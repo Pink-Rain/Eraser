@@ -15,6 +15,8 @@ Le site Sites/Cloudflare publié n’est pas modifié par ce travail.
 - Le premier compte créé dans une installation neuve devient administrateur.
 - GitHub Actions fabrique `Eraser-Setup.exe`, `latest.yml` et le fichier de mise à
   jour différentielle `.blockmap`.
+- L’installateur est exécuté silencieusement sur une machine Windows de test ;
+  GitHub vérifie ensuite que `Eraser.exe` existe, démarre et reste actif.
 
 ## Données et connexions à migrer avant une version stable
 
