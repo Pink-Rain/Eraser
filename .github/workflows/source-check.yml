@@ -1,0 +1,29 @@
+name: Vérifier la source Eraser
+
+on:
+  push:
+    branches:
+      - windows-app-migration
+  workflow_dispatch:
+
+jobs:
+  build-current-source:
+    name: Construire la version récupérée
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+
+    steps:
+      - name: Récupérer le dépôt
+        uses: actions/checkout@v7
+
+      - name: Préparer Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm ci
+
+      - name: Construire Eraser
+        run: npm run build
