@@ -28,10 +28,39 @@ jobs:
       - name: Installer les dépendances
         run: npm install
 
+      - name: Enregistrer le verrouillage des dépendances
+        if: github.ref == 'refs/heads/windows-app-migration'
+        shell: bash
+        run: |
+          if git diff --quiet -- package-lock.json; then
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add package-lock.json
+          git commit -m "Lock the Windows application dependencies [skip ci]"
+          git push origin HEAD:windows-app-migration
+
       - name: Construire l’installateur
         run: npm run desktop:dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Tester l’installation et le démarrage
+        shell: pwsh
+        run: |
+          $installer = Join-Path $PWD "release/Eraser-Setup.exe"
+          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
+          $executable = Join-Path $env:LOCALAPPDATA "Programs/Eraser/Eraser.exe"
+          if (-not (Test-Path $executable)) {
+            throw "Eraser.exe est introuvable après l’installation."
+          }
+          $process = Start-Process -FilePath $executable -PassThru
+          Start-Sleep -Seconds 15
+          if ($process.HasExited) {
+            throw "Eraser s’est fermé pendant le test de démarrage."
+          }
+          Get-Process -Name "Eraser" -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Conserver l’installateur comme artefact
         uses: actions/upload-artifact@v4
