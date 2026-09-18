@@ -1,5 +1,5 @@
 import { sql } from "drizzle-orm"
-import { index, integer, primaryKey, sqliteTable, text } from "drizzle-orm/sqlite-core"
+import { index, integer, primaryKey, sqliteTable, text, uniqueIndex } from "drizzle-orm/sqlite-core"
 
 export const users = sqliteTable(
   "users",
@@ -85,6 +85,19 @@ export const googleOAuthFlows = sqliteTable("google_oauth_flows", {
   expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 })
+
+export const userIdentityLinks = sqliteTable(
+  "user_identity_links",
+  {
+    localUserId: text("local_user_id")
+      .primaryKey()
+      .references(() => users.id, { onDelete: "cascade" }),
+    legacyUid: text("legacy_uid").notNull(),
+    createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+    updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+  },
+  (table) => [uniqueIndex("user_identity_links_legacy_uid_unique").on(table.legacyUid)],
+)
 
 export const jdrGoogleSheets = sqliteTable("jdr_google_sheets", {
   key: text("key", { enum: ["classes", "characters", "campaigns", "campaign_characters", "character_relations", "admin_todos", "inventory", "shops", "npcs", "tabletop"] }).primaryKey(),

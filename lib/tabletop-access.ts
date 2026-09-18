@@ -7,6 +7,7 @@ import {
 } from "@/lib/google-sheets"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
+import { identityUidsForUser } from "@/lib/identity-links"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -27,7 +28,8 @@ export async function listTabletopMapsForAccount(account: AuthorizedUser, pageLi
   if (!await canAccessTabletopPage(account, pageLinked)) return []
   const maps = await listTabletopMaps(pageLinked)
   if (pageLinked !== "bac-a-sable" || account.role === "admin") return maps
-  return maps.filter((map) => map.createdByUid === account.uid)
+  const identities = await identityUidsForUser(account.uid)
+  return maps.filter((map) => identities.includes(map.createdByUid))
 }
 
 export async function listTabletopSourcePages(account: AuthorizedUser): Promise<TabletopSourcePage[]> {
@@ -46,7 +48,9 @@ export async function authorizeTabletopMap(account: AuthorizedUser, mapId: strin
 async function accessibleCharacterIds(account: AuthorizedUser, pageLinked: string) {
   if (pageLinked !== "bac-a-sable") {
     const members = await listCampaignMembers(pageLinked)
-    return canManageTabletop(account) ? members.map((character) => character.id) : members.filter((character) => character.ownerUid === account.uid).map((character) => character.id)
+    if (canManageTabletop(account)) return members.map((character) => character.id)
+    const identities = await identityUidsForUser(account.uid)
+    return members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)
   }
   if (canManageTabletop(account)) return (await listAvailableCampaignCharacters()).map((character) => character.id)
   return (await listCharactersForUser(account.uid)).map((character) => character.id)
@@ -64,7 +68,8 @@ export async function getTabletopSpeakerName(account: AuthorizedUser, pageLinked
   if (await canManageTabletopPage(account, pageLinked)) return "MJ"
   if (!characterId) return "Joueur"
   const characters = pageLinked === "bac-a-sable" ? await listCharactersForUser(account.uid) : await listCampaignMembers(pageLinked)
-  const character = characters.find((candidate) => candidate.id === characterId && candidate.ownerUid === account.uid)
+  const identities = await identityUidsForUser(account.uid)
+  const character = characters.find((candidate) => candidate.id === characterId && identities.includes(candidate.ownerUid))
   return character?.name || "Joueur"
 }
 
@@ -126,11 +131,12 @@ export async function listTabletopLibraryForAccount(account: AuthorizedUser, pag
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
   const entities: TabletopEntityRecord[] = [...characters, ...npcs.map(npcEntity), ...shops.map((shop) => shopEntity(shop, pageLinked, npcById.get(shop.npcId)))]
   const canManage = await canManageTabletopPage(account, pageLinked)
-  return entities.map((entity) => ({ ...entity, controllable: canManage || (entity.kind === "character" && entity.ownerUid === account.uid) }))
+  const identities = await identityUidsForUser(account.uid)
+  return entities.map((entity) => ({ ...entity, controllable: canManage || (entity.kind === "character" && identities.includes(entity.ownerUid)) }))
 }
 
-function canSeeActivity(account: AuthorizedUser, activity: Awaited<ReturnType<typeof listTabletopActivities>>[number], ownedCharacterIds: Set<string>, isManager: boolean) {
-  if (activity.audience === "public" || activity.authorUid === account.uid) return true
+function canSeeActivity(account: AuthorizedUser, identities: string[], activity: Awaited<ReturnType<typeof listTabletopActivities>>[number], ownedCharacterIds: Set<string>, isManager: boolean) {
+  if (activity.audience === "public" || identities.includes(activity.authorUid)) return true
   if (activity.audience === "gm") return isManager
   return ownedCharacterIds.has(activity.recipientId)
 }
@@ -138,8 +144,8 @@ function canSeeActivity(account: AuthorizedUser, activity: Awaited<ReturnType<ty
 export async function getTabletopSnapshotForAccount(account: AuthorizedUser, mapId: string, roomKey = ""): Promise<TabletopSnapshot | null> {
   const map = await authorizeTabletopMap(account, mapId, roomKey)
   if (!map) return null
-  const [tokens, allActivities, library, isManager] = await Promise.all([
-    listTabletopTokens(map.id), listTabletopActivities(map.id), listTabletopLibraryForAccount(account, map.pageLinked), canManageTabletopPage(account, map.pageLinked),
+  const [tokens, allActivities, library, isManager, identities] = await Promise.all([
+    listTabletopTokens(map.id), listTabletopActivities(map.id), listTabletopLibraryForAccount(account, map.pageLinked), canManageTabletopPage(account, map.pageLinked), identityUidsForUser(account.uid),
   ])
   const known = new Set(library.map((entity) => `${entity.kind}:${entity.id}`))
   const missingCharacterIds = tokens.filter((token) => token.entityKind === "character" && !known.has(`character:${token.entityId}`)).map((token) => token.entityId)
@@ -149,9 +155,9 @@ export async function getTabletopSnapshotForAccount(account: AuthorizedUser, map
   const pageNpcById = new Map(pageNpcs.map((npc) => [npc.id, npc]))
   const shopEntities = shops.filter((shop) => missingShopIds.has(shop.id)).map((shop) => shopEntity(shop, map.pageLinked, pageNpcById.get(shop.npcId)))
   const markers: TabletopEntityRecord[] = tokens.filter((token) => token.entityKind === "marker").map((token) => ({ id: token.entityId, kind: "marker", name: token.label || "Point d’intérêt", subtitle: "Repère de carte", portrait: "", currentHp: 0, totalHp: 0, speed: 0, ownerUid: map.createdByUid, controllable: isManager }))
-  const entities = [...library, ...characters, ...npcs, ...shopEntities, ...markers].map((entity) => ({ ...entity, controllable: isManager || (entity.kind === "character" && entity.ownerUid === account.uid) }))
-  const ownedCharacterIds = new Set(entities.filter((entity) => entity.kind === "character" && entity.ownerUid === account.uid).map((entity) => entity.id))
-  const activities = allActivities.filter((activity) => canSeeActivity(account, activity, ownedCharacterIds, isManager))
+  const entities = [...library, ...characters, ...npcs, ...shopEntities, ...markers].map((entity) => ({ ...entity, controllable: isManager || (entity.kind === "character" && identities.includes(entity.ownerUid)) }))
+  const ownedCharacterIds = new Set(entities.filter((entity) => entity.kind === "character" && identities.includes(entity.ownerUid)).map((entity) => entity.id))
+  const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
   return { map, tokens, activities, entities }
 }
 

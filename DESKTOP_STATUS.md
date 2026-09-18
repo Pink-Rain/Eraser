@@ -9,7 +9,7 @@ Le site Sites/Cloudflare publié n’est pas modifié par ce travail.
 - Le build Windows produit un serveur Node autonome ; il ne charge pas le site
   public dans une fenêtre.
 - Le serveur Windows démarre sur `127.0.0.1:32147`, initialise une base SQLite locale
-  avec les 13 migrations existantes et répond en HTTP 200.
+  avec les 14 migrations existantes et répond en HTTP 200.
 - Les portraits, bannières et fonds de carte sont enregistrés dans le dossier de
   données local de l’application au lieu de R2.
 - Le premier compte créé dans une installation neuve devient administrateur.
@@ -35,6 +35,10 @@ La connexion se fait dans le navigateur système avec une redirection locale ver
 `http://127.0.0.1:32147/api/admin/google-drive/oauth/callback`. Les feuilles
 existantes sont retrouvées par leur nom exact et reliées sans suppression. Une
 nouvelle feuille n’est créée que si une feuille indispensable manque réellement.
+Après la liaison, l’administrateur peut reconnaître son ancienne identité grâce
+aux noms de ses campagnes et personnages. Cette association reste dans SQLite :
+elle ne réécrit aucun identifiant dans les feuilles et conserve la compatibilité
+avec le site en ligne.
 
 ### Roll20
 

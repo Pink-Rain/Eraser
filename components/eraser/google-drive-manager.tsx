@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useEffect, useState, type FormEvent } from "react"
 import {
   Check,
   ExternalLink,
@@ -13,6 +13,7 @@ import {
   Plus,
   ShieldCheck,
   Trash2,
+  UserRoundCheck,
 } from "lucide-react"
 
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert"
@@ -25,6 +26,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { DriveFile } from "@/lib/google-drive"
 import type { DriveSpreadsheetDuplicateGroup } from "@/lib/google-sheets"
+import type { LegacyIdentityCandidate } from "@/lib/google-sheets"
 
 type AuthorizationSummary = {
   googleEmail: string
@@ -80,10 +82,21 @@ export function GoogleDriveManager({
   const [message, setMessage] = useState<string | null>(null)
   const [linkingSheets, setLinkingSheets] = useState(false)
   const [sheetLinkMessage, setSheetLinkMessage] = useState<string | null>(null)
+  const [identityCandidates, setIdentityCandidates] = useState<LegacyIdentityCandidate[]>([])
+  const [identityMessage, setIdentityMessage] = useState<string | null>(null)
+  const [linkingIdentity, setLinkingIdentity] = useState("")
   const [visibleFiles, setVisibleFiles] = useState(files)
   const [visibleDuplicateGroups, setVisibleDuplicateGroups] = useState(duplicateGroups)
   const [cleaningFileId, setCleaningFileId] = useState("")
   const [cleanupMessage, setCleanupMessage] = useState<string | null>(null)
+
+  useEffect(() => {
+    if (!authorization) return
+    void fetch("/api/admin/google-drive/legacy-identity", { cache: "no-store" })
+      .then(async (response) => response.ok ? response.json() as Promise<{ candidates: LegacyIdentityCandidate[] }> : null)
+      .then((payload) => payload && setIdentityCandidates(payload.candidates))
+      .catch(() => undefined)
+  }, [authorization])
 
   async function trashDuplicate(fileId: string) {
     setCleaningFileId(fileId)
@@ -181,13 +194,32 @@ export function GoogleDriveManager({
     setLinkingSheets(true)
     setSheetLinkMessage(null)
     const response = await fetch("/api/admin/google-drive/bootstrap-jdr-sheets", { method: "POST" })
-    const payload = (await response.json()) as { sheets?: Array<{ name: string }>; error?: string }
+    const payload = (await response.json()) as { sheets?: Array<{ name: string }>; candidates?: LegacyIdentityCandidate[]; error?: string }
     setLinkingSheets(false)
     if (!response.ok || !payload.sheets) {
       setSheetLinkMessage(payload.error || "Les feuilles Eraser n’ont pas pu être reliées.")
       return
     }
+    setIdentityCandidates(payload.candidates ?? [])
     setSheetLinkMessage(`${payload.sheets.length} feuilles Eraser sont reliées. Les fichiers existants ont été conservés.`)
+  }
+
+  async function linkExistingIdentity(legacyUid: string) {
+    setLinkingIdentity(legacyUid)
+    setIdentityMessage(null)
+    const response = await fetch("/api/admin/google-drive/legacy-identity", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ legacyUid }),
+    })
+    const payload = (await response.json()) as { candidates?: LegacyIdentityCandidate[]; error?: string }
+    setLinkingIdentity("")
+    if (!response.ok || !payload.candidates) {
+      setIdentityMessage(payload.error || "L’ancien compte n’a pas pu être relié.")
+      return
+    }
+    setIdentityCandidates(payload.candidates)
+    setIdentityMessage("Ton compte Windows reconnaît maintenant ces campagnes et personnages, sans modifier les feuilles Google.")
   }
 
   return (
@@ -356,6 +388,46 @@ export function GoogleDriveManager({
             Relier mes feuilles existantes
           </Button>
           {sheetLinkMessage && <p className="mt-3 text-sm text-muted-foreground">{sheetLinkMessage}</p>}
+        </section>
+      )}
+
+      {authorization && identityCandidates.length > 0 && (
+        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Données du site</p>
+          <h2 className="font-display mt-2 text-2xl font-semibold">Reconnaître mon ancien compte</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Choisis le groupe qui contient tes campagnes ou tes personnages. Cette association reste uniquement sur cet ordinateur : aucune cellule Google Sheets n’est modifiée.
+          </p>
+          <div className="mt-4 space-y-3">
+            {identityCandidates.map((candidate) => (
+              <div key={candidate.uid} className="rounded-xl border bg-background/45 p-4 sm:flex sm:items-center sm:gap-4">
+                <UserRoundCheck className="size-5 shrink-0 text-primary" />
+                <div className="mt-2 min-w-0 flex-1 sm:mt-0">
+                  <p className="font-medium">
+                    {candidate.campaigns.length ? `Campagnes : ${candidate.campaigns.join(", ")}` : "Aucune campagne"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {candidate.characters.length ? `Personnages : ${candidate.characters.join(", ")}` : "Aucun personnage personnel"}
+                  </p>
+                </div>
+                {candidate.linkedToCurrentAccount ? (
+                  <Badge variant="outline" className="mt-3 sm:mt-0">Compte reconnu</Badge>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="mt-3 sm:mt-0"
+                    disabled={!candidate.available || Boolean(linkingIdentity)}
+                    onClick={() => void linkExistingIdentity(candidate.uid)}
+                  >
+                    {linkingIdentity === candidate.uid && <LoaderCircle className="size-4 animate-spin" />}
+                    C’est mon compte
+                  </Button>
+                )}
+              </div>
+            ))}
+          </div>
+          {identityMessage && <p className="mt-3 text-sm text-muted-foreground">{identityMessage}</p>}
         </section>
       )}
 

@@ -42,6 +42,9 @@
 - Le bouton « Relier mes feuilles existantes » recherche les noms définis dans
   `jdrSheetDefinitions`, conserve les fichiers trouvés et ne crée que les
   feuilles réellement absentes.
+- `user_identity_links` associe localement un compte Windows à son ancien UID du
+  site. Ne jamais remplacer cette association locale par une réécriture massive
+  des UID dans Google Sheets : le site en ligne doit continuer à fonctionner.
 
 ## Roll20
 

@@ -6,6 +6,7 @@ import { CampaignDashboard } from "@/components/eraser/campaign-dashboard"
 import { DeferredPageLoading } from "@/components/eraser/deferred-content-loading"
 import { getCampaignDashboard, getCampaignForPlayer, listCampaignMembers, listNpcs, type CampaignRecord } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+import { identityUidsForUser } from "@/lib/identity-links"
 
 export const dynamic = "force-dynamic"
 
@@ -24,7 +25,8 @@ async function CampaignDashboardData({
     listCampaignMembers(campaign.id),
     listNpcs(campaign.id).then((npcs) => npcs.filter((npc) => npc.inPlayerGroup)),
   ])
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={groupNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => character.ownerUid === accountUid).map((character) => character.id)} userEmail={userEmail} />
+  const identities = await identityUidsForUser(accountUid)
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={groupNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

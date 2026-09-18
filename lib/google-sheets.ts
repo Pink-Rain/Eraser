@@ -6,7 +6,7 @@ import {
 import { cache } from "react"
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import { getDb } from "@/db"
-import { campaignCharacters, campaignIndex, characterIndex, classIndex, sheetIndexSyncs, users } from "@/db/schema"
+import { campaignCharacters, campaignIndex, characterIndex, classIndex, sheetIndexSyncs, userIdentityLinks, users } from "@/db/schema"
 import {
   createGoogleSpreadsheet,
   findGoogleSpreadsheetByName,
@@ -64,6 +64,7 @@ import {
 import type { CampaignNpcRecord, CityKey, GeneratedShop, NpcInventoryItem, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
 
 export type CharacterRecord = {
   id: string
@@ -241,7 +242,7 @@ async function classesSource() {
 
 async function campaignsSource() {
   const stored = await getJdrSheet("campaigns")
-  return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:C` } : null
+  return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:F` } : null
 }
 
 async function googleSheetsFetch(path: string, init?: RequestInit) {
@@ -956,28 +957,29 @@ export async function ensureObjectIndexStackLimits() {
 
 async function listCharactersForUserUncached(uid: string) {
   const db = getDb()
+  const identityUids = await identityUidsForUser(uid)
   let characters = await db.select().from(characterIndex)
-    .where(and(eq(characterIndex.ownerUid, uid), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
+    .where(and(inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
   if (characters.length) return decorateCharacters(characters)
-  const syncKey = `characters:${uid}`
+  const syncKey = `characters:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!sync) {
     const source = await charactersSource()
     if (source) {
       const rows = await readRange(source.spreadsheetId, source.range)
-      for (const row of rows.slice(1).filter((item) => item[0] && item[1] === uid)) {
+      for (const row of rows.slice(1).filter((item) => item[0] && identityUids.includes(item[1]))) {
         await db.insert(characterIndex).values({
           id: row[0], ownerUid: row[1], name: row[2] || "Personnage sans nom",
           subtitle: row[3] || "", updatedAt: row[4] || new Date().toISOString(),
         }).onConflictDoUpdate({
           target: characterIndex.id,
-          set: { name: row[2] || "Personnage sans nom", subtitle: row[3] || "", updatedAt: row[4] || new Date().toISOString() },
+          set: { ownerUid: row[1], name: row[2] || "Personnage sans nom", subtitle: row[3] || "", updatedAt: row[4] || new Date().toISOString(), deletedAt: null },
         })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
     characters = await db.select().from(characterIndex)
-      .where(and(eq(characterIndex.ownerUid, uid), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
+      .where(and(inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
   }
   return decorateCharacters(characters)
 }
@@ -987,8 +989,9 @@ export const listCharactersForUser = cache(listCharactersForUserUncached)
 export async function getCharacterForUser(uid: string, id: string) {
   const listed = (await listCharactersForUser(uid)).find((character) => character.id === id)
   if (listed) return listed
+  const identityUids = await identityUidsForUser(uid)
   const [character] = await getDb().select().from(characterIndex)
-    .where(and(eq(characterIndex.ownerUid, uid), eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
+    .where(and(inArray(characterIndex.ownerUid, identityUids), eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
   return character ? (await decorateCharacters([character]))[0] ?? null : null
 }
 
@@ -1017,24 +1020,25 @@ async function decorateCharacters<T extends { id: string; ownerUid: string; name
 
 async function listCampaignsForMjUncached(uid: string) {
   const db = getDb()
+  const identityUids = await identityUidsForUser(uid)
   let campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-    .from(campaignIndex).where(and(eq(campaignIndex.mjUid, uid), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
+    .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
   if (campaigns.length) return campaigns
-  const syncKey = `campaigns:${uid}`
+  const syncKey = `campaigns:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!sync) {
     const source = await campaignsSource()
     if (source) {
       const rows = await readRange(source.spreadsheetId, source.range)
-      for (const row of rows.slice(1).filter((item) => item[0] && item[1] === uid)) {
+      for (const row of rows.slice(1).filter((item) => item[0] && identityUids.includes(item[1]))) {
         await db.insert(campaignIndex).values({
-          id: row[0], mjUid: row[1], name: row[2] || "Campagne sans nom",
-        }).onConflictDoUpdate({ target: campaignIndex.id, set: { name: row[2] || "Campagne sans nom", updatedAt: new Date().toISOString() } })
+          id: row[0], mjUid: row[1], name: row[2] || "Campagne sans nom", description: row[3] || "", bannerUrl: row[4] || "", accentColor: row[5] || "#927640",
+        }).onConflictDoUpdate({ target: campaignIndex.id, set: { mjUid: row[1], name: row[2] || "Campagne sans nom", description: row[3] || "", bannerUrl: row[4] || "", accentColor: row[5] || "#927640", updatedAt: new Date().toISOString(), deletedAt: null } })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
     campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-      .from(campaignIndex).where(and(eq(campaignIndex.mjUid, uid), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
+      .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
   }
   return campaigns
 }
@@ -1056,10 +1060,11 @@ export async function getCampaignForPlayer(uid: string, id: string) {
 }
 
 export async function getCharacterForMj(uid: string, id: string) {
+  const identityUids = await identityUidsForUser(uid)
   const [row] = await getDb().select({ character: characterIndex }).from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id))
-    .where(and(eq(characterIndex.id, id), eq(campaignIndex.mjUid, uid), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1)
+    .where(and(eq(characterIndex.id, id), inArray(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1)
   if (!row) return null
   return (await decorateCharacters([row.character]))[0] ?? null
 }
@@ -1067,8 +1072,9 @@ export async function getCharacterForMj(uid: string, id: string) {
 export async function getCampaignForMj(uid: string, id: string) {
   const listed = (await listCampaignsForMj(uid)).find((campaign) => campaign.id === id)
   if (listed) return listed
+  const identityUids = await identityUidsForUser(uid)
   const [campaign] = await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-    .from(campaignIndex).where(and(eq(campaignIndex.mjUid, uid), eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
+    .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
   return campaign ?? null
 }
 
@@ -2266,6 +2272,114 @@ export async function ensureJdrSheets() {
     if (stored) output.push(stored)
   }
   return output
+}
+
+export type LegacyIdentityCandidate = {
+  uid: string
+  campaigns: string[]
+  characters: string[]
+  linkedToCurrentAccount: boolean
+  available: boolean
+}
+
+/**
+ * Imports only the lightweight ownership indexes from the already linked sheets.
+ * This never writes to Google Sheets; it lets the desktop account recognize data
+ * created by the live site without changing that site's identifiers.
+ */
+export async function syncExistingIdentityIndexes() {
+  const [campaignSource, characterSource, relationSource] = await Promise.all([
+    campaignsSource(),
+    charactersSource(),
+    getJdrSheet("campaign_characters"),
+  ])
+  const [campaignRows, characterRows, relationRows] = await Promise.all([
+    campaignSource ? readRange(campaignSource.spreadsheetId, campaignSource.range) : Promise.resolve([]),
+    characterSource ? readRange(characterSource.spreadsheetId, characterSource.range) : Promise.resolve([]),
+    relationSource ? readRange(relationSource.spreadsheetId, `${relationSource.tabName}!A:B`) : Promise.resolve([]),
+  ])
+  const now = new Date().toISOString()
+  for (const row of campaignRows.slice(1)) {
+    if (!row[0] || !row[1]) continue
+    await getDb().insert(campaignIndex).values({
+      id: row[0],
+      mjUid: row[1],
+      name: row[2] || "Campagne sans nom",
+      description: row[3] || "",
+      bannerUrl: row[4] || "",
+      accentColor: row[5] || "#927640",
+      updatedAt: now,
+      deletedAt: null,
+    }).onConflictDoUpdate({
+      target: campaignIndex.id,
+      set: {
+        mjUid: row[1],
+        name: row[2] || "Campagne sans nom",
+        description: row[3] || "",
+        bannerUrl: row[4] || "",
+        accentColor: row[5] || "#927640",
+        updatedAt: now,
+        deletedAt: null,
+      },
+    })
+  }
+  for (const row of characterRows.slice(1)) {
+    if (!row[0] || !row[1]) continue
+    await getDb().insert(characterIndex).values({
+      id: row[0],
+      ownerUid: row[1],
+      name: row[2] || "Personnage sans nom",
+      subtitle: row[3] || "",
+      updatedAt: row[4] || now,
+      deletedAt: null,
+    }).onConflictDoUpdate({
+      target: characterIndex.id,
+      set: {
+        ownerUid: row[1],
+        name: row[2] || "Personnage sans nom",
+        subtitle: row[3] || "",
+        updatedAt: row[4] || now,
+        deletedAt: null,
+      },
+    })
+  }
+  for (const row of relationRows.slice(1)) {
+    if (!row[0] || !row[1]) continue
+    await getDb().insert(campaignCharacters).values({ campaignId: row[0], characterId: row[1] }).onConflictDoNothing()
+  }
+  return { campaigns: Math.max(0, campaignRows.length - 1), characters: Math.max(0, characterRows.length - 1) }
+}
+
+export async function listLegacyIdentityCandidates(localUserId: string): Promise<LegacyIdentityCandidate[]> {
+  await syncExistingIdentityIndexes()
+  const [campaigns, characters, links, currentLink] = await Promise.all([
+    getDb().select({ uid: campaignIndex.mjUid, name: campaignIndex.name }).from(campaignIndex).where(isNull(campaignIndex.deletedAt)),
+    getDb().select({ uid: characterIndex.ownerUid, name: characterIndex.name }).from(characterIndex).where(isNull(characterIndex.deletedAt)),
+    getDb().select().from(userIdentityLinks),
+    getIdentityLink(localUserId),
+  ])
+  const candidates = new Map<string, { campaigns: string[]; characters: string[] }>()
+  for (const campaign of campaigns) {
+    if (!campaign.uid || campaign.uid === localUserId) continue
+    const entry = candidates.get(campaign.uid) ?? { campaigns: [], characters: [] }
+    entry.campaigns.push(campaign.name)
+    candidates.set(campaign.uid, entry)
+  }
+  for (const character of characters) {
+    if (!character.uid || character.uid === localUserId) continue
+    const entry = candidates.get(character.uid) ?? { campaigns: [], characters: [] }
+    entry.characters.push(character.name)
+    candidates.set(character.uid, entry)
+  }
+  const claimed = new Map(links.map((link) => [link.legacyUid, link.localUserId]))
+  return [...candidates.entries()].map(([uid, data]) => ({
+    uid,
+    campaigns: [...new Set(data.campaigns)].sort((a, b) => a.localeCompare(b, "fr")),
+    characters: [...new Set(data.characters)].sort((a, b) => a.localeCompare(b, "fr")),
+    linkedToCurrentAccount: currentLink?.legacyUid === uid,
+    available: !claimed.has(uid) || claimed.get(uid) === localUserId,
+  })).sort((left, right) => Number(right.linkedToCurrentAccount) - Number(left.linkedToCurrentAccount)
+    || (right.campaigns.length + right.characters.length) - (left.campaigns.length + left.characters.length))
 }
 
 export type DriveSpreadsheetDuplicate = DriveFile & { inUse: boolean; keep: boolean }

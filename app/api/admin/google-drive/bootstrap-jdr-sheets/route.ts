@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { ensureJdrSheets } from "@/lib/google-sheets"
+import { ensureJdrSheets, listLegacyIdentityCandidates } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export async function POST() {
@@ -9,7 +9,8 @@ export async function POST() {
 
   try {
     const sheets = await ensureJdrSheets()
-    return NextResponse.json({ ok: true, sheets })
+    const candidates = await listLegacyIdentityCandidates(admin.uid)
+    return NextResponse.json({ ok: true, sheets, candidates })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     const message = code.includes("GOOGLE_DRIVE_NOT_AUTHORIZED")

@@ -1,4 +1,4 @@
-# Eraser 0.1.1-alpha.2 — préversion Windows autonome
+# Eraser 0.1.1-alpha.3 — préversion Windows autonome
 
 Cette préversion installe une vraie application Windows autonome. Elle embarque
 le serveur Eraser, utilise une base SQLite locale et un stockage local pour les
@@ -23,6 +23,15 @@ outil de développement.
 - les feuilles Eraser déjà présentes sur le Drive peuvent être reliées sans les
   supprimer ni les recréer ;
 - le compagnon Chrome Roll20 v0.4.0 appelle directement l’application locale.
+
+## Ajouté dans alpha.3
+
+- Eraser importe localement l’index des campagnes, personnages et appartenances
+  déjà présents dans les feuilles liées ;
+- une étape visuelle « C’est mon compte » relie le nouveau compte Windows à son
+  ancienne identité, sans modifier les feuilles Google ;
+- les lectures, permissions et nouvelles créations utilisent cette association,
+  afin de rester compatibles avec le site encore en ligne.
 
 ## Limites connues de cette préversion
 

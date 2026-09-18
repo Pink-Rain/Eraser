@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { getCampaignDashboard, getCampaignForPlayer, getNpcById, listCharacterRelations, listCharactersForUser } from "@/lib/google-sheets"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import { authorizedAccount } from "@/lib/server-auth"
+import { identityUidsForUser } from "@/lib/identity-links"
 
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
@@ -13,7 +14,7 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
   let allowed = account.role === "admin"
   if (account.role === "mj") allowed = npc.pageLinked === "bac-a-sable" || Boolean(await getCampaignDashboard(account.uid, npc.pageLinked).catch(() => null))
   if (account.role === "joueur" && await getCampaignForPlayer(account.uid, npc.pageLinked).catch(() => null)) {
-    allowed = npc.inPlayerGroup || npc.createdByUid === account.uid
+    allowed = npc.inPlayerGroup || (await identityUidsForUser(account.uid)).includes(npc.createdByUid)
     if (!allowed) {
       const characters = await listCharactersForUser(account.uid)
       const relations = await Promise.all(characters.map((character) => listCharacterRelations(character.id)))
