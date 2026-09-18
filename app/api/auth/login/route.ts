@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const code = error instanceof Error ? error.message : ""
     const message =
       code.includes("INVALID_LOGIN_CREDENTIALS")
-        ? "Adresse e-mail ou mot de passe incorrect."
+        ? "Adresse e-mail ou mot de passe incorrect. Tu peux utiliser « Réparer l’accès »."
         : "Impossible de se connecter pour le moment."
     return NextResponse.json({ error: message }, { status: 401 })
   }

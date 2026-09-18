@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 
-type AuthMode = "login" | "register"
+type AuthMode = "login" | "register" | "repair"
 
 export function AuthPanel() {
   const [mode, setMode] = useState<AuthMode>("login")
@@ -25,7 +25,8 @@ export function AuthPanel() {
 
     const form = new FormData(event.currentTarget)
     try {
-      const response = await fetch(`/api/auth/${mode}`, {
+      const endpoint = mode === "repair" ? "desktop-reset" : mode
+      const response = await fetch(`/api/auth/${endpoint}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -41,7 +42,7 @@ export function AuthPanel() {
         error?: string
       }
       if (!response.ok || !result.ok) {
-        throw new Error(result.error ?? "La connexion a échoué.")
+        throw new Error(result.error ?? (mode === "repair" ? "La réparation a échoué." : "La connexion a échoué."))
       }
       setMessage(result.message ?? "Connexion réussie.")
       window.setTimeout(() => {
@@ -64,15 +65,22 @@ export function AuthPanel() {
           setMessage(null)
         }}
       >
-        <TabsList className="grid w-full grid-cols-2">
+        <TabsList className="grid w-full grid-cols-3">
           <TabsTrigger value="login">Se connecter</TabsTrigger>
           <TabsTrigger value="register">Créer un compte</TabsTrigger>
+          <TabsTrigger value="repair">Réparer l’accès</TabsTrigger>
         </TabsList>
         <TabsContent value="login" className="pt-5">
           <AuthForm mode="login" busy={busy} onSubmit={submit} />
         </TabsContent>
         <TabsContent value="register" className="pt-5">
           <AuthForm mode="register" busy={busy} onSubmit={submit} />
+        </TabsContent>
+        <TabsContent value="repair" className="pt-5">
+          <p className="mb-4 text-sm leading-6 text-muted-foreground">
+            Si une ancienne installation a déjà créé ton compte local, saisis son adresse et choisis un nouveau mot de passe.
+          </p>
+          <AuthForm mode="repair" busy={busy} onSubmit={submit} />
         </TabsContent>
       </Tabs>
 
@@ -115,7 +123,7 @@ function AuthForm({
               id="displayName"
               name="displayName"
               autoComplete="name"
-              placeholder="Le nom visible sur le site"
+              placeholder="Le nom visible dans l’application"
               minLength={2}
               maxLength={80}
               required
@@ -152,17 +160,17 @@ function AuthForm({
           id={`${mode}-password`}
           name="password"
           type="password"
-          autoComplete={mode === "register" ? "new-password" : "current-password"}
+          autoComplete={mode === "login" ? "current-password" : "new-password"}
           minLength={8}
           required
         />
-        {mode === "register" && (
+        {mode !== "login" && (
           <p className="text-xs text-muted-foreground">8 caractères minimum.</p>
         )}
       </div>
       <Button type="submit" size="lg" className="w-full" disabled={busy}>
         {busy && <LoaderCircle className="size-4 animate-spin" />}
-        {mode === "register" ? "Créer mon compte" : "Me connecter"}
+        {mode === "register" ? "Créer mon compte" : mode === "repair" ? "Enregistrer le nouveau mot de passe" : "Me connecter"}
       </Button>
     </form>
   )

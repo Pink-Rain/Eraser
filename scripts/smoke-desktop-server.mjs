@@ -73,8 +73,30 @@ try {
   if (!sessionCookie) throw new Error("Le cookie de session local est absent.")
   if (/;\s*Secure/i.test(sessionCookie)) throw new Error("Le cookie local ne doit pas exiger HTTPS.")
   const cookie = sessionCookie.split(";", 1)[0]
+  const repair = await fetch(`${origin}/api/auth/desktop-reset`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "test-installation@eraser.local",
+      password: "nouveau-mot-de-passe-de-test",
+    }),
+  })
+  if (!repair.ok) throw new Error(`La réparation du compte local a échoué (${repair.status}).`)
+  const repairedCookies = repair.headers.getSetCookie?.() ?? [repair.headers.get("set-cookie") || ""]
+  const repairedSession = repairedCookies.find((value) => value.startsWith("eraser_session="))
+  if (!repairedSession) throw new Error("La réparation n’a pas créé de nouvelle session.")
+  const repairedCookie = repairedSession.split(";", 1)[0]
+  const repairedLogin = await fetch(`${origin}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "test-installation@eraser.local",
+      password: "nouveau-mot-de-passe-de-test",
+    }),
+  })
+  if (!repairedLogin.ok) throw new Error(`La connexion après réparation a échoué (${repairedLogin.status}).`)
   const oauthStatus = await fetch(`${origin}/api/admin/google-drive/oauth/status`, {
-    headers: { cookie },
+    headers: { cookie: repairedCookie },
   })
   if (!oauthStatus.ok) throw new Error(`La session administrateur locale ne fonctionne pas (${oauthStatus.status}).`)
   const oauthStart = await fetch(`${origin}/api/admin/google-drive/oauth/start?email=eraser.jdr@gmail.com`, {

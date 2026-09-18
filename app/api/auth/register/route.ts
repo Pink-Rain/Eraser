@@ -43,7 +43,7 @@ export async function POST(request: Request) {
       errorCode: code,
     })
     const message = code.includes("EMAIL_EXISTS")
-      ? "Un compte existe déjà avec cette adresse e-mail."
+      ? "Un compte local existe déjà avec cette adresse. Utilise « Réparer l’accès » si tu as oublié son mot de passe."
       : "Impossible de créer le compte pour le moment."
     return NextResponse.json({ error: message }, { status: 400 })
   }

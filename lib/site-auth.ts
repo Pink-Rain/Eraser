@@ -122,6 +122,32 @@ export async function registerAccount(input: {
   return { account: accountRecord(user), session: await createSession(id) }
 }
 
+export async function resetDesktopAccount(emailInput: string, password: string) {
+  const runtimeEnv = env as unknown as Record<string, string | undefined>
+  if (runtimeEnv.ERASER_DESKTOP !== "1") throw new Error("DESKTOP_ONLY")
+  if (password.length < 8) throw new Error("INVALID_PASSWORD")
+
+  const db = getDb()
+  const email = emailInput.trim().toLowerCase()
+  const [user] = await db.select().from(users).where(eq(users.email, email)).limit(1)
+  if (!user) {
+    const [{ value: accountCount }] = await db.select({ value: count() }).from(users)
+    if (accountCount === 0) throw new Error("ACCOUNT_NOT_FOUND_CREATE_FIRST")
+    throw new Error("ACCOUNT_NOT_FOUND")
+  }
+
+  const passwordData = await hashPassword(password)
+  const updatedAt = new Date().toISOString()
+  await db.update(users).set({
+    passwordHash: passwordData.hash,
+    passwordSalt: passwordData.salt,
+    updatedAt,
+  }).where(eq(users.id, user.id))
+  await db.delete(sessions).where(eq(sessions.userId, user.id))
+  const [updated] = await db.select().from(users).where(eq(users.id, user.id)).limit(1)
+  return { account: accountRecord(updated), session: await createSession(user.id) }
+}
+
 export async function loginAccount(email: string, password: string) {
   const db = getDb()
   const [user] = await db
