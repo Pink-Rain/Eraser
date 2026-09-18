@@ -1,4 +1,4 @@
-import { and, asc, eq, gt } from "drizzle-orm"
+import { and, asc, count, eq, gt } from "drizzle-orm"
 import { env } from "cloudflare:workers"
 
 import { getDb } from "@/db"
@@ -98,6 +98,8 @@ export async function registerAccount(input: {
   if (existing.length) throw new Error("EMAIL_EXISTS")
 
   const runtimeEnv = env as unknown as Record<string, string | undefined>
+  const [{ value: accountCount }] = await db.select({ value: count() }).from(users)
+  const firstDesktopAccount = runtimeEnv.ERASER_DESKTOP === "1" && accountCount === 0
   const adminEmail = runtimeEnv.ADMIN_EMAIL?.trim().toLowerCase()
   const adminSetupCode = runtimeEnv.ADMIN_SETUP_CODE
   const bootstrapAdmin =
@@ -113,8 +115,8 @@ export async function registerAccount(input: {
     displayName: input.displayName.trim(),
     passwordHash: passwordData.hash,
     passwordSalt: passwordData.salt,
-    role: bootstrapAdmin ? "admin" : null,
-    status: bootstrapAdmin ? "actif" : "en_attente",
+    role: bootstrapAdmin || firstDesktopAccount ? "admin" : null,
+    status: bootstrapAdmin || firstDesktopAccount ? "actif" : "en_attente",
   })
   const [user] = await db.select().from(users).where(eq(users.id, id)).limit(1)
   return { account: accountRecord(user), session: await createSession(id) }

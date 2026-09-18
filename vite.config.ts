@@ -1,5 +1,6 @@
 import vinext from "vinext";
 import { defineConfig } from "vite";
+import { resolve } from "node:path";
 import hostingConfig from "./.openai/hosting.json";
 import { sites } from "./build/sites-vite-plugin";
 
@@ -39,6 +40,25 @@ export default defineConfig(async () => {
   process.env.WRANGLER_WRITE_LOGS ??= "false";
   process.env.WRANGLER_LOG_PATH ??= ".wrangler/logs";
   process.env.MINIFLARE_REGISTRY_PATH ??= ".wrangler/registry";
+
+  const isDesktop = process.env.ERASER_DESKTOP === "1";
+
+  if (isDesktop) {
+    return {
+      server: {
+        host: "127.0.0.1",
+      },
+      resolve: {
+        alias: {
+          "cloudflare:workers": resolve(
+            process.cwd(),
+            "desktop/runtime/cloudflare-workers.ts",
+          ),
+        },
+      },
+      plugins: [vinext()],
+    };
+  }
 
   // Wrangler snapshots its log path while the Cloudflare plugin is imported.
   const { cloudflare } = await import("@cloudflare/vite-plugin");

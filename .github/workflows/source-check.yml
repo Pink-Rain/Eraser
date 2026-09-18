@@ -23,7 +23,9 @@ jobs:
           cache: npm
 
       - name: Installer les dépendances
-        run: npm ci
+        # La branche peut ajouter des dépendances desktop avant la mise à jour
+        # automatique de package-lock.json.
+        run: npm install
 
       - name: Construire Eraser
         run: npm run build

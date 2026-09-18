@@ -1,0 +1,52 @@
+name: Construire Eraser pour Windows
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+jobs:
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Récupérer le projet
+        uses: actions/checkout@v4
+
+      - name: Installer Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Installer les dépendances
+        run: npm install
+
+      - name: Construire l’installateur
+        run: npm run desktop:dist
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Conserver l’installateur comme artefact
+        uses: actions/upload-artifact@v4
+        with:
+          name: Eraser-Windows
+          path: |
+            release/Eraser-Setup.exe
+            release/latest.yml
+            release/*.blockmap
+          if-no-files-found: error
+
+      - name: Publier la Release GitHub
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          files: |
+            release/Eraser-Setup.exe
+            release/latest.yml
+            release/*.blockmap

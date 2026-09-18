@@ -2,6 +2,7 @@
   "name": "eraser-jdr",
   "version": "0.1.0",
   "private": true,
+  "main": "desktop/main.cjs",
   "engines": {
     "node": ">=22.13.0"
   },
@@ -12,7 +13,10 @@
     "start": "WRANGLER_LOG_PATH=.wrangler/wrangler.log vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
-    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate"
+    "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
+    "desktop:build": "node scripts/build-desktop.mjs",
+    "desktop:pack": "npm run desktop:build && electron-builder --win --dir",
+    "desktop:dist": "npm run desktop:build && electron-builder --win nsis"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",
@@ -23,6 +27,7 @@
     "cmdk": "^1.1.1",
     "date-fns": "^4.4.0",
     "drizzle-orm": "0.45.2",
+    "electron-updater": "6.6.2",
     "embla-carousel-react": "^8.6.0",
     "input-otp": "^1.4.2",
     "leaflet": "^1.9.4",
@@ -52,6 +57,8 @@
     "@vitejs/plugin-react": "6.0.2",
     "@vitejs/plugin-rsc": "0.5.26",
     "drizzle-kit": "0.31.10",
+    "electron": "44.0.0",
+    "electron-builder": "26.0.12",
     "eslint": "9.39.4",
     "eslint-config-next": "16.2.6",
     "react-server-dom-webpack": "19.2.6",

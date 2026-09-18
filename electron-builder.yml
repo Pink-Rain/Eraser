@@ -1,0 +1,33 @@
+appId: fr.eraserjdr.app
+productName: Eraser
+copyright: Copyright © 2026 Eraser
+directories:
+  output: release
+files:
+  - desktop/main.cjs
+  - desktop/preload.cjs
+  - package.json
+extraResources:
+  - from: dist/standalone
+    to: eraser-server
+  - from: drizzle
+    to: migrations
+win:
+  target:
+    - target: nsis
+      arch:
+        - x64
+  artifactName: Eraser-Setup.${ext}
+  icon: build-resources/icon.ico
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Eraser
+  uninstallDisplayName: Eraser
+publish:
+  provider: github
+  owner: Pink-Rain
+  repo: Eraser
+asar: true
