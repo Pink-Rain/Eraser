@@ -78,13 +78,15 @@ async function waitForServer(url, attempts = 480) {
 function serverPaths() {
   if (app.isPackaged) {
     return {
-      directory: join(process.resourcesPath, "eraser-server"),
+      directory: join(process.resourcesPath, "eraser-server.asar"),
       migrations: join(process.resourcesPath, "migrations"),
+      workingDirectory: process.resourcesPath,
     }
   }
   return {
     directory: join(app.getAppPath(), "dist", "standalone"),
     migrations: join(app.getAppPath(), "drizzle"),
+    workingDirectory: join(app.getAppPath(), "dist", "standalone"),
   }
 }
 
@@ -105,11 +107,12 @@ async function startServer() {
   logLine(`Démarrage d’Eraser ${app.getVersion()} sur 127.0.0.1:${port}.`)
   logLine(`Serveur : ${serverScript}`)
   serverProcess = spawn(process.execPath, [serverScript], {
-    cwd: paths.directory,
+    cwd: paths.workingDirectory,
     env: {
       ...process.env,
       ELECTRON_RUN_AS_NODE: "1",
       NODE_ENV: "production",
+      HOST: "127.0.0.1",
       HOSTNAME: "127.0.0.1",
       PORT: String(port),
       ERASER_DESKTOP: "1",
