@@ -1,8 +1,8 @@
-import { eq } from "drizzle-orm"
+import { eq, lt } from "drizzle-orm"
 import { env } from "cloudflare:workers"
 
 import { getDb } from "@/db"
-import { googleDriveAuthorizations, googleOAuthSettings } from "@/db/schema"
+import { googleDriveAuthorizations, googleOAuthFlows, googleOAuthSettings } from "@/db/schema"
 
 const AUTHORIZATION_ID = "primary"
 const SETTINGS_ID = "primary"
@@ -301,6 +301,35 @@ export async function saveGoogleOAuthSettings(input: {
     accessTokenExpiresAt: null,
   }).where(eq(googleDriveAuthorizations.id, AUTHORIZATION_ID))
   return getGoogleOAuthSettings()
+}
+
+export async function createGoogleOAuthFlow(input: {
+  state: string
+  googleEmail: string
+  codeVerifier: string
+  connectedBy: string
+}) {
+  const now = new Date().toISOString()
+  await getDb().delete(googleOAuthFlows).where(lt(googleOAuthFlows.expiresAt, now))
+  await getDb().insert(googleOAuthFlows).values({
+    state: input.state,
+    googleEmail: input.googleEmail.trim().toLowerCase(),
+    codeVerifier: input.codeVerifier,
+    connectedBy: input.connectedBy,
+    expiresAt: new Date(Date.now() + 10 * 60_000).toISOString(),
+  })
+}
+
+export async function takeGoogleOAuthFlow(state: string) {
+  if (!state) return null
+  const [flow] = await getDb()
+    .select()
+    .from(googleOAuthFlows)
+    .where(eq(googleOAuthFlows.state, state))
+    .limit(1)
+  if (!flow) return null
+  await getDb().delete(googleOAuthFlows).where(eq(googleOAuthFlows.state, state))
+  return flow.expiresAt > new Date().toISOString() ? flow : null
 }
 
 async function getAuthorizationWithToken() {

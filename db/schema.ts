@@ -75,6 +75,17 @@ export const googleOAuthSettings = sqliteTable("google_oauth_settings", {
   updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 })
 
+export const googleOAuthFlows = sqliteTable("google_oauth_flows", {
+  state: text("state").primaryKey(),
+  googleEmail: text("google_email").notNull(),
+  codeVerifier: text("code_verifier").notNull(),
+  connectedBy: text("connected_by")
+    .notNull()
+    .references(() => users.id, { onDelete: "cascade" }),
+  expiresAt: text("expires_at").notNull(),
+  createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
+})
+
 export const jdrGoogleSheets = sqliteTable("jdr_google_sheets", {
   key: text("key", { enum: ["classes", "characters", "campaigns", "campaign_characters", "character_relations", "admin_todos", "inventory", "shops", "npcs", "tabletop"] }).primaryKey(),
   spreadsheetId: text("spreadsheet_id").notNull(),

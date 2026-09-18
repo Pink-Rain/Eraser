@@ -3,7 +3,10 @@ import { NextResponse } from "next/server"
 import { roll20CampaignPayload, roll20LinkFromToken, updateRoll20HitPoints } from "@/lib/roll20-bridge"
 
 const corsHeaders = {
-  "access-control-allow-origin": "https://app.roll20.net",
+  // This endpoint never accepts cookies: the campaign-specific bearer key is
+  // the sole credential. Allowing the Chrome companion origin is therefore
+  // safe and required because extension origins are generated at install time.
+  "access-control-allow-origin": "*",
   "access-control-allow-headers": "authorization, content-type",
   "access-control-allow-methods": "GET, PATCH, OPTIONS",
   "cache-control": "no-store",

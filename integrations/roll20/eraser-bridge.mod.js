@@ -1,10 +1,10 @@
 /* Eraser Bridge for Roll20 — eraser-jdr.chatgpt.site
- * 0.3.1 : le jeton par défaut est entièrement construit par l'API
+ * 0.4.0 : compagnon relié à l’application Windows locale
  * (setDefaultTokenForCharacter). Plus aucune automatisation de fiche.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.3.1';
+  var VERSION = '0.4.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;

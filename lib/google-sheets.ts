@@ -2250,9 +2250,11 @@ export async function ensureJdrSheets() {
       output.push(existing)
       continue
     }
-    const file = await createGoogleSpreadsheet(definition.name)
-    await configureStructuredSheet(file.id, definition)
+    const existingFile = await findGoogleSpreadsheetByName(definition.name)
+    const file = existingFile ?? await createGoogleSpreadsheet(definition.name)
+    if (!existingFile) await configureStructuredSheet(file.id, definition)
     if (definition.key === "inventory") await ensureInventoryWorkbookSchema(file.id)
+    if (definition.key === "npcs") await ensureNpcSheetSchema(file.id, definition.tabName)
     if (definition.key === "tabletop") await ensureTabletopWorkbookSchema(file.id)
     const stored = await saveJdrSheet({
       key: definition.key,
@@ -2314,10 +2316,14 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
   }
   const definition = jdrSheetDefinitions.find((item) => item.key === key)
   if (!definition) throw new Error("UNKNOWN_JDR_SHEET")
-  const file = await createGoogleSpreadsheet(definition.name)
-  await configureStructuredSheet(file.id, definition)
+  const existingFile = await findGoogleSpreadsheetByName(definition.name)
+  const file = existingFile ?? await createGoogleSpreadsheet(definition.name)
+  if (!existingFile) await configureStructuredSheet(file.id, definition)
   if (key === "inventory") await ensureInventoryWorkbookSchema(file.id)
-  if (key === "npcs") npcSheetSchemaReady.add(`${file.id}:${definition.tabName}:v5`)
+  if (key === "npcs") {
+    if (existingFile) await ensureNpcSheetSchema(file.id, definition.tabName)
+    else npcSheetSchemaReady.add(`${file.id}:${definition.tabName}:v5`)
+  }
   return saveJdrSheet({
     key: definition.key,
     spreadsheetId: file.id,

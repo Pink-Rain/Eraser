@@ -9,7 +9,7 @@ export function setAuthCookie(
   response: NextResponse,
   session: { token: string; expiresAt: string },
 ) {
-  const secure = process.env.NODE_ENV === "production"
+  const secure = process.env.NODE_ENV === "production" && process.env.ERASER_DESKTOP !== "1"
   response.cookies.set(AUTH_COOKIE, session.token, {
     httpOnly: true,
     sameSite: "lax",
@@ -21,7 +21,7 @@ export function setAuthCookie(
 }
 
 export function setViewRoleCookie(response: NextResponse, role: SiteRole) {
-  const secure = process.env.NODE_ENV === "production"
+  const secure = process.env.NODE_ENV === "production" && process.env.ERASER_DESKTOP !== "1"
   response.cookies.set(VIEW_ROLE_COOKIE, role, {
     httpOnly: true,
     sameSite: "lax",

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import {
+  createGoogleOAuthFlow,
   googleAuthorizationUrl,
   googlePkceChallenge,
   randomOAuthState,
@@ -12,12 +13,43 @@ const EMAIL_COOKIE = "eraser_google_oauth_email"
 const PKCE_COOKIE = "eraser_google_oauth_pkce"
 const CALLBACK_PATH = "/api/admin/google-drive/oauth/callback"
 
+function validEmailFrom(request: Request) {
+  const requestUrl = new URL(request.url)
+  return (requestUrl.searchParams.get("email") || "").trim().toLowerCase()
+}
+
+async function oauthRequest(request: Request, adminUid: string) {
+  const requestUrl = new URL(request.url)
+  const email = validEmailFrom(request)
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) throw new Error("INVALID_EMAIL")
+  const state = randomOAuthState()
+  const codeVerifier = randomOAuthState()
+  await createGoogleOAuthFlow({ state, googleEmail: email, codeVerifier, connectedBy: adminUid })
+  const url = await googleAuthorizationUrl({
+    email,
+    state,
+    origin: requestUrl.origin,
+    codeChallenge: await googlePkceChallenge(codeVerifier),
+  })
+  return { url }
+}
+
+export async function POST(request: Request) {
+  const admin = await authorizedAccount(["admin"])
+  if (!admin) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  try {
+    return NextResponse.json(await oauthRequest(request, admin.uid))
+  } catch {
+    return NextResponse.json({ error: "La connexion Google n’a pas pu démarrer." }, { status: 400 })
+  }
+}
+
 export async function GET(request: Request) {
   const admin = await authorizedAccount(["admin"])
   if (!admin) return NextResponse.redirect(new URL("/", request.url))
 
   const requestUrl = new URL(request.url)
-  const email = (requestUrl.searchParams.get("email") || "").trim().toLowerCase()
+  const email = validEmailFrom(request)
   if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
     return NextResponse.redirect(new URL("/administration/google-drive?google=failed", request.url))
   }

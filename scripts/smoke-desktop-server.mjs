@@ -54,8 +54,33 @@ try {
   })
   child.stdout.on("data", (chunk) => { logs += String(chunk) })
   child.stderr.on("data", (chunk) => { logs += String(chunk) })
-  const status = await waitFor(`http://127.0.0.1:${port}/connexion`)
-  console.log(`Serveur local Eraser vérifié (HTTP ${status}).`)
+  const origin = `http://127.0.0.1:${port}`
+  const status = await waitFor(`${origin}/connexion`)
+  const registration = await fetch(`${origin}/api/auth/register`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({
+      email: "test-installation@eraser.local",
+      password: "mot-de-passe-de-test",
+      displayName: "Test installation",
+    }),
+  })
+  if (!registration.ok) throw new Error(`La création du premier compte a échoué (${registration.status}).`)
+  const setCookies = registration.headers.getSetCookie?.() ?? [registration.headers.get("set-cookie") || ""]
+  const sessionCookie = setCookies.find((value) => value.startsWith("eraser_session="))
+  if (!sessionCookie) throw new Error("Le cookie de session local est absent.")
+  if (/;\s*Secure/i.test(sessionCookie)) throw new Error("Le cookie local ne doit pas exiger HTTPS.")
+  const cookie = sessionCookie.split(";", 1)[0]
+  const oauthStatus = await fetch(`${origin}/api/admin/google-drive/oauth/status`, {
+    headers: { cookie },
+  })
+  if (!oauthStatus.ok) throw new Error(`La session administrateur locale ne fonctionne pas (${oauthStatus.status}).`)
+  const oauthStart = await fetch(`${origin}/api/admin/google-drive/oauth/start?email=eraser.jdr@gmail.com`, {
+    method: "POST",
+    headers: { cookie },
+  })
+  if (oauthStart.status !== 400) throw new Error("Le test OAuth sans identifiants aurait dû être refusé proprement.")
+  console.log(`Serveur local Eraser vérifié (HTTP ${status}), compte administrateur et flux OAuth local opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())
   console.error(error)

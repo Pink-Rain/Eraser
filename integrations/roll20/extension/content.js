@@ -1,7 +1,7 @@
 (function () {
   'use strict';
-  const VERSION = '0.3.1';
-  const API = 'https://eraser-jdr.eliot-myr-0.chatgpt.site/api/roll20/bridge';
+  const VERSION = '0.4.0';
+  const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
   const acknowledgements = new Map();

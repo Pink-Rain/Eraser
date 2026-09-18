@@ -70,6 +70,7 @@ export function GoogleDriveManager({
 }) {
   const [email, setEmail] = useState(authorization?.googleEmail ?? defaultEmail)
   const [authorizationNotice, setAuthorizationNotice] = useState<string | null>(null)
+  const [authorizing, setAuthorizing] = useState(false)
   const [clientId, setClientId] = useState(oauthSettings?.clientId ?? "")
   const [clientSecret, setClientSecret] = useState("")
   const [savingSettings, setSavingSettings] = useState(false)
@@ -77,6 +78,8 @@ export function GoogleDriveManager({
   const [sheetName, setSheetName] = useState("")
   const [creating, setCreating] = useState(false)
   const [message, setMessage] = useState<string | null>(null)
+  const [linkingSheets, setLinkingSheets] = useState(false)
+  const [sheetLinkMessage, setSheetLinkMessage] = useState<string | null>(null)
   const [visibleFiles, setVisibleFiles] = useState(files)
   const [visibleDuplicateGroups, setVisibleDuplicateGroups] = useState(duplicateGroups)
   const [cleaningFileId, setCleaningFileId] = useState("")
@@ -98,7 +101,7 @@ export function GoogleDriveManager({
     setCleanupMessage("Le doublon a été placé dans la corbeille Google Drive.")
   }
 
-  function authorizeGoogle(event: FormEvent) {
+  async function authorizeGoogle(event: FormEvent) {
     event.preventDefault()
     const normalizedEmail = email.trim().toLowerCase()
     if (!normalizedEmail) return
@@ -109,9 +112,31 @@ export function GoogleDriveManager({
       document.getElementById("google-oauth-client-id")?.focus()
       return
     }
-    window.location.assign(
+    setAuthorizing(true)
+    setAuthorizationNotice("Google va s’ouvrir dans ton navigateur. Eraser attend la confirmation…")
+    const response = await fetch(
       `/api/admin/google-drive/oauth/start?email=${encodeURIComponent(normalizedEmail)}`,
+      { method: "POST" },
     )
+    const payload = (await response.json()) as { url?: string; error?: string }
+    if (!response.ok || !payload.url) {
+      setAuthorizing(false)
+      setAuthorizationNotice(payload.error || "La connexion Google n’a pas pu démarrer.")
+      return
+    }
+    window.open(payload.url, "_blank", "noopener,noreferrer")
+    for (let attempt = 0; attempt < 120; attempt += 1) {
+      await new Promise((resolve) => window.setTimeout(resolve, 1_000))
+      const statusResponse = await fetch("/api/admin/google-drive/oauth/status", { cache: "no-store" })
+      if (!statusResponse.ok) continue
+      const status = (await statusResponse.json()) as { authorization?: AuthorizationSummary | null }
+      if (status.authorization?.googleEmail === normalizedEmail) {
+        window.location.reload()
+        return
+      }
+    }
+    setAuthorizing(false)
+    setAuthorizationNotice("La connexion n’a pas été confirmée. Termine l’autorisation dans le navigateur, puis réessaie.")
   }
 
   async function saveOAuthSettings(event: FormEvent) {
@@ -150,6 +175,19 @@ export function GoogleDriveManager({
     setVisibleFiles((current) => [payload.file!, ...current])
     setSheetName("")
     setMessage(`La feuille « ${payload.file.name} » a été créée dans le Drive.`)
+  }
+
+  async function linkEraserSheets() {
+    setLinkingSheets(true)
+    setSheetLinkMessage(null)
+    const response = await fetch("/api/admin/google-drive/bootstrap-jdr-sheets", { method: "POST" })
+    const payload = (await response.json()) as { sheets?: Array<{ name: string }>; error?: string }
+    setLinkingSheets(false)
+    if (!response.ok || !payload.sheets) {
+      setSheetLinkMessage(payload.error || "Les feuilles Eraser n’ont pas pu être reliées.")
+      return
+    }
+    setSheetLinkMessage(`${payload.sheets.length} feuilles Eraser sont reliées. Les fichiers existants ont été conservés.`)
   }
 
   return (
@@ -273,8 +311,8 @@ export function GoogleDriveManager({
               placeholder="eraser.jdr@gmail.com"
               required
             />
-            <Button type="submit" disabled={!email.trim()}>
-              <HardDrive className="size-4" />
+            <Button type="submit" disabled={!email.trim() || authorizing}>
+              {authorizing ? <LoaderCircle className="size-4 animate-spin" /> : <HardDrive className="size-4" />}
               {authorization ? "Changer ou reconnecter" : "Autoriser ce Drive"}
             </Button>
           </div>
@@ -305,6 +343,21 @@ export function GoogleDriveManager({
           </div>
         )}
       </section>
+
+      {authorization && (
+        <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Migration sûre</p>
+          <h2 className="font-display mt-2 text-2xl font-semibold">Relier les feuilles Eraser existantes</h2>
+          <p className="mt-2 text-sm leading-6 text-muted-foreground">
+            Eraser recherche les feuilles déjà présentes dans ce Drive par leur nom exact et les relie à l’application. Il ne supprime aucun fichier et n’en crée un nouveau que si une feuille indispensable manque réellement.
+          </p>
+          <Button type="button" className="mt-4" onClick={() => void linkEraserSheets()} disabled={linkingSheets}>
+            {linkingSheets ? <LoaderCircle className="size-4 animate-spin" /> : <FileSpreadsheet className="size-4" />}
+            Relier mes feuilles existantes
+          </Button>
+          {sheetLinkMessage && <p className="mt-3 text-sm text-muted-foreground">{sheetLinkMessage}</p>}
+        </section>
+      )}
 
       {authorization && (
         <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">

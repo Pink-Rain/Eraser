@@ -1,23 +1,15 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
 const { app, BrowserWindow, dialog, shell } = require("electron")
 const { spawn } = require("node:child_process")
-const { createServer } = require("node:net")
-const { mkdirSync, readFileSync, writeFileSync } = require("node:fs")
+const { request } = require("node:http")
+const { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
 const { join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 
+const LOCAL_PORT = 32147
 let mainWindow = null
 let serverProcess = null
-
-function freePort() {
-  return new Promise((resolve, reject) => {
-    const probe = createServer()
-    probe.once("error", reject)
-    probe.listen(0, "127.0.0.1", () => {
-      const address = probe.address()
-      probe.close(() => resolve(address.port))
-    })
-  })
-}
+let startupLogPath = ""
 
 function persistentSecret(dataDirectory) {
   const path = join(dataDirectory, "desktop-secret.txt")
@@ -32,12 +24,48 @@ function persistentSecret(dataDirectory) {
   return value
 }
 
-async function waitForServer(url, attempts = 120) {
+function localRequest(url) {
+  return new Promise((resolve, reject) => {
+    const pending = request(url, { method: "GET", timeout: 2_000 }, (response) => {
+      response.resume()
+      resolve(response.statusCode || 0)
+    })
+    pending.once("timeout", () => pending.destroy(new Error("Délai dépassé")))
+    pending.once("error", reject)
+    pending.end()
+  })
+}
+
+function logLine(message) {
+  const line = `[${new Date().toISOString()}] ${message}\n`
+  if (startupLogPath) {
+    try {
+      appendFileSync(startupLogPath, line, "utf8")
+    } catch {
+      // The dialog below still reports failures if the log cannot be written.
+    }
+  }
+  console.log(message)
+}
+
+function recentLog() {
+  try {
+    const content = readFileSync(startupLogPath, "utf8")
+    return content.slice(-4_000).trim()
+  } catch {
+    return ""
+  }
+}
+
+async function waitForServer(url, attempts = 480) {
   let lastError
   for (let attempt = 0; attempt < attempts; attempt += 1) {
+    if (serverProcess?.exitCode !== null) {
+      throw new Error(`Le service local s’est arrêté (code ${serverProcess?.exitCode ?? "inconnu"}).`)
+    }
     try {
-      const response = await fetch(url, { redirect: "manual" })
-      if (response.status < 500) return
+      const status = await localRequest(`${url}/connexion`)
+      if (status > 0 && status < 500) return status
     } catch (error) {
       lastError = error
     }
@@ -60,11 +88,20 @@ function serverPaths() {
 }
 
 async function startServer() {
-  const port = await freePort()
+  const port = LOCAL_PORT
+  const userDataDirectory = app.getPath("userData")
   const dataDirectory = join(app.getPath("userData"), "data")
   mkdirSync(dataDirectory, { recursive: true })
+  const logsDirectory = join(userDataDirectory, "logs")
+  mkdirSync(logsDirectory, { recursive: true })
+  startupLogPath = join(logsDirectory, "eraser-startup.log")
+  writeFileSync(startupLogPath, "", "utf8")
+  const readyPath = join(userDataDirectory, "startup-ready.json")
+  rmSync(readyPath, { force: true })
   const paths = serverPaths()
   const serverScript = join(paths.directory, "server.js")
+  logLine(`Démarrage d’Eraser ${app.getVersion()} sur 127.0.0.1:${port}.`)
+  logLine(`Serveur : ${serverScript}`)
   serverProcess = spawn(process.execPath, [serverScript], {
     cwd: paths.directory,
     env: {
@@ -81,15 +118,22 @@ async function startServer() {
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],
   })
-  serverProcess.stdout.on("data", (chunk) => console.log(`[Eraser] ${chunk}`))
-  serverProcess.stderr.on("data", (chunk) => console.error(`[Eraser] ${chunk}`))
+  serverProcess.once("error", (error) => logLine(`[service:error] ${error.stack || error}`))
+  serverProcess.stdout.on("data", (chunk) => logLine(`[service] ${String(chunk).trimEnd()}`))
+  serverProcess.stderr.on("data", (chunk) => logLine(`[service:error] ${String(chunk).trimEnd()}`))
   serverProcess.once("exit", (code) => {
+    logLine(`Le service local s’est arrêté avec le code ${code ?? "inconnu"}.`)
     if (code && mainWindow) {
-      void dialog.showErrorBox("Eraser s’est arrêté", `Le service local s’est fermé (code ${code}).`)
+      void dialog.showErrorBox(
+        "Eraser s’est arrêté",
+        `Le service local s’est fermé (code ${code}).\n\nJournal : ${startupLogPath}`,
+      )
     }
   })
   const url = `http://127.0.0.1:${port}`
-  await waitForServer(url)
+  const status = await waitForServer(url)
+  writeFileSync(readyPath, JSON.stringify({ version: app.getVersion(), url, status, readyAt: new Date().toISOString() }, null, 2), "utf8")
+  logLine(`Eraser est prêt (HTTP ${status}).`)
   return url
 }
 
@@ -169,9 +213,12 @@ app.whenReady().then(async () => {
     createWindow(await startServer())
     setTimeout(() => void prepareUpdates(), 10_000)
   } catch (error) {
+    const details = recentLog()
     dialog.showErrorBox(
       "Impossible d’ouvrir Eraser",
-      error instanceof Error ? error.message : String(error),
+      `${error instanceof Error ? error.message : String(error)}\n\n` +
+        `${details ? `Dernières informations :\n${details}\n\n` : ""}` +
+        `Journal complet : ${startupLogPath || app.getPath("logs")}`,
     )
     app.quit()
   }
