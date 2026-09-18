@@ -1,47 +1,24 @@
-# Eraser 0.1.1-alpha.3 — préversion Windows autonome
+# Eraser 0.1.1-alpha.4 — application Windows autonome
 
-Cette préversion installe une vraie application Windows autonome. Elle embarque
-le serveur Eraser, utilise une base SQLite locale et un stockage local pour les
-images. L’utilisateur n’a pas besoin d’installer Node.js, Git, Tauri ou un autre
-outil de développement.
+Cette préversion corrige le démarrage et clarifie l’architecture finale :
+l’application remplace le site sans dépendre de lui.
 
-## Vérifications effectuées
+## Fonctionnement
 
-- compilation du projet historique Cloudflare sans régression ;
-- démarrage du serveur local sur le port stable `32147` et réponse HTTP 200 ;
+- l’application ouvre son propre serveur local sur `127.0.0.1:32147` ;
+- elle utilise directement le même compte Google Drive et les mêmes Google Sheets ;
+- elle ne charge, n’appelle et ne synchronise aucun site web ;
+- ses comptes et sa base SQLite sont locaux ;
+- l’association des propriétaires déjà présents dans Sheets reste uniquement
+  dans SQLite et ne modifie aucune cellule ;
+- Roll20 communique uniquement avec l’application locale.
+
+## Vérifications automatiques
+
+- compilation complète ;
 - création de `Eraser-Setup.exe` ;
 - installation silencieuse sur Windows ;
-- lancement de `Eraser.exe`, création d’un témoin de démarrage et contrôle de la
-  vraie page de connexion ;
-- premier compte local automatiquement administrateur.
+- lancement réel de `Eraser.exe` ;
+- réponse HTTP 200 de la page de connexion.
 
-## Corrigé depuis alpha.1
-
-- l’erreur vague `fetch failed` est remplacée par un démarrage plus patient, un
-  diagnostic précis et un journal local ;
-- Google Drive/Sheets dispose d’un flux OAuth adapté à l’application Windows ;
-- les feuilles Eraser déjà présentes sur le Drive peuvent être reliées sans les
-  supprimer ni les recréer ;
-- le compagnon Chrome Roll20 v0.4.0 appelle directement l’application locale.
-
-## Ajouté dans alpha.3
-
-- Eraser importe localement l’index des campagnes, personnages et appartenances
-  déjà présents dans les feuilles liées ;
-- une étape visuelle « C’est mon compte » relie le nouveau compte Windows à son
-  ancienne identité, sans modifier les feuilles Google ;
-- les lectures, permissions et nouvelles créations utilisent cette association,
-  afin de rester compatibles avec le site encore en ligne.
-
-## Limites connues de cette préversion
-
-- elle ne contient pas encore les données D1/R2 du site publié ;
-- Google demande encore une validation unique du compte `eraser.jdr@gmail.com`
-  sur cette nouvelle installation ;
-- le compagnon Chrome et le script Mod Roll20 doivent être remplacés par leurs
-  versions 0.4.0 téléchargeables depuis la page Roll20 d’Eraser ;
-- les mises à jour automatiques sont préparées, mais un dépôt privé ne permet pas
-  de distribuer publiquement le flux de mise à jour sans authentification.
-
-Le site actuel reste en ligne et inchangé. Cette préversion sert à tester le socle
-Windows sans remplacer ni supprimer la version Sites.
+Le site en ligne et la branche `main` ne sont pas modifiés.

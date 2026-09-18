@@ -215,7 +215,7 @@ export function GoogleDriveManager({
     const payload = (await response.json()) as { candidates?: LegacyIdentityCandidate[]; error?: string }
     setLinkingIdentity("")
     if (!response.ok || !payload.candidates) {
-      setIdentityMessage(payload.error || "L’ancien compte n’a pas pu être relié.")
+      setIdentityMessage(payload.error || "Les données existantes n’ont pas pu être associées.")
       return
     }
     setIdentityCandidates(payload.candidates)
@@ -231,7 +231,7 @@ export function GoogleDriveManager({
           <AlertDescription>
             <p>
               Le compte est prêt côté Eraser. Il manque encore les identifiants OAuth
-              Google du site ; sans eux, Google ne peut pas ouvrir son écran d’autorisation.
+              Google de l’application ; sans eux, Google ne peut pas ouvrir son écran d’autorisation.
             </p>
             <p className="mt-1 break-all text-xs">URL de redirection : {callbackUrl}</p>
           </AlertDescription>
@@ -323,8 +323,8 @@ export function GoogleDriveManager({
           <div>
             <h2 className="font-display text-2xl font-semibold">Compte Google dédié</h2>
             <p className="mt-1 text-sm leading-6 text-muted-foreground">
-              Saisis le compte créé uniquement pour Eraser. Cette autorisation donne au
-              site l’accès à l’ensemble de son Drive et de ses feuilles Google Sheets.
+              Saisis le compte créé uniquement pour Eraser. Cette autorisation donne à
+              l’application l’accès à l’ensemble de son Drive et de ses feuilles Google Sheets.
             </p>
           </div>
         </div>
@@ -393,10 +393,10 @@ export function GoogleDriveManager({
 
       {authorization && identityCandidates.length > 0 && (
         <section className="rounded-2xl border bg-card/90 p-5 shadow-[0_10px_35px_rgb(67_50_31/0.06)] sm:p-6">
-          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Données du site</p>
-          <h2 className="font-display mt-2 text-2xl font-semibold">Reconnaître mon ancien compte</h2>
+          <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Données Google Sheets</p>
+          <h2 className="font-display mt-2 text-2xl font-semibold">Associer mes données existantes</h2>
           <p className="mt-2 text-sm leading-6 text-muted-foreground">
-            Choisis le groupe qui contient tes campagnes ou tes personnages. Cette association reste uniquement sur cet ordinateur : aucune cellule Google Sheets n’est modifiée.
+            Choisis le groupe qui contient tes campagnes ou tes personnages. L’application l’associe uniquement à ton compte local : elle ne contacte aucun site et ne modifie aucune cellule Google Sheets.
           </p>
           <div className="mt-4 space-y-3">
             {identityCandidates.map((candidate) => (
@@ -421,7 +421,7 @@ export function GoogleDriveManager({
                     onClick={() => void linkExistingIdentity(candidate.uid)}
                   >
                     {linkingIdentity === candidate.uid && <LoaderCircle className="size-4 animate-spin" />}
-                    C’est mon compte
+                    Ce sont mes données
                   </Button>
                 )}
               </div>

@@ -21,13 +21,13 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { legacyUid?: string }
     const candidates = await listLegacyIdentityCandidates(admin.uid)
     const candidate = candidates.find((item) => item.uid === body.legacyUid && item.available)
-    if (!candidate) return NextResponse.json({ error: "Cette identité n’est pas disponible." }, { status: 400 })
+    if (!candidate) return NextResponse.json({ error: "Ce groupe de données n’est pas disponible." }, { status: 400 })
     await linkLegacyIdentity(admin.uid, candidate.uid)
     return NextResponse.json({ ok: true, candidates: await listLegacyIdentityCandidates(admin.uid) })
   } catch (error) {
     const message = error instanceof Error && error.message.includes("UNIQUE")
-      ? "Cette identité est déjà reliée à un autre compte local."
-      : "L’identité existante n’a pas pu être reliée."
+      ? "Ce groupe de données est déjà associé à un autre compte local."
+      : "Les données existantes n’ont pas pu être associées."
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

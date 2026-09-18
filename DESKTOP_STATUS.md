@@ -35,10 +35,9 @@ La connexion se fait dans le navigateur système avec une redirection locale ver
 `http://127.0.0.1:32147/api/admin/google-drive/oauth/callback`. Les feuilles
 existantes sont retrouvées par leur nom exact et reliées sans suppression. Une
 nouvelle feuille n’est créée que si une feuille indispensable manque réellement.
-Après la liaison, l’administrateur peut reconnaître son ancienne identité grâce
-aux noms de ses campagnes et personnages. Cette association reste dans SQLite :
-elle ne réécrit aucun identifiant dans les feuilles et conserve la compatibilité
-avec le site en ligne.
+Après la liaison, l’administrateur associe son compte local au groupe de données
+qui contient ses campagnes et personnages. Cette association reste dans SQLite :
+elle ne contacte aucun site et ne réécrit aucun identifiant dans Google Sheets.
 
 ### Roll20
 

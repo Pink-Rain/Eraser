@@ -75,8 +75,8 @@ export default async function GoogleDriveAdministrationPage({
           Google Drive et Sheets
         </h1>
         <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">
-          Relie ici le compte Google créé spécialement pour Eraser. Le site pourra utiliser
-          tout son Drive pour lire, importer, créer et modifier les fichiers nécessaires.
+          Relie ici le compte Google créé spécialement pour Eraser. L’application pourra utiliser
+          tout ce Drive pour lire, importer, créer et modifier les fichiers nécessaires.
         </p>
         <Suspense fallback={<DeferredContentLoading label="Chargement du Drive…" />}>
           <GoogleDriveData origin={origin} oauthStatus={oauthStatus} />

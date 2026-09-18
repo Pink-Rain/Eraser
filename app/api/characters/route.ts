@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { createCharacterForUser } from "@/lib/google-sheets"
-import { preferredIdentityUid } from "@/lib/identity-links"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export async function POST(request: Request) {
@@ -13,7 +12,7 @@ export async function POST(request: Request) {
     if (!Array.isArray(body.values) || !body.values.every((value) => typeof value === "string")) {
       return NextResponse.json({ error: "Le formulaire est incomplet." }, { status: 400 })
     }
-    const character = await createCharacterForUser(await preferredIdentityUid(account.uid), body.values)
+    const character = await createCharacterForUser(account.uid, body.values)
     return NextResponse.json({ ok: true, character })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""

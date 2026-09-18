@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { createCampaignForMj } from "@/lib/google-sheets"
-import { preferredIdentityUid } from "@/lib/identity-links"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export async function POST(request: Request) {
@@ -10,7 +9,7 @@ export async function POST(request: Request) {
 
   try {
     const body = (await request.json()) as { name?: string; description?: string; bannerUrl?: string; accentColor?: string }
-    const campaign = await createCampaignForMj(await preferredIdentityUid(account.uid), {
+    const campaign = await createCampaignForMj(account.uid, {
       name: body.name || "", description: body.description, bannerUrl: body.bannerUrl, accentColor: body.accentColor,
     })
     return NextResponse.json({ ok: true, campaign })
