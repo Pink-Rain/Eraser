@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "Eraser — Compagnon Roll20",
+  "version": "0.3.1",
+  "description": "Synchronise une campagne Eraser avec Roll20.",
+  "permissions": ["storage"],
+  "host_permissions": ["https://eraser-jdr.eliot-myr-0.chatgpt.site/*", "https://app.roll20.net/*"],
+  "background": { "service_worker": "background.js" },
+  "content_scripts": [{
+    "matches": ["https://app.roll20.net/editor/*"],
+    "js": ["content.js"],
+    "css": ["content.css"],
+    "all_frames": true,
+    "run_at": "document_idle"
+  }]
+}

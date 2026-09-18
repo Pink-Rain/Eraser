@@ -1,0 +1,97 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1787943713670,
+      "tag": "0000_special_talisman",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1787945818494,
+      "tag": "0001_powerful_ezekiel",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1787947655063,
+      "tag": "0002_lazy_carlie_cooper",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1787948518694,
+      "tag": "0003_sour_electro",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1787956345430,
+      "tag": "0004_ordinary_nick_fury",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1787961048882,
+      "tag": "0005_sweet_blackheart",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1787965437107,
+      "tag": "0006_shallow_ego",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1787987426942,
+      "tag": "0007_bouncy_namor",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1787988501083,
+      "tag": "0008_skinny_talisman",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1787989030020,
+      "tag": "0009_remarkable_ultron",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1788430330109,
+      "tag": "0010_typical_marvel_boy",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1788600768065,
+      "tag": "0011_futuristic_speed_demon",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1789727412876,
+      "tag": "0012_friendly_rhodey",
+      "breakpoints": true
+    }
+  ]
+}
