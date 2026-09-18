@@ -7,7 +7,7 @@ import type { AccountRecord, AccountStatus, SiteRole } from "@/lib/auth-types"
 
 // Cloudflare Workers caps PBKDF2 at 100,000 iterations per derivation.
 const PASSWORD_ITERATIONS = 100_000
-const SESSION_DAYS = 30
+const SESSION_DAYS = 365
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = ""

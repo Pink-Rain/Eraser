@@ -85,7 +85,6 @@ try {
   const repairedCookies = repair.headers.getSetCookie?.() ?? [repair.headers.get("set-cookie") || ""]
   const repairedSession = repairedCookies.find((value) => value.startsWith("eraser_session="))
   if (!repairedSession) throw new Error("La réparation n’a pas créé de nouvelle session.")
-  const repairedCookie = repairedSession.split(";", 1)[0]
   const repairedLogin = await fetch(`${origin}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
@@ -95,13 +94,17 @@ try {
     }),
   })
   if (!repairedLogin.ok) throw new Error(`La connexion après réparation a échoué (${repairedLogin.status}).`)
+  const loginCookies = repairedLogin.headers.getSetCookie?.() ?? [repairedLogin.headers.get("set-cookie") || ""]
+  const loginSession = loginCookies.find((value) => value.startsWith("eraser_session="))
+  if (!loginSession) throw new Error("La reconnexion n’a pas créé de session persistante.")
+  const loginCookie = loginSession.split(";", 1)[0]
   const oauthStatus = await fetch(`${origin}/api/admin/google-drive/oauth/status`, {
-    headers: { cookie: repairedCookie },
+    headers: { cookie: loginCookie },
   })
   if (!oauthStatus.ok) throw new Error(`La session administrateur locale ne fonctionne pas (${oauthStatus.status}).`)
   const oauthStart = await fetch(`${origin}/api/admin/google-drive/oauth/start?email=eraser.jdr@gmail.com`, {
     method: "POST",
-    headers: { cookie },
+    headers: { cookie: loginCookie },
   })
   if (oauthStart.status !== 400) throw new Error("Le test OAuth sans identifiants aurait dû être refusé proprement.")
   console.log(`Serveur local Eraser vérifié (HTTP ${status}), compte administrateur et flux OAuth local opérationnels.`)

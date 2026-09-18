@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { app, BrowserWindow, dialog, shell } = require("electron")
+const { app, BrowserWindow, dialog, shell, session } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
 const { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
@@ -7,6 +7,7 @@ const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 
 const LOCAL_PORT = 32147
+const PERSISTENT_PARTITION = "persist:eraser"
 app.setName("Eraser")
 let mainWindow = null
 let serverProcess = null
@@ -156,7 +157,21 @@ function createWindow(url) {
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true,
+      partition: PERSISTENT_PARTITION,
     },
+  })
+  const persistentSession = session.fromPartition(PERSISTENT_PARTITION)
+  persistentSession.cookies.on("changed", () => {
+    void persistentSession.cookies.flushStore()
+  })
+  let closeAfterCookieFlush = false
+  mainWindow.on("close", (event) => {
+    if (closeAfterCookieFlush) return
+    event.preventDefault()
+    void persistentSession.cookies.flushStore().finally(() => {
+      closeAfterCookieFlush = true
+      mainWindow?.close()
+    })
   })
   mainWindow.once("ready-to-show", () => mainWindow.show())
   mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
