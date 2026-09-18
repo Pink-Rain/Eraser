@@ -3,10 +3,11 @@ const { app, BrowserWindow, dialog, shell } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
 const { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
-const { join } = require("node:path")
+const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 
 const LOCAL_PORT = 32147
+app.setName("Eraser")
 let mainWindow = null
 let serverProcess = null
 let startupLogPath = ""
@@ -93,10 +94,11 @@ async function startServer() {
   const dataDirectory = join(app.getPath("userData"), "data")
   mkdirSync(dataDirectory, { recursive: true })
   const logsDirectory = join(userDataDirectory, "logs")
-  mkdirSync(logsDirectory, { recursive: true })
-  startupLogPath = join(logsDirectory, "eraser-startup.log")
+  startupLogPath = process.env.ERASER_STARTUP_LOG || join(logsDirectory, "eraser-startup.log")
+  mkdirSync(dirname(startupLogPath), { recursive: true })
   writeFileSync(startupLogPath, "", "utf8")
-  const readyPath = join(userDataDirectory, "startup-ready.json")
+  const readyPath = process.env.ERASER_READY_FILE || join(userDataDirectory, "startup-ready.json")
+  mkdirSync(dirname(readyPath), { recursive: true })
   rmSync(readyPath, { force: true })
   const paths = serverPaths()
   const serverScript = join(paths.directory, "server.js")

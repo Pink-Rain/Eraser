@@ -42,8 +42,10 @@ jobs:
           if (-not (Test-Path $executable)) {
             throw "Eraser.exe est introuvable après l’installation."
           }
+          $env:ERASER_READY_FILE = Join-Path $PWD "eraser-startup-ready.json"
+          $env:ERASER_STARTUP_LOG = Join-Path $PWD "eraser-startup.log"
           $process = Start-Process -FilePath $executable -PassThru
-          $ready = Join-Path $env:APPDATA "Eraser/startup-ready.json"
+          $ready = $env:ERASER_READY_FILE
           $deadline = (Get-Date).AddMinutes(3)
           while ((Get-Date) -lt $deadline -and -not (Test-Path $ready)) {
             if ($process.HasExited) {
@@ -52,7 +54,7 @@ jobs:
             Start-Sleep -Seconds 2
           }
           if (-not (Test-Path $ready)) {
-            $log = Join-Path $env:APPDATA "Eraser/logs/eraser-startup.log"
+            $log = $env:ERASER_STARTUP_LOG
             if (Test-Path $log) { Get-Content $log }
             throw "Eraser n’a pas confirmé son démarrage complet."
           }
