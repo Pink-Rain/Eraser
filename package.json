@@ -15,8 +15,9 @@
     "lint": "bash scripts/sites-env.sh -- eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "bash scripts/sites-env.sh -- drizzle-kit generate",
     "desktop:build": "node scripts/build-desktop.mjs",
-    "desktop:pack": "npm run desktop:build && electron-builder --win --dir",
-    "desktop:dist": "npm run desktop:build && electron-builder --win nsis"
+    "desktop:verify": "node scripts/smoke-desktop-server.mjs",
+    "desktop:pack": "npm run desktop:build && npm run desktop:verify && electron-builder --win --dir",
+    "desktop:dist": "npm run desktop:build && npm run desktop:verify && electron-builder --win nsis"
   },
   "dependencies": {
     "@base-ui/react": "^1.7.0",

@@ -18,7 +18,7 @@ win:
       arch:
         - x64
   artifactName: Eraser-Setup.${ext}
-  icon: build-resources/icon.ico
+  icon: build-resources/icon.png
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
