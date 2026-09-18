@@ -3,6 +3,8 @@ name: Construire Eraser pour Windows
 on:
   workflow_dispatch:
   push:
+    branches:
+      - windows-app-migration
     tags:
       - "v*"
 
