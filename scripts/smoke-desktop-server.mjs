@@ -61,6 +61,18 @@ try {
   console.error(error)
   throw error
 } finally {
-  if (child && !child.killed) child.kill()
-  await rm(dataDirectory, { recursive: true, force: true })
+  if (child && child.exitCode === null) {
+    const stopped = new Promise((resolve) => child.once("exit", resolve))
+    child.kill()
+    await Promise.race([
+      stopped,
+      new Promise((resolve) => setTimeout(resolve, 5_000)),
+    ])
+  }
+  await rm(dataDirectory, {
+    recursive: true,
+    force: true,
+    maxRetries: 10,
+    retryDelay: 100,
+  })
 }
