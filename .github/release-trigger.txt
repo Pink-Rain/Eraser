@@ -1,0 +1,2 @@
+v0.1.0-alpha.1
+Validated local server, installer creation, silent installation and process startup.
