@@ -339,24 +339,22 @@ export function AppShell({
       [data-sidebar="content"]::-webkit-scrollbar-thumb:hover { background-color: var(--sidebar-ring); }
     `}</style>
     {/* DesktopTitlebar renders nothing on the website (no window.eraserDesktop).
-        In the desktop app it takes a frame:false window's custom title row, so
-        the rest of the app is wrapped below it in a column, in a div carrying a
-        `transform` so it becomes the containing block for the sidebar's own
-        `fixed inset-y-0` — otherwise that fixed positioning would resolve
-        against the true window top and render underneath this bar instead of
-        being pushed down by it. */}
-    <div className="flex min-h-svh flex-col">
-      <DesktopTitlebar />
-      <div className="min-h-0 flex-1" style={{ transform: "translateZ(0)" }}>
+        In the desktop app it's a `position: fixed` overlay (not a normal-flow
+        sibling — an earlier attempt to reserve flow space via a `transform`
+        containing-block trick on a wrapper div didn't actually shift the
+        sidebar's own `fixed inset-y-0` panel, which kept rendering under the
+        bar instead of below it). It compensates by injecting its own <style>
+        overrides that pad/shrink the sidebar primitives by its height instead. */}
+    <DesktopTitlebar />
     <SidebarProvider>
       <Sidebar collapsible="icon" className="border-r-0">
-        <SidebarHeader className="gap-3 border-b border-sidebar-border p-3">
+        <SidebarHeader className="gap-3 border-b border-sidebar-border p-3 group-data-[collapsible=icon]:p-1">
           <div className="flex items-center gap-2">
             <DropdownMenu open={accountMenuOpen} onOpenChange={setAccountMenuOpen}>
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="size-12 shrink-0 overflow-hidden rounded-xl p-0 hover:bg-transparent"
+                  className="size-12 shrink-0 overflow-hidden rounded-xl p-0 hover:bg-transparent group-data-[collapsible=icon]:size-8"
                   aria-label="Ouvrir mes personnages"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -640,8 +638,6 @@ export function AppShell({
         </ShellDataContext.Provider>
       </SidebarInset>
     </SidebarProvider>
-      </div>
-    </div>
     </PageLabelContext.Provider>
   )
 }

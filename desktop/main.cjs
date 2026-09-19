@@ -12,6 +12,11 @@ const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
 const NORMAL_MIN_WIDTH = 1024
 const NORMAL_MIN_HEIGHT = 700
 const TITLEBAR_HEIGHT = 40
+// Kept in sync by hand with TITLEBAR_HEIGHT_PX/COLLAPSED_WIDTH_PX in
+// components/eraser/desktop-titlebar.tsx (the two can't share a literal
+// constant across the IPC boundary). The collapsed mini bar only needs to
+// fit the icon + "Eraser - JDR", not the window's previous full width.
+const COLLAPSED_WIDTH = 220
 // The internal Electron app name: it determines the userData directory
 // (%APPDATA%/Eraser/...), so it must NEVER change independently of a
 // deliberate, tested data-migration — changing it would silently point
@@ -182,9 +187,9 @@ function collapseWindow() {
   collapseSavedWasMaximized = mainWindow.isMaximized()
   if (collapseSavedWasMaximized) mainWindow.unmaximize()
   collapseSavedBounds = mainWindow.getBounds()
-  mainWindow.setMinimumSize(200, TITLEBAR_HEIGHT)
+  mainWindow.setMinimumSize(COLLAPSED_WIDTH, TITLEBAR_HEIGHT)
   mainWindow.setResizable(false)
-  mainWindow.setBounds({ x: collapseSavedBounds.x, y: collapseSavedBounds.y, width: collapseSavedBounds.width, height: TITLEBAR_HEIGHT })
+  mainWindow.setBounds({ x: collapseSavedBounds.x, y: collapseSavedBounds.y, width: COLLAPSED_WIDTH, height: TITLEBAR_HEIGHT })
   mainWindow.setOpacity(0.88)
   isCollapsed = true
 }
