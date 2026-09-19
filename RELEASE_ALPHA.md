@@ -1,21 +1,22 @@
-# Eraser 0.1.1-alpha.8 — récupération des campagnes et personnages
+# Eraser 0.1.1-alpha.9 — pages qui plantent, fiche personnage plus fiable
 
-Cette version permet à l’administration de retrouver toutes les campagnes et
-tous les personnages présents dans les feuilles Google, y compris ceux qui
-n’ont plus de propriétaire reconnu par l’application Windows.
+Cette version corrige des pages qui affichaient une erreur brute ou un écran
+vide, accélère l’Index des classes et rend la fiche personnage plus robuste
+face aux clics rapides et répétés.
 
-## Ajouté
+## Corrigé
 
-- les pages « Toutes les campagnes » et « Tous les personnages » relisent les
-  feuilles Google avant d’afficher leur contenu ;
-- les lignes sans propriétaire sont désormais importées et visibles ;
-- les anciens identifiants de propriétaire sont signalés clairement ;
-- un administrateur peut attribuer une campagne ou un personnage à n’importe
-  quel compte local, changer son propriétaire ou le retirer ;
-- chaque changement de propriétaire est enregistré dans Google Sheets et dans
-  l’index local de l’application ;
-- la synchronisation administrative respecte les éléments déjà placés dans la
-  corbeille.
+- une page dont le chargement échoue (par exemple une réponse Google Sheets
+  ou Google Drive momentanément indisponible) affiche désormais un message
+  clair avec un bouton « Réessayer » au lieu d’une erreur brute ou d’un
+  écran vide ;
+- l’Index des classes se charge beaucoup plus vite : la détection des sorts
+  en double ne refait plus le même travail de comparaison pour chaque paire
+  de sorts ;
+- les boutons +/- de la fiche personnage (Notoriété, Moralité, Folie,
+  Destin, Niveau…) n’affichent plus de valeur qui « recule » toute seule
+  après des clics rapprochés : les écritures sont désormais mises en file
+  et seule la plus récente est appliquée à l’écran.
 
 ## Vérifications
 
