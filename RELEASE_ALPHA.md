@@ -37,6 +37,8 @@ plus, et un léger gain de vitesse de navigation.
 
 - compilation complète de l’application réussie ;
 - lint sans erreur ;
+- vérification de fidélité avec la source du site réussie (aucun fichier CSS
+  historique modifié, aucune suppression) ;
 - serveur Windows autonome construit et vérifié en HTTP 200 ;
 - pages « Toutes les campagnes », « Index des classes » et « Index des
   objets » revérifiées en HTTP 200 sur le serveur autonome.
