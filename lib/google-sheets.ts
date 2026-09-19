@@ -1813,7 +1813,7 @@ async function configureStructuredSheet(spreadsheetId: string, definition: Struc
     body: JSON.stringify({ requests }),
   })
   const lastColumn = columnName(definition.headers.length)
-  await updateRange(spreadsheetId, `${definition.tabName}!A1:${lastColumn}1`, [definition.headers])
+  await updateRange(spreadsheetId, sheetTabRange(definition.tabName, `A1:${lastColumn}1`), [definition.headers])
 }
 
 function columnName(columnCount: number) {
@@ -2294,9 +2294,11 @@ export async function syncExistingIdentityIndexes() {
     getJdrSheet("campaign_characters"),
   ])
   const [campaignRows, characterRows, relationRows] = await Promise.all([
-    campaignSource ? readRange(campaignSource.spreadsheetId, campaignSource.range) : Promise.resolve([]),
-    characterSource ? readRange(characterSource.spreadsheetId, characterSource.range) : Promise.resolve([]),
-    relationSource ? readRange(relationSource.spreadsheetId, `${relationSource.tabName}!A:B`) : Promise.resolve([]),
+    campaignSource ? readRange(campaignSource.spreadsheetId, campaignSource.range).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+    characterSource ? readRange(characterSource.spreadsheetId, characterSource.range).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+    // Le nom de cet onglet contient des espaces ("Personnages par campagne") : il doit être
+    // entre quotes dans la notation A1, sinon l'API Sheets renvoie une erreur de parsing.
+    relationSource ? readRange(relationSource.spreadsheetId, sheetTabRange(relationSource.tabName, "A:B")).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
   ])
   const now = new Date().toISOString()
   for (const row of campaignRows.slice(1)) {
@@ -2418,12 +2420,33 @@ export async function trashRedundantDriveSpreadsheet(fileId: string) {
   return trashDriveFile(candidate.id)
 }
 
+const jdrSheetHeaderChecked = new Set<JdrSheetKey>()
+
+async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
+  if (jdrSheetHeaderChecked.has(definition.key)) return
+  jdrSheetHeaderChecked.add(definition.key)
+  try {
+    const firstRow = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A1:A1"))
+    if (firstRow.length > 0) return
+    // La feuille est reliée mais totalement vide : ses en-têtes n'ont jamais pu être
+    // écrites (par exemple un onglet au nom contenant des espaces mal cité dans la
+    // notation A1). On ne les complète que si la feuille est confirmée vide, pour ne
+    // jamais écraser des données déjà présentes.
+    const lastColumn = columnName(definition.headers.length)
+    await updateRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${lastColumn}1`), [definition.headers])
+  } catch (error) {
+    console.error("JDR_SHEET_HEADER_CHECK_FAILED", definition.key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+  }
+}
+
 export async function ensureJdrSheet(key: JdrSheetKey) {
   if (key === "tabletop") return ensureTabletopWorkbook()
   const existing = await getJdrSheet(key)
   if (existing) {
     if (key === "inventory") await ensureInventoryWorkbookSchema(existing.spreadsheetId)
     if (key === "npcs") await ensureNpcSheetSchema(existing.spreadsheetId, existing.tabName)
+    const definition = jdrSheetDefinitions.find((item) => item.key === key)
+    if (definition) await ensureJdrSheetHeaderRow(existing, definition)
     return existing
   }
   const definition = jdrSheetDefinitions.find((item) => item.key === key)
@@ -3358,7 +3381,7 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
   }
   await getDb().insert(campaignCharacters).values({ campaignId, characterId: targetId }).onConflictDoNothing()
   const relationSheet = await ensureJdrSheet("campaign_characters")
-  if (relationSheet) await appendRows(relationSheet.spreadsheetId, `${relationSheet.tabName}!A:B`, [[campaignId, targetId]])
+  if (relationSheet) await appendRows(relationSheet.spreadsheetId, sheetTabRange(relationSheet.tabName, "A:B"), [[campaignId, targetId]])
   return (await listCampaignMembers(campaignId)).find((character) => character.id === targetId)
 }
 
