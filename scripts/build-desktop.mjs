@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process"
-import { mkdir, rm } from "node:fs/promises"
+import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { createPackage } from "@electron/asar"
 
 const root = process.cwd()
 const vinext = join(root, "node_modules", "vinext", "dist", "cli.js")
@@ -26,4 +27,17 @@ await new Promise((resolve, reject) => {
   })
 })
 
-console.log(`Serveur autonome préparé dans ${join(root, "dist", "standalone")}`)
+const launcher = join(root, "dist", "standalone", "server.js")
+const launcherSource = await readFile(launcher, "utf8")
+const patchedLauncher = launcherSource.replace(
+  'outDir: join(import.meta.dirname, "dist"),',
+  'outDir: process.env.ERASER_SERVER_OUT_DIR || join(import.meta.dirname, "dist"),',
+)
+if (patchedLauncher === launcherSource) {
+  throw new Error("Le lanceur autonome n’a pas pu être adapté au paquet Windows.")
+}
+await writeFile(launcher, patchedLauncher, "utf8")
+
+const archive = join(root, "dist", "eraser-server.asar")
+await createPackage(join(root, "dist", "standalone"), archive)
+console.log(`Serveur autonome emballé dans ${archive}`)

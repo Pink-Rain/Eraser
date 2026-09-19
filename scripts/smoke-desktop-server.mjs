@@ -3,10 +3,12 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
+import { extractAll } from "@electron/asar"
 
 const root = process.cwd()
 const dataDirectory = await mkdtemp(join(tmpdir(), "eraser-desktop-test-"))
-const serverDirectory = join(root, "dist", "standalone")
+const serverDirectory = join(dataDirectory, "server")
+extractAll(join(root, "dist", "eraser-server.asar"), serverDirectory)
 let child
 let logs = ""
 
@@ -48,6 +50,7 @@ try {
       ERASER_DESKTOP: "1",
       ERASER_DESKTOP_DATA_DIR: dataDirectory,
       ERASER_MIGRATIONS_DIR: join(root, "drizzle"),
+      ERASER_SERVER_OUT_DIR: join(root, "dist", "standalone", "dist"),
       GOOGLE_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     },
     stdio: ["ignore", "pipe", "pipe"],
@@ -56,6 +59,18 @@ try {
   child.stderr.on("data", (chunk) => { logs += String(chunk) })
   const origin = `http://127.0.0.1:${port}`
   const status = await waitFor(`${origin}/connexion`)
+  const loginPage = await fetch(`${origin}/connexion`)
+  const loginHtml = await loginPage.text()
+  const assetPaths = [...loginHtml.matchAll(/(?:src|href)=["'](\/assets\/[^"']+)["']/g)]
+    .map((match) => match[1])
+    .filter((path, index, paths) => paths.indexOf(path) === index)
+  if (!assetPaths.some((path) => path.endsWith(".js"))) {
+    throw new Error("La page de connexion ne référence aucun fichier JavaScript.")
+  }
+  for (const assetPath of assetPaths) {
+    const asset = await fetch(`${origin}${assetPath}`)
+    if (!asset.ok) throw new Error(`Le fichier d’interface ${assetPath} est inaccessible (${asset.status}).`)
+  }
   const registration = await fetch(`${origin}/api/auth/register`, {
     method: "POST",
     headers: { "content-type": "application/json" },

@@ -82,13 +82,15 @@ async function waitForServer(url, attempts = 480) {
 function serverPaths() {
   if (app.isPackaged) {
     return {
-      directory: join(process.resourcesPath, "eraser-server"),
+      directory: join(process.resourcesPath, "eraser-server.asar"),
+      outputDirectory: join(process.resourcesPath, "eraser-dist"),
       migrations: join(process.resourcesPath, "migrations"),
-      workingDirectory: join(process.resourcesPath, "eraser-server"),
+      workingDirectory: process.resourcesPath,
     }
   }
   return {
     directory: join(app.getAppPath(), "dist", "standalone"),
+    outputDirectory: join(app.getAppPath(), "dist", "standalone", "dist"),
     migrations: join(app.getAppPath(), "drizzle"),
     workingDirectory: join(app.getAppPath(), "dist", "standalone"),
   }
@@ -122,6 +124,7 @@ async function startServer() {
       ERASER_DESKTOP: "1",
       ERASER_DESKTOP_DATA_DIR: dataDirectory,
       ERASER_MIGRATIONS_DIR: paths.migrations,
+      ERASER_SERVER_OUT_DIR: paths.outputDirectory,
       GOOGLE_TOKEN_ENCRYPTION_KEY: persistentSecret(dataDirectory),
     },
     windowsHide: true,
