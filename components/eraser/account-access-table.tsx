@@ -1,10 +1,11 @@
 "use client"
 
 import { useState } from "react"
-import { LoaderCircle, Save } from "lucide-react"
+import { KeyRound, LoaderCircle, Save } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -35,6 +36,8 @@ function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent:
   const [status, setStatus] = useState<AccountStatus>(account.status)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
+  const [password, setPassword] = useState("")
+  const [passwordState, setPasswordState] = useState<"idle" | "saving" | "saved" | "error">("idle")
 
   async function save() {
     setSaving(true)
@@ -46,6 +49,25 @@ function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent:
     })
     setSaving(false)
     setSaved(response.ok)
+  }
+
+  async function resetPassword() {
+    if (password.length < 8) {
+      setPasswordState("error")
+      return
+    }
+    setPasswordState("saving")
+    const response = await fetch("/api/admin/accounts/password", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ uid: account.uid, password }),
+    })
+    if (response.ok) {
+      setPassword("")
+      setPasswordState("saved")
+    } else {
+      setPasswordState("error")
+    }
   }
 
   return (
@@ -88,6 +110,32 @@ function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent:
         {saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
         {saved ? "Enregistré" : "Enregistrer"}
       </Button>
+      <div className="flex flex-col gap-2 border-t pt-4 md:col-span-4 md:flex-row md:items-center">
+        <Input
+          aria-label={`Nouveau mot de passe de ${account.email}`}
+          className="md:max-w-sm"
+          minLength={8}
+          onChange={(event) => {
+            setPassword(event.target.value)
+            setPasswordState("idle")
+          }}
+          placeholder="Nouveau mot de passe (8 caractères minimum)"
+          type="password"
+          value={password}
+        />
+        <Button
+          disabled={passwordState === "saving" || password.length < 8}
+          onClick={resetPassword}
+          type="button"
+          variant="outline"
+        >
+          {passwordState === "saving" ? <LoaderCircle className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
+          {passwordState === "saved" ? "Mot de passe modifié" : "Changer le mot de passe"}
+        </Button>
+        {passwordState === "error" && (
+          <p className="text-sm text-destructive">La modification a échoué.</p>
+        )}
+      </div>
     </article>
   )
 }

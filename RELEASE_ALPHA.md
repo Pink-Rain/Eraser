@@ -1,23 +1,27 @@
-# Eraser 0.1.1-alpha.6 — connexion persistante
+# Eraser 0.1.1-alpha.7 — connexion et mises à jour corrigées
 
-Eraser conserve les comptes protégés par mot de passe.
+Cette version corrige l’écran de connexion de l’application installée et active
+les mises à jour automatiques depuis le dépôt GitHub public.
 
 ## Corrigé
 
-- les cookies de connexion utilisent maintenant un stockage Electron persistant ;
-- ils sont enregistrés immédiatement lorsqu’ils changent ;
-- fermer la fenêtre attend l’enregistrement du cookie avant d’arrêter Eraser ;
-- une session locale reste valable un an ;
-- l’onglet « Réparer l’accès » permet de choisir un nouveau mot de passe si une
-  ancienne installation a déjà créé le compte local.
+- « Se connecter » et « Créer un compte » fonctionnent aussi si le JavaScript de
+  l’écran tarde à démarrer ;
+- le premier compte créé devient administrateur ;
+- la réinitialisation publique « Réparer l’accès » est supprimée ;
+- seul un administrateur connecté peut attribuer un nouveau mot de passe ;
+- les mises à jour sont téléchargées automatiquement et s’installent sans
+  retélécharger manuellement l’installateur ;
+- la session reste enregistrée après la fermeture d’Eraser.
 
 ## Vérifications automatiques
 
-- création du premier compte administrateur avec mot de passe ;
-- réinitialisation du mot de passe ;
-- reconnexion et nouvelle session ;
+- comparaison complète avec la source du site, y compris les fichiers CSS ;
+- chargement interactif réel de l’écran de connexion dans l’application installée ;
+- création du premier compte administrateur depuis l’interface ;
+- vérification de la session créée par l’interface ;
 - construction et installation de l’exécutable Windows ;
-- ouverture réelle d’Eraser et réponse HTTP 200.
+- présence de `latest.yml` et du fichier de mise à jour différentielle.
 
 Les profils restent privés : connaître un nom de profil ne permet pas de s’y
 connecter sans son mot de passe.

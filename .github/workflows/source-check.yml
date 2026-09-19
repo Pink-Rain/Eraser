@@ -15,12 +15,19 @@ jobs:
     steps:
       - name: Récupérer le dépôt
         uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
 
       - name: Préparer Node.js
         uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
+
+      - name: Vérifier la fidélité avec la source du site
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          node scripts/verify-site-parity.mjs
 
       - name: Installer les dépendances
         run: npm ci

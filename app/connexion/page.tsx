@@ -6,8 +6,13 @@ import { currentAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-export default async function ConnexionPage() {
+export default async function ConnexionPage({
+  searchParams,
+}: {
+  searchParams: Promise<{ authError?: string }>
+}) {
   if (await currentAccount()) redirect("/")
+  const { authError } = await searchParams
   return (
     <main className="paper-grain min-h-svh px-5 py-7 sm:px-8 sm:py-10">
       <div className="mx-auto max-w-6xl">
@@ -23,12 +28,12 @@ export default async function ConnexionPage() {
               Entre dans <span className="text-primary">Eraser</span>
             </h1>
             <p className="mt-5 text-base leading-7 text-muted-foreground sm:text-lg sm:leading-8">
-              Crée ton compte directement sur le site. Une fois inscrit,
+              Crée ton compte directement dans l’application. Une fois inscrit,
               l’administrateur t’attribuera le rôle adapté à la campagne.
             </p>
           </section>
 
-          <AuthPanel />
+          <AuthPanel initialError={authError?.slice(0, 240)} />
         </div>
       </div>
     </main>

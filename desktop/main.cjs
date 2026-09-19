@@ -8,10 +8,13 @@ const { randomBytes } = require("node:crypto")
 
 const LOCAL_PORT = 32147
 const PERSISTENT_PARTITION = "persist:eraser"
+const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
 app.setName("Eraser")
 let mainWindow = null
 let serverProcess = null
 let startupLogPath = ""
+let updaterInitialized = false
+let updateCheckInProgress = false
 
 function persistentSecret(dataDirectory) {
   const path = join(dataDirectory, "desktop-secret.txt")
@@ -143,7 +146,7 @@ async function startServer() {
   return url
 }
 
-function createWindow(url) {
+async function createWindow(url) {
   mainWindow = new BrowserWindow({
     title: "Eraser",
     width: 1440,
@@ -185,37 +188,117 @@ function createWindow(url) {
       void shell.openExternal(target)
     }
   })
-  void mainWindow.loadURL(url)
+  mainWindow.webContents.on("console-message", (_event, ...args) => {
+    const details = args[0]
+    const message = details && typeof details === "object" ? details.message : args[1]
+    if (message) logLine(`[interface] ${message}`)
+  })
+  mainWindow.webContents.on("did-fail-load", (_event, code, description, validatedURL, isMainFrame) => {
+    if (isMainFrame) logLine(`[interface:error] ${code} ${description} (${validatedURL})`)
+  })
+  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+    logLine(`[interface:error] Le moteur d’affichage s’est arrêté : ${details.reason}.`)
+  })
+  await mainWindow.loadURL(url)
 }
 
 async function prepareUpdates() {
-  if (!app.isPackaged) return
+  if (!app.isPackaged || updateCheckInProgress || process.env.ERASER_UI_SMOKE_RESULT) return
+  updateCheckInProgress = true
   try {
     const { autoUpdater } = require("electron-updater")
-    autoUpdater.autoDownload = false
-    const result = await autoUpdater.checkForUpdates()
-    if (!result?.updateInfo || result.updateInfo.version === app.getVersion()) return
-    const answer = await dialog.showMessageBox({
-      type: "info",
-      buttons: ["Télécharger", "Plus tard"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Mise à jour Eraser",
-      message: `Eraser ${result.updateInfo.version} est disponible.`,
-    })
-    if (answer.response !== 0) return
-    await autoUpdater.downloadUpdate()
-    const install = await dialog.showMessageBox({
-      type: "info",
-      buttons: ["Redémarrer et installer", "Plus tard"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Mise à jour prête",
-      message: "La mise à jour est prête à être installée.",
-    })
-    if (install.response === 0) autoUpdater.quitAndInstall()
+    if (!updaterInitialized) {
+      autoUpdater.allowPrerelease = true
+      autoUpdater.autoDownload = true
+      autoUpdater.autoInstallOnAppQuit = true
+      autoUpdater.on("update-available", (info) => {
+        logLine(`Téléchargement automatique de la mise à jour ${info.version}.`)
+      })
+      autoUpdater.on("update-downloaded", async (info) => {
+        logLine(`Mise à jour ${info.version} téléchargée et prête.`)
+        if (!mainWindow || mainWindow.isDestroyed()) return
+        const install = await dialog.showMessageBox(mainWindow, {
+          type: "info",
+          buttons: ["Redémarrer maintenant", "Installer à la fermeture"],
+          defaultId: 0,
+          cancelId: 1,
+          title: "Mise à jour Eraser prête",
+          message: `Eraser ${info.version} a été téléchargé automatiquement.`,
+          detail: "Tu n’as rien à réinstaller. Eraser peut redémarrer maintenant, ou installer la mise à jour quand tu le fermeras.",
+        })
+        if (install.response === 0) {
+          await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
+          autoUpdater.quitAndInstall(false, true)
+        }
+      })
+      autoUpdater.on("error", (error) => {
+        logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
+      })
+      updaterInitialized = true
+    }
+    await autoUpdater.checkForUpdates()
   } catch (error) {
-    console.warn("Mise à jour automatique indisponible :", error)
+    logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    updateCheckInProgress = false
+  }
+}
+
+async function runInstalledUiSmoke(url) {
+  const resultPath = process.env.ERASER_UI_SMOKE_RESULT
+  if (!resultPath || !mainWindow) return
+  const result = { ok: false, version: app.getVersion(), checkedAt: new Date().toISOString() }
+  try {
+    await mainWindow.webContents.executeJavaScript(`new Promise((resolve, reject) => {
+      const deadline = Date.now() + 30000;
+      const check = () => {
+        const panel = document.querySelector('[data-eraser-auth-ready="true"]');
+        if (panel) return resolve(true);
+        if (Date.now() > deadline) return reject(new Error('L’interface de connexion ne devient pas interactive.'));
+        setTimeout(check, 100);
+      };
+      check();
+    })`)
+    await mainWindow.webContents.executeJavaScript(`(() => {
+      const form = document.querySelector('form[action="/api/auth/register"]');
+      if (!form) throw new Error('Le formulaire de création est introuvable.');
+      const values = {
+        displayName: 'Test interface installée',
+        email: 'interface-installee@eraser.local',
+        password: 'mot-de-passe-interface-installee'
+      };
+      for (const [name, value] of Object.entries(values)) {
+        const input = form.querySelector('[name="' + name + '"]');
+        if (!input) throw new Error('Champ introuvable : ' + name);
+        input.value = value;
+        input.dispatchEvent(new Event('input', { bubbles: true }));
+        input.dispatchEvent(new Event('change', { bubbles: true }));
+      }
+      form.requestSubmit();
+      return true;
+    })()`)
+    const deadline = Date.now() + 30_000
+    while (Date.now() < deadline && mainWindow.webContents.getURL().startsWith(`${url}/connexion`)) {
+      await new Promise((resolve) => setTimeout(resolve, 200))
+    }
+    if (mainWindow.webContents.getURL().startsWith(`${url}/connexion`)) {
+      throw new Error("La création de compte n’a pas quitté la page de connexion.")
+    }
+    const authenticatedStatus = await mainWindow.webContents.executeJavaScript(
+      `fetch('/api/admin/google-drive/oauth/status').then((response) => response.status)`,
+    )
+    if (authenticatedStatus !== 200) {
+      throw new Error(`La session créée par l’interface est refusée (${authenticatedStatus}).`)
+    }
+    result.ok = true
+    result.url = mainWindow.webContents.getURL()
+    result.authenticatedStatus = authenticatedStatus
+    writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf8")
+    logLine("Interface installée vérifiée : création de compte et session administrateur opérationnelles.")
+  } catch (error) {
+    result.error = error instanceof Error ? error.message : String(error)
+    writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf8")
+    logLine(`[interface:test-error] ${result.error}`)
   }
 }
 
@@ -230,8 +313,11 @@ app.on("second-instance", () => {
 
 app.whenReady().then(async () => {
   try {
-    createWindow(await startServer())
+    const url = await startServer()
+    await createWindow(url)
+    await runInstalledUiSmoke(url)
     setTimeout(() => void prepareUpdates(), 10_000)
+    setInterval(() => void prepareUpdates(), UPDATE_CHECK_INTERVAL_MS)
   } catch (error) {
     const details = recentLog()
     dialog.showErrorBox(

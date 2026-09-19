@@ -72,32 +72,33 @@ try {
   const sessionCookie = setCookies.find((value) => value.startsWith("eraser_session="))
   if (!sessionCookie) throw new Error("Le cookie de session local est absent.")
   if (/;\s*Secure/i.test(sessionCookie)) throw new Error("Le cookie local ne doit pas exiger HTTPS.")
-  const cookie = sessionCookie.split(";", 1)[0]
-  const repair = await fetch(`${origin}/api/auth/desktop-reset`, {
+  const login = await fetch(`${origin}/api/auth/login`, {
     method: "POST",
     headers: { "content-type": "application/json" },
     body: JSON.stringify({
       email: "test-installation@eraser.local",
-      password: "nouveau-mot-de-passe-de-test",
+      password: "mot-de-passe-de-test",
     }),
   })
-  if (!repair.ok) throw new Error(`La réparation du compte local a échoué (${repair.status}).`)
-  const repairedCookies = repair.headers.getSetCookie?.() ?? [repair.headers.get("set-cookie") || ""]
-  const repairedSession = repairedCookies.find((value) => value.startsWith("eraser_session="))
-  if (!repairedSession) throw new Error("La réparation n’a pas créé de nouvelle session.")
-  const repairedLogin = await fetch(`${origin}/api/auth/login`, {
-    method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify({
-      email: "test-installation@eraser.local",
-      password: "nouveau-mot-de-passe-de-test",
-    }),
-  })
-  if (!repairedLogin.ok) throw new Error(`La connexion après réparation a échoué (${repairedLogin.status}).`)
-  const loginCookies = repairedLogin.headers.getSetCookie?.() ?? [repairedLogin.headers.get("set-cookie") || ""]
+  if (!login.ok) throw new Error(`La connexion avec mot de passe a échoué (${login.status}).`)
+  const loginCookies = login.headers.getSetCookie?.() ?? [login.headers.get("set-cookie") || ""]
   const loginSession = loginCookies.find((value) => value.startsWith("eraser_session="))
   if (!loginSession) throw new Error("La reconnexion n’a pas créé de session persistante.")
   const loginCookie = loginSession.split(";", 1)[0]
+
+  const nativeForm = new FormData()
+  nativeForm.set("email", "second-profil@eraser.local")
+  nativeForm.set("password", "mot-de-passe-second-profil")
+  nativeForm.set("displayName", "Second profil")
+  const nativeRegistration = await fetch(`${origin}/api/auth/register`, {
+    method: "POST",
+    body: nativeForm,
+    redirect: "manual",
+  })
+  if (nativeRegistration.status !== 303) {
+    throw new Error(`Le formulaire HTML de création ne redirige pas correctement (${nativeRegistration.status}).`)
+  }
+
   const oauthStatus = await fetch(`${origin}/api/admin/google-drive/oauth/status`, {
     headers: { cookie: loginCookie },
   })
@@ -107,7 +108,7 @@ try {
     headers: { cookie: loginCookie },
   })
   if (oauthStart.status !== 400) throw new Error("Le test OAuth sans identifiants aurait dû être refusé proprement.")
-  console.log(`Serveur local Eraser vérifié (HTTP ${status}), compte administrateur et flux OAuth local opérationnels.`)
+  console.log(`Serveur local Eraser vérifié (HTTP ${status}), formulaires, mot de passe, compte administrateur et flux OAuth opérationnels.`)
 } catch (error) {
   if (logs.trim()) console.error(logs.trim())
   console.error(error)

@@ -18,6 +18,10 @@ Le site Sites/Cloudflare publié n’est pas modifié par ce travail.
 - L’installateur est exécuté silencieusement sur une machine Windows de test ;
   GitHub vérifie ensuite que `Eraser.exe` existe, que le serveur local est prêt et
   que la vraie page de connexion répond en HTTP 200.
+- Le test Windows attend l’hydratation de l’interface, remplit le formulaire de
+  création, crée réellement le premier compte administrateur et vérifie sa session.
+- La branche Windows contient tous les fichiers de `main`, sans suppression ni
+  renommage, et aucun fichier CSS historique n’est modifié.
 
 ## Données et connexions à migrer avant une version stable
 
@@ -30,7 +34,8 @@ export/import séparé et chiffré, puis le tester sur une copie.
 
 ### Google Sheets et Google Drive
 
-Le code Sheets/Drive est conservé. Les secrets ne sont pas placés dans GitHub.
+Le code Sheets/Drive est conservé. Les secrets ne sont pas placés dans GitHub,
+même si le dépôt est public.
 La connexion se fait dans le navigateur système avec une redirection locale vers
 `http://127.0.0.1:32147/api/admin/google-drive/oauth/callback`. Les feuilles
 existantes sont retrouvées par leur nom exact et reliées sans suppression. Une
@@ -48,11 +53,11 @@ ouverte pendant l’utilisation de Roll20.
 
 ## Mises à jour automatiques
 
-Le format electron-builder (`latest.yml` et `.blockmap`) et le code de vérification
-des mises à jour sont préparés. Le dépôt GitHub est actuellement privé : une
-application distribuée ne doit pas embarquer de jeton GitHub personnel. Avant
-d’activer les mises à jour silencieuses, il faudra rendre les Releases accessibles
-publiquement ou choisir un flux de mise à jour authentifié distinct.
+Le dépôt et ses Releases sont publics. Eraser vérifie les versions au démarrage
+et toutes les six heures, télécharge automatiquement l’installateur différentiel,
+puis propose de redémarrer immédiatement. Si la personne choisit d’attendre, la
+version téléchargée s’installe lors de la fermeture de l’application. Aucun jeton
+GitHub personnel n’est embarqué.
 
 ## Règle de publication
 

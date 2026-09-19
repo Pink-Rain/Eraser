@@ -18,12 +18,20 @@ jobs:
     steps:
       - name: Récupérer le projet
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Installer Node.js
         uses: actions/setup-node@v4
         with:
           node-version: 24
           cache: npm
+
+      - name: Vérifier la fidélité avec la source du site
+        shell: bash
+        run: |
+          git fetch origin main:refs/remotes/origin/main
+          node scripts/verify-site-parity.mjs
 
       - name: Installer les dépendances
         run: npm ci
@@ -32,6 +40,22 @@ jobs:
         run: npm run desktop:dist
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Vérifier les fichiers de mise à jour automatique
+        shell: pwsh
+        run: |
+          $version = node -p "require('./package.json').version"
+          $metadata = Join-Path $PWD "release/latest.yml"
+          $blockmap = Join-Path $PWD "release/Eraser-Setup.exe.blockmap"
+          if (-not (Test-Path $metadata)) { throw "latest.yml est absent." }
+          if (-not (Test-Path $blockmap)) { throw "Le fichier de mise à jour différentielle est absent." }
+          $content = Get-Content $metadata -Raw
+          if ($content -notmatch "version:\s+$([regex]::Escape($version))") {
+            throw "latest.yml ne correspond pas à la version $version."
+          }
+          if ($content -notmatch "path:\s+Eraser-Setup.exe") {
+            throw "latest.yml ne pointe pas vers l’installateur Eraser."
+          }
 
       - name: Tester l’installation et le démarrage
         shell: pwsh
@@ -44,6 +68,7 @@ jobs:
           }
           $env:ERASER_READY_FILE = Join-Path $PWD "eraser-startup-ready.json"
           $env:ERASER_STARTUP_LOG = Join-Path $PWD "eraser-startup.log"
+          $env:ERASER_UI_SMOKE_RESULT = Join-Path $PWD "eraser-ui-smoke.json"
           $process = Start-Process -FilePath $executable -PassThru
           $ready = $env:ERASER_READY_FILE
           $deadline = (Get-Date).AddMinutes(3)
@@ -61,7 +86,21 @@ jobs:
           $startup = Get-Content $ready -Raw | ConvertFrom-Json
           $response = Invoke-WebRequest -Uri "$($startup.url)/connexion" -UseBasicParsing
           if ($response.StatusCode -ne 200) { throw "La fenêtre Eraser ne reçoit pas la page de connexion." }
-          Write-Host "Application installée et réellement prête sur $($startup.url)."
+          $uiDeadline = (Get-Date).AddMinutes(1)
+          while ((Get-Date) -lt $uiDeadline -and -not (Test-Path $env:ERASER_UI_SMOKE_RESULT)) {
+            if ($process.HasExited) { throw "Eraser s’est fermé pendant le test de l’interface." }
+            Start-Sleep -Seconds 1
+          }
+          if (-not (Test-Path $env:ERASER_UI_SMOKE_RESULT)) {
+            if (Test-Path $env:ERASER_STARTUP_LOG) { Get-Content $env:ERASER_STARTUP_LOG }
+            throw "L’interface installée n’a pas terminé son test de connexion."
+          }
+          $uiResult = Get-Content $env:ERASER_UI_SMOKE_RESULT -Raw | ConvertFrom-Json
+          if (-not $uiResult.ok) {
+            if (Test-Path $env:ERASER_STARTUP_LOG) { Get-Content $env:ERASER_STARTUP_LOG }
+            throw "Le test interactif a échoué : $($uiResult.error)"
+          }
+          Write-Host "Application installée, interface interactive, compte créé et session ouverte sur $($startup.url)."
           Get-Process -Name "Eraser" -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Conserver l’installateur comme artefact

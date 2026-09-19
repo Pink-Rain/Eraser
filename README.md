@@ -3,11 +3,15 @@
 Eraser est une application de gestion de jeu de rôle : personnages, campagnes,
 classes, inventaires, PNJ, magasins, tabletop partagé et pont Roll20.
 
-Ce dépôt privé est désormais la source principale du projet. Il contient le
+Ce dépôt public est désormais la source principale du projet. Il contient le
 code complet récupéré depuis l’ancienne version Sites. La migration vers une
 application Windows autonome est en cours : l’objectif final est que les MJ et
 les joueur·euses téléchargent uniquement `Eraser-Setup.exe` depuis les Releases
 GitHub, sans installer d’outil de développement.
+
+Après la première installation, Eraser vérifie les Releases GitHub au démarrage
+et toutes les six heures. Une nouvelle version est téléchargée en arrière-plan,
+puis installée au redémarrage ou à la fermeture de l’application.
 
 ## État actuel
 
