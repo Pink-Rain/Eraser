@@ -284,16 +284,28 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
   const skillOffsetByGroup = characterSkillGroups.map((_, index) => characterSkillGroups.slice(0, index).reduce((total, group) => total + group.skills.length, 0))
 
+  // Joueurs qui cliquent vite sur +/- : chaque commit part en écriture Google Sheets
+  // en remplaçant toute la fiche. Sans file d’attente, deux requêtes en vol peuvent
+  // répondre dans le désordre et faire "reculer" une valeur qui vient d’être augmentée.
+  // On sérialise les envois et on n’applique que la réponse du dernier commit lancé.
+  const persistSeq = useRef(0)
+  const persistQueue = useRef(Promise.resolve())
+
   async function persist(nextValues: string[], portrait?: File) {
-    let response: Response
-    if (portrait) {
-      const form = new FormData(); form.append("portrait", portrait); form.append("values", JSON.stringify(nextValues))
-      response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", body: form })
-    } else {
-      response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: nextValues }) })
-    }
-    const payload = (await response.json()) as { character?: CharacterSheetRecord }
-    if (payload.character) { setCharacter(payload.character); setValues(payload.character.values) }
+    const seq = (persistSeq.current += 1)
+    const run = persistQueue.current.then(async () => {
+      let response: Response
+      if (portrait) {
+        const form = new FormData(); form.append("portrait", portrait); form.append("values", JSON.stringify(nextValues))
+        response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", body: form })
+      } else {
+        response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: nextValues }) })
+      }
+      const payload = (await response.json()) as { character?: CharacterSheetRecord }
+      if (payload.character && seq === persistSeq.current) { setCharacter(payload.character); setValues(payload.character.values) }
+    })
+    persistQueue.current = run.catch(() => {})
+    return run
   }
 
   async function commit(index: number, value: string) {

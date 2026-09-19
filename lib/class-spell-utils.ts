@@ -53,25 +53,37 @@ function tokenSet(value: string) {
   return new Set(normalizeClassSpellText(value).split(" ").filter((token) => token.length > 2))
 }
 
-function similarity(left: string, right: string) {
-  const a = tokenSet(left)
-  const b = tokenSet(right)
+function jaccardSimilarity(a: Set<string>, b: Set<string>) {
   if (!a.size || !b.size) return 0
-  const common = [...a].filter((token) => b.has(token)).length
+  let common = 0
+  for (const token of a) if (b.has(token)) common += 1
   return common / (a.size + b.size - common)
 }
 
 export function findClassSpellSimilarities(spells: Array<Pick<ClassSpell, "id" | "name" | "effect" | "description">>): SpellSimilarity[] {
+  // Precompute normalization/tokenization once per spell instead of once per pair:
+  // this loop is O(n²) by nature, and redoing string work inside it made large
+  // spell tables (500+ rows) noticeably slow to load.
+  const prepared = spells.map((spell) => {
+    const text = `${spell.effect} ${spell.description}`.trim()
+    return {
+      id: spell.id,
+      normalizedName: normalizeClassSpellText(spell.name),
+      normalizedText: normalizeClassSpellText(text),
+      nameTokens: tokenSet(spell.name),
+      textTokens: tokenSet(text),
+    }
+  })
   const results: SpellSimilarity[] = []
-  for (let leftIndex = 0; leftIndex < spells.length; leftIndex += 1) {
-    for (let rightIndex = leftIndex + 1; rightIndex < spells.length; rightIndex += 1) {
-      const left = spells[leftIndex]
-      const right = spells[rightIndex]
-      const sameName = normalizeClassSpellText(left.name) === normalizeClassSpellText(right.name)
-      const leftText = `${left.effect} ${left.description}`.trim()
-      const rightText = `${right.effect} ${right.description}`.trim()
-      const sameText = Boolean(normalizeClassSpellText(leftText)) && normalizeClassSpellText(leftText) === normalizeClassSpellText(rightText)
-      const score = Math.max(similarity(left.name, right.name), similarity(leftText, rightText), (similarity(left.name, right.name) + similarity(leftText, rightText)) / 2)
+  for (let leftIndex = 0; leftIndex < prepared.length; leftIndex += 1) {
+    const left = prepared[leftIndex]
+    for (let rightIndex = leftIndex + 1; rightIndex < prepared.length; rightIndex += 1) {
+      const right = prepared[rightIndex]
+      const sameName = left.normalizedName === right.normalizedName
+      const sameText = Boolean(left.normalizedText) && left.normalizedText === right.normalizedText
+      const nameScore = jaccardSimilarity(left.nameTokens, right.nameTokens)
+      const textScore = jaccardSimilarity(left.textTokens, right.textTokens)
+      const score = Math.max(nameScore, textScore, (nameScore + textScore) / 2)
       const kind = sameName && sameText ? "Doublon exact" : sameText ? "Même description" : sameName ? "Même nom" : score >= 0.72 ? "Très proche" : null
       if (kind) results.push({ leftId: left.id, rightId: right.id, kind, score: sameName && sameText ? 1 : Math.max(score, 0.8) })
     }
