@@ -1,30 +1,25 @@
-# Eraser 0.1.1-alpha.13 — mémoire d'interface et Index des classes en tableau
+# Eraser 0.1.1-alpha.14 — logo final et retour clair sur les mises à jour
 
-Correctifs demandés après retour sur l'alpha.12 : la nouvelle icône remplace
-aussi l'avatar « E » du menu latéral, les raccourcis de mise à jour sont
-visibles quel que soit le rôle actif, l'application se souvient des tris et
-onglets choisis d'une visite à l'autre, et l'Index des classes redevient un
-vrai tableau comme l'Index des objets.
-
-## Ajouté
-
-- mémoire des préférences d'affichage (tri manuel, colonne de tri, onglet
-  actif, tableau sélectionné…) : elles sont conservées d'une visite à l'autre
-  au lieu d'être réinitialisées à chaque retour sur une page — par exemple le
-  tri manuel des sorts dans la fiche personnage reste actif tant qu'on ne le
-  change pas soi-même ; couvre la fiche personnage, l'Index des classes et
-  l'Index des objets.
+Deux correctifs demandés juste après l'alpha.13 : le logo définitif remplace
+l'image provisoire utilisée pour l'icône, et le bouton « Chercher les mises
+à jour » dit enfin ce qu'il se passe au lieu d'un message vague identique
+dans tous les cas.
 
 ## Corrigé
 
-- l'avatar « E » en haut du menu latéral (sélection de rôle) affiche
-  maintenant le nouveau logo, comme l'icône de l'application ;
-- « Actualiser » et « Chercher les mises à jour » sont désormais visibles en
-  mode MJ et joueur, pas seulement en administration (seule « Corbeille »
-  reste réservée à l'administration) ;
-- l'Index des classes est reconstruit en véritable tableau (lignes/colonnes,
-  colonnes « Ligne » et « Actions » figées) exactement comme l'Index des
-  objets, à la place de l'ancien affichage en cartes qui ne convenait pas.
+- l'icône de l'application (fenêtre, barre des tâches, onglet navigateur) et
+  l'avatar du sélecteur de rôle utilisent maintenant l'image finale du logo
+  fournie par l'utilisateur ;
+- « Chercher les mises à jour » distingue désormais clairement chaque
+  résultat au lieu d'un message flou et identique à chaque clic :
+  « Mise à jour X.Y.Z trouvée, téléchargement en cours… », « Aucune mise à
+  jour disponible, tu as déjà la dernière version », un message d'erreur
+  explicite en cas d'échec, ou un avertissement si la vérification prend
+  trop de temps ;
+- côté application de bureau, la vérification manuelle attend désormais la
+  réponse réelle du service de mise à jour (electron-updater) avant de
+  répondre, au lieu de renvoyer un succès immédiat sans savoir si une mise
+  à jour existe.
 
 ## Vérifications
 
@@ -33,5 +28,6 @@ vrai tableau comme l'Index des objets.
 - vérification de fidélité avec la source du site réussie (aucun fichier CSS
   historique modifié, aucune suppression) ;
 - serveur Windows autonome construit et vérifié en HTTP 200 sur
-  « /connexion » et redirection d'authentification attendue (307) sur
-  « /ressources/index-des-classes » et « /ressources/index-des-objets ».
+  « /connexion » ;
+- build Windows complet en CI (installateur signé, installation silencieuse,
+  démarrage, création de compte et session admin) vérifié en succès.

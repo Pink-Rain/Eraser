@@ -202,46 +202,87 @@ async function createWindow(url) {
   await mainWindow.loadURL(url)
 }
 
+function ensureUpdaterConfigured() {
+  const { autoUpdater } = require("electron-updater")
+  if (!updaterInitialized) {
+    autoUpdater.allowPrerelease = true
+    autoUpdater.autoDownload = true
+    autoUpdater.autoInstallOnAppQuit = true
+    autoUpdater.on("update-available", (info) => {
+      logLine(`Téléchargement automatique de la mise à jour ${info.version}.`)
+    })
+    autoUpdater.on("update-downloaded", async (info) => {
+      logLine(`Mise à jour ${info.version} téléchargée et prête.`)
+      if (!mainWindow || mainWindow.isDestroyed()) return
+      const install = await dialog.showMessageBox(mainWindow, {
+        type: "info",
+        buttons: ["Redémarrer maintenant", "Installer à la fermeture"],
+        defaultId: 0,
+        cancelId: 1,
+        title: "Mise à jour Eraser prête",
+        message: `Eraser ${info.version} a été téléchargé automatiquement.`,
+        detail: "Tu n’as rien à réinstaller. Eraser peut redémarrer maintenant, ou installer la mise à jour quand tu le fermeras.",
+      })
+      if (install.response === 0) {
+        await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
+        autoUpdater.quitAndInstall(false, true)
+      }
+    })
+    autoUpdater.on("error", (error) => {
+      logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
+    })
+    updaterInitialized = true
+  }
+  return autoUpdater
+}
+
 async function prepareUpdates() {
   if (!app.isPackaged || updateCheckInProgress || process.env.ERASER_UI_SMOKE_RESULT) return
   updateCheckInProgress = true
   try {
-    const { autoUpdater } = require("electron-updater")
-    if (!updaterInitialized) {
-      autoUpdater.allowPrerelease = true
-      autoUpdater.autoDownload = true
-      autoUpdater.autoInstallOnAppQuit = true
-      autoUpdater.on("update-available", (info) => {
-        logLine(`Téléchargement automatique de la mise à jour ${info.version}.`)
-      })
-      autoUpdater.on("update-downloaded", async (info) => {
-        logLine(`Mise à jour ${info.version} téléchargée et prête.`)
-        if (!mainWindow || mainWindow.isDestroyed()) return
-        const install = await dialog.showMessageBox(mainWindow, {
-          type: "info",
-          buttons: ["Redémarrer maintenant", "Installer à la fermeture"],
-          defaultId: 0,
-          cancelId: 1,
-          title: "Mise à jour Eraser prête",
-          message: `Eraser ${info.version} a été téléchargé automatiquement.`,
-          detail: "Tu n’as rien à réinstaller. Eraser peut redémarrer maintenant, ou installer la mise à jour quand tu le fermeras.",
-        })
-        if (install.response === 0) {
-          await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
-          autoUpdater.quitAndInstall(false, true)
-        }
-      })
-      autoUpdater.on("error", (error) => {
-        logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
-      })
-      updaterInitialized = true
-    }
+    const autoUpdater = ensureUpdaterConfigured()
     await autoUpdater.checkForUpdates()
   } catch (error) {
     logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
   } finally {
     updateCheckInProgress = false
   }
+}
+
+// Used by the sidebar's "Chercher les mises à jour" button: unlike
+// prepareUpdates() (fire-and-forget, used for the automatic periodic
+// check), this waits for electron-updater to actually determine whether an
+// update exists so the UI can say something more useful than "recherche en
+// cours" forever.
+async function checkForUpdatesWithStatus() {
+  if (!app.isPackaged) return { status: "unavailable", version: app.getVersion() }
+  const autoUpdater = ensureUpdaterConfigured()
+  return new Promise((resolve) => {
+    let settled = false
+    let timeoutId
+    const finish = (status, extra = {}) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      autoUpdater.off("update-available", onAvailable)
+      autoUpdater.off("update-not-available", onNotAvailable)
+      autoUpdater.off("error", onError)
+      resolve({ status, version: app.getVersion(), ...extra })
+    }
+    const onAvailable = (info) => finish("available", { updateVersion: info.version })
+    const onNotAvailable = () => finish("not-available")
+    const onError = (error) => finish("error", { message: error instanceof Error ? error.message : String(error) })
+    autoUpdater.once("update-available", onAvailable)
+    autoUpdater.once("update-not-available", onNotAvailable)
+    autoUpdater.once("error", onError)
+    timeoutId = setTimeout(() => finish("timeout"), 20_000)
+    if (updateCheckInProgress) return // a background check is already running; just wait for it to settle above
+    updateCheckInProgress = true
+    autoUpdater
+      .checkForUpdates()
+      .catch((error) => finish("error", { message: error instanceof Error ? error.message : String(error) }))
+      .finally(() => { updateCheckInProgress = false })
+  })
 }
 
 async function runInstalledUiSmoke(url) {
@@ -302,10 +343,7 @@ async function runInstalledUiSmoke(url) {
   }
 }
 
-ipcMain.handle("eraser:check-for-updates", async () => {
-  await prepareUpdates()
-  return { ok: true, version: app.getVersion() }
-})
+ipcMain.handle("eraser:check-for-updates", async () => checkForUpdatesWithStatus())
 
 const hasLock = app.requestSingleInstanceLock()
 if (!hasLock) app.quit()

@@ -64,9 +64,16 @@ import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 
+type UpdateCheckResult = {
+  status: "available" | "not-available" | "error" | "timeout" | "unavailable"
+  version: string
+  updateVersion?: string
+  message?: string
+}
+
 declare global {
   interface Window {
-    eraserDesktop?: { checkForUpdates: () => Promise<{ ok: boolean; version: string }> }
+    eraserDesktop?: { checkForUpdates: () => Promise<UpdateCheckResult> }
   }
 }
 
@@ -303,13 +310,30 @@ export function AppShell({
     if (!window.eraserDesktop) { setUpdateNotice("Disponible uniquement dans l’application Windows."); return }
     setCheckingUpdate(true); setUpdateNotice("")
     try {
-      await window.eraserDesktop.checkForUpdates()
-      setUpdateNotice("Vérification lancée. Une mise à jour se télécharge automatiquement si elle existe.")
+      const result = await window.eraserDesktop.checkForUpdates()
+      switch (result.status) {
+        case "available":
+          setUpdateNotice(`Mise à jour ${result.updateVersion || ""} trouvée, téléchargement en cours…`.trim())
+          break
+        case "not-available":
+          setUpdateNotice("Aucune mise à jour disponible, tu as déjà la dernière version.")
+          break
+        case "timeout":
+          setUpdateNotice("La vérification prend trop de temps, réessaie plus tard.")
+          break
+        case "unavailable":
+          setUpdateNotice("Disponible uniquement dans l’application Windows installée.")
+          break
+        case "error":
+        default:
+          setUpdateNotice(result.message ? `La vérification a échoué : ${result.message}` : "La vérification a échoué.")
+          break
+      }
     } catch {
       setUpdateNotice("La vérification a échoué.")
     } finally {
       setCheckingUpdate(false)
-      window.setTimeout(() => setUpdateNotice(""), 6000)
+      window.setTimeout(() => setUpdateNotice(""), 8000)
     }
   }
 
