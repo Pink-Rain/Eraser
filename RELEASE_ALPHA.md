@@ -1,32 +1,23 @@
-# Eraser 0.1.1-alpha.10 — cause réelle des pages Drive corrigée
+# Eraser 0.1.1-alpha.11 — instructions Roll20 corrigées
 
-Cette version corrige la vraie cause des erreurs sur « Toutes les campagnes »,
-« Tous les personnages », « Magasins » et « PNJs » : un nom d’onglet Google
-Sheets contenant des espaces (« Personnages par campagne ») n’était pas mis
-entre quotes dans les requêtes envoyées à l’API Sheets, ce qui faisait
-échouer toute lecture ou écriture de liaison campagne / personnage — et donc
-plantait ces quatre pages pour les comptes administrateur.
+Vérification complète du compagnon Chrome et du script Mod Roll20 : le zip
+distribué est bien identique aux sources, les numéros de version du
+compagnon et du script correspondent (0.4.0) et le protocole d'échange entre
+les deux est cohérent de bout en bout. Une instruction obsolète a été
+corrigée au passage.
 
 ## Corrigé
 
-- la feuille qui relie les personnages à leurs campagnes est de nouveau
-  lisible et inscriptible : les quatre pages concernées se chargent
-  normalement ;
-- lier un personnage à une campagne écrit désormais réellement la liaison
-  dans Google Sheets, au lieu d’échouer silencieusement ;
-- une feuille reliée mais restée vide (ses en-têtes n’ayant jamais pu être
-  écrites à cause du même bug) se répare automatiquement, sans jamais
-  toucher une feuille contenant déjà des données ;
-- la synchronisation des index de propriété (campagnes, personnages,
-  liaisons) tolère désormais l’échec de lecture d’une feuille isolée au lieu
-  de faire planter toute la page.
+- le panneau d'installation Roll20 d'une campagne indiquait d'attendre le
+  message « Eraser Bridge 0.3.1 prêt » dans la console Mod, alors que le
+  script actuel (v0.4.0) affiche « Eraser Bridge 0.4.0 prêt » — corrigé pour
+  éviter toute confusion pendant l'installation.
 
 ## Vérifications
 
 - compilation complète de l’application réussie ;
 - lint sans erreur ;
 - serveur Windows autonome construit et vérifié en HTTP 200 ;
-- formulaires de compte, session administrateur et flux OAuth vérifiés par le
-  test du paquet Windows ;
-- pages « Toutes les campagnes », « Tous les personnages » et « Index des
-  classes » revérifiées en HTTP 200 sur le serveur autonome.
+- fichiers du compagnon Roll20 (`eraser-roll20-companion.zip`,
+  `eraser-bridge.mod.js`) confirmés servis en HTTP 200 et identiques à leurs
+  sources dans `integrations/roll20/`.

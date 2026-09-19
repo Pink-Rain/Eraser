@@ -119,7 +119,7 @@ export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: str
               <li className="list-decimal">Télécharge le compagnon, décompresse le fichier ZIP et conserve le dossier obtenu.</li>
               <li className="list-decimal">Dans Chrome, ouvre « chrome://extensions », active le mode développeur, clique sur « Charger l’extension non empaquetée », puis sélectionne ce dossier.</li>
               <li className="list-decimal">Télécharge le script Mod. Dans les paramètres de ta partie Roll20, ouvre « Mod Scripts », crée un nouveau script, colle tout son contenu et enregistre.</li>
-              <li className="list-decimal">Attends que la console Mod affiche « Eraser Bridge 0.3.1 prêt ».</li>
+              <li className="list-decimal">Attends que la console Mod affiche « Eraser Bridge 0.4.0 prêt ».</li>
               <li className="list-decimal">Ouvre ensuite la partie Roll20, clique sur « Eraser », puis colle la clé de liaison créée sur cette page.</li>
               <li className="list-decimal">Utilise « Tout synchroniser » ou « Renvoyer les PV ».</li>
             </ol>
