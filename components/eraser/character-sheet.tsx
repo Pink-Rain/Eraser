@@ -40,7 +40,7 @@ type CharacterTab = { id: string; type: CharacterTabType; label: string; removab
 
 const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
   { type: "competences", label: "Compétences" }, { type: "inventaire", label: "Inventaire" },
-  { type: "classe", label: "Classe" }, { type: "journal", label: "Journal" },
+  { type: "classe", label: "Sorts" }, { type: "journal", label: "Journal" },
   { type: "invocation", label: "Invocation" }, { type: "compagnon", label: "Compagnon" },
 ]
 

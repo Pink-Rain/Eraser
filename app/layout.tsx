@@ -9,8 +9,8 @@ export const metadata: Metadata = {
   title: "Eraser",
   description: "L’espace de jeu, de personnages et de campagne du JDR Eraser.",
   icons: {
-    icon: "/favicon.svg",
-    shortcut: "/favicon.svg",
+    icon: "/favicon.png",
+    shortcut: "/favicon.png",
   },
 };
 

@@ -275,7 +275,11 @@ async function googleSheetsJson<T>(path: string, init?: RequestInit) {
   return response.json() as Promise<T>
 }
 
-const RANGE_CACHE_MS = 60_000
+// Any write through the app (updateRange/appendRows) clears this cache for the
+// spreadsheet it touches, so a longer window here only risks staleness against
+// edits made outside Eraser (directly in Google Sheets) — an accepted tradeoff
+// for cutting down repeated round-trips while navigating within a session.
+const RANGE_CACHE_MS = 180_000
 const rangeReadCache = new Map<string, { expiresAt: number; promise: Promise<string[][]> }>()
 
 function rangeCacheKey(

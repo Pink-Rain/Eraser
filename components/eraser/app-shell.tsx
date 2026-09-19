@@ -9,12 +9,14 @@ import {
   ChevronDown,
   CircleUserRound,
   Crown,
+  DownloadCloud,
   FlaskConical,
   Home,
   LibraryBig,
   LogOut,
   Map,
   Plus,
+  RefreshCw,
   Search,
   ScrollText,
   ShieldCheck,
@@ -61,6 +63,12 @@ import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/goo
 import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
+
+declare global {
+  interface Window {
+    eraserDesktop?: { checkForUpdates: () => Promise<{ ok: boolean; version: string }> }
+  }
+}
 
 const PageLabelContext = createContext<(label: string) => void>(() => undefined)
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole } | null>(null)
@@ -181,6 +189,8 @@ export function AppShell({
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [todosLoaded, setTodosLoaded] = useState(todos.length > 0 || user.role !== "admin")
   const todosLoadingRef = useRef(false)
+  const [checkingUpdate, setCheckingUpdate] = useState(false)
+  const [updateNotice, setUpdateNotice] = useState("")
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -287,6 +297,20 @@ export function AppShell({
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" })
     window.location.assign("/connexion")
+  }
+
+  async function checkForUpdates() {
+    if (!window.eraserDesktop) { setUpdateNotice("Disponible uniquement dans l’application Windows."); return }
+    setCheckingUpdate(true); setUpdateNotice("")
+    try {
+      await window.eraserDesktop.checkForUpdates()
+      setUpdateNotice("Vérification lancée. Une mise à jour se télécharge automatiquement si elle existe.")
+    } catch {
+      setUpdateNotice("La vérification a échoué.")
+    } finally {
+      setCheckingUpdate(false)
+      window.setTimeout(() => setUpdateNotice(""), 6000)
+    }
   }
 
   return (
@@ -509,6 +533,17 @@ export function AppShell({
                   <SidebarMenuButton asChild tooltip="Corbeille" isActive={pathname === "/administration/corbeille"} className="h-10">
                     <IntentLink href="/administration/corbeille"><Trash2 /><span>Corbeille</span></IntentLink>
                   </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Actualiser" className="h-10" onClick={() => window.location.reload()}>
+                    <RefreshCw /><span>Actualiser</span>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+                <SidebarMenuItem>
+                  <SidebarMenuButton tooltip="Chercher les mises à jour" className="h-10" onClick={() => void checkForUpdates()} disabled={checkingUpdate}>
+                    <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} /><span>{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span>
+                  </SidebarMenuButton>
+                  {updateNotice && <p className="px-2 pb-1 pt-0.5 text-[11px] leading-4 text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">{updateNotice}</p>}
                 </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>

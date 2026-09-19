@@ -1,7 +1,7 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { Check, ChevronDown, ChevronUp, CircleDotDashed, Crosshair, Gauge, Plus, RotateCcw, Search, X, Zap } from "lucide-react"
+import { useMemo, useState, type DragEvent } from "react"
+import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, X, Zap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -62,17 +62,27 @@ function SpellGlyph({ category }: { category: ClassSpell["category"] }) {
   return <Zap />
 }
 
-function KnownSpell({ spell, rank, accent, currentCharges, onCharges, manual, canMoveUp, canMoveDown, onMove }: { spell: ClassSpell; rank: number | null; accent: string; currentCharges: number; onCharges: (value: number) => void; manual?: boolean; canMoveUp?: boolean; canMoveDown?: boolean; onMove?: (direction: -1 | 1) => void }) {
+function KnownSpell({ spell, rank, accent, currentCharges, onCharges, manual, dragOver, onDragStart, onDragEnd, onDragOver, onDrop }: { spell: ClassSpell; rank: number | null; accent: string; currentCharges: number; onCharges: (value: number) => void; manual?: boolean; dragOver?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragOver?: (event: DragEvent) => void; onDrop?: () => void }) {
   const tone = spellTone(spell)
-  return <details className="group rounded-xl border bg-background/45" style={{ borderColor: `${tone.background}66` }}>
+  return <details
+    className={`group rounded-xl border bg-background/45 transition-colors ${dragOver ? "border-dashed" : ""}`}
+    style={{ borderColor: dragOver ? accent : `${tone.background}66` }}
+    onDragOver={manual ? (event) => { event.preventDefault(); onDragOver?.(event) } : undefined}
+    onDrop={manual ? (event) => { event.preventDefault(); onDrop?.() } : undefined}
+  >
     <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+      {manual && <span
+        draggable
+        onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.effectAllowed = "move"; onDragStart?.() }}
+        onDragEnd={(event) => { event.stopPropagation(); onDragEnd?.() }}
+        onClick={(event) => event.preventDefault()}
+        className="flex shrink-0 cursor-grab touch-none items-center justify-center rounded p-1 text-muted-foreground hover:bg-muted hover:text-foreground active:cursor-grabbing"
+        aria-label={`Réordonner ${spell.name} (glisser-déposer)`}
+        title="Glisser pour réordonner"
+      ><GripVertical className="size-3.5" /></span>}
       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><span className="flex size-4 items-center justify-center [&>svg]:size-4"><SpellGlyph category={spell.category} /></span></span>
       <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{spell.name}</span><span className="block text-[11px] text-muted-foreground">{rank === null ? "Hors classe" : rank === 0 ? "Commun" : `Rang ${rank}`} · {spell.type}</span></span>
       {spell.category === "actif" && <SpellChargeStars total={spell.charges} current={currentCharges} interactive onChange={onCharges} accent={accent} />}
-      {manual && <span className="flex shrink-0 flex-col gap-0.5" onClick={(event) => event.preventDefault()}>
-        <button type="button" disabled={!canMoveUp} aria-label={`Monter ${spell.name}`} className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-25" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onMove?.(-1) }}><ChevronUp className="size-3.5" /></button>
-        <button type="button" disabled={!canMoveDown} aria-label={`Descendre ${spell.name}`} className="rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-25" onClick={(event) => { event.preventDefault(); event.stopPropagation(); onMove?.(1) }}><ChevronDown className="size-3.5" /></button>
-      </span>}
       <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
     </summary>
     <div className="border-t px-3 py-3 text-sm leading-6" style={{ borderColor: `${accent}28` }}>
@@ -113,17 +123,17 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
     if (state.extras.includes(spellId)) return
     return update({ ...state, extras: [...state.extras, spellId], order: [...state.order.filter((id) => id !== spellId), spellId] })
   }
-  function moveSpell(spell: ClassSpell, direction: -1 | 1) {
-    const categoryIds = sortedKnown.filter((item) => item.category === spell.category).map((item) => item.id)
-    const index = categoryIds.indexOf(spell.id)
-    const swapWith = categoryIds[index + direction]
-    if (!swapWith) return
+  const [draggedSpellId, setDraggedSpellId] = useState<string | null>(null)
+  const [dragOverSpellId, setDragOverSpellId] = useState<string | null>(null)
+  function reorderSpell(draggedId: string, targetId: string) {
+    if (draggedId === targetId) return
     const knownIds = new Set(known.map((item) => item.id))
     const baseOrder = [...state.order.filter((id) => knownIds.has(id)), ...known.map((item) => item.id).filter((id) => !state.order.includes(id))]
-    const left = baseOrder.indexOf(spell.id)
-    const right = baseOrder.indexOf(swapWith)
-    ;[baseOrder[left], baseOrder[right]] = [baseOrder[right], baseOrder[left]]
-    return update({ ...state, order: baseOrder })
+    const withoutDragged = baseOrder.filter((id) => id !== draggedId)
+    const targetIndex = withoutDragged.indexOf(targetId)
+    if (targetIndex < 0) return
+    withoutDragged.splice(targetIndex, 0, draggedId)
+    return update({ ...state, order: withoutDragged })
   }
   const manualPosition = new Map(state.order.map((id, index) => [id, index]))
   const naturalPosition = new Map(known.map((spell, index) => [spell.id, index]))
@@ -147,8 +157,8 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-muted-foreground">Répertoire</p><h2 className="font-display mt-1 text-2xl font-semibold">Capacités acquises</h2></div><div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground">Trier par<NativeSelect value={sort} onChange={(event) => setSort(event.target.value as "rank" | "name" | "type" | "manual")} className="h-10 min-w-40 py-0 pl-3 pr-10 leading-5"><NativeSelectOption value="rank">Rang</NativeSelectOption><NativeSelectOption value="name">Nom</NativeSelectOption><NativeSelectOption value="type">Type</NativeSelectOption><NativeSelectOption value="manual">Manuel</NativeSelectOption></NativeSelect></label><Button type="button" variant={searchOpen ? "secondary" : "outline"} size="icon-sm" aria-label="Ajouter une capacité" title="Ajouter une capacité" onClick={() => setSearchOpen((open) => !open)}>{searchOpen ? <X /> : <Plus />}</Button></div></div>
       {searchOpen && <div className="mt-4 rounded-xl border bg-card/55 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, mot-clé, type ou compétence…" className="pl-9" /></div><NativeSelect value={searchCategory} onChange={(event) => setSearchCategory(event.target.value as typeof searchCategory)} className="h-9 min-w-36"><NativeSelectOption value="all">Tout</NativeSelectOption><NativeSelectOption value="actif">Actifs</NativeSelectOption><NativeSelectOption value="passif">Passifs</NativeSelectOption><NativeSelectOption value="bonus">Bonus</NativeSelectOption></NativeSelect></div><div className="mt-3 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{searchResults.map((spell) => <div key={spell.id} className="flex items-center gap-3 rounded-lg border bg-background/55 p-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&>svg]:size-4" style={{ backgroundColor: spellTone(spell).background, color: spellTone(spell).foreground }}><SpellGlyph category={spell.category} /></span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{spell.name}</b><span className="block truncate text-xs text-muted-foreground">{spell.type}{spell.skills.length ? ` · ${spell.skills.join(" · ")}` : ""}</span></span><Button type="button" size="sm" variant="outline" onClick={() => void addExtra(spell.id)}><Plus />Ajouter</Button></div>)}</div>{matchingSearchResults.length > searchResults.length && <p className="pt-3 text-center text-xs text-muted-foreground">Affichage des 60 premiers résultats — précise ta recherche pour voir les autres.</p>}{!searchResults.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucune capacité correspondante.</p>}</div>}
       {sortedKnown.length ? <div className="mt-4 grid items-start gap-5 lg:grid-cols-2">
-        {(["actif", "passif"] as const).map((category) => { const categorySpells = sortedKnown.filter((spell) => spell.category === category); return <div key={category}><h3 className="mb-2 flex items-center gap-2 font-display text-lg font-semibold">{category === "actif" ? <Zap className="size-4" /> : <CircleDotDashed className="size-4" />}{category === "actif" ? "Actifs" : "Passifs"}</h3><div className="space-y-2">{categorySpells.map((spell, index) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={state.charges[spell.id] ?? spell.charges ?? 0} onCharges={(count) => void setCharges(spell, count)} manual={sort === "manual"} canMoveUp={index > 0} canMoveDown={index < categorySpells.length - 1} onMove={(direction) => void moveSpell(spell, direction)} /> })}{!categorySpells.length && <p className="rounded-xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">Aucun {category === "actif" ? "actif" : "passif"} acquis.</p>}</div></div> })}
-        {sortedKnown.some((spell) => spell.category === "bonus") && <details className="lg:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-muted-foreground">Afficher les bonus ({sortedKnown.filter((spell) => spell.category === "bonus").length})</summary><div className="mt-3 grid gap-2 lg:grid-cols-2">{sortedKnown.filter((spell) => spell.category === "bonus").map((spell, index, bonusSpells) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={0} onCharges={() => undefined} manual={sort === "manual"} canMoveUp={index > 0} canMoveDown={index < bonusSpells.length - 1} onMove={(direction) => void moveSpell(spell, direction)} /> })}</div></details>}
+        {(["actif", "passif"] as const).map((category) => { const categorySpells = sortedKnown.filter((spell) => spell.category === category); return <div key={category}><h3 className="mb-2 flex items-center gap-2 font-display text-lg font-semibold">{category === "actif" ? <Zap className="size-4" /> : <CircleDotDashed className="size-4" />}{category === "actif" ? "Actifs" : "Passifs"}</h3><div className="space-y-2">{categorySpells.map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={state.charges[spell.id] ?? spell.charges ?? 0} onCharges={(count) => void setCharges(spell, count)} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}{!categorySpells.length && <p className="rounded-xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">Aucun {category === "actif" ? "actif" : "passif"} acquis.</p>}</div></div> })}
+        {sortedKnown.some((spell) => spell.category === "bonus") && <details className="lg:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-muted-foreground">Afficher les bonus ({sortedKnown.filter((spell) => spell.category === "bonus").length})</summary><div className="mt-3 grid gap-2 lg:grid-cols-2">{sortedKnown.filter((spell) => spell.category === "bonus").map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={0} onCharges={() => undefined} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}</div></details>}
       </div> : <p className="mt-4 rounded-xl border border-dashed px-4 py-7 text-center text-sm text-muted-foreground">Aucune capacité disponible pour ce niveau.</p>}
     </section>
 

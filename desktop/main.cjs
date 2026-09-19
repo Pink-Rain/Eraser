@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { app, BrowserWindow, dialog, shell, session } = require("electron")
+const { app, BrowserWindow, dialog, ipcMain, Menu, shell, session } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
 const { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
@@ -302,6 +302,11 @@ async function runInstalledUiSmoke(url) {
   }
 }
 
+ipcMain.handle("eraser:check-for-updates", async () => {
+  await prepareUpdates()
+  return { ok: true, version: app.getVersion() }
+})
+
 const hasLock = app.requestSingleInstanceLock()
 if (!hasLock) app.quit()
 
@@ -312,6 +317,7 @@ app.on("second-instance", () => {
 })
 
 app.whenReady().then(async () => {
+  Menu.setApplicationMenu(null)
   try {
     const url = await startServer()
     await createWindow(url)
