@@ -357,11 +357,11 @@ export function AppShell({
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="size-10 shrink-0 overflow-hidden rounded-xl border border-[#4c4439] bg-[#26231f] p-0 text-[#e0bd82] shadow-inner hover:bg-[#332f29] hover:text-[#f6d49b]"
+                  className="size-12 shrink-0 overflow-hidden rounded-xl p-0 hover:bg-transparent"
                   aria-label="Ouvrir mes personnages"
                 >
                   {/* eslint-disable-next-line @next/next/no-img-element */}
-                  <img src="/favicon.png" alt="" className="size-full object-cover p-1" />
+                  <img src="/favicon.png" alt="" className="size-full object-contain transition-transform hover:scale-105" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start" className="w-80">
