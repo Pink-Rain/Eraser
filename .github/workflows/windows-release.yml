@@ -62,16 +62,24 @@ jobs:
         run: |
           $installer = Join-Path $PWD "release/Eraser-Setup.exe"
           Start-Process -FilePath $installer -ArgumentList "/S" -Wait
-          $executable = Join-Path $env:LOCALAPPDATA "Programs/Eraser/Eraser.exe"
+          $programsDir = Join-Path $env:LOCALAPPDATA "Programs"
+          # Search rather than assume "Programs/Eraser/Eraser.exe": the install
+          # folder name follows productName (currently "Eraser - JDR"), while
+          # win.executableName pins the .exe itself to "Eraser.exe" so existing
+          # shortcuts keep working. Searching avoids re-hardcoding that folder
+          # name here every time productName changes.
           # The assisted (non one-click) NSIS installer's launched process can exit
           # before its elevated inner installer has finished copying files, so the
           # executable isn't always on disk the instant -Wait returns. Poll briefly
           # instead of failing on the first check.
+          $executable = $null
           $installDeadline = (Get-Date).AddSeconds(30)
-          while ((Get-Date) -lt $installDeadline -and -not (Test-Path $executable)) {
-            Start-Sleep -Seconds 2
+          while ((Get-Date) -lt $installDeadline -and -not $executable) {
+            $found = Get-ChildItem -Path $programsDir -Filter "Eraser.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($found) { $executable = $found.FullName }
+            else { Start-Sleep -Seconds 2 }
           }
-          if (-not (Test-Path $executable)) {
+          if (-not $executable) {
             throw "Eraser.exe est introuvable après l’installation."
           }
           $env:ERASER_READY_FILE = Join-Path $PWD "eraser-startup-ready.json"

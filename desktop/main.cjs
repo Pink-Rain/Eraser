@@ -9,12 +9,31 @@ const { randomBytes } = require("node:crypto")
 const LOCAL_PORT = 32147
 const PERSISTENT_PARTITION = "persist:eraser"
 const UPDATE_CHECK_INTERVAL_MS = 6 * 60 * 60 * 1_000
+const NORMAL_MIN_WIDTH = 1024
+const NORMAL_MIN_HEIGHT = 700
+const TITLEBAR_HEIGHT = 40
+// The internal Electron app name: it determines the userData directory
+// (%APPDATA%/Eraser/...), so it must NEVER change independently of a
+// deliberate, tested data-migration — changing it would silently point
+// existing installs at an empty new folder, "losing" all local data. The
+// user-visible product name (window title, shortcuts, Programs listing) is
+// controlled separately, below and in electron-builder.yml.
 app.setName("Eraser")
 let mainWindow = null
 let serverProcess = null
 let startupLogPath = ""
 let updaterInitialized = false
 let updateCheckInProgress = false
+let isPinned = false
+let isCollapsed = false
+let collapseSavedBounds = null
+let collapseSavedWasMaximized = false
+
+function resolveIconPath() {
+  return app.isPackaged
+    ? join(process.resourcesPath, "icon.ico")
+    : join(__dirname, "..", "build-resources", "icon.ico")
+}
 
 function persistentSecret(dataDirectory) {
   const path = join(dataDirectory, "desktop-secret.txt")
@@ -146,14 +165,52 @@ async function startServer() {
   return url
 }
 
+function broadcastWindowState() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.webContents.send("eraser:window-state", {
+    isMaximized: mainWindow.isMaximized(),
+    isPinned,
+    isCollapsed,
+  })
+}
+
+// Shrinks the window to just its titlebar strip, remembering the exact
+// bounds (and maximized state) to restore later. Only reachable while
+// pinned, since a floating mini bar only makes sense on top of everything.
+function collapseWindow() {
+  if (!mainWindow || isCollapsed) return
+  collapseSavedWasMaximized = mainWindow.isMaximized()
+  if (collapseSavedWasMaximized) mainWindow.unmaximize()
+  collapseSavedBounds = mainWindow.getBounds()
+  mainWindow.setMinimumSize(200, TITLEBAR_HEIGHT)
+  mainWindow.setResizable(false)
+  mainWindow.setBounds({ x: collapseSavedBounds.x, y: collapseSavedBounds.y, width: collapseSavedBounds.width, height: TITLEBAR_HEIGHT })
+  mainWindow.setOpacity(0.88)
+  isCollapsed = true
+}
+
+function restoreFromCollapse() {
+  if (!mainWindow || !isCollapsed) return
+  mainWindow.setOpacity(1)
+  if (collapseSavedBounds) mainWindow.setBounds(collapseSavedBounds)
+  mainWindow.setMinimumSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT)
+  mainWindow.setResizable(true)
+  if (collapseSavedWasMaximized) mainWindow.maximize()
+  collapseSavedBounds = null
+  collapseSavedWasMaximized = false
+  isCollapsed = false
+}
+
 async function createWindow(url) {
   mainWindow = new BrowserWindow({
-    title: "Eraser",
+    title: "Eraser - JDR",
+    icon: resolveIconPath(),
     width: 1440,
     height: 940,
-    minWidth: 1024,
-    minHeight: 700,
+    minWidth: NORMAL_MIN_WIDTH,
+    minHeight: NORMAL_MIN_HEIGHT,
     show: false,
+    frame: false,
     backgroundColor: "#f4ead6",
     webPreferences: {
       preload: join(__dirname, "preload.cjs"),
@@ -163,6 +220,8 @@ async function createWindow(url) {
       partition: PERSISTENT_PARTITION,
     },
   })
+  mainWindow.on("maximize", broadcastWindowState)
+  mainWindow.on("unmaximize", broadcastWindowState)
   const persistentSession = session.fromPartition(PERSISTENT_PARTITION)
   persistentSession.cookies.on("changed", () => {
     void persistentSession.cookies.flushStore()
@@ -344,6 +403,43 @@ async function runInstalledUiSmoke(url) {
 }
 
 ipcMain.handle("eraser:check-for-updates", async () => checkForUpdatesWithStatus())
+
+ipcMain.handle("eraser:window-get-state", () => ({
+  isMaximized: mainWindow ? mainWindow.isMaximized() : false,
+  isPinned,
+  isCollapsed,
+}))
+
+ipcMain.handle("eraser:window-minimize", () => {
+  mainWindow?.minimize()
+})
+
+ipcMain.handle("eraser:window-toggle-maximize", () => {
+  if (!mainWindow) return
+  if (mainWindow.isMaximized()) mainWindow.unmaximize()
+  else mainWindow.maximize()
+})
+
+ipcMain.handle("eraser:window-close", () => {
+  mainWindow?.close()
+})
+
+ipcMain.handle("eraser:window-toggle-pin", () => {
+  if (!mainWindow) return { isPinned }
+  isPinned = !isPinned
+  mainWindow.setAlwaysOnTop(isPinned)
+  if (!isPinned && isCollapsed) restoreFromCollapse()
+  broadcastWindowState()
+  return { isPinned }
+})
+
+ipcMain.handle("eraser:window-toggle-collapse", () => {
+  if (!mainWindow || !isPinned) return { isCollapsed }
+  if (isCollapsed) restoreFromCollapse()
+  else collapseWindow()
+  broadcastWindowState()
+  return { isCollapsed }
+})
 
 const hasLock = app.requestSingleInstanceLock()
 if (!hasLock) app.quit()

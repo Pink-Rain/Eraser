@@ -1,5 +1,5 @@
 appId: fr.eraserjdr.app
-productName: Eraser
+productName: Eraser - JDR
 copyright: Copyright © 2026 Eraser
 directories:
   output: release
@@ -12,6 +12,8 @@ extraResources:
     to: eraser-server.asar
   - from: drizzle
     to: migrations
+  - from: build-resources/icon.ico
+    to: icon.ico
 win:
   target:
     - target: nsis
@@ -19,13 +21,17 @@ win:
         - x64
   artifactName: Eraser-Setup.${ext}
   icon: build-resources/icon.png
+  # Pinned independently of productName: existing users' desktop/taskbar
+  # shortcuts point at this literal file. Renaming it would silently break
+  # every shortcut created before this change on their next auto-update.
+  executableName: Eraser
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
   createDesktopShortcut: true
   createStartMenuShortcut: true
-  shortcutName: Eraser
-  uninstallDisplayName: Eraser
+  shortcutName: Eraser - JDR
+  uninstallDisplayName: Eraser - JDR
 publish:
   provider: github
   owner: Pink-Rain

@@ -59,23 +59,12 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
+import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
+import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
-
-type UpdateCheckResult = {
-  status: "available" | "not-available" | "error" | "timeout" | "unavailable"
-  version: string
-  updateVersion?: string
-  message?: string
-}
-
-declare global {
-  interface Window {
-    eraserDesktop?: { checkForUpdates: () => Promise<UpdateCheckResult> }
-  }
-}
 
 const PageLabelContext = createContext<(label: string) => void>(() => undefined)
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole } | null>(null)
@@ -349,6 +338,16 @@ export function AppShell({
       [data-sidebar="content"]::-webkit-scrollbar-thumb { background-color: var(--sidebar-border); border-radius: 9999px; }
       [data-sidebar="content"]::-webkit-scrollbar-thumb:hover { background-color: var(--sidebar-ring); }
     `}</style>
+    {/* DesktopTitlebar renders nothing on the website (no window.eraserDesktop).
+        In the desktop app it takes a frame:false window's custom title row, so
+        the rest of the app is wrapped below it in a column, in a div carrying a
+        `transform` so it becomes the containing block for the sidebar's own
+        `fixed inset-y-0` — otherwise that fixed positioning would resolve
+        against the true window top and render underneath this bar instead of
+        being pushed down by it. */}
+    <div className="flex min-h-svh flex-col">
+      <DesktopTitlebar />
+      <div className="min-h-0 flex-1" style={{ transform: "translateZ(0)" }}>
     <SidebarProvider>
       <Sidebar collapsible="icon" className="border-r-0">
         <SidebarHeader className="gap-3 border-b border-sidebar-border p-3">
@@ -641,6 +640,8 @@ export function AppShell({
         </ShellDataContext.Provider>
       </SidebarInset>
     </SidebarProvider>
+      </div>
+    </div>
     </PageLabelContext.Provider>
   )
 }
