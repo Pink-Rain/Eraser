@@ -82,9 +82,9 @@ async function waitForServer(url, attempts = 480) {
 function serverPaths() {
   if (app.isPackaged) {
     return {
-      directory: join(process.resourcesPath, "eraser-server.asar"),
+      directory: join(process.resourcesPath, "eraser-server"),
       migrations: join(process.resourcesPath, "migrations"),
-      workingDirectory: process.resourcesPath,
+      workingDirectory: join(process.resourcesPath, "eraser-server"),
     }
   }
   return {

@@ -8,8 +8,8 @@ files:
   - desktop/preload.cjs
   - package.json
 extraResources:
-  - from: dist/eraser-server.asar
-    to: eraser-server.asar
+  - from: dist/standalone
+    to: eraser-server
   - from: drizzle
     to: migrations
 win:

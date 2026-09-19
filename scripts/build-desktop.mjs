@@ -1,12 +1,12 @@
 import { spawn } from "node:child_process"
 import { mkdir, rm } from "node:fs/promises"
 import { join } from "node:path"
-import { createPackage } from "@electron/asar"
 
 const root = process.cwd()
 const vinext = join(root, "node_modules", "vinext", "dist", "cli.js")
 
 await mkdir(join(root, "release"), { recursive: true })
+await rm(join(root, "dist"), { recursive: true, force: true })
 
 await new Promise((resolve, reject) => {
   const child = spawn(process.execPath, [vinext, "build"], {
@@ -26,7 +26,4 @@ await new Promise((resolve, reject) => {
   })
 })
 
-const archive = join(root, "dist", "eraser-server.asar")
-await rm(archive, { force: true })
-await createPackage(join(root, "dist", "standalone"), archive)
-console.log(`Serveur autonome emballé dans ${archive}`)
+console.log(`Serveur autonome préparé dans ${join(root, "dist", "standalone")}`)

@@ -3,12 +3,10 @@ import { mkdtemp, rm } from "node:fs/promises"
 import { createServer } from "node:net"
 import { tmpdir } from "node:os"
 import { join } from "node:path"
-import { extractAll } from "@electron/asar"
 
 const root = process.cwd()
 const dataDirectory = await mkdtemp(join(tmpdir(), "eraser-desktop-test-"))
-const serverDirectory = join(dataDirectory, "server")
-extractAll(join(root, "dist", "eraser-server.asar"), serverDirectory)
+const serverDirectory = join(root, "dist", "standalone")
 let child
 let logs = ""
 
