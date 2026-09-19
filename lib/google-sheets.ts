@@ -2300,10 +2300,10 @@ export async function syncExistingIdentityIndexes() {
   ])
   const now = new Date().toISOString()
   for (const row of campaignRows.slice(1)) {
-    if (!row[0] || !row[1]) continue
+    if (!row[0]) continue
     await getDb().insert(campaignIndex).values({
       id: row[0],
-      mjUid: row[1],
+      mjUid: row[1] || "",
       name: row[2] || "Campagne sans nom",
       description: row[3] || "",
       bannerUrl: row[4] || "",
@@ -2313,21 +2313,20 @@ export async function syncExistingIdentityIndexes() {
     }).onConflictDoUpdate({
       target: campaignIndex.id,
       set: {
-        mjUid: row[1],
+        mjUid: row[1] || "",
         name: row[2] || "Campagne sans nom",
         description: row[3] || "",
         bannerUrl: row[4] || "",
         accentColor: row[5] || "#927640",
         updatedAt: now,
-        deletedAt: null,
       },
     })
   }
   for (const row of characterRows.slice(1)) {
-    if (!row[0] || !row[1]) continue
+    if (!row[0]) continue
     await getDb().insert(characterIndex).values({
       id: row[0],
-      ownerUid: row[1],
+      ownerUid: row[1] || "",
       name: row[2] || "Personnage sans nom",
       subtitle: row[3] || "",
       updatedAt: row[4] || now,
@@ -2335,11 +2334,10 @@ export async function syncExistingIdentityIndexes() {
     }).onConflictDoUpdate({
       target: characterIndex.id,
       set: {
-        ownerUid: row[1],
+        ownerUid: row[1] || "",
         name: row[2] || "Personnage sans nom",
         subtitle: row[3] || "",
         updatedAt: row[4] || now,
-        deletedAt: null,
       },
     })
   }
@@ -3182,6 +3180,7 @@ export async function getCampaignDashboard(mjUid: string | null, id: string) {
 }
 
 export async function listAllCharactersForAdmin() {
+  await syncExistingIdentityIndexes()
   const rows = await getDb().select({
     character: characterIndex,
     ownerName: users.displayName,
@@ -3191,11 +3190,16 @@ export async function listAllCharactersForAdmin() {
   const decorated = await decorateCharacters(rows.map((row) => row.character))
   return decorated.map((character) => {
     const owner = rows.find((row) => row.character.id === character.id)
-    return { ...character, ownerName: owner?.ownerName || "Compte inconnu", ownerEmail: owner?.ownerEmail || "" }
+    return {
+      ...character,
+      ownerName: owner?.ownerName || (character.ownerUid ? "Identifiant historique" : "Sans propriétaire"),
+      ownerEmail: owner?.ownerEmail || "",
+    }
   })
 }
 
 export async function listAllCampaignsForAdmin() {
+  await syncExistingIdentityIndexes()
   const rows = await getDb().select({
     campaign: campaignIndex,
     ownerName: users.displayName,
@@ -3207,10 +3211,50 @@ export async function listAllCampaignsForAdmin() {
     .where(isNull(characterIndex.deletedAt))
   return rows.map((row) => ({
     ...row.campaign,
-    ownerName: row.ownerName || "Compte inconnu",
+    ownerName: row.ownerName || (row.campaign.mjUid ? "Identifiant historique" : "Sans propriétaire"),
     ownerEmail: row.ownerEmail || "",
     characters: links.filter((link) => link.campaignId === row.campaign.id).map((link) => ({ id: link.characterId, name: link.characterName })),
   }))
+}
+
+export async function updateAdminItemOwner(
+  kind: "character" | "campaign",
+  id: string,
+  ownerUid: string,
+) {
+  const normalizedOwnerUid = ownerUid.trim()
+  const db = getDb()
+  if (normalizedOwnerUid) {
+    const [owner] = await db.select({ id: users.id }).from(users).where(eq(users.id, normalizedOwnerUid)).limit(1)
+    if (!owner) throw new Error("OWNER_NOT_FOUND")
+  }
+
+  await syncExistingIdentityIndexes()
+  if (kind === "character") {
+    const [character] = await db.select({ id: characterIndex.id }).from(characterIndex)
+      .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
+    if (!character) throw new Error("CHARACTER_NOT_FOUND")
+    const source = await charactersSource()
+    if (!source) throw new Error("CHARACTERS_SHEET_NOT_FOUND")
+    const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
+    if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+    await updateRange(source.spreadsheetId, `${source.tabName}!B${rowNumber}`, [[normalizedOwnerUid]])
+    await db.update(characterIndex).set({ ownerUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
+      .where(eq(characterIndex.id, id))
+    return
+  }
+
+  const [campaign] = await db.select({ id: campaignIndex.id }).from(campaignIndex)
+    .where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
+  if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
+  const source = await campaignsSource()
+  if (!source) throw new Error("CAMPAIGNS_SHEET_NOT_FOUND")
+  const tabName = source.range.split("!")[0]
+  const rowNumber = await findSheetRowById(source.spreadsheetId, tabName, id)
+  if (!rowNumber) throw new Error("CAMPAIGN_SHEET_ROW_NOT_FOUND")
+  await updateRange(source.spreadsheetId, `${tabName}!B${rowNumber}`, [[normalizedOwnerUid]])
+  await db.update(campaignIndex).set({ mjUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
+    .where(eq(campaignIndex.id, id))
 }
 
 export async function updateCampaignForMj(mjUid: string | null, id: string, patch: Partial<Pick<CampaignRecord, "name" | "description" | "bannerUrl" | "accentColor">>) {
