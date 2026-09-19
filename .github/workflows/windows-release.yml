@@ -63,6 +63,14 @@ jobs:
           $installer = Join-Path $PWD "release/Eraser-Setup.exe"
           Start-Process -FilePath $installer -ArgumentList "/S" -Wait
           $executable = Join-Path $env:LOCALAPPDATA "Programs/Eraser/Eraser.exe"
+          # The assisted (non one-click) NSIS installer's launched process can exit
+          # before its elevated inner installer has finished copying files, so the
+          # executable isn't always on disk the instant -Wait returns. Poll briefly
+          # instead of failing on the first check.
+          $installDeadline = (Get-Date).AddSeconds(30)
+          while ((Get-Date) -lt $installDeadline -and -not (Test-Path $executable)) {
+            Start-Sleep -Seconds 2
+          }
           if (-not (Test-Path $executable)) {
             throw "Eraser.exe est introuvable après l’installation."
           }
