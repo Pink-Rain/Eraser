@@ -315,6 +315,16 @@ export function AppShell({
 
   return (
     <PageLabelContext.Provider value={setCurrentPageLabel}>
+    {/* The sidebar is always dark; without this the OS-default light scrollbar
+        shows up on top of it. Kept as an inline style tag (not globals.css)
+        since historical CSS files must stay byte-identical to the site. */}
+    <style>{`
+      [data-sidebar="content"] { scrollbar-width: thin; scrollbar-color: var(--sidebar-border) transparent; }
+      [data-sidebar="content"]::-webkit-scrollbar { width: 8px; }
+      [data-sidebar="content"]::-webkit-scrollbar-track { background: transparent; }
+      [data-sidebar="content"]::-webkit-scrollbar-thumb { background-color: var(--sidebar-border); border-radius: 9999px; }
+      [data-sidebar="content"]::-webkit-scrollbar-thumb:hover { background-color: var(--sidebar-ring); }
+    `}</style>
     <SidebarProvider>
       <Sidebar collapsible="icon" className="border-r-0">
         <SidebarHeader className="gap-3 border-b border-sidebar-border p-3">
