@@ -27,16 +27,25 @@ await new Promise((resolve, reject) => {
   })
 })
 
-const launcher = join(root, "dist", "standalone", "server.js")
-const launcherSource = await readFile(launcher, "utf8")
-const patchedLauncher = launcherSource.replace(
-  'outDir: join(import.meta.dirname, "dist"),',
-  'outDir: process.env.ERASER_SERVER_OUT_DIR || join(import.meta.dirname, "dist"),',
+const staticCacheRuntime = join(
+  root,
+  "dist",
+  "standalone",
+  "node_modules",
+  "vinext",
+  "dist",
+  "server",
+  "static-file-cache.js",
 )
-if (patchedLauncher === launcherSource) {
-  throw new Error("Le lanceur autonome n’a pas pu être adapté au paquet Windows.")
+const staticCacheSource = await readFile(staticCacheRuntime, "utf8")
+const patchedStaticCache = staticCacheSource.replace(
+  "relativePath: path.relative(base, batch[j]),",
+  'relativePath: path.relative(base, batch[j]).split(path.sep).join("/"),',
+)
+if (patchedStaticCache === staticCacheSource) {
+  throw new Error("Le serveur Windows n’a pas pu être adapté aux chemins de fichiers Windows.")
 }
-await writeFile(launcher, patchedLauncher, "utf8")
+await writeFile(staticCacheRuntime, patchedStaticCache, "utf8")
 
 const archive = join(root, "dist", "eraser-server.asar")
 await createPackage(join(root, "dist", "standalone"), archive)

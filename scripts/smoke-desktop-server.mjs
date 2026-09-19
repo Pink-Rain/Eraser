@@ -50,7 +50,6 @@ try {
       ERASER_DESKTOP: "1",
       ERASER_DESKTOP_DATA_DIR: dataDirectory,
       ERASER_MIGRATIONS_DIR: join(root, "drizzle"),
-      ERASER_SERVER_OUT_DIR: join(root, "dist", "standalone", "dist"),
       GOOGLE_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     },
     stdio: ["ignore", "pipe", "pipe"],

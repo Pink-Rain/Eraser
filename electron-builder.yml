@@ -10,8 +10,6 @@ files:
 extraResources:
   - from: dist/eraser-server.asar
     to: eraser-server.asar
-  - from: dist/standalone/dist
-    to: eraser-dist
   - from: drizzle
     to: migrations
 win:
