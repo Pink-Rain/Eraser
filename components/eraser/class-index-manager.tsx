@@ -10,6 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { ClassSpell, ClassSpellDraft, SpellSimilarity } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
@@ -143,24 +144,24 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, compa
     {showMatches && <Similarities spell={spell} allSpells={allSpells} similarities={similarities} />}
   </article>
 
-  return <article className="rounded-xl border bg-background/60 p-3" style={{ borderColor: `${tone.background}55` }}>
-    <div className="grid items-start gap-3 xl:grid-cols-[minmax(18rem,1.5fr)_minmax(11rem,.8fr)_minmax(9rem,.7fr)_7rem_6rem_minmax(14rem,1.1fr)_auto]">
-      <div>
-        <Input aria-label="Nom du sort" value={draft.name} onChange={(event) => field("name", event.target.value)} className={`font-semibold ${fieldInputClass}`} />
-        <blockquote className="mt-2 border-l-2 pl-2" style={{ borderColor: tone.background }}>
-          <RichTextEditorField value={draft.effectHtml || draft.effect} onChange={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} className="text-xs" />
-          <RichTextEditorField value={draft.descriptionHtml || draft.description} onChange={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="mt-1 text-xs text-muted-foreground" />
-        </blockquote>
-      </div>
-      <Input list="class-spell-types" aria-label="Type" value={draft.type} onChange={(event) => field("type", event.target.value)} className={`h-9 self-start text-xs ${fieldInputClass}`} />
-      <Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} className={`h-9 self-start text-xs font-semibold text-[#b3261e] ${fieldInputClass}`} />
-      <Input aria-label="Distance" value={draft.distance} onChange={(event) => field("distance", event.target.value)} className={`h-9 self-start text-xs ${fieldInputClass}`} />
-      {classSpellCategory(draft.type) === "actif" ? <Input type="number" min={0} max={5} aria-label="Charges" value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} className={`h-9 self-start text-xs ${fieldInputClass}`} /> : <span className="flex min-h-9 items-center text-xs text-muted-foreground">—</span>}
-      <div><ClassLinksEditor draft={draft} classes={classes} spells={allSpells} rowNumber={spell.rowNumber} onChange={(classRanks) => field("classRanks", classRanks)} /></div>
-      <div className="flex items-start justify-end gap-1">{actions}</div>
-    </div>
-    {showMatches && <Similarities spell={spell} allSpells={allSpells} similarities={similarities} />}
-  </article>
+  // Vue "tableau" (comme l'index des objets) : une vraie ligne <tr>, une cellule
+  // par champ. Les doublons et ressemblances s'ouvrent dans une ligne pleine
+  // largeur juste en dessous plutôt que dans un panneau flottant.
+  return <>
+    <tr className="border-b align-top last:border-b-0">
+      <td className="sticky left-0 z-10 border-r bg-background px-3 py-2 text-xs tabular-nums text-muted-foreground">{spell.rowNumber}</td>
+      <td className="min-w-48 border-r p-1.5"><Input aria-label="Nom du sort" value={draft.name} onChange={(event) => field("name", event.target.value)} className={`font-semibold ${fieldInputClass}`} /></td>
+      <td className="min-w-52 border-r p-1.5"><RichTextEditorField value={draft.effectHtml || draft.effect} onChange={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} className="text-xs" /></td>
+      <td className="min-w-52 border-r p-1.5"><RichTextEditorField value={draft.descriptionHtml || draft.description} onChange={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="text-xs" /></td>
+      <td className="min-w-32 border-r p-1.5"><Input list="class-spell-types" aria-label="Type" value={draft.type} onChange={(event) => field("type", event.target.value)} className={`h-9 text-xs ${fieldInputClass}`} /></td>
+      <td className="min-w-36 border-r p-1.5"><Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} className={`h-9 text-xs font-semibold text-[#b3261e] ${fieldInputClass}`} /></td>
+      <td className="min-w-28 border-r p-1.5"><Input aria-label="Distance" value={draft.distance} onChange={(event) => field("distance", event.target.value)} className={`h-9 text-xs ${fieldInputClass}`} /></td>
+      <td className="min-w-24 border-r p-1.5">{classSpellCategory(draft.type) === "actif" ? <Input type="number" min={0} max={5} aria-label="Charges" value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} className={`h-9 text-xs ${fieldInputClass}`} /> : <span className="flex min-h-9 items-center text-xs text-muted-foreground">—</span>}</td>
+      <td className="min-w-56 border-r p-1.5"><ClassLinksEditor draft={draft} classes={classes} spells={allSpells} rowNumber={spell.rowNumber} onChange={(classRanks) => field("classRanks", classRanks)} /></td>
+      <td className="sticky right-0 z-10 border-l bg-background px-2 py-2"><div className="flex gap-1">{actions}</div></td>
+    </tr>
+    {showMatches && <tr className="border-b bg-amber-500/5 last:border-b-0"><td colSpan={10} className="p-3"><Similarities spell={spell} allSpells={allSpells} similarities={similarities} /></td></tr>}
+  </>
 }
 
 function SearchExisting({ classId, rank, spells, pending, onClose, onLink }: { classId: string; rank: number; spells: ClassSpell[]; pending: boolean; onClose: () => void; onLink: (spell: ClassSpell) => void }) {
@@ -175,8 +176,14 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   const [error, setError] = useState(initialError)
   const [pending, setPending] = useState(false)
   const [query, setQuery] = useState("")
-  const [tab, setTab] = useState("classes")
-  const [selectedClassId, setSelectedClassId] = useState(initialData.classes[0]?.id || "")
+  const [tab, setTab] = usePersistentState(
+    "eraser:class-index:tab", "classes",
+    (v): v is string => typeof v === "string",
+  )
+  const [selectedClassId, setSelectedClassId] = usePersistentState(
+    "eraser:class-index:selected-class", initialData.classes[0]?.id || "",
+    (v): v is string => typeof v === "string",
+  )
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
   const [searchRank, setSearchRank] = useState<number | null>(null)
   const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
@@ -244,7 +251,28 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   }
 
   const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, pending, onSave: save, onDelete: remove }
-  const tableFor = (spells: ClassSpell[]) => <div className="space-y-3"><div className="hidden grid-cols-[minmax(18rem,1.5fr)_minmax(11rem,.8fr)_minmax(9rem,.7fr)_7rem_6rem_minmax(14rem,1.1fr)_auto] gap-3 px-3 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground xl:grid"><span>Sort, effet et description</span><span>Type</span><span>Compétences</span><span>Distance</span><span>Charges</span><span>Classes et rangs</span><span>Actions</span></div>{spells.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}{!spells.length && <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Aucun sort dans cette vue.</p>}</div>
+  // Même présentation que l'Index des objets : un vrai tableau, une cellule par
+  // champ, colonnes "Ligne" et "Actions" figées sur les côtés.
+  const tableFor = (spells: ClassSpell[]) => <div className="overflow-x-auto rounded-xl border bg-background/60">
+    <table className="w-max min-w-full border-collapse text-sm">
+      <thead className="bg-muted/70">
+        <tr>
+          <th className="sticky left-0 z-20 min-w-16 border-b border-r bg-muted px-3 py-3 text-left font-semibold">Ligne</th>
+          <th className="min-w-48 border-b border-r px-2 py-2 text-left font-semibold">Nom</th>
+          <th className="min-w-52 border-b border-r px-2 py-2 text-left font-semibold">Effet</th>
+          <th className="min-w-52 border-b border-r px-2 py-2 text-left font-semibold">Description</th>
+          <th className="min-w-32 border-b border-r px-2 py-2 text-left font-semibold">Type</th>
+          <th className="min-w-36 border-b border-r px-2 py-2 text-left font-semibold">Compétences</th>
+          <th className="min-w-28 border-b border-r px-2 py-2 text-left font-semibold">Distance</th>
+          <th className="min-w-24 border-b border-r px-2 py-2 text-left font-semibold">Charges</th>
+          <th className="min-w-56 border-b border-r px-2 py-2 text-left font-semibold">Classes et rangs</th>
+          <th className="sticky right-0 z-20 min-w-36 border-b border-l bg-muted px-3 py-3 text-left font-semibold">Actions</th>
+        </tr>
+      </thead>
+      <tbody>{spells.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}</tbody>
+    </table>
+    {!spells.length && <div className="px-5 py-12 text-center text-sm text-muted-foreground">Aucun sort dans cette vue.</div>}
+  </div>
 
   return <section className="mt-8">
     <datalist id="class-spell-types">{classSpellTypeSuggestions.map((type) => <option key={type} value={type} />)}</datalist>

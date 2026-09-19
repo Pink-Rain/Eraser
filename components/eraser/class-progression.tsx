@@ -1,6 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent } from "react"
+import { usePersistentState } from "@/hooks/use-persistent-state"
 import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, X, Zap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
@@ -104,7 +105,10 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
 export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string }) {
   const state = useMemo(() => parseClassChoices(value), [value])
   const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
-  const [sort, setSort] = useState<"rank" | "name" | "type" | "manual">("rank")
+  const [sort, setSort] = usePersistentState<"rank" | "name" | "type" | "manual">(
+    "eraser:class-progression:sort", "rank",
+    (v): v is "rank" | "name" | "type" | "manual" => v === "rank" || v === "name" || v === "type" || v === "manual",
+  )
   const [searchOpen, setSearchOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [searchCategory, setSearchCategory] = useState<"all" | ClassSpell["category"]>("all")

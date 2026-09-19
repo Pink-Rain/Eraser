@@ -333,10 +333,11 @@ export function AppShell({
               <DropdownMenuTrigger asChild>
                 <Button
                   variant="ghost"
-                  className="size-10 shrink-0 rounded-xl border border-[#4c4439] bg-[#26231f] p-0 text-[#e0bd82] shadow-inner hover:bg-[#332f29] hover:text-[#f6d49b]"
+                  className="size-10 shrink-0 overflow-hidden rounded-xl border border-[#4c4439] bg-[#26231f] p-0 text-[#e0bd82] shadow-inner hover:bg-[#332f29] hover:text-[#f6d49b]"
                   aria-label="Ouvrir mes personnages"
                 >
-                  <span className="font-display text-xl font-bold">E</span>
+                  {/* eslint-disable-next-line @next/next/no-img-element */}
+                  <img src="/favicon.png" alt="" className="size-full object-cover p-1" />
                 </Button>
               </DropdownMenuTrigger>
               <DropdownMenuContent side="right" align="start" className="w-80">
@@ -544,21 +545,30 @@ export function AppShell({
                     <IntentLink href="/administration/corbeille"><Trash2 /><span>Corbeille</span></IntentLink>
                   </SidebarMenuButton>
                 </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Actualiser" className="h-10" onClick={() => window.location.reload()}>
-                    <RefreshCw /><span>Actualiser</span>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-                <SidebarMenuItem>
-                  <SidebarMenuButton tooltip="Chercher les mises à jour" className="h-10" onClick={() => void checkForUpdates()} disabled={checkingUpdate}>
-                    <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} /><span>{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span>
-                  </SidebarMenuButton>
-                  {updateNotice && <p className="px-2 pb-1 pt-0.5 text-[11px] leading-4 text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">{updateNotice}</p>}
-                </SidebarMenuItem>
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>
         )}
+
+        {/* Actualiser / mise à jour concernent l'application de bureau elle-même,
+            pas les droits d'administration : visibles quel que soit le rôle. */}
+        <SidebarGroup className={user.role === "admin" && viewRole === "admin" ? "border-t border-sidebar-border" : "mt-auto border-t border-sidebar-border"}>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Actualiser" className="h-10" onClick={() => window.location.reload()}>
+                  <RefreshCw /><span>Actualiser</span>
+                </SidebarMenuButton>
+              </SidebarMenuItem>
+              <SidebarMenuItem>
+                <SidebarMenuButton tooltip="Chercher les mises à jour" className="h-10" onClick={() => void checkForUpdates()} disabled={checkingUpdate}>
+                  <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} /><span>{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span>
+                </SidebarMenuButton>
+                {updateNotice && <p className="px-2 pb-1 pt-0.5 text-[11px] leading-4 text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">{updateNotice}</p>}
+              </SidebarMenuItem>
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
 
         <SidebarFooter className="border-t border-sidebar-border p-3">
           <SidebarMenu>

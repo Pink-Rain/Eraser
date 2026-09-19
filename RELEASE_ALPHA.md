@@ -1,44 +1,37 @@
-# Eraser 0.1.1-alpha.12 — confort d'utilisation
+# Eraser 0.1.1-alpha.13 — mémoire d'interface et Index des classes en tableau
 
-Une série de retouches d'ergonomie et de confort demandées après usage :
-fenêtre plus propre, nouvelle icône, édition plus fluide dans l'Index des
-classes, tri par glisser-déposer, texte des menus déroulants qui ne se coupe
-plus, et un léger gain de vitesse de navigation.
+Correctifs demandés après retour sur l'alpha.12 : la nouvelle icône remplace
+aussi l'avatar « E » du menu latéral, les raccourcis de mise à jour sont
+visibles quel que soit le rôle actif, l'application se souvient des tris et
+onglets choisis d'une visite à l'autre, et l'Index des classes redevient un
+vrai tableau comme l'Index des objets.
 
 ## Ajouté
 
-- deux liens sous « Corbeille » (admin) : « Actualiser » et « Chercher les
-  mises à jour » (déclenche une vérification immédiate, sans attendre le
-  cycle automatique de 6h) ;
-- tri manuel des sorts par glisser-déposer (poignée dédiée) à la place des
-  flèches monter/descendre, dans l'onglet « Sorts » de la fiche personnage.
+- mémoire des préférences d'affichage (tri manuel, colonne de tri, onglet
+  actif, tableau sélectionné…) : elles sont conservées d'une visite à l'autre
+  au lieu d'être réinitialisées à chaque retour sur une page — par exemple le
+  tri manuel des sorts dans la fiche personnage reste actif tant qu'on ne le
+  change pas soi-même ; couvre la fiche personnage, l'Index des classes et
+  l'Index des objets.
 
 ## Corrigé
 
-- la barre de menu Windows (Fichier, Édition…) est retirée de la fenêtre,
-  elle ne servait à rien dans cette application ;
-- l'icône de l'application (fenêtre, barre des tâches, onglet navigateur)
-  est remplacée par le nouveau logo ;
-- l'onglet « Classe » de la fiche personnage est renommé « Sorts » ;
-- dans l'Index des classes, modifier un sort ne fait plus basculer toute la
-  ligne dans un mode d'édition séparé (source des sauts d'affichage) :
-  chaque champ est directement modifiable, comme dans l'Index des objets,
-  avec un bouton Enregistrer qui ne s'active que si quelque chose a changé ;
-- le texte sélectionné dans les menus déroulants ne se coupe plus
-  brutalement (troncature propre avec points de suspension) ;
-- la barre de défilement du menu latéral est maintenant assortie au thème
-  sombre au lieu d'afficher la barre blanche par défaut du système ;
-- la fenêtre de cache des lectures Google Sheets est allongée (60 s → 3 min)
-  pour réduire les allers-retours réseau répétés en navigant d'une page à
-  l'autre — toute modification faite dans l'application continue d'invalider
-  le cache immédiatement.
+- l'avatar « E » en haut du menu latéral (sélection de rôle) affiche
+  maintenant le nouveau logo, comme l'icône de l'application ;
+- « Actualiser » et « Chercher les mises à jour » sont désormais visibles en
+  mode MJ et joueur, pas seulement en administration (seule « Corbeille »
+  reste réservée à l'administration) ;
+- l'Index des classes est reconstruit en véritable tableau (lignes/colonnes,
+  colonnes « Ligne » et « Actions » figées) exactement comme l'Index des
+  objets, à la place de l'ancien affichage en cartes qui ne convenait pas.
 
 ## Vérifications
 
-- compilation complète de l’application réussie ;
+- compilation complète de l'application réussie ;
 - lint sans erreur ;
 - vérification de fidélité avec la source du site réussie (aucun fichier CSS
   historique modifié, aucune suppression) ;
-- serveur Windows autonome construit et vérifié en HTTP 200 ;
-- pages « Toutes les campagnes », « Index des classes » et « Index des
-  objets » revérifiées en HTTP 200 sur le serveur autonome.
+- serveur Windows autonome construit et vérifié en HTTP 200 sur
+  « /connexion » et redirection d'authentification attendue (307) sur
+  « /ressources/index-des-classes » et « /ressources/index-des-objets ».

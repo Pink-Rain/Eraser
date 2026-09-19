@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react"
 import { ArrowDownAZ, ArrowUpAZ, Boxes, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, Save, Search, Sparkles, Trash2 } from "lucide-react"
 
+import { usePersistentState } from "@/hooks/use-persistent-state"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -25,13 +26,19 @@ function tableKey(table: ObjectIndexTable) {
 
 export function ObjectIndexManager({ initialTables, initialError }: { initialTables: ObjectIndexTable[]; initialError: string }) {
   const [tables, setTables] = useState(initialTables)
-  const [selectedKey, setSelectedKey] = useState(initialTables[0] ? tableKey(initialTables[0]) : "")
+  const [selectedKey, setSelectedKey] = usePersistentState(
+    "eraser:object-index:selected-table", initialTables[0] ? tableKey(initialTables[0]) : "",
+    (v): v is string => typeof v === "string",
+  )
   const [drafts, setDrafts] = useState<Record<string, string[]>>({})
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [notice, setNotice] = useState("")
   const [query, setQuery] = useState("")
-  const [sort, setSort] = useState<{ column: number; direction: "asc" | "desc" } | null>(null)
+  const [sort, setSort] = usePersistentState<{ column: number; direction: "asc" | "desc" } | null>(
+    "eraser:object-index:sort", null,
+    (v): v is { column: number; direction: "asc" | "desc" } | null => v === null || (typeof v === "object" && v !== null && typeof (v as { column?: unknown }).column === "number" && ((v as { direction?: unknown }).direction === "asc" || (v as { direction?: unknown }).direction === "desc")),
+  )
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
   const displayedRows = useMemo(() => {
     if (!selected) return []
@@ -101,7 +108,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
             <thead className="bg-muted/70">
               <tr>
                 <th className="sticky left-0 z-20 min-w-16 border-b border-r bg-muted px-3 py-3 text-left font-semibold">Ligne</th>
-                {selected.headers.map((header, index) => <th key={`${header}:${index}`} className="min-w-48 border-b border-r px-2 py-2 text-left font-semibold last:border-r-0"><Button type="button" variant="ghost" size="sm" className="w-full justify-between" onClick={() => setSort((current) => current?.column === index ? { column: index, direction: current.direction === "asc" ? "desc" : "asc" } : { column: index, direction: "asc" })}>{header}{sort?.column === index ? sort.direction === "asc" ? <ArrowDownAZ /> : <ArrowUpAZ /> : null}</Button></th>)}
+                {selected.headers.map((header, index) => <th key={`${header}:${index}`} className="min-w-48 border-b border-r px-2 py-2 text-left font-semibold last:border-r-0"><Button type="button" variant="ghost" size="sm" className="w-full justify-between" onClick={() => setSort(sort?.column === index ? { column: index, direction: sort.direction === "asc" ? "desc" : "asc" } : { column: index, direction: "asc" })}>{header}{sort?.column === index ? sort.direction === "asc" ? <ArrowDownAZ /> : <ArrowUpAZ /> : null}</Button></th>)}
                 <th className="sticky right-0 z-20 min-w-36 border-b border-l bg-muted px-3 py-3 text-left font-semibold">Actions</th>
               </tr>
             </thead>
