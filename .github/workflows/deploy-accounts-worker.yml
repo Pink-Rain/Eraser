@@ -7,6 +7,12 @@ name: Déployer le Worker de comptes partagés
 # Ne jamais réutiliser ce workflow pour le site Sites/Cloudflare en ligne.
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - windows-app-migration
+    paths:
+      - "worker-accounts/**"
+      - ".github/workflows/deploy-accounts-worker.yml"
 
 jobs:
   deploy:
