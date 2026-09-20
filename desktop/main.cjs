@@ -414,8 +414,14 @@ async function runInstalledUiSmoke(url) {
     if (mainWindow.webContents.getURL().startsWith(`${url}/connexion`)) {
       throw new Error("La création de compte n’a pas quitté la page de connexion.")
     }
+    // A freshly registered account is "en attente" with no role (only the
+    // ADMIN_EMAIL + code combination becomes admin), so this can't check an
+    // admin-only route. `/` renders for any authenticated account regardless
+    // of role/status (redirecting to /connexion only when unauthenticated),
+    // so a manual-redirect fetch distinguishes "has a valid session" (200)
+    // from "no session" (redirected, reported as status 0) either way.
     const authenticatedStatus = await mainWindow.webContents.executeJavaScript(
-      `fetch('/api/admin/google-drive/oauth/status').then((response) => response.status)`,
+      `fetch('/', { redirect: 'manual' }).then((response) => response.status)`,
     )
     if (authenticatedStatus !== 200) {
       throw new Error(`La session créée par l’interface est refusée (${authenticatedStatus}).`)
