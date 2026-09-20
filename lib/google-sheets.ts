@@ -26,7 +26,7 @@ import {
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
 import { getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
-import { googleOAuthAuthorizedFetch } from "@/lib/google-oauth"
+import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import {
   htmlToRichText,
   hexColorToRgb,
@@ -1236,6 +1236,10 @@ export async function updateClassAccentColors(updates: Array<{ id: string; dark:
 
 export async function listClasses() {
   const db = getDb()
+  // Warmed here, in the foreground, so the background work below (which may run
+  // after this request has already responded — see warmGoogleOAuthAccessToken)
+  // can reuse the cached token instead of failing to authenticate.
+  await warmGoogleOAuthAccessToken()
   runInBackground(ensureClassImagesSynced(), "CLASS_IMAGE_AUTO_SYNC_FAILED")
   let rows = await db.select().from(classIndex).orderBy(classIndex.name)
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global")).limit(1)

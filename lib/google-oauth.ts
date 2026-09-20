@@ -485,6 +485,24 @@ export async function googleOAuthAccessToken() {
   return accessTokenPromise
 }
 
+// In remote-accounts mode (see accounts-remote.ts), fetching the shared Drive
+// access token needs the caller's session cookie (currentAuthToken()), which
+// next/headers only allows reading during the synchronous part of a request.
+// Background work started with runInBackground/waitUntil runs after that
+// window closes, so a Sheets call made purely in the background would fail
+// to authenticate. Call this — and await it — from the foreground before
+// handing any Drive/Sheets-touching work to runInBackground, so the token is
+// already cached (googleOAuthAccessToken's fast path above) by the time the
+// background promise actually needs it.
+export async function warmGoogleOAuthAccessToken() {
+  try {
+    await googleOAuthAccessToken()
+  } catch {
+    // The caller's own request-scoped Sheets/Drive calls will surface this
+    // the same way they always have; this is best-effort priming only.
+  }
+}
+
 export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit = {}) {
   const token = await googleOAuthAccessToken()
   const headers = new Headers(init.headers)
