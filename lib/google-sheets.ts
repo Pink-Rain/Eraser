@@ -2653,6 +2653,21 @@ export async function listSavedShops(pageLinked: string, onlyInCampaign = false)
   return rows.map(savedShopFromRow).filter((shop): shop is SavedShopRecord => Boolean(shop && !shop.id.startsWith("latest:") && shop.pageLinked === pageLinked && (!onlyInCampaign || shop.inCampaign)))
 }
 
+/**
+ * Le dernier tirage d'une campagne est enregistré avec des identifiants
+ * préfixés « latest: » pour ne pas se mélanger aux magasins sauvegardés.
+ * Sans cette lecture, le message « Dernier tirage sauvegardé » était faux :
+ * l'écriture avait bien lieu, mais plus rien ne relisait ces lignes.
+ */
+export async function listLatestShops(pageLinked: string): Promise<GeneratedShop[]> {
+  const sheet = await ensureJdrSheet("shops")
+  if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)
+  return rows.map(savedShopFromRow).flatMap((shop) => shop && shop.pageLinked === pageLinked && shop.id.startsWith("latest:")
+    ? [{ id: shop.id.slice("latest:".length), key: shop.key, name: shop.name, size: shop.size, cityKey: shop.cityKey, cityName: shop.cityName, items: shop.items }]
+    : [])
+}
+
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
@@ -3541,10 +3556,57 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`, [copiedRow])
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
-  await getDb().insert(campaignCharacters).values({ campaignId, characterId: targetId }).onConflictDoNothing()
+  // La feuille partagée d'abord, l'index local ensuite. Dans l'autre ordre, un
+  // échec d'écriture Sheets affichait une erreur alors que le personnage était
+  // déjà dans l'index local : « erreur » à l'écran, personnage présent après
+  // actualisation, et invisible depuis les autres installations.
   const relationSheet = await ensureJdrSheet("campaign_characters")
-  if (relationSheet) await appendRows(relationSheet.spreadsheetId, sheetTabRange(relationSheet.tabName, "A:B"), [[campaignId, targetId]])
-  return (await listCampaignMembers(campaignId)).find((character) => character.id === targetId)
+  if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
+  const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
+  const existingRelations = await readRange(relationSheet.spreadsheetId, relationRange).catch(() => [] as string[][])
+  if (!existingRelations.some((row) => row[0] === campaignId && row[1] === targetId)) {
+    await appendRows(relationSheet.spreadsheetId, relationRange, [[campaignId, targetId]])
+  }
+  await getDb().insert(campaignCharacters).values({ campaignId, characterId: targetId }).onConflictDoNothing()
+  // À partir d'ici, le lien existe des deux côtés : plus rien ne doit pouvoir
+  // le faire passer pour un échec. On renvoie au pire la fiche telle que
+  // l'index la connaît, l'enrichissement se fera au prochain chargement.
+  try {
+    const member = (await listCampaignMembers(campaignId)).find((character) => character.id === targetId)
+    if (member) return member
+  } catch (error) {
+    console.error("CAMPAIGN_MEMBER_RELOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+  }
+  return {
+    id: targetId,
+    ownerUid: sourceCharacter.ownerUid,
+    name: sourceCharacter.name,
+    subtitle: sourceCharacter.subtitle,
+    updatedAt: sourceCharacter.updatedAt,
+    campaigns: [{ id: campaign.id, name: campaign.name, accentColor: campaign.accentColor }],
+    people: sourceCharacter.subtitle,
+    classes: "",
+    level: "",
+    honoraryTitle: "",
+  } satisfies CampaignMemberRecord
+}
+
+export async function removeCharacterFromCampaign(mjUid: string | null, campaignId: string, characterId: string) {
+  const campaign = await getCampaignDashboard(mjUid, campaignId)
+  if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
+  // La feuille partagée fait foi : si on ne retirait la ligne que de l'index
+  // local, la prochaine resynchronisation la réimporterait aussitôt.
+  const relationSheet = await ensureJdrSheet("campaign_characters")
+  if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
+  const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
+  const rows = await readRange(relationSheet.spreadsheetId, relationRange)
+  const cleared = rows.flatMap((row, index) => row[0] === campaignId && row[1] === characterId
+    ? [{ range: sheetTabRange(relationSheet.tabName, `A${index + 1}:B${index + 1}`), values: [["", ""]] }]
+    : [])
+  await updateRanges(relationSheet.spreadsheetId, cleared)
+  await getDb().delete(campaignCharacters)
+    .where(and(eq(campaignCharacters.campaignId, campaignId), eq(campaignCharacters.characterId, characterId)))
+  return { id: characterId }
 }
 
 export async function createCharacterForUser(uid: string, values: string[]) {

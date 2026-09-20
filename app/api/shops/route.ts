@@ -4,11 +4,16 @@ import { copySavedShopsToPage, deleteSavedShops, getCampaignDashboard, listCampa
 import type { GeneratedShop } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
-function shopErrorMessage(error: unknown) {
+function shopErrorMessage(error: unknown, isAdmin = false) {
   const code = error instanceof Error ? error.message : ""
   if (code === "NPC_NOT_FOUND") return "Ce PNJ n’existe pas dans cette campagne."
   if (code === "SHOPS_SHEET_UNAVAILABLE") return "La feuille Google Sheets des magasins n’est pas reliée."
-  if (code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED") return "La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration."
+  if (code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED") {
+    // Le message générique masquait la vraie cause (quota, onglet absent,
+    // cellule trop longue…). Un administrateur voit le code brut.
+    return `La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration.${isAdmin ? ` (${code})` : ""}`
+  }
+  if (isAdmin && code && code !== "INVALID_SHOPS" && code !== "INVALID_SHOP_ACTION" && code !== "INVALID_SHOP_IMPORT") return `Les magasins n’ont pas pu être enregistrés. (${code})`
   return ""
 }
 
@@ -34,20 +39,24 @@ function validShops(value: unknown): value is GeneratedShop[] {
 export async function GET(request: Request) {
   const url = new URL(request.url)
   const pageLinked = url.searchParams.get("pageLinked") || ""
-  if (!await canUsePage(pageLinked)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const account = await canUsePage(pageLinked)
+  if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const shops = await listSavedShops(pageLinked, url.searchParams.get("inCampaign") === "1")
     return NextResponse.json({ shops })
   } catch (error) {
-    return NextResponse.json({ error: shopErrorMessage(error) || "Les magasins sauvegardés n’ont pas pu être chargés." }, { status: 400 })
+    return NextResponse.json({ error: shopErrorMessage(error, account.role === "admin") || "Les magasins sauvegardés n’ont pas pu être chargés." }, { status: 400 })
   }
 }
 
 export async function POST(request: Request) {
+  let isAdmin = false
   try {
     const body = (await request.json()) as { action?: string; pageLinked?: string; sourcePageLinked?: string; shopIds?: unknown; shops?: unknown; npcId?: string }
     const pageLinked = body.pageLinked || ""
-    if (!await canUsePage(pageLinked)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+    const account = await canUsePage(pageLinked)
+    if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+    isAdmin = account.role === "admin"
     if (body.action === "import") {
       const sourcePageLinked = body.sourcePageLinked || ""
       if (!await canUsePage(sourcePageLinked)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
@@ -81,6 +90,6 @@ export async function POST(request: Request) {
     await saveGeneratedShops(pageLinked, body.shops, options)
     return NextResponse.json({ ok: true })
   } catch (error) {
-    return NextResponse.json({ error: shopErrorMessage(error) || "Les magasins n’ont pas pu être enregistrés." }, { status: 400 })
+    return NextResponse.json({ error: shopErrorMessage(error, isAdmin) || "Les magasins n’ont pas pu être enregistrés." }, { status: 400 })
   }
 }

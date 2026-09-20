@@ -1,43 +1,43 @@
-# Eraser 0.1.1-alpha.27 — fin de l'audit « qu'est-ce qui reste local ? »
+# Eraser 0.1.1-alpha.28 — personnages d'une campagne, et magasins
 
-L'alpha.26 a déplacé les visuels et les liens d'identité sur le partagé.
-Cette version termine l'inventaire, en repartant cette fois de **toutes**
-les formes de stockage et non des seules tables : bases locales, stockage
-de fichiers, écritures disque directes, mémoire du navigateur.
+## Ajouter un personnage à une campagne
 
-## Corrigé
+L'erreur « La connexion à Google Sheets a échoué » s'affichait alors que le
+personnage était bel et bien ajouté après actualisation. L'app écrivait
+d'abord dans son index local, puis dans la feuille partagée : quand la
+seconde écriture échouait, l'erreur était affichée alors que le lien
+existait déjà localement — et restait invisible depuis les autres
+installations.
 
-- **Le script Google des images de classes** : l'app notait dans sa base
-  locale qu'un script était déjà installé sur la feuille partagée. Chaque
-  autre installation, ne le sachant pas, en créait un second sur la même
-  feuille. Cette information vit maintenant sur le serveur partagé.
+L'ordre est inversé : la feuille partagée d'abord, l'index local ensuite.
+Une fois le lien écrit des deux côtés, plus rien ne peut le faire passer
+pour un échec, et le personnage apparaît immédiatement dans la liste,
+sans actualiser la page.
 
-## Inventaire complet
+## Retirer un personnage d'une campagne
 
-Stockage de fichiers (portraits, bannières, fonds de carte) : partagé
-depuis l'alpha.26. Écritures disque hors de ce stockage : aucune.
-Mémoire du navigateur : uniquement des préférences d'affichage (onglet
-ouvert, dernier personnage sélectionné) — rien qui concerne les autres.
+Nouveau bouton sur chaque carte de la section « Personnages joueurs »,
+réservé au MJ et aux administrateurs, avec confirmation. La fiche et
+l'inventaire du personnage ne sont pas supprimés : il peut être rajouté
+plus tard ou rejoindre une autre campagne. La ligne est retirée de la
+feuille partagée, sinon la prochaine synchronisation la réimporterait.
 
-Tables : comptes, sessions, connexion Google, liens d'identité et script
-Google sont partagés. Les index (personnages, campagnes, classes,
-liaison des feuilles) sont des caches dont la source de vérité est
-Google Sheets, et ils se resynchronisent seuls depuis l'alpha.24/25.
-Tables inutilisées : to-do administration, connexions Drive.
+## « Dernier tirage sauvegardé » n'est plus un mensonge
 
-## Reste local, volontairement, avec sa conséquence
+Le tirage d'une campagne était bien enregistré, mais plus rien ne le
+relisait : partir de la page ou actualiser le faisait disparaître. Il est
+maintenant restauré à l'ouverture de la page, avec la taille de ville
+correspondante. Même chose dans le bac à sable.
 
-- **L'état temporaire de connexion Google** (quelques minutes) : il est
-  lié au navigateur qui ouvre la fenêtre d'autorisation, sur cette
-  machine. Le partager serait un risque inutile.
-- **Le lien Roll20 d'une campagne** : le compagnon Chrome parle au
-  serveur local de l'ordinateur où tournent Eraser et Roll20, et cette
-  route n'accepte volontairement aucune authentification par compte.
-  Conséquence assumée : un lien créé sur un ordinateur n'apparaît pas
-  depuis un autre, et en recréer un ailleurs invalide le premier.
+## Magasins : message d'erreur exploitable
+
+Pour un administrateur, le message générique est complété par le code
+d'erreur réel de Google (quota, onglet absent, feuille non reliée…), au
+lieu de renvoyer tout le monde vers la connexion Drive quelle que soit la
+cause.
 
 ## Vérifications
 
-- compilation complète de l'application (Sites et desktop) réussie ;
-- lint et vérification des types sans nouvelle erreur ;
-- build production (`npm run build`) réussi.
+- `npm run build` réussi ;
+- lint sans erreur ;
+- `npm run desktop:parity` : 0 fichier manquant, 0 style modifié.

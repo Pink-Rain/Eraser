@@ -45,3 +45,4 @@ next-env.d.ts
 
 # generated at CI build time from secrets, never committed
 /desktop/accounts-config.generated.cjs
+*.tsbuildinfo

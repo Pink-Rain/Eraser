@@ -3,8 +3,9 @@
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
-import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Star, Upload, UserRound, Users, X } from "lucide-react"
+import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Star, Trash2, Upload, UserRound, Users, X } from "lucide-react"
 
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -83,6 +84,8 @@ export function CampaignDashboard({
   const selectedCharacter = availableCharacters.find((item) => item.id === characterId)
   const [duplicate, setDuplicate] = useState(true)
   const [selectedCharacterId, setSelectedCharacterId] = useState("")
+  const [removeTarget, setRemoveTarget] = useState<CampaignMemberRecord | null>(null)
+  const [removing, setRemoving] = useState(false)
   useEffect(() => {
     const timer = window.setTimeout(() => setSelectedCharacterId(window.localStorage.getItem(`eraser-character:${userEmail}`) || ""), 0)
     return () => window.clearTimeout(timer)
@@ -148,6 +151,23 @@ export function CampaignDashboard({
       return
     }
     setAvailableError(payload.error || "Le personnage n’a pas pu être ajouté.")
+  }
+
+  async function removeCharacter(character: CampaignMemberRecord) {
+    setRemoving(true)
+    setAvailableError("")
+    try {
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters?characterId=${encodeURIComponent(character.id)}`, { method: "DELETE" })
+      const payload = (await response.json()) as { removed?: string; error?: string }
+      if (!response.ok || !payload.removed) throw new Error(payload.error || "Le personnage n’a pas pu être retiré.")
+      setMembers((current) => current.filter((member) => member.id !== character.id))
+      setAvailableLoaded(false)
+      setRemoveTarget(null)
+    } catch (caught) {
+      setAvailableError(caught instanceof Error ? caught.message : "Le personnage n’a pas pu être retiré.")
+    } finally {
+      setRemoving(false)
+    }
   }
 
   async function toggleCharacterPicker() {
@@ -235,9 +255,22 @@ export function CampaignDashboard({
               const classes = parseMultiple(character.classes).entries.join(" · ")
               const honoraryTitle = parseMultiple(character.honoraryTitle).selected
               const classAndLevel = [classes, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
-              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}</div>{canOpen && <Button asChild size="icon-sm" variant="ghost" className="absolute right-2 top-2" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}</article>
+              return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}
           </div>
+          {canManage && !addingCharacter && availableError && <p className="mt-3 text-sm text-destructive">{availableError}</p>}
+          <AlertDialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null) }}>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Retirer ce personnage de la campagne ?</AlertDialogTitle>
+                <AlertDialogDescription>{removeTarget ? `${removeTarget.name} ne fera plus partie de ${campaign.name}. Sa fiche et son inventaire ne sont pas supprimés : il pourra être rajouté plus tard ou rejoindre une autre campagne.` : ""}</AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel disabled={removing}>Annuler</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" disabled={removing} onClick={(event) => { event.preventDefault(); if (removeTarget) void removeCharacter(removeTarget) }}>{removing ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Trash2 />}Retirer</AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">

@@ -4,7 +4,7 @@ import { notFound, redirect } from "next/navigation"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ShopGenerator } from "@/components/eraser/shop-generator"
-import { getCampaignDashboard, listAllCampaignsForAdmin, listCampaignNpcs, listCampaignsForMj } from "@/lib/google-sheets"
+import { getCampaignDashboard, listAllCampaignsForAdmin, listCampaignNpcs, listCampaignsForMj, listLatestShops } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { loadShopGeneratorItems, type ShopGeneratorItem } from "@/lib/shop-schema"
 
@@ -13,10 +13,11 @@ export const dynamic = "force-dynamic"
 async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaignId: string; accountUid: string; isAdmin: boolean }) {
   let items: ShopGeneratorItem[] = []
   let loadError = ""
-  const [loadedItems, npcs, campaigns] = await Promise.all([
+  const [loadedItems, npcs, campaigns, latestDraw] = await Promise.all([
     loadShopGeneratorItems().catch(() => null),
     listCampaignNpcs(campaignId),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
+    listLatestShops(campaignId).catch(() => []),
   ])
   if (loadedItems) items = loadedItems
   else loadError = "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."
@@ -31,6 +32,7 @@ async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaign
       savedHref={`${baseHref}/sauvegardes`}
       npcs={npcs}
       sourcePages={sourcePages}
+      initialDraw={latestDraw}
     />
   )
 }
