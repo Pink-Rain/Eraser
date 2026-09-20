@@ -7,14 +7,14 @@ import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { Button } from "@/components/ui/button"
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
 import { listAllCampaignsForAdmin } from "@/lib/google-sheets"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { listAccounts } from "@/lib/site-auth"
 
 export const dynamic = "force-dynamic"
 
 export default async function AllCampaignsPage() {
   if (!(await authorizedAccount(["admin"]))) redirect("/")
-  const [campaigns, accounts] = await Promise.all([listAllCampaignsForAdmin(), listAccounts()])
+  const [campaigns, accounts] = await Promise.all([listAllCampaignsForAdmin(), listAccounts(await currentAuthToken())])
   return (
     <AuthenticatedShell pageLabel="Toutes les campagnes" roles={["admin"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">

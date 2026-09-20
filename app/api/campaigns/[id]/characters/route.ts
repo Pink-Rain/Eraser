@@ -22,7 +22,17 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const character = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate !== false)
     if (!character) throw new Error("CHARACTER_NOT_FOUND")
     return NextResponse.json({ character })
-  } catch {
-    return NextResponse.json({ error: "Le personnage n’a pas pu être ajouté." }, { status: 400 })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    const message = code === "CAMPAIGN_NOT_FOUND"
+      ? "Cette campagne est introuvable ou tu n’y as pas accès."
+      : code === "CHARACTER_NOT_FOUND"
+        ? "Ce personnage est introuvable."
+        : code === "CHARACTER_SHEET_ROW_NOT_FOUND"
+          ? "La fiche de ce personnage est introuvable dans Google Sheets."
+          : code === "CHARACTERS_SHEET_UNAVAILABLE"
+            ? "La feuille Google Sheets des personnages n’est pas reliée."
+            : "Le personnage n’a pas pu être ajouté."
+    return NextResponse.json({ error: message }, { status: 400 })
   }
 }

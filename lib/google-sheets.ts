@@ -1244,10 +1244,14 @@ export async function listClasses() {
   if (shouldRefresh) {
     const refresh = refreshClassIndex(rows)
     if (!rows.length) {
+      // Nothing cached yet: a failed refresh here must not be swallowed into an
+      // empty list, or the page shows "no classes yet" instead of the real
+      // "Sheets is unavailable" message (see app/regles/classes/page.tsx).
       try {
         rows = await refresh
       } catch (error) {
         console.error("CLASS_INDEX_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+        throw error
       }
     } else {
       runInBackground(refresh, "CLASS_INDEX_REFRESH_FAILED")

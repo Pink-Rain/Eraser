@@ -37,7 +37,7 @@ export function CampaignCreationForm() {
       if (!upload.ok) { setPending(false); return setError("La campagne est créée, mais la bannière n’a pas pu être importée.") }
     }
     setPending(false)
-    router.push("/")
+    router.push(`/campagne/${encodeURIComponent(payload.campaign.id)}`)
     router.refresh()
   }
 

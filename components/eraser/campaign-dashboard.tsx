@@ -134,17 +134,20 @@ export function CampaignDashboard({
 
   async function addCharacter() {
     if (!characterId) return
+    setAvailableError("")
     const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ characterId, duplicate }),
     })
-    const payload = (await response.json()) as { character?: CampaignMemberRecord }
+    const payload = (await response.json()) as { character?: CampaignMemberRecord; error?: string }
     if (payload.character) {
       setMembers((current) => current.some((member) => member.id === payload.character!.id)
         ? current.map((member) => member.id === payload.character!.id ? payload.character! : member)
         : [...current, payload.character!])
       setCharacterId("")
       setAddingCharacter(false)
+      return
     }
+    setAvailableError(payload.error || "Le personnage n’a pas pu être ajouté.")
   }
 
   async function toggleCharacterPicker() {

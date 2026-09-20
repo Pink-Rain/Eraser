@@ -94,10 +94,10 @@ export function CharacterCreationForm({ classes }: { classes: Array<{ id: string
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ values }),
     })
-    const payload = (await response.json()) as { error?: string }
+    const payload = (await response.json()) as { error?: string; character?: { id: string } }
     setPending(false)
-    if (!response.ok) return setError(payload.error || "Le personnage n’a pas pu être créé.")
-    router.push("/")
+    if (!response.ok || !payload.character) return setError(payload.error || "Le personnage n’a pas pu être créé.")
+    router.push(`/personnage/${encodeURIComponent(payload.character.id)}`)
     router.refresh()
   }
 
