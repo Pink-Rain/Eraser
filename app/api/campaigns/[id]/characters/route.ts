@@ -3,6 +3,14 @@ import { NextResponse } from "next/server"
 import { addCharacterToCampaign, getCampaignDashboard, listAvailableCampaignCharacters, removeCharacterFromCampaign } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
+// Le lien a bien été créé localement, mais pas encore écrit dans la feuille
+// partagée : c'est un avertissement, pas un échec — les autres installations ne
+// le verront qu'une fois la feuille réparée.
+function sharedWarning(code: string | null, isAdmin: boolean) {
+  if (!code) return ""
+  return `Enregistré sur cet ordinateur, mais pas encore dans Google Sheets : les autres comptes ne le verront pas tant que la feuille « Personnages des campagnes » n’est pas réparée (Administration › Google Drive et Sheets).${isAdmin ? ` (${code})` : ""}`
+}
+
 function membershipErrorMessage(error: unknown, fallback: string, showDetail: boolean) {
   const code = error instanceof Error ? error.message : ""
   const message = code === "CAMPAIGN_NOT_FOUND"
@@ -18,8 +26,9 @@ function membershipErrorMessage(error: unknown, fallback: string, showDetail: bo
             : code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED"
               ? "La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration."
               : fallback
-  // Un administrateur a besoin du code brut pour diagnostiquer ; un joueur non.
-  return showDetail && code && message === fallback ? `${fallback} (${code})` : message
+  // Un administrateur a besoin du code brut de Google pour diagnostiquer ; sans
+  // lui, toutes les pannes se ressemblent à l'écran. Un joueur ne le voit pas.
+  return showDetail && code ? `${message} (${code})` : message
 }
 
 export async function GET(_: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -38,9 +47,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const body = (await request.json()) as { characterId?: string; duplicate?: boolean }
     if (!body.characterId) throw new Error("CHARACTER_NOT_FOUND")
-    const character = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate !== false)
-    if (!character) throw new Error("CHARACTER_NOT_FOUND")
-    return NextResponse.json({ character })
+    const { member, sharedError } = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate !== false)
+    return NextResponse.json({ character: member, warning: sharedWarning(sharedError, account.role === "admin") })
   } catch (error) {
     return NextResponse.json({ error: membershipErrorMessage(error, "Le personnage n’a pas pu être ajouté.", account.role === "admin") }, { status: 400 })
   }
@@ -53,8 +61,8 @@ export async function DELETE(request: Request, { params }: { params: Promise<{ i
   const { id } = await params
   try {
     if (!characterId) throw new Error("CHARACTER_NOT_FOUND")
-    await removeCharacterFromCampaign(account.role === "admin" ? null : account.uid, id, characterId)
-    return NextResponse.json({ removed: characterId })
+    const { sharedError } = await removeCharacterFromCampaign(account.role === "admin" ? null : account.uid, id, characterId)
+    return NextResponse.json({ removed: characterId, warning: sharedWarning(sharedError, account.role === "admin") })
   } catch (error) {
     return NextResponse.json({ error: membershipErrorMessage(error, "Le personnage n’a pas pu être retiré.", account.role === "admin") }, { status: 400 })
   }

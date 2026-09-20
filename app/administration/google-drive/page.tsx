@@ -7,6 +7,7 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { GoogleDriveManager } from "@/components/eraser/google-drive-manager"
 import { listDriveFiles } from "@/lib/google-drive"
 import {
+  diagnoseJdrSheets,
   listDriveSpreadsheetDuplicates,
 } from "@/lib/google-sheets"
 import {
@@ -53,6 +54,50 @@ async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthS
   )
 }
 
+async function SheetDiagnostics() {
+  const diagnostics = await diagnoseJdrSheets().catch(() => null)
+  if (!diagnostics) return null
+  const broken = diagnostics.filter((item) => item.status !== "ok")
+  return (
+    <section className="mt-10 rounded-2xl border bg-card/70 p-5 sm:p-6">
+      <h2 className="font-display text-2xl font-semibold">Diagnostic des feuilles</h2>
+      <p className="mt-1 text-sm text-muted-foreground">
+        {broken.length
+          ? `${broken.length} feuille${broken.length > 1 ? "s" : ""} en défaut. L’erreur brute de Google est indiquée telle quelle.`
+          : "Toutes les feuilles répondent correctement."}
+      </p>
+      <div className="mt-4 overflow-x-auto">
+        <table className="w-full min-w-[42rem] text-sm">
+          <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
+            <tr><th className="py-2 pr-3 font-semibold">Feuille</th><th className="py-2 pr-3 font-semibold">Onglet attendu</th><th className="py-2 pr-3 font-semibold">Lignes</th><th className="py-2 font-semibold">État</th></tr>
+          </thead>
+          <tbody className="divide-y">
+            {diagnostics.map((item) => (
+              <tr key={item.key} className="align-top">
+                <td className="py-2 pr-3 font-medium">
+                  {item.webViewLink
+                    ? <a href={item.webViewLink} target="_blank" rel="noreferrer" className="underline underline-offset-2">{item.name}</a>
+                    : item.name}
+                </td>
+                <td className="py-2 pr-3 text-muted-foreground">{item.expectedTab}</td>
+                <td className="py-2 pr-3 tabular-nums text-muted-foreground">{item.rows === null ? "—" : item.rows}</td>
+                <td className="py-2">
+                  {item.status === "ok"
+                    ? <span className="text-emerald-700">OK</span>
+                    : <span className="text-destructive">
+                        {item.detail}
+                        {item.actualTabs.length ? <span className="block text-xs text-muted-foreground">Onglets présents : {item.actualTabs.join(", ")}</span> : null}
+                      </span>}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </section>
+  )
+}
+
 export default async function GoogleDriveAdministrationPage({
   searchParams,
 }: {
@@ -81,6 +126,9 @@ export default async function GoogleDriveAdministrationPage({
         </p>
         <Suspense fallback={<DeferredContentLoading label="Chargement du Drive…" />}>
           <GoogleDriveData origin={origin} oauthStatus={oauthStatus} />
+        </Suspense>
+        <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
+          <SheetDiagnostics />
         </Suspense>
       </div>
     </AuthenticatedShell>

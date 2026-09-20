@@ -255,13 +255,14 @@ async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null>
         missingJdrSheetRetryAt.set(key, Date.now() + MISSING_JDR_SHEET_RETRY_MS)
         return null
       }
-      return await saveJdrSheet({
+      const linked = await saveJdrSheet({
         key,
         spreadsheetId: file.id,
         name: definition.name,
         tabName: definition.tabName,
         webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
       })
+      return linked ? await verifyJdrSheetTab(linked, definition) : linked
     } catch (error) {
       console.error("JDR_SHEET_AUTOLINK_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
       missingJdrSheetRetryAt.set(key, Date.now() + MISSING_JDR_SHEET_RETRY_MS)
@@ -2533,6 +2534,51 @@ export async function trashRedundantDriveSpreadsheet(fileId: string) {
 
 const jdrSheetHeaderChecked = new Set<JdrSheetKey>()
 
+// Le nom d'onglet enregistré est celui que la définition *attend*. Quand un
+// classeur a été relié (trouvé par son nom dans le Drive) au lieu d'avoir été
+// créé par l'app, son onglet porte encore le nom par défaut de Google
+// (« Feuille 1 »). Toutes les plages A1 étaient alors construites sur un nom
+// d'onglet inexistant : chaque lecture et chaque écriture échouaient avec une
+// erreur d'analyse de plage, y compris l'ajout d'un personnage à une campagne.
+const verifiedJdrSheetTabs = new Set<string>()
+
+async function spreadsheetTabs(spreadsheetId: string) {
+  const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(
+    `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
+  )
+  return (metadata.sheets ?? []).flatMap((item) => item.properties?.title
+    ? [{ sheetId: item.properties.sheetId, title: item.properties.title }]
+    : [])
+}
+
+function storeTabName(sheet: JdrSheetRecord, tabName: string) {
+  return saveJdrSheet({ key: sheet.key, spreadsheetId: sheet.spreadsheetId, name: sheet.name, tabName, webViewLink: sheet.webViewLink })
+}
+
+async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
+  const cacheKey = `${sheet.spreadsheetId}:${definition.key}`
+  if (verifiedJdrSheetTabs.has(cacheKey)) return sheet
+  try {
+    const tabs = await spreadsheetTabs(sheet.spreadsheetId)
+    verifiedJdrSheetTabs.add(cacheKey)
+    if (!tabs.length || tabs.some((tab) => tab.title === definition.tabName)) {
+      return sheet.tabName === definition.tabName ? sheet : (await storeTabName(sheet, definition.tabName)) ?? sheet
+    }
+    // Un seul onglet : c'est forcément celui du classeur qu'on a relié, on le
+    // renomme pour ne perdre aucune ligne. Plusieurs onglets : on en ajoute un.
+    const requests = tabs.length === 1
+      ? [{ updateSheetProperties: { properties: { sheetId: tabs[0].sheetId, title: definition.tabName }, fields: "title" } }]
+      : [{ addSheet: { properties: { title: definition.tabName, gridProperties: { rowCount: 1000, columnCount: definition.headers.length, frozenRowCount: 1, frozenColumnCount: definition.frozenColumns } } } }]
+    await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    console.error("JDR_SHEET_TAB_REPAIRED", definition.key, tabs.map((tab) => tab.title).join(" | "), "->", definition.tabName)
+    return (await storeTabName(sheet, definition.tabName)) ?? { ...sheet, tabName: definition.tabName }
+  } catch (error) {
+    console.error("JDR_SHEET_TAB_CHECK_FAILED", definition.key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return sheet
+  }
+}
+
 async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
   if (jdrSheetHeaderChecked.has(definition.key)) return
   jdrSheetHeaderChecked.add(definition.key)
@@ -2550,14 +2596,64 @@ async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: Struct
   }
 }
 
+export type JdrSheetDiagnostic = {
+  key: JdrSheetKey
+  name: string
+  expectedTab: string
+  linked: boolean
+  spreadsheetId: string
+  webViewLink: string
+  actualTabs: string[]
+  rows: number | null
+  status: "ok" | "not-linked" | "error"
+  detail: string
+}
+
+/**
+ * Teste réellement chaque feuille, une par une, et rapporte l'erreur brute de
+ * Google. Sans cela, toutes les pannes se ressemblaient à l'écran
+ * (« la connexion à Google Sheets a échoué ») quelle qu'en soit la cause.
+ */
+export async function diagnoseJdrSheets(): Promise<JdrSheetDiagnostic[]> {
+  return Promise.all(jdrSheetDefinitions.map(async (definition): Promise<JdrSheetDiagnostic> => {
+    const base = {
+      key: definition.key,
+      name: definition.name,
+      expectedTab: definition.tabName,
+      linked: false,
+      spreadsheetId: "",
+      webViewLink: "",
+      actualTabs: [] as string[],
+      rows: null as number | null,
+    }
+    const stored = await getJdrSheet(definition.key)
+    if (!stored) {
+      return { ...base, status: "not-linked", detail: "Aucun classeur relié pour cette feuille." }
+    }
+    const linked = { ...base, linked: true, spreadsheetId: stored.spreadsheetId, webViewLink: stored.webViewLink }
+    try {
+      const tabs = await spreadsheetTabs(stored.spreadsheetId)
+      const titles = tabs.map((tab) => tab.title)
+      if (!titles.includes(definition.tabName)) {
+        return { ...linked, actualTabs: titles, status: "error", detail: `L’onglet « ${definition.tabName} » est absent de ce classeur.` }
+      }
+      const rows = await readRange(stored.spreadsheetId, sheetTabRange(definition.tabName, "A:A"))
+      return { ...linked, actualTabs: titles, rows: Math.max(0, rows.length - 1), status: "ok", detail: "" }
+    } catch (error) {
+      return { ...linked, status: "error", detail: error instanceof Error ? error.message : "UNKNOWN_ERROR" }
+    }
+  }))
+}
+
 export async function ensureJdrSheet(key: JdrSheetKey) {
   if (key === "tabletop") return ensureTabletopWorkbook()
-  const existing = await getJdrSheet(key)
-  if (existing) {
+  const stored = await getJdrSheet(key)
+  if (stored) {
+    const knownDefinition = jdrSheetDefinitions.find((item) => item.key === key)
+    const existing = knownDefinition ? await verifyJdrSheetTab(stored, knownDefinition) : stored
     if (key === "inventory") await ensureInventoryWorkbookSchema(existing.spreadsheetId)
     if (key === "npcs") await ensureNpcSheetSchema(existing.spreadsheetId, existing.tabName)
-    const definition = jdrSheetDefinitions.find((item) => item.key === key)
-    if (definition) await ensureJdrSheetHeaderRow(existing, definition)
+    if (knownDefinition) await ensureJdrSheetHeaderRow(existing, knownDefinition)
     return existing
   }
   const definition = jdrSheetDefinitions.find((item) => item.key === key)
@@ -3556,28 +3652,14 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`, [copiedRow])
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
-  // La feuille partagée d'abord, l'index local ensuite. Dans l'autre ordre, un
-  // échec d'écriture Sheets affichait une erreur alors que le personnage était
-  // déjà dans l'index local : « erreur » à l'écran, personnage présent après
-  // actualisation, et invisible depuis les autres installations.
-  const relationSheet = await ensureJdrSheet("campaign_characters")
-  if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
-  const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
-  const existingRelations = await readRange(relationSheet.spreadsheetId, relationRange).catch(() => [] as string[][])
-  if (!existingRelations.some((row) => row[0] === campaignId && row[1] === targetId)) {
-    await appendRows(relationSheet.spreadsheetId, relationRange, [[campaignId, targetId]])
-  }
+  // On tente d'abord la feuille partagée, mais son échec ne doit plus bloquer
+  // l'ajout : la version précédente écrivait l'index local d'abord et
+  // affichait quand même une erreur (personnage présent après actualisation),
+  // la suivante refusait tout. Ici le lien est toujours créé, et l'app dit
+  // franchement quand il n'a pas encore pu être partagé.
+  const shared = await writeCampaignRelation(campaignId, targetId)
   await getDb().insert(campaignCharacters).values({ campaignId, characterId: targetId }).onConflictDoNothing()
-  // À partir d'ici, le lien existe des deux côtés : plus rien ne doit pouvoir
-  // le faire passer pour un échec. On renvoie au pire la fiche telle que
-  // l'index la connaît, l'enrichissement se fera au prochain chargement.
-  try {
-    const member = (await listCampaignMembers(campaignId)).find((character) => character.id === targetId)
-    if (member) return member
-  } catch (error) {
-    console.error("CAMPAIGN_MEMBER_RELOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-  }
-  return {
+  const fallbackMember = {
     id: targetId,
     ownerUid: sourceCharacter.ownerUid,
     name: sourceCharacter.name,
@@ -3589,24 +3671,56 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     level: "",
     honoraryTitle: "",
   } satisfies CampaignMemberRecord
+  let member = fallbackMember
+  try {
+    member = (await listCampaignMembers(campaignId)).find((character) => character.id === targetId) ?? fallbackMember
+  } catch (error) {
+    console.error("CAMPAIGN_MEMBER_RELOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+  }
+  return { member, sharedError: shared }
+}
+
+// Renvoie null si la ligne est bien dans la feuille partagée, sinon le code
+// d'erreur Google, que l'appelant remonte tel quel à l'administrateur.
+async function writeCampaignRelation(campaignId: string, characterId: string) {
+  try {
+    const relationSheet = await ensureJdrSheet("campaign_characters")
+    if (!relationSheet) return "CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE"
+    const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
+    const existing = await readRange(relationSheet.spreadsheetId, relationRange)
+    if (existing.some((row) => row[0] === campaignId && row[1] === characterId)) return null
+    await appendRows(relationSheet.spreadsheetId, relationRange, [[campaignId, characterId]])
+    return null
+  } catch (error) {
+    const code = error instanceof Error ? error.message : "UNKNOWN_ERROR"
+    console.error("CAMPAIGN_RELATION_WRITE_FAILED", code)
+    return code
+  }
 }
 
 export async function removeCharacterFromCampaign(mjUid: string | null, campaignId: string, characterId: string) {
   const campaign = await getCampaignDashboard(mjUid, campaignId)
   if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
   // La feuille partagée fait foi : si on ne retirait la ligne que de l'index
-  // local, la prochaine resynchronisation la réimporterait aussitôt.
-  const relationSheet = await ensureJdrSheet("campaign_characters")
-  if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
-  const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
-  const rows = await readRange(relationSheet.spreadsheetId, relationRange)
-  const cleared = rows.flatMap((row, index) => row[0] === campaignId && row[1] === characterId
-    ? [{ range: sheetTabRange(relationSheet.tabName, `A${index + 1}:B${index + 1}`), values: [["", ""]] }]
-    : [])
-  await updateRanges(relationSheet.spreadsheetId, cleared)
+  // local, la prochaine resynchronisation la réimporterait aussitôt. Le retrait
+  // local a quand même lieu si la feuille est injoignable, avec un avertissement.
+  let sharedError: string | null = null
+  try {
+    const relationSheet = await ensureJdrSheet("campaign_characters")
+    if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
+    const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
+    const rows = await readRange(relationSheet.spreadsheetId, relationRange)
+    const cleared = rows.flatMap((row, index) => row[0] === campaignId && row[1] === characterId
+      ? [{ range: sheetTabRange(relationSheet.tabName, `A${index + 1}:B${index + 1}`), values: [["", ""]] }]
+      : [])
+    await updateRanges(relationSheet.spreadsheetId, cleared)
+  } catch (error) {
+    sharedError = error instanceof Error ? error.message : "UNKNOWN_ERROR"
+    console.error("CAMPAIGN_RELATION_REMOVE_FAILED", sharedError)
+  }
   await getDb().delete(campaignCharacters)
     .where(and(eq(campaignCharacters.campaignId, campaignId), eq(campaignCharacters.characterId, characterId)))
-  return { id: characterId }
+  return { id: characterId, sharedError }
 }
 
 export async function createCharacterForUser(uid: string, values: string[]) {

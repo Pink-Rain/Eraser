@@ -6,15 +6,16 @@ import { authorizedAccount } from "@/lib/server-auth"
 
 function shopErrorMessage(error: unknown, isAdmin = false) {
   const code = error instanceof Error ? error.message : ""
+  if (!code) return ""
+  // Le message générique masquait la vraie cause (onglet absent, quota,
+  // cellule trop longue…). Un administrateur voit le code brut de Google.
+  const detail = isAdmin ? ` (${code})` : ""
   if (code === "NPC_NOT_FOUND") return "Ce PNJ n’existe pas dans cette campagne."
   if (code === "SHOPS_SHEET_UNAVAILABLE") return "La feuille Google Sheets des magasins n’est pas reliée."
   if (code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED") {
-    // Le message générique masquait la vraie cause (quota, onglet absent,
-    // cellule trop longue…). Un administrateur voit le code brut.
-    return `La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration.${isAdmin ? ` (${code})` : ""}`
+    return `La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration.${detail}`
   }
-  if (isAdmin && code && code !== "INVALID_SHOPS" && code !== "INVALID_SHOP_ACTION" && code !== "INVALID_SHOP_IMPORT") return `Les magasins n’ont pas pu être enregistrés. (${code})`
-  return ""
+  return isAdmin ? `Les magasins n’ont pas pu être enregistrés.${detail}` : ""
 }
 
 async function canUsePage(pageLinked: string) {

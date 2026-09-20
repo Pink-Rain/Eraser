@@ -1,40 +1,42 @@
-# Eraser 0.1.1-alpha.28 — personnages d'une campagne, et magasins
+# Eraser 0.1.1-alpha.29 — la vraie cause, et de quoi la voir
 
-## Ajouter un personnage à une campagne
+## Ce qui n'allait pas
 
-L'erreur « La connexion à Google Sheets a échoué » s'affichait alors que le
-personnage était bel et bien ajouté après actualisation. L'app écrivait
-d'abord dans son index local, puis dans la feuille partagée : quand la
-seconde écriture échouait, l'erreur était affichée alors que le lien
-existait déjà localement — et restait invisible depuis les autres
-installations.
+Chaque feuille Google a un nom de classeur et un nom d'onglet. Quand
+l'app **crée** un classeur, elle renomme son onglet comme prévu. Quand
+elle **relie** un classeur déjà présent dans le Drive — ce qu'elle fait
+seule depuis l'alpha.24 — elle enregistrait le nom d'onglet attendu sans
+jamais vérifier celui du classeur. Si l'onglet s'appelait encore
+« Feuille 1 », toutes les plages construites ensuite pointaient vers un
+onglet inexistant : chaque lecture et chaque écriture de cette feuille
+échouaient, toujours avec le même message illisible.
 
-L'ordre est inversé : la feuille partagée d'abord, l'index local ensuite.
-Une fois le lien écrit des deux côtés, plus rien ne peut le faire passer
-pour un échec, et le personnage apparaît immédiatement dans la liste,
-sans actualiser la page.
+C'est ce qui empêchait d'ajouter un personnage à une campagne.
 
-## Retirer un personnage d'une campagne
+## Corrigé
 
-Nouveau bouton sur chaque carte de la section « Personnages joueurs »,
-réservé au MJ et aux administrateurs, avec confirmation. La fiche et
-l'inventaire du personnage ne sont pas supprimés : il peut être rajouté
-plus tard ou rejoindre une autre campagne. La ligne est retirée de la
-feuille partagée, sinon la prochaine synchronisation la réimporterait.
+- **Vérification des onglets.** Avant de s'en servir, l'app compare
+  l'onglet attendu à ceux réellement présents. S'il manque et que le
+  classeur n'a qu'un onglet, elle le renomme, sans perdre une ligne ;
+  s'il y en a plusieurs, elle ajoute l'onglet attendu. Le nom corrigé est
+  mémorisé.
+- **Ajouter un personnage ne peut plus échouer.** Le lien est créé dans
+  tous les cas et le personnage apparaît tout de suite. Si la feuille
+  partagée n'a pas pu être écrite, un avertissement orange le dit
+  franchement — au lieu d'une erreur rouge sur une action qui avait
+  pourtant réussi à moitié.
+- **Retirer un personnage d'une campagne** suit la même règle.
 
-## « Dernier tirage sauvegardé » n'est plus un mensonge
+## Nouveau : diagnostic des feuilles
 
-Le tirage d'une campagne était bien enregistré, mais plus rien ne le
-relisait : partir de la page ou actualiser le faisait disparaître. Il est
-maintenant restauré à l'ouverture de la page, avec la taille de ville
-correspondante. Même chose dans le bac à sable.
+Administration › Google Drive et Sheets affiche maintenant, feuille par
+feuille : l'onglet attendu, le nombre de lignes lues, et en cas de
+problème **l'erreur brute renvoyée par Google** ainsi que les onglets
+réellement présents dans le classeur.
 
-## Magasins : message d'erreur exploitable
-
-Pour un administrateur, le message générique est complété par le code
-d'erreur réel de Google (quota, onglet absent, feuille non reliée…), au
-lieu de renvoyer tout le monde vers la connexion Drive quelle que soit la
-cause.
+Les messages d'erreur des magasins et des personnages donnent eux aussi
+ce code brut aux administrateurs. Un seul coup d'œil suffit désormais
+pour savoir quelle feuille est en cause et pourquoi.
 
 ## Vérifications
 

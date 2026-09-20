@@ -86,6 +86,7 @@ export function CampaignDashboard({
   const [selectedCharacterId, setSelectedCharacterId] = useState("")
   const [removeTarget, setRemoveTarget] = useState<CampaignMemberRecord | null>(null)
   const [removing, setRemoving] = useState(false)
+  const [memberWarning, setMemberWarning] = useState("")
   useEffect(() => {
     const timer = window.setTimeout(() => setSelectedCharacterId(window.localStorage.getItem(`eraser-character:${userEmail}`) || ""), 0)
     return () => window.clearTimeout(timer)
@@ -141,7 +142,8 @@ export function CampaignDashboard({
     const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters`, {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ characterId, duplicate }),
     })
-    const payload = (await response.json()) as { character?: CampaignMemberRecord; error?: string }
+    const payload = (await response.json()) as { character?: CampaignMemberRecord; warning?: string; error?: string }
+    setMemberWarning(payload.warning || "")
     if (payload.character) {
       setMembers((current) => current.some((member) => member.id === payload.character!.id)
         ? current.map((member) => member.id === payload.character!.id ? payload.character! : member)
@@ -158,8 +160,9 @@ export function CampaignDashboard({
     setAvailableError("")
     try {
       const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign.id)}/characters?characterId=${encodeURIComponent(character.id)}`, { method: "DELETE" })
-      const payload = (await response.json()) as { removed?: string; error?: string }
+      const payload = (await response.json()) as { removed?: string; warning?: string; error?: string }
       if (!response.ok || !payload.removed) throw new Error(payload.error || "Le personnage n’a pas pu être retiré.")
+      setMemberWarning(payload.warning || "")
       setMembers((current) => current.filter((member) => member.id !== character.id))
       setAvailableLoaded(false)
       setRemoveTarget(null)
@@ -259,6 +262,7 @@ export function CampaignDashboard({
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}
           </div>
           {canManage && !addingCharacter && availableError && <p className="mt-3 text-sm text-destructive">{availableError}</p>}
+          {canManage && memberWarning && <p className="mt-3 rounded-xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-900">{memberWarning}</p>}
           <AlertDialog open={Boolean(removeTarget)} onOpenChange={(open) => { if (!open && !removing) setRemoveTarget(null) }}>
             <AlertDialogContent>
               <AlertDialogHeader>
