@@ -77,6 +77,32 @@ jobs:
             fs.writeFileSync("wrangler.jsonc", JSON.stringify(config, null, 2));
           '
 
+      - name: Enregistrer un sous-domaine workers.dev si nécessaire
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          API="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/workers/subdomain"
+          CURRENT=$(curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" "$API")
+          HAS_SUBDOMAIN=$(echo "$CURRENT" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).result?.subdomain||"")}catch(e){console.log("")}})')
+          if [ -n "$HAS_SUBDOMAIN" ]; then
+            echo "Sous-domaine workers.dev déjà enregistré : $HAS_SUBDOMAIN"
+          else
+            echo "Aucun sous-domaine workers.dev, enregistrement de eraser-jdr…"
+            RESPONSE=$(curl -sS -X PUT "$API" \
+              -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+              -H "content-type: application/json" \
+              -d '{"subdomain":"eraser-jdr"}')
+            OK=$(echo "$RESPONSE" | node -e 'let d="";process.stdin.on("data",c=>d+=c);process.stdin.on("end",()=>{try{console.log(JSON.parse(d).success)}catch(e){console.log("false")}})')
+            if [ "$OK" != "true" ]; then
+              echo "$RESPONSE"
+              echo "Impossible d'enregistrer eraser-jdr.workers.dev (probablement déjà pris)." >&2
+              exit 1
+            fi
+            echo "Sous-domaine eraser-jdr.workers.dev enregistré."
+          fi
+
       - name: Déployer le Worker
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
