@@ -1,28 +1,35 @@
-# Eraser 0.1.1-alpha.23 — faux échec à l'ajout d'un personnage, erreurs plus précises
+# Eraser 0.1.1-alpha.24 — les feuilles Google se relient toutes seules
+
+## La cause des bugs « ça marche chez moi mais pas chez lui »
+
+Chaque installation d'Eraser possède sa propre base locale. Les feuilles
+Google, elles, sont partagées. Le lien entre les deux — quelle feuille
+Google correspond aux personnages, aux campagnes, aux classes — était
+enregistré **uniquement dans la base locale de l'ordinateur sur lequel un
+administrateur avait cliqué « Relier mes feuilles existantes »**.
+
+Sur une autre installation, ce lien n'existait pas. Les écritures ne s'en
+apercevaient pas (elles retrouvent la feuille dans le Drive toutes
+seules — c'est pour ça qu'un compte se mettait à voir les personnages
+juste après en avoir créé un). Mais toutes les **lectures** renvoyaient
+simplement « aucune donnée », sans erreur :
+
+- **les classes apparaissaient vides** (« aucune classe », sans message
+  d'erreur) ;
+- **les campagnes n'étaient jamais synchronisées** localement, donc
+  considérées comme introuvables — ce qui bloquait l'ajout d'un
+  personnage joueur à une campagne et faisait répondre « Accès refusé »
+  à l'enregistrement des magasins de cette campagne.
 
 ## Corrigé
 
-- **Ajouter un personnage à une campagne pouvait afficher une erreur alors
-  que l'ajout avait réellement fonctionné**, visible seulement après avoir
-  rafraîchi la page : la liste des membres de la campagne relit ensuite
-  Google Sheets pour enrichir l'affichage (classe, niveau, titre), et une
-  lecture ratée sur ce point faisait échouer toute l'opération alors que
-  le lien campagne/personnage était déjà enregistré. Cette lecture
-  d'enrichissement ne fait plus échouer l'opération si elle rate.
-
-## Diagnostic
-
-Ces écrans affichent maintenant la vraie raison technique au lieu d'un
-message générique, ce qui permettra de cerner précisément les bugs encore
-signalés (classes invisibles pour un compte, magasins qui ne
-s'enregistrent pas) :
-
-- Règles > Classe et Ressources > Index des classes affichent le code
-  d'erreur réel (visible par les administrateurs) sous le message
-  générique quand le chargement échoue.
-- Les magasins et l'ajout de personnage à une campagne distinguent
-  maintenant une vraie panne de connexion Google Sheets/Drive des autres
-  échecs.
+- Les lectures relient désormais automatiquement la feuille Google
+  existante à l'installation qui ne la connaissait pas encore. Aucune
+  feuille n'est jamais recréée : seule une feuille déjà présente dans le
+  Drive connecté est reliée.
+- Si une feuille est réellement introuvable, l'index des classes le dit
+  explicitement (avec la marche à suivre) au lieu d'afficher « aucune
+  classe ».
 
 ## Vérifications
 
