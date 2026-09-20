@@ -1,50 +1,41 @@
-# Eraser 0.1.1-alpha.18 — corrections de la barre du haut
+# Eraser 0.1.1-alpha.19 — comptes, rôles et connexion Drive partagés
 
-L'alpha.17 (bouton épingle, barre sans cadre natif) a introduit plusieurs
-régressions visuelles remontées immédiatement après coup : la barre du haut
-poussait mal le reste de l'interface, l'icône du menu se coupait une fois
-réduit, et le repli en mini-barre ne fonctionnait qu'à moitié.
+Jusqu'ici, chaque installation Windows lançait son propre serveur local avec
+sa propre base de données : le premier compte créé sur une machine devenait
+automatiquement administrateur sur cette machine, restait invisible dans la
+page « Comptes et rôles » d'une autre installation, et la connexion Google
+Drive d'un admin ne profitait à personne d'autre.
 
-## Corrigé
+## Ajouté
 
-- **la barre du haut ne casse plus le menu ni le reste de l'interface** :
-  elle poussait mal le panneau latéral et le contenu, qui se retrouvaient
-  partiellement cachés derrière elle. Le menu et la barre du haut restent
-  maintenant fixes, sans se chevaucher ;
-- **l'icône du menu latéral ne se coupe plus** quand le menu est réduit en
-  mode icônes seules : elle réduit sa propre taille pour tenir dans
-  l'espace disponible au lieu d'être rognée ;
-- **double-cliquer n'importe où sur la barre du haut réduit désormais la
-  fenêtre** (pas seulement sur l'icône) — le survol/clic sur une zone de
-  déplacement de fenêtre ne recevait pas toujours l'évènement de
-  double-clic ; il est désormais détecté de façon fiable sur toute la
-  barre ;
-- **la réduction se fait aussi en largeur, pas seulement en hauteur** :
-  la mini-barre ne garde que la place pour l'icône et le titre de
-  l'application, rien de plus ;
-- **plus de barre de défilement visible pendant la réduction** ;
-- **la barre de défilement générale de la fenêtre est maintenant assortie
-  au thème sombre** au lieu d'afficher le style clair par défaut du
-  système, cohérent avec le reste de l'interface.
+- un petit Worker Cloudflare séparé et dédié (`eraser-accounts`, voir
+  `worker-accounts/`), distinct du site Sites/Cloudflare historique, héberge
+  désormais l'annuaire partagé des comptes, des rôles et de la connexion
+  Google Drive ;
+- une fois `ERASER_ACCOUNTS_API_URL`/`ERASER_ACCOUNTS_API_KEY` configurés
+  (c'est le cas pour cette Release), toute installation Windows lit et écrit
+  comptes/rôles/connexion Drive sur ce Worker au lieu de sa base locale ;
+- un nouveau compte reste « en attente » tant qu'un·e admin ne lui attribue
+  pas de rôle, où qu'il se connecte ; seul le compte configuré via
+  `ADMIN_EMAIL` + le code d'installation devient admin automatiquement ;
+- une fois la connexion Google Drive faite par un·e admin, toutes les
+  installations la voient et peuvent l'utiliser, sans repasser par l'écran
+  de connexion Google.
 
 ## Notes techniques
 
-- la barre du haut est maintenant un survol (`position: fixed`) plutôt
-  qu'un élément normal du flux de page ; elle compense en ajustant par CSS
-  la hauteur/le remplissage réservés par le panneau latéral et le contenu
-  au lieu de dépendre d'une technique de bloc de confinement qui ne
-  fonctionnait pas de façon fiable avec le panneau latéral existant ;
-- toujours vérifié uniquement via compilation, typage, lint et démarrage
-  du serveur (pages non connectées et connectées) depuis cet environnement
-  Linux — le rendu réel de la fenêtre (chevauchements, glisser-déposer,
-  redimensionnement) nécessite un test sur la version installée.
+- sans ces deux variables (déploiement Cloudflare Sites historique), le
+  comportement local d'origine est strictement inchangé ;
+- `google_oauth_flows` (état PKCE éphémère) et `user_identity_links`
+  restent strictement locaux, comme avant ;
+- les données de jeu (personnages, campagnes, classes) restent sur Google
+  Sheets/Drive, inchangé.
 
 ## Vérifications
 
-- compilation complète de l'application réussie ;
+- compilation complète de l'application (Sites et desktop) réussie ;
 - lint sans erreur ;
-- vérification de fidélité avec la source du site réussie (aucun fichier CSS
-  historique modifié, aucune suppression) ;
-- serveur Windows autonome construit et vérifié en HTTP 200 sur
-  « /connexion » et sur une page connectée (création de compte + tableau de
-  bord) sans erreur serveur.
+- Worker de comptes testé localement (inscription, connexion, liste des
+  comptes, changement de rôle, paramètres Google OAuth) avant déploiement ;
+- Worker déployé et secrets configurés avec succès sur Cloudflare ;
+- serveur Windows autonome construit et vérifié en HTTP 200.
