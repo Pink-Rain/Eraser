@@ -17,17 +17,16 @@ import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-async function ClassesIndexData({ canSampleAccents }: { canSampleAccents: boolean }) {
+async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSampleAccents: boolean; showErrorDetail: boolean }) {
   let classes: Awaited<ReturnType<typeof listClasses>> = []
   let loadError = false
+  let loadErrorDetail = ""
   try {
     classes = await listClasses()
   } catch (error) {
     loadError = true
-    console.error(
-      "CLASS_INDEX_LOAD_FAILED",
-      error instanceof Error ? error.message : "UNKNOWN_ERROR",
-    )
+    loadErrorDetail = error instanceof Error ? error.message : "UNKNOWN_ERROR"
+    console.error("CLASS_INDEX_LOAD_FAILED", loadErrorDetail)
   }
   const imageCounts = new Map<string, number>()
   classes.forEach((characterClass) => imageCounts.set(characterClass.image, (imageCounts.get(characterClass.image) || 0) + 1))
@@ -40,6 +39,7 @@ async function ClassesIndexData({ canSampleAccents }: { canSampleAccents: boolea
       {loadError && (
         <div className="mt-10 rounded-2xl border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
           L’index Google Sheets est momentanément indisponible.
+          {showErrorDetail && loadErrorDetail && <span className="mt-1 block font-mono text-xs opacity-80">{loadErrorDetail}</span>}
         </div>
       )}
 
@@ -112,7 +112,7 @@ export default async function ClassesRulesPage() {
         </section>
 
         <Suspense fallback={<DeferredContentLoading label="Chargement des classes…" />}>
-          <ClassesIndexData canSampleAccents={account.role === "admin"} />
+          <ClassesIndexData canSampleAccents={account.role === "admin"} showErrorDetail={account.role === "admin"} />
         </Suspense>
       </div>
     </AuthenticatedShell>

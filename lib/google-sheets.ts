@@ -3347,12 +3347,25 @@ export async function listCampaignMembers(campaignId: string) {
     .orderBy(characterIndex.name)
   const characters = await decorateCharacters(rows.map((row) => row.character_index))
   if (!characters.length) return []
+  const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", level: "", honoraryTitle: "" }))
   const source = await charactersSource()
-  if (!source) return characters.map((character) => ({ ...character, people: character.subtitle, classes: "", level: "", honoraryTitle: "" }))
-  const [identityRows, titleRows] = await readRanges(source.spreadsheetId, [
-    `${source.tabName}!A:F`,
-    `${source.tabName}!AL:AL`,
-  ])
+  if (!source) return fallback()
+  // This enrichment (class/level/title columns) is best-effort: the caller
+  // already has the D1-backed member list above, which is the part that
+  // must not fail. A transient Sheets read failure here used to throw and
+  // make the whole operation look like it failed (e.g. addCharacterToCampaign
+  // reporting an error even though the character had already been added).
+  let identityRows: string[][]
+  let titleRows: string[][]
+  try {
+    [identityRows, titleRows] = await readRanges(source.spreadsheetId, [
+      `${source.tabName}!A:F`,
+      `${source.tabName}!AL:AL`,
+    ])
+  } catch (error) {
+    console.error("CAMPAIGN_MEMBERS_ENRICHMENT_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return fallback()
+  }
   const valuesById = new Map(identityRows.slice(1).flatMap((row, index) => row[0]
     ? [[row[0], { identity: row, honoraryTitle: titleRows[index + 1]?.[0] || "" }] as const]
     : []))

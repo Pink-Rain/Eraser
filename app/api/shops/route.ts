@@ -4,6 +4,14 @@ import { copySavedShopsToPage, deleteSavedShops, getCampaignDashboard, listCampa
 import type { GeneratedShop } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
+function shopErrorMessage(error: unknown) {
+  const code = error instanceof Error ? error.message : ""
+  if (code === "NPC_NOT_FOUND") return "Ce PNJ n’existe pas dans cette campagne."
+  if (code === "SHOPS_SHEET_UNAVAILABLE") return "La feuille Google Sheets des magasins n’est pas reliée."
+  if (code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED") return "La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration."
+  return ""
+}
+
 async function canUsePage(pageLinked: string) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account || !pageLinked) return null
@@ -30,8 +38,8 @@ export async function GET(request: Request) {
   try {
     const shops = await listSavedShops(pageLinked, url.searchParams.get("inCampaign") === "1")
     return NextResponse.json({ shops })
-  } catch {
-    return NextResponse.json({ error: "Les magasins sauvegardés n’ont pas pu être chargés." }, { status: 400 })
+  } catch (error) {
+    return NextResponse.json({ error: shopErrorMessage(error) || "Les magasins sauvegardés n’ont pas pu être chargés." }, { status: 400 })
   }
 }
 
@@ -73,7 +81,6 @@ export async function POST(request: Request) {
     await saveGeneratedShops(pageLinked, body.shops, options)
     return NextResponse.json({ ok: true })
   } catch (error) {
-    const code = error instanceof Error ? error.message : ""
-    return NextResponse.json({ error: code === "NPC_NOT_FOUND" ? "Ce PNJ n’existe pas dans cette campagne." : "Les magasins n’ont pas pu être enregistrés." }, { status: 400 })
+    return NextResponse.json({ error: shopErrorMessage(error) || "Les magasins n’ont pas pu être enregistrés." }, { status: 400 })
   }
 }

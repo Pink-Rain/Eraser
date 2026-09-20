@@ -32,7 +32,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
           ? "La fiche de ce personnage est introuvable dans Google Sheets."
           : code === "CHARACTERS_SHEET_UNAVAILABLE"
             ? "La feuille Google Sheets des personnages n’est pas reliée."
-            : "Le personnage n’a pas pu être ajouté."
+            : code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED"
+              ? "La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration."
+              : "Le personnage n’a pas pu être ajouté."
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }
