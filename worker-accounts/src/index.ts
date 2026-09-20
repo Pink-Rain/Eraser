@@ -333,6 +333,42 @@ async function handleSaveIdentityLink(request: Request, env: Env) {
   return json({ link: { localUserId, legacyUid, updatedAt: now } })
 }
 
+type SharedRecordRow = { scope: string; key: string; value: string; updated_at: string }
+
+function sharedRecord(row: SharedRecordRow) {
+  return { scope: row.scope, key: row.key, value: row.value, updatedAt: row.updated_at }
+}
+
+async function handleListSharedRecords(request: Request, env: Env, scope: string) {
+  await requireAccount(request, env)
+  const { results } = await env.DB.prepare("SELECT * FROM shared_records WHERE scope = ?1").bind(scope).all<SharedRecordRow>()
+  return json({ records: (results as SharedRecordRow[]).map(sharedRecord) })
+}
+
+async function handleGetSharedRecord(request: Request, env: Env, scope: string, key: string) {
+  await requireAccount(request, env)
+  const row = await env.DB.prepare("SELECT * FROM shared_records WHERE scope = ?1 AND key = ?2").bind(scope, key).first<SharedRecordRow>()
+  return json({ record: row ? sharedRecord(row) : null })
+}
+
+async function handleSaveSharedRecord(request: Request, env: Env, scope: string, key: string) {
+  await requireAccount(request, env)
+  const body = await readJson<{ value?: unknown }>(request)
+  if (typeof body.value !== "string" || body.value.length > 20_000) throw new HttpError(400, "INVALID_SHARED_VALUE")
+  const now = new Date().toISOString()
+  await env.DB.prepare(
+    `INSERT INTO shared_records (scope, key, value, updated_at) VALUES (?1, ?2, ?3, ?4)
+     ON CONFLICT(scope, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at`,
+  ).bind(scope, key, body.value, now).run()
+  return json({ record: { scope, key, value: body.value, updatedAt: now } })
+}
+
+async function handleDeleteSharedRecord(request: Request, env: Env, scope: string, key: string) {
+  await requireAccount(request, env)
+  await env.DB.prepare("DELETE FROM shared_records WHERE scope = ?1 AND key = ?2").bind(scope, key).run()
+  return json({ ok: true })
+}
+
 // ---------- Google Drive connection (shared) ----------
 
 async function oauthSettingsRow(env: Env) {
@@ -552,6 +588,18 @@ const worker = {
 
       const accessMatch = path.match(/^\/accounts\/([^/]+)\/access$/)
       if (method === "POST" && accessMatch) return await handleUpdateAccess(request, env, decodeURIComponent(accessMatch[1]))
+
+      const sharedScopeMatch = path.match(/^\/shared\/([^/]+)$/)
+      if (method === "GET" && sharedScopeMatch) return await handleListSharedRecords(request, env, decodeURIComponent(sharedScopeMatch[1]))
+
+      const sharedKeyMatch = path.match(/^\/shared\/([^/]+)\/([^/]+)$/)
+      if (sharedKeyMatch) {
+        const scope = decodeURIComponent(sharedKeyMatch[1])
+        const key = decodeURIComponent(sharedKeyMatch[2])
+        if (method === "GET") return await handleGetSharedRecord(request, env, scope, key)
+        if (method === "POST") return await handleSaveSharedRecord(request, env, scope, key)
+        if (method === "DELETE") return await handleDeleteSharedRecord(request, env, scope, key)
+      }
 
       if (method === "GET" && path === "/identity-links") return await handleListIdentityLinks(request, env)
       if (method === "POST" && path === "/identity-links") return await handleSaveIdentityLink(request, env)

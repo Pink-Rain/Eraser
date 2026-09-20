@@ -2,6 +2,7 @@ import { eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { googleAppsScriptIntegrations } from "@/db/schema"
+import { readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 import { getGoogleOAuthSettings, googleOAuthAuthorizedFetch } from "@/lib/google-oauth"
 
 const INTEGRATION_KEY = "class_images"
@@ -117,7 +118,29 @@ async function appsScriptJson<T>(path: string, init?: RequestInit) {
   return payload
 }
 
-async function getIntegration() {
+type StoredIntegration = {
+  key: string
+  spreadsheetId: string
+  scriptId: string
+  deploymentId: string | null
+  lastError: string | null
+  lastRunAt: string | null
+  updatedAt: string
+}
+
+// Le script vit dans Google, attaché à une feuille partagée : savoir qu'il
+// existe déjà n'est pas une information propre à un ordinateur. Stocké en
+// local, chaque autre installation croyait devoir en créer un second.
+async function getIntegration(): Promise<StoredIntegration | null> {
+  if (sharedStoreAvailable()) {
+    const record = await readSharedRecord("apps-script", INTEGRATION_KEY).catch(() => null)
+    if (!record) return null
+    try {
+      return JSON.parse(record.value) as StoredIntegration
+    } catch {
+      return null
+    }
+  }
   const [integration] = await getDb()
     .select()
     .from(googleAppsScriptIntegrations)
@@ -134,6 +157,19 @@ async function saveIntegration(input: {
   lastRunAt?: string | null
 }) {
   const now = new Date().toISOString()
+  if (sharedStoreAvailable()) {
+    const stored: StoredIntegration = {
+      key: INTEGRATION_KEY,
+      spreadsheetId: input.spreadsheetId,
+      scriptId: input.scriptId,
+      deploymentId: input.deploymentId ?? null,
+      lastError: input.lastError ?? null,
+      lastRunAt: input.lastRunAt ?? null,
+      updatedAt: now,
+    }
+    await writeSharedRecord("apps-script", INTEGRATION_KEY, JSON.stringify(stored))
+    return stored
+  }
   await getDb()
     .insert(googleAppsScriptIntegrations)
     .values({
@@ -230,18 +266,15 @@ async function ensureScriptIntegration(spreadsheetId: string) {
   if (!integration) throw new Error("APPS_SCRIPT_INTEGRATION_MISSING")
 
   if (!integration.deploymentId) {
-    await installScriptContent(integration.scriptId)
+    const { scriptId } = integration
+    await installScriptContent(scriptId)
     try {
-      const deploymentId = await deployScript(integration.scriptId)
-      integration = await saveIntegration({
-        spreadsheetId,
-        scriptId: integration.scriptId,
-        deploymentId,
-      })
+      const deploymentId = await deployScript(scriptId)
+      integration = await saveIntegration({ spreadsheetId, scriptId, deploymentId })
     } catch (error) {
       await saveIntegration({
         spreadsheetId,
-        scriptId: integration.scriptId,
+        scriptId,
         lastError: error instanceof Error ? error.message : "APPS_SCRIPT_DEPLOYMENT_FAILED",
       })
       throw error

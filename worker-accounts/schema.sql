@@ -64,3 +64,16 @@ CREATE TABLE IF NOT EXISTS user_identity_links (
 );
 
 CREATE INDEX IF NOT EXISTS user_identity_links_legacy_uid_idx ON user_identity_links(legacy_uid);
+
+-- Petit magasin partagé pour l'état qui décrit une ressource commune et non
+-- une machine : le lien Roll20 d'une campagne, le script Google attaché à une
+-- feuille partagée. Stockés localement, ils faisaient croire à chaque nouvelle
+-- installation que rien n'existait — et la poussaient à recréer un second lien
+-- ou un second script sur une ressource déjà partagée.
+CREATE TABLE IF NOT EXISTS shared_records (
+  scope TEXT NOT NULL,
+  key TEXT NOT NULL,
+  value TEXT NOT NULL,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  PRIMARY KEY (scope, key)
+);
