@@ -1,23 +1,4 @@
-import { cookies } from "next/headers"
-import { NextResponse } from "next/server"
-
 import { completeGoogleOAuth, takeGoogleOAuthFlow } from "@/lib/google-oauth"
-import { authorizedAccount } from "@/lib/server-auth"
-
-const STATE_COOKIE = "eraser_google_oauth_state"
-const EMAIL_COOKIE = "eraser_google_oauth_email"
-const PKCE_COOKIE = "eraser_google_oauth_pkce"
-const CALLBACK_PATH = "/api/admin/google-drive/oauth/callback"
-
-function completedResponse(request: Request, status: string) {
-  const response = NextResponse.redirect(
-    new URL(`/administration/google-drive?google=${encodeURIComponent(status)}`, request.url),
-  )
-  response.cookies.set(STATE_COOKIE, "", { path: CALLBACK_PATH, maxAge: 0 })
-  response.cookies.set(EMAIL_COOKIE, "", { path: CALLBACK_PATH, maxAge: 0 })
-  response.cookies.set(PKCE_COOKIE, "", { path: CALLBACK_PATH, maxAge: 0 })
-  return response
-}
 
 function desktopResponse(status: string) {
   const success = status === "connected"
@@ -35,59 +16,23 @@ export async function GET(request: Request) {
   const requestUrl = new URL(request.url)
   const receivedState = requestUrl.searchParams.get("state") || ""
   const desktopFlow = await takeGoogleOAuthFlow(receivedState)
-  if (desktopFlow) {
-    if (requestUrl.searchParams.get("error")) return desktopResponse("access_denied")
-    const code = requestUrl.searchParams.get("code")
-    if (!code) return desktopResponse("invalid_state")
-    try {
-      await completeGoogleOAuth({
-        code,
-        origin: requestUrl.origin,
-        codeVerifier: desktopFlow.codeVerifier,
-        expectedEmail: desktopFlow.googleEmail,
-        connectedBy: desktopFlow.connectedBy,
-      })
-      return desktopResponse("connected")
-    } catch (error) {
-      if (error instanceof Error && error.message === "ACCOUNT_MISMATCH") return desktopResponse("account_mismatch")
-      if (error instanceof Error && error.message === "MISSING_REFRESH_TOKEN") return desktopResponse("missing_refresh_token")
-      return desktopResponse("failed")
-    }
-  }
-
-  const admin = await authorizedAccount(["admin"])
-  if (!admin) return NextResponse.redirect(new URL("/", request.url))
-  if (requestUrl.searchParams.get("error")) return completedResponse(request, "access_denied")
-
-  const cookieStore = await cookies()
-  const cookieState = requestUrl.searchParams.get("state")
-  const expectedState = cookieStore.get(STATE_COOKIE)?.value
-  const expectedEmail = cookieStore.get(EMAIL_COOKIE)?.value?.trim().toLowerCase()
-  const codeVerifier = cookieStore.get(PKCE_COOKIE)?.value
+  if (!desktopFlow) return desktopResponse("invalid_state")
+  if (requestUrl.searchParams.get("error")) return desktopResponse("access_denied")
   const code = requestUrl.searchParams.get("code")
-  if (
-    !cookieState ||
-    !expectedState ||
-    cookieState !== expectedState ||
-    !code ||
-    !expectedEmail ||
-    !codeVerifier
-  ) {
-    return completedResponse(request, "invalid_state")
-  }
+  if (!code) return desktopResponse("invalid_state")
 
   try {
     await completeGoogleOAuth({
       code,
       origin: requestUrl.origin,
-      codeVerifier,
-      expectedEmail,
-      connectedBy: admin.uid,
+      codeVerifier: desktopFlow.codeVerifier,
+      expectedEmail: desktopFlow.googleEmail,
+      connectedBy: desktopFlow.connectedBy,
     })
-    return completedResponse(request, "connected")
+    return desktopResponse("connected")
   } catch (error) {
-    if (error instanceof Error && error.message === "ACCOUNT_MISMATCH") return completedResponse(request, "account_mismatch")
-    if (error instanceof Error && error.message === "MISSING_REFRESH_TOKEN") return completedResponse(request, "missing_refresh_token")
-    return completedResponse(request, "failed")
+    if (error instanceof Error && error.message === "ACCOUNT_MISMATCH") return desktopResponse("account_mismatch")
+    if (error instanceof Error && error.message === "MISSING_REFRESH_TOKEN") return desktopResponse("missing_refresh_token")
+    return desktopResponse("failed")
   }
 }

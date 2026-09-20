@@ -1,51 +1,71 @@
 # Eraser
 
-Eraser est une application de gestion de jeu de rôle : personnages, campagnes,
-classes, inventaires, PNJ, magasins, tabletop partagé et pont Roll20.
+Eraser est une application Windows de gestion de jeu de rôle : personnages,
+campagnes, classes, inventaires, PNJ, magasins, tabletop partagé et pont
+Roll20.
 
-Ce dépôt public est désormais la source principale du projet. Il contient le
-code complet récupéré depuis l’ancienne version Sites. La migration vers une
-application Windows autonome est en cours : l’objectif final est que les MJ et
-les joueur·euses téléchargent uniquement `Eraser-Setup.exe` depuis les Releases
-GitHub, sans installer d’outil de développement.
+Les MJ et les joueur·euses installent `Eraser-Setup.exe` depuis les Releases
+GitHub. L’application embarque Electron et un serveur Node/Vinext local servi
+sur `http://127.0.0.1:32147` ; aucune installation de Node.js, Git, Rust ou
+outil de développement n’est requise.
 
-Après la première installation, Eraser vérifie les Releases GitHub au démarrage
-et toutes les six heures. Une nouvelle version est téléchargée en arrière-plan,
-puis installée au redémarrage ou à la fermeture de l’application.
+## Architecture
 
-## État actuel
+- Electron démarre et supervise le serveur local, la fenêtre et les mises à
+  jour automatiques.
+- SQLite conserve les données techniques locales, les caches et certains
+  pointeurs nécessaires au serveur embarqué.
+- Le Worker Cloudflare `eraser-accounts`, dans `worker-accounts/`, partage les
+  comptes, sessions, rôles, réglages OAuth Google, liens d’identité et certains
+  états communs entre installations.
+- Google Sheets reste la source principale des données JDR.
+- Google Drive reste la source principale des médias partagés ; le stockage
+  local sert de cache et de repli.
+- Trystero assure le temps réel du tabletop.
+- Le compagnon et le Mod Roll20 communiquent avec le serveur local pendant
+  qu’Eraser est ouvert.
 
-Le code présent dans `app/`, `components/`, `lib/`, `db/` et `worker/` est la
-source complète de la version actuellement publiée sur Sites. Cette version
-utilise encore des services propres à l’hébergement d’origine :
+Le détail des responsabilités et des flux se trouve dans
+[ARCHITECTURE.md](ARCHITECTURE.md).
 
-- Cloudflare D1 pour les comptes, sessions et index internes ;
-- Cloudflare R2 pour certains portraits, cartes et bannières ;
-- un Worker pour les routes serveur ;
-- Google Drive et Google Sheets pour les données JDR partagées ;
-- Trystero pour le temps réel du tabletop ;
-- l’extension et le mod présents dans `integrations/roll20/` pour Roll20.
+## Développement
 
-Ces dépendances sont inventoriées dans [MIGRATION.md](MIGRATION.md). Ne supprimez
-pas l’ancienne version Sites tant que toutes les données n’ont pas été exportées,
-migrées et vérifiées dans l’application Windows.
+Prérequis : Node.js 22.13 ou plus récent.
 
-## Règles importantes pour les IA et contributeur·ices
+```bash
+npm ci
+npm run dev
+```
 
-- GitHub est la source principale : toute modification durable doit être faite
-  dans ce dépôt.
-- Ne jamais ajouter de mot de passe, jeton Google, clé privée ou secret dans le
-  dépôt.
-- Préserver le fonctionnement existant pendant la migration.
-- Google Sheets reste la source partagée des données de jeu tant que la
-  migration n’indique pas explicitement le contraire.
-- Ne pas réactiver une application qui se contente d’ouvrir l’URL du site :
-  l’application finale doit embarquer son interface et son fonctionnement.
-- Une Release n’est publiable qu’après vérification de l’installation Windows
-  et des fonctions critiques.
+Vérifications principales :
 
-## Développement historique
+```bash
+npm run lint
+npm run build
+npm run test:ci
+npm run desktop:build
+npm run desktop:verify
+```
 
-La version Sites est une application Next/Vinext construite pour Cloudflare
-Workers. Les commandes et dépendances historiques restent dans `package.json`
-pendant la migration afin que le projet existant demeure reproductible.
+Le packaging Windows complet s’exécute avec `npm run desktop:dist` sur Windows
+ou dans le workflow `.github/workflows/windows-release.yml`.
+
+## Distribution et mises à jour
+
+Le workflow Windows construit l’installateur NSIS, l’installe sur une machine
+de test, vérifie le lancement et publie les métadonnées `latest.yml` et
+`.blockmap` utilisées par `electron-updater`.
+
+Après installation, Eraser cherche une nouvelle Release au démarrage puis
+toutes les six heures. Le téléchargement se fait en arrière-plan et la mise à
+jour s’installe au redémarrage ou à la fermeture de l’application.
+
+## Sécurité des données
+
+- Ne jamais ajouter de mot de passe, jeton OAuth, clé privée, secret ou export
+  de données utilisateur dans le dépôt.
+- Ne jamais recréer une feuille Google lorsqu’une feuille Eraser du même nom
+  existe déjà dans le Drive connecté.
+- Ne jamais supprimer une migration SQL : les installations existantes les
+  appliquent directement.
+- Tester les migrations de données sur une copie et prévoir un retour arrière.

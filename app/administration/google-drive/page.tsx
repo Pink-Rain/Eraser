@@ -116,8 +116,8 @@ export default async function GoogleDriveAdministrationPage({
 
   const headerStore = await headers()
   const host = headerStore.get("x-forwarded-host") || headerStore.get("host")
-  const protocol = headerStore.get("x-forwarded-proto") || "https"
-  const origin = host ? `${protocol}://${host}` : "https://eraser-jdr.eliot-myr-0.chatgpt.site"
+  const protocol = headerStore.get("x-forwarded-proto") || "http"
+  const origin = host ? `${protocol}://${host}` : "http://127.0.0.1:32147"
   const query = await searchParams
   const oauthStatus = query.google
   const writeTest = query.test === "ecriture"

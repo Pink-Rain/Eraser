@@ -2,8 +2,9 @@
 
 Petit Worker Cloudflare séparé qui héberge l'annuaire partagé des comptes,
 des rôles et de la connexion Google Drive pour toutes les installations
-Windows d'Eraser. Voir la section « Correctif » dans
-[`../MIGRATION.md`](../MIGRATION.md) pour le contexte complet.
+Windows d'Eraser. Il conserve aussi les liens d’identité partagés et le petit
+magasin `shared_records`. Voir
+[`../ARCHITECTURE.md`](../ARCHITECTURE.md) pour le contexte complet.
 
 Ce Worker est totalement indépendant du site Sites/Cloudflare historique
 (nom de déploiement différent, base D1 différente). Ne jamais le confondre
@@ -36,6 +37,15 @@ idempotent (réutilise la base D1 existante si elle existe déjà).
 
 ## Schéma
 
-Voir `schema.sql`. Sous-ensemble des tables `db/schema.ts` du dépôt principal
-directement lié aux comptes : `users`, `sessions`,
-`google_drive_authorizations`, `google_oauth_settings`.
+Voir `schema.sql`. Le Worker conserve :
+
+- `users` ;
+- `sessions` ;
+- `google_drive_authorizations` ;
+- `google_oauth_settings` ;
+- `user_identity_links` ;
+- `shared_records`.
+
+`shared_records` est réservé aux petits états communs qui décrivent une
+ressource partagée. Les données JDR volumineuses restent dans Google
+Sheets/Drive.

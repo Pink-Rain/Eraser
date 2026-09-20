@@ -23,14 +23,13 @@ local de fichiers. Retrait d'un personnage d'une campagne.
 
 ## État de la suite de tests
 
-Deux tests échouaient déjà avant cette session : `renders development
-preview metadata` et `Roll20 bridge creates and updates one Eraser NPC`.
-Vérifié en recompilant la version d'avant et en relançant la suite
-dessus : mêmes deux échecs. Ils ne viennent pas des changements récents
-et ne sont pas corrigés ici.
+Le test `Roll20 bridge creates and updates one Eraser NPC` échouait déjà avant
+le nettoyage et reste suivi séparément. L’ancien test de metadata de preview a
+été supprimé avec l’environnement Sites qu’il était seul à couvrir.
 
 ## Vérifications
 
 - `npm run build` réussi ;
 - lint sans erreur ;
-- `npm run desktop:parity` : 0 fichier manquant, 0 style modifié.
+- `npm run test:ci` réussi ;
+- `npm run desktop:build` et `npm run desktop:verify` réussis.
