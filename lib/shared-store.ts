@@ -15,15 +15,15 @@ export function sharedStoreAvailable() {
   return Boolean(remoteAccountsConfig(env))
 }
 
-async function call(path: string, init: { method: "GET" | "POST" | "DELETE"; body?: unknown }) {
+async function call(path: string, init: { method: "GET" | "POST"; body?: unknown }) {
   const config = remoteAccountsConfig(env)
   if (!config) return null
   const token = await currentAuthToken().catch(() => undefined)
   return remoteAccountsFetch(config, path, { ...init, token })
 }
 
-function scopePath(scope: string, key?: string) {
-  return key ? `/shared/${encodeURIComponent(scope)}/${encodeURIComponent(key)}` : `/shared/${encodeURIComponent(scope)}`
+function scopePath(scope: string, key: string) {
+  return `/shared/${encodeURIComponent(scope)}/${encodeURIComponent(key)}`
 }
 
 export async function readSharedRecord(scope: string, key: string) {
@@ -31,15 +31,7 @@ export async function readSharedRecord(scope: string, key: string) {
   return (response as { record: SharedRecord | null } | null)?.record ?? null
 }
 
-export async function listSharedRecords(scope: string) {
-  const response = await call(scopePath(scope), { method: "GET" })
-  return (response as { records: SharedRecord[] } | null)?.records ?? []
-}
-
 export async function writeSharedRecord(scope: string, key: string, value: string) {
   await call(scopePath(scope, key), { method: "POST", body: { value } })
 }
 
-export async function deleteSharedRecord(scope: string, key: string) {
-  await call(scopePath(scope, key), { method: "DELETE" })
-}

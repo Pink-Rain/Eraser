@@ -1,33 +1,33 @@
-# Eraser 0.1.1-alpha.30 — les magasins
+# Eraser 0.1.1-alpha.31 — revue point par point
 
-## L'app ne peut plus annoncer un enregistrement qu'elle n'a pas vérifié
+Version de vérification : chaque demande faite depuis le début de cette
+session a été recontrôlée dans le code, et non de mémoire.
 
-Jusqu'ici, enregistrer un magasin voulait dire : envoyer les lignes à
-Google, et si Google ne renvoie pas d'erreur, afficher « Magasin(s)
-sauvegardé(s) ». Une écriture acceptée mais sans effet — dans un onglet
-que l'app ne relit pas, hors de la grille — était donc indiscernable d'un
-vrai succès. C'est exactement ce qui se passait : message vert, aucun
-magasin dans la liste.
+## Corrigé dans cette version
 
-Maintenant, après chaque écriture, l'app relit la feuille et vérifie que
-les magasins y sont. S'ils n'y sont pas, elle le dit clairement au lieu
-de féliciter dans le vide. Cela vaut pour le tirage, la sauvegarde d'un
-magasin et l'ajout à la campagne.
+- **Ressources › Index des classes** donnait un message générique quand la
+  feuille « Classes » n'était pas reliée, alors que Règles › Classes
+  expliquait quoi faire. Les deux pages disent maintenant la même chose.
+- **Nettoyage** : deux fonctions du magasin partagé n'étaient appelées
+  nulle part, elles sont supprimées.
 
-## Test d'écriture dans le diagnostic
+## Vérifié, présent dans le code
 
-Administration › Google Drive et Sheets a un lien « Tester aussi
-l'écriture ». Pour chaque feuille, l'app y ajoute une ligne témoin, la
-relit, puis l'efface — et rapporte lequel des trois a échoué, avec
-l'erreur brute de Google. C'est ce qui permet de distinguer « Google
-refuse » de « Google accepte mais la ligne n'arrive pas où l'app
-regarde ».
+Mini-barre disponible sans épingler au préalable et épinglage
+automatique. Chat de table sur toutes les pages avec `/rjoueur`. Pages
+d'administration des campagnes et des personnages. Redirection après
+création. Réattribution d'un personnage ou d'une campagne. Suppression
+d'un compte, et plus aucune trace de changement de mot de passe. Visuels
+et liens d'identité sur le partagé, plus aucun accès direct au stockage
+local de fichiers. Retrait d'un personnage d'une campagne.
 
-## Ordre d'authentification
+## État de la suite de tests
 
-La route d'enregistrement des magasins était la seule route d'écriture de
-l'application à lire le corps de la requête avant de résoudre le compte.
-Elle suit maintenant l'ordre de toutes les autres.
+Deux tests échouaient déjà avant cette session : `renders development
+preview metadata` et `Roll20 bridge creates and updates one Eraser NPC`.
+Vérifié en recompilant la version d'avant et en relançant la suite
+dessus : mêmes deux échecs. Ils ne viennent pas des changements récents
+et ne sont pas corrigés ici.
 
 ## Vérifications
 

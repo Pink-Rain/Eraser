@@ -17,9 +17,12 @@ async function ClassIndexData({ showErrorDetail }: { showErrorDetail: boolean })
   } catch (error) {
     const detail = error instanceof Error ? error.message : "UNKNOWN_ERROR"
     console.error("CLASS_INDEX_MANAGER_LOAD_FAILED", detail)
-    loadError = showErrorDetail
-      ? `Les tableaux « Sorts de classe » n’ont pas pu être chargés. (${detail})`
+    // Même diagnostic que la page Règles › Classes : une feuille non reliée
+    // n'est pas une panne, elle se répare en un clic depuis l'administration.
+    const base = detail === "CLASSES_SHEET_NOT_LINKED"
+      ? "La feuille « Classes » n’est pas reliée à cette installation d’Eraser. Un administrateur doit ouvrir Administration → Google Drive et cliquer sur « Relier mes feuilles existantes »."
       : "Les tableaux « Sorts de classe » n’ont pas pu être chargés."
+    loadError = showErrorDetail ? `${base} (${detail})` : base
   }
   return <ClassIndexManager initialData={data ?? { classes: [], spells: [], similarities: [], headers: [], file: null }} initialError={loadError} />
 }
