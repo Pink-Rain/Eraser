@@ -54,8 +54,8 @@ async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthS
   )
 }
 
-async function SheetDiagnostics() {
-  const diagnostics = await diagnoseJdrSheets().catch(() => null)
+async function SheetDiagnostics({ writeTest }: { writeTest: boolean }) {
+  const diagnostics = await diagnoseJdrSheets(writeTest).catch(() => null)
   if (!diagnostics) return null
   const broken = diagnostics.filter((item) => item.status !== "ok")
   return (
@@ -64,7 +64,15 @@ async function SheetDiagnostics() {
       <p className="mt-1 text-sm text-muted-foreground">
         {broken.length
           ? `${broken.length} feuille${broken.length > 1 ? "s" : ""} en défaut. L’erreur brute de Google est indiquée telle quelle.`
-          : "Toutes les feuilles répondent correctement."}
+          : writeTest
+            ? "Toutes les feuilles se lisent et s’écrivent correctement."
+            : "Toutes les feuilles se lisent correctement."}
+      </p>
+      <p className="mt-3 text-sm">
+        <a href={writeTest ? "/administration/google-drive" : "/administration/google-drive?test=ecriture"} className="font-medium underline underline-offset-2">
+          {writeTest ? "Revenir au test de lecture seule" : "Tester aussi l’écriture"}
+        </a>
+        <span className="ml-2 text-muted-foreground">Le test d’écriture ajoute une ligne témoin dans chaque feuille puis l’efface.</span>
       </p>
       <div className="mt-4 overflow-x-auto">
         <table className="w-full min-w-[42rem] text-sm">
@@ -101,7 +109,7 @@ async function SheetDiagnostics() {
 export default async function GoogleDriveAdministrationPage({
   searchParams,
 }: {
-  searchParams: Promise<{ google?: string }>
+  searchParams: Promise<{ google?: string; test?: string }>
 }) {
   const admin = await authorizedAccount(["admin"])
   if (!admin) redirect("/")
@@ -110,7 +118,9 @@ export default async function GoogleDriveAdministrationPage({
   const host = headerStore.get("x-forwarded-host") || headerStore.get("host")
   const protocol = headerStore.get("x-forwarded-proto") || "https"
   const origin = host ? `${protocol}://${host}` : "https://eraser-jdr.eliot-myr-0.chatgpt.site"
-  const oauthStatus = (await searchParams).google
+  const query = await searchParams
+  const oauthStatus = query.google
+  const writeTest = query.test === "ecriture"
   return (
     <AuthenticatedShell pageLabel="Google Drive et Sheets" roles={["admin"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
@@ -127,8 +137,8 @@ export default async function GoogleDriveAdministrationPage({
         <Suspense fallback={<DeferredContentLoading label="Chargement du Drive…" />}>
           <GoogleDriveData origin={origin} oauthStatus={oauthStatus} />
         </Suspense>
-        <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
-          <SheetDiagnostics />
+        <Suspense key={writeTest ? "write" : "read"} fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
+          <SheetDiagnostics writeTest={writeTest} />
         </Suspense>
       </div>
     </AuthenticatedShell>

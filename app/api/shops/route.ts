@@ -12,6 +12,9 @@ function shopErrorMessage(error: unknown, isAdmin = false) {
   const detail = isAdmin ? ` (${code})` : ""
   if (code === "NPC_NOT_FOUND") return "Ce PNJ n’existe pas dans cette campagne."
   if (code === "SHOPS_SHEET_UNAVAILABLE") return "La feuille Google Sheets des magasins n’est pas reliée."
+  if (code.startsWith("SHOPS_WRITE_NOT_PERSISTED")) {
+    return `Google a accepté l’enregistrement mais les magasins ne sont pas dans la feuille après relecture. Ouvre Administration › Google Drive et Sheets pour voir l’état de la feuille « Magasins ».${detail}`
+  }
   if (code.startsWith("SHEETS_API_ERROR") || code === "GOOGLE_DRIVE_NOT_AUTHORIZED") {
     return `La connexion à Google Sheets a échoué. Vérifie la connexion Google Drive dans Administration.${detail}`
   }
@@ -51,13 +54,16 @@ export async function GET(request: Request) {
 }
 
 export async function POST(request: Request) {
-  let isAdmin = false
+  // Le compte est résolu avant de lire le corps de la requête : c'est l'ordre
+  // suivi par toutes les autres routes qui écrivent, et les cookies de session
+  // se lisent de manière fiable au tout début de la requête.
+  const viewer = await authorizedAccount(["admin", "mj"])
+  if (!viewer) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const isAdmin = viewer.role === "admin"
   try {
     const body = (await request.json()) as { action?: string; pageLinked?: string; sourcePageLinked?: string; shopIds?: unknown; shops?: unknown; npcId?: string }
     const pageLinked = body.pageLinked || ""
-    const account = await canUsePage(pageLinked)
-    if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-    isAdmin = account.role === "admin"
+    if (!await canUsePage(pageLinked)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
     if (body.action === "import") {
       const sourcePageLinked = body.sourcePageLinked || ""
       if (!await canUsePage(sourcePageLinked)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
@@ -88,8 +94,8 @@ export async function POST(request: Request) {
             ? {}
             : null
     if (!options) throw new Error("INVALID_SHOP_ACTION")
-    await saveGeneratedShops(pageLinked, body.shops, options)
-    return NextResponse.json({ ok: true })
+    const saved = await saveGeneratedShops(pageLinked, body.shops, options)
+    return NextResponse.json({ ok: true, shops: saved })
   } catch (error) {
     return NextResponse.json({ error: shopErrorMessage(error, isAdmin) || "Les magasins n’ont pas pu être enregistrés." }, { status: 400 })
   }

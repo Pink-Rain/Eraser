@@ -2614,7 +2614,34 @@ export type JdrSheetDiagnostic = {
  * Google. Sans cela, toutes les pannes se ressemblaient à l'écran
  * (« la connexion à Google Sheets a échoué ») quelle qu'en soit la cause.
  */
-export async function diagnoseJdrSheets(): Promise<JdrSheetDiagnostic[]> {
+/**
+ * Écrit une ligne témoin, la relit, puis l'efface. C'est le seul moyen de
+ * distinguer « Google refuse l'écriture » de « Google accepte l'écriture mais
+ * la ligne n'arrive pas là où l'app la relit » — les deux se présentaient à
+ * l'écran comme un simple échec d'enregistrement.
+ */
+async function testJdrSheetWrite(spreadsheetId: string, definition: StructuredSheetDefinition) {
+  const marker = `diagnostic:${crypto.randomUUID()}`
+  const lastColumn = columnName(definition.headers.length)
+  const range = sheetTabRange(definition.tabName, `A:${lastColumn}`)
+  try {
+    const probe = [marker, ...Array(Math.max(0, definition.headers.length - 1)).fill("")]
+    await appendRows(spreadsheetId, range, [probe])
+    clearSpreadsheetReadCache(spreadsheetId)
+    const rows = await readRange(spreadsheetId, sheetTabRange(definition.tabName, "A:A"))
+    const rowNumber = rows.findIndex((row) => row[0] === marker) + 1
+    if (!rowNumber) return "\u00c9criture accept\u00e9e par Google, mais la ligne t\u00e9moin est introuvable \u00e0 la relecture."
+    await updateRanges(spreadsheetId, [{
+      range: sheetTabRange(definition.tabName, `A${rowNumber}:${lastColumn}${rowNumber}`),
+      values: [Array(definition.headers.length).fill("")],
+    }])
+    return ""
+  } catch (error) {
+    return error instanceof Error ? error.message : "UNKNOWN_ERROR"
+  }
+}
+
+export async function diagnoseJdrSheets(withWriteTest = false): Promise<JdrSheetDiagnostic[]> {
   return Promise.all(jdrSheetDefinitions.map(async (definition): Promise<JdrSheetDiagnostic> => {
     const base = {
       key: definition.key,
@@ -2638,7 +2665,12 @@ export async function diagnoseJdrSheets(): Promise<JdrSheetDiagnostic[]> {
         return { ...linked, actualTabs: titles, status: "error", detail: `L’onglet « ${definition.tabName} » est absent de ce classeur.` }
       }
       const rows = await readRange(stored.spreadsheetId, sheetTabRange(definition.tabName, "A:A"))
-      return { ...linked, actualTabs: titles, rows: Math.max(0, rows.length - 1), status: "ok", detail: "" }
+      const readOnly = { ...linked, actualTabs: titles, rows: Math.max(0, rows.length - 1) }
+      if (!withWriteTest) return { ...readOnly, status: "ok", detail: "" }
+      const write = await testJdrSheetWrite(stored.spreadsheetId, definition)
+      return write
+        ? { ...readOnly, status: "error", detail: write }
+        : { ...readOnly, status: "ok", detail: "Lecture et \u00e9criture OK." }
     } catch (error) {
       return { ...linked, status: "error", detail: error instanceof Error ? error.message : "UNKNOWN_ERROR" }
     }
@@ -2765,6 +2797,23 @@ export async function listLatestShops(pageLinked: string): Promise<GeneratedShop
 }
 
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
+  await writeShopRows(pageLinked, shops, options)
+  // On relit la feuille pour vérifier que les lignes y sont vraiment. Sans ce
+  // contrôle, une écriture acceptée par Google mais sans effet (mauvais onglet,
+  // plage hors grille…) affichait « Magasin(s) sauvegardé(s) » alors que rien
+  // n'était enregistré : impossible à distinguer d'un succès côté utilisateur.
+  if (!shops.length) return []
+  const sheet = await ensureJdrSheet("shops")
+  if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
+  clearSpreadsheetReadCache(sheet.spreadsheetId)
+  const written = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)
+  const storedIds = new Set(written.flatMap((row) => row[0] ? [row[0]] : []))
+  const missing = shops.filter((shop) => !storedIds.has(shop.id))
+  if (missing.length) throw new Error(`SHOPS_WRITE_NOT_PERSISTED:${missing.length}/${shops.length}:${sheet.tabName}`)
+  return written.map(savedShopFromRow).flatMap((shop) => shop && shops.some((item) => item.id === shop.id) ? [shop] : [])
+}
+
+async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
   const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)

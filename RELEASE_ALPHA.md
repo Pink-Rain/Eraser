@@ -1,42 +1,33 @@
-# Eraser 0.1.1-alpha.29 — la vraie cause, et de quoi la voir
+# Eraser 0.1.1-alpha.30 — les magasins
 
-## Ce qui n'allait pas
+## L'app ne peut plus annoncer un enregistrement qu'elle n'a pas vérifié
 
-Chaque feuille Google a un nom de classeur et un nom d'onglet. Quand
-l'app **crée** un classeur, elle renomme son onglet comme prévu. Quand
-elle **relie** un classeur déjà présent dans le Drive — ce qu'elle fait
-seule depuis l'alpha.24 — elle enregistrait le nom d'onglet attendu sans
-jamais vérifier celui du classeur. Si l'onglet s'appelait encore
-« Feuille 1 », toutes les plages construites ensuite pointaient vers un
-onglet inexistant : chaque lecture et chaque écriture de cette feuille
-échouaient, toujours avec le même message illisible.
+Jusqu'ici, enregistrer un magasin voulait dire : envoyer les lignes à
+Google, et si Google ne renvoie pas d'erreur, afficher « Magasin(s)
+sauvegardé(s) ». Une écriture acceptée mais sans effet — dans un onglet
+que l'app ne relit pas, hors de la grille — était donc indiscernable d'un
+vrai succès. C'est exactement ce qui se passait : message vert, aucun
+magasin dans la liste.
 
-C'est ce qui empêchait d'ajouter un personnage à une campagne.
+Maintenant, après chaque écriture, l'app relit la feuille et vérifie que
+les magasins y sont. S'ils n'y sont pas, elle le dit clairement au lieu
+de féliciter dans le vide. Cela vaut pour le tirage, la sauvegarde d'un
+magasin et l'ajout à la campagne.
 
-## Corrigé
+## Test d'écriture dans le diagnostic
 
-- **Vérification des onglets.** Avant de s'en servir, l'app compare
-  l'onglet attendu à ceux réellement présents. S'il manque et que le
-  classeur n'a qu'un onglet, elle le renomme, sans perdre une ligne ;
-  s'il y en a plusieurs, elle ajoute l'onglet attendu. Le nom corrigé est
-  mémorisé.
-- **Ajouter un personnage ne peut plus échouer.** Le lien est créé dans
-  tous les cas et le personnage apparaît tout de suite. Si la feuille
-  partagée n'a pas pu être écrite, un avertissement orange le dit
-  franchement — au lieu d'une erreur rouge sur une action qui avait
-  pourtant réussi à moitié.
-- **Retirer un personnage d'une campagne** suit la même règle.
+Administration › Google Drive et Sheets a un lien « Tester aussi
+l'écriture ». Pour chaque feuille, l'app y ajoute une ligne témoin, la
+relit, puis l'efface — et rapporte lequel des trois a échoué, avec
+l'erreur brute de Google. C'est ce qui permet de distinguer « Google
+refuse » de « Google accepte mais la ligne n'arrive pas où l'app
+regarde ».
 
-## Nouveau : diagnostic des feuilles
+## Ordre d'authentification
 
-Administration › Google Drive et Sheets affiche maintenant, feuille par
-feuille : l'onglet attendu, le nombre de lignes lues, et en cas de
-problème **l'erreur brute renvoyée par Google** ainsi que les onglets
-réellement présents dans le classeur.
-
-Les messages d'erreur des magasins et des personnages donnent eux aussi
-ce code brut aux administrateurs. Un seul coup d'œil suffit désormais
-pour savoir quelle feuille est en cause et pourquoi.
+La route d'enregistrement des magasins était la seule route d'écriture de
+l'application à lire le corps de la requête avant de résoudre le compte.
+Elle suit maintenant l'ordre de toutes les autres.
 
 ## Vérifications
 
