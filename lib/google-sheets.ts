@@ -272,6 +272,27 @@ async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null>
   return resolution
 }
 
+// Same family of problem as resolveJdrSheet above, one level up: the
+// character/campaign indexes are a per-installation cache of the shared
+// sheets. An installation that has never synced them answers "introuvable"
+// for content everyone else can see, so the lookups that gate access retry
+// once behind this instead of trusting an empty cache. Deduplicated and
+// rate-limited so a genuinely missing id doesn't re-read Sheets every time.
+let identityIndexSyncPromise: Promise<unknown> | null = null
+let identityIndexSyncedAt = 0
+const IDENTITY_INDEX_SYNC_TTL_MS = 60_000
+
+async function ensureIdentityIndexes() {
+  if (Date.now() - identityIndexSyncedAt < IDENTITY_INDEX_SYNC_TTL_MS) return
+  if (!identityIndexSyncPromise) {
+    identityIndexSyncPromise = syncExistingIdentityIndexes()
+      .then(() => { identityIndexSyncedAt = Date.now() })
+      .catch((error) => console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+      .finally(() => { identityIndexSyncPromise = null })
+  }
+  await identityIndexSyncPromise
+}
+
 async function charactersSource() {
   const runtime = runtimeEnv()
   const spreadsheetId = runtime.GOOGLE_CHARACTERS_SHEET_ID
@@ -1050,7 +1071,13 @@ export async function getCharacterForUser(uid: string, id: string) {
 }
 
 async function getCharacterByIdUncached(id: string) {
-  const [character] = await getDb().select().from(characterIndex).where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
+  const read = async () => (await getDb().select().from(characterIndex)
+    .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1))[0]
+  let character = await read()
+  if (!character) {
+    await ensureIdentityIndexes()
+    character = await read()
+  }
   if (!character) return null
   return (await decorateCharacters([character]))[0] ?? null
 }
@@ -1117,10 +1144,15 @@ export async function getCampaignForPlayer(uid: string, id: string) {
 
 async function getCharacterForMjUncached(uid: string, id: string) {
   const identityUids = await identityUidsForUser(uid)
-  const [row] = await getDb().select({ character: characterIndex }).from(characterIndex)
+  const read = async () => (await getDb().select({ character: characterIndex }).from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id))
-    .where(and(eq(characterIndex.id, id), inArray(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1)
+    .where(and(eq(characterIndex.id, id), inArray(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1))[0]
+  let row = await read()
+  if (!row) {
+    await ensureIdentityIndexes()
+    row = await read()
+  }
   if (!row) return null
   return (await decorateCharacters([row.character]))[0] ?? null
 }
@@ -3264,10 +3296,13 @@ export async function deleteCharacterRelation(characterId: string, relationId: s
 }
 
 async function getCampaignDashboardUncached(mjUid: string | null, id: string) {
-  const campaign = mjUid
-    ? await getCampaignForMj(mjUid, id)
-    : (await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt }).from(campaignIndex).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1))[0] ?? null
-  return campaign
+  if (mjUid) return getCampaignForMj(mjUid, id)
+  const read = async () => (await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
+    .from(campaignIndex).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1))[0] ?? null
+  const campaign = await read()
+  if (campaign) return campaign
+  await ensureIdentityIndexes()
+  return read()
 }
 
 export const getCampaignDashboard = cache(getCampaignDashboardUncached)
@@ -3391,10 +3426,15 @@ export async function updateCampaignForMj(mjUid: string | null, id: string, patc
 }
 
 export async function listCampaignMembers(campaignId: string) {
-  const rows = await getDb().select().from(characterIndex)
+  const read = () => getDb().select().from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .where(and(eq(campaignCharacters.campaignId, campaignId), isNull(characterIndex.deletedAt)))
     .orderBy(characterIndex.name)
+  let rows = await read()
+  if (!rows.length) {
+    await ensureIdentityIndexes()
+    rows = await read()
+  }
   const characters = await decorateCharacters(rows.map((row) => row.character_index))
   if (!characters.length) return []
   const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", level: "", honoraryTitle: "" }))
@@ -3455,14 +3495,25 @@ export async function listInventoryTransferTargets(
 }
 
 export async function listAvailableCampaignCharacters() {
-  const rows = await getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(200)
+  const read = () => getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(200)
+  let rows = await read()
+  if (!rows.length) {
+    await ensureIdentityIndexes()
+    rows = await read()
+  }
   return decorateCharacters(rows)
 }
 
 export async function addCharacterToCampaign(mjUid: string | null, campaignId: string, characterId: string, duplicate: boolean) {
   const campaign = await getCampaignDashboard(mjUid, campaignId)
   if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
-  const [sourceCharacter] = await getDb().select().from(characterIndex).where(and(eq(characterIndex.id, characterId), isNull(characterIndex.deletedAt))).limit(1)
+  const readSource = async () => (await getDb().select().from(characterIndex)
+    .where(and(eq(characterIndex.id, characterId), isNull(characterIndex.deletedAt))).limit(1))[0]
+  let sourceCharacter = await readSource()
+  if (!sourceCharacter) {
+    await ensureIdentityIndexes()
+    sourceCharacter = await readSource()
+  }
   if (!sourceCharacter) throw new Error("CHARACTER_NOT_FOUND")
   let targetId = characterId
   if (duplicate) {
