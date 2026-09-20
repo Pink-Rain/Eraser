@@ -1,36 +1,39 @@
-# Eraser 0.1.1-alpha.25 — audit complet de ce qui restait local
+# Eraser 0.1.1-alpha.26 — visuels partagés et application plus rapide
 
-L'alpha.24 corrigeait la liaison des feuilles Google. Cette version
-termine le travail : l'audit table par table de tout ce qui reste stocké
-localement a révélé deux autres endroits où une installation « neuve »
-se comportait comme si les données partagées n'existaient pas.
+## Les visuels sont enfin partagés
 
-## Corrigé
+Les portraits de personnages, portraits de PNJ, bannières de campagne et
+fonds de carte étaient écrits dans le dossier local de l'ordinateur qui
+les envoyait. Autrement dit : la personne qui envoyait une image était la
+seule à pouvoir la voir, pour toujours. Dans une application partagée,
+c'est un non-sens.
 
-- **Les index locaux (personnages, campagnes) ne sont plus crus sur
-  parole quand ils sont vides.** Les lectures qui conditionnent l'accès
-  relancent une synchronisation avant de conclure « introuvable ». Cela
-  débloque, sur une installation jamais synchronisée : l'ouverture d'une
-  campagne, l'ajout d'un personnage joueur à une campagne, la liste des
-  personnages proposés, les membres d'une campagne, l'ouverture d'une
-  fiche de personnage, et l'enregistrement des magasins d'une campagne
-  (qui répondait « Accès refusé » parce que la campagne semblait
-  inexistante).
-- **La table virtuelle restait bloquée sur « préparation »** sur
-  l'installation d'un joueur : la préparation était réservée aux MJ et
-  administrateurs, alors qu'il s'agit d'une mise en route de
-  l'installation, pas d'une action de jeu. Elle relie le classeur
-  existant au lieu d'en créer un second.
+Ils vivent maintenant dans un dossier du Drive partagé
+(« Eraser - Visuels »). Le stockage local devient un simple cache : une
+image n'est téléchargée qu'une fois par ordinateur. Les images envoyées
+avant cette version sont automatiquement remontées sur le Drive à leur
+première lecture — elles cessent donc d'être invisibles pour les autres.
 
-## Audit
+## Les liens d'identité sont partagés
 
-Tables vérifiées une à une : comptes, sessions, liaison des feuilles,
-index personnages/campagnes/classes, liens d'identité, to-do
-administration, magasins, PNJ, relations, table virtuelle, Roll20,
-intégration Apps Script, connexion Google Drive. Restent volontairement
-locales : l'état temporaire de connexion Google (sécurité), les
-marqueurs de synchronisation, et le pont Roll20 (le compagnon parle au
-serveur local de la machine connectée à Roll20).
+Le lien « ce compte correspond à cet identifiant historique » était lui
+aussi local : une réattribution faite sur un ordinateur restait invisible
+de tous les autres. Il vit maintenant sur le serveur de comptes partagé,
+à côté des comptes et des rôles qu'il décrit.
+
+## Rapidité
+
+- **Chaque page faisait un aller-retour réseau vers le serveur de comptes
+  avant d'afficher quoi que ce soit** (validation de la session). Ce
+  résultat est maintenant gardé en mémoire quelques secondes : la latence
+  disparaît de la navigation. Un changement de rôle ou de statut reste
+  appliqué immédiatement.
+- **La synchronisation des index réécrivait toutes les lignes de toutes
+  les feuilles à chaque chargement de page** — des centaines d'écritures
+  successives, même quand rien n'avait changé. Elle ne réécrit plus que
+  les lignes réellement modifiées, et n'est plus relancée à chaque page.
+- Les images ne déclenchent plus une recherche Drive chacune : une seule
+  liste du dossier les sert toutes.
 
 ## Vérifications
 

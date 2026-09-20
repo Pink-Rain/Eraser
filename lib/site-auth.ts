@@ -148,11 +148,32 @@ export async function loginAccount(email: string, password: string) {
   return { account: accountRecord(user), session: await createSession(user.id) }
 }
 
+// With the shared accounts Worker, resolving "who is this?" is a network
+// round-trip — and it happens before anything renders, on every single page.
+// The session token is stable and accounts change rarely, so a short cache
+// removes that latency from navigation. A role or status change takes at most
+// this long to apply, and the paths that change one clear the cache directly.
+const SESSION_CACHE_MS = 30_000
+const sessionAccountCache = new Map<string, { expiresAt: number; account: Promise<AccountRecord | null> }>()
+
+function forgetCachedSessions() {
+  sessionAccountCache.clear()
+}
+
 export async function accountFromSession(token: string) {
   const remote = remoteAccountsConfig(env)
   if (remote) {
-    const response = await remoteAccountsFetch(remote, "/session", { method: "GET", token }).catch(() => null)
-    return (response as { account: AccountRecord } | null)?.account ?? null
+    const cached = sessionAccountCache.get(token)
+    if (cached && cached.expiresAt > Date.now()) return cached.account
+    const account = remoteAccountsFetch(remote, "/session", { method: "GET", token })
+      .then((response) => (response as { account: AccountRecord } | null)?.account ?? null)
+      .catch(() => {
+        sessionAccountCache.delete(token)
+        return null
+      })
+    if (sessionAccountCache.size >= 200) forgetCachedSessions()
+    sessionAccountCache.set(token, { expiresAt: Date.now() + SESSION_CACHE_MS, account })
+    return account
   }
 
   const tokenHash = await sha256(token)
@@ -168,6 +189,7 @@ export async function accountFromSession(token: string) {
 }
 
 export async function deleteSession(token: string) {
+  sessionAccountCache.delete(token)
   const remote = remoteAccountsConfig(env)
   if (remote) {
     await remoteAccountsFetch(remote, "/logout", { method: "POST", token }).catch(() => null)
@@ -192,6 +214,7 @@ export async function updateAccountAccess(
   status: AccountStatus,
   sessionToken?: string,
 ) {
+  forgetCachedSessions()
   const remote = remoteAccountsConfig(env)
   if (remote) {
     const response = await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}/access`, {
@@ -210,6 +233,7 @@ export async function updateAccountAccess(
 
 export async function deleteAccount(uid: string, adminUid: string, sessionToken?: string) {
   if (uid === adminUid) throw new Error("CANNOT_DELETE_SELF")
+  forgetCachedSessions()
   const remote = remoteAccountsConfig(env)
   if (remote) {
     await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}`, { method: "DELETE", token: sessionToken })
