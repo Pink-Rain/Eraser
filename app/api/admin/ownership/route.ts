@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { updateAdminItemOwner } from "@/lib/google-sheets"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 
 export async function POST(request: Request) {
   if (!(await authorizedAccount(["admin"]))) {
@@ -16,7 +16,7 @@ export async function POST(request: Request) {
     if (body.ownerUid !== null && body.ownerUid !== undefined && typeof body.ownerUid !== "string") {
       return NextResponse.json({ error: "Le propriétaire est invalide." }, { status: 400 })
     }
-    await updateAdminItemOwner(body.kind, body.id, body.ownerUid || "")
+    await updateAdminItemOwner(body.kind, body.id, body.ownerUid || "", await currentAuthToken())
     return NextResponse.json({ ok: true })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""

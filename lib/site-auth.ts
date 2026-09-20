@@ -208,28 +208,19 @@ export async function updateAccountAccess(
   return accountRecord(updated)
 }
 
-export async function resetAccountPasswordByAdmin(uid: string, password: string, sessionToken?: string) {
-  if (password.length < 8) throw new Error("INVALID_PASSWORD")
+export async function deleteAccount(uid: string, adminUid: string, sessionToken?: string) {
+  if (uid === adminUid) throw new Error("CANNOT_DELETE_SELF")
   const remote = remoteAccountsConfig(env)
   if (remote) {
-    const response = await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}/password`, {
-      method: "POST",
-      body: { password },
-      token: sessionToken,
-    })
-    return (response as { account: AccountRecord }).account
+    await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}`, { method: "DELETE", token: sessionToken })
+    return
   }
   const db = getDb()
-  const [user] = await db.select().from(users).where(eq(users.id, uid)).limit(1)
+  const [user] = await db.select({ id: users.id }).from(users).where(eq(users.id, uid)).limit(1)
   if (!user) throw new Error("ACCOUNT_NOT_FOUND")
-  const passwordData = await hashPassword(password)
-  const updatedAt = new Date().toISOString()
-  await db.update(users).set({
-    passwordHash: passwordData.hash,
-    passwordSalt: passwordData.salt,
-    updatedAt,
-  }).where(eq(users.id, uid))
-  await db.delete(sessions).where(eq(sessions.userId, uid))
-  const [updated] = await db.select().from(users).where(eq(users.id, uid)).limit(1)
-  return accountRecord(updated)
+  try {
+    await db.delete(users).where(eq(users.id, uid))
+  } catch {
+    throw new Error("ACCOUNT_REFERENCED")
+  }
 }

@@ -14,7 +14,8 @@ export const dynamic = "force-dynamic"
 
 export default async function AllCharactersPage() {
   if (!(await authorizedAccount(["admin"]))) redirect("/")
-  const [characters, accounts] = await Promise.all([listAllCharactersForAdmin(), listAccounts(await currentAuthToken())])
+  const token = await currentAuthToken()
+  const [characters, accounts] = await Promise.all([listAllCharactersForAdmin(token), listAccounts(token)])
   return (
     <AuthenticatedShell pageLabel="Tous les personnages" roles={["admin"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">

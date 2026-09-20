@@ -22,7 +22,7 @@ export function remoteAccountsConfig(env: unknown): RemoteAccountsConfig | null 
 export async function remoteAccountsFetch(
   config: RemoteAccountsConfig,
   path: string,
-  init: { method: "GET" | "POST"; body?: unknown; token?: string | null },
+  init: { method: "GET" | "POST" | "DELETE"; body?: unknown; token?: string | null },
 ) {
   const headers: Record<string, string> = { "x-eraser-client-key": config.clientKey }
   if (init.token) headers.authorization = `Bearer ${init.token}`

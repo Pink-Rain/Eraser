@@ -27,6 +27,8 @@ import {
 import { runInBackground } from "@/lib/background-work"
 import { getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
+import { remoteAccountsConfig } from "@/lib/accounts-remote"
+import { listAccounts } from "@/lib/site-auth"
 import {
   htmlToRichText,
   hexColorToRgb,
@@ -3220,54 +3222,71 @@ async function getCampaignDashboardUncached(mjUid: string | null, id: string) {
 
 export const getCampaignDashboard = cache(getCampaignDashboardUncached)
 
-export async function listAllCharactersForAdmin() {
+// In remote-accounts mode the local `users` table is empty — every real
+// account lives on the shared accounts Worker instead (see
+// accounts-remote.ts). Anything that used to join/look accounts up locally
+// has to go through listAccounts()/this helper instead, or it silently
+// treats every account as nonexistent.
+async function accountLookup(sessionToken?: string) {
+  const remote = remoteAccountsConfig(runtimeEnv())
+  if (remote) {
+    const accounts = await listAccounts(sessionToken).catch(() => [])
+    return new Map(accounts.map((account) => [account.uid, { displayName: account.displayName, email: account.email }]))
+  }
+  const rows = await getDb().select({ id: users.id, displayName: users.displayName, email: users.email }).from(users)
+  return new Map(rows.map((row) => [row.id, { displayName: row.displayName, email: row.email }]))
+}
+
+export async function listAllCharactersForAdmin(sessionToken?: string) {
   await syncExistingIdentityIndexes()
-  const rows = await getDb().select({
-    character: characterIndex,
-    ownerName: users.displayName,
-    ownerEmail: users.email,
-  }).from(characterIndex).leftJoin(users, eq(characterIndex.ownerUid, users.id))
-    .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500)
+  const [rows, owners] = await Promise.all([
+    getDb().select({ character: characterIndex }).from(characterIndex)
+      .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
+    accountLookup(sessionToken),
+  ])
   const decorated = await decorateCharacters(rows.map((row) => row.character))
   return decorated.map((character) => {
-    const owner = rows.find((row) => row.character.id === character.id)
+    const owner = owners.get(character.ownerUid)
     return {
       ...character,
-      ownerName: owner?.ownerName || (character.ownerUid ? "Identifiant historique" : "Sans propriétaire"),
-      ownerEmail: owner?.ownerEmail || "",
+      ownerName: owner?.displayName || (character.ownerUid ? "Identifiant historique" : "Sans propriétaire"),
+      ownerEmail: owner?.email || "",
     }
   })
 }
 
-export async function listAllCampaignsForAdmin() {
+export async function listAllCampaignsForAdmin(sessionToken?: string) {
   await syncExistingIdentityIndexes()
-  const rows = await getDb().select({
-    campaign: campaignIndex,
-    ownerName: users.displayName,
-    ownerEmail: users.email,
-  }).from(campaignIndex).leftJoin(users, eq(campaignIndex.mjUid, users.id))
-    .where(isNull(campaignIndex.deletedAt)).orderBy(campaignIndex.name).limit(500)
-  const links = await getDb().select({ campaignId: campaignCharacters.campaignId, characterId: characterIndex.id, characterName: characterIndex.name })
-    .from(campaignCharacters).innerJoin(characterIndex, eq(campaignCharacters.characterId, characterIndex.id))
-    .where(isNull(characterIndex.deletedAt))
-  return rows.map((row) => ({
-    ...row.campaign,
-    ownerName: row.ownerName || (row.campaign.mjUid ? "Identifiant historique" : "Sans propriétaire"),
-    ownerEmail: row.ownerEmail || "",
-    characters: links.filter((link) => link.campaignId === row.campaign.id).map((link) => ({ id: link.characterId, name: link.characterName })),
-  }))
+  const [rows, owners, links] = await Promise.all([
+    getDb().select({ campaign: campaignIndex }).from(campaignIndex)
+      .where(isNull(campaignIndex.deletedAt)).orderBy(campaignIndex.name).limit(500),
+    accountLookup(sessionToken),
+    getDb().select({ campaignId: campaignCharacters.campaignId, characterId: characterIndex.id, characterName: characterIndex.name })
+      .from(campaignCharacters).innerJoin(characterIndex, eq(campaignCharacters.characterId, characterIndex.id))
+      .where(isNull(characterIndex.deletedAt)),
+  ])
+  return rows.map((row) => {
+    const owner = owners.get(row.campaign.mjUid)
+    return {
+      ...row.campaign,
+      ownerName: owner?.displayName || (row.campaign.mjUid ? "Identifiant historique" : "Sans propriétaire"),
+      ownerEmail: owner?.email || "",
+      characters: links.filter((link) => link.campaignId === row.campaign.id).map((link) => ({ id: link.characterId, name: link.characterName })),
+    }
+  })
 }
 
 export async function updateAdminItemOwner(
   kind: "character" | "campaign",
   id: string,
   ownerUid: string,
+  sessionToken?: string,
 ) {
   const normalizedOwnerUid = ownerUid.trim()
   const db = getDb()
   if (normalizedOwnerUid) {
-    const [owner] = await db.select({ id: users.id }).from(users).where(eq(users.id, normalizedOwnerUid)).limit(1)
-    if (!owner) throw new Error("OWNER_NOT_FOUND")
+    const owners = await accountLookup(sessionToken)
+    if (!owners.has(normalizedOwnerUid)) throw new Error("OWNER_NOT_FOUND")
   }
 
   await syncExistingIdentityIndexes()

@@ -1,11 +1,15 @@
 "use client"
 
 import { useState } from "react"
-import { KeyRound, LoaderCircle, Save } from "lucide-react"
+import { LoaderCircle, Save, Trash2 } from "lucide-react"
+import { useRouter } from "next/navigation"
 
+import {
+  AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
+  AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
+} from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import {
   Select,
   SelectContent,
@@ -22,22 +26,29 @@ export function AccountAccessTable({
   accounts: AccountRecord[]
   currentUid: string
 }) {
+  const [items, setItems] = useState(accounts)
   return (
     <div className="mt-8 space-y-3">
-      {accounts.map((account) => (
-        <AccountRow key={account.uid} account={account} isCurrent={account.uid === currentUid} />
+      {items.map((account) => (
+        <AccountRow
+          key={account.uid}
+          account={account}
+          isCurrent={account.uid === currentUid}
+          onDeleted={() => setItems((current) => current.filter((item) => item.uid !== account.uid))}
+        />
       ))}
     </div>
   )
 }
 
-function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent: boolean }) {
+function AccountRow({ account, isCurrent, onDeleted }: { account: AccountRecord; isCurrent: boolean; onDeleted: () => void }) {
+  const router = useRouter()
   const [role, setRole] = useState<SiteRole>(account.role ?? "joueur")
   const [status, setStatus] = useState<AccountStatus>(account.status)
   const [saving, setSaving] = useState(false)
   const [saved, setSaved] = useState(false)
-  const [password, setPassword] = useState("")
-  const [passwordState, setPasswordState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [deleting, setDeleting] = useState(false)
+  const [deleteError, setDeleteError] = useState("")
 
   async function save() {
     setSaving(true)
@@ -51,27 +62,22 @@ function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent:
     setSaved(response.ok)
   }
 
-  async function resetPassword() {
-    if (password.length < 8) {
-      setPasswordState("error")
+  async function remove() {
+    setDeleting(true)
+    setDeleteError("")
+    const response = await fetch(`/api/admin/accounts/${encodeURIComponent(account.uid)}`, { method: "DELETE" })
+    if (response.ok) {
+      onDeleted()
+      router.refresh()
       return
     }
-    setPasswordState("saving")
-    const response = await fetch("/api/admin/accounts/password", {
-      method: "POST",
-      headers: { "content-type": "application/json" },
-      body: JSON.stringify({ uid: account.uid, password }),
-    })
-    if (response.ok) {
-      setPassword("")
-      setPasswordState("saved")
-    } else {
-      setPasswordState("error")
-    }
+    const payload = await response.json().catch(() => null) as { error?: string } | null
+    setDeleteError(payload?.error || "Le compte n’a pas pu être supprimé.")
+    setDeleting(false)
   }
 
   return (
-    <article className="grid items-center gap-4 rounded-2xl border bg-card/90 p-4 shadow-[0_8px_30px_rgb(67_50_31/0.05)] md:grid-cols-[minmax(0,1fr)_180px_160px_auto]">
+    <article className="grid items-center gap-4 rounded-2xl border bg-card/90 p-4 shadow-[0_8px_30px_rgb(67_50_31/0.05)] md:grid-cols-[minmax(0,1fr)_180px_160px_auto_auto]">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
           <p className="truncate font-medium">{account.displayName || account.email}</p>
@@ -110,32 +116,34 @@ function AccountRow({ account, isCurrent }: { account: AccountRecord; isCurrent:
         {saving ? <LoaderCircle className="size-4 animate-spin" /> : <Save className="size-4" />}
         {saved ? "Enregistré" : "Enregistrer"}
       </Button>
-      <div className="flex flex-col gap-2 border-t pt-4 md:col-span-4 md:flex-row md:items-center">
-        <Input
-          aria-label={`Nouveau mot de passe de ${account.email}`}
-          className="md:max-w-sm"
-          minLength={8}
-          onChange={(event) => {
-            setPassword(event.target.value)
-            setPasswordState("idle")
-          }}
-          placeholder="Nouveau mot de passe (8 caractères minimum)"
-          type="password"
-          value={password}
-        />
-        <Button
-          disabled={passwordState === "saving" || password.length < 8}
-          onClick={resetPassword}
-          type="button"
-          variant="outline"
-        >
-          {passwordState === "saving" ? <LoaderCircle className="size-4 animate-spin" /> : <KeyRound className="size-4" />}
-          {passwordState === "saved" ? "Mot de passe modifié" : "Changer le mot de passe"}
-        </Button>
-        {passwordState === "error" && (
-          <p className="text-sm text-destructive">La modification a échoué.</p>
-        )}
-      </div>
+      {!isCurrent && (
+        <div className="flex flex-col items-end gap-1">
+          <AlertDialog>
+            <AlertDialogTrigger asChild>
+              <Button type="button" variant="ghost" size="icon" aria-label={`Supprimer le compte de ${account.email}`}>
+                <Trash2 className="size-4 text-destructive" />
+              </Button>
+            </AlertDialogTrigger>
+            <AlertDialogContent>
+              <AlertDialogHeader>
+                <AlertDialogTitle>Supprimer le compte de {account.displayName || account.email} ?</AlertDialogTitle>
+                <AlertDialogDescription>
+                  Cette action est définitive : le compte et sa connexion ne pourront plus être utilisés pour se connecter.
+                  Ses personnages et campagnes ne sont pas supprimés ; réattribue-les depuis « Toutes les campagnes »
+                  et « Tous les personnages » si besoin.
+                </AlertDialogDescription>
+              </AlertDialogHeader>
+              <AlertDialogFooter>
+                <AlertDialogCancel>Annuler</AlertDialogCancel>
+                <AlertDialogAction variant="destructive" disabled={deleting} onClick={() => void remove()}>
+                  {deleting ? <LoaderCircle className="size-4 animate-spin" /> : "Supprimer"}
+                </AlertDialogAction>
+              </AlertDialogFooter>
+            </AlertDialogContent>
+          </AlertDialog>
+          {deleteError && <p className="text-xs text-destructive">{deleteError}</p>}
+        </div>
+      )}
     </article>
   )
 }

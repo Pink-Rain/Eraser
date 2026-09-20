@@ -285,21 +285,21 @@ async function handleUpdateAccess(request: Request, env: Env, uid: string) {
   return json({ account: accountRecord(updated) })
 }
 
-async function handleResetPassword(request: Request, env: Env, uid: string) {
-  await requireAccount(request, env, ["admin"])
-  const body = await readJson<{ password?: string }>(request)
-  const password = body.password ?? ""
-  if (password.length < 8) throw new HttpError(400, "INVALID_PASSWORD")
-  const user = await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(uid).first<UserRow>()
+async function handleDeleteAccount(request: Request, env: Env, uid: string) {
+  const admin = await requireAccount(request, env, ["admin"])
+  if (admin.id === uid) throw new HttpError(400, "CANNOT_DELETE_SELF")
+  const user = await env.DB.prepare("SELECT id FROM users WHERE id = ?1").bind(uid).first<{ id: string }>()
   if (!user) throw new HttpError(404, "ACCOUNT_NOT_FOUND")
-  const passwordData = await hashPassword(password)
-  const now = new Date().toISOString()
-  await env.DB.prepare("UPDATE users SET password_hash = ?1, password_salt = ?2, updated_at = ?3 WHERE id = ?4")
-    .bind(passwordData.hash, passwordData.salt, now, uid)
-    .run()
-  await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?1").bind(uid).run()
-  const updated = await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(uid).first<UserRow>()
-  return json({ account: accountRecord(updated!) })
+  try {
+    // sessions cascades; google_drive_authorizations/google_oauth_settings
+    // reference users without cascading, so deleting whoever connected
+    // Drive or configured OAuth is rejected by that foreign key instead of
+    // silently orphaning the shared Drive connection.
+    await env.DB.prepare("DELETE FROM users WHERE id = ?1").bind(uid).run()
+  } catch {
+    throw new HttpError(409, "ACCOUNT_REFERENCED")
+  }
+  return json({ ok: true })
 }
 
 // ---------- Google Drive connection (shared) ----------
@@ -522,8 +522,8 @@ const worker = {
       const accessMatch = path.match(/^\/accounts\/([^/]+)\/access$/)
       if (method === "POST" && accessMatch) return await handleUpdateAccess(request, env, decodeURIComponent(accessMatch[1]))
 
-      const passwordMatch = path.match(/^\/accounts\/([^/]+)\/password$/)
-      if (method === "POST" && passwordMatch) return await handleResetPassword(request, env, decodeURIComponent(passwordMatch[1]))
+      const accountMatch = path.match(/^\/accounts\/([^/]+)$/)
+      if (method === "DELETE" && accountMatch) return await handleDeleteAccount(request, env, decodeURIComponent(accountMatch[1]))
 
       if (method === "GET" && path === "/google/oauth-settings") return await handleGetOAuthSettings(request, env)
       if (method === "POST" && path === "/google/oauth-settings") return await handleSaveOAuthSettings(request, env)
