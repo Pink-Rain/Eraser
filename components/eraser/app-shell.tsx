@@ -65,6 +65,7 @@ import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/goo
 import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
+const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
 
 const PageLabelContext = createContext<(label: string) => void>(() => undefined)
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole } | null>(null)
@@ -90,6 +91,7 @@ function IntentLink(props: ComponentProps<typeof Link>) {
 }
 
 export type ShellUser = {
+  uid: string
   email: string
   displayName: string
   role: SiteRole
@@ -638,6 +640,7 @@ export function AppShell({
         </ShellDataContext.Provider>
       </SidebarInset>
     </SidebarProvider>
+    <GlobalTableChat user={{ uid: user.uid, role: user.role }} />
     </PageLabelContext.Provider>
   )
 }

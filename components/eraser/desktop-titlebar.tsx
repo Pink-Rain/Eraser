@@ -68,7 +68,8 @@ export function DesktopTitlebar() {
   // this fix) ever saw it fire. Detecting the double-click off raw
   // mousedown timestamps instead works uniformly across the whole bar.
   function handleBarMouseDown() {
-    if (!state.isPinned) return
+    // Collapsing pins the window automatically (main.cjs), so the double-click
+    // is available whether or not the pin was clicked first.
     const now = Date.now()
     if (now - lastMouseDownAt.current < DOUBLE_CLICK_MS) {
       lastMouseDownAt.current = 0

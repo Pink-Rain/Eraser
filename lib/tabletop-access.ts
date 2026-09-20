@@ -166,6 +166,32 @@ function hpValue(value: unknown, fallback: number) {
   return Number.isFinite(parsed) ? Math.max(0, Math.min(99999, Math.trunc(parsed))) : fallback
 }
 
+export function chatRoomId(pageLinked: string) {
+  return `chat:${pageLinked}`
+}
+
+export async function listChatCampaignsForAccount(account: AuthorizedUser) {
+  if (canManageTabletop(account)) return listTabletopSourcePages(account)
+  const characters = await listCharactersForUser(account.uid)
+  const seen = new Map<string, string>()
+  for (const character of characters) for (const campaign of character.campaigns) seen.set(campaign.id, campaign.name)
+  return [...seen.entries()].map(([id, name]) => ({ id, name }))
+}
+
+export async function getChatBootstrapForAccount(account: AuthorizedUser, pageLinked: string) {
+  if (!await canAccessTabletopPage(account, pageLinked)) return null
+  const roomId = chatRoomId(pageLinked)
+  const [allActivities, members, isManager, identities] = await Promise.all([
+    listTabletopActivities(roomId),
+    pageLinked === "bac-a-sable" ? Promise.resolve([]) : listCampaignMembers(pageLinked),
+    canManageTabletopPage(account, pageLinked),
+    identityUidsForUser(account.uid),
+  ])
+  const ownedCharacterIds = new Set(members.filter((member) => identities.includes(member.ownerUid)).map((member) => member.id))
+  const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
+  return { roomId, activities, members: members.map((member) => ({ id: member.id, name: member.name, ownerUid: member.ownerUid })), canManage: isManager }
+}
+
 export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked: string, kind: "npc" | "character", id: string, patch: { currentHp?: unknown; totalHp?: unknown }) {
   if (kind === "npc") {
     if (!await canManageTabletopPage(account, pageLinked)) return null

@@ -28,7 +28,7 @@ export default async function RootLayout({
     ]);
     content = (
       <AppShell
-        user={{ email: account.email, displayName: account.displayName, role: account.role }}
+        user={{ uid: account.uid, email: account.email, displayName: account.displayName, role: account.role }}
         initialViewRole={viewAccount.role}
         characters={characters}
         campaigns={campaigns}

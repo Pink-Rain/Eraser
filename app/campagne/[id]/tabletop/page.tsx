@@ -1,7 +1,7 @@
 import { notFound, redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { TabletopWorkspace } from "@/components/eraser/tabletop-workspace-v2"
+import { TabletopWorkspaceLazy as TabletopWorkspace } from "@/components/eraser/tabletop-workspace-lazy"
 import { getCampaignDashboard, getCampaignForPlayer } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 

@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { Backpack, Bold, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, Heading2, ImagePlus, Italic, ListChecks, LoaderCircle, Minus, NotebookPen, PawPrint, Pencil, Plus, Sparkles, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -45,6 +45,10 @@ const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
 ]
 
 const baseCharacterTabs: CharacterTab[] = tabTypes.slice(0, 4).map((tab) => ({ ...tab, id: `base-${tab.type}`, removable: false }))
+
+// characterSkillGroups never changes at runtime, so this offset table is computed
+// once for the module instead of on every character-sheet render (every keystroke).
+const skillOffsetByGroup = characterSkillGroups.map((_, index) => characterSkillGroups.slice(0, index).reduce((total, group) => total + group.skills.length, 0))
 
 function parseCharacterTabs(value: string): CharacterTab[] {
   try {
@@ -282,7 +286,6 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   const [viewStateReady, setViewStateReady] = useState(false)
   const [addingTab, setAddingTab] = useState(false)
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
-  const skillOffsetByGroup = characterSkillGroups.map((_, index) => characterSkillGroups.slice(0, index).reduce((total, group) => total + group.skills.length, 0))
 
   // Joueurs qui cliquent vite sur +/- : chaque commit part en écriture Google Sheets
   // en remplaçant toute la fiche. Sans file d’attente, deux requêtes en vol peuvent
@@ -333,10 +336,16 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   const customTabs = parseCharacterTabs(values[characterCustomTabsIndex] || "")
   const characterTabs = [...baseCharacterTabs, ...customTabs]
   const currentLevel = Math.max(0, Math.min(20, Math.trunc(Number(values[3]) || 0)))
-  const assignedClasses = selectedCharacterClasses(values[2] || "", availableClasses)
+  const characterClassValue = values[2] || ""
+  const assignedClasses = useMemo(() => selectedCharacterClasses(characterClassValue, availableClasses), [characterClassValue, availableClasses])
   const classChoicesValue = values[characterClassChoicesIndex] || ""
   const classChoiceState = parseClassChoices(classChoicesValue)
-  const knownClassSpells = knownSpellsForCharacter(assignedClasses, availableClassSpells, currentLevel, classChoicesValue)
+  // Recomputing this per keystroke was the most expensive step in the render (it
+  // scans every known spell against every skill row via linkedAbilities below).
+  const knownClassSpells = useMemo(
+    () => knownSpellsForCharacter(assignedClasses, availableClassSpells, currentLevel, classChoicesValue),
+    [assignedClasses, availableClassSpells, currentLevel, classChoicesValue],
+  )
 
   function linkedAbilities(skillName: string) {
     const normalized = skillName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")

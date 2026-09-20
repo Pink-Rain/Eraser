@@ -363,7 +363,9 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
   const directTargets = useMemo(() => entities.filter((entity) => entity.kind === "character" && entity.ownerUid !== user.uid).filter((entity, index, all) => all.findIndex((candidate) => candidate.id === entity.id) === index).sort((left, right) => left.name.localeCompare(right.name, "fr")), [entities, user.uid])
   const speaker = ownedSpeakers.find((entity) => entity.id === speakerId) || ownedSpeakers[0]
   const speakerName = canManage ? "MJ" : speaker?.name || "Joueur"
-  const directTail = chatText.match(/^\/joueur\s+(.*)$/i)?.[1] ?? null
+  const directCommandMatch = chatText.match(/^\/(r?joueur)\s+(.*)$/i)
+  const directPrefix = directCommandMatch?.[1].toLocaleLowerCase("fr") === "rjoueur" ? "/rjoueur" : "/joueur"
+  const directTail = directCommandMatch?.[2] ?? null
   const directSelection = directTail === null ? null : directTargets.find((target) => directTail.toLocaleLowerCase("fr").startsWith(`${target.name.toLocaleLowerCase("fr")} `))
   const directSuggestions = directTail === null || directSelection ? [] : directTargets.filter((target) => !directTail.trim() || target.name.toLocaleLowerCase("fr").includes(directTail.trim().toLocaleLowerCase("fr"))).slice(0, 8)
 
@@ -1159,6 +1161,15 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
         kind = "dice"
         audience = "gm"
         diceExpression = raw.replace(/^\/rmj\s+/i, "")
+      } else if (/^\/rjoueur\s+/i.test(raw)) {
+        const tail = raw.replace(/^\/rjoueur\s+/i, "")
+        const target = [...directTargets].sort((left, right) => right.name.length - left.name.length).find((candidate) => tail.toLocaleLowerCase("fr").startsWith(`${candidate.name.toLocaleLowerCase("fr")} `))
+        if (!target) throw new Error("TARGET")
+        kind = "dice"
+        audience = "character"
+        recipientId = target.id
+        recipientName = target.name
+        diceExpression = tail.slice(target.name.length).trim()
       } else if (/^\/r\s+/i.test(raw)) {
         kind = "dice"
         diceExpression = raw.replace(/^\/r\s+/i, "")
@@ -1183,7 +1194,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
       setChatText("")
       void publishActivity({ id: crypto.randomUUID(), mapId: activeMap.id, kind, authorUid: user.uid, authorName: speakerName, text: content, diceExpression, diceResult, createdAt: new Date().toISOString(), audience, recipientId, recipientName })
     } catch {
-      showNotice("Commande invalide. Exemples : /r 1d20 + 5, /rmj 2d6 ou /joueur puis choisis un personnage.", true)
+      showNotice("Commande invalide. Exemples : /r 1d20 + 5, /rmj 2d6, /joueur ou /rjoueur puis choisis un personnage.", true)
     }
   }
 
@@ -1442,9 +1453,9 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
               <div ref={activityEndRef} />
             </div>
             <form className="relative border-t p-3" onSubmit={sendChat}>
-              {directSuggestions.length > 0 && <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border bg-popover p-1 shadow-xl">{directSuggestions.map((target) => <button type="button" key={target.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent" onClick={() => setChatText(`/joueur ${target.name} `)}><UserRound className="size-4 text-primary" /><span>{target.name}</span></button>)}</div>}
+              {directSuggestions.length > 0 && <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border bg-popover p-1 shadow-xl">{directSuggestions.map((target) => <button type="button" key={target.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent" onClick={() => setChatText(`${directPrefix} ${target.name} `)}><UserRound className="size-4 text-primary" /><span>{target.name}</span></button>)}</div>}
               <div className="flex gap-2"><Input value={chatText} onChange={(event) => setChatText(event.target.value)} maxLength={1200} placeholder="Message ou /r 1d20 + 5" /><Button type="submit" size="icon" disabled={!chatText.trim()}><Send /></Button></div>
-              <p className="mt-1.5 text-[10px] text-muted-foreground">/r · /rmj · /mj · /joueur puis choisir</p>
+              <p className="mt-1.5 text-[10px] text-muted-foreground">/r · /rmj · /mj · /joueur · /rjoueur puis choisir</p>
             </form>
           </section>
         )}

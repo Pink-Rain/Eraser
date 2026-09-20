@@ -999,11 +999,13 @@ export async function getCharacterForUser(uid: string, id: string) {
   return character ? (await decorateCharacters([character]))[0] ?? null : null
 }
 
-export async function getCharacterById(id: string) {
+async function getCharacterByIdUncached(id: string) {
   const [character] = await getDb().select().from(characterIndex).where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
   if (!character) return null
   return (await decorateCharacters([character]))[0] ?? null
 }
+
+export const getCharacterById = cache(getCharacterByIdUncached)
 
 async function decorateCharacters<T extends { id: string; ownerUid: string; name: string; subtitle: string; updatedAt: string }>(characters: T[]) {
   if (!characters.length) return []
@@ -1063,7 +1065,7 @@ export async function getCampaignForPlayer(uid: string, id: string) {
   return (await listCampaignsForPlayer(uid)).find((campaign) => campaign.id === id) ?? null
 }
 
-export async function getCharacterForMj(uid: string, id: string) {
+async function getCharacterForMjUncached(uid: string, id: string) {
   const identityUids = await identityUidsForUser(uid)
   const [row] = await getDb().select({ character: characterIndex }).from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
@@ -1072,6 +1074,8 @@ export async function getCharacterForMj(uid: string, id: string) {
   if (!row) return null
   return (await decorateCharacters([row.character]))[0] ?? null
 }
+
+export const getCharacterForMj = cache(getCharacterForMjUncached)
 
 export async function getCampaignForMj(uid: string, id: string) {
   const listed = (await listCampaignsForMj(uid)).find((campaign) => campaign.id === id)
@@ -3199,12 +3203,14 @@ export async function deleteCharacterRelation(characterId: string, relationId: s
   if (index >= 0) await updateRange(sheet.spreadsheetId, `${sheet.tabName}!A${index + 2}:K${index + 2}`, [Array(11).fill("")])
 }
 
-export async function getCampaignDashboard(mjUid: string | null, id: string) {
+async function getCampaignDashboardUncached(mjUid: string | null, id: string) {
   const campaign = mjUid
     ? await getCampaignForMj(mjUid, id)
     : (await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt }).from(campaignIndex).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1))[0] ?? null
   return campaign
 }
+
+export const getCampaignDashboard = cache(getCampaignDashboardUncached)
 
 export async function listAllCharactersForAdmin() {
   await syncExistingIdentityIndexes()

@@ -200,8 +200,9 @@ function broadcastWindowState() {
 }
 
 // Shrinks the window to just its titlebar strip, remembering the exact
-// bounds (and maximized state) to restore later. Only reachable while
-// pinned, since a floating mini bar only makes sense on top of everything.
+// bounds (and maximized state) to restore later. The caller pins the window
+// first if it wasn't already — a floating mini bar only makes sense on top
+// of everything, so collapsing implies pinning rather than requiring it.
 function collapseWindow() {
   if (!mainWindow || isCollapsed) return
   collapseSavedWasMaximized = mainWindow.isMaximized()
@@ -470,9 +471,19 @@ ipcMain.handle("eraser:window-toggle-pin", () => {
 })
 
 ipcMain.handle("eraser:window-toggle-collapse", () => {
-  if (!mainWindow || !isPinned) return { isCollapsed }
-  if (isCollapsed) restoreFromCollapse()
-  else collapseWindow()
+  if (!mainWindow) return { isCollapsed }
+  if (isCollapsed) {
+    restoreFromCollapse()
+  } else {
+    // Collapsing without pinning first would leave a tiny window that other
+    // apps can immediately cover, defeating the point of the mini bar — so
+    // pin automatically instead of refusing the collapse outright.
+    if (!isPinned) {
+      isPinned = true
+      mainWindow.setAlwaysOnTop(true)
+    }
+    collapseWindow()
+  }
   broadcastWindowState()
   return { isCollapsed }
 })
