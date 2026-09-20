@@ -59,10 +59,14 @@ jobs:
               echo "La base vient d'être créée mais n'apparaît pas dans wrangler d1 list." >&2
               exit 1
             fi
-            npx wrangler d1 execute eraser-accounts-db --remote --file=./schema.sql --database-id="$EXISTING_ID"
           else
             echo "Base existante réutilisée."
           fi
+          # Toujours ré-appliquer le schéma : il n'utilise que des
+          # CREATE TABLE/INDEX IF NOT EXISTS, donc c'est sans risque, et ça
+          # rattrape le cas où une exécution précédente avait créé la base
+          # sans jamais atteindre cette étape (ex: un run interrompu juste après).
+          npx wrangler d1 execute eraser-accounts-db --remote --file=./schema.sql --database-id="$EXISTING_ID"
           echo "database_id=$EXISTING_ID" >> "$GITHUB_OUTPUT"
 
       - name: Écrire l'identifiant de la base dans la configuration
