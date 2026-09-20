@@ -384,12 +384,17 @@ async function runInstalledUiSmoke(url) {
       };
       check();
     })`)
+    // A unique email per run: the shared accounts backend (worker-accounts/)
+    // persists across CI runs, unlike the old fully-local per-run database,
+    // so a hardcoded address would collide with EMAIL_EXISTS on every run
+    // after the first successful one.
+    const smokeTestId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
     await mainWindow.webContents.executeJavaScript(`(() => {
       const form = document.querySelector('form[action="/api/auth/register"]');
       if (!form) throw new Error('Le formulaire de création est introuvable.');
       const values = {
         displayName: 'Test interface installée',
-        email: 'interface-installee@eraser.local',
+        email: 'interface-installee-${smokeTestId}@eraser.local',
         password: 'mot-de-passe-interface-installee'
       };
       for (const [name, value] of Object.entries(values)) {
