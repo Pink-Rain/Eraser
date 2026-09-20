@@ -37,30 +37,28 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
           set -euo pipefail
-          EXISTING_ID=$(npx wrangler d1 list --json | node -e '
-            let data = "";
-            process.stdin.on("data", (chunk) => { data += chunk; });
-            process.stdin.on("end", () => {
-              const list = JSON.parse(data);
-              const db = list.find((entry) => entry.name === "eraser-accounts-db");
-              console.log(db ? db.uuid : "");
-            });
-          ')
-          if [ -z "$EXISTING_ID" ]; then
-            echo "Base introuvable, création…"
-            # `wrangler d1 create` has no --json output (unlike `d1 list`); parse
-            # the database_id out of its plain-text/TOML-snippet output instead.
-            CREATE_OUTPUT=$(npx wrangler d1 create eraser-accounts-db)
-            echo "$CREATE_OUTPUT"
-            EXISTING_ID=$(echo "$CREATE_OUTPUT" | node -e '
+          find_id() {
+            npx wrangler d1 list --json | node -e '
               let data = "";
               process.stdin.on("data", (chunk) => { data += chunk; });
               process.stdin.on("end", () => {
-                const match = data.match(/database_id\s*=\s*"([^"]+)"/);
-                if (!match) { console.error("database_id introuvable dans la sortie de wrangler d1 create"); process.exit(1); }
-                console.log(match[1]);
+                const list = JSON.parse(data);
+                const db = list.find((entry) => entry.name === "eraser-accounts-db");
+                console.log(db ? db.uuid : "");
               });
-            ')
+            '
+          }
+          EXISTING_ID=$(find_id)
+          if [ -z "$EXISTING_ID" ]; then
+            echo "Base introuvable, création…"
+            # wrangler d1 create prints the id in a format that differs across
+            # versions (JSON snippet vs TOML), so re-list rather than parse it.
+            npx wrangler d1 create eraser-accounts-db
+            EXISTING_ID=$(find_id)
+            if [ -z "$EXISTING_ID" ]; then
+              echo "La base vient d'être créée mais n'apparaît pas dans wrangler d1 list." >&2
+              exit 1
+            fi
             npx wrangler d1 execute eraser-accounts-db --remote --file=./schema.sql --database-id="$EXISTING_ID"
           else
             echo "Base existante réutilisée."
