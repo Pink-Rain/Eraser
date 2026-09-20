@@ -79,9 +79,11 @@ export const googleOAuthFlows = sqliteTable("google_oauth_flows", {
   state: text("state").primaryKey(),
   googleEmail: text("google_email").notNull(),
   codeVerifier: text("code_verifier").notNull(),
-  connectedBy: text("connected_by")
-    .notNull()
-    .references(() => users.id, { onDelete: "cascade" }),
+  // Not a foreign key to `users`: when accounts live in the shared
+  // eraser-accounts Worker (see lib/accounts-remote.ts), this uid comes from
+  // that remote table and the local `users` table stays empty, so a local FK
+  // reference would always fail to insert.
+  connectedBy: text("connected_by").notNull(),
   expiresAt: text("expires_at").notNull(),
   createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
 })
@@ -89,9 +91,9 @@ export const googleOAuthFlows = sqliteTable("google_oauth_flows", {
 export const userIdentityLinks = sqliteTable(
   "user_identity_links",
   {
-    localUserId: text("local_user_id")
-      .primaryKey()
-      .references(() => users.id, { onDelete: "cascade" }),
+    // Not a foreign key to `users`, for the same reason as
+    // googleOAuthFlows.connectedBy above.
+    localUserId: text("local_user_id").primaryKey(),
     legacyUid: text("legacy_uid").notNull(),
     createdAt: text("created_at").notNull().default(sql`CURRENT_TIMESTAMP`),
     updatedAt: text("updated_at").notNull().default(sql`CURRENT_TIMESTAMP`),
