@@ -56,9 +56,12 @@ export async function GET(request: Request) {
   try {
     const storageReady = await isTabletopWorkbookReady()
     if (!storageReady) {
-      if (canManageTabletop(account) && url.searchParams.get("prepare") === "1") {
-        prepareTabletopWorkbookInBackground()
-      }
+      // Preparing the workbook is installation bootstrap, not a user action:
+      // it uses the shared Drive account and links the existing workbook
+      // rather than creating a second one. Gating it on the manage role left
+      // a player's own installation stuck on "préparation" forever, since no
+      // one with that role ever opens the tabletop from their machine.
+      if (url.searchParams.get("prepare") === "1") prepareTabletopWorkbookInBackground()
       return NextResponse.json({ preparing: true }, { status: 202 })
     }
     if (url.searchParams.get("sources") === "1") {

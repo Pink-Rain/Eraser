@@ -2299,7 +2299,7 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
 let tabletopWorkbookPromise: Promise<JdrSheetRecord | null> | null = null
 
 export async function isTabletopWorkbookReady() {
-  const sheet = await getJdrSheet("tabletop")
+  const sheet = await resolveJdrSheet("tabletop")
   if (!sheet) return false
   const [synced] = await getDb()
     .select()
