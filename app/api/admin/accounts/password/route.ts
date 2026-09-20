@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { resetAccountPasswordByAdmin } from "@/lib/site-auth"
 
 export async function POST(request: Request) {
@@ -18,7 +18,7 @@ export async function POST(request: Request) {
   }
 
   try {
-    await resetAccountPasswordByAdmin(uid, password)
+    await resetAccountPasswordByAdmin(uid, password, await currentAuthToken())
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: "Impossible de modifier ce mot de passe." }, { status: 400 })

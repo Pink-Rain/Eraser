@@ -4,8 +4,7 @@ copyright: Copyright © 2026 Eraser
 directories:
   output: release
 files:
-  - desktop/main.cjs
-  - desktop/preload.cjs
+  - desktop/*.cjs
   - package.json
 extraResources:
   - from: dist/eraser-server.asar

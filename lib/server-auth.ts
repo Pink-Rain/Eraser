@@ -17,6 +17,11 @@ export const currentAccount = cache(async function currentAccount() {
   return accountFromSession(token).catch(() => null)
 })
 
+export async function currentAuthToken() {
+  const cookieStore = await cookies()
+  return cookieStore.get(AUTH_COOKIE)?.value
+}
+
 export const currentViewAccount = cache(async function currentViewAccount(): Promise<AuthorizedUser | null> {
   const account = await currentAccount()
   if (!account || account.status !== "actif" || !account.role) return null

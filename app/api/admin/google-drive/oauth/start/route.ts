@@ -6,7 +6,7 @@ import {
   googlePkceChallenge,
   randomOAuthState,
 } from "@/lib/google-oauth"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 
 const STATE_COOKIE = "eraser_google_oauth_state"
 const EMAIL_COOKIE = "eraser_google_oauth_email"
@@ -30,6 +30,7 @@ async function oauthRequest(request: Request, adminUid: string) {
     state,
     origin: requestUrl.origin,
     codeChallenge: await googlePkceChallenge(codeVerifier),
+    sessionToken: await currentAuthToken(),
   })
   return { url }
 }
@@ -63,6 +64,7 @@ export async function GET(request: Request) {
         state,
         origin: requestUrl.origin,
         codeChallenge: await googlePkceChallenge(codeVerifier),
+        sessionToken: await currentAuthToken(),
       }),
     )
     const cookieOptions = {

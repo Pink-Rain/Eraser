@@ -2,7 +2,7 @@ import { redirect } from "next/navigation"
 
 import { AccountAccessTable } from "@/components/eraser/account-access-table"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { listAccounts } from "@/lib/site-auth"
 
 export const dynamic = "force-dynamic"
@@ -10,7 +10,7 @@ export const dynamic = "force-dynamic"
 export default async function AccountsAndRolesPage() {
   const admin = await authorizedAccount(["admin"])
   if (!admin) redirect("/")
-  const accounts = await listAccounts()
+  const accounts = await listAccounts(await currentAuthToken())
 
   return (
     <AuthenticatedShell pageLabel="Comptes et rôles" roles={["admin"]}>

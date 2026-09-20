@@ -24,6 +24,18 @@ const COLLAPSED_WIDTH = 220
 // user-visible product name (window title, shortcuts, Programs listing) is
 // controlled separately, below and in electron-builder.yml.
 app.setName("Eraser")
+
+// Generated at CI build time from the ERASER_ACCOUNTS_API_URL/ERASER_ACCOUNTS_API_KEY
+// repository secrets (see .github/workflows/windows-release.yml). It never exists in
+// source control and is absent during local development, in which case this desktop
+// build falls back to its own local, per-machine account database as before.
+function accountsConfig() {
+  try {
+    return require("./accounts-config.generated.cjs")
+  } catch {
+    return {}
+  }
+}
 let mainWindow = null
 let serverProcess = null
 let startupLogPath = ""
@@ -134,6 +146,12 @@ async function startServer() {
   const serverScript = join(paths.directory, "server.js")
   logLine(`Démarrage d’Eraser ${app.getVersion()} sur 127.0.0.1:${port}.`)
   logLine(`Serveur : ${serverScript}`)
+  const accounts = accountsConfig()
+  logLine(
+    accounts.url
+      ? "Comptes et rôles : annuaire partagé (eraser-accounts) configuré."
+      : "Comptes et rôles : aucun annuaire partagé configuré, base locale à cette machine.",
+  )
   serverProcess = spawn(process.execPath, [serverScript], {
     cwd: paths.workingDirectory,
     env: {
@@ -147,6 +165,8 @@ async function startServer() {
       ERASER_DESKTOP_DATA_DIR: dataDirectory,
       ERASER_MIGRATIONS_DIR: paths.migrations,
       GOOGLE_TOKEN_ENCRYPTION_KEY: persistentSecret(dataDirectory),
+      ...(accounts.url ? { ERASER_ACCOUNTS_API_URL: accounts.url } : {}),
+      ...(accounts.apiKey ? { ERASER_ACCOUNTS_API_KEY: accounts.apiKey } : {}),
     },
     windowsHide: true,
     stdio: ["ignore", "pipe", "pipe"],

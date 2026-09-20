@@ -42,3 +42,6 @@ next-env.d.ts
 /.sites-runtime/
 /outputs/
 /work/
+
+# generated at CI build time from secrets, never committed
+/desktop/accounts-config.generated.cjs

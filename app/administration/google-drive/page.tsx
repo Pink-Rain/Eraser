@@ -16,15 +16,16 @@ import {
   googleOAuthConfigured,
   googleOAuthRedirectUri,
 } from "@/lib/google-oauth"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
 async function GoogleDriveData({ origin, oauthStatus }: { origin: string; oauthStatus?: string }) {
+  const sessionToken = await currentAuthToken()
   const [configured, oauthSettings, authorization] = await Promise.all([
-    googleOAuthConfigured(),
-    getGoogleOAuthSettings(),
-    getGoogleAuthorization(),
+    googleOAuthConfigured(sessionToken),
+    getGoogleOAuthSettings(sessionToken),
+    getGoogleAuthorization(sessionToken),
   ])
   const callbackUrl = googleOAuthRedirectUri(origin)
   let files: Awaited<ReturnType<typeof listDriveFiles>> = []

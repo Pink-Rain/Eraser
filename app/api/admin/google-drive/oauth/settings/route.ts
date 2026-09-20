@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { saveGoogleOAuthSettings } from "@/lib/google-oauth"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 
 export async function POST(request: Request) {
   const admin = await authorizedAccount(["admin"])
@@ -23,6 +23,7 @@ export async function POST(request: Request) {
       clientId,
       clientSecret: body.clientSecret,
       configuredBy: admin.uid,
+      sessionToken: await currentAuthToken(),
     })
     return NextResponse.json({ ok: true, settings })
   } catch {

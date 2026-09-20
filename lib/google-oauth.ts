@@ -3,6 +3,8 @@ import { env } from "cloudflare:workers"
 
 import { getDb } from "@/db"
 import { googleDriveAuthorizations, googleOAuthFlows, googleOAuthSettings } from "@/db/schema"
+import { remoteAccountsConfig, remoteAccountsFetch } from "@/lib/accounts-remote"
+import { currentAuthToken } from "@/lib/server-auth"
 
 const AUTHORIZATION_ID = "primary"
 const SETTINGS_ID = "primary"
@@ -122,7 +124,15 @@ async function tokenRequest(body: URLSearchParams) {
   return payload
 }
 
-export async function googleOAuthConfigured() {
+export async function googleOAuthConfigured(sessionToken?: string | null) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    try {
+      return Boolean(await getGoogleOAuthSettings(sessionToken))
+    } catch {
+      return false
+    }
+  }
   try {
     await oauthConfig("")
     return true
@@ -144,11 +154,19 @@ export async function googleAuthorizationUrl(input: {
   state: string
   origin: string
   codeChallenge: string
+  sessionToken?: string | null
 }) {
-  const config = await oauthConfig(googleOAuthRedirectUri(input.origin))
+  const redirectUri = googleOAuthRedirectUri(input.origin)
+  const remote = remoteAccountsConfig(env)
+  const clientId = remote
+    ? ((await remoteAccountsFetch(remote, "/google/oauth-settings", { method: "GET", token: input.sessionToken })) as {
+        settings: { clientId: string } | null
+      }).settings?.clientId
+    : (await oauthConfig(redirectUri)).clientId
+  if (!clientId) throw new Error("GOOGLE_OAUTH_NOT_CONFIGURED")
   const parameters = new URLSearchParams({
-    client_id: config.clientId,
-    redirect_uri: config.redirectUri,
+    client_id: clientId,
+    redirect_uri: redirectUri,
     response_type: "code",
     scope: GOOGLE_SCOPES.join(" "),
     access_type: "offline",
@@ -229,7 +247,14 @@ export async function saveGoogleAuthorization(input: {
   return getGoogleAuthorization()
 }
 
-export async function getGoogleAuthorization() {
+export async function getGoogleAuthorization(sessionToken?: string | null) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = (await remoteAccountsFetch(remote, "/google/authorization", { method: "GET", token: sessionToken })) as {
+      authorization: { googleEmail: string; scopes: string; connectedAt: string; updatedAt: string } | null
+    }
+    return response.authorization
+  }
   const [authorization] = await getDb()
     .select({
       googleEmail: googleDriveAuthorizations.googleEmail,
@@ -243,6 +268,40 @@ export async function getGoogleAuthorization() {
   return authorization ?? null
 }
 
+export async function completeGoogleOAuth(input: {
+  code: string
+  origin: string
+  codeVerifier: string
+  expectedEmail?: string
+  connectedBy: string
+}) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const redirectUri = googleOAuthRedirectUri(input.origin)
+    const response = (await remoteAccountsFetch(remote, "/google/oauth/complete", {
+      method: "POST",
+      body: {
+        code: input.code,
+        codeVerifier: input.codeVerifier,
+        redirectUri,
+        expectedEmail: input.expectedEmail,
+        connectedBy: input.connectedBy,
+      },
+    })) as { authorization: { googleEmail: string; scopes: string; connectedAt: string; updatedAt: string } }
+    return response.authorization
+  }
+  const token = await exchangeAuthorizationCode({ code: input.code, origin: input.origin, codeVerifier: input.codeVerifier })
+  const googleEmail = await googleEmailForAccessToken(token.access_token!)
+  if (input.expectedEmail && googleEmail !== input.expectedEmail.trim().toLowerCase()) throw new Error("ACCOUNT_MISMATCH")
+  if (!token.refresh_token) throw new Error("MISSING_REFRESH_TOKEN")
+  return saveGoogleAuthorization({
+    googleEmail,
+    refreshToken: token.refresh_token,
+    scopes: token.scope,
+    connectedBy: input.connectedBy,
+  })
+}
+
 export function googleAuthorizationCanManageAppsScript(
   authorization: { scopes: string } | null,
 ) {
@@ -251,7 +310,14 @@ export function googleAuthorizationCanManageAppsScript(
   return APPS_SCRIPT_SCOPES.every((scope) => grantedScopes.has(scope))
 }
 
-export async function getGoogleOAuthSettings() {
+export async function getGoogleOAuthSettings(sessionToken?: string | null) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = (await remoteAccountsFetch(remote, "/google/oauth-settings", { method: "GET", token: sessionToken })) as {
+      settings: { clientId: string; hasClientSecret: boolean; updatedAt: string } | null
+    }
+    return response.settings
+  }
   const settings = await getGoogleOAuthSettingsWithSecret()
   return settings
     ? {
@@ -266,7 +332,17 @@ export async function saveGoogleOAuthSettings(input: {
   clientId: string
   clientSecret?: string
   configuredBy: string
+  sessionToken?: string | null
 }) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = (await remoteAccountsFetch(remote, "/google/oauth-settings", {
+      method: "POST",
+      token: input.sessionToken,
+      body: { clientId: input.clientId, clientSecret: input.clientSecret },
+    })) as { settings: { clientId: string; hasClientSecret: boolean; updatedAt: string } | null }
+    return response.settings
+  }
   const existing = await getGoogleOAuthSettingsWithSecret()
   const secret = input.clientSecret?.trim()
   const encrypted = secret ? await encryptSecret(secret) : null
@@ -344,6 +420,17 @@ async function getAuthorizationWithToken() {
 
 async function loadGoogleOAuthAccessToken() {
   if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + 60_000) {
+    return cachedAccessToken.token
+  }
+
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const sessionToken = await currentAuthToken().catch(() => undefined)
+    const response = (await remoteAccountsFetch(remote, "/google/access-token", { method: "GET", token: sessionToken })) as {
+      accessToken: string
+      expiresAt: number
+    }
+    cachedAccessToken = { token: response.accessToken, expiresAt: response.expiresAt }
     return cachedAccessToken.token
   }
 

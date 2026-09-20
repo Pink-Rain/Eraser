@@ -58,3 +58,27 @@ Tauri et ne doit exécuter aucune commande.
 - Les secrets et jetons ne sont jamais stockés dans GitHub.
 - Les fonctions critiques sont migrées et testées une par une.
 - L’ancien site reste un filet de sécurité jusqu’à validation de l’application.
+
+## Correctif : comptes, rôles et connexion Google Drive partagés
+
+Le tableau ci-dessus indiquait que `users`, `sessions`,
+`google_drive_authorizations` et `google_oauth_settings` deviendraient une
+« base locale » par machine. En pratique, une page « Comptes et rôles »
+gérée par un·e admin n’a de sens que si tous les comptes sont visibles
+partout, et la connexion Google Drive doit être la même pour tout le monde.
+
+Ces quatre tables sont donc hébergées dans un petit Worker Cloudflare séparé
+et dédié, `worker-accounts/` (nom de déploiement `eraser-accounts`), avec sa
+propre base D1 — distincte de tout Worker/D1 « Sites » historique, jamais
+touché par ce correctif. Chaque application Windows reste un serveur local
+autonome (aucune dépendance à une URL de site central), mais appelle ce
+Worker pour tout ce qui concerne comptes/rôles/Drive lorsque
+`ERASER_ACCOUNTS_API_URL`/`ERASER_ACCOUNTS_API_KEY` sont configurés (voir
+`lib/accounts-remote.ts`). Sans ces variables, le comportement local d’origine
+est conservé à l’identique.
+
+Restent strictement locales, comme prévu à l’origine : `google_oauth_flows`
+(état PKCE éphémère, seule la machine qui a initié la connexion reçoit la
+redirection Google) et `user_identity_links` (pont vers d’anciens UID Google
+Sheets). Les données de jeu (personnages, campagnes, classes…) restent sur
+Google Sheets/Drive, inchangé.

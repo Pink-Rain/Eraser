@@ -4,6 +4,7 @@ import { env } from "cloudflare:workers"
 import { getDb } from "@/db"
 import { sessions, users } from "@/db/schema"
 import type { AccountRecord, AccountStatus, SiteRole } from "@/lib/auth-types"
+import { remoteAccountsConfig, remoteAccountsFetch } from "@/lib/accounts-remote"
 
 // Cloudflare Workers caps PBKDF2 at 100,000 iterations per derivation.
 const PASSWORD_ITERATIONS = 100_000
@@ -92,6 +93,12 @@ export async function registerAccount(input: {
   displayName: string
   adminCode?: string
 }) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, "/register", { method: "POST", body: input })
+    return response as { account: AccountRecord; session: { token: string; expiresAt: string } }
+  }
+
   const db = getDb()
   const email = input.email.trim().toLowerCase()
   const existing = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1)
@@ -123,6 +130,12 @@ export async function registerAccount(input: {
 }
 
 export async function loginAccount(email: string, password: string) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, "/login", { method: "POST", body: { email, password } })
+    return response as { account: AccountRecord; session: { token: string; expiresAt: string } }
+  }
+
   const db = getDb()
   const [user] = await db
     .select()
@@ -136,6 +149,12 @@ export async function loginAccount(email: string, password: string) {
 }
 
 export async function accountFromSession(token: string) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, "/session", { method: "GET", token }).catch(() => null)
+    return (response as { account: AccountRecord } | null)?.account ?? null
+  }
+
   const tokenHash = await sha256(token)
   const db = getDb()
   const [session] = await db
@@ -149,10 +168,20 @@ export async function accountFromSession(token: string) {
 }
 
 export async function deleteSession(token: string) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    await remoteAccountsFetch(remote, "/logout", { method: "POST", token }).catch(() => null)
+    return
+  }
   await getDb().delete(sessions).where(eq(sessions.tokenHash, await sha256(token)))
 }
 
-export async function listAccounts() {
+export async function listAccounts(sessionToken?: string) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, "/accounts", { method: "GET", token: sessionToken })
+    return (response as { accounts: AccountRecord[] }).accounts
+  }
   const rows = await getDb().select().from(users).orderBy(asc(users.createdAt))
   return rows.map(accountRecord)
 }
@@ -161,7 +190,17 @@ export async function updateAccountAccess(
   uid: string,
   role: SiteRole,
   status: AccountStatus,
+  sessionToken?: string,
 ) {
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}/access`, {
+      method: "POST",
+      body: { role, status },
+      token: sessionToken,
+    })
+    return (response as { account: AccountRecord }).account
+  }
   const now = new Date().toISOString()
   await getDb().update(users).set({ role, status, updatedAt: now }).where(eq(users.id, uid))
   const [updated] = await getDb().select().from(users).where(eq(users.id, uid)).limit(1)
@@ -169,8 +208,17 @@ export async function updateAccountAccess(
   return accountRecord(updated)
 }
 
-export async function resetAccountPasswordByAdmin(uid: string, password: string) {
+export async function resetAccountPasswordByAdmin(uid: string, password: string, sessionToken?: string) {
   if (password.length < 8) throw new Error("INVALID_PASSWORD")
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, `/accounts/${encodeURIComponent(uid)}/password`, {
+      method: "POST",
+      body: { password },
+      token: sessionToken,
+    })
+    return (response as { account: AccountRecord }).account
+  }
   const db = getDb()
   const [user] = await db.select().from(users).where(eq(users.id, uid)).limit(1)
   if (!user) throw new Error("ACCOUNT_NOT_FOUND")

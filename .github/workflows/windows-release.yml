@@ -36,6 +36,20 @@ jobs:
       - name: Installer les dépendances
         run: npm ci
 
+      - name: Générer la configuration de l’annuaire de comptes partagé
+        shell: bash
+        env:
+          ERASER_ACCOUNTS_API_URL: ${{ secrets.ERASER_ACCOUNTS_API_URL }}
+          ERASER_ACCOUNTS_API_KEY: ${{ secrets.ERASER_ACCOUNTS_API_KEY }}
+        run: |
+          node -e "
+            const fs = require('fs');
+            const url = process.env.ERASER_ACCOUNTS_API_URL || '';
+            const apiKey = process.env.ERASER_ACCOUNTS_API_KEY || '';
+            const body = 'module.exports = ' + JSON.stringify({ url, apiKey }, null, 2) + ';\n';
+            fs.writeFileSync('desktop/accounts-config.generated.cjs', body, 'utf8');
+          "
+
       - name: Construire l’installateur
         run: npm run desktop:dist
         env:

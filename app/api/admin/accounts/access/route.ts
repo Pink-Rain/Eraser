@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import type { AccountStatus, SiteRole } from "@/lib/auth-types"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { updateAccountAccess } from "@/lib/site-auth"
 
 const roles: SiteRole[] = ["admin", "mj", "joueur"]
@@ -26,6 +26,6 @@ export async function POST(request: Request) {
     )
   }
 
-  const updated = await updateAccountAccess(body.uid, body.role, body.status)
+  const updated = await updateAccountAccess(body.uid, body.role, body.status, await currentAuthToken())
   return NextResponse.json({ ok: true, account: updated })
 }

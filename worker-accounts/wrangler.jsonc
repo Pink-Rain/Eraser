@@ -1,0 +1,13 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "eraser-accounts",
+  "main": "src/index.ts",
+  "compatibility_date": "2024-09-23",
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "eraser-accounts-db",
+      "database_id": "REPLACE_AFTER_WRANGLER_D1_CREATE"
+    }
+  ]
+}

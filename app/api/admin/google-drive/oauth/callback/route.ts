@@ -1,12 +1,7 @@
 import { cookies } from "next/headers"
 import { NextResponse } from "next/server"
 
-import {
-  exchangeAuthorizationCode,
-  googleEmailForAccessToken,
-  saveGoogleAuthorization,
-  takeGoogleOAuthFlow,
-} from "@/lib/google-oauth"
+import { completeGoogleOAuth, takeGoogleOAuthFlow } from "@/lib/google-oauth"
 import { authorizedAccount } from "@/lib/server-auth"
 
 const STATE_COOKIE = "eraser_google_oauth_state"
@@ -45,22 +40,17 @@ export async function GET(request: Request) {
     const code = requestUrl.searchParams.get("code")
     if (!code) return desktopResponse("invalid_state")
     try {
-      const token = await exchangeAuthorizationCode({
+      await completeGoogleOAuth({
         code,
         origin: requestUrl.origin,
         codeVerifier: desktopFlow.codeVerifier,
-      })
-      const googleEmail = await googleEmailForAccessToken(token.access_token!)
-      if (googleEmail !== desktopFlow.googleEmail) return desktopResponse("account_mismatch")
-      if (!token.refresh_token) return desktopResponse("missing_refresh_token")
-      await saveGoogleAuthorization({
-        googleEmail,
-        refreshToken: token.refresh_token,
-        scopes: token.scope,
+        expectedEmail: desktopFlow.googleEmail,
         connectedBy: desktopFlow.connectedBy,
       })
       return desktopResponse("connected")
-    } catch {
+    } catch (error) {
+      if (error instanceof Error && error.message === "ACCOUNT_MISMATCH") return desktopResponse("account_mismatch")
+      if (error instanceof Error && error.message === "MISSING_REFRESH_TOKEN") return desktopResponse("missing_refresh_token")
       return desktopResponse("failed")
     }
   }
@@ -87,22 +77,17 @@ export async function GET(request: Request) {
   }
 
   try {
-    const token = await exchangeAuthorizationCode({
+    await completeGoogleOAuth({
       code,
       origin: requestUrl.origin,
       codeVerifier,
-    })
-    const googleEmail = await googleEmailForAccessToken(token.access_token!)
-    if (googleEmail !== expectedEmail) return completedResponse(request, "account_mismatch")
-    if (!token.refresh_token) return completedResponse(request, "missing_refresh_token")
-    await saveGoogleAuthorization({
-      googleEmail,
-      refreshToken: token.refresh_token,
-      scopes: token.scope,
+      expectedEmail,
       connectedBy: admin.uid,
     })
     return completedResponse(request, "connected")
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "ACCOUNT_MISMATCH") return completedResponse(request, "account_mismatch")
+    if (error instanceof Error && error.message === "MISSING_REFRESH_TOKEN") return completedResponse(request, "missing_refresh_token")
     return completedResponse(request, "failed")
   }
 }
