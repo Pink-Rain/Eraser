@@ -1,38 +1,28 @@
-# Eraser 0.1.1-alpha.22 — comptes et propriétaires réparés
-
-L'alpha.21 (annuaire de comptes partagé) laissait plusieurs écrans
-d'administration comparer les comptes réels — qui vivent désormais sur le
-Worker de comptes partagé — à la table locale `users`, restée vide. Cette
-version corrige les conséquences les plus gênantes.
+# Eraser 0.1.1-alpha.23 — faux échec à l'ajout d'un personnage, erreurs plus précises
 
 ## Corrigé
 
-- **Réattribuer un personnage ou une campagne échouait toujours**, y
-  compris en choisissant son propre compte, avec le message « Ce compte
-  n'existe plus » : la vérification comparait le compte choisi à la table
-  locale vide au lieu de l'annuaire de comptes réel.
-- **« Toutes les campagnes » et « Tous les personnages » affichaient les
-  vrais comptes comme des « Identifiant historique »** (avec un
-  identifiant technique à la place du nom) pour la même raison.
+- **Ajouter un personnage à une campagne pouvait afficher une erreur alors
+  que l'ajout avait réellement fonctionné**, visible seulement après avoir
+  rafraîchi la page : la liste des membres de la campagne relit ensuite
+  Google Sheets pour enrichir l'affichage (classe, niveau, titre), et une
+  lecture ratée sur ce point faisait échouer toute l'opération alors que
+  le lien campagne/personnage était déjà enregistré. Cette lecture
+  d'enrichissement ne fait plus échouer l'opération si elle rate.
 
-## Ajouté
+## Diagnostic
 
-- **Suppression de compte** : un administrateur peut maintenant supprimer
-  un compte utilisateur (sauf le sien, et sauf un compte qui a connecté
-  Google Drive ou configuré la connexion Google — il faut d'abord relier
-  un autre compte). Les personnages et campagnes de ce compte ne sont pas
-  supprimés ; réattribue-les si besoin.
-- Retiré la fonctionnalité « changer le mot de passe d'un compte » côté
-  administration (bouton, route et Worker de comptes).
+Ces écrans affichent maintenant la vraie raison technique au lieu d'un
+message générique, ce qui permettra de cerner précisément les bugs encore
+signalés (classes invisibles pour un compte, magasins qui ne
+s'enregistrent pas) :
 
-## Non résolu, en attente d'informations
-
-- Un administrateur ne voit toujours pas l'index des classes le temps que
-  la mise à jour se propage à son installation — sera revisité si le
-  problème persiste après cette version.
-- L'ajout d'un personnage joueur à une campagne pouvait échouer quand la
-  campagne appartenait à un identifiant historique non réattribué : à
-  revérifier maintenant que la réattribution fonctionne.
+- Règles > Classe et Ressources > Index des classes affichent le code
+  d'erreur réel (visible par les administrateurs) sous le message
+  générique quand le chargement échoue.
+- Les magasins et l'ajout de personnage à une campagne distinguent
+  maintenant une vraie panne de connexion Google Sheets/Drive des autres
+  échecs.
 
 ## Vérifications
 
