@@ -224,12 +224,60 @@ export type FormattedSheet = {
   rows: FormattedSheetCell[][]
 }
 
+// The sheet-id mapping (jdr_google_sheets) lives in each installation's own
+// local database, while the sheets themselves are shared in Drive. A copy of
+// Eraser whose admin never ran "Relier mes feuilles existantes" therefore has
+// an empty mapping, and every read path used to silently return "no data"
+// instead of the shared content — classes disappeared, campaigns never synced,
+// and any account on a fresh installation saw an empty app. Write paths never
+// had that problem because ensureJdrSheet() links the sheet on the fly.
+//
+// This is the read-side equivalent: it links an existing Drive sheet into this
+// installation when the mapping is missing, but never creates one (AGENTS.md:
+// never recreate a sheet that already exists in the connected Drive).
+const missingJdrSheetRetryAt = new Map<JdrSheetKey, number>()
+const pendingJdrSheetResolutions = new Map<JdrSheetKey, Promise<JdrSheetRecord | null>>()
+const MISSING_JDR_SHEET_RETRY_MS = 60_000
+
+async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null> {
+  const stored = await getJdrSheet(key)
+  if (stored) return stored
+  const retryAt = missingJdrSheetRetryAt.get(key) ?? 0
+  if (retryAt > Date.now()) return null
+  const pending = pendingJdrSheetResolutions.get(key)
+  if (pending) return pending
+  const resolution = (async () => {
+    const definition = jdrSheetDefinitions.find((item) => item.key === key)
+    if (!definition) return null
+    try {
+      const file = await findGoogleSpreadsheetByName(definition.name)
+      if (!file) {
+        missingJdrSheetRetryAt.set(key, Date.now() + MISSING_JDR_SHEET_RETRY_MS)
+        return null
+      }
+      return await saveJdrSheet({
+        key,
+        spreadsheetId: file.id,
+        name: definition.name,
+        tabName: definition.tabName,
+        webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
+      })
+    } catch (error) {
+      console.error("JDR_SHEET_AUTOLINK_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      missingJdrSheetRetryAt.set(key, Date.now() + MISSING_JDR_SHEET_RETRY_MS)
+      return null
+    }
+  })().finally(() => pendingJdrSheetResolutions.delete(key))
+  pendingJdrSheetResolutions.set(key, resolution)
+  return resolution
+}
+
 async function charactersSource() {
   const runtime = runtimeEnv()
   const spreadsheetId = runtime.GOOGLE_CHARACTERS_SHEET_ID
   const tab = runtime.GOOGLE_CHARACTERS_TAB || "Personnages"
   if (spreadsheetId) return { spreadsheetId, tabName: tab, range: `${tab}!A:E` }
-  const stored = await getJdrSheet("characters")
+  const stored = await resolveJdrSheet("characters")
   return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName, range: `${stored.tabName}!A:E` } : null
 }
 
@@ -238,12 +286,12 @@ async function classesSource() {
   const spreadsheetId = runtime.GOOGLE_CLASSES_SHEET_ID
   const tab = runtime.GOOGLE_CLASSES_TAB || "Classes"
   if (spreadsheetId) return { spreadsheetId, range: `${tab}!A:K` }
-  const stored = await getJdrSheet("classes")
+  const stored = await resolveJdrSheet("classes")
   return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:K` } : null
 }
 
 async function campaignsSource() {
-  const stored = await getJdrSheet("campaigns")
+  const stored = await resolveJdrSheet("campaigns")
   return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:F` } : null
 }
 
@@ -1095,7 +1143,9 @@ function numberFromCell(value: unknown, fallback = 0) {
 
 async function loadClassesFromGoogle() {
   const source = await classesSource()
-  if (!source) return []
+  // Returning [] here would surface as "aucune classe" instead of telling the
+  // admin the sheet simply isn't reachable from this installation.
+  if (!source) throw new Error("CLASSES_SHEET_NOT_LINKED")
   const tabName = source.range.split("!")[0]
   await ensureSheetColumnCount(source.spreadsheetId, tabName, 11)
   const [headers = []] = await readRange(source.spreadsheetId, `${tabName}!A1:K1`, "FORMULA")
@@ -2309,7 +2359,7 @@ export async function syncExistingIdentityIndexes() {
   const [campaignSource, characterSource, relationSource] = await Promise.all([
     campaignsSource(),
     charactersSource(),
-    getJdrSheet("campaign_characters"),
+    resolveJdrSheet("campaign_characters"),
   ])
   const [campaignRows, characterRows, relationRows] = await Promise.all([
     campaignSource ? readRange(campaignSource.spreadsheetId, campaignSource.range).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
@@ -4842,7 +4892,7 @@ async function configureExistingClassesSheet(spreadsheetId: string) {
 }
 
 export async function seedDefaultClasses() {
-  const source = await getJdrSheet("classes")
+  const source = await resolveJdrSheet("classes")
   if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
   await configureExistingClassesSheet(source.spreadsheetId)
 
@@ -4865,7 +4915,7 @@ export async function seedDefaultClasses() {
 }
 
 export async function ensureDefaultClassesIfEmpty() {
-  const source = await getJdrSheet("classes")
+  const source = await resolveJdrSheet("classes")
   if (!source) return { seeded: false, count: 0 }
   const current = await readRange(source.spreadsheetId, `${source.tabName}!A2:C26`)
   const count = current.filter((row) => row[0] && row[2]).length
@@ -4876,5 +4926,5 @@ export async function ensureDefaultClassesIfEmpty() {
 
 export async function sheetsConfigured() {
   if (googleServiceConfigured() && runtimeEnv().GOOGLE_CHARACTERS_SHEET_ID) return true
-  return Boolean(await getJdrSheet("characters"))
+  return Boolean(await resolveJdrSheet("characters"))
 }

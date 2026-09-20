@@ -38,7 +38,9 @@ async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSamp
       })} />}
       {loadError && (
         <div className="mt-10 rounded-2xl border border-destructive/30 bg-destructive/5 px-5 py-4 text-sm text-destructive">
-          L’index Google Sheets est momentanément indisponible.
+          {loadErrorDetail === "CLASSES_SHEET_NOT_LINKED"
+            ? "La feuille « Classes » n’est pas reliée à cette installation d’Eraser. Un administrateur doit ouvrir Administration → Google Drive et cliquer sur « Relier mes feuilles existantes »."
+            : "L’index Google Sheets est momentanément indisponible."}
           {showErrorDetail && loadErrorDetail && <span className="mt-1 block font-mono text-xs opacity-80">{loadErrorDetail}</span>}
         </div>
       )}
