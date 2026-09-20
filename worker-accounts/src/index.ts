@@ -302,6 +302,37 @@ async function handleDeleteAccount(request: Request, env: Env, uid: string) {
   return json({ ok: true })
 }
 
+type IdentityLinkRow = { local_user_id: string; legacy_uid: string; updated_at: string }
+
+async function handleListIdentityLinks(request: Request, env: Env) {
+  await requireAccount(request, env)
+  const { results } = await env.DB.prepare("SELECT * FROM user_identity_links").all<IdentityLinkRow>()
+  const links = (results as IdentityLinkRow[]).map((row) => ({
+    localUserId: row.local_user_id,
+    legacyUid: row.legacy_uid,
+    updatedAt: row.updated_at,
+  }))
+  return json({ links })
+}
+
+async function handleSaveIdentityLink(request: Request, env: Env) {
+  const account = await requireAccount(request, env)
+  const body = await readJson<{ localUserId?: string; legacyUid?: string }>(request)
+  const localUserId = body.localUserId?.trim() || account.id
+  const legacyUid = body.legacyUid?.trim() ?? ""
+  // Only an admin can rewrite someone else's identity link.
+  if (localUserId !== account.id && account.role !== "admin") throw new HttpError(403, "FORBIDDEN")
+  if (!legacyUid || legacyUid.length > 200 || legacyUid === localUserId) throw new HttpError(400, "INVALID_LEGACY_IDENTITY")
+  const owner = await env.DB.prepare("SELECT local_user_id FROM user_identity_links WHERE legacy_uid = ?1").bind(legacyUid).first<{ local_user_id: string }>()
+  if (owner && owner.local_user_id !== localUserId) throw new HttpError(409, "LEGACY_IDENTITY_TAKEN")
+  const now = new Date().toISOString()
+  await env.DB.prepare(
+    `INSERT INTO user_identity_links (local_user_id, legacy_uid, updated_at) VALUES (?1, ?2, ?3)
+     ON CONFLICT(local_user_id) DO UPDATE SET legacy_uid = excluded.legacy_uid, updated_at = excluded.updated_at`,
+  ).bind(localUserId, legacyUid, now).run()
+  return json({ link: { localUserId, legacyUid, updatedAt: now } })
+}
+
 // ---------- Google Drive connection (shared) ----------
 
 async function oauthSettingsRow(env: Env) {
@@ -521,6 +552,9 @@ const worker = {
 
       const accessMatch = path.match(/^\/accounts\/([^/]+)\/access$/)
       if (method === "POST" && accessMatch) return await handleUpdateAccess(request, env, decodeURIComponent(accessMatch[1]))
+
+      if (method === "GET" && path === "/identity-links") return await handleListIdentityLinks(request, env)
+      if (method === "POST" && path === "/identity-links") return await handleSaveIdentityLink(request, env)
 
       const accountMatch = path.match(/^\/accounts\/([^/]+)$/)
       if (method === "DELETE" && accountMatch) return await handleDeleteAccount(request, env, decodeURIComponent(accountMatch[1]))

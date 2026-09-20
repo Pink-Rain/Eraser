@@ -140,6 +140,55 @@ export async function downloadDriveFile(fileId: string) {
   )
 }
 
+export async function ensureDriveFolder(name: string) {
+  const existing = await findDriveFolderByName(name)
+  if (existing) return existing.id
+  const created = await driveJson<DriveFile>("files?fields=id,name,mimeType", {
+    method: "POST",
+    body: JSON.stringify({ name: name.trim(), mimeType: FOLDER_MIME_TYPE }),
+  })
+  return created.id
+}
+
+export async function findDriveFileByName(folderId: string, name: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(folderId)) throw new Error("INVALID_DRIVE_FILE_ID")
+  const files = await listFilesMatching(
+    `name = '${driveQueryValue(name)}' and '${folderId}' in parents and trashed = false`,
+  )
+  return files.sort((left, right) => (right.modifiedTime || "").localeCompare(left.modifiedTime || ""))[0] ?? null
+}
+
+// Drive's multipart upload: metadata part, then the bytes, in one request.
+export async function uploadDriveFile(input: {
+  folderId: string
+  name: string
+  contentType: string
+  bytes: ArrayBuffer
+}) {
+  const boundary = `eraser${crypto.randomUUID().replace(/-/g, "")}`
+  const metadata = JSON.stringify({ name: input.name, parents: [input.folderId] })
+  const encoder = new TextEncoder()
+  const head = encoder.encode(
+    `--${boundary}\r\ncontent-type: application/json; charset=UTF-8\r\n\r\n${metadata}\r\n--${boundary}\r\ncontent-type: ${input.contentType}\r\n\r\n`,
+  )
+  const tail = encoder.encode(`\r\n--${boundary}--\r\n`)
+  const payload = new Uint8Array(head.byteLength + input.bytes.byteLength + tail.byteLength)
+  payload.set(head, 0)
+  payload.set(new Uint8Array(input.bytes), head.byteLength)
+  payload.set(tail, head.byteLength + input.bytes.byteLength)
+  const response = await googleOAuthAuthorizedFetch(
+    "https://www.googleapis.com/upload/drive/v3/files?uploadType=multipart&fields=id,name,mimeType,modifiedTime,webViewLink",
+    {
+      method: "POST",
+      headers: { "content-type": `multipart/related; boundary=${boundary}` },
+      body: payload,
+    },
+  )
+  const payloadJson = (await response.json()) as DriveFile & { error?: { message?: string } }
+  if (!response.ok || !payloadJson.id) throw new Error(payloadJson.error?.message || `DRIVE_UPLOAD_FAILED:${response.status}`)
+  return payloadJson
+}
+
 export async function createGoogleSpreadsheet(name: string) {
   const normalizedName = name.trim()
   if (!normalizedName || normalizedName.length > 120) throw new Error("INVALID_SHEET_NAME")

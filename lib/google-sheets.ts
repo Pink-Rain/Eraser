@@ -2401,57 +2401,68 @@ export async function syncExistingIdentityIndexes() {
     relationSource ? readRange(relationSource.spreadsheetId, sheetTabRange(relationSource.tabName, "A:B")).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
   ])
   const now = new Date().toISOString()
+  const db = getDb()
+  // Only write rows that actually changed. This used to upsert every row of
+  // every sheet on each call — hundreds of sequential writes per page load,
+  // even when nothing had moved. In steady state it now writes nothing.
+  const [existingCampaigns, existingCharacters, existingLinks] = await Promise.all([
+    db.select().from(campaignIndex),
+    db.select().from(characterIndex),
+    db.select().from(campaignCharacters),
+  ])
+  const campaignById = new Map(existingCampaigns.map((row) => [row.id, row]))
+  const characterById = new Map(existingCharacters.map((row) => [row.id, row]))
+  const linkKeys = new Set(existingLinks.map((row) => `${row.campaignId}::${row.characterId}`))
+
   for (const row of campaignRows.slice(1)) {
     if (!row[0]) continue
-    await getDb().insert(campaignIndex).values({
-      id: row[0],
+    const next = {
       mjUid: row[1] || "",
       name: row[2] || "Campagne sans nom",
       description: row[3] || "",
       bannerUrl: row[4] || "",
       accentColor: row[5] || "#927640",
-      updatedAt: now,
-      deletedAt: null,
-    }).onConflictDoUpdate({
-      target: campaignIndex.id,
-      set: {
-        mjUid: row[1] || "",
-        name: row[2] || "Campagne sans nom",
-        description: row[3] || "",
-        bannerUrl: row[4] || "",
-        accentColor: row[5] || "#927640",
-        updatedAt: now,
-      },
-    })
+    }
+    const current = campaignById.get(row[0])
+    if (current
+      && !current.deletedAt
+      && current.mjUid === next.mjUid
+      && current.name === next.name
+      && current.description === next.description
+      && current.bannerUrl === next.bannerUrl
+      && current.accentColor === next.accentColor) continue
+    await db.insert(campaignIndex).values({ id: row[0], ...next, updatedAt: now, deletedAt: null })
+      .onConflictDoUpdate({ target: campaignIndex.id, set: { ...next, updatedAt: now } })
   }
+
   for (const row of characterRows.slice(1)) {
     if (!row[0]) continue
-    await getDb().insert(characterIndex).values({
-      id: row[0],
+    const next = {
       ownerUid: row[1] || "",
       name: row[2] || "Personnage sans nom",
       subtitle: row[3] || "",
       updatedAt: row[4] || now,
-      deletedAt: null,
-    }).onConflictDoUpdate({
-      target: characterIndex.id,
-      set: {
-        ownerUid: row[1] || "",
-        name: row[2] || "Personnage sans nom",
-        subtitle: row[3] || "",
-        updatedAt: row[4] || now,
-      },
-    })
+    }
+    const current = characterById.get(row[0])
+    if (current
+      && !current.deletedAt
+      && current.ownerUid === next.ownerUid
+      && current.name === next.name
+      && current.subtitle === next.subtitle
+      && current.updatedAt === next.updatedAt) continue
+    await db.insert(characterIndex).values({ id: row[0], ...next, deletedAt: null })
+      .onConflictDoUpdate({ target: characterIndex.id, set: next })
   }
+
   for (const row of relationRows.slice(1)) {
-    if (!row[0] || !row[1]) continue
-    await getDb().insert(campaignCharacters).values({ campaignId: row[0], characterId: row[1] }).onConflictDoNothing()
+    if (!row[0] || !row[1] || linkKeys.has(`${row[0]}::${row[1]}`)) continue
+    await db.insert(campaignCharacters).values({ campaignId: row[0], characterId: row[1] }).onConflictDoNothing()
   }
   return { campaigns: Math.max(0, campaignRows.length - 1), characters: Math.max(0, characterRows.length - 1) }
 }
 
 export async function listLegacyIdentityCandidates(localUserId: string): Promise<LegacyIdentityCandidate[]> {
-  await syncExistingIdentityIndexes()
+  await ensureIdentityIndexes()
   const [campaigns, characters, links, currentLink] = await Promise.all([
     getDb().select({ uid: campaignIndex.mjUid, name: campaignIndex.name }).from(campaignIndex).where(isNull(campaignIndex.deletedAt)),
     getDb().select({ uid: characterIndex.ownerUid, name: characterIndex.name }).from(characterIndex).where(isNull(characterIndex.deletedAt)),
@@ -3323,7 +3334,7 @@ async function accountLookup(sessionToken?: string) {
 }
 
 export async function listAllCharactersForAdmin(sessionToken?: string) {
-  await syncExistingIdentityIndexes()
+  await ensureIdentityIndexes()
   const [rows, owners] = await Promise.all([
     getDb().select({ character: characterIndex }).from(characterIndex)
       .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
@@ -3341,7 +3352,7 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
 }
 
 export async function listAllCampaignsForAdmin(sessionToken?: string) {
-  await syncExistingIdentityIndexes()
+  await ensureIdentityIndexes()
   const [rows, owners, links] = await Promise.all([
     getDb().select({ campaign: campaignIndex }).from(campaignIndex)
       .where(isNull(campaignIndex.deletedAt)).orderBy(campaignIndex.name).limit(500),
@@ -3374,7 +3385,7 @@ export async function updateAdminItemOwner(
     if (!owners.has(normalizedOwnerUid)) throw new Error("OWNER_NOT_FOUND")
   }
 
-  await syncExistingIdentityIndexes()
+  await ensureIdentityIndexes()
   if (kind === "character") {
     const [character] = await db.select({ id: characterIndex.id }).from(characterIndex)
       .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)

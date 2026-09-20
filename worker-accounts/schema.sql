@@ -51,3 +51,16 @@ CREATE TABLE IF NOT EXISTS google_oauth_settings (
   configured_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
+
+-- Lien entre un compte et l'identifiant historique que ses données portent
+-- déjà dans Google Sheets. Il vivait dans la base locale de chaque
+-- installation : une réattribution faite sur un ordinateur restait invisible
+-- partout ailleurs. C'est une information de compte, donc elle est partagée.
+CREATE TABLE IF NOT EXISTS user_identity_links (
+  local_user_id TEXT PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+  legacy_uid TEXT NOT NULL UNIQUE,
+  created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  updated_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP
+);
+
+CREATE INDEX IF NOT EXISTS user_identity_links_legacy_uid_idx ON user_identity_links(legacy_uid);
