@@ -191,14 +191,15 @@ function classAccents(type: ClassType, dark: string | undefined, light: string |
 }
 
 type ValuesResponse = { values?: GoogleSheetCellValue[][] }
-type UpdateValuesResponse = { updatedData?: { values?: GoogleSheetCellValue[][] } }
+type UpdateValuesResponse = {
+  updatedRange?: string
+  updatedRows?: number
+  updatedColumns?: number
+  updatedCells?: number
+  updatedData?: { values?: GoogleSheetCellValue[][] }
+}
 type AppendValuesResponse = {
-  updates?: {
-    updatedRange?: string
-    updatedRows?: number
-    updatedColumns?: number
-    updatedCells?: number
-  }
+  updates?: UpdateValuesResponse
 }
 
 export type AppendRowsResult = {
@@ -206,6 +207,12 @@ export type AppendRowsResult = {
   updatedRows: number
   updatedColumns: number
   updatedCells: number
+  updatedValues: string[][]
+}
+
+type WriteValuesOptions = {
+  valueInputOption?: "RAW" | "USER_ENTERED"
+  includeValuesInResponse?: boolean
 }
 type GridNotesResponse = {
   sheets?: Array<{
@@ -582,9 +589,18 @@ export async function appendRows(
   spreadsheetId: string,
   range: string,
   values: Array<Array<string | number | boolean>>,
+  options: WriteValuesOptions = {},
 ) {
+  const parameters = new URLSearchParams({
+    valueInputOption: options.valueInputOption || "USER_ENTERED",
+    insertDataOption: "INSERT_ROWS",
+  })
+  if (options.includeValuesInResponse) {
+    parameters.set("includeValuesInResponse", "true")
+    parameters.set("responseValueRenderOption", "FORMATTED_VALUE")
+  }
   const response = await googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
+    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?${parameters.toString()}`,
     { method: "POST", body: JSON.stringify({ values }) },
   )
   clearSpreadsheetReadCache(spreadsheetId)
@@ -609,6 +625,7 @@ export async function appendRows(
     updatedRows: updates?.updatedRows ?? values.length,
     updatedColumns: updates?.updatedColumns ?? 0,
     updatedCells: updates?.updatedCells ?? 0,
+    updatedValues: normalizeGoogleSheetRows(updates?.updatedData?.values),
   } satisfies AppendRowsResult
 }
 
@@ -642,13 +659,24 @@ async function updateRangeAndReturnValues(
   return normalizeGoogleSheetRows(((await response.json()) as UpdateValuesResponse).updatedData?.values)
 }
 
-async function updateRanges(spreadsheetId: string, data: Array<{ range: string; values: Array<Array<string | number | boolean>> }>) {
-  if (!data.length) return
-  await googleSheetsFetch(`spreadsheets/${spreadsheetId}/values:batchUpdate`, {
+async function updateRanges(
+  spreadsheetId: string,
+  data: Array<{ range: string; values: Array<Array<string | number | boolean>> }>,
+  options: WriteValuesOptions = {},
+) {
+  if (!data.length) return [] as UpdateValuesResponse[]
+  const response = await googleSheetsFetch(`spreadsheets/${spreadsheetId}/values:batchUpdate`, {
     method: "POST",
-    body: JSON.stringify({ valueInputOption: "USER_ENTERED", data }),
+    body: JSON.stringify({
+      valueInputOption: options.valueInputOption || "USER_ENTERED",
+      includeValuesInResponse: options.includeValuesInResponse || false,
+      responseValueRenderOption: "FORMATTED_VALUE",
+      data,
+    }),
   })
   clearSpreadsheetReadCache(spreadsheetId)
+  const payload = (await response.json()) as { responses?: UpdateValuesResponse[] }
+  return payload.responses ?? []
 }
 
 export type ObjectIndexRow = {
@@ -2682,20 +2710,26 @@ async function testJdrSheetWrite(spreadsheetId: string, definition: StructuredSh
   const marker = `diagnostic:${crypto.randomUUID()}`
   const lastColumn = columnName(definition.headers.length)
   const range = sheetTabRange(definition.tabName, `A:${lastColumn}`)
+  let writtenRange = ""
   try {
     const probe = [marker, ...Array(Math.max(0, definition.headers.length - 1)).fill("")]
-    await appendRows(spreadsheetId, range, [probe])
+    const write = await appendRows(spreadsheetId, range, [probe], { valueInputOption: "RAW", includeValuesInResponse: true })
+    writtenRange = write.updatedRange
     clearSpreadsheetReadCache(spreadsheetId)
-    const rows = await readRange(spreadsheetId, sheetTabRange(definition.tabName, "A:A"))
-    const rowNumber = rows.findIndex((row) => row[0] === marker) + 1
-    if (!rowNumber) return "\u00c9criture accept\u00e9e par Google, mais la ligne t\u00e9moin est introuvable \u00e0 la relecture."
-    await updateRanges(spreadsheetId, [{
-      range: sheetTabRange(definition.tabName, `A${rowNumber}:${lastColumn}${rowNumber}`),
-      values: [Array(definition.headers.length).fill("")],
-    }])
+    const rows = await readRange(spreadsheetId, writtenRange)
+    const confirmed = rows.some((row) => row[0] === marker)
+      || write.updatedValues.some((row) => row[0] === marker)
+    if (!confirmed) return `\u00c9criture accept\u00e9e par Google dans ${writtenRange}, mais la ligne t\u00e9moin est introuvable \u00e0 la relecture.`
     return ""
   } catch (error) {
     return error instanceof Error ? error.message : "UNKNOWN_ERROR"
+  } finally {
+    if (writtenRange) {
+      await updateRanges(spreadsheetId, [{
+        range: writtenRange,
+        values: [[""]],
+      }], { valueInputOption: "RAW" }).catch(() => undefined)
+    }
   }
 }
 
@@ -2879,7 +2913,7 @@ export async function listLatestShops(pageLinked: string): Promise<GeneratedShop
 }
 
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
-  await writeShopRows(pageLinked, shops, options)
+  const receipts = await writeShopRows(pageLinked, shops, options)
   // On relit la feuille pour vérifier que les lignes y sont vraiment. Sans ce
   // contrôle, une écriture acceptée par Google mais sans effet (mauvais onglet,
   // plage hors grille…) affichait « Magasin(s) sauvegardé(s) » alors que rien
@@ -2887,9 +2921,24 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
   if (!shops.length) return []
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
-  clearSpreadsheetReadCache(sheet.spreadsheetId)
-  const written = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)
-  const storedById = new Map(written.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : []))
+  let storedById = new Map<string, SavedShopRecord>()
+  const delays = [0, 100, 250, 500]
+  for (const delay of delays) {
+    if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    const written = await readRanges(sheet.spreadsheetId, receipts.map((receipt) => receipt.range))
+    storedById = new Map(written.flatMap((rows) => rows.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : [])))
+    if (shops.every((shop) => storedById.has(shop.id))) break
+  }
+  // La réponse d'écriture Google contient les valeurs réellement acceptées.
+  // Elle sert de preuve de secours si la relecture exacte est brièvement en
+  // retard, sans transformer un simple HTTP 200 en faux succès.
+  for (const receipt of receipts) {
+    for (const row of receipt.updatedValues) {
+      const stored = savedShopFromRow(row)
+      if (stored && !storedById.has(stored.id)) storedById.set(stored.id, stored)
+    }
+  }
   const invalid = shops.filter((shop) => {
     const stored = storedById.get(shop.id)
     if (!stored || stored.pageLinked !== pageLinked) return true
@@ -2902,6 +2951,23 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
     const stored = storedById.get(shop.id)
     return stored ? [stored] : []
   })
+}
+
+type ShopWriteReceipt = { range: string; updatedValues: string[][] }
+
+async function appendShopRows(spreadsheetId: string, tabName: string, rows: Array<Array<string | number | boolean>>): Promise<ShopWriteReceipt[]> {
+  if (!rows.length) return []
+  const result = await appendRows(spreadsheetId, sheetTabRange(tabName, "A:L"), rows, { valueInputOption: "RAW", includeValuesInResponse: true })
+  return [{ range: result.updatedRange, updatedValues: result.updatedValues }]
+}
+
+async function updateShopRows(spreadsheetId: string, writes: Array<{ range: string; values: Array<Array<string | number | boolean>> }>): Promise<ShopWriteReceipt[]> {
+  if (!writes.length) return []
+  const responses = await updateRanges(spreadsheetId, writes, { valueInputOption: "RAW", includeValuesInResponse: true })
+  return writes.map((write, index) => ({
+    range: responses[index]?.updatedRange || write.range,
+    updatedValues: normalizeGoogleSheetRows(responses[index]?.updatedData?.values),
+  }))
 }
 
 async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
@@ -2917,17 +2983,17 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
   if (options.replace || options.replaceLatest) {
     const targetRows = stored.flatMap((shop, index) => shop?.pageLinked === pageLinked && (!options.replaceLatest || shop.id.startsWith("latest:")) ? [index + 2] : [])
     const replacements = shops.slice(0, targetRows.length).map((shop, index) => ({
-      range: `${sheet.tabName}!A${targetRows[index]}:L${targetRows[index]}`,
+      range: sheetTabRange(sheet.tabName, `A${targetRows[index]}:L${targetRows[index]}`),
       values: [shopRow(shop, pageLinked, null, options)],
     }))
     const clear = targetRows.slice(shops.length).map((rowNumber) => ({
-      range: `${sheet.tabName}!A${rowNumber}:L${rowNumber}`,
+      range: sheetTabRange(sheet.tabName, `A${rowNumber}:L${rowNumber}`),
       values: [Array(12).fill("")],
     }))
-    await updateRanges(sheet.spreadsheetId, [...replacements, ...clear])
+    const receipts = await updateShopRows(sheet.spreadsheetId, replacements)
+    await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
     const additions = shops.slice(targetRows.length)
-    if (additions.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:L`, additions.map((shop) => shopRow(shop, pageLinked, null, options)))
-    return
+    return [...receipts, ...await appendShopRows(sheet.spreadsheetId, sheet.tabName, additions.map((shop) => shopRow(shop, pageLinked, null, options)))]
   }
 
   const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
@@ -2935,11 +3001,13 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
   for (const shop of shops) {
     const existing = existingById.get(shop.id)
     const values = shopRow(shop, pageLinked, existing?.shop ?? null, options)
-    if (existing) updates.push({ range: `${sheet.tabName}!A${existing.rowNumber}:L${existing.rowNumber}`, values: [values] })
+    if (existing) updates.push({ range: sheetTabRange(sheet.tabName, `A${existing.rowNumber}:L${existing.rowNumber}`), values: [values] })
     else additions.push(values)
   }
-  await updateRanges(sheet.spreadsheetId, updates)
-  if (additions.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:L`, additions)
+  return [
+    ...await updateShopRows(sheet.spreadsheetId, updates),
+    ...await appendShopRows(sheet.spreadsheetId, sheet.tabName, additions),
+  ]
 }
 
 export async function deleteSavedShops(pageLinked: string, shopIds: string[]) {

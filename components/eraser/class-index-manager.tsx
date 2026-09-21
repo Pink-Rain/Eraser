@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { useEffect, useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
 import { AlertTriangle, Check, CircleDotDashed, CopyCheck, ExternalLink, Gauge, LoaderCircle, Plus, RefreshCw, RotateCcw, Search, Trash2, X, Zap } from "lucide-react"
 
 import { RichTextEditorField } from "@/components/eraser/rich-text-inline-editor"
@@ -117,6 +117,15 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, compa
   const persisted = useMemo(() => toDraft(spell), [spell])
   const changed = JSON.stringify(draft) !== JSON.stringify(persisted)
   const field = <K extends keyof ClassSpellDraft>(key: K, value: ClassSpellDraft[K]) => setDraft((current) => ({ ...current, [key]: value }))
+
+  // Une ligne existante est enregistrée après une courte pause de frappe.
+  // Cela regroupe les changements et évite une requête Google par caractère.
+  // Le bouton reste disponible pour forcer immédiatement la sauvegarde.
+  useEffect(() => {
+    if (!changed || pending || !draft.name.trim()) return
+    const timer = window.setTimeout(() => onSave(spell, draft), 700)
+    return () => window.clearTimeout(timer)
+  }, [changed, draft, onSave, pending, spell])
   const actions = <>
     <Button type="button" size={compact ? "sm" : "icon-sm"} disabled={pending || !changed || !draft.name.trim()} onClick={() => onSave(spell, draft)} title="Enregistrer">{pending ? <LoaderCircle className="animate-spin" /> : <Check />}{compact && "Enregistrer"}</Button>
     <Button type="button" size={compact ? "sm" : "icon-sm"} variant="outline" onClick={() => setShowMatches((current) => !current)} title="Voir les doublons et ressemblances"><CopyCheck />{compact && "Doublons"}</Button>

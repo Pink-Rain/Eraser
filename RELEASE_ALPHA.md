@@ -1,31 +1,28 @@
-# Eraser 0.1.1-alpha.33 — magasins, index et PNJs consolidés
+# Eraser 0.1.1-alpha.34 — persistance des magasins corrigée
 
-Cette préversion applique la migration fonctionnelle de l’application Windows
-en conservant Google Sheets comme source métier et Google Drive pour les médias.
+Cette préversion corrige le blocage d’écriture encore visible dans la feuille
+Magasins, sans modifier l’architecture Google Sheets/Drive ni les données
+existantes.
 
 ## Changements principaux
 
-- persistance des magasins fiabilisée avec contrôle de la plage réellement
-  écrite, vérification complète des en-têtes et relecture après sauvegarde ;
-- relance d’un magasin entier, relances depuis le Créateur de session et prix
-  propres à chaque magasin ;
-- index Objets et Classes redimensionnables, hauteur commune persistante,
-  cellules multilignes et éditeur riche stabilisé ;
-- couleurs de texte normalisées et compatibles avec les anciens formats Google
-  Sheets ;
-- modèle PNJ simplifié autour des PV, six caractéristiques, Notes, Notes MJ et
-  un Sac à dos unique, avec migration non destructive des anciennes données ;
-- cartes PNJ en lecture seule et formulaire unique pour créer ou modifier ;
-- confidentialité Tabletop corrigée : Notes visibles, Notes MJ protégées côté
-  serveur ;
-- bridge Roll20 en schema 2, inventaire réel, attributs PV/CON/FOR/DEX/INT/SAG/CHA,
-  conservation des permissions du MJ et nettoyage ciblé des anciens attributs ;
-- Mod Roll20 et compagnon Chrome mis à jour ensemble en version 0.5.0.
+- les IDs, l’association à la page et les objets JSON des magasins sont écrits
+  en valeurs brutes pour empêcher toute interprétation par Google Sheets ;
+- la vérification relit désormais les lignes exactes indiquées par
+  `updates.updatedRange`, avec de courtes nouvelles tentatives si la relecture
+  Google est momentanément en retard ;
+- la réponse d’écriture avec les valeurs réellement acceptées reste une preuve
+  de secours, sans supprimer `SHOPS_WRITE_NOT_PERSISTED` ;
+- le diagnostic d’écriture efface précisément sa ligne témoin ;
+- le dernier tirage, les magasins sauvegardés, l’ajout au Créateur de session
+  et les transferts du bac à sable utilisent tous ce chemin corrigé ;
+- les lignes existantes de l’Index des classes se sauvegardent automatiquement
+  après une courte pause de saisie.
 
 ## Vérifications
 
 - installation propre des dépendances ;
 - lint, build Vinext et tests CI ;
-- tests Roll20 de non-duplication, attributs, permissions, Bio et GM Notes ;
+- tests fonctionnels de l’application, dont Roll20 ;
 - build et vérification du serveur desktop ;
 - paquet compagnon reconstruit avec le manifest à la racine.
