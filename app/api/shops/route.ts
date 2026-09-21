@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { copySavedShopsToPage, deleteSavedShops, getCampaignDashboard, listCampaignNpcs, listSavedShops, saveGeneratedShops } from "@/lib/google-sheets"
+import { copySavedShopsToPage, deleteSavedShops, getCampaignDashboard, listCampaignNpcs, listLatestShops, listSavedShops, saveGeneratedShops } from "@/lib/google-sheets"
 import type { GeneratedShop } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -61,8 +61,10 @@ export async function GET(request: Request) {
   const account = await canUsePage(pageLinked)
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const shops = await listSavedShops(pageLinked, url.searchParams.get("inCampaign") === "1")
-    return NextResponse.json({ shops })
+    const shops = url.searchParams.get("view") === "latest"
+      ? await listLatestShops(pageLinked)
+      : await listSavedShops(pageLinked, url.searchParams.get("inCampaign") === "1")
+    return NextResponse.json({ shops }, { headers: { "cache-control": "no-store" } })
   } catch (error) {
     return NextResponse.json({ error: shopErrorMessage(error, account.role === "admin") || "Les magasins sauvegardés n’ont pas pu être chargés." }, { status: 400 })
   }

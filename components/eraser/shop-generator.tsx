@@ -111,8 +111,23 @@ function EditablePrice({ item, pending, onCommit }: { item: GeneratedShopItem; p
 
 async function persistShops(action: "replace" | "replace-latest" | "save" | "add-to-campaign" | "remove-from-campaign" | "link-npc" | "delete", pageLinked: string, shops: GeneratedShop[], npcId = "") {
   const response = await fetch("/api/shops", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, pageLinked, shops, npcId }) })
-  const payload = (await response.json()) as { error?: string }
+  const payload = (await response.json()) as { shops?: SavedShopRecord[]; error?: string }
   if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
+  return payload.shops || []
+}
+
+async function fetchPersistedShops<T extends GeneratedShop = SavedShopRecord>(pageLinked: string, options: { latest?: boolean; inCampaign?: boolean } = {}): Promise<T[]> {
+  const parameters = new URLSearchParams({ pageLinked })
+  if (options.latest) parameters.set("view", "latest")
+  if (options.inCampaign) parameters.set("inCampaign", "1")
+  const response = await fetch(`/api/shops?${parameters.toString()}`, { cache: "no-store" })
+  const payload = (await response.json()) as { shops?: T[]; error?: string }
+  if (!response.ok) throw new Error(payload.error || "Relecture des magasins impossible.")
+  return payload.shops || []
+}
+
+function requirePersistedShops(expected: GeneratedShop[], stored: GeneratedShop[], message: string, predicate: (shop: GeneratedShop) => boolean = () => true) {
+  if (expected.some((shop) => !stored.some((candidate) => candidate.id === shop.id && predicate(candidate)))) throw new Error(message)
 }
 
 async function importShops(pageLinked: string, sourcePageLinked: string, shopIds: string[]) {
@@ -208,13 +223,100 @@ function NpcDialog({ state, npcs, pending, onClose, onConfirm }: { state: { acti
 export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable", campaignId, savedHref, npcs = [], sourcePages = [], destinationPages = [], initialDraw = [] }: { items: ShopGeneratorItem[]; loadError?: string; pageLinked?: string; campaignId?: string; savedHref?: string; npcs?: CampaignNpcRecord[]; sourcePages?: ReusablePageOption[]; destinationPages?: ReusablePageOption[]; initialDraw?: GeneratedShop[] }) {
   const router = useRouter()
   const [cityKey, setCityKey] = useState<CityKey>(initialDraw[0]?.cityKey || "village"); const [shops, setShops] = useState<GeneratedShop[] | null>(initialDraw.length ? initialDraw : null); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [importOpen, setImportOpen] = useState(false); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null); const [destinationShops, setDestinationShops] = useState<GeneratedShop[] | null>(null); const city = cityDefinitions[cityKey]
-  async function create() { const generated = generateShops(cityKey, items); setShops(generated); setNotice(""); setError(""); setPending(true); try { if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, generated); else await persistShops("replace-latest", pageLinked, generated.map((shop) => ({ ...shop, id: `latest:${shop.id}` }))); router.refresh(); setNotice("Dernier tirage sauvegardé.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Sauvegarde impossible.") } setPending(false) }
-  async function run(action: "save" | "add-to-campaign" | "link-npc", selected: GeneratedShop[], npcId = "") { setPending(true); setError(""); setNotice(""); try { await persistShops(action, pageLinked, selected, npcId); router.refresh(); setNotice(action === "save" ? "Magasin(s) sauvegardé(s)." : action === "link-npc" ? "Lien avec le PNJ enregistré." : "Magasin(s) ajouté(s) à la campagne."); setDialog(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") } setPending(false) }
-  async function rerollLine(shop: GeneratedShop, item: GeneratedShopItem) { const replacement = rerollShopItem(items, shop); if (!replacement || !shops) return; const nextShops = shops.map((candidate) => candidate.id === shop.id ? { ...candidate, items: candidate.items.map((candidateItem) => candidateItem.id === item.id ? replacement : candidateItem) } : candidate); setShops(nextShops); setPending(true); setError(""); setNotice(""); try { if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, nextShops); else await persistShops("replace-latest", pageLinked, nextShops.map((candidate) => ({ ...candidate, id: `latest:${candidate.id}` }))); router.refresh(); setNotice("Ligne relancée et dernier tirage sauvegardé.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") } setPending(false) }
-  async function rerollWholeShop(shop: GeneratedShop) { if (!shops) return; const updated = rerollShop(items, shop); const nextShops = shops.map((candidate) => candidate.id === shop.id ? updated : candidate); setShops(nextShops); setPending(true); setError(""); setNotice(""); try { if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, nextShops); else await persistShops("replace-latest", pageLinked, nextShops.map((candidate) => ({ ...candidate, id: `latest:${candidate.id}` }))); router.refresh(); setNotice("Magasin relancé et dernier tirage sauvegardé.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") } setPending(false) }
-  async function runImport(source: string, ids: string[]) { setPending(true); setError(""); setNotice(""); try { const imported = await importShops(pageLinked, source, ids); router.refresh(); setImportOpen(false); setNotice(`${imported.length} magasin${imported.length > 1 ? "s" : ""} récupéré${imported.length > 1 ? "s" : ""} dans les magasins sauvegardés.`) } catch (caught) { setError(caught instanceof Error ? caught.message : "Import impossible.") } setPending(false) }
-  async function renameShop(name: string) { if (!renameTarget || !shops) return; const nextShops = shops.map((shop) => shop.id === renameTarget.id ? { ...shop, name } : shop); setShops(nextShops); setPending(true); setError(""); setNotice(""); try { if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, nextShops); else await persistShops("replace-latest", pageLinked, nextShops.map((shop) => ({ ...shop, id: `latest:${shop.id}` }))); router.refresh(); setNotice("Nom du magasin enregistré."); setRenameTarget(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Le nom n’a pas pu être enregistré.") } setPending(false) }
-  async function sendToCampaign(destinationId: string) { if (!destinationShops) return; setPending(true); setError(""); setNotice(""); try { const copies = destinationShops.map((shop) => ({ ...shop, id: crypto.randomUUID() })); await persistShops("save", destinationId, copies); router.refresh(); setNotice(`${copies.length} magasin${copies.length > 1 ? "s ont" : " a"} été copié${copies.length > 1 ? "s" : ""} dans la campagne.`); setDestinationShops(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Copie vers la campagne impossible.") } setPending(false) }
+
+  async function persistDraw(nextShops: GeneratedShop[]) {
+    if (pageLinked === "bac-a-sable") await persistShops("replace", pageLinked, nextShops)
+    else await persistShops("replace-latest", pageLinked, nextShops.map((shop) => ({ ...shop, id: `latest:${shop.id}` })))
+    const stored = pageLinked === "bac-a-sable"
+      ? await fetchPersistedShops<GeneratedShop>(pageLinked)
+      : await fetchPersistedShops<GeneratedShop>(pageLinked, { latest: true })
+    requirePersistedShops(nextShops, stored, "Le tirage n’est pas revenu de Google Sheets après son enregistrement.")
+    setShops(stored)
+  }
+
+  async function create() {
+    const generated = generateShops(cityKey, items)
+    setShops(generated); setNotice(""); setError(""); setPending(true)
+    try {
+      await persistDraw(generated)
+      router.refresh()
+      setNotice("Dernier tirage sauvegardé.")
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Sauvegarde impossible.") }
+    setPending(false)
+  }
+
+  async function run(action: "save" | "add-to-campaign" | "link-npc", selected: GeneratedShop[], npcId = "") {
+    setPending(true); setError(""); setNotice("")
+    try {
+      await persistShops(action, pageLinked, selected, npcId)
+      const stored = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" })
+      requirePersistedShops(selected, stored, "Les magasins ne sont pas retrouvés après leur enregistrement.", (candidate) => {
+        const saved = candidate as SavedShopRecord
+        if (action === "add-to-campaign" && !saved.inCampaign) return false
+        return !npcId || saved.npcId === npcId
+      })
+      router.refresh()
+      setNotice(action === "save" ? "Magasin(s) sauvegardé(s)." : action === "link-npc" ? "Lien avec le PNJ enregistré." : "Magasin(s) ajouté(s) à la campagne.")
+      setDialog(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") }
+    setPending(false)
+  }
+
+  async function rerollLine(shop: GeneratedShop, item: GeneratedShopItem) {
+    const replacement = rerollShopItem(items, shop)
+    if (!replacement || !shops) return
+    const nextShops = shops.map((candidate) => candidate.id === shop.id ? { ...candidate, items: candidate.items.map((candidateItem) => candidateItem.id === item.id ? replacement : candidateItem) } : candidate)
+    setShops(nextShops); setPending(true); setError(""); setNotice("")
+    try { await persistDraw(nextShops); router.refresh(); setNotice("Ligne relancée et dernier tirage sauvegardé.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
+    setPending(false)
+  }
+
+  async function rerollWholeShop(shop: GeneratedShop) {
+    if (!shops) return
+    const updated = rerollShop(items, shop)
+    const nextShops = shops.map((candidate) => candidate.id === shop.id ? updated : candidate)
+    setShops(nextShops); setPending(true); setError(""); setNotice("")
+    try { await persistDraw(nextShops); router.refresh(); setNotice("Magasin relancé et dernier tirage sauvegardé.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
+    setPending(false)
+  }
+
+  async function runImport(source: string, ids: string[]) {
+    setPending(true); setError(""); setNotice("")
+    try {
+      const imported = await importShops(pageLinked, source, ids)
+      const stored = await fetchPersistedShops(pageLinked)
+      requirePersistedShops(imported, stored, "Les magasins importés ne sont pas retrouvés après leur enregistrement.")
+      router.refresh(); setImportOpen(false)
+      setNotice(`${imported.length} magasin${imported.length > 1 ? "s" : ""} récupéré${imported.length > 1 ? "s" : ""} dans les magasins sauvegardés.`)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Import impossible.") }
+    setPending(false)
+  }
+
+  async function renameShop(name: string) {
+    if (!renameTarget || !shops) return
+    const nextShops = shops.map((shop) => shop.id === renameTarget.id ? { ...shop, name } : shop)
+    setShops(nextShops); setPending(true); setError(""); setNotice("")
+    try { await persistDraw(nextShops); router.refresh(); setNotice("Nom du magasin enregistré."); setRenameTarget(null) }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Le nom n’a pas pu être enregistré.") }
+    setPending(false)
+  }
+
+  async function sendToCampaign(destinationId: string) {
+    if (!destinationShops) return
+    setPending(true); setError(""); setNotice("")
+    try {
+      const copies = destinationShops.map((shop) => ({ ...shop, id: crypto.randomUUID() }))
+      await persistShops("save", destinationId, copies)
+      const stored = await fetchPersistedShops(destinationId)
+      requirePersistedShops(copies, stored, "Les magasins copiés ne sont pas retrouvés dans la campagne.")
+      router.refresh()
+      setNotice(`${copies.length} magasin${copies.length > 1 ? "s ont" : " a"} été copié${copies.length > 1 ? "s" : ""} dans la campagne.`)
+      setDestinationShops(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Copie vers la campagne impossible.") }
+    setPending(false)
+  }
   return <div className="mt-7 space-y-5"><section className="overflow-hidden rounded-2xl border bg-card/85 shadow-sm"><div className="grid lg:grid-cols-[minmax(0,1fr)_22rem]"><div className="p-5 sm:p-6"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Dices className="size-5" /></span><h2 className="font-display text-2xl font-semibold">Générer une ville marchande</h2></div><div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end"><label className="grid flex-1 gap-1.5 text-sm font-medium">Taille de la ville<Select value={cityKey} onValueChange={(value) => { setCityKey(value as CityKey); setShops(null); setNotice("") }}><SelectTrigger className="h-11 w-full bg-background/70"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(cityDefinitions).map(([key, definition]) => <SelectItem key={key} value={key}>{definition.name} · {definition.population}</SelectItem>)}</SelectContent></Select></label><Button className="h-11 px-5" onClick={() => void create()} disabled={!items.length || pending}>{pending ? <LoaderCircle className="animate-spin" /> : <Dices />}{shops ? "Relancer" : "Créer les magasins"}</Button></div></div><div className="border-t bg-primary/[0.045] p-5 lg:border-l lg:border-t-0 sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Sélection actuelle</p><p className="font-display mt-2 text-3xl font-semibold">{city.name}</p><p className="mt-1 text-sm text-muted-foreground">{city.population}</p><div className="mt-4 flex flex-wrap gap-1.5">{shopDefinitions.map((shop) => <Badge key={shop.key} variant="outline" className="bg-background/55">{shop.name} {city.chances[shop.key]}%</Badge>)}</div></div></div></section>
     {loadError && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{loadError}</p>}{error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}{notice && <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">{notice}</p>}
     {campaignId && <div className="flex flex-wrap gap-2 rounded-xl border bg-card/65 p-3"><Button disabled={!shops?.length || pending} onClick={() => shops && void run("save", shops)}><Save />Sauvegarder les magasins</Button>{savedHref && <Button asChild variant="outline"><Link href={savedHref} prefetch={false}><LibraryBig />Voir les magasins sauvegardés</Link></Button>}{sourcePages.length > 0 && <Button variant="outline" disabled={pending} onClick={() => setImportOpen(true)}><Download />Récupérer des magasins</Button>}<Button disabled={!shops?.length || pending} variant="secondary" onClick={() => shops && setDialog({ action: "add-to-campaign", shops })}><MapPinned />Ajouter à la campagne</Button></div>}
@@ -226,12 +328,87 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
 export function SavedShopCollection({ initialShops, pageLinked, npcs = [], generatorItems = [], mode = "saved" }: { initialShops: SavedShopRecord[]; pageLinked: string; npcs?: CampaignNpcRecord[]; generatorItems?: ShopGeneratorItem[]; mode?: "saved" | "locations" | "view" }) {
   const router = useRouter()
   const [shops, setShops] = useState(initialShops); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [deleteTarget, setDeleteTarget] = useState<GeneratedShop | null>(null); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null)
-  async function run(action: "add-to-campaign" | "link-npc", selected: GeneratedShop[], npcId = "") { setPending(true); setError(""); setNotice(""); try { await persistShops(action, pageLinked, selected, npcId); const ids = new Set(selected.map((shop) => shop.id)); setShops((current) => current.map((shop) => ids.has(shop.id) ? { ...shop, ...(action === "add-to-campaign" ? { inCampaign: true } : {}), npcId } : shop)); router.refresh(); setNotice(action === "add-to-campaign" ? "Ajouté à la campagne." : "Lien avec le PNJ enregistré."); setDialog(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") } setPending(false) }
-  async function remove(shop: GeneratedShop) { setPending(true); setError(""); setNotice(""); try { await persistShops(mode === "locations" ? "remove-from-campaign" : "delete", pageLinked, [shop]); setShops((current) => current.filter((candidate) => candidate.id !== shop.id)); router.refresh(); setNotice(mode === "locations" ? "Magasin retiré de Lieux et rencontres." : "Magasin supprimé."); setDeleteTarget(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") } setPending(false) }
-  async function rerollLine(shop: GeneratedShop, item: GeneratedShopItem) { const replacement = rerollShopItem(generatorItems, shop); if (!replacement) return; const updated = { ...shop, items: shop.items.map((candidate) => candidate.id === item.id ? replacement : candidate) }; setPending(true); setError(""); setNotice(""); try { await persistShops("save", pageLinked, [updated]); setShops((current) => current.map((candidate) => candidate.id === shop.id ? { ...candidate, ...updated } as SavedShopRecord : candidate)); router.refresh(); setNotice("Ligne relancée et magasin sauvegardé.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") } setPending(false) }
-  async function rerollWholeShop(shop: GeneratedShop) { const updated = rerollShop(generatorItems, shop); setPending(true); setError(""); setNotice(""); try { await persistShops("save", pageLinked, [updated]); setShops((current) => current.map((candidate) => candidate.id === shop.id ? { ...candidate, ...updated } as SavedShopRecord : candidate)); router.refresh(); setNotice("Magasin relancé et sauvegardé.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") } setPending(false) }
-  async function changePrice(shop: GeneratedShop, item: GeneratedShopItem, price: string) { const updated = { ...shop, items: shop.items.map((candidate) => candidate.id === item.id ? { ...candidate, price } : candidate) }; setPending(true); setError(""); setNotice(""); try { await persistShops("save", pageLinked, [updated]); setShops((current) => current.map((candidate) => candidate.id === shop.id ? { ...candidate, ...updated } as SavedShopRecord : candidate)); router.refresh(); setNotice("Prix du magasin enregistré sans modifier l’objet source.") } catch (caught) { setError(caught instanceof Error ? caught.message : "Le prix n’a pas pu être enregistré.") } setPending(false) }
-  async function renameShop(name: string) { if (!renameTarget) return; const updated = { ...renameTarget, name }; setPending(true); setError(""); setNotice(""); try { await persistShops("save", pageLinked, [updated]); setShops((current) => current.map((shop) => shop.id === updated.id ? { ...shop, name } : shop)); router.refresh(); setNotice("Nom du magasin enregistré."); setRenameTarget(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Le nom n’a pas pu être enregistré.") } setPending(false) }
+
+  async function reloadCollection(expected: GeneratedShop[] = []) {
+    const loaded = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: mode === "locations" })
+    if (expected.length) requirePersistedShops(expected, loaded, "Le magasin n’est pas retrouvé dans Google Sheets après son enregistrement.")
+    const focusedId = new URLSearchParams(window.location.search).get("shop")
+    setShops(focusedId ? loaded.filter((shop) => shop.id === focusedId) : loaded)
+    return loaded
+  }
+
+  async function saveAndReload(updated: GeneratedShop, success: string) {
+    await persistShops("save", pageLinked, [updated])
+    await reloadCollection([updated])
+    router.refresh()
+    setNotice(success)
+  }
+
+  async function run(action: "add-to-campaign" | "link-npc", selected: GeneratedShop[], npcId = "") {
+    setPending(true); setError(""); setNotice("")
+    try {
+      await persistShops(action, pageLinked, selected, npcId)
+      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" || mode === "locations" })
+      requirePersistedShops(selected, persisted, "Le magasin n’est pas retrouvé avec son état de campagne après l’enregistrement.", (candidate) => {
+        const saved = candidate as SavedShopRecord
+        if (action === "add-to-campaign" && !saved.inCampaign) return false
+        return !npcId || saved.npcId === npcId
+      })
+      await reloadCollection()
+      router.refresh()
+      setNotice(action === "add-to-campaign" ? "Ajouté à la campagne." : "Lien avec le PNJ enregistré.")
+      setDialog(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") }
+    setPending(false)
+  }
+
+  async function remove(shop: GeneratedShop) {
+    setPending(true); setError(""); setNotice("")
+    try {
+      await persistShops(mode === "locations" ? "remove-from-campaign" : "delete", pageLinked, [shop])
+      const loaded = await reloadCollection()
+      if (loaded.some((candidate) => candidate.id === shop.id)) throw new Error(mode === "locations" ? "Le magasin apparaît encore dans le Créateur de session après son retrait." : "Le magasin existe encore après sa suppression.")
+      router.refresh()
+      setNotice(mode === "locations" ? "Magasin retiré de Lieux et rencontres." : "Magasin supprimé.")
+      setDeleteTarget(null)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
+    setPending(false)
+  }
+
+  async function rerollLine(shop: GeneratedShop, item: GeneratedShopItem) {
+    const replacement = rerollShopItem(generatorItems, shop)
+    if (!replacement) return
+    const updated = { ...shop, items: shop.items.map((candidate) => candidate.id === item.id ? replacement : candidate) }
+    setPending(true); setError(""); setNotice("")
+    try { await saveAndReload(updated, "Ligne relancée et magasin sauvegardé.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
+    setPending(false)
+  }
+
+  async function rerollWholeShop(shop: GeneratedShop) {
+    const updated = rerollShop(generatorItems, shop)
+    setPending(true); setError(""); setNotice("")
+    try { await saveAndReload(updated, "Magasin relancé et sauvegardé.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Relance impossible.") }
+    setPending(false)
+  }
+
+  async function changePrice(shop: GeneratedShop, item: GeneratedShopItem, price: string) {
+    const updated = { ...shop, items: shop.items.map((candidate) => candidate.id === item.id ? { ...candidate, price } : candidate) }
+    setPending(true); setError(""); setNotice("")
+    try { await saveAndReload(updated, "Prix du magasin enregistré sans modifier l’objet source.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Le prix n’a pas pu être enregistré.") }
+    setPending(false)
+  }
+
+  async function renameShop(name: string) {
+    if (!renameTarget) return
+    const updated = { ...renameTarget, name }
+    setPending(true); setError(""); setNotice("")
+    try { await saveAndReload(updated, "Nom du magasin enregistré."); setRenameTarget(null) }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Le nom n’a pas pu être enregistré.") }
+    setPending(false)
+  }
   useEffect(() => {
     const id = new URLSearchParams(window.location.search).get("shop")
     if (!id) return

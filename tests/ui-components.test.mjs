@@ -104,8 +104,9 @@ test("rerolls only a shop stock and preserves its identity", async () => {
 });
 
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
-  const [sheets, generator, campaignPage, sandboxPage] = await Promise.all([
+  const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/shops/route.ts", import.meta.url), "utf8"),
     readFile(new URL("../components/eraser/shop-generator.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/campagne/[id]/magasin-et-fouille/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/bac-a-sable/magasin/page.tsx", import.meta.url), "utf8"),
@@ -117,6 +118,12 @@ test("shop persistence bypasses stale caches and requires a real reread", async 
   );
   assert.match(shopSection, /readRangeFresh/);
   assert.doesNotMatch(shopSection, /receipt\.updatedValues/);
+  assert.match(sheets, /values:batchGetByDataFilter/);
+  assert.match(sheets, /dataFilters: \[\{ a1Range: range \}\]/);
+  assert.match(route, /url\.searchParams\.get\("view"\) === "latest"/);
+  assert.match(generator, /fetchPersistedShops<GeneratedShop>/);
+  assert.match(generator, /fetchPersistedShops<SavedShopRecord>/);
+  assert.match(generator, /requirePersistedShops\(selected, persisted/);
   assert.match(generator, /router\.refresh\(\)/);
   assert.match(generator, /href=\{savedHref\} prefetch=\{false\}/);
   assert.doesNotMatch(campaignPage, /listLatestShops\(campaignId\)\.catch/);

@@ -421,27 +421,31 @@ export async function readRange(
 /**
  * Lit directement Google Sheets sans passer par le cache mémoire du bundle.
  *
- * Une lecture normale peut rester trois minutes dans notre Map. De plus,
- * vinext déduplique les GET identiques pendant une requête : vider la Map
- * après un append ne suffit donc pas, le second GET peut encore recevoir la
- * réponse prise avant l'écriture. `no-store` et les paramètres explicites
- * garantissent ici une vraie lecture réseau, différente du GET préparatoire.
+ * Cette lecture utilise volontairement batchGetByDataFilter (POST). Le serveur
+ * desktop peut dédupliquer deux GET Sheets identiques même avec `no-store` :
+ * après une écriture, la prétendue relecture recevait alors encore la réponse
+ * antérieure. Un POST n'entre pas dans ce cache et force Google à relire la
+ * plage demandée. Les magasins utilisent ce chemin pour leurs lectures et
+ * pour la vérification de persistance.
  */
 async function readRangeFresh(
   spreadsheetId: string,
   range: string,
   valueRenderOption: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA" = "FORMATTED_VALUE",
 ) {
-  const parameters = new URLSearchParams({
-    valueRenderOption,
-    majorDimension: "ROWS",
-    fields: "range,majorDimension,values",
+  const payload = await googleSheetsJson<{
+    valueRanges?: Array<{ valueRange?: { values?: GoogleSheetCellValue[][] } }>
+  }>(`spreadsheets/${spreadsheetId}/values:batchGetByDataFilter`, {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({
+      dataFilters: [{ a1Range: range }],
+      majorDimension: "ROWS",
+      valueRenderOption,
+      dateTimeRenderOption: "FORMATTED_STRING",
+    }),
   })
-  const response = await googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?${parameters.toString()}`,
-    { cache: "no-store" },
-  )
-  return normalizeGoogleSheetRows(((await response.json()) as ValuesResponse).values)
+  return normalizeGoogleSheetRows(payload.valueRanges?.[0]?.valueRange?.values)
 }
 
 async function readRanges(
