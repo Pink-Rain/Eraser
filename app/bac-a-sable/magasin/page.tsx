@@ -18,7 +18,7 @@ async function SandboxShopData({ accountUid, isAdmin }: { accountUid: string; is
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
     // Dans le bac à sable, le tirage *est* la sauvegarde : « replace » réécrit
     // les lignes de la page à chaque tirage.
-    listSavedShops("bac-a-sable").catch(() => []),
+    listSavedShops("bac-a-sable"),
   ])
   if (loadedItems) items = loadedItems
   else loadError = "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."

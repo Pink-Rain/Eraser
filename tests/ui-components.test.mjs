@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test, { after } from "node:test";
+import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
 
 import React from "react";
@@ -100,6 +101,26 @@ test("rerolls only a shop stock and preserves its identity", async () => {
   assert.equal(updated.cityKey, shop.cityKey);
   assert.equal(updated.cityName, shop.cityName);
   assert.notEqual(updated.items, shop.items);
+});
+
+test("shop persistence bypasses stale caches and requires a real reread", async () => {
+  const [sheets, generator, campaignPage, sandboxPage] = await Promise.all([
+    readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/shop-generator.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/campagne/[id]/magasin-et-fouille/page.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../app/bac-a-sable/magasin/page.tsx", import.meta.url), "utf8"),
+  ]);
+
+  const shopSection = sheets.slice(
+    sheets.indexOf("export async function listSavedShops"),
+    sheets.indexOf("function npcNumber"),
+  );
+  assert.match(shopSection, /readRangeFresh/);
+  assert.doesNotMatch(shopSection, /receipt\.updatedValues/);
+  assert.match(generator, /router\.refresh\(\)/);
+  assert.match(generator, /href=\{savedHref\} prefetch=\{false\}/);
+  assert.doesNotMatch(campaignPage, /listLatestShops\(campaignId\)\.catch/);
+  assert.doesNotMatch(sandboxPage, /listSavedShops\("bac-a-sable"\)\.catch/);
 });
 
 test("keeps exact class spell types and detects their category", async () => {

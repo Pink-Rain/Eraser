@@ -17,7 +17,7 @@ async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaign
     loadShopGeneratorItems().catch(() => null),
     listCampaignNpcs(campaignId),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
-    listLatestShops(campaignId).catch(() => []),
+    listLatestShops(campaignId),
   ])
   if (loadedItems) items = loadedItems
   else loadError = "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."
