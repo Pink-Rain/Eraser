@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Eraser — Compagnon Roll20",
-  "version": "0.4.0",
+  "version": "0.5.0",
   "description": "Synchronise une campagne de l’application Eraser avec Roll20.",
   "permissions": ["storage"],
   "host_permissions": ["http://127.0.0.1:32147/*", "https://app.roll20.net/*"],

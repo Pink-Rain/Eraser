@@ -52,10 +52,10 @@ async function relationCandidates(access: NonNullable<Awaited<ReturnType<typeof 
   const groups = await Promise.all(access.campaigns.map(async (campaign) => {
     const [npcs, characters] = await Promise.all([listNpcs(campaign.id), listCampaignMembers(campaign.id)])
     const visibleNpcs = access.account.role === "joueur"
-      ? npcs.filter((npc) => npc.inPlayerGroup || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
+      ? npcs.filter((npc) => npc.inCampaign || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
       : npcs
     const npcCandidates: RelationCandidate[] = visibleNpcs.map((npc) => ({
-      id: npc.id, kind: "npc", name: npc.name, portrait: npc.portrait, people: npc.people, description: npc.description,
+      id: npc.id, kind: "npc", name: npc.name, portrait: npc.portrait, people: "", description: npc.playerNotes,
       campaignId: campaign.id, campaignName: campaign.name,
       canEdit: access.account.role === "admin" || access.account.role === "mj" || npc.createdByUid === access.account.uid,
     }))
@@ -93,11 +93,9 @@ async function enrichedRelations(
 
 function blankNpc(pageLinked: string, name: string, createdByUid: string): CampaignNpcRecord {
   return {
-    id: crypto.randomUUID(), pageLinked, name, classOrJob: "", currentHp: 0, totalHp: 0, speed: 0,
-    strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0, combatAbility: 0,
-    shootingAbility: 0, magicAbility: 0, mentalStrength: 0, constitution: 0, people: "", gender: "", age: "",
-    weight: "", height: "", other: "", portrait: "", description: "", inventory: [], inCampaign: false,
-    folder: "", inPlayerGroup: false, important: false, createdByUid, createdAt: "", updatedAt: "",
+    id: crypto.randomUUID(), pageLinked, name, portrait: "", currentHp: 0, totalHp: 0,
+    constitution: 0, strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0,
+    playerNotes: "", gmNotes: "", inCampaign: false, createdByUid, createdAt: "", updatedAt: "",
   }
 }
 
@@ -149,7 +147,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!mayEdit) throw new Error("FORBIDDEN_RELATION_TARGET")
       const name = shortText(body.name, 200)
       if (!name) throw new Error("INVALID_RELATION")
-      await saveNpc(npc.pageLinked, { ...npc, name, people: shortText(body.people, 180), description: shortText(body.description, 3000), portrait: shortText(body.portrait, 1500) })
+      await saveNpc(npc.pageLinked, { ...npc, name, playerNotes: shortText(body.description, 3000), portrait: shortText(body.portrait, 1500) })
       await saveCharacterRelation({ ...relation, name })
     } else if (body.action === "delete") {
       const relationId = shortText(body.relationId, 200)

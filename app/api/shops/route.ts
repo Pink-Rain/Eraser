@@ -30,6 +30,20 @@ async function canUsePage(pageLinked: string) {
 }
 
 function validShops(value: unknown): value is GeneratedShop[] {
+  const validRarities = new Set(["very-common", "common", "rare", "very-rare", "ultimate"])
+  const validItem = (item: unknown) => {
+    if (!item || typeof item !== "object") return false
+    const candidate = item as Record<string, unknown>
+    return typeof candidate.id === "string" && candidate.id.trim().length > 0 && candidate.id.length <= 300
+      && typeof candidate.name === "string" && candidate.name.trim().length > 0 && candidate.name.length <= 300
+      && typeof candidate.price === "string" && candidate.price.length <= 500
+      && typeof candidate.rarity === "string" && validRarities.has(candidate.rarity)
+      && (candidate.description === undefined || typeof candidate.description === "string" && candidate.description.length <= 20_000)
+      && (candidate.effect === undefined || typeof candidate.effect === "string" && candidate.effect.length <= 20_000)
+      && (candidate.type === undefined || typeof candidate.type === "string" && candidate.type.length <= 300)
+      && (candidate.subtype === undefined || typeof candidate.subtype === "string" && candidate.subtype.length <= 300)
+      && (candidate.icon === undefined || typeof candidate.icon === "string" && candidate.icon.length <= 2_000)
+  }
   return Array.isArray(value) && value.length <= 100 && value.every((shop) => {
     if (!shop || typeof shop !== "object") return false
     const candidate = shop as Partial<GeneratedShop>
@@ -37,6 +51,7 @@ function validShops(value: unknown): value is GeneratedShop[] {
       && typeof candidate.name === "string" && candidate.name.length <= 200
       && typeof candidate.cityName === "string" && candidate.cityName.length <= 200
       && Array.isArray(candidate.items) && candidate.items.length <= 30
+      && candidate.items.every(validItem)
   })
 }
 

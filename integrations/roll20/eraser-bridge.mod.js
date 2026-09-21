@@ -1,10 +1,10 @@
 /* Eraser Bridge for Roll20 — eraser-jdr.chatgpt.site
- * 0.4.0 : compagnon relié à l’application Windows locale
+ * 0.5.0 : modèle PNJ simplifié, inventaire réel et payload schema 2
  * (setDefaultTokenForCharacter). Plus aucune automatisation de fiche.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.4.0';
+  var VERSION = '0.5.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
@@ -96,16 +96,12 @@ var EraserBridge = EraserBridge || (function () {
 
   /* ---------- fiches ---------- */
   function notesForNpc(npc) {
-    var identity = [npc.people, npc.gender, npc.age && ('Âge : ' + npc.age), npc.height && ('Taille : ' + npc.height), npc.weight && ('Poids : ' + npc.weight)].filter(Boolean).join(' · ');
     var inventory = (npc.inventory || []).map(function (item) { return html(item.quantity || 1) + '× ' + html(item.name) + (item.notes ? ' — ' + html(item.notes) : ''); }).join('<br>');
-    var description = html(npc.description || '').replace(/\n/g, '<br>');
-    return (npc.classOrJob ? '<p><strong>' + html(npc.classOrJob) + '</strong></p>' : '') + (identity ? '<p>' + html(identity) + '</p>' : '') + (description ? '<p>' + description + '</p>' : '') + (inventory ? '<hr><p><strong>Inventaire</strong><br>' + inventory + '</p>' : '');
+    var playerNotes = html(npc.playerNotes || '').replace(/\n/g, '<br>');
+    return (playerNotes ? '<p>' + playerNotes + '</p>' : '') + (inventory ? '<hr><p><strong>Inventaire</strong><br>' + inventory + '</p>' : '');
   }
   function gmNotesForNpc(npc) {
-    var notes = [];
-    if (npc.other) notes.push('<p>' + html(npc.other).replace(/\n/g, '<br>') + '</p>');
-    if (npc.important) notes.push('<p><strong>PNJ important</strong></p>');
-    return notes.join('');
+    return npc.gmNotes ? '<p>' + html(npc.gmNotes).replace(/\n/g, '<br>') + '</p>' : '';
   }
 
   function upsertAttribute(characterId, name, current, max) {
@@ -127,26 +123,39 @@ var EraserBridge = EraserBridge || (function () {
     return Object.keys(npcs).filter(function (id) { return npcs[id] === characterId; })[0] || '';
   }
 
+  function characterWithEraserId(eraserId) {
+    var marker = findObjs({ _type: 'attribute', name: 'eraser_id', current: eraserId })[0];
+    if (!marker) return null;
+    return getObj('character', marker.get('_characterid') || marker.get('characterid'));
+  }
+
+  function removeLegacyNpcAttributes(characterId) {
+    ['rapidite', 'combat', 'tir', 'magie', 'force_mentale'].forEach(function (name) {
+      findObjs({ _type: 'attribute', _characterid: characterId, name: name }).forEach(function (attribute) { attribute.remove(); });
+    });
+  }
+
   function upsertNpc(npc) {
     var s = state.EraserBridge;
     var character = s.npcs[npc.id] && getObj('character', s.npcs[npc.id]);
+    if (!character) character = characterWithEraserId(npc.id);
     var created = false;
     if (!character) {
-      character = createObj('character', { name: npc.name, inplayerjournals: npc.inPlayerGroup ? 'all' : '', controlledby: '' });
-      s.npcs[npc.id] = character.id;
+      character = createObj('character', { name: npc.name, inplayerjournals: '', controlledby: '' });
       s.tokens[npc.id] = false;
       s.portraits[npc.id] = '';
       created = true;
     }
+    s.npcs[npc.id] = character.id;
     var values = { name: npc.name, bio: notesForNpc(npc), gmnotes: gmNotesForNpc(npc) };
-    if (created) values.inplayerjournals = npc.inPlayerGroup ? 'all' : '';
+    if (created) values.inplayerjournals = '';
     character.set(values);
+    if (!created) removeLegacyNpcAttributes(character.id);
     upsertAttribute(character.id, 'eraser_id', npc.id);
     upsertAttribute(character.id, 'pv', npc.currentHp, npc.totalHp);
-    upsertAttribute(character.id, 'rapidite', npc.speed);
-    [['force', npc.strength], ['dexterite', npc.dexterity], ['intelligence', npc.intelligence], ['sagesse', npc.wisdom], ['charisme', npc.charisma], ['combat', npc.combatAbility], ['tir', npc.shootingAbility], ['magie', npc.magicAbility], ['force_mentale', npc.mentalStrength], ['constitution', npc.constitution]]
+    [['constitution', npc.constitution], ['force', npc.strength], ['dexterite', npc.dexterity], ['intelligence', npc.intelligence], ['sagesse', npc.wisdom], ['charisme', npc.charisma]]
       .forEach(function (entry) { upsertAttribute(character.id, entry[0], entry[1]); });
-    var portraitHash = hash(npc.portrait || npc.portraitUrl || '');
+    var portraitHash = hash(npc.portraitUrl || '');
     return {
       character: character,
       meta: {

@@ -1,7 +1,7 @@
 import {
   getCampaignDashboard, getCampaignForMj, getCampaignForPlayer, getCharacterSheet, getTabletopMap,
   listAllCampaignsForAdmin, listAvailableCampaignCharacters, listCampaignMembers, listCampaignNpcs,
-  listCampaignsForMj, listCharactersForUser, listNpcs, listSavedShops, listTabletopActivities,
+  listCampaignsForMj, listCharactersForUser, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopActivities,
   listTabletopCharacterEntitiesByIds, listTabletopMaps, listTabletopNpcEntitiesByIds, listTabletopTokens,
   saveNpc, updateCharacterSheet,
 } from "@/lib/google-sheets"
@@ -57,7 +57,7 @@ async function accessibleCharacterIds(account: AuthorizedUser, pageLinked: strin
 }
 
 function npcEntity(npc: Awaited<ReturnType<typeof listNpcs>>[number]): TabletopEntityRecord {
-  return { id: npc.id, kind: "npc", name: npc.name, subtitle: [npc.classOrJob, npc.people].filter(Boolean).join(" · "), portrait: npc.portrait, currentHp: npc.currentHp, totalHp: npc.totalHp, speed: npc.speed, ownerUid: npc.createdByUid }
+  return { id: npc.id, kind: "npc", name: npc.name, subtitle: "PNJ", portrait: npc.portrait, currentHp: npc.currentHp, totalHp: npc.totalHp, speed: 0, ownerUid: npc.createdByUid }
 }
 
 function shopEntity(shop: Awaited<ReturnType<typeof listSavedShops>>[number], _pageLinked: string, linkedNpc?: Awaited<ReturnType<typeof listNpcs>>[number]): TabletopEntityRecord {
@@ -90,32 +90,24 @@ export async function getTabletopNpcDetail(account: AuthorizedUser, mapId: strin
   if (!map) return null
   const token = (await listTabletopTokens(map.id)).find((candidate) => candidate.entityKind === "npc" && candidate.entityId === npcId)
   if (!token) return null
-  const npc = (await listNpcs(map.pageLinked)).find((candidate) => candidate.id === npcId)
+  const [npcs, inventories] = await Promise.all([listNpcs(map.pageLinked), listNpcBackpackSummaries([npcId])])
+  const npc = npcs.find((candidate) => candidate.id === npcId)
   if (!npc) return null
   const canViewPrivate = await canManageTabletopPage(account, map.pageLinked)
   const stats = [
-    ["Force", "FOR", npc.strength], ["Dextérité", "DEX", npc.dexterity], ["Intelligence", "INT", npc.intelligence],
-    ["Sagesse", "SAG", npc.wisdom], ["Charisme", "CHA", npc.charisma], ["Combat", "COM", npc.combatAbility],
-    ["Tir", "TIR", npc.shootingAbility], ["Magie", "MAG", npc.magicAbility], ["Force mentale", "MEN", npc.mentalStrength],
-    ["Constitution", "CON", npc.constitution],
+    ["Constitution", "CON", npc.constitution], ["Force", "FOR", npc.strength], ["Dextérité", "DEX", npc.dexterity],
+    ["Intelligence", "INT", npc.intelligence], ["Sagesse", "SAG", npc.wisdom], ["Charisme", "CHA", npc.charisma],
   ].map(([label, short, value]) => ({ label: String(label), short: String(short), value: Number(value) || 0 }))
   return {
     id: npc.id,
     name: npc.name,
-    classOrJob: npc.classOrJob,
     portrait: npc.portrait,
     currentHp: npc.currentHp,
     totalHp: npc.totalHp,
-    speed: npc.speed,
-    people: npc.people,
-    gender: npc.gender,
-    age: npc.age,
-    height: npc.height,
-    weight: npc.weight,
-    description: canViewPrivate ? npc.description : "",
-    other: canViewPrivate ? npc.other : "",
-    stats: canViewPrivate ? stats : [],
-    inventory: canViewPrivate ? npc.inventory : [],
+    playerNotes: npc.playerNotes,
+    gmNotes: canViewPrivate ? npc.gmNotes : "",
+    stats,
+    inventory: inventories[npc.id] || [],
     canViewPrivate,
   }
 }

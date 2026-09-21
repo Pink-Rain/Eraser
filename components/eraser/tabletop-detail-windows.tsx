@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- portraits use authenticated, dynamic API URLs */
 
-import { ChevronDown, Gauge, Heart, PackageOpen, Store, UserRound, X } from "lucide-react"
+import { ChevronDown, Heart, PackageOpen, Store, UserRound, X } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -94,31 +94,19 @@ function NpcContent({ npc, entity }: { npc: TabletopNpcDetail | null; entity: Ta
   const detail = npc || {
     currentHp: entity.currentHp,
     totalHp: entity.totalHp,
-    speed: entity.speed,
-    people: "",
-    gender: "",
-    age: "",
-    height: "",
-    weight: "",
-    description: "",
-    other: "",
+    playerNotes: "",
+    gmNotes: "",
     stats: [],
     inventory: [],
     canViewPrivate: false,
   }
-  const identity = [detail.people, detail.gender, detail.age && `${detail.age} ans`, detail.height, detail.weight].filter(Boolean)
   return (
     <div className="space-y-4 p-4">
-      <div className="grid grid-cols-[minmax(0,1fr)_auto] items-end gap-3">
-        <LifeBar current={detail.currentHp} total={detail.totalHp} />
-        <Badge variant="outline" className="gap-1"><Gauge className="size-3" />Rapidité {detail.speed}</Badge>
-      </div>
-      {identity.length > 0 && <div className="flex flex-wrap gap-1.5">{identity.map((value) => <Badge key={value} variant="secondary">{value}</Badge>)}</div>}
-      {detail.description && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Description</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{detail.description}</p></div>}
-      {detail.other && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Informations</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{detail.other}</p></div>}
-      {detail.stats.length > 0 && <div className="grid grid-cols-5 gap-1.5">{detail.stats.map((stat) => <div key={stat.short} title={stat.label} className="rounded-lg border bg-background/65 px-1.5 py-2 text-center"><p className="text-[9px] font-bold text-muted-foreground">{stat.short}</p><p className="font-display font-semibold tabular-nums">{stat.value}</p></div>)}</div>}
+      <LifeBar current={detail.currentHp} total={detail.totalHp} />
+      {detail.playerNotes && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Notes</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{detail.playerNotes}</p></div>}
+      {detail.stats.length > 0 && <div className="grid grid-cols-6 gap-1.5">{detail.stats.map((stat) => <div key={stat.short} title={stat.label} className="rounded-lg border bg-background/65 px-1.5 py-2 text-center"><p className="text-[9px] font-bold text-muted-foreground">{stat.short}</p><p className="font-display font-semibold tabular-nums">{stat.value}</p></div>)}</div>}
       {detail.inventory.length > 0 && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Inventaire</p><div className="mt-2 space-y-1">{detail.inventory.map((item) => <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-background/55 px-2.5 py-2 text-sm"><span className="min-w-0 flex-1 truncate font-medium">{item.name}</span><Badge variant="outline">×{item.quantity}</Badge></div>)}</div></div>}
-      {!detail.canViewPrivate && <p className="text-xs text-muted-foreground">Les informations réservées au MJ restent masquées.</p>}
+      {detail.gmNotes && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Notes MJ</p><p className="mt-1 whitespace-pre-wrap text-sm leading-6 text-muted-foreground">{detail.gmNotes}</p></div>}
     </div>
   )
 }

@@ -43,43 +43,21 @@ export type CampaignNpcRecord = {
   id: string
   pageLinked: string
   name: string
-  classOrJob: string
+  portrait: string
   currentHp: number
   totalHp: number
-  speed: number
+  constitution: number
   strength: number
   dexterity: number
   intelligence: number
   wisdom: number
   charisma: number
-  combatAbility: number
-  shootingAbility: number
-  magicAbility: number
-  mentalStrength: number
-  constitution: number
-  people: string
-  gender: string
-  age: string
-  weight: string
-  height: string
-  other: string
-  portrait: string
-  description: string
-  inventory: NpcInventoryItem[]
+  playerNotes: string
+  gmNotes: string
   inCampaign: boolean
-  folder: string
-  inPlayerGroup: boolean
-  important: boolean
   createdByUid: string
   createdAt: string
   updatedAt: string
-}
-
-export type NpcInventoryItem = {
-  id: string
-  name: string
-  quantity: number
-  notes: string
 }
 
 function normalizedHeader(value: string) {

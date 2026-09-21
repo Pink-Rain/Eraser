@@ -6,20 +6,22 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { NpcManager } from "@/components/eraser/npc-manager"
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
 import { getCampaignDashboard, listNpcs, listSavedShops } from "@/lib/google-sheets"
+import { loadShopGeneratorItems } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
 async function SessionCreatorData({ campaignId }: { campaignId: string }) {
-  const [shops, npcs] = await Promise.all([
+  const [shops, npcs, generatorItems] = await Promise.all([
     listSavedShops(campaignId, true),
     listNpcs(campaignId, true),
+    loadShopGeneratorItems(),
   ])
   return (
     <>
       <section className="mt-7">
         <p className="mb-3 text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Magasins</p>
-        <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} mode="locations" />
+        <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} mode="locations" />
       </section>
       <section className="mt-10 border-t pt-8">
         <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">PNJs</p>

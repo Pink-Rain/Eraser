@@ -99,18 +99,11 @@ export type TabletopShopDetail = {
 export type TabletopNpcDetail = {
   id: string
   name: string
-  classOrJob: string
   portrait: string
   currentHp: number
   totalHp: number
-  speed: number
-  people: string
-  gender: string
-  age: string
-  height: string
-  weight: string
-  description: string
-  other: string
+  playerNotes: string
+  gmNotes: string
   stats: Array<{ label: string; short: string; value: number }>
   inventory: Array<{ id: string; name: string; quantity: number; notes: string }>
   canViewPrivate: boolean

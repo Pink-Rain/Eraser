@@ -23,10 +23,11 @@ async function CampaignDashboardData({
 }) {
   const [members, groupNpcs] = await Promise.all([
     listCampaignMembers(campaign.id),
-    listNpcs(campaign.id).then((npcs) => npcs.filter((npc) => npc.inPlayerGroup)),
+    listNpcs(campaign.id, true),
   ])
   const identities = await identityUidsForUser(accountUid)
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={groupNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
+  const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "" }))
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

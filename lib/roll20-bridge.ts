@@ -2,7 +2,7 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { roll20CampaignLinks } from "@/db/schema"
-import { getCampaignDashboard, listNpcs, listSavedShops, saveNpcs } from "@/lib/google-sheets"
+import { getCampaignDashboard, listNpcBackpackSummaries, listNpcs, listSavedShops, saveNpcs } from "@/lib/google-sheets"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
 
@@ -79,7 +79,8 @@ export async function roll20LinkFromImageToken(campaignId: string, imageToken: s
 
 export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }) {
   const campaign = await getCampaignDashboard(null, link.campaignId)
-  const [npcs, shops] = await Promise.all([listNpcs(link.campaignId), listSavedShops(link.campaignId)])
+  const [npcs, shops] = await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
+  const inventories = await listNpcBackpackSummaries(npcs.map((npc) => npc.id))
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
   const portraitUrl = (npcId: string, portrait: string) => portrait
     ? `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(npcId)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}`
@@ -91,9 +92,24 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
     lastPullAt: now, updatedAt: now,
   }).where(eq(roll20CampaignLinks.id, link.id))
   return {
-    schema: 1,
+    schema: 2,
     campaign: { id: campaign.id, name: campaign.name, updatedAt: campaign.updatedAt },
-    npcs: npcs.map((npc) => ({ ...npc, portraitUrl: portraitUrl(npc.id, npc.portrait) })),
+    npcs: npcs.map((npc) => ({
+      id: npc.id,
+      name: npc.name,
+      portraitUrl: portraitUrl(npc.id, npc.portrait),
+      currentHp: npc.currentHp,
+      totalHp: npc.totalHp,
+      constitution: npc.constitution,
+      strength: npc.strength,
+      dexterity: npc.dexterity,
+      intelligence: npc.intelligence,
+      wisdom: npc.wisdom,
+      charisma: npc.charisma,
+      playerNotes: npc.playerNotes,
+      gmNotes: npc.gmNotes,
+      inventory: inventories[npc.id] || [],
+    })),
     shops: shops.map((shop) => {
       const seller = npcById.get(shop.npcId)
       return { ...shop, seller: seller ? { id: seller.id, name: seller.name, portraitUrl: portraitUrl(seller.id, seller.portrait) } : null }

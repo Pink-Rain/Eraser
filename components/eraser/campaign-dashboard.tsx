@@ -3,7 +3,7 @@
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
-import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Star, Trash2, Upload, UserRound, Users, X } from "lucide-react"
+import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Trash2, Upload, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -278,8 +278,8 @@ export function CampaignDashboard({
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">
-          <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><UserRound className="size-5" />PNJs du groupe</h2>
-          {initialGroupNpcs.length ? <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{initialGroupNpcs.map((npc) => <article key={npc.id} className="relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm"><div className="relative min-h-28 bg-muted">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-9 text-primary/20" /></div>}</div><div className="min-w-0 p-4"><div className="flex items-start gap-2"><h3 className="min-w-0 flex-1 font-display text-lg font-semibold leading-tight">{npc.name}</h3>{npc.important && <Star className="size-4 shrink-0 fill-amber-400 text-amber-500" />}</div>{npc.classOrJob && <p className="mt-2 text-sm font-semibold text-foreground/80">{npc.classOrJob}</p>}{npc.people && <p className="mt-1 text-sm text-muted-foreground">{npc.people}</p>}</div></article>)}</div> : <p className="mt-4 text-sm text-muted-foreground">Aucun PNJ n’a encore été ajouté au groupe.</p>}
+          <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><UserRound className="size-5" />PNJs de la session</h2>
+          {initialGroupNpcs.length ? <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">{initialGroupNpcs.map((npc) => <article key={npc.id} className="relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm"><div className="relative min-h-28 bg-muted">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-9 text-primary/20" /></div>}</div><div className="min-w-0 p-4"><h3 className="font-display text-lg font-semibold leading-tight">{npc.name}</h3><p className="mt-2 text-sm text-muted-foreground">PV {npc.currentHp} / {npc.totalHp}</p></div></article>)}</div> : <p className="mt-4 text-sm text-muted-foreground">Aucun PNJ n’a encore été ajouté à la session.</p>}
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">

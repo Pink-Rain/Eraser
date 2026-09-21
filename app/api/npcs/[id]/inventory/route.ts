@@ -1,11 +1,9 @@
 import { NextResponse } from "next/server"
 
 import {
-  addCharacterInventoryContainer, addCharacterInventoryItem, createCharacterInventoryContainer,
-  createCharacterInventoryItem, deleteCharacterInventoryContainer, getCampaignDashboard, getCharacterInventory, getNpcById,
+  addCharacterInventoryItem, createCharacterInventoryItem, getCampaignDashboard, getNpcBackpackInventory, getNpcById,
   listInventoryTransferTargets,
-  moveCharacterInventoryItem, setCharacterInventoryCurrency, setCharacterInventoryItemEquipped,
-  setCharacterInventoryItemQuantity, transferCharacterInventoryItem, updateCharacterInventoryContainer, updateCharacterInventoryItem,
+  setCharacterInventoryItemQuantity, transferCharacterInventoryItem, updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -27,7 +25,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
     if (new URL(request.url).searchParams.get("targets") === "1") {
       return NextResponse.json({ transferTargets: authorization.npc.pageLinked === "bac-a-sable" ? [] : await listInventoryTransferTargets(authorization.npc.pageLinked, id) })
     }
-    const inventory = await getCharacterInventory(id)
+    const inventory = await getNpcBackpackInventory(id, new URL(request.url).searchParams.get("summary") !== "1")
     return NextResponse.json({ inventory: new URL(request.url).searchParams.get("summary") === "1" ? { ...inventory, items: [] } : inventory })
   } catch {
     return NextResponse.json({ error: "L’inventaire n’a pas pu être chargé." }, { status: 400 })
@@ -41,22 +39,15 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const body = (await request.json()) as Record<string, unknown>
     let inventory
-    if (body.action === "add-container" && typeof body.typeId === "string") inventory = await addCharacterInventoryContainer(id, body.typeId)
-    else if (body.action === "create-container" && typeof body.name === "string" && typeof body.category === "string" && typeof body.capacity === "number" && Number.isFinite(body.capacity)) inventory = await createCharacterInventoryContainer(id, { name: body.name, category: body.category, capacity: body.capacity })
-    else if (body.action === "update-container" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.capacity === "number" && Number.isFinite(body.capacity)) inventory = await updateCharacterInventoryContainer(id, body.containerId, { name: body.name, capacity: body.capacity })
-    else if (body.action === "delete-container" && typeof body.containerId === "string") inventory = await deleteCharacterInventoryContainer(id, body.containerId)
-    else if (body.action === "add-item" && typeof body.itemId === "string") inventory = await addCharacterInventoryItem(id, body.itemId, typeof body.containerId === "string" ? body.containerId : undefined)
-    else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await createCharacterInventoryItem(id, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
-    else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity)
-    else if (body.action === "set-equipped" && typeof body.slotId === "string" && typeof body.equipped === "boolean") inventory = await setCharacterInventoryItemEquipped(id, body.slotId, body.equipped)
-    else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
-    else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") inventory = await moveCharacterInventoryItem(id, body.slotId, body.containerId)
+    if (body.action === "add-item" && typeof body.itemId === "string") inventory = await addCharacterInventoryItem(id, body.itemId, undefined, "npc")
+    else if (body.action === "create-item" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await createCharacterInventoryItem(id, "", { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect }, "npc")
+    else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "npc")
+    else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect }, "npc")
     else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string" && authorization.npc.pageLinked !== "bac-a-sable") {
       const targets = await listInventoryTransferTargets(authorization.npc.pageLinked, id)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      inventory = await transferCharacterInventoryItem(id, body.slotId, body.targetId)
+      inventory = await transferCharacterInventoryItem(id, body.slotId, body.targetId, "npc")
     }
-    else if (body.action === "set-currency" && typeof body.containerId === "string" && typeof body.currency === "string" && typeof body.amount === "number" && Number.isFinite(body.amount)) inventory = await setCharacterInventoryCurrency(id, body.containerId, body.currency, body.amount)
     else throw new Error("INVALID_INVENTORY_ACTION")
     return NextResponse.json({ inventory: { ...inventory, items: [] } })
   } catch (error) {

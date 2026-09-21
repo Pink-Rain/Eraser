@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.4.0';
+  const VERSION = '0.5.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -228,6 +228,7 @@
     const url = API + '?gameId=' + encodeURIComponent(gameId()) + '&gameName=' + encodeURIComponent(gameName());
     const response = await bridgeFetch({ url, headers: { authorization: 'Bearer ' + token } });
     if (!response?.ok) throw new Error(response?.payload?.error || 'Connexion à Eraser impossible.');
+    if (response.payload?.schema !== 2) throw new Error('Version de données Eraser incompatible (schema ' + (response.payload?.schema ?? 'absent') + '). Mets à jour l’application, le compagnon et le Mod en 0.5.0.');
     return response.payload;
   }
 

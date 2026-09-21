@@ -63,7 +63,7 @@ import {
   type InventoryItemRecord,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
-import type { CampaignNpcRecord, CityKey, GeneratedShop, NpcInventoryItem, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
+import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
@@ -192,6 +192,21 @@ function classAccents(type: ClassType, dark: string | undefined, light: string |
 
 type ValuesResponse = { values?: GoogleSheetCellValue[][] }
 type UpdateValuesResponse = { updatedData?: { values?: GoogleSheetCellValue[][] } }
+type AppendValuesResponse = {
+  updates?: {
+    updatedRange?: string
+    updatedRows?: number
+    updatedColumns?: number
+    updatedCells?: number
+  }
+}
+
+export type AppendRowsResult = {
+  updatedRange: string
+  updatedRows: number
+  updatedColumns: number
+  updatedCells: number
+}
 type GridNotesResponse = {
   sheets?: Array<{
     data?: Array<{
@@ -568,11 +583,33 @@ export async function appendRows(
   range: string,
   values: Array<Array<string | number | boolean>>,
 ) {
-  await googleSheetsFetch(
+  const response = await googleSheetsFetch(
     `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?valueInputOption=USER_ENTERED&insertDataOption=INSERT_ROWS`,
     { method: "POST", body: JSON.stringify({ values }) },
   )
   clearSpreadsheetReadCache(spreadsheetId)
+  const updates = ((await response.json()) as AppendValuesResponse).updates
+  const updatedRange = updates?.updatedRange?.trim() || ""
+  if (values.length && !updatedRange) throw new Error("SHEETS_APPEND_RANGE_MISSING")
+
+  const tabFromRange = (value: string) => {
+    const raw = value.split("!", 1)[0]?.trim() || ""
+    return raw.startsWith("'") && raw.endsWith("'")
+      ? raw.slice(1, -1).replace(/''/g, "'")
+      : raw
+  }
+  if (updatedRange && tabFromRange(updatedRange) !== tabFromRange(range)) {
+    throw new Error(`SHEETS_APPEND_WRONG_RANGE:${updatedRange}`)
+  }
+  if (typeof updates?.updatedRows === "number" && updates.updatedRows !== values.length) {
+    throw new Error(`SHEETS_APPEND_ROW_COUNT_MISMATCH:${updates.updatedRows}/${values.length}:${updatedRange}`)
+  }
+  return {
+    updatedRange,
+    updatedRows: updates?.updatedRows ?? values.length,
+    updatedColumns: updates?.updatedColumns ?? 0,
+    updatedCells: updates?.updatedCells ?? 0,
+  } satisfies AppendRowsResult
 }
 
 export async function updateRange(
@@ -1674,7 +1711,7 @@ const npcSheetHeaders = [
   "ID", "Page lié", "Nom du PNJ", "Classe / métier", "Vie actuelle", "Vie totale", "Rapidité",
   "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat",
   "Capacité de tir", "Capacité magique", "Force mentale", "Constitution", "Peuple", "Genre", "Âge",
-  "Poids", "Taille", "Autre", "Portrait", "Description", "Inventaire JSON",
+  "Poids", "Taille", "Notes MJ", "Portrait", "Notes joueurs", "Inventaire JSON (archive)",
   "Ajouté au créateur de session", "Créé le", "Modifié le", "Dossier", "Dans le groupe joueur", "PNJ important", "Créé par",
 ]
 
@@ -1931,7 +1968,7 @@ function columnName(columnCount: number) {
 const npcSheetSchemaReady = new Set<string>()
 
 async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
-  const schemaKey = `${spreadsheetId}:${tabName}:v5`
+  const schemaKey = `${spreadsheetId}:${tabName}:v6`
   if (npcSheetSchemaReady.has(schemaKey)) return
   const persistentKey = `npc-sheet-schema:${schemaKey}`
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, persistentKey)).limit(1)
@@ -1965,7 +2002,9 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
   const [headers = []] = await readRange(spreadsheetId, `${tabName}!A1:AG1`)
   const alreadyCurrent = npcSheetHeaders.every((header, index) => headers[index] === header)
   if (!alreadyCurrent) {
+    const rowOneContainsData = headers.some((value) => value.trim()) && headers[0] !== "ID"
     const formattingRequests: Array<Record<string, unknown>> = [
+      ...(rowOneContainsData ? [{ insertDimension: { range: { sheetId: properties.sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 }, inheritFromBefore: false } }] : []),
       {
         repeatCell: {
           range: { sheetId: properties.sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: npcSheetHeaders.length },
@@ -2532,7 +2571,7 @@ export async function trashRedundantDriveSpreadsheet(fileId: string) {
   return trashDriveFile(candidate.id)
 }
 
-const jdrSheetHeaderChecked = new Set<JdrSheetKey>()
+const jdrSheetHeaderChecked = new Set<string>()
 
 // Le nom d'onglet enregistré est celui que la définition *attend*. Quand un
 // classeur a été relié (trouvé par son nom dans le Drive) au lieu d'avoir été
@@ -2560,8 +2599,8 @@ async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSh
   if (verifiedJdrSheetTabs.has(cacheKey)) return sheet
   try {
     const tabs = await spreadsheetTabs(sheet.spreadsheetId)
-    verifiedJdrSheetTabs.add(cacheKey)
     if (!tabs.length || tabs.some((tab) => tab.title === definition.tabName)) {
+      verifiedJdrSheetTabs.add(cacheKey)
       return sheet.tabName === definition.tabName ? sheet : (await storeTabName(sheet, definition.tabName)) ?? sheet
     }
     // Un seul onglet : c'est forcément celui du classeur qu'on a relié, on le
@@ -2571,6 +2610,7 @@ async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSh
       : [{ addSheet: { properties: { title: definition.tabName, gridProperties: { rowCount: 1000, columnCount: definition.headers.length, frozenRowCount: 1, frozenColumnCount: definition.frozenColumns } } } }]
     await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
     clearSpreadsheetReadCache(sheet.spreadsheetId)
+    verifiedJdrSheetTabs.add(cacheKey)
     console.error("JDR_SHEET_TAB_REPAIRED", definition.key, tabs.map((tab) => tab.title).join(" | "), "->", definition.tabName)
     return (await storeTabName(sheet, definition.tabName)) ?? { ...sheet, tabName: definition.tabName }
   } catch (error) {
@@ -2580,19 +2620,37 @@ async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSh
 }
 
 async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
-  if (jdrSheetHeaderChecked.has(definition.key)) return
-  jdrSheetHeaderChecked.add(definition.key)
+  const cacheKey = `${sheet.spreadsheetId}:${sheet.tabName}:${definition.key}`
+  if (jdrSheetHeaderChecked.has(cacheKey)) return
   try {
-    const firstRow = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A1:A1"))
-    if (firstRow.length > 0) return
-    // La feuille est reliée mais totalement vide : ses en-têtes n'ont jamais pu être
-    // écrites (par exemple un onglet au nom contenant des espaces mal cité dans la
-    // notation A1). On ne les complète que si la feuille est confirmée vide, pour ne
-    // jamais écraser des données déjà présentes.
     const lastColumn = columnName(definition.headers.length)
+    const [firstRow = []] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${lastColumn}1`))
+    if (definition.headers.every((header, index) => firstRow[index] === header)) {
+      jdrSheetHeaderChecked.add(cacheKey)
+      return
+    }
+
+    const hasExistingValues = firstRow.some((value) => value.trim())
+    if (hasExistingValues) {
+      const tabs = await spreadsheetTabs(sheet.spreadsheetId)
+      const sheetId = tabs.find((tab) => tab.title === sheet.tabName)?.sheetId
+      if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
+      await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
+        method: "POST",
+        body: JSON.stringify({ requests: [{
+          insertDimension: {
+            range: { sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 },
+            inheritFromBefore: false,
+          },
+        }] }),
+      })
+      clearSpreadsheetReadCache(sheet.spreadsheetId)
+    }
     await updateRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${lastColumn}1`), [definition.headers])
+    jdrSheetHeaderChecked.add(cacheKey)
   } catch (error) {
     console.error("JDR_SHEET_HEADER_CHECK_FAILED", definition.key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    throw error
   }
 }
 
@@ -2693,18 +2751,22 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
   const existingFile = await findGoogleSpreadsheetByName(definition.name)
   const file = existingFile ?? await createGoogleSpreadsheet(definition.name)
   if (!existingFile) await configureStructuredSheet(file.id, definition)
-  if (key === "inventory") await ensureInventoryWorkbookSchema(file.id)
-  if (key === "npcs") {
-    if (existingFile) await ensureNpcSheetSchema(file.id, definition.tabName)
-    else npcSheetSchemaReady.add(`${file.id}:${definition.tabName}:v5`)
-  }
-  return saveJdrSheet({
+  const saved = await saveJdrSheet({
     key: definition.key,
     spreadsheetId: file.id,
     name: definition.name,
     tabName: definition.tabName,
     webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
   })
+  if (!saved) throw new Error("JDR_SHEET_LINK_FAILED")
+  const verified = await verifyJdrSheetTab(saved, definition)
+  if (key === "inventory") await ensureInventoryWorkbookSchema(verified.spreadsheetId)
+  if (key === "npcs") {
+    if (existingFile) await ensureNpcSheetSchema(verified.spreadsheetId, verified.tabName)
+    else npcSheetSchemaReady.add(`${verified.spreadsheetId}:${verified.tabName}:v6`)
+  }
+  await ensureJdrSheetHeaderRow(verified, definition)
+  return verified
 }
 
 export async function createCampaignForMj(mjUid: string, input: { name: string; description?: string; bannerUrl?: string; accentColor?: string }) {
@@ -2736,7 +2798,27 @@ function savedShopFromRow(row: string[]): SavedShopRecord | null {
   let items: GeneratedShop["items"] = []
   try {
     const parsed = JSON.parse(row[7] || "[]") as unknown
-    if (Array.isArray(parsed)) items = parsed as GeneratedShop["items"]
+    if (Array.isArray(parsed)) items = parsed.flatMap((value, index) => {
+      if (!value || typeof value !== "object") return []
+      const item = value as Record<string, unknown>
+      const name = typeof item.name === "string" ? item.name : ""
+      if (!name) return []
+      const rarity = ["very-common", "common", "rare", "very-rare", "ultimate"].includes(String(item.rarity))
+        ? item.rarity as GeneratedShop["items"][number]["rarity"]
+        : "common"
+      return [{
+        id: typeof item.id === "string" && item.id ? item.id : `legacy-${row[0]}-${index}`,
+        name,
+        description: typeof item.description === "string" ? item.description : "",
+        effect: typeof item.effect === "string" ? item.effect : "",
+        type: typeof item.type === "string" ? item.type : "Objet",
+        subtype: typeof item.subtype === "string" ? item.subtype : "",
+        price: typeof item.price === "string" ? item.price : "",
+        icon: typeof item.icon === "string" ? item.icon : "",
+        locations: Array.isArray(item.locations) ? item.locations as Array<{ place: string; rarity: string }> : [],
+        rarity,
+      }]
+    })
   } catch {
     items = []
   }
@@ -2807,10 +2889,19 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   const written = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)
-  const storedIds = new Set(written.flatMap((row) => row[0] ? [row[0]] : []))
-  const missing = shops.filter((shop) => !storedIds.has(shop.id))
-  if (missing.length) throw new Error(`SHOPS_WRITE_NOT_PERSISTED:${missing.length}/${shops.length}:${sheet.tabName}`)
-  return written.map(savedShopFromRow).flatMap((shop) => shop && shops.some((item) => item.id === shop.id) ? [shop] : [])
+  const storedById = new Map(written.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : []))
+  const invalid = shops.filter((shop) => {
+    const stored = storedById.get(shop.id)
+    if (!stored || stored.pageLinked !== pageLinked) return true
+    if (options.inCampaign !== undefined && stored.inCampaign !== options.inCampaign) return true
+    if (options.npcId !== undefined && stored.npcId !== options.npcId) return true
+    return false
+  })
+  if (invalid.length) throw new Error(`SHOPS_WRITE_NOT_PERSISTED:${invalid.length}/${shops.length}:${sheet.tabName}`)
+  return shops.flatMap((shop) => {
+    const stored = storedById.get(shop.id)
+    return stored ? [stored] : []
+  })
 }
 
 async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
@@ -2879,13 +2970,15 @@ function npcNumber(value: string | undefined) {
   return Number.isFinite(parsed) ? Math.max(0, parsed) : 0
 }
 
-function npcInventoryFromCell(value: string | undefined): NpcInventoryItem[] {
+type LegacyNpcInventoryItem = { id: string; name: string; quantity: number; notes: string }
+
+function npcInventoryFromCell(value: string | undefined): LegacyNpcInventoryItem[] {
   try {
     const parsed = JSON.parse(value || "[]") as unknown
     if (!Array.isArray(parsed)) return []
-    return parsed.flatMap<NpcInventoryItem>((item) => {
+    return parsed.flatMap<LegacyNpcInventoryItem>((item) => {
       if (!item || typeof item !== "object") return []
-      const candidate = item as Partial<NpcInventoryItem>
+      const candidate = item as Partial<LegacyNpcInventoryItem>
       if (!candidate.name?.trim()) return []
       return [{
         id: typeof candidate.id === "string" && candidate.id ? candidate.id : crypto.randomUUID(),
@@ -2902,29 +2995,39 @@ function npcInventoryFromCell(value: string | undefined): NpcInventoryItem[] {
 function npcFromRow(row: string[]): CampaignNpcRecord | null {
   if (!row[0] || !row[1]) return null
   return {
-    id: row[0], pageLinked: row[1], name: row[2] || "PNJ sans nom", classOrJob: row[3] || "",
-    currentHp: npcNumber(row[4]), totalHp: npcNumber(row[5]), speed: npcNumber(row[6]),
+    id: row[0], pageLinked: row[1], name: row[2] || "PNJ sans nom",
+    currentHp: npcNumber(row[4]), totalHp: npcNumber(row[5]),
     strength: npcNumber(row[7]), dexterity: npcNumber(row[8]), intelligence: npcNumber(row[9]),
-    wisdom: npcNumber(row[10]), charisma: npcNumber(row[11]), combatAbility: npcNumber(row[12]),
-    shootingAbility: npcNumber(row[13]), magicAbility: npcNumber(row[14]), mentalStrength: npcNumber(row[15]),
-    constitution: npcNumber(row[16]), people: row[17] || "", gender: row[18] || "", age: row[19] || "", weight: row[20] || "",
-    height: row[21] || "", other: row[22] || "", portrait: row[23] || "", description: row[24] || "",
-    inventory: npcInventoryFromCell(row[25]), inCampaign: sheetValueIsChecked(row[26]),
-    createdAt: row[27] || "", updatedAt: row[28] || "", folder: row[29] || "",
-    inPlayerGroup: sheetValueIsChecked(row[30]), important: sheetValueIsChecked(row[31]), createdByUid: row[32] || "",
+    wisdom: npcNumber(row[10]), charisma: npcNumber(row[11]), constitution: npcNumber(row[16]),
+    gmNotes: row[22] || "", portrait: row[23] || "", playerNotes: row[24] || "",
+    inCampaign: sheetValueIsChecked(row[26]), createdAt: row[27] || "", updatedAt: row[28] || "",
+    createdByUid: row[32] || "",
   }
 }
 
-function npcRow(npc: CampaignNpcRecord, pageLinked: string, current: CampaignNpcRecord | null, options: { inCampaign?: boolean } = {}) {
+function npcRow(npc: CampaignNpcRecord, pageLinked: string, original: string[] | null, options: { inCampaign?: boolean } = {}) {
   const now = new Date().toISOString()
-  return [
-    npc.id, pageLinked, npc.name, npc.classOrJob, npc.currentHp, npc.totalHp, npc.speed,
-    npc.strength, npc.dexterity, npc.intelligence, npc.wisdom, npc.charisma, npc.combatAbility,
-    npc.shootingAbility, npc.magicAbility, npc.mentalStrength, npc.constitution, npc.people, npc.gender, npc.age,
-    npc.weight, npc.height, npc.other, npc.portrait, npc.description, JSON.stringify(npc.inventory),
-    (options.inCampaign ?? npc.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non", current?.createdAt || now, now,
-    npc.folder || "", npc.inPlayerGroup ? "Oui" : "Non", npc.important ? "Oui" : "Non", npc.createdByUid || current?.createdByUid || "",
-  ]
+  const values: Array<string | number | boolean> = Array.from({ length: npcSheetHeaders.length }, (_, index) => original?.[index] || "")
+  const current = original ? npcFromRow(original) : null
+  values[0] = npc.id
+  values[1] = pageLinked
+  values[2] = npc.name
+  values[4] = npc.currentHp
+  values[5] = npc.totalHp
+  values[7] = npc.strength
+  values[8] = npc.dexterity
+  values[9] = npc.intelligence
+  values[10] = npc.wisdom
+  values[11] = npc.charisma
+  values[16] = npc.constitution
+  values[22] = npc.gmNotes
+  values[23] = npc.portrait
+  values[24] = npc.playerNotes
+  values[26] = (options.inCampaign ?? npc.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non"
+  values[27] = current?.createdAt || npc.createdAt || now
+  values[28] = now
+  values[32] = npc.createdByUid || current?.createdByUid || ""
+  return values
 }
 
 export async function listNpcs(pageLinked: string, onlyInCampaign = false) {
@@ -2952,8 +3055,8 @@ export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], op
   const saved: CampaignNpcRecord[] = []
   for (const npc of npcs) {
     const existingIndex = rows.findIndex((row) => row[0] === npc.id && row[1] === pageLinked)
-    const current = existingIndex >= 0 ? npcFromRow(rows[existingIndex]) : null
-    const values = npcRow(npc, pageLinked, current, options)
+    const original = existingIndex >= 0 ? rows[existingIndex] : null
+    const values = npcRow(npc, pageLinked, original, options)
     if (existingIndex >= 0) updates.push({ range: `${sheet.tabName}!A${existingIndex + 2}:AG${existingIndex + 2}`, values: [values] })
     else additions.push(values)
     const record = npcFromRow(values.map(String))
@@ -2992,7 +3095,7 @@ export async function copyNpcsToPage(sourcePageLinked: string, targetPageLinked:
       if (copied) portrait = `/api/npcs/portrait/${encodeURIComponent(id)}`
     }
     await copyCharacterInventory(npc.id, id)
-    copies.push({ ...npc, id, pageLinked: targetPageLinked, portrait, inCampaign: false, inPlayerGroup: false, createdAt: "", updatedAt: "" })
+    copies.push({ ...npc, id, pageLinked: targetPageLinked, portrait, inCampaign: false, createdAt: "", updatedAt: "" })
   }
   return copies.length ? saveNpcs(targetPageLinked, copies) : []
 }
@@ -3005,7 +3108,6 @@ export async function moveNpcsToPage(sourcePageLinked: string, targetPageLinked:
     ...npc,
     pageLinked: targetPageLinked,
     inCampaign: false,
-    inPlayerGroup: false,
     createdAt: "",
     updatedAt: "",
   })))
@@ -3404,11 +3506,11 @@ export async function listTabletopNpcEntitiesByIds(ids: string[], pageLinked = "
     id: npc.id,
     kind: "npc",
     name: npc.name,
-    subtitle: [npc.classOrJob, npc.people].filter(Boolean).join(" · "),
+    subtitle: "PNJ",
     portrait: npc.portrait,
     currentHp: npc.currentHp,
     totalHp: npc.totalHp,
-    speed: npc.speed,
+    speed: 0,
     ownerUid: npc.createdByUid,
   }))
 }
@@ -3656,7 +3758,7 @@ export async function listInventoryTransferTargets(
   if (!campaign) return []
   const campaignOwnerId = campaignInventoryOwnerId(campaignId)
   const visibleNpcs = playerVisibility
-    ? npcs.filter((npc) => npc.inPlayerGroup || npc.createdByUid === playerVisibility.uid || playerVisibility.relatedNpcIds.has(npc.id))
+    ? npcs.filter((npc) => npc.inCampaign || npc.createdByUid === playerVisibility.uid || playerVisibility.relatedNpcIds.has(npc.id))
     : npcs
   return [
     ...(campaignOwnerId === excludedOwnerId ? [] : [{ id: campaignOwnerId, name: "Inventaire de campagne", kind: "campaign" as const, campaignId, campaignName: campaign.name }]),
@@ -4373,6 +4475,79 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
   return await readInventoryWorkbook(includeCatalog)
 }
 
+type InventoryOwnerMode = "character" | "npc"
+
+async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog = true) {
+  let workbook = await readInventoryWorkbook(includeCatalog)
+  const now = new Date().toISOString()
+  const active = workbook.containers.filter((container) => container.characterId === npcId && !container.deletedAt)
+  const existingBackpack = active.find((container) => container.typeId === "TYPE-SAC-BASE")
+    ?? active.find((container) => inventoryContainerCategory(container, new Map(workbook.containerTypes.map((type) => [type.id, type]))) === "Inventaire")
+  const alreadyMigrated = active.length === 1
+    && existingBackpack?.typeId === "TYPE-SAC-BASE"
+    && existingBackpack.customName === "Sac à dos"
+  if (alreadyMigrated && existingBackpack) {
+    await appendInventorySlots(workbook, existingBackpack, workbook.containerTypes.find((type) => type.id === "TYPE-SAC-BASE"))
+    return readInventoryWorkbook(includeCatalog)
+  }
+
+  const npcSheet = await ensureJdrSheet("npcs")
+  const npcRows = await readRange(npcSheet.spreadsheetId, `${npcSheet.tabName}!A2:AG`)
+  const legacyItems = npcInventoryFromCell(npcRows.find((row) => row[0] === npcId)?.[25])
+  const activeIds = new Set(active.map((container) => container.id))
+  const occupied = workbook.contents
+    .filter((content) => content.characterId === npcId && activeIds.has(content.containerId))
+    .filter((content) => content.quantity > 0 && Boolean(content.itemId || content.customName))
+    .sort((left, right) => left.index - right.index)
+  const capacity = Math.max(15, occupied.length + legacyItems.length)
+  let backpack = existingBackpack
+  if (!backpack) {
+    backpack = {
+      id: crypto.randomUUID(), characterId: npcId, typeId: "TYPE-SAC-BASE", customName: "Sac à dos",
+      category: "Inventaire", capacity, order: 0, createdAt: now, deletedAt: "", rowNumber: 0,
+    }
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), [[
+      backpack.id, npcId, backpack.typeId, backpack.customName, backpack.category, backpack.capacity, 0, now, "",
+    ]])
+    clearInventoryWorkbookCache()
+    workbook = await readInventoryWorkbook(includeCatalog)
+    backpack = workbook.containers.find((container) => container.id === backpack?.id)
+    if (!backpack) throw new Error("INVENTORY_CONTAINER_NOT_FOUND")
+  }
+
+  const normalizedBackpack: StoredInventoryContainer = {
+    ...backpack, typeId: "TYPE-SAC-BASE", customName: "Sac à dos", category: "Inventaire", capacity, order: 0, deletedAt: "",
+  }
+  const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = [{
+    range: sheetTabRange(inventoryContainerTab, `A${backpack.rowNumber}:I${backpack.rowNumber}`),
+    values: [[normalizedBackpack.id, npcId, normalizedBackpack.typeId, normalizedBackpack.customName, normalizedBackpack.category, capacity, 0, normalizedBackpack.createdAt || now, ""]],
+  }]
+  active.filter((container) => container.id !== backpack.id).forEach((container) => updates.push({
+    range: sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`), values: [[now]],
+  }))
+  occupied.forEach((content, index) => updates.push({
+    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:M${content.rowNumber}`),
+    values: [inventoryContentRow({ ...content, containerId: backpack!.id, index: index + 1, equipped: false, updatedAt: now })],
+  }))
+  const legacyRows: StoredInventoryContent[] = legacyItems.map((item, index) => ({
+    ...makeEmptyInventorySlot(npcId, backpack!.id, occupied.length + index + 1),
+    id: `NPC-LEGACY-${npcId}-${item.id || index}`,
+    quantity: item.quantity, customName: item.name, customDescription: item.notes, type: "Objet", updatedAt: now,
+  })).filter((item) => !workbook.contents.some((content) => content.id === item.id))
+  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), legacyRows.map(inventoryContentRow))
+  if (updates.length) await updateRanges(workbook.spreadsheetId, updates)
+  clearInventoryWorkbookCache()
+  workbook = await readInventoryWorkbook(includeCatalog)
+  const refreshedBackpack = workbook.containers.find((container) => container.id === backpack.id && !container.deletedAt)
+  if (!refreshedBackpack) throw new Error("INVENTORY_CONTAINER_NOT_FOUND")
+  await appendInventorySlots(workbook, refreshedBackpack, workbook.containerTypes.find((type) => type.id === "TYPE-SAC-BASE"))
+  return readInventoryWorkbook(includeCatalog)
+}
+
+async function inventoryStorageFor(ownerId: string, includeCatalog: boolean, mode: InventoryOwnerMode) {
+  return mode === "npc" ? ensureNpcBackpackInventoryStorage(ownerId, includeCatalog) : ensureCharacterInventoryStorage(ownerId, includeCatalog)
+}
+
 function customInventoryItem(content: StoredInventoryContent): InventoryItemRecord | null {
   if (!content.customName) return null
   return {
@@ -4463,6 +4638,24 @@ export async function getCharacterInventory(characterId: string) {
 
 export async function getCharacterInventorySummary(characterId: string) {
   return { ...buildCharacterInventory(characterId, await ensureCharacterInventoryStorage(characterId, false)), items: [] }
+}
+
+export async function getNpcBackpackInventory(npcId: string, includeCatalog = true) {
+  return buildCharacterInventory(npcId, await ensureNpcBackpackInventoryStorage(npcId, includeCatalog))
+}
+
+export async function listNpcBackpackSummaries(npcIds: string[]) {
+  const uniqueIds = [...new Set(npcIds)]
+  for (const npcId of uniqueIds) await ensureNpcBackpackInventoryStorage(npcId, false)
+  const workbook = await readInventoryWorkbook(false)
+  const entries = uniqueIds.map((npcId) => {
+    const inventory = buildCharacterInventory(npcId, workbook)
+    const items = inventory.containers.flatMap((container) => container.slots.flatMap((slot) => slot.item && slot.quantity > 0 ? [{
+      id: slot.item.id, name: slot.item.name, quantity: slot.quantity, notes: slot.item.notes || slot.item.description,
+    }] : []))
+    return [npcId, items] as const
+  })
+  return Object.fromEntries(entries) as Record<string, Array<{ id: string; name: string; quantity: number; notes: string }>>
 }
 
 export async function getCampaignInventory(campaignId: string) {
@@ -4629,8 +4822,8 @@ async function updateStoredInventoryContent(workbook: InventoryWorkbook, content
   cacheInventoryWorkbook(workbook)
 }
 
-export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string) {
-  const workbook = await ensureCharacterInventoryStorage(characterId)
+export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string, mode: InventoryOwnerMode = "character") {
+  const workbook = await inventoryStorageFor(characterId, true, mode)
   const item = workbook.items.find((candidate) => candidate.id === itemId && candidate.active)
   if (!item) throw new Error("INVENTORY_ITEM_NOT_FOUND")
   const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
@@ -4638,7 +4831,8 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     .filter((container) => container.characterId === characterId && !container.deletedAt)
     .filter((container) => isCampaignInventoryOwner(characterId) || canItemGoInInventoryCategory(`${item.type} ${item.subtype}`, inventoryContainerCategory(container, typeById), item.effect))
     .sort((left, right) => left.order - right.order)
-  if (requestedContainerId) containers = containers.filter((container) => container.id === requestedContainerId)
+  if (mode === "npc") containers = containers.filter((container) => container.typeId === "TYPE-SAC-BASE")
+  else if (requestedContainerId) containers = containers.filter((container) => container.id === requestedContainerId)
   if (!containers.length) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
 
   const containerIds = new Set(containers.map((container) => container.id))
@@ -4686,9 +4880,10 @@ export async function createCharacterInventoryItem(
   characterId: string,
   requestedContainerId: string,
   input: { name: string; description: string; type: string; subtype: string; effect: string },
+  mode: InventoryOwnerMode = "character",
 ) {
-  const workbook = await ensureCharacterInventoryStorage(characterId)
-  const container = workbook.containers.find((candidate) => candidate.id === requestedContainerId && candidate.characterId === characterId && !candidate.deletedAt)
+  const workbook = await inventoryStorageFor(characterId, true, mode)
+  const container = workbook.containers.find((candidate) => candidate.characterId === characterId && !candidate.deletedAt && (mode === "npc" ? candidate.typeId === "TYPE-SAC-BASE" : candidate.id === requestedContainerId))
   const name = input.name.trim()
   const type = input.type.trim() || "Objet"
   if (!container || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) throw new Error("INVALID_INVENTORY_ITEM")
@@ -4713,8 +4908,8 @@ export async function createCharacterInventoryItem(
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function setCharacterInventoryItemQuantity(characterId: string, slotId: string, quantity: number) {
-  const workbook = await ensureCharacterInventoryStorage(characterId)
+export async function setCharacterInventoryItemQuantity(characterId: string, slotId: string, quantity: number, mode: InventoryOwnerMode = "character") {
+  const workbook = await inventoryStorageFor(characterId, true, mode)
   const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === characterId)
   if (!content || (!content.itemId && !content.customName)) throw new Error("INVENTORY_SLOT_NOT_FOUND")
   const container = workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
@@ -4742,8 +4937,8 @@ export async function setCharacterInventoryItemEquipped(characterId: string, slo
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string }) {
-  const workbook = await ensureCharacterInventoryStorage(characterId)
+export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string }, mode: InventoryOwnerMode = "character") {
+  const workbook = await inventoryStorageFor(characterId, true, mode)
   const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === characterId)
   const container = content && workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
   const name = input.name.trim()
@@ -4822,9 +5017,10 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string) {
-  await ensureCharacterInventoryStorage(sourceId)
-  const workbook = await ensureCharacterInventoryStorage(targetId)
+export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character") {
+  await inventoryStorageFor(sourceId, true, sourceMode)
+  const targetMode: InventoryOwnerMode = await getNpcById(targetId).catch(() => null) ? "npc" : "character"
+  const workbook = await inventoryStorageFor(targetId, true, targetMode)
   const source = workbook.contents.find((content) => content.id === slotId && content.characterId === sourceId)
   if (!source || (!source.itemId && !source.customName) || sourceId === targetId) throw new Error("INVENTORY_SLOT_NOT_FOUND")
   const sourceItem = workbook.items.find((item) => item.id === source.itemId) ?? customInventoryItem(source)

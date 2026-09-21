@@ -55,7 +55,7 @@ test("preserves Google Sheets rich-text runs", async () => {
 });
 
 test("preserves Google Sheets text colors", async () => {
-  const { richTextHtml, htmlToRichText } = await vite.ssrLoadModule(
+  const { richTextHtml, htmlToRichText, normalizeCssColorToHex } = await vite.ssrLoadModule(
     "/lib/google-sheet-rich-text.ts",
   );
   const html = richTextHtml("Rouge vert", [
@@ -69,6 +69,37 @@ test("preserves Google Sheets text colors", async () => {
   assert.equal(roundTrip.runs.length, 2);
   assert.equal(roundTrip.runs[0].format?.foregroundColorStyle?.rgbColor?.red > 0.69, true);
   assert.equal(roundTrip.runs[1].format?.foregroundColorStyle?.rgbColor?.green > 0.35, true);
+  assert.equal(normalizeCssColorToHex("#AbC"), "#aabbcc");
+  assert.equal(normalizeCssColorToHex("rgb(255, 0, 128)"), "#ff0080");
+  assert.equal(normalizeCssColorToHex("rgba(128, 64, 32, 50%)"), "#804020");
+  const legacy = htmlToRichText('<font color="rgb(255,0,0)">Ancien</font> <span style="color:#0f0">vert</span>');
+  assert.equal(legacy.text, "Ancien vert");
+  assert.equal(legacy.runs.length, 3);
+  assert.equal(legacy.runs[0].format?.foregroundColorStyle?.rgbColor?.red, 1);
+  assert.equal(legacy.runs[2].format?.foregroundColorStyle?.rgbColor?.green, 1);
+});
+
+test("clamps persistent table layouts to comfortable limits", async () => {
+  const { clampTableColumnWidth, clampTableRowHeight } = await vite.ssrLoadModule(
+    "/hooks/use-persistent-table-layout.ts",
+  );
+  assert.equal(clampTableColumnWidth(20), 80);
+  assert.equal(clampTableColumnWidth(1200), 900);
+  assert.equal(clampTableRowHeight(12), 40);
+  assert.equal(clampTableRowHeight(600), 240);
+});
+
+test("rerolls only a shop stock and preserves its identity", async () => {
+  const { rerollShop } = await vite.ssrLoadModule("/components/eraser/shop-generator.tsx");
+  const shop = { id: "shop-1", key: "market", name: "Aux merveilles", size: "Minuscule", cityKey: "village", cityName: "Brume", items: [] };
+  const updated = rerollShop([], shop);
+  assert.equal(updated.id, shop.id);
+  assert.equal(updated.key, shop.key);
+  assert.equal(updated.name, shop.name);
+  assert.equal(updated.size, shop.size);
+  assert.equal(updated.cityKey, shop.cityKey);
+  assert.equal(updated.cityName, shop.cityName);
+  assert.notEqual(updated.items, shop.items);
 });
 
 test("keeps exact class spell types and detects their category", async () => {

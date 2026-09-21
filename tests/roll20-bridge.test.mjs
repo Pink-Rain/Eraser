@@ -3,17 +3,15 @@ import { readFile } from "node:fs/promises"
 import test from "node:test"
 import vm from "node:vm"
 
-test("Roll20 bridge creates and updates one Eraser NPC without duplicates", async () => {
-  const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
+function roll20Runtime(source) {
   const handlers = {}
   const objects = new Map()
   const chatMessages = []
-  const defaultTokens = []
   let sequence = 0
   const createObj = (type, initial) => {
     const id = `${type}-${++sequence}`
     const values = { ...initial }
-    const object = { id, get: (key, callback) => { const value = values[key]; if (callback) callback(value); return value }, set: (patch) => Object.assign(values, patch), remove: () => objects.delete(id), values, type }
+    const object = { id, get: (key, callback) => { const value = values[key]; if (callback) callback(value); return value }, set: (key, value) => typeof key === "string" ? (values[key] = value) : Object.assign(values, key), remove: () => objects.delete(id), values, type }
     objects.set(id, object)
     return object
   }
@@ -22,64 +20,68 @@ test("Roll20 bridge creates and updates one Eraser NPC without duplicates", asyn
     on: (event, callback) => { handlers[event] = callback }, createObj,
     getObj: (type, id) => objects.get(id)?.type === type ? objects.get(id) : null,
     findObjs: (query) => [...objects.values()].filter((object) => object.type === query._type && Object.entries(query).every(([key, value]) => key === "_type" || object.values[key.replace(/^_/, "")] === value)),
-    Campaign: () => ({ get: () => "page-1" }), setDefaultTokenForCharacter: (character, token) => { defaultTokens.push({ ...token.values }); character.values._defaulttoken = JSON.stringify(token.values) },
-    decodeURIComponent, encodeURIComponent, parseInt, isNaN, JSON, Object, String, Number, Error, setTimeout: (callback) => callback(),
+    Campaign: () => ({ get: () => "page-1" }), setDefaultTokenForCharacter() {},
+    decodeURIComponent, encodeURIComponent, parseInt, isNaN, JSON, Object, String, Number, Error, setTimeout: (callback) => callback(), Date,
   }
   vm.createContext(context)
   vm.runInContext(source, context)
   handlers.ready()
-  const encodePayload = (value) => Buffer.from(JSON.stringify(value), "utf8").toString("base64url")
-  const npc = { id: "npc-1", name: "Saren", currentHp: 12, totalHp: 20, speed: 6, portrait: "portrait-saren-v1", portraitUrl: "https://example.test/saren.jpg", inventory: [] }
-  const encoded = encodePayload({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, syncId: "sync-1" })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-import ${encoded}` })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-import ${encoded}` })
-  const characters = [...objects.values()].filter((object) => object.type === "character")
-  assert.equal(characters.length, 1)
-  assert.equal(characters[0].values.name, "Saren")
-  assert.doesNotMatch(characters[0].values.bio, /<img/)
-  assert.equal(characters[0].values.gmnotes, "")
-  assert.equal([...objects.values()].filter((object) => object.type === "attribute" && object.values.name === "pv").length, 1)
-  const importMessage = chatMessages.find((message) => message.includes("ERASER_ACK:sync-1:"))
-  const importMetadata = JSON.parse(Buffer.from(importMessage.match(/ERASER_ACK:sync-1:([A-Za-z0-9_-]+)/)[1], "base64url").toString("utf8"))
-  assert.equal(importMetadata.characterId, characters[0].id)
-  assert.equal(importMetadata.needsAvatar, true)
-  assert.equal(importMetadata.token, true)
-  assert.equal(importMetadata.updated, 0)
-  assert.equal(defaultTokens.length, 0)
+  return { handlers, objects, chatMessages }
+}
 
-  characters[0].set({ avatar: "https://files.d20.io/images/123456/original.jpg?1" })
-  const existingToken = createObj("graphic", { represents: characters[0].id, imgsrc: "https://files.d20.io/images/old/thumb.jpg?1", showplayers_bar1: false, playersedit_bar1: true, bar1_num_permission: "everyone", showname: false, showplayers_name: false, playersedit_name: true })
-  const hpAttribute = [...objects.values()].find((object) => object.type === "attribute" && object.values.name === "pv")
-  const tokenCommand = encodePayload({ ...importMetadata, syncId: "token-1" })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-token ${tokenCommand}` })
-  const avatarCommand = encodePayload({ ...importMetadata, syncId: "avatar-1" })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-avatar ${avatarCommand}` })
-  assert.equal(defaultTokens.length, 0)
-  assert.equal(existingToken.values.imgsrc, "https://files.d20.io/images/123456/thumb.jpg?1")
-  assert.equal(existingToken.values.bar1_link, hpAttribute.id)
-  assert.equal(existingToken.values.bar1_value, "12")
-  assert.equal(existingToken.values.bar1_max, "20")
-  assert.equal(existingToken.values.showplayers_bar1, false)
-  assert.equal(existingToken.values.playersedit_bar1, true)
+function encodePayload(value) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url") }
 
-  const uiReady = encodePayload({ ...importMetadata, avatar: true, syncId: "ui-ready-1" })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-ui-ready ${uiReady}` })
-  characters[0].set({ inplayerjournals: "player-custom" })
-  const resync = encodePayload({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, syncId: "sync-2" })
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-import ${resync}` })
-  const resyncMessage = chatMessages.find((message) => message.includes("ERASER_ACK:sync-2:"))
-  const resyncMetadata = JSON.parse(Buffer.from(resyncMessage.match(/ERASER_ACK:sync-2:([A-Za-z0-9_-]+)/)[1], "base64url").toString("utf8"))
-  assert.equal(resyncMetadata.needsAvatar, false)
-  assert.equal(resyncMetadata.initializeToken, false)
-  assert.equal(characters[0].values.inplayerjournals, "player-custom")
-  assert.equal(existingToken.values.showplayers_bar1, false)
-  assert.equal(existingToken.values.playersedit_bar1, true)
+test("Roll20 bridge 0.5.0 syncs schema-2 NPC fields without duplicates", async () => {
+  const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
+  const { handlers, objects, chatMessages } = roll20Runtime(source)
+  const npc = {
+    id: "npc-1", name: "Saren", portraitUrl: "", currentHp: 12, totalHp: 20,
+    constitution: 31, strength: 32, dexterity: 33, intelligence: 34, wisdom: 35, charisma: 36,
+    playerNotes: "Visible par les joueurs", gmNotes: "Secret MJ",
+    inventory: [{ id: "item-1", name: "Potion", quantity: 2, notes: "Rouge" }],
+  }
+  const sendNpc = (syncId) => handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-import ${encodePayload({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, syncId })}` })
+  sendNpc("sync-1")
+  const character = [...objects.values()].find((object) => object.type === "character")
+  assert.ok(character)
+  assert.equal(character.values.inplayerjournals, "")
+  assert.match(character.values.bio, /Visible par les joueurs/)
+  assert.match(character.values.bio, /Potion/)
+  assert.doesNotMatch(character.values.bio, /Secret MJ/)
+  assert.match(character.values.gmnotes, /Secret MJ/)
+
+  const attributes = () => [...objects.values()].filter((object) => object.type === "attribute" && object.values.characterid === character.id)
+  assert.deepEqual(new Set(attributes().map((attribute) => attribute.values.name)), new Set(["eraser_id", "pv", "constitution", "force", "dexterite", "intelligence", "sagesse", "charisme"]))
+  assert.equal(attributes().find((attribute) => attribute.values.name === "pv").values.max, "20")
+
+  for (const name of ["rapidite", "combat", "tir", "magie", "force_mentale"]) {
+    const legacy = { characterid: character.id, name, current: "99" }
+    const id = `attribute-legacy-${name}`
+    objects.set(id, { id, type: "attribute", values: legacy, get: (key) => legacy[key], set: (patch) => Object.assign(legacy, patch), remove: () => objects.delete(id) })
+  }
+  character.set({ inplayerjournals: "player-custom", controlledby: "player-1" })
+  sendNpc("sync-2")
+  assert.equal([...objects.values()].filter((object) => object.type === "character").length, 1)
+  assert.equal(character.values.inplayerjournals, "player-custom")
+  assert.equal(character.values.controlledby, "player-1")
+  assert.equal(attributes().some((attribute) => ["rapidite", "combat", "tir", "magie", "force_mentale"].includes(attribute.values.name)), false)
+
   handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser-push-hp" })
   const hpMessage = chatMessages.find((message) => message.includes("ERASER_HP:"))
   const hpPayload = JSON.parse(Buffer.from(hpMessage.match(/ERASER_HP:([A-Za-z0-9_-]+)/)[1], "base64url").toString("utf8"))
   assert.deepEqual(hpPayload.hitPoints, [{ id: "npc-1", currentHp: 12, totalHp: 20 }])
-  handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser-reset-all reset-test" })
-  assert.equal(chatMessages.some((message) => message.includes("ERASER_ACK:reset-test:")), true)
-  assert.equal([...objects.values()].filter((object) => object.type === "character").length, 0)
   assert.equal(chatMessages.some((message) => message.includes("Erreur")), false)
+})
+
+test("public Roll20 Mod is identical and companion enforces schema 2", async () => {
+  const [source, publicSource, content, manifest] = await Promise.all([
+    readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8"),
+    readFile(new URL("../public/roll20/eraser-bridge.mod.js", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/content.js", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
+  ])
+  assert.equal(publicSource, source)
+  assert.match(source, /VERSION = '0\.5\.0'/)
+  assert.match(content, /payload\?\.schema !== 2/)
+  assert.equal(JSON.parse(manifest).version, "0.5.0")
 })

@@ -1,9 +1,10 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { ArrowDownAZ, ArrowUpAZ, Boxes, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, Save, Search, Sparkles, Trash2 } from "lucide-react"
+import { useMemo, useState, type PointerEvent as ReactPointerEvent } from "react"
+import { ArrowDownAZ, ArrowUpAZ, Boxes, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, RotateCcw, Save, Search, Sparkles, Trash2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { clampTableColumnWidth, clampTableRowHeight, usePersistentTableLayout } from "@/hooks/use-persistent-table-layout"
 import {
   AlertDialog,
   AlertDialogAction,
@@ -40,6 +41,45 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     (v): v is { column: number; direction: "asc" | "desc" } | null => v === null || (typeof v === "object" && v !== null && typeof (v as { column?: unknown }).column === "number" && ((v as { direction?: unknown }).direction === "asc" || (v as { direction?: unknown }).direction === "desc")),
   )
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
+  const defaultLayout = useMemo(() => ({
+    columnWidths: Object.fromEntries([
+      ["line", 70],
+      ...(selected?.headers ?? []).map((_, index) => [`column:${index}`, index === 0 ? 180 : 240] as const),
+      ["actions", 140],
+    ]),
+    rowHeight: 72,
+  }), [selected])
+  const [layout, setLayout] = usePersistentTableLayout(
+    `eraser:object-index:layout:${selected?.fileId || "none"}:${selected?.sheetId || "none"}`,
+    defaultLayout,
+  )
+  const [previewWidths, setPreviewWidths] = useState<Record<string, number>>({})
+  const [previewRowHeight, setPreviewRowHeight] = useState<number | null>(null)
+  const columnWidth = (key: string) => previewWidths[key] ?? layout.columnWidths[key] ?? defaultLayout.columnWidths[key] ?? 180
+  const rowHeight = previewRowHeight ?? layout.rowHeight
+  const tableWidth = ["line", ...(selected?.headers ?? []).map((_, index) => `column:${index}`), "actions"].reduce((total, key) => total + columnWidth(key), 0)
+
+  function startColumnResize(event: ReactPointerEvent<HTMLSpanElement>, key: string, minimum = 80, maximum = 900) {
+    event.preventDefault()
+    event.stopPropagation()
+    const startX = event.clientX
+    const startWidth = columnWidth(key)
+    let latest = startWidth
+    const move = (pointerEvent: PointerEvent) => {
+      latest = clampTableColumnWidth(startWidth + pointerEvent.clientX - startX, minimum, maximum)
+      setPreviewWidths((current) => ({ ...current, [key]: latest }))
+    }
+    const finish = () => {
+      window.removeEventListener("pointermove", move)
+      window.removeEventListener("pointerup", finish)
+      window.removeEventListener("pointercancel", finish)
+      setLayout({ ...layout, columnWidths: { ...layout.columnWidths, [key]: latest } })
+      setPreviewWidths((current) => { const next = { ...current }; delete next[key]; return next })
+    }
+    window.addEventListener("pointermove", move)
+    window.addEventListener("pointerup", finish)
+    window.addEventListener("pointercancel", finish)
+  }
   const displayedRows = useMemo(() => {
     if (!selected) return []
     const normalizedQuery = query.trim().toLocaleLowerCase("fr")
@@ -102,14 +142,35 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
       {error && <p className="mt-4 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
       {notice && <p className="mt-4 rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm">{notice}</p>}
 
+      {selected && <div className="mt-4 flex flex-wrap items-center gap-3 rounded-xl border bg-muted/25 px-3 py-2">
+        <label className="flex items-center gap-2 text-xs font-medium">Hauteur des lignes
+          <input
+            type="range"
+            min={40}
+            max={240}
+            value={rowHeight}
+            onChange={(event) => setPreviewRowHeight(clampTableRowHeight(Number(event.target.value)))}
+            onPointerUp={(event) => { const value = clampTableRowHeight(Number(event.currentTarget.value)); setLayout({ ...layout, rowHeight: value }); setPreviewRowHeight(null) }}
+            onBlur={(event) => { const value = clampTableRowHeight(Number(event.currentTarget.value)); setLayout({ ...layout, rowHeight: value }); setPreviewRowHeight(null) }}
+          />
+          <span className="w-12 tabular-nums text-muted-foreground">{rowHeight}px</span>
+        </label>
+        <Button type="button" size="sm" variant="ghost" onClick={() => { setLayout(defaultLayout); setPreviewWidths({}); setPreviewRowHeight(null) }}><RotateCcw />Réinitialiser la mise en page</Button>
+      </div>}
+
       {selected ? (
         <div className="mt-5 overflow-x-auto rounded-xl border bg-background/60">
-          <table className="w-max min-w-full border-collapse text-sm">
+          <table className="border-collapse text-sm" style={{ tableLayout: "fixed", width: tableWidth, minWidth: "100%" }}>
+            <colgroup>
+              <col style={{ width: columnWidth("line") }} />
+              {selected.headers.map((_, index) => <col key={index} style={{ width: columnWidth(`column:${index}`) }} />)}
+              <col style={{ width: columnWidth("actions") }} />
+            </colgroup>
             <thead className="bg-muted/70">
               <tr>
-                <th className="sticky left-0 z-20 min-w-16 border-b border-r bg-muted px-3 py-3 text-left font-semibold">Ligne</th>
-                {selected.headers.map((header, index) => <th key={`${header}:${index}`} className="min-w-48 border-b border-r px-2 py-2 text-left font-semibold last:border-r-0"><Button type="button" variant="ghost" size="sm" className="w-full justify-between" onClick={() => setSort(sort?.column === index ? { column: index, direction: sort.direction === "asc" ? "desc" : "asc" } : { column: index, direction: "asc" })}>{header}{sort?.column === index ? sort.direction === "asc" ? <ArrowDownAZ /> : <ArrowUpAZ /> : null}</Button></th>)}
-                <th className="sticky right-0 z-20 min-w-36 border-b border-l bg-muted px-3 py-3 text-left font-semibold">Actions</th>
+                <th className="sticky left-0 z-20 relative border-b border-r bg-muted px-3 py-3 text-left font-semibold whitespace-normal break-words">Ligne<span role="separator" aria-label="Redimensionner la colonne Ligne" onPointerDown={(event) => startColumnResize(event, "line", 60, 180)} className="absolute inset-y-0 right-0 z-30 w-2 translate-x-1 cursor-col-resize touch-none" /></th>
+                {selected.headers.map((header, index) => <th key={`${header}:${index}`} className="relative border-b border-r px-2 py-2 text-left font-semibold whitespace-normal break-words last:border-r-0"><Button type="button" variant="ghost" size="sm" className="h-auto min-h-8 w-full justify-between whitespace-normal break-words text-left" onClick={() => setSort(sort?.column === index ? { column: index, direction: sort.direction === "asc" ? "desc" : "asc" } : { column: index, direction: "asc" })}>{header}{sort?.column === index ? sort.direction === "asc" ? <ArrowDownAZ /> : <ArrowUpAZ /> : null}</Button><span role="separator" aria-label={`Redimensionner la colonne ${header}`} onPointerDown={(event) => startColumnResize(event, `column:${index}`)} onClick={(event) => event.stopPropagation()} className="absolute inset-y-0 right-0 z-30 w-2 translate-x-1 cursor-col-resize touch-none" /></th>)}
+                <th className="sticky right-0 z-20 relative border-b border-l bg-muted px-3 py-3 text-left font-semibold whitespace-normal break-words">Actions<span role="separator" aria-label="Redimensionner la colonne Actions" onPointerDown={(event) => startColumnResize(event, "actions", 110, 300)} className="absolute inset-y-0 left-0 z-30 w-2 -translate-x-1 cursor-col-resize touch-none" /></th>
               </tr>
             </thead>
             <tbody>
@@ -119,20 +180,21 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
                 const changed = values.some((value, index) => value !== (row.values[index] ?? ""))
                 const rowPending = pending.endsWith(`:${row.rowNumber}`)
                 return (
-                  <tr key={key} className="border-b last:border-b-0">
-                    <td className="sticky left-0 z-10 border-r bg-background px-3 py-2 text-xs tabular-nums text-muted-foreground">{row.rowNumber}</td>
+                  <tr key={key} className="border-b last:border-b-0" style={{ height: rowHeight }}>
+                    <td className="sticky left-0 z-10 h-full overflow-hidden border-r bg-background px-3 py-2 text-xs tabular-nums text-muted-foreground">{row.rowNumber}</td>
                     {selected.headers.map((header, index) => (
-                      <td key={`${header}:${index}`} className="border-r p-1.5 last:border-r-0">
-                        <Input
+                      <td key={`${header}:${index}`} className="h-full overflow-hidden border-r p-1.5 align-top last:border-r-0">
+                        <textarea
                           value={values[index] ?? ""}
                           disabled={rowPending}
                           aria-label={`${header}, ligne ${row.rowNumber}`}
-                          className="min-w-44 border-transparent bg-transparent shadow-none focus-visible:border-input focus-visible:bg-background"
+                          className="h-full w-full resize-none overflow-auto whitespace-pre-wrap break-words rounded-md border border-transparent bg-transparent px-2 py-1.5 text-sm outline-none focus:border-input focus:bg-background"
+                          style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
                           onChange={(event) => setDrafts((current) => ({ ...current, [key]: selected.headers.map((_, column) => column === index ? event.target.value : values[column] ?? "") }))}
                         />
                       </td>
                     ))}
-                    <td className="sticky right-0 z-10 border-l bg-background px-2 py-2">
+                    <td className="sticky right-0 z-10 h-full overflow-hidden border-l bg-background px-2 py-2 align-top">
                       <div className="flex gap-1">
                         <Button type="button" size="icon-sm" variant="ghost" disabled={!changed || Boolean(pending)} onClick={() => void mutate("update", row.rowNumber, values)} aria-label={`Enregistrer la ligne ${row.rowNumber}`} title="Enregistrer"><Save /></Button>
                         <Button type="button" size="icon-sm" variant="ghost" disabled={Boolean(pending)} onClick={() => void mutate("duplicate", row.rowNumber)} aria-label={`Dupliquer la ligne ${row.rowNumber}`} title="Dupliquer"><Copy /></Button>

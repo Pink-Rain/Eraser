@@ -47,14 +47,27 @@ function googleColorToHex(color?: GoogleRgbColor) {
   return `#${channel(color.red)}${channel(color.green)}${channel(color.blue)}`
 }
 
-function hexToGoogleColor(value: string): GoogleRgbColor | undefined {
+export function normalizeCssColorToHex(value: string) {
   const normalized = value.trim().toLowerCase()
   const short = normalized.match(/^#([0-9a-f])([0-9a-f])([0-9a-f])$/i)
+  if (short) return `#${short.slice(1).map((channel) => `${channel}${channel}`).join("")}`
+  const full = normalized.match(/^#([0-9a-f]{6})$/i)
+  if (full) return `#${full[1]}`
+  const rgb = normalized.match(/^rgba?\(\s*([+-]?[\d.]+)(%)?\s*[, ]\s*([+-]?[\d.]+)(%)?\s*[, ]\s*([+-]?[\d.]+)(%)?(?:\s*[,/]\s*[\d.]+%?)?\s*\)$/i)
+  if (!rgb) return ""
+  const channel = (raw: string, percent: string | undefined) => {
+    const numeric = Number(raw)
+    const value255 = percent ? numeric * 2.55 : numeric
+    return Math.round(Math.max(0, Math.min(255, value255))).toString(16).padStart(2, "0")
+  }
+  return `#${channel(rgb[1], rgb[2])}${channel(rgb[3], rgb[4])}${channel(rgb[5], rgb[6])}`
+}
+
+function hexToGoogleColor(value: string): GoogleRgbColor | undefined {
+  const normalized = normalizeCssColorToHex(value)
   const full = normalized.match(/^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i)
-  const channels = short
-    ? short.slice(1).map((channel) => Number.parseInt(`${channel}${channel}`, 16))
-    : full?.slice(1).map((channel) => Number.parseInt(channel, 16))
-  if (!channels) return undefined
+  if (!full) return undefined
+  const channels = full.slice(1).map((channel) => Number.parseInt(channel, 16))
   return { red: channels[0] / 255, green: channels[1] / 255, blue: channels[2] / 255 }
 }
 
@@ -146,8 +159,9 @@ export function htmlToRichText(value: string) {
       const href = safeLink(token.match(/\bhref\s*=\s*["']([^"']+)["']/i)?.[1])
       if (href) next.link = { uri: href }
     }
-    if (tag === "span") {
-      const color = token.match(/\bstyle\s*=\s*["'][^"']*\bcolor\s*:\s*(#[0-9a-f]{3}|#[0-9a-f]{6})\b[^"']*["']/i)?.[1]
+    if (tag === "span" || tag === "font") {
+      const color = token.match(/\bstyle\s*=\s*["'][^"']*\bcolor\s*:\s*([^;"']+)/i)?.[1]
+        || token.match(/\bcolor\s*=\s*["']([^"']+)["']/i)?.[1]
       const rgbColor = color ? hexToGoogleColor(color) : undefined
       if (rgbColor) next.foregroundColorStyle = { rgbColor }
     }
