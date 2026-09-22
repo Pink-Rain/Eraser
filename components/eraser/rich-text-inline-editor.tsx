@@ -33,21 +33,41 @@ export function sanitizeRichText(html: string) {
     .replace(/javascript:/gi, "")
 }
 
-const textColors = ["#1f1b16", "#b3261e", "#7f1d1d", "#315b55", "#285f8f", "#6b4c9a", "#b7791f"]
-type RichTextCommand = "bold" | "italic" | "underline" | "createLink" | "foreColor"
+export const richTextColors = ["#1f1b16", "#b3261e", "#7f1d1d", "#315b55", "#285f8f", "#6b4c9a", "#b7791f"]
+const textColors = richTextColors
+export type RichTextCommand = "bold" | "italic" | "underline" | "createLink" | "foreColor"
+
+/** Texte brut d’une cellule enrichie : les retours à la ligne HTML redeviennent des « \n ». */
+export function richTextPlainText(html: string) {
+  return html
+    .replace(/<br\s*\/?>/gi, "\n")
+    .replace(/<\/(?:p|div|li)>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&nbsp;/gi, " ")
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim()
+}
+
+/** Échappe un texte brut pour l’injecter dans une cellule éditable sans interpréter de balise. */
+export function escapeRichText(text: string) {
+  return String(text ?? "").replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+}
 
 function selectionBelongsTo(editor: HTMLElement, range: Range) {
   return editor.contains(range.commonAncestorContainer)
 }
 
-function rememberSelection(editor: HTMLElement | null, savedRange: MutableRefObject<Range | null>) {
+export function rememberRichTextSelection(editor: HTMLElement | null, savedRange: MutableRefObject<Range | null>) {
   const selection = window.getSelection()
   if (!editor || !selection?.rangeCount) return
   const range = selection.getRangeAt(0)
   if (selectionBelongsTo(editor, range)) savedRange.current = range.cloneRange()
 }
 
-function applyRangeCommand(editor: HTMLElement | null, savedRange: MutableRefObject<Range | null>, name: RichTextCommand, value?: string) {
+export function applyRichTextCommand(editor: HTMLElement | null, savedRange: MutableRefObject<Range | null>, name: RichTextCommand, value?: string) {
   if (!editor) return false
   editor.focus()
   const selection = window.getSelection()
@@ -109,8 +129,8 @@ export function RichTextInlineEditor({ html, fallback, canEdit, onSave, classNam
     if (editing && editor.current && editor.current.innerHTML !== safe) editor.current.innerHTML = safe
   }, [editing, safe])
 
-  const captureSelection = () => rememberSelection(editor.current, savedRange)
-  function command(name: RichTextCommand, value?: string) { applyRangeCommand(editor.current, savedRange, name, value) }
+  const captureSelection = () => rememberRichTextSelection(editor.current, savedRange)
+  function command(name: RichTextCommand, value?: string) { applyRichTextCommand(editor.current, savedRange, name, value) }
   async function save() {
     setPending(true)
     await onSave(sanitizeRichText(editor.current?.innerHTML || ""))
@@ -136,9 +156,9 @@ export function RichTextEditorField({ value, onChange, className = "", variant =
     if (editing && editor.current && document.activeElement !== editor.current && editor.current.innerHTML !== safe) editor.current.innerHTML = safe
   }, [editing, safe])
 
-  const captureSelection = () => rememberSelection(editor.current, savedRange)
+  const captureSelection = () => rememberRichTextSelection(editor.current, savedRange)
   function emit() { onChange(sanitizeRichText(editor.current?.innerHTML || "")) }
-  function command(name: RichTextCommand, value?: string) { if (applyRangeCommand(editor.current, savedRange, name, value)) emit() }
+  function command(name: RichTextCommand, value?: string) { if (applyRichTextCommand(editor.current, savedRange, name, value)) emit() }
   function beginEditing() { originalValue.current = value; setEditing(true) }
 
   if (variant === "table" && !editing) return <div tabIndex={0} role="button" onDoubleClick={beginEditing} onKeyDown={(event) => { if (event.key === "Enter") beginEditing() }} title="Double-cliquer pour modifier" className={`h-full overflow-auto whitespace-pre-wrap break-words rounded-md px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring ${className}`} style={{ overflowWrap: "anywhere", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: safe }} />

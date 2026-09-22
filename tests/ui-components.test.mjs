@@ -329,3 +329,71 @@ test("adds equipped item modifiers to the skill and speed totals", async () => {
   // Rapidité : 12 - 2.
   assert.match(html, />10</);
 });
+
+test("keeps a zero as a deliberate item modifier", async () => {
+  const { serializeItemModifiers, parseItemModifiers, indexInventoryModifiers, modifierTotalFor, linkedItemsFor, hasModifierAmount } =
+    await vite.ssrLoadModule("/lib/item-modifiers.ts");
+
+  assert.equal(hasModifierAmount("0"), true);
+  assert.equal(hasModifierAmount(""), false);
+  assert.equal(hasModifierAmount("abc"), false);
+
+  const serialized = serializeItemModifiers([
+    { value: "0", target: "vie" },
+    { value: "", target: "rapidite" },
+  ]);
+  const parsed = parseItemModifiers(serialized);
+  assert.equal(parsed.length, 1);
+  assert.equal(parsed[0].target, "vie");
+
+  const index = indexInventoryModifiers([{
+    id: "CNT-1",
+    typeId: "TYPE-EQUIPEMENT-BASE",
+    name: "Équipement de base",
+    category: "Équipement",
+    capacity: 8,
+    order: 0,
+    isBase: true,
+    used: 1,
+    slots: [{ id: "SLOT-1", index: 1, itemId: "OBJ-1", quantity: 1, equipped: true, modifiers: serialized, item: { id: "OBJ-1", name: "Amulette neutre", maxQuantity: 1 } }],
+  }]);
+  // Le lien existe et reste listé, mais il n'ajoute rien au total.
+  assert.equal(modifierTotalFor(index, "vie"), 0);
+  assert.equal(linkedItemsFor(index, "vie").length, 1);
+});
+
+test("converts sheet cells between rich text and plain text", async () => {
+  const { richTextPlainText, escapeRichText, sanitizeRichText } = await vite.ssrLoadModule(
+    "/components/eraser/rich-text-inline-editor.tsx",
+  );
+  assert.equal(richTextPlainText("<strong>Coup</strong> net<br>puis recul"), "Coup net\npuis recul");
+  assert.equal(escapeRichText("1 < 2 & 3 > 2"), "1 &lt; 2 &amp; 3 &gt; 2");
+  // La mise en forme utile survit, le script est retiré.
+  const safe = sanitizeRichText('<span style="color:#b3261e">rouge</span><script>alert(1)</script>');
+  assert.match(safe, /color:#b3261e/);
+  assert.doesNotMatch(safe, /script/i);
+});
+
+test("renders the shared sheet grid with pinned headers and editable cells", async () => {
+  const { SheetGrid } = await vite.ssrLoadModule("/components/eraser/sheet-grid.tsx");
+  const html = renderToStaticMarkup(
+    React.createElement(SheetGrid, {
+      layoutKey: "test:grid",
+      columns: [
+        { key: "nom", label: "Nom", width: 200, plain: true },
+        { key: "effet", label: "Effet", width: 300 },
+      ],
+      rows: [{ key: "2", rowNumber: 2 }],
+      valueOf: (rowKey, columnKey) => (columnKey === "nom" ? "Épée" : "<strong>Tranchant</strong>"),
+      onCommit: () => {},
+      empty: "Vide",
+    }),
+  );
+  // En-têtes collés en haut, colonne « Ligne » collée à gauche.
+  assert.match(html, /sticky top-0/);
+  assert.match(html, /Ligne/);
+  // Toutes les cellules sont modifiables en permanence : aucun mode lecture.
+  assert.equal((html.match(/contenteditable="true"/gi) || []).length, 2);
+  assert.match(html, /<strong>Tranchant<\/strong>/);
+  assert.doesNotMatch(html, /<textarea/);
+});

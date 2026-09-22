@@ -348,7 +348,7 @@ export function AppShell({
         bar instead of below it). It compensates by injecting its own <style>
         overrides that pad/shrink the sidebar primitives by its height instead. */}
     <DesktopTitlebar />
-    <SidebarProvider>
+    <SidebarProvider className="h-svh overflow-hidden">
       <Sidebar collapsible="icon" className="border-r-0">
         <SidebarHeader className="gap-3 border-b border-sidebar-border p-3 group-data-[collapsible=icon]:p-1">
           <div className="flex items-center gap-2">
@@ -636,7 +636,7 @@ export function AppShell({
             {roleViewLabels[viewRole]}
           </Badge>
         </header>
-        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip">
+        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain">
           <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole }}>
             <div data-view-role={viewRole} className="contents">
               {children}

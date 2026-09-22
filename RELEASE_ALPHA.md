@@ -1,48 +1,45 @@
-# Eraser 0.1.1-alpha.40 — objets liés aux compétences et barre toujours visible
+# Eraser 0.1.1-alpha.41 — les index se comportent enfin comme un tableur
 
-Cette préversion relie les objets d’inventaire aux caractéristiques et aux
-compétences de la fiche : un objet coché ajoute enfin ses modificateurs aux
-totaux.
+Les deux index de ressources partagent désormais le même tableau : mêmes cellules,
+même mise en forme, même comportement. Seul l’onglet « Par classe » garde sa
+présentation en fiches, puisqu’il ne montre pas la même chose.
 
-## Ajouté
+## Index des objets et Index des classes
 
-- chaque objet, dans tous les rangements d’une fiche, possède un bouton « lier »
-  qui ouvre une fenêtre où l’on écrit un modificateur positif ou négatif et où
-  l’on choisit sa cible dans une liste cherchable ;
-- les cibles proposées couvrent la vie, la rapidité, l’échec et la réussite
-  critiques, la folie, le destin, la moralité, la notoriété, les bonus de dégâts
-  et d’armure, les dix caractéristiques principales et toutes leurs compétences ;
-- un même objet peut porter plusieurs liens ;
-- les liens enregistrés s’affichent sous l’effet de l’objet, en pastilles
-  compactes, estompées tant que l’objet n’est pas équipé ;
-- la colonne « Mod. » de l’onglet Compétences additionne les liens des objets
-  cochés et les totaux en tiennent compte, plafonnement entre 10 et 90 compris ;
-- le survol d’une compétence, d’une caractéristique, de la vie, de la rapidité,
-  des critiques, des dégâts, des armures, de la folie, du destin, de la moralité
-  et de la notoriété liste les objets concernés avec une case pour les équiper ou
-  les déséquiper sans quitter l’onglet.
+- la barre d’outils de mise en forme et la ligne des colonnes restent collées en
+  haut de l’écran pendant tout le défilement ;
+- la barre de défilement horizontale reste en bas de l’écran, comme dans un
+  tableur, au lieu de suivre le bas du tableau ;
+- les cellules sont modifiables en permanence : plus aucune zone de saisie
+  n’apparaît au clic, et chaque cellule s’enregistre seule peu après la frappe
+  sans figer le tableau ;
+- le texte revient toujours à la ligne et c’est lui qui donne sa hauteur à la
+  ligne ; la jauge globale de hauteur a disparu. Une poignée sous le numéro de
+  ligne permet de fixer une hauteur à la main, et un double-clic revient à
+  l’ajustement automatique ;
+- l’Index des objets conserve et affiche enfin les couleurs, le gras, l’italique,
+  le souligné et les liens, comme l’Index des classes ; chaque cellule est
+  enregistrée individuellement, sans écraser ses voisines ;
+- « Classes et rangs » tient maintenant dans une cellule : chaque lien est une
+  pastille aux couleurs de la classe, avec son rang modifiable sur place, et un
+  seul bouton ouvre une liste de classes cherchable ;
+- les colonnes se redimensionnent toujours, et un bouton remet largeurs et
+  hauteurs à zéro ;
+- le clic droit sur un mot souligné en rouge propose enfin les corrections
+  orthographiques, avec « Ajouter au dictionnaire », couper, copier et coller.
 
-## Modifié
+## Corrections
 
-- la barre supérieure — menu, fil d’Ariane et vue en cours — reste visible en
-  permanence, quel que soit le défilement de la page ;
-- les cases à cocher d’équipement, réservées jusqu’ici aux armes, existent
-  désormais dans tous les rangements d’une fiche sauf la bourse ;
-- le rangement « purement esthétique » permet de chercher dans tout le catalogue
-  d’objets, comme le sac à dos, tout en restant exclu du placement automatique ;
-- un objet déplacé ou transféré conserve son équipement et ses liens ;
-- les charges de sort se comportent comme une barre : cliquer une étincelle
-  pleine vide les charges jusqu’à elle comprise, cliquer une étincelle vide les
-  remplit jusqu’à elle comprise ;
-- les charges disponibles s’affichent en pleine opacité et les charges dépensées
-  en opacité réduite, y compris dans le raccourci de l’onglet Compétences ;
-- la feuille « Contenu inventaire » reçoit une colonne « Modificateurs » ; les
-  feuilles existantes sont complétées automatiquement, sans perte de données.
+- « 0 » est accepté comme modificateur d’objet à part entière : le lien est
+  conservé et reste visible, il n’ajoute simplement rien au total ;
+- la seconde barre de défilement verticale apparue avec l’alpha.40 a disparu :
+  seule celle du contenu subsiste.
 
 ## Vérifications
 
 - lint sans erreur ;
 - build Vinext complet ;
-- suite de tests d’interface au vert, avec deux nouveaux tests couvrant le calcul
-  des modificateurs et leur report dans les totaux de la fiche ;
+- suite de tests d’interface au vert, avec trois nouveaux tests couvrant le
+  modificateur nul, la conversion texte enrichi / texte brut et le rendu de la
+  grille partagée ;
 - serveur desktop construit et vérifié en HTTP 200.

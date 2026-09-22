@@ -59,6 +59,14 @@ export function parseModifierAmount(value: string) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
+/**
+ * « 0 » est un modificateur volontaire et valable : on distingue une valeur
+ * chiffrée, même nulle, d’une case vide ou illisible.
+ */
+export function hasModifierAmount(value: string) {
+  return Number.isFinite(Number.parseFloat(String(value ?? "").replace(",", ".").replace(/\s|\+/g, "")))
+}
+
 export function formatModifierAmount(amount: number) {
   if (!Number.isFinite(amount) || amount === 0) return "0"
   const rounded = Math.round(amount * 100) / 100
@@ -82,7 +90,7 @@ export function parseItemModifiers(raw: string): ItemModifier[] {
 export function serializeItemModifiers(modifiers: ItemModifier[]) {
   const kept = modifiers
     .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim() }))
-    .filter((modifier) => modifier.target && itemModifierTargetById.has(modifier.target) && parseModifierAmount(modifier.value) !== 0)
+    .filter((modifier) => modifier.target && itemModifierTargetById.has(modifier.target) && hasModifierAmount(modifier.value))
   return kept.length ? JSON.stringify(kept) : ""
 }
 
@@ -109,8 +117,8 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
     for (const slot of container.slots) {
       if (!slot.item || slot.quantity <= 0) continue
       for (const modifier of parseItemModifiers(slot.modifiers)) {
+        if (!hasModifierAmount(modifier.value)) continue
         const amount = parseModifierAmount(modifier.value)
-        if (!amount) continue
         if (slot.equipped) totals.set(modifier.target, (totals.get(modifier.target) || 0) + amount)
         items.set(modifier.target, [...(items.get(modifier.target) || []), {
           slotId: slot.id,

@@ -252,6 +252,43 @@ async function createWindow(url) {
   persistentSession.cookies.on("changed", () => {
     void persistentSession.cookies.flushStore()
   })
+  // Correcteur orthographique français : Electron souligne les fautes mais n'affiche
+  // aucun menu contextuel par défaut. On construit donc le nôtre pour que le clic
+  // droit propose enfin les corrections, comme dans un traitement de texte.
+  try {
+    const available = persistentSession.availableSpellCheckerLanguages || []
+    const wanted = ["fr-FR", "fr"].filter((language) => available.includes(language))
+    persistentSession.setSpellCheckerLanguages(wanted.length ? [wanted[0]] : ["fr"])
+  } catch (error) {
+    logLine(`[interface] Correcteur orthographique indisponible : ${error && error.message ? error.message : error}`)
+  }
+  mainWindow.webContents.on("context-menu", (_event, params) => {
+    const items = []
+    for (const suggestion of params.dictionarySuggestions || []) {
+      items.push({ label: suggestion, click: () => mainWindow?.webContents.replaceMisspelling(suggestion) })
+    }
+    if (items.length) items.push({ type: "separator" })
+    if (params.misspelledWord) {
+      items.push({
+        label: "Ajouter au dictionnaire",
+        click: () => persistentSession.addWordToSpellCheckerDictionary(params.misspelledWord),
+      })
+      items.push({ type: "separator" })
+    }
+    if (params.isEditable || params.selectionText) {
+      items.push(
+        { label: "Annuler", role: "undo", enabled: params.isEditable && params.editFlags.canUndo },
+        { label: "Rétablir", role: "redo", enabled: params.isEditable && params.editFlags.canRedo },
+        { type: "separator" },
+        { label: "Couper", role: "cut", enabled: params.editFlags.canCut },
+        { label: "Copier", role: "copy", enabled: params.editFlags.canCopy },
+        { label: "Coller", role: "paste", enabled: params.editFlags.canPaste },
+        { label: "Tout sélectionner", role: "selectAll", enabled: params.editFlags.canSelectAll },
+      )
+    }
+    if (!items.length) return
+    Menu.buildFromTemplate(items).popup({ window: mainWindow })
+  })
   let closeAfterCookieFlush = false
   mainWindow.on("close", (event) => {
     if (closeAfterCookieFlush) return

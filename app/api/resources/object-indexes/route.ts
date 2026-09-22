@@ -8,6 +8,7 @@ import {
   ensureObjectIndexStackLimits,
   listObjectIndexTables,
   refreshObjectIndexTables,
+  updateObjectIndexCell,
   updateObjectIndexRow,
 } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -32,7 +33,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; values?: unknown[] }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; column?: number; html?: string; values?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
@@ -42,6 +43,12 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
     }
     if (!body.fileId || !body.tabName) throw new Error("INVALID_OBJECT_INDEX")
+    // L’éditeur enregistre cellule par cellule : la réponse ne renvoie alors pas tout
+    // le classeur, pour que la frappe reste fluide.
+    if (body.action === "update-cell" && typeof body.rowNumber === "number" && typeof body.column === "number" && typeof body.html === "string") {
+      await updateObjectIndexCell(body.fileId, body.tabName, body.rowNumber, body.column, body.html)
+      return NextResponse.json({ ok: true })
+    }
     if (body.action === "add") await addObjectIndexRow(body.fileId, body.tabName)
     else if (body.action === "update" && typeof body.rowNumber === "number" && Array.isArray(body.values)) {
       await updateObjectIndexRow(body.fileId, body.tabName, body.rowNumber, body.values.map((value) => String(value ?? "")))

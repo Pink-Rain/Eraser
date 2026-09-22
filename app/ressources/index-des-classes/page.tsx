@@ -31,10 +31,12 @@ export default async function ClassIndexPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return <AuthenticatedShell pageLabel="Index des classes" roles={["admin", "mj"]}>
-    <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
-      <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
-      <h1 className="font-display mt-3 text-4xl font-semibold sm:text-5xl">Index des classes</h1>
-      <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">Crée, relie et range les bonus, passifs et actifs sans multiplier les doublons.</p>
+    {/* Même disposition que l’Index des objets : seule la zone de tableau défile. */}
+    <div className="flex min-h-0 w-full flex-1 flex-col gap-3 px-4 py-4 sm:px-6">
+      <div className="shrink-0">
+        <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
+        <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des classes</h1>
+      </div>
       <Suspense fallback={<DeferredContentLoading label="Chargement des sorts de classe…" />}><ClassIndexData showErrorDetail={account.role === "admin"} /></Suspense>
     </div>
   </AuthenticatedShell>

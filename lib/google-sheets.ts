@@ -729,6 +729,8 @@ async function updateRanges(
 export type ObjectIndexRow = {
   rowNumber: number
   values: string[]
+  /** Même contenu que `values`, mais avec la mise en forme Google Sheets conservée. */
+  html: string[]
 }
 
 export type ObjectIndexTable = {
@@ -779,16 +781,36 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
         const tabName = sheet.properties?.title
         return sheetId === undefined || !tabName ? [] : [{ sheetId, tabName }]
       })
-      const parameters = new URLSearchParams()
+      // Les cellules sont lues avec leur mise en forme (couleurs, gras, liens) afin que
+      // l’Index des objets l’affiche et la conserve, comme l’Index des classes.
+      const parameters = new URLSearchParams({
+        includeGridData: "true",
+        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(textFormat)))))",
+      })
       sheets.forEach((sheet) => parameters.append("ranges", sheetTabRange(sheet.tabName, "A1:AZ")))
-      const payload = sheets.length ? await googleSheetsJson<{ valueRanges?: Array<{ values?: GoogleSheetCellValue[][] }> }>(
-        `spreadsheets/${file.id}/values:batchGet?${parameters.toString()}`,
-      ) : { valueRanges: [] }
-      return { tables: sheets.map((sheet, sheetIndex) => {
-        const values = normalizeGoogleSheetRows(payload.valueRanges?.[sheetIndex]?.values)
-        const usedWidth = Math.max(1, ...values.map((row) => row.length))
-        const rawHeaders = values[0] ?? []
-        const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.trim() || `Colonne ${index + 1}`)
+      const payload = sheets.length ? await googleSheetsJson<{
+        sheets?: Array<{
+          properties?: { sheetId?: number; title?: string }
+          data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
+        }>
+      }>(`spreadsheets/${file.id}?${parameters.toString()}`) : { sheets: [] }
+      return { tables: sheets.map((sheet) => {
+        const grid = payload.sheets?.find((candidate) => candidate.properties?.title === sheet.tabName)
+        const cells: Array<Array<{ value: string; html: string }>> = []
+        for (const block of grid?.data ?? []) {
+          const startRow = block.startRow ?? 0
+          const startColumn = block.startColumn ?? 0
+          for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
+            const target = cells[startRow + rowOffset] ||= []
+            for (const [columnOffset, cell] of (row.values ?? []).entries()) {
+              const value = gridCellValue(cell)
+              target[startColumn + columnOffset] = { value, html: richTextHtml(value, cell.textFormatRuns, cell.effectiveFormat?.textFormat) }
+            }
+          }
+        }
+        const usedWidth = Math.max(1, ...cells.map((row) => row.length))
+        const rawHeaders = cells[0] ?? []
+        const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.value.trim() || `Colonne ${index + 1}`)
         return {
           fileId: file.id,
           fileName: file.name,
@@ -796,8 +818,12 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
           sheetId: sheet.sheetId,
           tabName: sheet.tabName,
           headers,
-          rows: values.slice(1).flatMap((row, index) => row.some((value) => String(value).trim())
-            ? [{ rowNumber: index + 2, values: headers.map((_, column) => String(row[column] ?? "")) }]
+          rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim())
+            ? [{
+                rowNumber: index + 2,
+                values: headers.map((_, column) => row[column]?.value ?? ""),
+                html: headers.map((_, column) => row[column]?.html ?? ""),
+              }]
             : []),
         } satisfies ObjectIndexTable
       }), error: null }
@@ -837,6 +863,34 @@ export async function addObjectIndexRow(fileId: string, tabName: string) {
   clearObjectIndexTableCache()
 }
 
+/**
+ * Enregistre une seule cellule avec sa mise en forme. L’éditeur de l’Index des objets
+ * sauvegarde cellule par cellule : deux colonnes modifiées coup sur coup ne s’écrasent
+ * plus l’une l’autre, et la mise en forme des autres cellules reste intacte.
+ */
+export async function updateObjectIndexCell(fileId: string, tabName: string, rowNumber: number, column: number, html: string) {
+  const table = await validatedObjectIndexTable(fileId, tabName)
+  const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
+  if (!row || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
+  await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column, html })
+  const plain = htmlToRichText(html.slice(0, 50_000)).text
+  if (objectIndexTableCache) {
+    objectIndexTableCache = {
+      expiresAt: objectIndexTableCache.expiresAt,
+      tables: objectIndexTableCache.tables.map((candidate) => candidate.fileId === fileId && candidate.tabName === tabName
+        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber
+            ? {
+                ...candidateRow,
+                values: candidateRow.values.map((value, index) => index === column ? plain : value),
+                html: candidateRow.html.map((value, index) => index === column ? html : value),
+              }
+            : candidateRow) }
+        : candidate),
+    }
+  }
+  clearInventoryWorkbookCache()
+}
+
 export async function updateObjectIndexRow(fileId: string, tabName: string, rowNumber: number, values: string[]) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
@@ -847,7 +901,7 @@ export async function updateObjectIndexRow(fileId: string, tabName: string, rowN
     objectIndexTableCache = {
       expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS,
       tables: objectIndexTableCache.tables.map((candidate) => candidate.fileId === fileId && candidate.tabName === tabName
-        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber ? { ...candidateRow, values: normalizedValues } : candidateRow) }
+        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber ? { ...candidateRow, values: normalizedValues, html: normalizedValues } : candidateRow) }
         : candidate),
     }
   }

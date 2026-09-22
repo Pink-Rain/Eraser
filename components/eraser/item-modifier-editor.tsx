@@ -9,6 +9,7 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
   formatModifierAmount,
+  hasModifierAmount,
   itemModifierTargets,
   itemModifierTargetById,
   parseModifierAmount,
@@ -76,8 +77,8 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
     setDraft((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry))
   }
 
-  const usable = draft.filter((entry) => entry.target && parseModifierAmount(entry.value) !== 0)
-  const incomplete = draft.some((entry) => (entry.target && !parseModifierAmount(entry.value)) || (!entry.target && entry.value.trim()))
+  const usable = draft.filter((entry) => entry.target && hasModifierAmount(entry.value))
+  const incomplete = draft.some((entry) => (entry.target && !hasModifierAmount(entry.value)) || (!entry.target && entry.value.trim()))
 
   async function save() {
     if (await onSave(serializeItemModifiers(draft))) onClose()

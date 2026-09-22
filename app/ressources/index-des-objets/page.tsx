@@ -27,10 +27,13 @@ export default async function ObjectIndexesPage() {
   if (!account) redirect("/")
   return (
     <AuthenticatedShell pageLabel="Index des objets" roles={["admin", "mj"]}>
-      <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
-        <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
-        <h1 className="font-display mt-3 text-4xl font-semibold sm:text-5xl">Index des objets</h1>
-        <p className="mt-3 max-w-3xl leading-7 text-muted-foreground">Tous les tableaux Google Sheets du dossier Drive « Objets », modifiables directement depuis Eraser.</p>
+      {/* Page pleine hauteur : seul le tableau défile, ses en-têtes et sa barre d’outils
+          restent visibles en permanence. */}
+      <div className="flex min-h-0 w-full flex-1 flex-col gap-3 px-4 py-4 sm:px-6">
+        <div className="shrink-0">
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
+          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des objets</h1>
+        </div>
         <Suspense fallback={<DeferredContentLoading label="Chargement des index d’objets…" />}>
           <ObjectIndexesData />
         </Suspense>
