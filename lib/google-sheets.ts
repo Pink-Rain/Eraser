@@ -263,7 +263,7 @@ const missingJdrSheetRetryAt = new Map<JdrSheetKey, number>()
 const pendingJdrSheetResolutions = new Map<JdrSheetKey, Promise<JdrSheetRecord | null>>()
 const MISSING_JDR_SHEET_RETRY_MS = 60_000
 
-async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null> {
+export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null> {
   const stored = await getJdrSheet(key)
   if (stored) return stored
   const retryAt = missingJdrSheetRetryAt.get(key) ?? 0
@@ -680,9 +680,10 @@ export async function updateRange(
   spreadsheetId: string,
   range: string,
   values: Array<Array<string | number | boolean>>,
+  options: Pick<WriteValuesOptions, "valueInputOption"> = {},
 ) {
   await googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=USER_ENTERED`,
+    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?valueInputOption=${options.valueInputOption || "USER_ENTERED"}`,
     { method: "PUT", body: JSON.stringify({ values }) },
   )
   clearSpreadsheetReadCache(spreadsheetId)
@@ -1980,6 +1981,14 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     columnWidths: [180, 190, 170, 150, 170, 220, 150, 520, 160, 180, 170, 170],
   },
   {
+    key: "vocabulary",
+    name: "Vocabulaire",
+    tabName: "Vocabulaire",
+    frozenColumns: 1,
+    headers: ["Titre", "Contenu"],
+    columnWidths: [240, 720],
+  },
+  {
     key: "npcs",
     name: "PNJs",
     tabName: "PNJs",
@@ -2215,7 +2224,7 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
   await getDb().insert(sheetIndexSyncs).values({ key: persistentKey }).onConflictDoNothing()
 }
 
-function sheetTabRange(tabName: string, cells: string) {
+export function sheetTabRange(tabName: string, cells: string) {
   return `'${tabName.replaceAll("'", "''")}'!${cells}`
 }
 
