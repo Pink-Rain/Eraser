@@ -60,6 +60,7 @@ import {
 } from "@/components/ui/sidebar"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
+import { useStoredText } from "@/hooks/use-persistent-state"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
@@ -167,8 +168,9 @@ export function AppShell({
   children,
 }: {
   user: ShellUser
-  characters: CharacterRecord[]
-  campaigns: CampaignRecord[]
+  /** Listes de la barre latérale, encore en vol : la coque ne les attend jamais. */
+  characters: CharacterRecord[] | Promise<CharacterRecord[]>
+  campaigns: CampaignRecord[] | Promise<CampaignRecord[]>
   todos: AdminTodoRecord[]
   initialViewRole: SiteRole
   pageLabel: string
@@ -179,10 +181,13 @@ export function AppShell({
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
   const [viewRole, setViewRole] = useState<SiteRole>(initialViewRole)
-  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-  const [visibleCharacters, setVisibleCharacters] = useState(characters)
-  const [visibleCampaigns, setVisibleCampaigns] = useState(campaigns)
+  // Le personnage et la campagne retenus sont lus dès le premier rendu client,
+  // et non plus recopiés dans un état par un effet différé : la barre latérale
+  // s'affiche donc directement sur le bon choix, sans rendu supplémentaire.
+  const [selectedCharacterId, setSelectedCharacterId] = useStoredText(characterStorageKey)
+  const [selectedCampaignId, setSelectedCampaignId] = useStoredText(campaignStorageKey)
+  const [visibleCharacters, setVisibleCharacters] = useState<CharacterRecord[]>(() => Array.isArray(characters) ? characters : [])
+  const [visibleCampaigns, setVisibleCampaigns] = useState<CampaignRecord[]>(() => Array.isArray(campaigns) ? campaigns : [])
   const [visibleTodos, setVisibleTodos] = useState(todos)
   const [currentPageLabel, setCurrentPageLabel] = useState(pageLabel)
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -191,14 +196,22 @@ export function AppShell({
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateNotice, setUpdateNotice] = useState("")
 
+  // La barre latérale se remplit quand Sheets répond, sans jamais suspendre la
+  // coque : c'est ce qui permet à la page de s'afficher avant ces listes. Un
+  // `setTimeout` traînait ici et ajoutait un rendu complet de la coque après
+  // peinture à chaque navigation ; la promesse le remplace sans y rien perdre.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setVisibleCharacters(characters)
-      setVisibleCampaigns(campaigns)
-      setVisibleTodos(todos)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [campaigns, characters, todos])
+    let active = true
+    void Promise.resolve(characters).then((resolved) => { if (active) setVisibleCharacters(resolved) })
+    return () => { active = false }
+  }, [characters])
+
+  useEffect(() => {
+    let active = true
+    void Promise.resolve(campaigns).then((resolved) => { if (active) setVisibleCampaigns(resolved) })
+    return () => { active = false }
+  }, [campaigns])
+
 
   useEffect(() => {
     if (!accountMenuOpen || viewRole !== "admin" || user.role !== "admin" || todosLoaded || todosLoadingRef.current) return
@@ -221,20 +234,6 @@ export function AppShell({
     return () => window.removeEventListener("eraser:campaign-updated", updateCampaign)
   }, [])
 
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const savedCharacter = window.localStorage.getItem(characterStorageKey)
-      if (savedCharacter && visibleCharacters.some((character) => character.id === savedCharacter)) {
-        setSelectedCharacterId(savedCharacter)
-      }
-      const savedCampaign = window.localStorage.getItem(campaignStorageKey)
-      if (savedCampaign && visibleCampaigns.some((campaign) => campaign.id === savedCampaign)) {
-        setSelectedCampaignId(savedCampaign)
-      }
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [campaignStorageKey, characterStorageKey, visibleCampaigns, visibleCharacters])
-
   const selectedCharacter = useMemo(
     () => visibleCharacters.find((character) => character.id === selectedCharacterId) ?? null,
     [visibleCharacters, selectedCharacterId],
@@ -256,15 +255,9 @@ export function AppShell({
     window.location.assign("/")
   }
 
-  function selectCharacter(characterId: string) {
-    window.localStorage.setItem(characterStorageKey, characterId)
-    setSelectedCharacterId(characterId)
-  }
-
-  function selectCampaign(campaignId: string) {
-    window.localStorage.setItem(campaignStorageKey, campaignId)
-    setSelectedCampaignId(campaignId)
-  }
+  // Choisir enregistre : le crochet écrit la préférence et prévient les lecteurs.
+  const selectCharacter = setSelectedCharacterId
+  const selectCampaign = setSelectedCampaignId
 
   async function deleteItem(kind: "character" | "campaign", id: string) {
     const response = await fetch("/api/items/delete", {
@@ -273,10 +266,10 @@ export function AppShell({
     if (!response.ok) return
     if (kind === "character") {
       setVisibleCharacters((current) => current.filter((item) => item.id !== id))
-      if (selectedCharacterId === id) setSelectedCharacterId(null)
+      if (selectedCharacterId === id) setSelectedCharacterId("")
     } else {
       setVisibleCampaigns((current) => current.filter((item) => item.id !== id))
-      if (selectedCampaignId === id) setSelectedCampaignId(null)
+      if (selectedCampaignId === id) setSelectedCampaignId("")
     }
   }
 

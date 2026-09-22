@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
@@ -41,6 +41,7 @@ import {
   type LinkedModifierItem,
 } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
+import { usePersistentState } from "@/hooks/use-persistent-state"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
@@ -59,6 +60,24 @@ const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
 ]
 
 const baseCharacterTabs: CharacterTab[] = tabTypes.slice(0, 4).map((tab) => ({ ...tab, id: `base-${tab.type}`, removable: false }))
+
+/**
+ * Ce que la fiche retient d'une visite à l'autre : l'onglet ouvert et l'état des
+ * deux grandes sections. Le format enregistré est celui des versions
+ * précédentes, les préférences déjà sur le disque restent donc valables.
+ */
+type CharacterView = { activeTab: string; narrativeExpanded: boolean; mechanicsExpanded: boolean }
+
+const defaultCharacterView: CharacterView = { activeTab: "base-competences", narrativeExpanded: true, mechanicsExpanded: true }
+
+function isCharacterView(value: unknown): value is CharacterView {
+  if (!value || typeof value !== "object") return false
+  const candidate = value as Partial<CharacterView>
+  return typeof candidate.activeTab === "string"
+    && typeof candidate.narrativeExpanded === "boolean"
+    && typeof candidate.mechanicsExpanded === "boolean"
+}
+
 
 // characterSkillGroups never changes at runtime, so this offset table is computed
 // once for the module instead of on every character-sheet render (every keystroke).
@@ -334,10 +353,15 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   const [classCatalogLoading, setClassCatalogLoading] = useState(loadClassCatalog)
   const [classCatalogError, setClassCatalogError] = useState("")
   const [portraitPending, setPortraitPending] = useState(false)
-  const [narrativeExpanded, setNarrativeExpanded] = useState(true)
-  const [mechanicsExpanded, setMechanicsExpanded] = useState(true)
-  const [activeTab, setActiveTab] = useState("base-competences")
-  const [viewStateReady, setViewStateReady] = useState(false)
+  // Onglet ouvert et sections repliées : une seule préférence, lue dès le premier
+  // rendu client et enregistrée au même format qu'avant. La fiche la restaurait
+  // auparavant dans un `setTimeout`, ce qui la dessinait une première fois sur
+  // l'onglet par défaut avant de sauter sur le bon.
+  const [view, setView] = usePersistentState(`eraser:character-sheet:${character.id}:view`, defaultCharacterView, isCharacterView)
+  const setActiveTab = useCallback((id: string) => setView({ ...view, activeTab: id }), [setView, view])
+  const setNarrativeExpanded = useCallback((next: boolean) => setView({ ...view, narrativeExpanded: next }), [setView, view])
+  const setMechanicsExpanded = useCallback((next: boolean) => setView({ ...view, mechanicsExpanded: next }), [setView, view])
+  const { narrativeExpanded, mechanicsExpanded } = view
   const [addingTab, setAddingTab] = useState(false)
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
   // L’inventaire vit ici : l’onglet Compétences a besoin des objets équipés et de leurs liens.
@@ -481,26 +505,6 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     return () => { cancelled = true }
   }, [loadClassCatalog])
 
-  useEffect(() => {
-    const restore = window.setTimeout(() => {
-      try {
-        const stored = JSON.parse(localStorage.getItem(`eraser:character-sheet:${character.id}:view`) || "{}") as { activeTab?: string; narrativeExpanded?: boolean; mechanicsExpanded?: boolean }
-        if (stored.activeTab && characterTabs.some((tab) => tab.id === stored.activeTab)) setActiveTab(stored.activeTab)
-        if (typeof stored.narrativeExpanded === "boolean") setNarrativeExpanded(stored.narrativeExpanded)
-        if (typeof stored.mechanicsExpanded === "boolean") setMechanicsExpanded(stored.mechanicsExpanded)
-      } catch { /* état local absent ou ancien */ }
-      setViewStateReady(true)
-    }, 0)
-    return () => window.clearTimeout(restore)
-  // Les onglets personnalisés sont déjà présents au premier rendu de la fiche.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.id])
-
-  useEffect(() => {
-    if (!viewStateReady) return
-    localStorage.setItem(`eraser:character-sheet:${character.id}:view`, JSON.stringify({ activeTab, narrativeExpanded, mechanicsExpanded }))
-  }, [activeTab, character.id, mechanicsExpanded, narrativeExpanded, viewStateReady])
-
   async function addCharacterTab() {
     const definition = tabTypes.find((tab) => tab.type === newTabType)
     if (!definition) return
@@ -552,6 +556,9 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }
 
+  // Un onglet personnalisé supprimé depuis la dernière visite laisserait la fiche
+  // sans contenu : on retombe alors sur le premier onglet.
+  const activeTab = view.activeTab
   const activeCharacterTab = characterTabs.find((tab) => tab.id === activeTab) ?? characterTabs[0]
 
   return <div className="w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties}>
@@ -588,7 +595,7 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
             </div>
           </div>
           <div className="mt-5">
-            <button type="button" onClick={() => setNarrativeExpanded((current) => !current)} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[.18em] text-muted-foreground hover:text-foreground" aria-expanded={narrativeExpanded}>
+            <button type="button" onClick={() => setNarrativeExpanded(!narrativeExpanded)} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[.18em] text-muted-foreground hover:text-foreground" aria-expanded={narrativeExpanded}>
               <span>But · Personnalité · Histoire</span>
               {narrativeExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
             </button>
@@ -601,7 +608,7 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     <div className="mt-6">{secondaryCharacteristics}</div>
 
     <section className="hidden">
-      <button type="button" onClick={() => setMechanicsExpanded((current) => !current)} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-3 text-left" aria-expanded={mechanicsExpanded}>
+      <button type="button" onClick={() => setMechanicsExpanded(!mechanicsExpanded)} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-3 text-left" aria-expanded={mechanicsExpanded}>
         <div><p className="text-[10px] font-semibold uppercase tracking-[.25em] text-primary/70">Système de jeu</p><h2 className="font-display text-3xl font-semibold">Caractéristiques & compétences</h2></div>
         {mechanicsExpanded ? <ChevronUp className="size-5 text-muted-foreground" /> : <ChevronDown className="size-5 text-muted-foreground" />}
       </button>

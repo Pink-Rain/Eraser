@@ -1,37 +1,97 @@
-import { useEffect, useState } from "react"
+import { useCallback, useRef, useSyncExternalStore } from "react"
 
-// Remembers a UI preference (a sort mode, an active tab, a selected filter…)
-// across visits, so the player or MJ doesn't have to reselect it every time
-// they come back to a page. Backed by localStorage; safe to use with SSR
-// since it only reads/writes after mount, and silently no-ops if storage is
-// unavailable (private browsing, quota, …).
+// Les préférences d'interface (un tri, un onglet actif, une largeur de colonne)
+// vivent dans localStorage. Le stockage est ici traité comme ce qu'il est — une
+// source extérieure à React — et lu par `useSyncExternalStore`.
+//
+// La version précédente le lisait dans un `useEffect` différé par un
+// `setTimeout(0)`, ce qui coûtait à chaque montage un rendu complet du composant
+// *après* la peinture : la page s'affichait avec la valeur par défaut puis
+// sautait sur la valeur enregistrée. Dans un tableau, ce saut changeait la clé de
+// mise en page et remontait toutes les cellules. Le détour par le minuteur
+// servait aussi à contourner la règle qui interdit `setState` dans un effet.
+//
+// Ici, rien de tout cela : le premier rendu client lit déjà la bonne valeur, et
+// le rendu serveur reçoit la valeur par défaut, donc l'hydratation reste saine.
+
+const listeners = new Set<() => void>()
+
+function subscribe(onStoreChange: () => void) {
+  // Une écriture venue de cette fenêtre (`listeners`) comme d'une autre
+  // (`storage`) doit rafraîchir les lecteurs de la préférence.
+  listeners.add(onStoreChange)
+  window.addEventListener("storage", onStoreChange)
+  return () => {
+    listeners.delete(onStoreChange)
+    window.removeEventListener("storage", onStoreChange)
+  }
+}
+
+function readRaw(key: string) {
+  try {
+    return window.localStorage.getItem(key)
+  } catch {
+    return null
+  }
+}
+
 export function usePersistentState<T>(key: string, initial: T, isValid: (value: unknown) => value is T) {
-  const [value, setValue] = useState(initial)
+  // `getSnapshot` doit renvoyer une valeur stable tant que le stockage n'a pas
+  // bougé : re-parser le JSON à chaque appel rendrait une nouvelle référence et
+  // ferait boucler React. La dernière chaîne lue et sa valeur sont donc gardées.
+  const parsed = useRef<{ raw: string | null; key: string; value: T } | null>(null)
 
-  useEffect(() => {
-    // Déféré hors du corps synchrone de l'effet (comme ailleurs dans l'appli)
-    // pour éviter d'enchaîner un re-rendu directement pendant le montage.
-    const timer = window.setTimeout(() => {
+  const getSnapshot = useCallback(() => {
+    const raw = readRaw(key)
+    const cached = parsed.current
+    if (cached && cached.key === key && cached.raw === raw) return cached.value
+    let value = initial
+    if (raw !== null) {
       try {
-        const stored = window.localStorage.getItem(key)
-        if (stored !== null) {
-          const parsed = JSON.parse(stored) as unknown
-          if (isValid(parsed)) { setValue(parsed); return }
-        }
-      } catch { /* stockage indisponible : on garde la valeur par défaut */ }
-      setValue(initial)
-    }, 0)
-    return () => window.clearTimeout(timer)
-    // La clé peut changer (ex. un identifiant de personnage) : on relit à
-    // chaque changement, pas seulement au montage. `initial` est traité comme
-    // une valeur de repli stable, volontairement hors des dépendances.
+        const candidate = JSON.parse(raw) as unknown
+        if (isValid(candidate)) value = candidate
+      } catch { /* préférence illisible ou d'une ancienne version */ }
+    }
+    parsed.current = { raw, key, value }
+    return value
+    // `initial` est un repli volontairement stable, comme dans la version
+    // précédente : il n'entre pas dans les dépendances.
     // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [key, isValid])
+
+  // Côté serveur, aucune préférence n'est connue : c'est la valeur par défaut.
+  const getServerSnapshot = useCallback(() => initial, [initial])
+
+  const value = useSyncExternalStore(subscribe, getSnapshot, getServerSnapshot)
+
+  const set = useCallback((next: T) => {
+    try {
+      window.localStorage.setItem(key, JSON.stringify(next))
+    } catch { /* stockage indisponible : la valeur reste celle de la session */ }
+    // La valeur est publiée tout de suite, même si l'écriture a échoué : une
+    // fenêtre de navigation privée doit rester utilisable.
+    parsed.current = { raw: readRaw(key), key, value: next }
+    listeners.forEach((listener) => listener())
   }, [key])
 
-  function set(next: T) {
-    setValue(next)
-    try { window.localStorage.setItem(key, JSON.stringify(next)) } catch { /* stockage indisponible */ }
-  }
+  return [value, set] as const
+}
+
+/**
+ * Même mécanique, pour une préférence déjà enregistrée en texte brut plutôt
+ * qu'en JSON (le personnage et la campagne retenus dans la barre latérale).
+ * Garder leur format évite de repartir de zéro sur les installations existantes.
+ */
+export function useStoredText(key: string) {
+  const read = useCallback(() => readRaw(key) ?? "", [key])
+  const value = useSyncExternalStore(subscribe, read, () => "")
+
+  const set = useCallback((next: string) => {
+    try {
+      window.localStorage.setItem(key, next)
+    } catch { /* stockage indisponible */ }
+    listeners.forEach((listener) => listener())
+  }, [key])
 
   return [value, set] as const
 }

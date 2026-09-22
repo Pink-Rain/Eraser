@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react"
 import { Minus, Pin, Square, X } from "lucide-react"
 
 import { AppTabStrip, useAppTabs } from "@/components/eraser/app-tabs"
@@ -18,11 +18,22 @@ type AppRegionStyle = CSSProperties & { WebkitAppRegion?: "drag" | "no-drag" }
 const dragStyle: AppRegionStyle = { WebkitAppRegion: "drag" }
 const noDragStyle: AppRegionStyle = { WebkitAppRegion: "no-drag" }
 
+// Le pont est injecté par le préchargement avant l'exécution de la page : une
+// fois là, il ne disparaît plus. Il n'y a donc rien à écouter.
+function subscribeToDesktopBridge() {
+  return () => undefined
+}
+
 // Only rendered inside the desktop app (window.eraserDesktop exists only
 // there, injected by desktop/preload.cjs); on the website this returns null
 // and nothing about the page layout changes.
 export function DesktopTitlebar() {
-  const [ready, setReady] = useState(false)
+  // « Sommes-nous dans l'application Windows ? » est une question posée à
+  // l'extérieur de React : le pont est injecté par preload.cjs et n'existe pas
+  // au rendu serveur. La lire ainsi affiche la barre de titre dès le premier
+  // rendu client, au lieu de l'ajouter après peinture — ce que faisait le
+  // `setTimeout` précédent, au prix d'un décalage visible de toute la page.
+  const ready = useSyncExternalStore(subscribeToDesktopBridge, () => Boolean(window.eraserDesktop), () => false)
   const tabs = useAppTabs()
   const [state, setState] = useState<DesktopWindowState>({ isMaximized: false, isPinned: false, isCollapsed: false })
   const lastMouseDownAt = useRef(0)
@@ -30,17 +41,8 @@ export function DesktopTitlebar() {
   useEffect(() => {
     const bridge = window.eraserDesktop
     if (!bridge) return
-    // Deferred like elsewhere in this app (see usePersistentState): avoids
-    // chaining a synchronous setState directly into the effect's own body.
-    const timer = window.setTimeout(() => {
-      setReady(true)
-      bridge.windowGetState().then(setState).catch(() => undefined)
-    }, 0)
-    const unsubscribe = bridge.onWindowStateChange(setState)
-    return () => {
-      window.clearTimeout(timer)
-      unsubscribe()
-    }
+    bridge.windowGetState().then(setState).catch(() => undefined)
+    return bridge.onWindowStateChange(setState)
   }, [])
 
   useEffect(() => {

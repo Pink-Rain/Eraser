@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
@@ -112,6 +112,38 @@ function SheetGridToolbar({ targetRef, ready, leading, trailing, onReset }: { ta
   </div>
 }
 
+/**
+ * Une cellule de texte. Mémoïsée sur sa valeur brute, et c'est elle — pas la
+ * grille — qui l'assainit : le nettoyage HTML ne repasse donc que sur les
+ * cellules réellement modifiées. Auparavant chaque rendu de la grille
+ * réassainissait toutes les cellules, y compris pour un simple survol ou un
+ * changement de sélection, ce qui est vite devenu le poste le plus cher de la
+ * page sur un index fourni. Les deux rappels sont stables par construction,
+ * sinon la mémoïsation ne servirait à rien.
+ */
+const SheetGridTextCell = memo(function SheetGridTextCell({
+  rowKey, columnKey, value, plain, disabled, cellClassName, onCommit, onActivate,
+}: {
+  rowKey: string
+  columnKey: string
+  value: string
+  plain: boolean
+  disabled: boolean
+  cellClassName: string
+  onCommit: (rowKey: string, columnKey: string, value: string) => void
+  onActivate: (rowKey: string, columnKey: string, editor: RichTextTarget) => void
+}) {
+  return <RichTextSurface
+    initialHtml={plain ? escapeRichText(value) : sanitizeRichText(value)}
+    plain={plain}
+    disabled={disabled}
+    placeholder=""
+    onCommit={(next) => onCommit(rowKey, columnKey, next)}
+    onActivate={(editor) => onActivate(rowKey, columnKey, editor)}
+    className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${cellClassName}`}
+  />
+})
+
 export function SheetGrid({
   layoutKey, columns, rows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, version = 0,
@@ -138,7 +170,9 @@ export function SheetGrid({
   version?: number
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
-  const [preview, setPreview] = useState<{ columns: Record<string, number>; rows: Record<string, number> }>({ columns: {}, rows: {} })
+  // Le tableau lui-même : le redimensionnement écrit dans ses `<col>` sans
+  // repasser par React, il lui faut donc une référence.
+  const tableRef = useRef<HTMLTableElement>(null)
   // La cellule active vit dans une référence : la sélectionner ne redessine rien.
   // Seul le passage « aucune cellule » → « une cellule » réveille la barre d'outils.
   const activeRef = useRef<RichTextTarget | null>(null)
@@ -160,16 +194,35 @@ export function SheetGrid({
     setToolbarReady((current) => current || true)
   }, [])
 
+  // `onCommit` change d'identité à chaque rendu de la page parente. Le garder
+  // dans une référence donne aux cellules deux rappels stables, sans quoi leur
+  // mémoïsation serait systématiquement invalidée.
+  const commitRef = useRef(onCommit)
+  useEffect(() => { commitRef.current = onCommit })
+  const commitCell = useCallback((rowKey: string, columnKey: string, value: string) => {
+    commitRef.current(rowKey, columnKey, value)
+  }, [])
+  const activateCell = useCallback((rowKey: string, columnKey: string, editor: RichTextTarget) => {
+    activate(editor)
+    setActiveCell({ row: rowKey, column: columnKey })
+    setSelection((current) => current.length ? [] : current)
+  }, [activate])
+
   const textColumns = useMemo(() => columns.filter((column) => !column.custom), [columns])
   const rowKeys = useMemo(() => rows.map((row) => row.key), [rows])
+  // Index des lignes. Les versions précédentes cherchaient chaque clé par
+  // `indexOf`/`includes` : sur un tableau de plusieurs centaines de lignes, la
+  // sélection et le rendu devenaient quadratiques et se sentaient au clic.
+  const rowIndexes = useMemo(() => new Map(rowKeys.map((key, index) => [key, index] as const)), [rowKeys])
   // Une ligne disparue (suppression, filtre, tri) sort de la sélection d'elle-même :
   // elle est recalculée à l'affichage plutôt que corrigée après coup.
-  const selection = useMemo(() => rawSelection.filter((key) => rowKeys.includes(key)), [rawSelection, rowKeys])
-  const indexOfRow = useCallback((key: string) => rowKeys.indexOf(key), [rowKeys])
+  const selection = useMemo(() => rawSelection.filter((key) => rowIndexes.has(key)), [rawSelection, rowIndexes])
+  const selectedKeys = useMemo(() => new Set(selection), [selection])
+  const indexOfRow = useCallback((key: string) => rowIndexes.get(key) ?? -1, [rowIndexes])
 
   const defaultWidths = useMemo(() => Object.fromEntries(columns.map((column) => [column.key, column.width] as const)), [columns])
-  const columnWidth = (key: string) => preview.columns[key] ?? layout.columnWidths[key] ?? defaultWidths[key] ?? 200
-  const rowHeight = (key: string) => preview.rows[key] ?? layout.rowHeights[key]
+  const columnWidth = (key: string) => layout.columnWidths[key] ?? defaultWidths[key] ?? 200
+  const rowHeight = (key: string) => layout.rowHeights[key]
   const totalWidth = columns.reduce((total, column) => total + columnWidth(column.key), HANDLE_WIDTH)
 
   /** Valeurs mises en forme d'un bloc de lignes, colonnes de texte uniquement. */
@@ -234,10 +287,10 @@ export function SheetGrid({
   }
 
   /** Le menu contextuel agit sur la sélection si la ligne visée en fait partie. */
-  const targetRows = useCallback((key: string) => selection.includes(key) ? selection : [key], [selection])
+  const targetRows = useCallback((key: string) => selectedKeys.has(key) ? selection : [key], [selectedKeys, selection])
   /** Un Ctrl+clic sélectionne dans le désordre : copier et coller partent du haut. */
   const ordered = useMemo(() => [...selection].sort((left, right) => indexOfRow(left) - indexOfRow(right)), [indexOfRow, selection])
-  const orderedTargets = useCallback((key: string) => selection.includes(key) ? ordered : [key], [ordered, selection])
+  const orderedTargets = useCallback((key: string) => selectedKeys.has(key) ? ordered : [key], [ordered, selectedKeys])
 
   // Les raccourcis ne s'appliquent qu'à une sélection de lignes, jamais pendant la
   // frappe : dans une cellule, le navigateur garde son copier-coller de texte.
@@ -271,15 +324,22 @@ export function SheetGrid({
     event.preventDefault(); event.stopPropagation()
     const startX = event.clientX
     const startWidth = columnWidth(key)
+    const column = tableRef.current?.querySelector<HTMLElement>(`col[data-column-key="${CSS.escape(key)}"]`)
+    const startTotal = totalWidth
     let latest = startWidth
+    // Le glissement écrit directement dans le DOM. Il passait auparavant par un
+    // état React, donc par un rendu de toutes les cellules du tableau à chaque
+    // pixel : sur un index fourni, la poignée décrochait complètement.
     const move = (pointerEvent: PointerEvent) => {
       latest = clampTableColumnWidth(startWidth + pointerEvent.clientX - startX, minimum, maximum)
-      setPreview((current) => ({ ...current, columns: { ...current.columns, [key]: latest } }))
+      if (!column || !tableRef.current) return
+      column.style.width = `${latest}px`
+      tableRef.current.style.width = `${startTotal + latest - startWidth}px`
     }
     const finish = () => {
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish)
+      // Un seul rendu, à la fin : React reprend la main sur la largeur retenue.
       setLayout({ ...layout, columnWidths: { ...layout.columnWidths, [key]: latest } })
-      setPreview((current) => { const next = { ...current.columns }; delete next[key]; return { ...current, columns: next } })
     }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish); window.addEventListener("pointercancel", finish)
   }
@@ -288,15 +348,17 @@ export function SheetGrid({
     event.preventDefault(); event.stopPropagation()
     const startY = event.clientY
     const startHeight = rowHeight(key) ?? element?.getBoundingClientRect().height ?? 48
+    const rowElement = element?.closest<HTMLElement>("tr[data-row-key]") ?? null
     let latest = startHeight
+    // Même principe que pour les colonnes : la hauteur suit le pointeur dans le
+    // DOM, et React n'apprend la nouvelle valeur qu'au relâchement.
     const move = (pointerEvent: PointerEvent) => {
       latest = clampTableRowHeight(startHeight + pointerEvent.clientY - startY)
-      setPreview((current) => ({ ...current, rows: { ...current.rows, [key]: latest } }))
+      if (rowElement) rowElement.style.height = `${latest}px`
     }
     const finish = () => {
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish)
       setLayout({ ...layout, rowHeights: { ...layout.rowHeights, [key]: latest } })
-      setPreview((current) => { const next = { ...current.rows }; delete next[key]; return { ...current, rows: next } })
     }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish); window.addEventListener("pointercancel", finish)
   }
@@ -353,16 +415,16 @@ export function SheetGrid({
       ready={toolbarReady}
       leading={toolbarLeading}
       trailing={<>{notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}</>}
-      onReset={() => { setLayout(emptyLayout); setPreview({ columns: {}, rows: {} }) }}
+      onReset={() => setLayout(emptyLayout)}
     />
     {/* Un seul conteneur défile, dans les deux sens : les en-têtes restent collés en haut
         de l’écran et la barre horizontale reste collée en bas, comme dans Google Sheets. */}
     <div className="min-h-0 flex-1 overflow-auto">
       {/* Changer de tableau remonte les cellules : aucune ne garde le contenu du précédent. */}
-      <table key={layoutKey} className="border-separate border-spacing-0 text-sm" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
+      <table ref={tableRef} key={layoutKey} className="border-separate border-spacing-0 text-sm" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
         <colgroup>
           <col style={{ width: HANDLE_WIDTH }} />
-          {columns.map((column) => <col key={column.key} style={{ width: columnWidth(column.key) }} />)}
+          {columns.map((column) => <col key={column.key} data-column-key={column.key} style={{ width: columnWidth(column.key) }} />)}
         </colgroup>
         <thead>
           <tr>
@@ -385,7 +447,7 @@ export function SheetGrid({
         <tbody>
           {rows.map((row, rowIndex) => {
             const manualHeight = rowHeight(row.key)
-            const selected = selection.includes(row.key)
+            const selected = selectedKeys.has(row.key)
             // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
             // qui défile derrière elle. La teinte de sélection est posée par-dessus.
             const cellBase = `relative border-b border-r bg-background p-1 align-top ${manualHeight ? "overflow-hidden" : ""}`
@@ -395,7 +457,7 @@ export function SheetGrid({
                   <td
                     className={`sticky left-0 z-20 cursor-pointer border-b border-r bg-muted p-0 align-top ${selected ? "" : "hover:bg-accent"}`}
                     onPointerDown={(event) => { if (event.button === 0) selectRow(row.key, event) }}
-                    onContextMenu={() => { if (!selection.includes(row.key)) { anchor.current = row.key; setSelection([row.key]) } }}
+                    onContextMenu={() => { if (!selectedKeys.has(row.key)) { anchor.current = row.key; setSelection([row.key]) } }}
                     aria-label={`Ligne ${row.rowNumber}`}
                     title="Cliquer pour sélectionner la ligne, clic droit pour le menu"
                   >
@@ -441,15 +503,16 @@ export function SheetGrid({
                   {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
                   {column.custom
                     ? renderCustomCell?.(row.key, column.key)
-                    : <RichTextSurface
+                    : <SheetGridTextCell
                         key={`${version}:${writeTick}:${column.key}`}
-                        initialHtml={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
+                        rowKey={row.key}
+                        columnKey={column.key}
+                        value={valueOf(row.key, column.key)}
                         plain={Boolean(column.plain)}
                         disabled={disabled}
-                        placeholder=""
-                        onCommit={(value) => onCommit(row.key, column.key, value)}
-                        onActivate={(editor) => { activate(editor); setActiveCell({ row: row.key, column: column.key }); setSelection((current) => current.length ? [] : current) }}
-                        className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
+                        cellClassName={column.cellClassName || ""}
+                        onCommit={commitCell}
+                        onActivate={activateCell}
                       />}
                   {isActive && !column.custom && <span
                     role="separator"
