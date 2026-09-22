@@ -79,3 +79,7 @@
 Le workflow Windows produit `Eraser-Setup.exe`, `latest.yml` et le `.blockmap`,
 puis teste une vraie installation. Une préversion est publiée seulement par un
 commit contenant `[publish alpha]` sur `windows-app-migration`.
+Chaque commit `[publish alpha]` doit **incrémenter `version` dans
+`package.json`** (`0.1.1-alpha.N` → `N+1`) et réécrire `RELEASE_ALPHA.md` :
+sinon la construction réussit mais la publication échoue, le tag existant déjà,
+et aucune mise à jour n’arrive aux utilisateurs.
