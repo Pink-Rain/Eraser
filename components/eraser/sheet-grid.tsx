@@ -71,11 +71,6 @@ const SheetCell = memo(function SheetCell({ initialHtml, plain, disabled, onComm
 }) {
   const editor = useRef<HTMLDivElement>(null)
   const timer = useRef<number | null>(null)
-  // Figé au montage. Sans cela, l'enregistrement fait remonter la valeur au parent,
-  // la propriété change, et React réécrit le contenu de la cellule : le curseur
-  // repart au début en plein milieu de la frappe. Le contenu n'est repris que
-  // lorsque la grille change sa `version` et remonte la cellule.
-  const [mountedHtml] = useState(initialHtml)
   const applied = useRef(initialHtml)
   const commit = useRef(onCommit)
   // Le rappel est relu à chaque rendu sans être une dépendance : la cellule n'a
@@ -92,6 +87,16 @@ const SheetCell = memo(function SheetCell({ initialHtml, plain, disabled, onComm
     commit.current(plain ? richTextPlainText(safe) : safe)
   }, [plain])
 
+  // Le contenu est posé une seule fois, à la main, et React ne le connaît pas :
+  // la cellule n'a ni enfants ni `dangerouslySetInnerHTML`. C'est indispensable,
+  // car React réécrit le contenu d'un élément `contentEditable` à chaque rendu
+  // même quand la valeur n'a pas changé — ce qui effaçait la frappe en cours au
+  // moment où l'enregistrement remontait la valeur au tableau.
+  useEffect(() => {
+    // Volontairement au montage uniquement : la suite appartient au navigateur.
+    if (editor.current) editor.current.innerHTML = applied.current
+  }, [])
+
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
 
   return <div
@@ -107,7 +112,6 @@ const SheetCell = memo(function SheetCell({ initialHtml, plain, disabled, onComm
     onFocus={() => { if (editor.current) onActivate({ node: editor.current, flush }) }}
     className={`min-h-full w-full whitespace-pre-wrap break-words rounded-md px-2 py-1.5 outline-none focus:bg-background focus:ring-2 focus:ring-ring/45 [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc ${className}`}
     style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
-    dangerouslySetInnerHTML={{ __html: mountedHtml }}
   />
 })
 

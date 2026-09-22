@@ -396,6 +396,18 @@ test("renders the shared sheet grid with pinned headers and editable cells", asy
   assert.match(html, /Ligne/);
   // Toutes les cellules sont modifiables en permanence : aucun mode lecture.
   assert.equal((html.match(/contenteditable="true"/gi) || []).length, 2);
-  assert.match(html, /<strong>Tranchant<\/strong>/);
   assert.doesNotMatch(html, /<textarea/);
+});
+
+test("keeps sheet cell content out of React's hands", async () => {
+  const source = await readFile(new URL("../components/eraser/sheet-grid.tsx", import.meta.url), "utf8");
+  const cell = source.slice(source.indexOf("const SheetCell"), source.indexOf("function SheetGridToolbar"));
+  // React reecrit le contenu d'un element contentEditable a chaque rendu, meme quand
+  // la valeur n'a pas change : confier ce contenu a React efface la frappe en cours au
+  // moment ou l'enregistrement fait remonter la valeur au tableau. La cellule pose donc
+  // son contenu elle-meme, une seule fois, et n'expose ni enfants ni
+  // dangerouslySetInnerHTML. Verifie au navigateur ; ce test empeche le retour en arriere.
+  assert.doesNotMatch(cell, /dangerouslySetInnerHTML=\{/);
+  assert.match(cell, /editor\.current\.innerHTML = applied\.current/);
+  assert.match(cell, /contentEditable=\{!disabled\}/);
 });

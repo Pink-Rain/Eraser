@@ -1,31 +1,31 @@
-# Eraser 0.1.1-alpha.43 — curseur stable et mise en forme des objets partout
+# Eraser 0.1.1-alpha.44 — le curseur des cellules tient enfin
 
 ## Corrigé
 
-- le curseur ne saute plus au début d’une cellule au moment de l’enregistrement.
-  La cause est trouvée : la valeur enregistrée remontait jusqu’à la grille, la
-  cellule recevait alors une nouvelle valeur et son contenu était réécrit en
-  pleine frappe. Le contenu est désormais figé au montage de la cellule ; il
-  n’est repris que lors d’une actualisation, d’un ajout ou d’une suppression de
-  ligne. On peut donc écrire longuement, sélectionner et mettre en forme sans
-  être interrompu, et l’enregistrement automatique reste en place ;
-- la mise en forme des objets (gras, couleurs, liens) s’affiche enfin partout.
-  Le résumé d’inventaire chargé à l’ouverture d’une fiche ne lisait pas le
-  catalogue Drive et ne connaissait donc que le texte brut. L’inventaire conserve
-  maintenant la mise en forme à côté du texte, dans trois nouvelles colonnes de
-  la feuille « Contenu inventaire » ajoutées automatiquement.
+- le curseur ne saute plus au début d’une cellule et le texte tapé ne disparaît
+  plus au moment de l’enregistrement.
 
-## Où la mise en forme est respectée
+La cause exacte a été trouvée en reproduisant le problème dans un vrai
+navigateur, au lieu de la déduire : React réécrit le contenu d’un élément
+modifiable à chaque rendu, **même lorsque la valeur n’a pas changé**. Dès que
+l’enregistrement faisait remonter la cellule au tableau, celui-ci se redessinait
+et le contenu de la cellule était remis à son état de départ — d’où le curseur
+au début et la frappe perdue. Les préversions précédentes avaient supprimé
+d’autres chemins de réécriture, mais pas celui-là.
 
-- inventaires de personnages, de PNJ et de campagne, y compris en lecture seule ;
-- recherche d’objets à ajouter dans un inventaire ;
-- magasins et fouilles, y compris ceux enregistrés avant ce changement : leur
-  mise en forme est retrouvée dans le catalogue tant que le texte n’a pas été
-  réécrit ;
-- fenêtres de détail du plateau de jeu.
+La cellule pose désormais son contenu elle-même, une seule fois, et React n’en a
+plus connaissance du tout. Le contenu n’est remplacé que lors d’une
+actualisation, d’un ajout ou d’une suppression de ligne.
 
-Un texte réécrit à la main dans un inventaire redevient du texte brut, comme
-attendu ; les autres champs du même objet gardent la leur.
+Vérifié au navigateur sur les cas qui échouaient :
+
+- écriture longue traversant plusieurs enregistrements ;
+- frappe au milieu d’un texte déjà écrit ;
+- sélection maintenue, puis mise en gras et changement de couleur ;
+- correcteur orthographique toujours actif sur la cellule ;
+- actualisation qui remplace bien le contenu.
+
+Un test empêche désormais ce retour en arrière.
 
 ## Vérifications
 
