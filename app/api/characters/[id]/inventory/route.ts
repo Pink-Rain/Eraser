@@ -94,7 +94,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "set-modifiers" && typeof body.slotId === "string" && typeof body.modifiers === "string") {
       inventory = await setCharacterInventoryItemModifiers(id, body.slotId, body.modifiers)
     } else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
-      inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
+      inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, nameHtml: typeof body.nameHtml === "string" ? body.nameHtml : undefined, descriptionHtml: typeof body.descriptionHtml === "string" ? body.descriptionHtml : undefined, effectHtml: typeof body.effectHtml === "string" ? body.effectHtml : undefined })
     } else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") {
       inventory = await moveCharacterInventoryItem(id, body.slotId, body.containerId)
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {

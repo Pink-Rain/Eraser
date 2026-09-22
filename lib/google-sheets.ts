@@ -5224,7 +5224,7 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string }, mode: InventoryOwnerMode = "character") {
+export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string; nameHtml?: string; descriptionHtml?: string; effectHtml?: string }, mode: InventoryOwnerMode = "character") {
   const workbook = await inventoryStorageFor(characterId, true, mode)
   const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === characterId)
   const container = content && workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
@@ -5242,9 +5242,11 @@ export async function updateCharacterInventoryItem(characterId: string, slotId: 
     type,
     subtype: input.subtype.trim(),
     effect: input.effect.trim(),
-    nameHtml: name === content.customName ? content.nameHtml : "",
-    descriptionHtml: input.description.trim() === content.customDescription ? content.descriptionHtml : "",
-    effectHtml: input.effect.trim() === content.effect ? content.effectHtml : "",
+    // La mise en forme envoyée par l'éditeur prime ; sinon celle d'origine n'est
+    // conservée que pour les champs dont le texte n'a pas bougé.
+    nameHtml: input.nameHtml !== undefined ? input.nameHtml : name === content.customName ? content.nameHtml : "",
+    descriptionHtml: input.descriptionHtml !== undefined ? input.descriptionHtml : input.description.trim() === content.customDescription ? content.descriptionHtml : "",
+    effectHtml: input.effectHtml !== undefined ? input.effectHtml : input.effect.trim() === content.effect ? content.effectHtml : "",
     updatedAt: new Date().toISOString(),
   })
   return buildCharacterInventory(characterId, workbook)

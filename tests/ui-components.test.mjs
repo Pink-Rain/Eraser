@@ -364,7 +364,7 @@ test("keeps a zero as a deliberate item modifier", async () => {
 
 test("converts sheet cells between rich text and plain text", async () => {
   const { richTextPlainText, escapeRichText, sanitizeRichText } = await vite.ssrLoadModule(
-    "/components/eraser/rich-text-inline-editor.tsx",
+    "/components/eraser/rich-text.tsx",
   );
   assert.equal(richTextPlainText("<strong>Coup</strong> net<br>puis recul"), "Coup net\npuis recul");
   assert.equal(escapeRichText("1 < 2 & 3 > 2"), "1 &lt; 2 &amp; 3 &gt; 2");
@@ -399,9 +399,9 @@ test("renders the shared sheet grid with pinned headers and editable cells", asy
   assert.doesNotMatch(html, /<textarea/);
 });
 
-test("keeps sheet cell content out of React's hands", async () => {
-  const source = await readFile(new URL("../components/eraser/sheet-grid.tsx", import.meta.url), "utf8");
-  const cell = source.slice(source.indexOf("const SheetCell"), source.indexOf("function SheetGridToolbar"));
+test("keeps rich text content out of React's hands", async () => {
+  const source = await readFile(new URL("../components/eraser/rich-text.tsx", import.meta.url), "utf8");
+  const cell = source.slice(source.indexOf("export const RichTextSurface"), source.indexOf("export function RichTextView"));
   // React reecrit le contenu d'un element contentEditable a chaque rendu, meme quand
   // la valeur n'a pas change : confier ce contenu a React efface la frappe en cours au
   // moment ou l'enregistrement fait remonter la valeur au tableau. La cellule pose donc
@@ -410,4 +410,8 @@ test("keeps sheet cell content out of React's hands", async () => {
   assert.doesNotMatch(cell, /dangerouslySetInnerHTML=\{/);
   assert.match(cell, /editor\.current\.innerHTML = applied\.current/);
   assert.match(cell, /contentEditable=\{!disabled\}/);
+  // Toute l'application partage ce moteur : aucun autre éditeur ne doit subsister.
+  const others = await readFile(new URL("../components/eraser/sheet-grid.tsx", import.meta.url), "utf8");
+  assert.match(others, /RichTextSurface/);
+  assert.doesNotMatch(others, /contentEditable/);
 });

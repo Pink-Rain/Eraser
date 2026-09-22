@@ -7,11 +7,11 @@ import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
   AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
+import { RichTextField, RichTextView } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { Textarea } from "@/components/ui/textarea"
 import type { AdminTodoRecord } from "@/lib/google-sheets"
 
 const priorityIcons = { haute: AlertTriangle, moyenne: Minus, basse: ArrowDown }
@@ -97,7 +97,7 @@ export function AdminTodoMenu({ todos, onTodosChange, viewControls }: { todos: A
       {formOpen && (
         <form onSubmit={save} className="mx-1 mb-2 grid gap-2 rounded-lg border bg-background/70 p-3" onClick={(event) => event.stopPropagation()}>
           <Input value={form.name} onChange={(event) => setForm({ ...form, name: event.target.value })} placeholder="Nom (facultatif)" />
-          <Textarea value={form.content} onChange={(event) => setForm({ ...form, content: event.target.value })} placeholder="Contenu de la to-do" required className="min-h-20" />
+          <RichTextField value={form.content} onCommit={(html) => setForm({ ...form, content: html })} placeholder="Contenu de la to-do" minHeight="min-h-20" />
           <div className="grid grid-cols-2 gap-2">
             <NativeSelect className="w-full" value={form.priority} onChange={(event) => setForm({ ...form, priority: event.target.value as AdminTodoRecord["priority"] })} aria-label="Priorité">
               <NativeSelectOption value="haute">Priorité élevée</NativeSelectOption>
@@ -136,7 +136,7 @@ export function AdminTodoMenu({ todos, onTodosChange, viewControls }: { todos: A
               </button>
               <div className="min-w-0 flex-1">
                 <p className={`text-sm font-medium ${todo.completed === "oui" ? "line-through opacity-60" : ""}`}>{title}</p>
-                {todo.name && <p className="line-clamp-2 text-xs text-muted-foreground">{todo.content}</p>}
+                {todo.name && <RichTextView html={todo.content} className="line-clamp-2 text-xs text-muted-foreground" />}
                 <div className="mt-1 flex flex-wrap gap-1">
                   {todo.label && <span className="rounded-full px-2 py-0.5 text-[10px] text-white" style={{ backgroundColor: todo.labelColor }}>{todo.label}</span>}
                   <span className="rounded-full bg-muted px-2 py-0.5 text-[10px]">{todo.creatorName}</span>

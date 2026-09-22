@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react"
 import { AlertTriangle, Check, CircleDotDashed, CopyCheck, ExternalLink, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
-import { RichTextEditorField } from "@/components/eraser/rich-text-inline-editor"
+import { RichTextField } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Badge } from "@/components/ui/badge"
@@ -134,8 +134,8 @@ function SpellForm({ initial, classes, spells, pending, title, onCancel, onSave 
       <label className="grid gap-1 text-xs font-semibold">Distance<Input value={draft.distance} onChange={(event) => field("distance", event.target.value)} /></label>
       <label className="grid gap-1 text-xs font-semibold">Charges{classSpellCategory(draft.type) === "actif" ? <Input type="number" min={0} max={5} value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} /> : <span className="flex min-h-9 items-center text-muted-foreground">—</span>}</label>
       <div className="md:col-span-2 xl:col-span-1"><p className="mb-1 text-xs font-semibold">Classes et rangs</p><ClassLinksEditor draft={draft} classes={classes} spells={spells} onChange={(classRanks) => field("classRanks", classRanks)} /></div>
-      <label className="grid gap-1 text-xs font-semibold md:col-span-2">Effet<RichTextEditorField value={draft.effectHtml || draft.effect} onChange={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} /></label>
-      <label className="grid gap-1 text-xs font-semibold md:col-span-2">Description<RichTextEditorField value={draft.descriptionHtml || draft.description} onChange={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} /></label>
+      <label className="grid gap-1 text-xs font-semibold md:col-span-2">Effet<RichTextField value={draft.effectHtml || draft.effect} onCommit={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} /></label>
+      <label className="grid gap-1 text-xs font-semibold md:col-span-2">Description<RichTextField value={draft.descriptionHtml || draft.description} onCommit={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} /></label>
     </div>
     <div className="mt-4 flex justify-end gap-2"><Button type="button" variant="outline" onClick={onCancel}>Annuler</Button><Button type="button" onClick={() => onSave(draft)} disabled={pending || !draft.name.trim()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button></div>
   </section>
@@ -182,8 +182,8 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, onSav
         <Input aria-label="Nom du sort" value={draft.name} onChange={(event) => field("name", event.target.value)} className={`h-9 font-display text-lg font-semibold ${fieldInputClass}`} />
         <Input list="class-spell-types" aria-label="Type" value={draft.type} onChange={(event) => field("type", event.target.value)} className={`h-7 w-fit min-w-28 rounded-full text-xs font-semibold ${fieldInputClass}`} style={{ backgroundColor: `${tone.background}1c` }} />
         <blockquote className="border-l-2 pl-3 text-sm leading-6" style={{ borderColor: tone.background }}>
-          <RichTextEditorField value={draft.effectHtml || draft.effect} onChange={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} />
-          <RichTextEditorField value={draft.descriptionHtml || draft.description} onChange={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="mt-1 text-muted-foreground" />
+          <RichTextField value={draft.effectHtml || draft.effect} onCommit={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} />
+          <RichTextField value={draft.descriptionHtml || draft.description} onCommit={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="mt-1 text-muted-foreground" />
         </blockquote>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} placeholder="Compétences" className={`h-7 min-w-32 flex-1 font-semibold text-[#b3261e] ${fieldInputClass}`} />

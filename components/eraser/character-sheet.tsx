@@ -1,10 +1,11 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
-import { Backpack, Bold, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, Heading2, ImagePlus, Italic, ListChecks, LoaderCircle, Minus, NotebookPen, PawPrint, Pencil, Plus, Sparkles, X } from "lucide-react"
+import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
+import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
 import { ClassProgression, knownSpellsForCharacter, parseClassChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
@@ -167,63 +168,32 @@ function InlineEdit({ label, value, onCommit, compact, multiline, numeric, singl
   return <button type="button" onClick={singleClick ? () => setEditing(true) : undefined} onDoubleClick={!singleClick ? () => setEditing(true) : undefined} className="min-w-0 text-left" title={singleClick ? "Cliquer pour modifier" : "Double-cliquer pour modifier"}>{children ?? <span className={value ? "" : "text-muted-foreground/55"}>{value || "Non renseigné"}</span>}</button>
 }
 
-function sanitizeNotes(html: string) {
-  return html
-    .replace(/☑/g, '<input type="checkbox" checked>')
-    .replace(/☐/g, '<input type="checkbox">')
-    .replace(/<input\b[^>]*>/gi, (tag) => `<input type="checkbox"${/\schecked(?:\s|=|>)/i.test(tag) ? " checked" : ""}>`)
-    .replace(/<(?!\/?(?:p|div|br|strong|b|em|i|u|h2|h3|ul|ol|li|hr|input)\b)[^>]*>/gi, "")
-    .replace(/\s(?:on\w+|style|class|id)=(?:"[^"]*"|'[^']*')/gi, "")
-    .replace(/javascript:/gi, "")
-}
-
+/**
+ * Carnet de notes et récits de la fiche. Même moteur d'édition que partout ailleurs :
+ * la mise en page (repli, bordures, mode discret) est la seule chose propre à la fiche.
+ */
 function NotesEditor({ value, onCommit, label = "Carnet de notes", compact = false, collapsible = false, embedded = false, plain = false }: { value: string; onCommit: (value: string) => Promise<void>; label?: string; compact?: boolean; collapsible?: boolean; embedded?: boolean; plain?: boolean }) {
-  const editor = useRef<HTMLDivElement>(null)
-  const reader = useRef<HTMLDivElement>(null)
-  const [pending, setPending] = useState(false)
-  const [dirty, setDirty] = useState(false)
-  const [editing, setEditing] = useState(false)
   const [expanded, setExpanded] = useState(true)
-  const safeValue = sanitizeNotes(value)
+  const shell = plain
+    ? "min-w-0"
+    : compact
+      ? "overflow-hidden rounded-xl border border-border/55 bg-background/20 shadow-sm"
+      : `${embedded ? "" : "mt-6"} overflow-hidden rounded-2xl border border-[#74664f55] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.015))] shadow-sm`
 
-  function command(name: string, argument?: string) {
-    editor.current?.focus()
-    document.execCommand(name, false, argument)
-    setDirty(true)
-  }
-
-  async function save() {
-    setPending(true)
-    await onCommit(sanitizeNotes(editor.current?.innerHTML || ""))
-    setPending(false)
-    setDirty(false)
-    setEditing(false)
-  }
-
-  async function toggleCheckbox(event: MouseEvent<HTMLDivElement>) {
-    const target = event.target as HTMLInputElement
-    if (target.tagName !== "INPUT" || target.type !== "checkbox") return
-    if (target.checked) target.setAttribute("checked", "")
-    else target.removeAttribute("checked")
-    await onCommit(sanitizeNotes(reader.current?.innerHTML || ""))
-  }
-
-  return <section className={plain && !editing ? "min-w-0" : `${compact ? "overflow-hidden rounded-xl border border-border/55 bg-background/20 shadow-sm" : `${embedded ? "" : "mt-6"} overflow-hidden rounded-2xl border border-[#74664f55] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.015))] shadow-sm`}`}>
-    <div className={`flex flex-wrap items-center gap-1 px-3 py-2 ${plain && !editing ? "px-0 pb-1 pt-0" : "border-b border-border/45"}`}>
-      <div className={`mr-2 flex items-center gap-2 font-medium ${plain && !editing ? "text-[11px] uppercase tracking-[.16em] text-muted-foreground" : "text-sm"}`} style={plain && !editing ? undefined : { color: "var(--character-accent, #d7b77d)" }}>{!plain || editing ? <NotebookPen className="size-4" /> : null}{label}</div>
-      {editing && (!collapsible || expanded) && <>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => command("bold")} title="Gras"><Bold /></Button>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => command("italic")} title="Italique"><Italic /></Button>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => command("formatBlock", "h2")} title="Titre"><Heading2 /></Button>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => command("insertHorizontalRule")} title="Ligne"><Minus /></Button>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => command("insertHTML", '<input type="checkbox"> ')} title="Case à cocher"><ListChecks /></Button>
-      <Button type="button" size="icon-xs" variant="default" onClick={save} disabled={pending || !dirty} className="ml-auto" aria-label={`Enregistrer ${label}`} title="Enregistrer">{pending ? <LoaderCircle className="animate-spin" /> : <Check />}</Button>
-      <Button type="button" size="icon-xs" variant="ghost" onClick={() => { setDirty(false); setEditing(false) }} aria-label="Annuler" title="Annuler"><X /></Button>
-      </>}
-      {!editing && (!collapsible || expanded) && <Button type="button" size="icon-xs" variant="ghost" onClick={() => setEditing(true)} className="ml-auto opacity-55 hover:opacity-100" aria-label={`Modifier ${label}`} title={`Modifier ${label}`}><Pencil /></Button>}
-      {collapsible && <Button type="button" size="icon-xs" variant="ghost" onClick={() => setExpanded((current) => !current)} className={!expanded ? "ml-auto" : ""} aria-label={expanded ? `Réduire ${label}` : `Afficher ${label}`}>{expanded ? <ChevronUp /> : <ChevronDown />}</Button>}
+  return <section className={shell}>
+    <div className={`flex flex-wrap items-center gap-1 px-3 py-2 ${plain ? "px-0 pb-1 pt-0" : "border-b border-border/45"}`}>
+      <div className={`mr-2 flex items-center gap-2 font-medium ${plain ? "text-[11px] uppercase tracking-[.16em] text-muted-foreground" : "text-sm"}`} style={plain ? undefined : { color: "var(--character-accent, #d7b77d)" }}>
+        {!plain && <NotebookPen className="size-4" />}{label}
+      </div>
+      {collapsible && <Button type="button" size="icon-xs" variant="ghost" onClick={() => setExpanded((current) => !current)} className="ml-auto" aria-label={expanded ? `Réduire ${label}` : `Afficher ${label}`}>{expanded ? <ChevronUp /> : <ChevronDown />}</Button>}
     </div>
-    {expanded && (editing ? <div ref={editor} contentEditable suppressContentEditableWarning onInput={() => setDirty(true)} dangerouslySetInnerHTML={{ __html: safeValue }} className={`${compact ? "min-h-20 px-3 py-2.5" : "min-h-32 px-5 py-4"} text-sm leading-6 outline-none empty:before:text-muted-foreground/50 empty:before:content-['Écrire…'] [&_h2]:mb-2 [&_h2]:font-display [&_h2]:text-xl [&_h3]:font-display [&_h3]:text-lg [&_hr]:my-3 [&_hr]:border-border [&_li]:ml-5 [&_ul]:list-disc [&_input]:mr-2 [&_input]:accent-primary`} /> : safeValue ? <div ref={reader} onClick={(event) => void toggleCheckbox(event)} onDoubleClick={() => setEditing(true)} dangerouslySetInnerHTML={{ __html: safeValue }} className={`${plain ? "px-0 py-1" : compact ? "min-h-20 px-3 py-3" : "min-h-32 px-5 py-4"} text-sm leading-6 [&_h2]:mb-2 [&_h2]:font-display [&_h2]:text-xl [&_h3]:font-display [&_h3]:text-lg [&_hr]:my-3 [&_hr]:border-border [&_li]:ml-5 [&_ul]:list-disc [&_input]:mr-2 [&_input]:cursor-pointer [&_input]:accent-primary`} /> : <button type="button" onDoubleClick={() => setEditing(true)} className={`${plain ? "min-h-10 px-0 py-1" : compact ? "min-h-20 px-3 py-3" : "min-h-32 px-5 py-4"} w-full text-left text-sm italic text-muted-foreground/45`}>Non renseigné.</button>)}
+    {expanded && <RichTextField
+      value={value}
+      onCommit={(html) => void onCommit(html)}
+      placeholder="Écrire…"
+      minHeight={compact || plain ? "min-h-20" : "min-h-32"}
+      className={plain ? "border-0 bg-transparent" : "rounded-none border-0 bg-transparent"}
+    />}
   </section>
 }
 

@@ -7,7 +7,7 @@ import { ArrowLeft, Beaker, BookOpen, Bookmark, Check, ChevronDown, Dices, Downl
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
-import { sanitizeRichText } from "@/components/eraser/rich-text-inline-editor"
+import { sanitizeRichText } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -226,7 +226,7 @@ function ShopCards({ shops, actions, pending, npcs = [], onSave, onSend, onAdd, 
         </div>}
         <p className={`${linkedNpcId ? "mt-2" : "mt-1"} text-xs text-muted-foreground`}>{shop.cityName} · {itemCounts[shop.size]} emplacements</p>
       </div>
-      {actions !== "none" && <div className="flex shrink-0 flex-col items-center gap-1 border-l border-primary/15 p-2">
+      {actions !== "none" && <div className="grid shrink-0 grid-cols-2 content-start gap-1 border-l border-primary/15 p-2">
         {actions === "locations" && <Button type="button" variant="ghost" size="icon-sm" onClick={() => toggleShop(shop.id)} aria-expanded={!collapsed} aria-label={collapsed ? `Développer ${shop.name}` : `Réduire ${shop.name}`} title={collapsed ? "Développer" : "Réduire"}><ChevronDown className={`transition-transform ${collapsed ? "-rotate-90" : ""}`} /></Button>}
         {onRerollShop && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onRerollShop(shop)} aria-label={`Relancer le magasin ${shop.name}`} title="Relancer le magasin"><RefreshCw /></Button>}
         {onRename && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onRename(shop)} aria-label={`Nommer ${shop.name}`} title="Nommer"><Pencil /></Button>}

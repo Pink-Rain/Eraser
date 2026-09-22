@@ -4,10 +4,10 @@ import { useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { LoaderCircle, Map, Save } from "lucide-react"
 
+import { RichTextField } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Textarea } from "@/components/ui/textarea"
 
 export function CampaignCreationForm() {
   const router = useRouter()
@@ -65,7 +65,7 @@ export function CampaignCreationForm() {
         </div>
         <div className="mt-5 grid gap-2">
           <Label htmlFor="campaign-description">Brève description</Label>
-          <Textarea id="campaign-description" value={description} onChange={(event) => setDescription(event.target.value)} className="min-h-24" />
+          <RichTextField value={description} onCommit={setDescription} minHeight="min-h-24" />
         </div>
         <div className="mt-5 grid gap-5 sm:grid-cols-[1fr_auto]">
           <div className="grid gap-2"><Label htmlFor="campaign-banner">URL de bannière</Label><Input id="campaign-banner" type="url" value={bannerUrl} onChange={(event) => { setBannerUrl(event.target.value); setBannerFile(null) }} placeholder="https://…" /><Label htmlFor="campaign-banner-file" className="mt-2">Ou importer une image</Label><Input id="campaign-banner-file" type="file" accept="image/*" onChange={(event) => setBannerFile(event.target.files?.[0] || null)} /></div>

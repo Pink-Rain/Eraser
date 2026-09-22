@@ -6,6 +6,7 @@ import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from 
 import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Trash2, Upload, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
+import { RichTextView } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
@@ -220,7 +221,7 @@ export function CampaignDashboard({
             <button type="button" onDoubleClick={() => setEditingDescription(true)} className="mt-2 block max-w-3xl whitespace-pre-wrap text-left text-sm leading-6 text-white/80 hover:text-white" title="Double-cliquer pour modifier la description">
               {campaign.description || "Double-cliquer pour ajouter une description…"}
             </button>
-          ) : campaign.description ? <p className="mt-2 max-w-3xl whitespace-pre-wrap text-sm leading-6 text-white/80">{campaign.description}</p> : null}
+          ) : campaign.description ? <RichTextView html={campaign.description} className="mt-2 max-w-3xl text-sm leading-6 text-white/80" /> : null}
         </div>
       </section>
 
