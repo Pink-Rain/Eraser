@@ -9,7 +9,7 @@ import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/component
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import type { ObjectIndexTable } from "@/lib/google-sheets"
+import type { ObjectIndexCellEdit, ObjectIndexTable } from "@/lib/google-sheets"
 
 function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -88,6 +88,46 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   // Les cellules en cours d’enregistrement gardent la valeur saisie : le tableau
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
   const localEdits = useRef<Record<string, string>>({})
+  // Cellules écrites mais pas encore parties, et le minuteur qui les emmènera.
+  const outbox = useRef(new Map<string, ObjectIndexCellEdit>())
+  const outboxTimer = useRef<number | null>(null)
+
+  /**
+   * Regroupe les écritures. Une frappe ne touche qu’une cellule, mais un collage,
+   * une recopie ou un vidage en touchent des dizaines d’un coup : chacune partait
+   * dans sa propre requête, toutes en même temps, et Google répondait 429 — d’où
+   * les réessais et l’impression que l’application se figeait. Elles attendent
+   * maintenant un court instant, puis partent ensemble dans une seule requête.
+   */
+  const flushOutbox = useCallback(async (table: ObjectIndexTable) => {
+    outboxTimer.current = null
+    const cells = [...outbox.current.values()]
+    outbox.current.clear()
+    if (!cells.length) return
+    setSaving((current) => current + 1)
+    try {
+      const response = await fetch("/api/resources/object-indexes", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ action: "update-cells", fileId: table.fileId, tabName: table.tabName, cells }),
+      })
+      if (!response.ok) {
+        const payload = (await response.json()) as { error?: string }
+        setError(payload.error || "Ces cellules n’ont pas pu être enregistrées.")
+      } else setError("")
+    } catch {
+      setError("Ces cellules n’ont pas pu être enregistrées.")
+    }
+    setSaving((current) => current - 1)
+  }, [])
+
+  const queueCell = useCallback((table: ObjectIndexTable, cell: ObjectIndexCellEdit) => {
+    outbox.current.set(`${cell.rowNumber}:${cell.column}`, cell)
+    if (outboxTimer.current) window.clearTimeout(outboxTimer.current)
+    // Assez court pour rester imperceptible après une frappe déjà temporisée par
+    // la cellule, assez long pour ramasser un collage entier.
+    outboxTimer.current = window.setTimeout(() => void flushOutbox(table), 120)
+  }, [flushOutbox])
 
   const columns = useMemo<SheetGridColumn[]>(() => (selected?.headers ?? []).map((header, index) => ({
     key: String(index),
@@ -105,37 +145,29 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     return sorted.map((row) => ({ key: String(row.rowNumber), rowNumber: row.rowNumber }))
   }, [query, selected, sort])
 
+  // Recherche d'une ligne en temps constant. Le `find` d'avant était refait pour
+  // chaque cellule affichée, donc autant de parcours du tableau que de cellules.
+  const rowsByNumber = useMemo(() => new Map((selected?.rows ?? []).map((row) => [String(row.rowNumber), row] as const)), [selected])
+
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     // La clé vient du tableau réellement affiché, pas de la préférence enregistrée :
     // au premier affichage la préférence est encore vide alors qu'un tableau est choisi.
     const local = selected ? localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] : undefined
     if (local !== undefined) return local
-    const row = selected?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
-    return row?.html[Number(columnKey)] ?? ""
-  }, [selected])
+    return rowsByNumber.get(rowKey)?.html[Number(columnKey)] ?? ""
+  }, [rowsByNumber, selected])
 
-  const commitCell = useCallback(async (rowKey: string, columnKey: string, html: string) => {
+  const commitCell = useCallback((rowKey: string, columnKey: string, html: string) => {
     if (!selected) return
     localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] = html
-    setSaving((current) => current + 1)
-    try {
-      const response = await fetch("/api/resources/object-indexes", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update-cell", fileId: selected.fileId, tabName: selected.tabName, rowNumber: Number(rowKey), column: Number(columnKey), html }),
-      })
-      if (!response.ok) {
-        const payload = (await response.json()) as { error?: string }
-        setError(payload.error || "Cette cellule n’a pas pu être enregistrée.")
-      } else setError("")
-    } catch {
-      setError("Cette cellule n’a pas pu être enregistrée.")
-    }
-    setSaving((current) => current - 1)
-  }, [selected])
+    queueCell(selected, { rowNumber: Number(rowKey), column: Number(columnKey), html })
+  }, [queueCell, selected])
 
   async function refresh() {
     setPending("refresh"); setError("")
+    // Ce qui vient d’être tapé part avant la relecture, sinon la réponse
+    // écraserait à l’écran une saisie encore en attente.
+    if (selected) await flushOutbox(selected)
     const response = await fetch("/api/resources/object-indexes?refresh=1", { cache: "no-store" })
     const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
     setPending("")
@@ -148,6 +180,9 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   async function mutate(body: Record<string, unknown>, label: string) {
     if (!selected) return
     setPending(label); setError("")
+    // Insérer ou supprimer une ligne décale les suivantes : une écriture encore
+    // en attente viserait alors la mauvaise. Elle part donc d’abord.
+    await flushOutbox(selected)
     const response = await fetch("/api/resources/object-indexes", {
       method: "POST",
       headers: { "content-type": "application/json" },

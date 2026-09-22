@@ -446,3 +446,81 @@ test("keeps rich text content out of React's hands", async () => {
   assert.match(others, /RichTextSurface/);
   assert.doesNotMatch(others, /contentEditable/);
 });
+
+test("renders every page without waiting for Google Sheets", async () => {
+  const [layout, shell] = await Promise.all([
+    readFile(new URL("../app/layout.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/app-shell.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // La coque est rendue à chaque navigation, y compris les navigations internes.
+  // Y attendre une lecture Sheets retarde le premier octet de toutes les pages,
+  // même de celles qui n'ont besoin ni des personnages ni des campagnes.
+  const body = layout.slice(layout.indexOf("export default async function RootLayout"));
+  assert.doesNotMatch(body, /await listCharactersForUser/);
+  assert.doesNotMatch(body, /await listCampaignsForMj/);
+  assert.match(body, /listCharactersForUser\(account\.uid\)\.catch/);
+  assert.match(body, /listCampaignsForMj\(account\.uid\)\.catch/);
+  // La coque accepte donc des listes encore en vol et ne se suspend pas dessus.
+  assert.match(shell, /characters: CharacterRecord\[\] \| Promise<CharacterRecord\[\]>/);
+  assert.match(shell, /Promise\.resolve\(characters\)\.then/);
+});
+
+test("restores interface preferences without a deferred second render", async () => {
+  const [hook, sheet, titlebar, shell] = await Promise.all([
+    readFile(new URL("../hooks/use-persistent-state.ts", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/character-sheet.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/desktop-titlebar.tsx", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/app-shell.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // Ces préférences étaient restaurées dans un setTimeout(0), ce qui coûtait un
+  // rendu complet après peinture et un saut visible. Elles sont désormais lues
+  // dès le premier rendu client. Ce test empêche le retour en arrière.
+  assert.match(hook, /useSyncExternalStore/);
+  // Les commentaires du fichier citent l'ancien détour : on vise donc l'appel.
+  assert.doesNotMatch(hook, /window\.setTimeout\(/);
+  for (const source of [sheet, titlebar, shell]) {
+    assert.doesNotMatch(source, /window\.setTimeout\(\(\) => \{[\s\S]{0,400}?localStorage/);
+  }
+  assert.match(titlebar, /useSyncExternalStore\(subscribeToDesktopBridge/);
+  assert.match(shell, /useStoredText\(characterStorageKey\)/);
+});
+
+test("sends a pasted block to Sheets as one request", async () => {
+  const [sheets, route, manager] = await Promise.all([
+    readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
+    readFile(new URL("../app/api/resources/object-indexes/route.ts", import.meta.url), "utf8"),
+    readFile(new URL("../components/eraser/object-index-manager.tsx", import.meta.url), "utf8"),
+  ]);
+
+  // Un collage ou une recopie touche des dizaines de cellules. Une requête par
+  // cellule saturait le quota Sheets, qui répondait 429 : l'application
+  // paraissait figée le temps des réessais.
+  assert.match(sheets, /export async function updateObjectIndexCells/);
+  assert.match(sheets, /requests: cells\.map\(\(cell\) => \(\{ updateCells/);
+  assert.match(route, /body\.action === "update-cells"/);
+  assert.match(manager, /action: "update-cells"/);
+  assert.match(manager, /outbox\.current\.set/);
+  // Une ligne insérée ou supprimée décale les suivantes : ce qui est en attente
+  // doit partir avant, sinon l'écriture viserait la mauvaise ligne.
+  const mutate = manager.slice(manager.indexOf("async function mutate"), manager.indexOf("const busy = Boolean"));
+  assert.match(mutate, /await flushOutbox\(selected\)/);
+});
+
+test("rereads only the workbook that actually changed", async () => {
+  const sheets = await readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8");
+
+  // Ajouter une ligne vidait tout l'index, ce qui obligeait à relire chaque
+  // classeur du dossier « Objets » avec sa grille complète pour afficher cette
+  // seule ligne. Les classeurs intacts restent désormais en cache.
+  assert.match(sheets, /const staleObjectIndexFiles = new Set<string>\(\)/);
+  assert.match(sheets, /function markObjectIndexFileStale/);
+  const listing = sheets.slice(
+    sheets.indexOf("export async function listObjectIndexTables"),
+    sheets.indexOf("export async function refreshObjectIndexTables"),
+  );
+  assert.match(listing, /files\.filter\(\(file\) => stale\.has\(file\.id\)\)/);
+  // Une relecture partielle qui échoue ne doit pas laisser un cache mi-ancien.
+  assert.match(listing, /clearObjectIndexTableCache\(\)\n      throw firstError/);
+});

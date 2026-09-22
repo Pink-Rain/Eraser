@@ -11,6 +11,7 @@ import {
   listObjectIndexTables,
   refreshObjectIndexTables,
   updateObjectIndexCell,
+  updateObjectIndexCells,
   updateObjectIndexRow,
 } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -35,7 +36,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[] }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; cells?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
@@ -49,6 +50,19 @@ export async function POST(request: Request) {
     // le classeur, pour que la frappe reste fluide.
     if (body.action === "update-cell" && typeof body.rowNumber === "number" && typeof body.column === "number" && typeof body.html === "string") {
       await updateObjectIndexCell(body.fileId, body.tabName, body.rowNumber, body.column, body.html)
+      return NextResponse.json({ ok: true })
+    }
+    // Un collage ou une recopie touche beaucoup de cellules d’un coup : elles
+    // arrivent groupées et repartent chez Google en une seule requête.
+    if (body.action === "update-cells" && Array.isArray(body.cells)) {
+      const cells = body.cells.flatMap((cell) => {
+        const candidate = cell as { rowNumber?: unknown; column?: unknown; html?: unknown }
+        return typeof candidate.rowNumber === "number" && typeof candidate.column === "number" && typeof candidate.html === "string"
+          ? [{ rowNumber: candidate.rowNumber, column: candidate.column, html: candidate.html }]
+          : []
+      })
+      if (cells.length !== body.cells.length) throw new Error("INVALID_OBJECT_INDEX_CELLS")
+      await updateObjectIndexCells(body.fileId, body.tabName, cells)
       return NextResponse.json({ ok: true })
     }
     // Plusieurs lignes se suppriment du bas vers le haut : retirer la première
