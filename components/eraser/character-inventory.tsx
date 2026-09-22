@@ -1,11 +1,12 @@
 "use client"
 
 import { useEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react"
-import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { ArrowLeft, Backpack, Check, Coins, Gem, Link2, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/ui/combobox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -13,7 +14,8 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
-import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget } from "@/lib/inventory-schema"
+import { characterModifierTargets } from "@/lib/character-sheet-schema"
+import { canItemGoInInventoryCategory, emptyCharacterInventory, parseItemModifiers, serializeItemModifiers, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventoryItemModifier, type InventorySlotRecord, type InventoryTransferTarget } from "@/lib/inventory-schema"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
@@ -33,6 +35,7 @@ const categoryDefaults: Record<InventoryCategory, { name: string; capacity: numb
 }
 
 type ItemFields = { name: string; description: string; type: string; subtype: string; effect: string }
+type ItemFieldsWithModifiers = ItemFields & { modifiers: string }
 type MutationBody =
   | { action: "create-container"; name: string; category: InventoryCategory; capacity: number }
   | { action: "update-container"; containerId: string; name: string; capacity: number }
@@ -41,7 +44,7 @@ type MutationBody =
   | ({ action: "create-item"; containerId: string } & ItemFields)
   | { action: "set-quantity"; slotId: string; quantity: number }
   | { action: "set-equipped"; slotId: string; equipped: boolean }
-  | ({ action: "update-item"; slotId: string } & ItemFields)
+  | ({ action: "update-item"; slotId: string } & ItemFieldsWithModifiers)
   | { action: "move-item"; slotId: string; containerId: string }
   | { action: "transfer-item"; slotId: string; targetId: string }
   | { action: "set-currency"; containerId: string; currency: string; amount: number }
@@ -100,24 +103,76 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   if (!item) return null
   const visual = item.image || item.icon
   const visualIsImage = /^(?:https?:\/\/|\/)/i.test(visual)
-  const update = (changes: Partial<ItemFields>) => mutate({ action: "update-item", slotId: slot.id, name: changes.name ?? item.name, description: changes.description ?? item.description, type: changes.type ?? item.type, subtype: changes.subtype ?? item.subtype, effect: changes.effect ?? item.effect }, `slot:${slot.id}`)
+  const update = (changes: Partial<ItemFieldsWithModifiers>) => mutate({ action: "update-item", slotId: slot.id, name: changes.name ?? item.name, description: changes.description ?? item.description, type: changes.type ?? item.type, subtype: changes.subtype ?? item.subtype, effect: changes.effect ?? item.effect, modifiers: changes.modifiers ?? item.modifiers }, `slot:${slot.id}`)
   const internalTargets = compatibleContainers.filter((candidate) => candidate.id !== container.id)
+  const modifiers = parseItemModifiers(item.modifiers)
   return <article className="rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm">
     <div className="flex items-start gap-3">
-      {container.category === "Armes" && !readOnly && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? "Arme équipée" : "Arme non équipée"} />}
+      {!readOnly && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? "Objet équipé (modificateurs actifs)" : "Objet non équipé"} />}
       <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={visual} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : item.icon ? <span className="text-xl" aria-hidden="true">{item.icon}</span> : <PackageOpen className="size-4" />}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1"><InlineField readOnly={readOnly} label="le nom" value={item.name} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><InlineField readOnly={readOnly} label="le type" value={item.type} onCommit={(type) => update({ type }).then(() => undefined)} /><span>·</span><InlineField readOnly={readOnly} label="le sous-type" value={item.subtype} onCommit={(subtype) => update({ subtype }).then(() => undefined)} /></div></div>
           {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
+          {!readOnly && <ItemModifierEditor value={item.modifiers} disabled={pending} onSave={(value) => update({ modifiers: value }).then(() => undefined)} />}
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} />{container.category !== "Esthétique" && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} /></div>}</div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground">
+          <InlineField readOnly={readOnly} multiline label="la description" value={item.description} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} />
+          {container.category !== "Esthétique" && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} /></div>}
+          {modifiers.length > 0 && <div className="mt-0.5 flex flex-wrap gap-1">{modifiers.map((modifier, index) => <span key={index} className="inline-flex items-center gap-1 rounded-full bg-primary/10 px-2 py-0.5 text-[10px] font-medium text-primary"><Link2 className="size-2.5 shrink-0" />{modifier.value > 0 ? `+${modifier.value}` : modifier.value} {characterModifierTargets.find((target) => target.id === modifier.target)?.label || modifier.target}</span>)}</div>}
+        </div>
       </div>
     </div>
   </article>
+}
+
+function ModifierRow({ modifier, onChange, onRemove }: { modifier: InventoryItemModifier; onChange: (next: InventoryItemModifier) => void; onRemove: () => void }) {
+  const selected = characterModifierTargets.find((target) => target.id === modifier.target) ?? null
+  return <div className="flex items-center gap-1.5">
+    <Input
+      value={modifier.value > 0 ? `+${modifier.value}` : String(modifier.value)}
+      onChange={(event) => { const raw = event.target.value.trim(); const parsed = Number.parseInt(raw.replace(/(?!^-)[^\d]/g, ""), 10); onChange({ ...modifier, value: Number.isFinite(parsed) ? parsed : 0 }) }}
+      className="h-8 w-16 shrink-0 px-2 text-center"
+      placeholder="+0"
+      aria-label="Modificateur (+ ou -)"
+    />
+    <Combobox items={characterModifierTargets} value={selected} onValueChange={(next) => onChange({ ...modifier, target: next?.id ?? "" })} itemToStringLabel={(target) => target?.label ?? ""}>
+      <ComboboxInput placeholder="Lié à…" className="h-8 min-w-0 flex-1" aria-label="Lié à une compétence ou caractéristique" />
+      <ComboboxContent>
+        <ComboboxEmpty>Aucun résultat.</ComboboxEmpty>
+        <ComboboxList>{(target: (typeof characterModifierTargets)[number]) => <ComboboxItem key={target.id} value={target}><span className="min-w-0 flex-1 truncate">{target.label}</span><span className="shrink-0 text-[10px] text-muted-foreground">{target.group}</span></ComboboxItem>}</ComboboxList>
+      </ComboboxContent>
+    </Combobox>
+    <button type="button" onClick={onRemove} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer ce modificateur"><X className="size-3.5" /></button>
+  </div>
+}
+
+function ItemModifierEditor({ value, disabled, onSave }: { value: string; disabled: boolean; onSave: (value: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false)
+  const [rows, setRows] = useState<InventoryItemModifier[]>(() => parseItemModifiers(value))
+  const [pending, setPending] = useState(false)
+  const linkedCount = parseItemModifiers(value).length
+  function openChange(next: boolean) { setOpen(next); if (next) setRows(parseItemModifiers(value)) }
+  function updateRow(index: number, next: InventoryItemModifier) { setRows((current) => current.map((row, rowIndex) => rowIndex === index ? next : row)) }
+  function removeRow(index: number) { setRows((current) => current.filter((_, rowIndex) => rowIndex !== index)) }
+  async function save() { setPending(true); await onSave(serializeItemModifiers(rows)); setPending(false); setOpen(false) }
+  return <Popover open={open} onOpenChange={openChange}>
+    <PopoverTrigger asChild><button type="button" disabled={disabled} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${linkedCount ? "text-primary" : "text-muted-foreground"}`} aria-label="Lier à une compétence ou une caractéristique" title={linkedCount ? `${linkedCount} liaison${linkedCount > 1 ? "s" : ""}` : "Lier à une compétence ou une caractéristique"}><Link2 className="size-3.5" /></button></PopoverTrigger>
+    <PopoverContent align="end" side="bottom" className="w-96 p-3">
+      <p className="mb-2 text-xs font-medium text-muted-foreground">Modificateurs liés</p>
+      <div className="space-y-1.5">
+        {rows.length === 0 && <p className="rounded-lg border border-dashed px-3 py-4 text-center text-xs text-muted-foreground">Aucun modificateur pour l’instant. Ajoute une ligne pour lier cet objet à une vie, une caractéristique ou une compétence.</p>}
+        {rows.map((row, index) => <ModifierRow key={index} modifier={row} onChange={(next) => updateRow(index, next)} onRemove={() => removeRow(index)} />)}
+      </div>
+      <div className="mt-2 flex items-center justify-between gap-2">
+        <Button type="button" variant="ghost" size="sm" onClick={() => setRows((current) => [...current, { target: "", value: 1 }])}><Plus />Ajouter</Button>
+        <Button type="button" size="sm" disabled={pending} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
+      </div>
+    </PopoverContent>
+  </Popover>
 }
 
 function CurrencyLine({ slot, container, readOnly, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; readOnly: boolean; mutate: Mutate }) {
@@ -158,7 +213,7 @@ function CategorySection({ category, inventory, pendingKey, openSearch, catalogL
   return <div className="rounded-[1.4rem] border p-3" style={{ borderColor: `${presentation.color}42`, background: `linear-gradient(145deg, ${presentation.color}12, rgba(255,255,255,.015))` }}><div className="mb-3 flex items-center gap-3 px-1"><div className="flex size-9 items-center justify-center rounded-xl" style={{ color: presentation.color, backgroundColor: `${presentation.color}18` }}><Icon className="size-4.5" /></div><h3 className="font-display flex-1 text-xl font-semibold" style={{ color: presentation.color }}>{presentation.label || category}</h3>{!readOnly && !fixed && <Button type="button" variant="ghost" size="icon-sm" onClick={() => openContainerCreation(category)} aria-label={`Ajouter ${presentation.singular}`}><Plus /></Button>}</div><div className="space-y-3">{cards}</div></div>
 }
 
-export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character" }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc" }) {
+export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", onChange }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; onChange?: (inventory: CharacterInventoryRecord) => void }) {
   const [inventory, setInventory] = useState(initialInventory || emptyCharacterInventory())
   const [initialLoading, setInitialLoading] = useState(!initialInventory)
   const [pendingKey, setPendingKey] = useState("")
@@ -192,14 +247,19 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }
     setPendingKey("")
     if (!response.ok || !payload.inventory) { setError(payload.error || "La modification n’a pas pu être enregistrée."); return false }
-    setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items })); return true
+    setInventory((current) => {
+      const merged = { ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items }
+      onChange?.(merged)
+      return merged
+    })
+    return true
   }
 
   async function openItemSearch(containerId: string) {
     setOpenSearch(containerId)
     if (catalogLoaded || catalogLoading) return
     setCatalogLoading(true)
-    try { const response = await fetch(inventoryEndpoint); const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }; if (!response.ok || !payload.inventory) throw new Error(payload.error || "Chargement impossible."); setInventory(payload.inventory); setCatalogLoaded(true) }
+    try { const response = await fetch(inventoryEndpoint); const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }; if (!response.ok || !payload.inventory) throw new Error(payload.error || "Chargement impossible."); setInventory(payload.inventory); onChange?.(payload.inventory); setCatalogLoaded(true) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Le catalogue d’objets n’a pas pu être chargé.") }
     finally { setCatalogLoading(false) }
   }

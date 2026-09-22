@@ -57,3 +57,38 @@ export function characterSkillValueIndex(skillIndex: number, metricIndex: number
 export function characterCriticalValueIndex(characteristicIndex: number, kind: "success" | "failure") { return characterCriticalStart + characteristicIndex * 2 + (kind === "failure" ? 1 : 0) }
 export function characterSecondaryCalculationValueIndex(fieldIndex: number, kind: "bonus" | "modifier") { return characterSecondaryCalculationStart + fieldIndex * 2 + (kind === "modifier" ? 1 : 0) }
 export function isEditableSkillMetric(metricIndex: number) { return metricIndex === 0 || metricIndex === 3 || metricIndex === 6 }
+
+export type CharacterModifierTarget = { id: string; label: string; group: string }
+
+export const characterSpecialModifierTargets: CharacterModifierTarget[] = [
+  { id: "vie", label: "Vie", group: "Statistiques" },
+  { id: "rapidite", label: "Rapidité", group: "Statistiques" },
+  { id: "echec-critique", label: "Échec critique", group: "Statistiques" },
+  { id: "reussite-critique", label: "Réussite critique", group: "Statistiques" },
+  { id: "folie", label: "Folie", group: "Statistiques" },
+  { id: "destin", label: "Destin", group: "Statistiques" },
+  { id: "degats-magiques", label: "Bonus de dégâts magiques", group: "Statistiques" },
+  { id: "degats-physiques", label: "Bonus de dégâts physiques", group: "Statistiques" },
+  { id: "armure-magique", label: "Bonus d’armure magique", group: "Statistiques" },
+  { id: "armure-physique", label: "Bonus d’armure physique", group: "Statistiques" },
+  { id: "notoriete", label: "Notoriété", group: "Statistiques" },
+  { id: "moralite", label: "Moralité", group: "Statistiques" },
+]
+
+export function characteristicModifierTarget(characteristic: string) { return `car:${characteristic}` }
+export function skillModifierTarget(skillName: string) { return `skill:${skillName}` }
+
+export const characterModifierTargets: CharacterModifierTarget[] = [
+  ...characterSpecialModifierTargets,
+  ...characterCharacteristics.map(({ characteristic }) => ({ id: characteristicModifierTarget(characteristic), label: characteristic, group: "Caractéristiques" })),
+  ...characterSkills.map((skill) => ({ id: skillModifierTarget(skill.name), label: skill.name, group: skill.characteristic })),
+]
+
+export const specialModifierSecondaryFieldIndex: Record<string, number> = {
+  "degats-physiques": 17, "degats-magiques": 18, "armure-physique": 19, "armure-magique": 20,
+  "rapidite": 21, "echec-critique": 22, "reussite-critique": 23,
+}
+
+export const specialModifierBaseValueIndex: Record<string, number> = {
+  vie: 10, notoriete: 12, moralite: 14, folie: 15, destin: 16,
+}

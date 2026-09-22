@@ -31,6 +31,53 @@ export type InventoryItemRecord = {
   prerequisites: string
   edition: string
   active: boolean
+  modifiers: string
+}
+
+export type InventoryItemModifier = { target: string; value: number }
+
+export function parseItemModifiers(value: string): InventoryItemModifier[] {
+  if (!value) return []
+  try {
+    const parsed = JSON.parse(value)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((entry) => entry && typeof entry.target === "string" && entry.target && Number.isFinite(entry.value)
+      ? [{ target: entry.target as string, value: Math.trunc(entry.value as number) }]
+      : [])
+  } catch { return [] }
+}
+
+export function serializeItemModifiers(modifiers: InventoryItemModifier[]): string {
+  const cleaned = modifiers.filter((modifier) => modifier.target && Number.isFinite(modifier.value) && modifier.value !== 0)
+  return cleaned.length ? JSON.stringify(cleaned) : ""
+}
+
+export function sumEquippedItemModifiers(inventory: CharacterInventoryRecord): Record<string, number> {
+  const totals: Record<string, number> = {}
+  for (const container of inventory.containers) {
+    for (const slot of container.slots) {
+      if (!slot.equipped || !slot.item) continue
+      for (const modifier of parseItemModifiers(slot.item.modifiers)) {
+        totals[modifier.target] = (totals[modifier.target] || 0) + modifier.value
+      }
+    }
+  }
+  return totals
+}
+
+export type ModifierLinkedItem = { slotId: string; containerId: string; name: string; equipped: boolean }
+
+export function itemsLinkedToModifierTarget(inventory: CharacterInventoryRecord, targetId: string): ModifierLinkedItem[] {
+  const linked: ModifierLinkedItem[] = []
+  for (const container of inventory.containers) {
+    for (const slot of container.slots) {
+      if (!slot.item) continue
+      if (parseItemModifiers(slot.item.modifiers).some((modifier) => modifier.target === targetId)) {
+        linked.push({ slotId: slot.id, containerId: container.id, name: slot.item.name, equipped: slot.equipped })
+      }
+    }
+  }
+  return linked
 }
 
 export type InventorySlotRecord = {
@@ -101,9 +148,9 @@ export const inventoryWorkbookTabs = [
     name: "Contenu inventaire",
     headers: [
       "ID", "ID personnage", "ID contenant", "Emplacement", "ID objet", "Nombre", "Nom personnalisé",
-      "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé",
+      "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé", "Modificateurs",
     ],
-    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100],
+    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100, 260],
   },
 ] as const
 
@@ -127,7 +174,7 @@ export function compatibleInventoryCategory(itemType: string): InventoryCategory
 
 export function canItemGoInInventoryCategory(itemType: string, category: InventoryCategory, itemEffect = "") {
   const specializedCategory = compatibleInventoryCategory(itemType)
-  if (category === "Esthétique") return specializedCategory === "Équipement" && !itemEffect.trim()
+  if (category === "Esthétique") return specializedCategory !== "Bourse"
   if (category === "Inventaire") return specializedCategory !== "Bourse"
   return specializedCategory === category
 }
