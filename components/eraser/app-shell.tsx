@@ -620,8 +620,11 @@ export function AppShell({
         </SidebarFooter>
       </Sidebar>
 
-      <SidebarInset className="paper-grain min-h-svh min-w-0 w-0 flex-1 overflow-x-clip">
-        <header className="sticky top-0 z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-4 shadow-sm backdrop-blur md:px-7">
+      {/* La hauteur est fixée et seul le bloc de contenu défile : l’en-tête reste visible
+          quelle que soit la page affichée, sans dépendre d’un `position: sticky` que le
+          contenu d’une page pourrait neutraliser. */}
+      <SidebarInset className="h-svh min-h-svh min-w-0 w-0 flex-1 overflow-hidden">
+        <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-4 shadow-sm backdrop-blur md:px-7">
           <SidebarTrigger aria-label="Afficher ou masquer la navigation" />
           <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
             <BookOpen className="size-4 shrink-0" />
@@ -633,11 +636,13 @@ export function AppShell({
             {roleViewLabels[viewRole]}
           </Badge>
         </header>
-        <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole }}>
-          <div data-view-role={viewRole} className="contents">
-            {children}
-          </div>
-        </ShellDataContext.Provider>
+        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip">
+          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole }}>
+            <div data-view-role={viewRole} className="contents">
+              {children}
+            </div>
+          </ShellDataContext.Provider>
+        </div>
       </SidebarInset>
     </SidebarProvider>
     <GlobalTableChat user={{ uid: user.uid, role: user.role }} />

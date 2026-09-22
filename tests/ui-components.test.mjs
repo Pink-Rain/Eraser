@@ -168,15 +168,19 @@ test("derives the sheet row number from the range Google actually read", async (
   assert.equal(sheetRangeStartRow(undefined), null);
 });
 
-test("spends and recovers spell charges only at the edge of the bar", async () => {
+test("spends and recovers spell charges as a continuous bar", async () => {
   const { nextSpellChargeValue, SpellChargeStars } = await vite.ssrLoadModule(
     "/components/eraser/spell-charges.tsx",
   );
-  assert.equal(nextSpellChargeValue(5, 5, 3), 5);
+  // Cliquer une etincelle pleine vide la barre jusqu'a elle comprise.
+  assert.equal(nextSpellChargeValue(5, 5, 0), 0);
+  assert.equal(nextSpellChargeValue(5, 5, 3), 3);
   assert.equal(nextSpellChargeValue(5, 5, 4), 4);
   assert.equal(nextSpellChargeValue(5, 3, 2), 2);
+  // Cliquer une etincelle vide remplit la barre jusqu'a elle comprise.
+  assert.equal(nextSpellChargeValue(5, 0, 2), 3);
   assert.equal(nextSpellChargeValue(5, 3, 3), 4);
-  assert.equal(nextSpellChargeValue(5, 3, 4), 3);
+  assert.equal(nextSpellChargeValue(5, 3, 4), 5);
   assert.equal(nextSpellChargeValue(5, 0, 0), 1);
   const threeCharges = renderToStaticMarkup(
     React.createElement(SpellChargeStars, { total: 3 }),
@@ -214,4 +218,114 @@ test("renders a character sheet even when a saved tab no longer exists", async (
   assert.match(html, /Compétences/);
   assert.match(html, /Inventaire/);
   assert.match(html, /Classe/);
+});
+test("only counts an item's modifiers once it is equipped", async () => {
+  const { indexInventoryModifiers, modifierTotalFor, linkedItemsFor, serializeItemModifiers, parseItemModifiers, skillModifierTargetId } =
+    await vite.ssrLoadModule("/lib/item-modifiers.ts");
+
+  const serialized = serializeItemModifiers([
+    { value: "+2", target: skillModifierTargetId("Parade") },
+    { value: "-1", target: "rapidite" },
+    { value: "3", target: "cible-inconnue" },
+    { value: "", target: "vie" },
+  ]);
+  assert.equal(parseItemModifiers(serialized).length, 2);
+
+  const container = (equipped) => ({
+    id: "CNT-1",
+    typeId: "TYPE-ARMES-BASE",
+    name: "Armes de base",
+    category: "Armes",
+    capacity: 6,
+    order: 0,
+    isBase: true,
+    used: 1,
+    slots: [{
+      id: "SLOT-1",
+      index: 1,
+      itemId: "OBJ-1",
+      quantity: 1,
+      equipped,
+      modifiers: serialized,
+      item: { id: "OBJ-1", name: "Bouclier rond", maxQuantity: 1 },
+    }],
+  });
+
+  const unequipped = indexInventoryModifiers([container(false)]);
+  assert.equal(modifierTotalFor(unequipped, skillModifierTargetId("Parade")), 0);
+  // L'objet reste listé pour pouvoir l'équiper depuis l'onglet Compétences.
+  assert.equal(linkedItemsFor(unequipped, skillModifierTargetId("Parade")).length, 1);
+  assert.equal(linkedItemsFor(unequipped, skillModifierTargetId("Parade"))[0].equipped, false);
+
+  const equipped = indexInventoryModifiers([container(true)]);
+  assert.equal(modifierTotalFor(equipped, skillModifierTargetId("Parade")), 2);
+  assert.equal(modifierTotalFor(equipped, "rapidite"), -1);
+  assert.equal(modifierTotalFor(equipped, "vie"), 0);
+});
+
+test("adds equipped item modifiers to the skill and speed totals", async () => {
+  const { CharacterSheet } = await vite.ssrLoadModule(
+    "/components/eraser/character-sheet.tsx",
+  );
+  const { characterValueHeaders, characterCustomTabsIndex, characterSkills, characterSkillValueIndex } =
+    await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
+  const { serializeItemModifiers, skillModifierTargetId } = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+
+  const paradeIndex = characterSkills.findIndex((skill) => skill.name === "Parade");
+  const values = characterValueHeaders.map(() => "");
+  values[0] = "Personnage test";
+  values[characterCustomTabsIndex] = "[]";
+  values[21] = "12"; // Rapidité calculée par la feuille
+  values[30] = "40"; // Force
+  values[characterSkillValueIndex(paradeIndex, 0)] = "5"; // Bonus/Malus de stats
+  values[characterSkillValueIndex(paradeIndex, 2)] = "45"; // Total calculé par la feuille
+
+  const inventory = {
+    containerTypes: [],
+    items: [],
+    containers: [{
+      id: "CNT-1",
+      typeId: "TYPE-EQUIPEMENT-BASE",
+      name: "Équipement de base",
+      category: "Équipement",
+      capacity: 8,
+      order: 0,
+      isBase: true,
+      used: 1,
+      slots: [{
+        id: "SLOT-1",
+        index: 1,
+        itemId: "OBJ-1",
+        quantity: 1,
+        equipped: true,
+        modifiers: serializeItemModifiers([
+          { value: "+7", target: skillModifierTargetId("Parade") },
+          { value: "-2", target: "rapidite" },
+        ]),
+        item: { id: "OBJ-1", name: "Brassards gravés", maxQuantity: 1 },
+      }],
+    }],
+  };
+
+  const html = renderToStaticMarkup(
+    React.createElement(CharacterSheet, {
+      initialCharacter: {
+        id: "PER-TEST",
+        ownerUid: "USR-TEST",
+        name: "Personnage test",
+        subtitle: "",
+        updatedAt: "2026-09-05T00:00:00.000Z",
+        campaigns: [],
+        values,
+      },
+      classes: [],
+      classSpells: [],
+      initialInventory: inventory,
+    }),
+  );
+
+  // Parade : 40 (Force) + 5 (bonus) + 7 (objet équipé), borné entre 10 et 90.
+  assert.match(html, />52</);
+  // Rapidité : 12 - 2.
+  assert.match(html, />10</);
 });

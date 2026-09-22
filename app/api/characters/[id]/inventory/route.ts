@@ -17,6 +17,7 @@ import {
   moveCharacterInventoryItem,
   setCharacterInventoryCurrency,
   setCharacterInventoryItemEquipped,
+  setCharacterInventoryItemModifiers,
   setCharacterInventoryItemQuantity,
   transferCharacterInventoryItem,
   updateCharacterInventoryContainer,
@@ -90,6 +91,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity)
     } else if (body.action === "set-equipped" && typeof body.slotId === "string" && typeof body.equipped === "boolean") {
       inventory = await setCharacterInventoryItemEquipped(id, body.slotId, body.equipped)
+    } else if (body.action === "set-modifiers" && typeof body.slotId === "string" && typeof body.modifiers === "string") {
+      inventory = await setCharacterInventoryItemModifiers(id, body.slotId, body.modifiers)
     } else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
     } else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") {
@@ -107,6 +110,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const code = error instanceof Error ? error.message : ""
     const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet objet."
+        : code === "INVALID_INVENTORY_MODIFIERS" ? "Ces liens vers des caractéristiques sont trop nombreux."
+        : code === "INVENTORY_SLOT_NOT_FOUND" ? "Cet objet n’est plus dans cet inventaire."
         : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet objet n’existe plus dans la feuille Objets."
           : code === "INVENTORY_CONTAINER_TYPE_NOT_FOUND" ? "Ce type de contenant n’est plus disponible."
             : code === "INVALID_INVENTORY_CONTAINER" ? "Donne un nom au contenant et une capacité comprise entre 1 et 10 000."

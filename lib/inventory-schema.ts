@@ -39,6 +39,8 @@ export type InventorySlotRecord = {
   itemId: string
   quantity: number
   equipped: boolean
+  /** Liens vers des caractéristiques ou compétences, au format JSON. Voir `lib/item-modifiers`. */
+  modifiers: string
   item: InventoryItemRecord | null
 }
 
@@ -101,9 +103,9 @@ export const inventoryWorkbookTabs = [
     name: "Contenu inventaire",
     headers: [
       "ID", "ID personnage", "ID contenant", "Emplacement", "ID objet", "Nombre", "Nom personnalisé",
-      "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé",
+      "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé", "Modificateurs",
     ],
-    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100],
+    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100, 320],
   },
 ] as const
 
@@ -125,11 +127,20 @@ export function compatibleInventoryCategory(itemType: string): InventoryCategory
   return parseInventoryCategory(itemType) ?? "Inventaire"
 }
 
-export function canItemGoInInventoryCategory(itemType: string, category: InventoryCategory, itemEffect = "") {
+export function canItemGoInInventoryCategory(itemType: string, category: InventoryCategory) {
   const specializedCategory = compatibleInventoryCategory(itemType)
-  if (category === "Esthétique") return specializedCategory === "Équipement" && !itemEffect.trim()
-  if (category === "Inventaire") return specializedCategory !== "Bourse"
+  // L’esthétique accepte tout le catalogue, comme le sac à dos : seule la bourse reste réservée aux monnaies.
+  if (category === "Esthétique" || category === "Inventaire") return specializedCategory !== "Bourse"
   return specializedCategory === category
+}
+
+/**
+ * Placement automatique (ajout sans contenant choisi, transfert entre fiches) : le rangement
+ * esthétique n’accueille un objet que lorsqu’il est explicitement visé, même s’il accepte tout
+ * le catalogue à la recherche.
+ */
+export function canItemBeAutoPlacedInInventoryCategory(itemType: string, category: InventoryCategory) {
+  return category !== "Esthétique" && canItemGoInInventoryCategory(itemType, category)
 }
 
 export function emptyCharacterInventory(): CharacterInventoryRecord {

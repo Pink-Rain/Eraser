@@ -4,6 +4,8 @@ import dynamic from "next/dynamic"
 import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
 import { Backpack, Bold, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, Heading2, ImagePlus, Italic, ListChecks, LoaderCircle, Minus, NotebookPen, PawPrint, Pencil, Plus, Sparkles, X } from "lucide-react"
 
+import { Checkbox } from "@/components/ui/checkbox"
+
 import { Button } from "@/components/ui/button"
 import { ClassProgression, knownSpellsForCharacter, parseClassChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
@@ -26,6 +28,17 @@ import {
 import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
 import type { CharacterInventoryRecord } from "@/lib/inventory-schema"
+import {
+  cappedSkillTotal,
+  characteristicModifierTargetId,
+  formatModifierAmount,
+  indexInventoryModifiers,
+  itemModifierTargets,
+  linkedItemsFor,
+  modifierTotalFor,
+  skillModifierTargetId,
+  type LinkedModifierItem,
+} from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
@@ -214,7 +227,66 @@ function NotesEditor({ value, onCommit, label = "Carnet de notes", compact = fal
   </section>
 }
 
-function SkillRow({ skillIndex, values, color, commit, abilities, charges, setCharges }: { skillIndex: number; values: string[]; color: (typeof palette)[number]; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void }) {
+function sheetNumber(value: string) {
+  const parsed = Number.parseFloat(String(value ?? "").replace(",", "."))
+  return Number.isFinite(parsed) ? parsed : 0
+}
+
+/** Affiche un total en y ajoutant les modificateurs d’objets, sans toucher à la valeur de la feuille. */
+function totalWithModifier(raw: string, modifier: number, fallback = "0") {
+  if (!modifier) return raw || fallback
+  const parsed = Number.parseFloat(String(raw ?? "").replace(",", "."))
+  if (!Number.isFinite(parsed)) return raw || fallback
+  return String(Math.round((parsed + modifier) * 100) / 100)
+}
+
+/** Un même objet peut viser une compétence et sa caractéristique : on additionne ses apports. */
+function mergeLinkedItems(...lists: LinkedModifierItem[][]) {
+  const merged = new Map<string, LinkedModifierItem>()
+  for (const entry of lists.flat()) {
+    const existing = merged.get(entry.slotId)
+    merged.set(entry.slotId, existing ? { ...existing, amount: existing.amount + entry.amount } : entry)
+  }
+  return [...merged.values()]
+}
+
+type SlotToggle = { pendingSlot: string; onToggle: (slotId: string, equipped: boolean) => void }
+
+function ModifierBadge({ amount, plain = false }: { amount: number; plain?: boolean }) {
+  if (!amount) return null
+  const tone = plain ? "bg-white/25 text-white" : amount < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300"
+  return <span className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`} title="Apporté par les objets équipés">{formatModifierAmount(amount)}</span>
+}
+
+function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: LinkedModifierItem[]; toggle: SlotToggle; borderColor: string; total?: string }) {
+  if (!items.length) return null
+  return <div className="mt-2 border-t pt-2" style={{ borderColor }}>
+    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Backpack className="size-3" />Objets liés</p>
+    <div className="space-y-1">
+      {items.map((entry) => <label key={entry.slotId} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
+        <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
+        <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
+        <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"} ${entry.equipped ? "" : "opacity-40"}`}>{formatModifierAmount(entry.amount)}</span>
+      </label>)}
+    </div>
+    {total !== undefined && <p className="mt-1.5 text-right text-[10px] text-muted-foreground">Total avec objets : <b className="text-foreground">{total}</b></p>}
+  </div>
+}
+
+/** Entoure une carte non dépliable (vie, folie, caractéristique…) d’un survol listant ses objets liés. */
+function ModifierHoverShell({ items, toggle, title, color, total, children }: { items: LinkedModifierItem[]; toggle: SlotToggle; title: string; color: string; total?: string; children: ReactNode }) {
+  const [open, setOpen] = useState(false)
+  if (!items.length) return <>{children}</>
+  return <div className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+    {children}
+    {open && <div className="absolute left-1/2 top-[calc(100%-3px)] z-40 w-60 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl" style={{ borderColor: `${color}66` }}>
+      <p className="font-display text-sm font-semibold" style={{ color }}>{title}</p>
+      <LinkedItemsPanel items={items} toggle={toggle} borderColor={`${color}40`} total={total} />
+    </div>}
+  </div>
+}
+
+function SkillRow({ skillIndex, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, toggle }: { skillIndex: number; values: string[]; color: (typeof palette)[number]; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const skill = characterSkills[skillIndex]
   const shortName = skill.name
@@ -222,54 +294,66 @@ function SkillRow({ skillIndex, values, color, commit, abilities, charges, setCh
     .replace(/^Résistance\b/, "Rés")
     .replace(/^Volonté\b/, "Vol")
     .replace(/^Connaissances?\b/, "Co")
-  const totals = [2, 5, 8].map((metric) => values[characterSkillValueIndex(skillIndex, metric)] || "—")
+  // La feuille calcule déjà « caractéristique + bonus », borné entre 10 et 90. Tant qu’aucun
+  // objet équipé ne vise cette compétence, on réaffiche sa valeur telle quelle.
+  const statModifier = skillModifier + characteristicModifier
+  const statTotal = statModifier
+    ? String(cappedSkillTotal(sheetNumber(values[skill.characteristicIndex]) + characteristicModifier + sheetNumber(values[characterSkillValueIndex(skillIndex, 0)]) + skillModifier))
+    : values[characterSkillValueIndex(skillIndex, 2)] || "—"
+  const totals = [
+    statTotal,
+    totalWithModifier(values[characterSkillValueIndex(skillIndex, 5)], successModifier, "—"),
+    totalWithModifier(values[characterSkillValueIndex(skillIndex, 8)], failureModifier, "—"),
+  ]
+  const metricModifiers = [statModifier, successModifier, failureModifier]
   return <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     <button type="button" onClick={() => setOpen((current) => !current)} className={`grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border }}>
       <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}</span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? "text-foreground" : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
     </button>
     {open && <div className="absolute left-2 right-2 top-[calc(100%-2px)] z-30 rounded-xl border bg-popover p-3 text-popover-foreground shadow-2xl" style={{ borderColor: color.border }}>
       <p className="mb-2 font-display text-sm font-semibold" style={{ color: color.accent }}>{shortName}</p><div className="mb-2 grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Calcul</span><span>B/M</span><span>Mod.</span></div>
-      {[{ label: "Stat", bonus: 0, modifier: 1 }, { label: "Réussite critique", bonus: 3, modifier: 4 }, { label: "Échec critique", bonus: 6, modifier: 7 }].map((line) => {
+      {[{ label: "Stat", bonus: 0 }, { label: "Réussite critique", bonus: 3 }, { label: "Échec critique", bonus: 6 }].map((line, lineIndex) => {
         const bonusIndex = characterSkillValueIndex(skillIndex, line.bonus)
-        const modifierIndex = characterSkillValueIndex(skillIndex, line.modifier)
-        return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className="rounded bg-muted px-1.5 py-1 text-center text-muted-foreground" title="Calculé par la classe et l’inventaire">{values[modifierIndex] || "0"}</span></div>
+        const lineModifier = metricModifiers[lineIndex]
+        return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className={`rounded px-1.5 py-1 text-center font-semibold ${lineModifier ? (lineModifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted font-normal text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{lineModifier ? formatModifierAmount(lineModifier) : "0"}</span></div>
       })}
+      <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={statModifier ? statTotal : undefined} />
       {abilities.length > 0 && <div className="mt-2 border-t pt-2" style={{ borderColor: color.border }}><p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Actifs et passifs liés</p><div className="space-y-1.5">{abilities.map((spell) => <details key={spell.id} className="rounded-lg border bg-background/45 px-2.5 py-2" style={{ borderColor: color.border }}><summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span className="min-w-0 flex-1 truncate">{spell.name}</span><span className="text-[9px] text-muted-foreground">{spell.type}</span>{spell.category === "actif" && <SpellChargeStars total={spell.charges} current={charges[spell.id] ?? spell.charges ?? 0} interactive onChange={(value) => setCharges(spell, value)} accent={color.accent} />}</summary><blockquote className="mt-2 border-l-2 pl-2 text-xs leading-5 text-muted-foreground" style={{ borderColor: color.accent }}>{spell.effect && <div dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}{spell.description && <div className="mt-1" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}</blockquote></details>)}</div></div>}
     </div>}
   </div>
 }
 
-function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color, values, commit, compact = false }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean }) {
+function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color, values, commit, compact = false, modifier = 0, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const definitionIndex = characterSecondaryCalculatedFields.findIndex((field) => field.valueIndex === fieldIndex)
   const bonusIndex = characterSecondaryCalculationValueIndex(definitionIndex, "bonus")
-  const modifierIndex = characterSecondaryCalculationValueIndex(definitionIndex, "modifier")
+  const total = totalWithModifier(values[fieldIndex], modifier)
   return <div className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} font-semibold tabular-nums`} style={{ color }}>{values[fieldIndex] || "0"}</span></button>
-    {open && <div className="absolute left-1/2 top-[calc(100%-3px)] z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl" style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold text-muted-foreground" title="Calculé plus tard par la classe et l’inventaire">{values[modifierIndex] || "0"}</span></div></div></div>}
+    <button type="button" onClick={() => setOpen((current) => !current)} className={`flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} font-semibold tabular-nums`} style={{ color }}>{total}</span></button>
+    {open && <div className="absolute left-1/2 top-[calc(100%-3px)] z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl" style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{modifier ? formatModifierAmount(modifier) : "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
 
-function CombinedCalculatedCard({ label, groupColor, fields, values, commit }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string }>; values: string[]; commit: (index: number, value: string) => Promise<void> }) {
+function CombinedCalculatedCard({ label, groupColor, fields, values, commit, modifierFor, linkedFor, toggle }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string }>; values: string[]; commit: (index: number, value: string) => Promise<void>; modifierFor: (valueIndex: number) => number; linkedFor: (valueIndex: number) => LinkedModifierItem[]; toggle: SlotToggle }) {
   return <div className="h-full min-h-20 rounded-xl border p-1.5 shadow-sm" style={{ backgroundColor: `${groupColor}18`, borderColor: `${groupColor}55`, borderTop: `2px solid ${groupColor}` }}>
     <p className="mb-1 text-center text-[9px] font-semibold uppercase tracking-[.18em]" style={{ color: groupColor }}>{label}</p>
     <div className="grid grid-cols-2 gap-1">
-      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} color={field.color} values={values} commit={commit} />)}
+      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} color={field.color} values={values} commit={commit} modifier={modifierFor(field.index)} linkedItems={linkedFor(field.index)} toggle={toggle} />)}
     </div>
   </div>
 }
 
-function LifePool({ current, total, commit }: { current: string; total: string; commit: (index: number, value: string) => Promise<void> }) {
+function LifePool({ current, total, commit, modifier = 0 }: { current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number }) {
   const [editing, setEditing] = useState(false)
   const [expression, setExpression] = useState(current || "0")
   const [editingTotal, setEditingTotal] = useState(false)
   const [totalExpression, setTotalExpression] = useState(total || "0")
   const currentNumber = Number.parseFloat(current || "0") || 0
-  const totalNumber = Number.parseFloat(total || "0") || 0
+  const totalNumber = (Number.parseFloat(total || "0") || 0) + modifier
   const healthRatio = totalNumber > 0 ? Math.max(0, Math.min(100, (currentNumber / totalNumber) * 100)) : 0
   async function save() { await commit(9, String(calculateExpression(expression, Number(current) || 0))); setEditing(false) }
   async function saveTotal() { await commit(10, String(calculateExpression(totalExpression, Number(total) || 0))); setEditingTotal(false) }
-  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl bg-[#6e9ee816] px-4 py-3 text-center shadow-sm" style={{ borderTop: "2px solid #6e9ee8" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Points de vie</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") setEditing(false) }} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onClick={save} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums text-[#6798e2]" title="Valeur, +10, -10%, *2 ou /3">{current || "0"}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") setEditingTotal(false) }} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onClick={saveTotal} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums text-[#86ace6]" title="Valeur, +10%, *2 ou /3">{total || "0"}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#6e9ee826]"><div className="h-full rounded-full bg-[#6e9ee8] transition-[width]" style={{ width: `${healthRatio}%` }} /></div></div></div>
+  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl bg-[#6e9ee816] px-4 py-3 text-center shadow-sm" style={{ borderTop: "2px solid #6e9ee8" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Points de vie</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") setEditing(false) }} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onClick={save} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums text-[#6798e2]" title="Valeur, +10, -10%, *2 ou /3">{current || "0"}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") setEditingTotal(false) }} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onClick={saveTotal} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums text-[#86ace6]" title="Valeur, +10%, *2 ou /3">{total || "0"}</button>}<ModifierBadge amount={modifier} /></div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#6e9ee826]"><div className="h-full rounded-full bg-[#6e9ee8] transition-[width]" style={{ width: `${healthRatio}%` }} /></div></div></div>
 }
 
 export function CharacterSheet({ initialCharacter, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
@@ -286,6 +370,10 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   const [viewStateReady, setViewStateReady] = useState(false)
   const [addingTab, setAddingTab] = useState(false)
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
+  // L’inventaire vit ici : l’onglet Compétences a besoin des objets équipés et de leurs liens.
+  const [inventory, setInventory] = useState<CharacterInventoryRecord | null>(initialInventory ?? null)
+  const [inventoryLoading, setInventoryLoading] = useState(!initialInventory)
+  const [equipPending, setEquipPending] = useState("")
 
   // Joueurs qui cliquent vite sur +/- : chaque commit part en écriture Google Sheets
   // en remplaçant toute la fiche. Sans file d’attente, deux requêtes en vol peuvent
@@ -293,6 +381,29 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   // On sérialise les envois et on n’applique que la réponse du dernier commit lancé.
   const persistSeq = useRef(0)
   const persistQueue = useRef(Promise.resolve())
+
+  const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
+  const modifierIndex = useMemo(() => indexInventoryModifiers(inventory?.containers || []), [inventory])
+  const modifiersByValueIndex = useMemo(() => {
+    const map = new Map<number, { total: number; items: LinkedModifierItem[] }>()
+    for (const target of itemModifierTargets) {
+      map.set(target.valueIndex, { total: modifierTotalFor(modifierIndex, target.id), items: linkedItemsFor(modifierIndex, target.id) })
+    }
+    return map
+  }, [modifierIndex])
+  const modifierForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.total || 0
+  const linkedForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.items || []
+
+  async function setSlotEquipped(slotId: string, equipped: boolean) {
+    setEquipPending(slotId)
+    try {
+      const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "set-equipped", slotId, equipped }) })
+      const payload = (await response.json()) as { inventory?: CharacterInventoryRecord }
+      if (response.ok && payload.inventory) setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] }))
+    } catch { /* l’inventaire reste affiché tel quel */ }
+    setEquipPending("")
+  }
+  const slotToggle: SlotToggle = { pendingSlot: equipPending, onToggle: (slotId, equipped) => void setSlotEquipped(slotId, equipped) }
 
   async function persist(nextValues: string[], portrait?: File) {
     const seq = (persistSeq.current += 1)
@@ -360,6 +471,17 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   }
 
   useEffect(() => {
+    if (initialInventory) return
+    let active = true
+    fetch(`${inventoryEndpoint}?summary=1`)
+      .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
+      .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory(payload.inventory) })
+      .catch(() => { /* la fiche reste utilisable sans ses objets */ })
+      .finally(() => { if (active) setInventoryLoading(false) })
+    return () => { active = false }
+  }, [initialInventory, inventoryEndpoint])
+
+  useEffect(() => {
     if (!loadClassCatalog) return
     let cancelled = false
     async function load() {
@@ -419,15 +541,15 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   }
 
   const secondaryCharacteristics = <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(18,minmax(0,1fr))]">
-    <div className="xl:col-span-3 xl:row-span-2"><LifePool current={values[9]} total={values[10]} commit={commit} /></div>
+    <div className="xl:col-span-3 xl:row-span-2"><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title="Vie totale" color="#6e9ee8" total={totalWithModifier(values[10], modifierForValue(10))}><LifePool current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>
     <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#75a9c816] px-3 py-2 text-center xl:col-span-3" style={{ borderTop: "2px solid #75a9c8" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Classe sociale</p><div className="mt-1 max-w-full"><SelectEdit label="Classe sociale" value={values[11]} options={socialClasses} onCommit={(value) => commit(11, value)} /></div></div>
-    <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#70a8c516] px-3 py-2 text-center xl:col-span-2" style={{ borderTop: "2px solid #70a8c5" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Notoriété</p><div className="mt-1"><Stepper label="Notoriété" value={values[12]} onCommit={(value) => commit(12, value)} /></div></div>
+    <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#70a8c516] px-3 py-2 text-center xl:col-span-2" style={{ borderTop: "2px solid #70a8c5" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Notoriété</p><ModifierHoverShell items={linkedForValue(12)} toggle={slotToggle} title="Notoriété" color="#70a8c5" total={totalWithModifier(values[12], modifierForValue(12))}><div className="mt-1 flex items-center justify-center gap-1.5"><Stepper label="Notoriété" value={values[12]} onCommit={(value) => commit(12, value)} /><ModifierBadge amount={modifierForValue(12)} /></div></ModifierHoverShell></div>
     <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#c3799816] px-3 py-2 text-center xl:col-span-3" style={{ borderTop: "2px solid #c37998" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Alignement</p><div className="mt-1 max-w-full"><SelectEdit label="Alignement" value={values[13]} options={alignments} onCommit={(value) => commit(13, value)} /></div></div>
-    {[{ index: 14, label: "Moralité", color: "#bd7b99", span: "xl:col-span-2" }, { index: 15, label: "Folie", color: "#8f79b5", span: "xl:col-span-2" }, { index: 16, label: "Destin", color: "#e7ae69", span: "xl:col-span-3" }].map((field) => <div key={field.index} className={`flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${field.span}`} style={{ backgroundColor: `${field.color}16`, borderTop: `2px solid ${field.color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{field.label}</p><div className="mt-1"><Stepper label={field.label} value={values[field.index]} onCommit={(value) => commit(field.index, value)} /></div></div>)}
-    <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Dégâts" groupColor="#b96485" fields={calculatedSecondary.slice(0, 2)} values={values} commit={commit} /></div>
-    <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Armure" groupColor="#6da184" fields={calculatedSecondary.slice(2, 4)} values={values} commit={commit} /></div>
-    <div className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={calculatedSecondary[4].index} label={calculatedSecondary[4].label} color={calculatedSecondary[4].color} values={values} commit={commit} /></div>
-    <div className="sm:col-span-2 xl:col-span-5"><CombinedCalculatedCard label="Critique" groupColor="#d19466" fields={[{ ...calculatedSecondary[5], shortLabel: "Échec" }, { ...calculatedSecondary[6], shortLabel: "Réussite" }]} values={values} commit={commit} /></div>
+    {[{ index: 14, label: "Moralité", color: "#bd7b99", span: "xl:col-span-2" }, { index: 15, label: "Folie", color: "#8f79b5", span: "xl:col-span-2" }, { index: 16, label: "Destin", color: "#e7ae69", span: "xl:col-span-3" }].map((field) => <div key={field.index} className={`flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${field.span}`} style={{ backgroundColor: `${field.color}16`, borderTop: `2px solid ${field.color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{field.label}</p><ModifierHoverShell items={linkedForValue(field.index)} toggle={slotToggle} title={field.label} color={field.color} total={totalWithModifier(values[field.index], modifierForValue(field.index))}><div className="mt-1 flex items-center justify-center gap-1.5"><Stepper label={field.label} value={values[field.index]} onCommit={(value) => commit(field.index, value)} /><ModifierBadge amount={modifierForValue(field.index)} /></div></ModifierHoverShell></div>)}
+    <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Dégâts" groupColor="#b96485" fields={calculatedSecondary.slice(0, 2)} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
+    <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Armure" groupColor="#6da184" fields={calculatedSecondary.slice(2, 4)} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
+    <div className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={calculatedSecondary[4].index} label={calculatedSecondary[4].label} color={calculatedSecondary[4].color} values={values} commit={commit} modifier={modifierForValue(calculatedSecondary[4].index)} linkedItems={linkedForValue(calculatedSecondary[4].index)} toggle={slotToggle} /></div>
+    <div className="sm:col-span-2 xl:col-span-5"><CombinedCalculatedCard label="Critique" groupColor="#d19466" fields={[{ ...calculatedSecondary[5], shortLabel: "Échec" }, { ...calculatedSecondary[6], shortLabel: "Réussite" }]} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
   </div>
 
   function renderSkillsContent() { return <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -435,18 +557,20 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       const color = palette[groupIndex]
       return <article key={group.characteristic} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
         <div className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}>
-          <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold">{group.characteristic}</h3><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit></div>
-          <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-2px)] z-40 translate-y-1 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" style={{ borderColor: color.border }}><p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p><div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}</p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div></div>
+          <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold">{group.characteristic}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit><ModifierBadge amount={modifierForValue(group.characteristicIndex)} plain /></span></div>
+          <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-2px)] z-40 translate-y-1 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" style={{ borderColor: color.border }}><p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p><div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}</p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div><LinkedItemsPanel items={linkedForValue(group.characteristicIndex)} toggle={slotToggle} borderColor={color.border} total={totalWithModifier(values[group.characteristicIndex], modifierForValue(group.characteristicIndex))} /></div>
         </div>
         <div className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] gap-1 px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Compétence</span><span className="text-center">Stat</span><span className="text-center">RC</span><span className="text-center">EC</span></div>
-        {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} /> })}
+        {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name))} characteristicModifier={modifierTotalFor(modifierIndex, characteristicModifierTargetId(group.characteristic))} successModifier={modifierForValue(23)} failureModifier={modifierForValue(22)} linkedItems={mergeLinkedItems(linkedItemsFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name)), linkedItemsFor(modifierIndex, characteristicModifierTargetId(group.characteristic)))} toggle={slotToggle} /> })}
       </article>
     })}
   </div> }
 
   function renderTabContent(tab: CharacterTab) {
     if (tab.type === "competences") return renderSkillsContent()
-    if (tab.type === "inventaire") return <CharacterInventory characterId={character.id} initialInventory={initialInventory} />
+    if (tab.type === "inventaire") return inventoryLoading
+      ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
+      : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
     if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} />
     if (tab.type === "journal") return <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,.65fr)]"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><aside className="min-w-0"><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></aside></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
@@ -508,15 +632,15 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       {mechanicsExpanded && <div className="mt-5">
       <div className="mb-3"><p className="text-[10px] font-semibold uppercase tracking-[.25em] text-primary/70">Repères</p><h3 className="font-display text-2xl font-semibold">Caractéristiques secondaires</h3></div>
       <div className="grid gap-2 rounded-2xl border border-border/60 bg-card/35 p-2.5 shadow-sm sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(18,minmax(0,1fr))]">
-        <div className="xl:col-span-3 xl:row-span-2"><LifePool current={values[9]} total={values[10]} commit={commit} /></div>
+        <div className="xl:col-span-3 xl:row-span-2"><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title="Vie totale" color="#6e9ee8" total={totalWithModifier(values[10], modifierForValue(10))}><LifePool current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>
         <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#75a9c816] px-3 py-2 text-center xl:col-span-3" style={{ borderTop: "2px solid #75a9c8" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Classe sociale</p><div className="mt-1 max-w-full"><SelectEdit label="Classe sociale" value={values[11]} options={socialClasses} onCommit={(value) => commit(11, value)} /></div></div>
-        <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#70a8c516] px-3 py-2 text-center xl:col-span-2" style={{ borderTop: "2px solid #70a8c5" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Notoriété</p><div className="mt-1"><Stepper label="Notoriété" value={values[12]} onCommit={(value) => commit(12, value)} /></div></div>
+        <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#70a8c516] px-3 py-2 text-center xl:col-span-2" style={{ borderTop: "2px solid #70a8c5" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Notoriété</p><ModifierHoverShell items={linkedForValue(12)} toggle={slotToggle} title="Notoriété" color="#70a8c5" total={totalWithModifier(values[12], modifierForValue(12))}><div className="mt-1 flex items-center justify-center gap-1.5"><Stepper label="Notoriété" value={values[12]} onCommit={(value) => commit(12, value)} /><ModifierBadge amount={modifierForValue(12)} /></div></ModifierHoverShell></div>
         <div className="flex min-h-20 flex-col items-center justify-center rounded-xl bg-[#c3799816] px-3 py-2 text-center xl:col-span-3" style={{ borderTop: "2px solid #c37998" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Alignement</p><div className="mt-1 max-w-full"><SelectEdit label="Alignement" value={values[13]} options={alignments} onCommit={(value) => commit(13, value)} /></div></div>
-        {[{ index: 14, label: "Moralité", color: "#bd7b99", span: "xl:col-span-2" }, { index: 15, label: "Folie", color: "#8f79b5", span: "xl:col-span-2" }, { index: 16, label: "Destin", color: "#e7ae69", span: "xl:col-span-3" }].map((field) => <div key={field.index} className={`flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${field.span}`} style={{ backgroundColor: `${field.color}16`, borderTop: `2px solid ${field.color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{field.label}</p><div className="mt-1"><Stepper label={field.label} value={values[field.index]} onCommit={(value) => commit(field.index, value)} /></div></div>)}
-        <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Dégâts" groupColor="#b96485" fields={calculatedSecondary.slice(0, 2)} values={values} commit={commit} /></div>
-        <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Armure" groupColor="#6da184" fields={calculatedSecondary.slice(2, 4)} values={values} commit={commit} /></div>
-        <div className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={calculatedSecondary[4].index} label={calculatedSecondary[4].label} color={calculatedSecondary[4].color} values={values} commit={commit} /></div>
-        <div className="sm:col-span-2 xl:col-span-5"><CombinedCalculatedCard label="Critique" groupColor="#d19466" fields={[{ ...calculatedSecondary[5], shortLabel: "Échec" }, { ...calculatedSecondary[6], shortLabel: "Réussite" }]} values={values} commit={commit} /></div>
+        {[{ index: 14, label: "Moralité", color: "#bd7b99", span: "xl:col-span-2" }, { index: 15, label: "Folie", color: "#8f79b5", span: "xl:col-span-2" }, { index: 16, label: "Destin", color: "#e7ae69", span: "xl:col-span-3" }].map((field) => <div key={field.index} className={`flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${field.span}`} style={{ backgroundColor: `${field.color}16`, borderTop: `2px solid ${field.color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{field.label}</p><ModifierHoverShell items={linkedForValue(field.index)} toggle={slotToggle} title={field.label} color={field.color} total={totalWithModifier(values[field.index], modifierForValue(field.index))}><div className="mt-1 flex items-center justify-center gap-1.5"><Stepper label={field.label} value={values[field.index]} onCommit={(value) => commit(field.index, value)} /><ModifierBadge amount={modifierForValue(field.index)} /></div></ModifierHoverShell></div>)}
+        <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Dégâts" groupColor="#b96485" fields={calculatedSecondary.slice(0, 2)} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
+        <div className="sm:col-span-2 xl:col-span-4"><CombinedCalculatedCard label="Armure" groupColor="#6da184" fields={calculatedSecondary.slice(2, 4)} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
+        <div className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={calculatedSecondary[4].index} label={calculatedSecondary[4].label} color={calculatedSecondary[4].color} values={values} commit={commit} modifier={modifierForValue(calculatedSecondary[4].index)} linkedItems={linkedForValue(calculatedSecondary[4].index)} toggle={slotToggle} /></div>
+        <div className="sm:col-span-2 xl:col-span-5"><CombinedCalculatedCard label="Critique" groupColor="#d19466" fields={[{ ...calculatedSecondary[5], shortLabel: "Échec" }, { ...calculatedSecondary[6], shortLabel: "Réussite" }]} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
       </div>
       <div className="mb-4 mt-9"><p className="text-[10px] font-semibold uppercase tracking-[.25em] text-primary/70">Aptitudes</p><h3 className="font-display text-2xl font-semibold">Caractéristiques principales & compétences</h3></div>
       <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-5">
@@ -524,14 +648,15 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
           const color = palette[groupIndex]
           return <article key={group.characteristic} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
             <div className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}>
-              <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold">{group.characteristic}</h3><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit></div>
+              <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold">{group.characteristic}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit><ModifierBadge amount={modifierForValue(group.characteristicIndex)} plain /></span></div>
               <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-2px)] z-40 translate-y-1 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" style={{ borderColor: color.border }}>
                 <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
                 <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}</p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
+                <LinkedItemsPanel items={linkedForValue(group.characteristicIndex)} toggle={slotToggle} borderColor={color.border} total={totalWithModifier(values[group.characteristicIndex], modifierForValue(group.characteristicIndex))} />
               </div>
             </div>
             <div className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] gap-1 px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Compétence</span><span className="text-center">Stat</span><span className="text-center">RC</span><span className="text-center">EC</span></div>
-            {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} /> })}
+            {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name))} characteristicModifier={modifierTotalFor(modifierIndex, characteristicModifierTargetId(group.characteristic))} successModifier={modifierForValue(23)} failureModifier={modifierForValue(22)} linkedItems={mergeLinkedItems(linkedItemsFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name)), linkedItemsFor(modifierIndex, characteristicModifierTargetId(group.characteristic)))} toggle={slotToggle} /> })}
           </article>
         })}
       </div>

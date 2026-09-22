@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react"
-import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Link2, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,9 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
+import { ItemModifierDialog, ItemModifierSummary } from "@/components/eraser/item-modifier-editor"
 import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget } from "@/lib/inventory-schema"
+import { parseItemModifiers } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
@@ -41,6 +43,7 @@ type MutationBody =
   | ({ action: "create-item"; containerId: string } & ItemFields)
   | { action: "set-quantity"; slotId: string; quantity: number }
   | { action: "set-equipped"; slotId: string; equipped: boolean }
+  | { action: "set-modifiers"; slotId: string; modifiers: string }
   | ({ action: "update-item"; slotId: string } & ItemFields)
   | { action: "move-item"; slotId: string; containerId: string }
   | { action: "transfer-item"; slotId: string; targetId: string }
@@ -94,9 +97,14 @@ function InventoryTransferPicker({ itemName, slotId, internalTargets, transferTa
   </div>
 }
 
-function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
+function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, flat, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; flat: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
   const item = slot.item
   const [moving, setMoving] = useState(false)
+  const [linking, setLinking] = useState(false)
+  const modifiers = parseItemModifiers(slot.modifiers)
+  // Équiper et lier n’ont de sens que sur une fiche de personnage : les inventaires
+  // plats (campagne, PNJ) n’alimentent aucun total de compétence.
+  const equippable = !readOnly && !flat && container.category !== "Bourse"
   if (!item) return null
   const visual = item.image || item.icon
   const visualIsImage = /^(?:https?:\/\/|\/)/i.test(visual)
@@ -104,19 +112,21 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const internalTargets = compatibleContainers.filter((candidate) => candidate.id !== container.id)
   return <article className="rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm">
     <div className="flex items-start gap-3">
-      {container.category === "Armes" && !readOnly && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? "Arme équipée" : "Arme non équipée"} />}
+      {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
       <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={visual} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : item.icon ? <span className="text-xl" aria-hidden="true">{item.icon}</span> : <PackageOpen className="size-4" />}</div>
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1"><InlineField readOnly={readOnly} label="le nom" value={item.name} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><InlineField readOnly={readOnly} label="le type" value={item.type} onCommit={(type) => update({ type }).then(() => undefined)} /><span>·</span><InlineField readOnly={readOnly} label="le sous-type" value={item.subtype} onCommit={(subtype) => update({ subtype }).then(() => undefined)} /></div></div>
           {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
+          {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length ? "text-primary" : "text-muted-foreground"}`} aria-label={`Lier ${item.name} à une caractéristique`} title={modifiers.length ? `${modifiers.length} lien${modifiers.length > 1 ? "s" : ""} vers des caractéristiques` : "Lier à une caractéristique ou une compétence"}><Link2 className="size-3.5" /></button>}
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} />{container.category !== "Esthétique" && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} /></div>}</div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} /></div>}<ItemModifierSummary modifiers={modifiers} className={slot.equipped ? "" : "opacity-55"} /></div>
       </div>
     </div>
+    {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} modifiers={modifiers} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: serialized }, `slot:${slot.id}`)} />}
   </article>
 }
 
@@ -136,7 +146,7 @@ function ContainerCard({ container, inventory, pendingKey, searchOpen, catalogLo
   const presentation = categoryPresentation[container.category]
   const occupiedSlots = container.slots.filter((slot) => slot.item && slot.quantity > 0)
   const normalizedQuery = normalizedSearch(search)
-  const compatibleItems = useMemo(() => inventory.items.filter((item) => flat || canItemGoInInventoryCategory(`${item.type} ${item.subtype}`, container.category, item.effect)).filter((item) => !normalizedQuery || normalizedSearch(`${item.name} ${item.type} ${item.subtype}`).includes(normalizedQuery)).slice(0, 20), [container.category, flat, inventory.items, normalizedQuery])
+  const compatibleItems = useMemo(() => inventory.items.filter((item) => flat || canItemGoInInventoryCategory(`${item.type} ${item.subtype}`, container.category)).filter((item) => !normalizedQuery || normalizedSearch(`${item.name} ${item.type} ${item.subtype}`).includes(normalizedQuery)).slice(0, 20), [container.category, flat, inventory.items, normalizedQuery])
   const pending = pendingKey.startsWith(`container:${container.id}`) || container.slots.some((slot) => pendingKey.endsWith(slot.id))
   const purse = container.category === "Bourse" && !flat
   const unlimited = container.category === "Esthétique" && !flat
@@ -144,7 +154,7 @@ function ContainerCard({ container, inventory, pendingKey, searchOpen, catalogLo
   return <article className={`${purse ? "rounded-[2rem_2rem_1.35rem_1.35rem] px-4 pb-4 pt-3" : "rounded-2xl p-3"} border bg-card/70 shadow-sm`} style={{ borderColor: `${presentation.color}55`, background: purse ? `linear-gradient(165deg, ${presentation.color}20, rgba(255,255,255,.02))` : undefined }}>
     <div className="flex items-start gap-3"><div className="min-w-0 flex-1"><div className="flex flex-wrap items-center justify-between gap-2"><h4 className="font-display text-lg font-semibold">{container.name}</h4>{!unlimited && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold tabular-nums" style={{ color: presentation.color, backgroundColor: `${presentation.color}16` }}>{container.used}/{container.capacity}</span>}{unlimited && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ color: presentation.color, backgroundColor: `${presentation.color}16` }}>∞</span>}</div>{!unlimited && <Progress value={Math.min(100, (container.used / Math.max(1, container.capacity)) * 100)} className="mt-2 h-1.5" />}</div>{!readOnly && !purse && <Button type="button" variant="ghost" size="sm" onClick={() => setSearchOpen(!searchOpen)} disabled={pending} className="shrink-0" style={{ color: presentation.color }}>{searchOpen ? <X /> : <Plus />}{searchOpen ? "Fermer" : addLabel}</Button>}{!readOnly && !flat && !unlimited && <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} aria-label={`Modifier ${container.name}`}><Pencil /></Button>}{!readOnly && !flat && !unlimited && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-sm" disabled={pending} className="text-destructive/75" aria-label={`Supprimer ${container.name}`}><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Supprimer « {container.name} » ?</AlertDialogTitle><AlertDialogDescription>Le contenant doit être vide.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "delete-container", containerId: container.id }, `container:${container.id}:delete`)}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}</div>
     {searchOpen && !purse && <div className="mt-3 rounded-xl border bg-background/45 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="border-0 bg-background/55 pl-9 shadow-none" placeholder="Nom, type ou sous-type…" autoFocus disabled={catalogLoading} /></div><Button type="button" variant="outline" onClick={onCreateItem}><Plus />Créer un objet</Button></div><div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{catalogLoading ? <div className="grid min-h-20 place-items-center"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div> : compatibleItems.length ? compatibleItems.map((item) => <button type="button" key={item.id} disabled={pending} onClick={async () => { const saved = await mutate({ action: "add-item", itemId: item.id, containerId: container.id }, `container:${container.id}:item`); if (saved) setSearch("") }} className="flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent disabled:opacity-50"><span className="text-base">{item.icon || "◇"}</span><span className="min-w-0 flex-1 font-medium">{item.name}</span><span className="text-[10px] text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}</span><Plus className="size-3.5" /></button>) : <p className="px-3 py-5 text-center text-xs text-muted-foreground">Aucun objet ne correspond à cette recherche.</p>}</div></div>}
-    <div className={`${purse ? "mt-3 grid grid-cols-3 gap-2" : "mt-3 space-y-2"}`}>{purse ? container.slots.map((slot) => <CurrencyLine key={slot.id} slot={slot} container={container} readOnly={readOnly} mutate={mutate} />) : occupiedSlots.length ? occupiedSlots.map((slot) => <InventoryItemLine key={slot.id} slot={slot} container={container} compatibleContainers={inventory.containers.filter((candidate) => flat || (slot.item && canItemGoInInventoryCategory(`${slot.item.type} ${slot.item.subtype}`, candidate.category, slot.item.effect)))} transferTargets={transferTargets} targetsLoading={targetsLoading} pending={pending} readOnly={readOnly} ensureTargets={ensureTargets} mutate={mutate} />) : <div className="rounded-xl border border-dashed px-4 py-5 text-center text-xs text-muted-foreground">Tous les emplacements sont libres.</div>}</div>{!purse && !unlimited && <p className="mt-2 text-right text-[10px] text-muted-foreground">{Math.max(0, container.capacity - container.used)} emplacement{container.capacity - container.used > 1 ? "s" : ""} libre{container.capacity - container.used > 1 ? "s" : ""}</p>}
+    <div className={`${purse ? "mt-3 grid grid-cols-3 gap-2" : "mt-3 space-y-2"}`}>{purse ? container.slots.map((slot) => <CurrencyLine key={slot.id} slot={slot} container={container} readOnly={readOnly} mutate={mutate} />) : occupiedSlots.length ? occupiedSlots.map((slot) => <InventoryItemLine key={slot.id} slot={slot} container={container} compatibleContainers={inventory.containers.filter((candidate) => flat || (slot.item && canItemGoInInventoryCategory(`${slot.item.type} ${slot.item.subtype}`, candidate.category)))} transferTargets={transferTargets} targetsLoading={targetsLoading} pending={pending} readOnly={readOnly} flat={flat} ensureTargets={ensureTargets} mutate={mutate} />) : <div className="rounded-xl border border-dashed px-4 py-5 text-center text-xs text-muted-foreground">Tous les emplacements sont libres.</div>}</div>{!purse && !unlimited && <p className="mt-2 text-right text-[10px] text-muted-foreground">{Math.max(0, container.capacity - container.used)} emplacement{container.capacity - container.used > 1 ? "s" : ""} libre{container.capacity - container.used > 1 ? "s" : ""}</p>}
   </article>
 }
 
@@ -158,9 +168,19 @@ function CategorySection({ category, inventory, pendingKey, openSearch, catalogL
   return <div className="rounded-[1.4rem] border p-3" style={{ borderColor: `${presentation.color}42`, background: `linear-gradient(145deg, ${presentation.color}12, rgba(255,255,255,.015))` }}><div className="mb-3 flex items-center gap-3 px-1"><div className="flex size-9 items-center justify-center rounded-xl" style={{ color: presentation.color, backgroundColor: `${presentation.color}18` }}><Icon className="size-4.5" /></div><h3 className="font-display flex-1 text-xl font-semibold" style={{ color: presentation.color }}>{presentation.label || category}</h3>{!readOnly && !fixed && <Button type="button" variant="ghost" size="icon-sm" onClick={() => openContainerCreation(category)} aria-label={`Ajouter ${presentation.singular}`}><Plus /></Button>}</div><div className="space-y-3">{cards}</div></div>
 }
 
-export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character" }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc" }) {
-  const [inventory, setInventory] = useState(initialInventory || emptyCharacterInventory())
-  const [initialLoading, setInitialLoading] = useState(!initialInventory)
+export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", inventory: controlledInventory, onInventoryChange }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; inventory?: CharacterInventoryRecord | null; onInventoryChange?: (inventory: CharacterInventoryRecord) => void }) {
+  // Mode contrôlé : la fiche de personnage détient l’inventaire pour que l’onglet
+  // Compétences voie les mêmes objets équipés. Sinon le composant gère son état.
+  const controlled = Boolean(onInventoryChange)
+  const [ownInventory, setOwnInventory] = useState(initialInventory || emptyCharacterInventory())
+  const inventory = controlled ? controlledInventory || emptyCharacterInventory() : ownInventory
+  const [initialLoading, setInitialLoading] = useState(!initialInventory && !controlled)
+
+  function applyInventory(next: CharacterInventoryRecord | ((current: CharacterInventoryRecord) => CharacterInventoryRecord)) {
+    const resolved = typeof next === "function" ? next(inventory) : next
+    if (onInventoryChange) onInventoryChange(resolved)
+    else setOwnInventory(resolved)
+  }
   const [pendingKey, setPendingKey] = useState("")
   const [error, setError] = useState("")
   const [addingCategory, setAddingCategory] = useState<InventoryCategory | null>(null)
@@ -171,7 +191,7 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const [newItem, setNewItem] = useState<ItemFields>({ name: "", description: "", type: "Objet", subtype: "", effect: "" })
   const [openSearch, setOpenSearch] = useState<string | null>(null)
   const [searches, setSearches] = useState<Record<string, string>>({})
-  const [catalogLoaded, setCatalogLoaded] = useState(Boolean(initialInventory?.items.length))
+  const [catalogLoaded, setCatalogLoaded] = useState(Boolean((controlledInventory || initialInventory)?.items.length))
   const [catalogLoading, setCatalogLoading] = useState(false)
   const [transferTargets, setTransferTargets] = useState<InventoryTransferTarget[]>([])
   const [targetsLoaded, setTargetsLoaded] = useState(false)
@@ -179,11 +199,11 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const inventoryEndpoint = endpoint || `/api/characters/${encodeURIComponent(characterId)}/inventory`
 
   useEffect(() => {
-    if (initialInventory) return
+    if (initialInventory || controlled) return
     let active = true
-    fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setInventory(payload.inventory); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
+    fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory(payload.inventory); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
     return () => { active = false }
-  }, [initialInventory, inventoryEndpoint])
+  }, [controlled, initialInventory, inventoryEndpoint])
 
   async function mutate(body: MutationBody, key: string) {
     if (readOnly) return false
@@ -192,14 +212,14 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }
     setPendingKey("")
     if (!response.ok || !payload.inventory) { setError(payload.error || "La modification n’a pas pu être enregistrée."); return false }
-    setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items })); return true
+    applyInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items })); return true
   }
 
   async function openItemSearch(containerId: string) {
     setOpenSearch(containerId)
     if (catalogLoaded || catalogLoading) return
     setCatalogLoading(true)
-    try { const response = await fetch(inventoryEndpoint); const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }; if (!response.ok || !payload.inventory) throw new Error(payload.error || "Chargement impossible."); setInventory(payload.inventory); setCatalogLoaded(true) }
+    try { const response = await fetch(inventoryEndpoint); const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }; if (!response.ok || !payload.inventory) throw new Error(payload.error || "Chargement impossible."); applyInventory(payload.inventory); setCatalogLoaded(true) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Le catalogue d’objets n’a pas pu être chargé.") }
     finally { setCatalogLoading(false) }
   }

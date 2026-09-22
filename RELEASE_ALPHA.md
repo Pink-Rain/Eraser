@@ -1,48 +1,48 @@
-# Eraser 0.1.1-alpha.37 — écritures des magasins sur des lignes déterminées
+# Eraser 0.1.1-alpha.40 — objets liés aux compétences et barre toujours visible
 
-Cette préversion corrige l’écriture elle-même. Les préversions précédentes
-fiabilisaient la relecture ; l’inspection de la feuille « Magasins » du Drive
-partagé montre que le problème se situait en amont.
+Cette préversion relie les objets d’inventaire aux caractéristiques et aux
+compétences de la fiche : un objet coché ajoute enfin ses modificateurs aux
+totaux.
 
-## Constat sur la feuille réelle
+## Ajouté
 
-- la feuille ne contient aucune ligne `latest:` : les derniers tirages de
-  campagne n’y sont jamais arrivés ;
-- aucune ligne de magasin n’y a été écrite depuis le 20/09, alors que les
-  feuilles PNJs, Campagnes et Relations ont bien été écrites depuis ;
-- les lignes libérées par une suppression ou un remplacement sont blanchies et
-  non retirées : la feuille est trouée (lignes vides au milieu des données).
+- chaque objet, dans tous les rangements d’une fiche, possède un bouton « lier »
+  qui ouvre une fenêtre où l’on écrit un modificateur positif ou négatif et où
+  l’on choisit sa cible dans une liste cherchable ;
+- les cibles proposées couvrent la vie, la rapidité, l’échec et la réussite
+  critiques, la folie, le destin, la moralité, la notoriété, les bonus de dégâts
+  et d’armure, les dix caractéristiques principales et toutes leurs compétences ;
+- un même objet peut porter plusieurs liens ;
+- les liens enregistrés s’affichent sous l’effet de l’objet, en pastilles
+  compactes, estompées tant que l’objet n’est pas équipé ;
+- la colonne « Mod. » de l’onglet Compétences additionne les liens des objets
+  cochés et les totaux en tiennent compte, plafonnement entre 10 et 90 compris ;
+- le survol d’une compétence, d’une caractéristique, de la vie, de la rapidité,
+  des critiques, des dégâts, des armures, de la folie, du destin, de la moralité
+  et de la notoriété liste les objets concernés avec une case pour les équiper ou
+  les déséquiper sans quitter l’onglet.
 
-## Cause corrigée
+## Modifié
 
-- les nouvelles lignes étaient confiées à `values.append`, qui doit deviner
-  seul où s’arrête le « tableau » à l’intérieur de `A:L`. Sur une feuille
-  trouée, cette détection n’est pas fiable, et le contrôle de cohérence
-  d’Eraser rejetait alors l’écriture entière ;
-- la relecture par `values:batchGetByDataFilter` renvoie la plage réellement
-  lue, mais le numéro de ligne d’un magasin restait déduit d’une constante
-  (`index + 2`). Une lecture décalée faisait écrire par-dessus la ligne
-  voisine ;
-- la vérification d’écriture relisait uniquement la plage renvoyée par Google,
-  donc un autre chemin que celui de l’affichage : le serveur pouvait annoncer
-  un succès pendant que la liste rechargée restait vide.
-
-## Changements
-
-- les nouvelles lignes réutilisent explicitement les lignes libres déjà
-  repérées à la lecture ; `values.append` ne reçoit plus que le surplus ;
-- le numéro de ligne est déduit de la plage que Google déclare avoir lue ;
-- la vérification d’écriture emprunte la même plage `A2:L` que
-  `listSavedShops` et `listLatestShops`, et transporte les plages écrites dans
-  son code d’erreur ;
-- le diagnostic d’écriture (Administration › Google Drive › « Tester aussi
-  l’écriture ») contrôle désormais que la ligne témoin est visible dans la
-  plage que l’application relit, et que les deux numéros de ligne concordent ;
-- `deleteSavedShops` échappe le nom d’onglet et écrit en `RAW`, comme le reste
-  du chemin magasins.
+- la barre supérieure — menu, fil d’Ariane et vue en cours — reste visible en
+  permanence, quel que soit le défilement de la page ;
+- les cases à cocher d’équipement, réservées jusqu’ici aux armes, existent
+  désormais dans tous les rangements d’une fiche sauf la bourse ;
+- le rangement « purement esthétique » permet de chercher dans tout le catalogue
+  d’objets, comme le sac à dos, tout en restant exclu du placement automatique ;
+- un objet déplacé ou transféré conserve son équipement et ses liens ;
+- les charges de sort se comportent comme une barre : cliquer une étincelle
+  pleine vide les charges jusqu’à elle comprise, cliquer une étincelle vide les
+  remplit jusqu’à elle comprise ;
+- les charges disponibles s’affichent en pleine opacité et les charges dépensées
+  en opacité réduite, y compris dans le raccourci de l’onglet Compétences ;
+- la feuille « Contenu inventaire » reçoit une colonne « Modificateurs » ; les
+  feuilles existantes sont complétées automatiquement, sans perte de données.
 
 ## Vérifications
 
-- lint, build Vinext et suite de tests (dont un test sur la déduction du
-  numéro de ligne à partir de la plage renvoyée par Google) ;
-- build desktop et vérification du serveur embarqué.
+- lint sans erreur ;
+- build Vinext complet ;
+- suite de tests d’interface au vert, avec deux nouveaux tests couvrant le calcul
+  des modificateurs et leur report dans les totaux de la fiche ;
+- serveur desktop construit et vérifié en HTTP 200.
