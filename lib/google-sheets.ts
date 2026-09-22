@@ -588,34 +588,6 @@ export async function updateFormattedCell(input: {
   clearSpreadsheetReadCache(input.spreadsheetId)
 }
 
-// Écrit plusieurs colonnes d'une même ligne en un seul aller-retour (une
-// requête updateCells par colonne, regroupées dans un unique batchUpdate)
-// plutôt qu'un appel réseau par cellule.
-export async function updateFormattedRow(input: {
-  spreadsheetId: string
-  sheetId: number
-  rowNumber: number
-  htmlByColumn: string[]
-}) {
-  if (!Number.isInteger(input.rowNumber) || input.rowNumber < 1) throw new Error("INVALID_SHEET_CELL")
-  const requests = input.htmlByColumn.map((html, column) => {
-    const richText = htmlToRichText((html || "").slice(0, 50_000))
-    return { updateCells: {
-      range: {
-        sheetId: input.sheetId,
-        startRowIndex: input.rowNumber - 1,
-        endRowIndex: input.rowNumber,
-        startColumnIndex: column,
-        endColumnIndex: column + 1,
-      },
-      rows: [{ values: [{ userEnteredValue: { stringValue: richText.text }, textFormatRuns: richText.runs }] }],
-      fields: "userEnteredValue,textFormatRuns",
-    } }
-  })
-  if (requests.length) await googleSheetsJson(`spreadsheets/${input.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-  clearSpreadsheetReadCache(input.spreadsheetId)
-}
-
 export async function updateCellColors(input: {
   spreadsheetId: string
   sheetId: number
@@ -755,7 +727,6 @@ async function updateRanges(
 export type ObjectIndexRow = {
   rowNumber: number
   values: string[]
-  html: string[]
 }
 
 export type ObjectIndexTable = {
@@ -806,35 +777,16 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
         const tabName = sheet.properties?.title
         return sheetId === undefined || !tabName ? [] : [{ sheetId, tabName }]
       })
-      const parameters = new URLSearchParams({
-        includeGridData: "true",
-        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(textFormat)))))",
-      })
+      const parameters = new URLSearchParams()
       sheets.forEach((sheet) => parameters.append("ranges", sheetTabRange(sheet.tabName, "A1:AZ")))
-      const payload = sheets.length ? await googleSheetsJson<{
-        sheets?: Array<{
-          properties?: { sheetId?: number; title?: string }
-          data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
-        }>
-      }>(`spreadsheets/${file.id}?${parameters.toString()}`) : { sheets: [] }
-      return { tables: sheets.map((sheet) => {
-        const sheetPayload = payload.sheets?.find((item) => item.properties?.sheetId === sheet.sheetId)
-        const grid: Array<Array<{ value: string; html: string }>> = []
-        for (const block of sheetPayload?.data ?? []) {
-          const startRow = block.startRow ?? 0
-          const startColumn = block.startColumn ?? 0
-          for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
-            const rowIndex = startRow + rowOffset
-            grid[rowIndex] ||= []
-            for (const [columnOffset, cell] of (row.values ?? []).entries()) {
-              const value = gridCellValue(cell)
-              grid[rowIndex][startColumn + columnOffset] = { value, html: richTextHtml(value, cell.textFormatRuns, cell.effectiveFormat?.textFormat) }
-            }
-          }
-        }
-        const usedWidth = Math.max(1, ...grid.map((row) => row?.length ?? 0))
-        const rawHeaders = grid[0] ?? []
-        const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.value?.trim() || `Colonne ${index + 1}`)
+      const payload = sheets.length ? await googleSheetsJson<{ valueRanges?: Array<{ values?: GoogleSheetCellValue[][] }> }>(
+        `spreadsheets/${file.id}/values:batchGet?${parameters.toString()}`,
+      ) : { valueRanges: [] }
+      return { tables: sheets.map((sheet, sheetIndex) => {
+        const values = normalizeGoogleSheetRows(payload.valueRanges?.[sheetIndex]?.values)
+        const usedWidth = Math.max(1, ...values.map((row) => row.length))
+        const rawHeaders = values[0] ?? []
+        const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.trim() || `Colonne ${index + 1}`)
         return {
           fileId: file.id,
           fileName: file.name,
@@ -842,8 +794,8 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
           sheetId: sheet.sheetId,
           tabName: sheet.tabName,
           headers,
-          rows: grid.slice(1).flatMap((row, index) => row?.some((cell) => cell?.value?.trim())
-            ? [{ rowNumber: index + 2, values: headers.map((_, column) => row?.[column]?.value ?? ""), html: headers.map((_, column) => row?.[column]?.html ?? "") }]
+          rows: values.slice(1).flatMap((row, index) => row.some((value) => String(value).trim())
+            ? [{ rowNumber: index + 2, values: headers.map((_, column) => String(row[column] ?? "")) }]
             : []),
         } satisfies ObjectIndexTable
       }), error: null }
@@ -883,18 +835,17 @@ export async function addObjectIndexRow(fileId: string, tabName: string) {
   clearObjectIndexTableCache()
 }
 
-export async function updateObjectIndexRow(fileId: string, tabName: string, rowNumber: number, values: string[], html?: string[]) {
+export async function updateObjectIndexRow(fileId: string, tabName: string, rowNumber: number, values: string[]) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row || !Number.isInteger(rowNumber) || rowNumber < 2 || values.length > table.headers.length) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
   const normalizedValues = table.headers.map((_, index) => String(values[index] ?? ""))
-  const normalizedHtml = table.headers.map((_, index) => String(html?.[index] ?? normalizedValues[index] ?? ""))
-  await updateFormattedRow({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, htmlByColumn: normalizedHtml })
+  await updateRange(fileId, sheetTabRange(tabName, `A${rowNumber}:${columnName(table.headers.length)}${rowNumber}`), [normalizedValues])
   if (objectIndexTableCache) {
     objectIndexTableCache = {
       expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS,
       tables: objectIndexTableCache.tables.map((candidate) => candidate.fileId === fileId && candidate.tabName === tabName
-        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber ? { ...candidateRow, values: normalizedValues, html: normalizedHtml } : candidateRow) }
+        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber ? { ...candidateRow, values: normalizedValues } : candidateRow) }
         : candidate),
     }
   }
@@ -906,13 +857,7 @@ export async function duplicateObjectIndexRow(fileId: string, tabName: string, r
   const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
   const values = table.headers.map((header, index) => normalizedHeader(header) === "id" ? crypto.randomUUID() : row.values[index] ?? "")
-  const appended = await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values], { includeValuesInResponse: true })
-  const newRowMatch = appended.updatedRange.match(/![A-Z]+(\d+):/)
-  const newRowNumber = newRowMatch ? Number(newRowMatch[1]) : null
-  if (newRowNumber) {
-    const html = table.headers.map((header, index) => normalizedHeader(header) === "id" ? values[index] : row.html[index] || row.values[index] || "")
-    await updateFormattedRow({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber: newRowNumber, htmlByColumn: html })
-  }
+  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values])
   clearObjectIndexTableCache()
 }
 
@@ -2202,7 +2147,7 @@ async function inventoryWorkbookProperties(spreadsheetId: string) {
 }
 
 async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
-  const syncKey = `inventory-workbook:v4:${spreadsheetId}`
+  const syncKey = `inventory-workbook:v3:${spreadsheetId}`
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (alreadySynced) return
 
@@ -4283,7 +4228,6 @@ type StoredInventoryContent = {
   effect: string
   updatedAt: string
   equipped: boolean
-  modifiers: string
   rowNumber: number
 }
 
@@ -4374,7 +4318,6 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
       prerequisites: row[15] || "",
       edition: row[16] || "",
       active: sheetValueIsActive(row[17]),
-      modifiers: "",
     }]
   })
 }
@@ -4423,7 +4366,6 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       prerequisites: objectIndexCell(table, row, ["Prérequis", "Prerequis"]),
       edition: objectIndexCell(table, row, ["Édition", "Edition"]),
       active: sheetValueIsActive(objectIndexCell(table, row, ["Actif", "Active", "Disponible"])),
-      modifiers: "",
     }]
   }))
 }
@@ -4438,7 +4380,7 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     sheetTabRange("Types de contenants", "A2:F"),
     sheetTabRange(inventoryContainerTab, "A2:I"),
     sheetTabRange(inventoryItemsTab, "A2:S"),
-    sheetTabRange(inventoryContentsTab, "A2:N"),
+    sheetTabRange(inventoryContentsTab, "A2:M"),
   ]
   const parameters = new URLSearchParams()
   ranges.forEach((range) => parameters.append("ranges", range))
@@ -4483,7 +4425,6 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
       effect: row[10] || "",
       updatedAt: row[11] || "",
       equipped: sheetValueIsChecked(row[12]),
-      modifiers: row[13] || "",
       rowNumber: index + 2,
     }] : []),
   }
@@ -4506,7 +4447,6 @@ function inventoryContentRow(content: StoredInventoryContent) {
     content.effect,
     content.updatedAt,
     content.equipped ? "Oui" : "Non",
-    content.modifiers,
   ]
 }
 
@@ -4525,7 +4465,6 @@ function makeEmptyInventorySlot(characterId: string, containerId: string, index:
     effect: "",
     updatedAt: new Date().toISOString(),
     equipped: false,
-    modifiers: "",
     rowNumber: 0,
   }
 }
@@ -4574,7 +4513,7 @@ async function appendInventorySlots(
     }
   }
   if (rows.length) {
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), rows.map(inventoryContentRow))
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), rows.map(inventoryContentRow))
     clearInventoryWorkbookCache()
   }
 }
@@ -4738,7 +4677,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     range: sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`), values: [[now]],
   }))
   occupied.forEach((content, index) => updates.push({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:M${content.rowNumber}`),
     values: [inventoryContentRow({ ...content, containerId: backpack!.id, index: index + 1, equipped: false, updatedAt: now })],
   }))
   const legacyRows: StoredInventoryContent[] = legacyItems.map((item, index) => ({
@@ -4746,7 +4685,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     id: `NPC-LEGACY-${npcId}-${item.id || index}`,
     quantity: item.quantity, customName: item.name, customDescription: item.notes, type: "Objet", updatedAt: now,
   })).filter((item) => !workbook.contents.some((content) => content.id === item.id))
-  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), legacyRows.map(inventoryContentRow))
+  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), legacyRows.map(inventoryContentRow))
   if (updates.length) await updateRanges(workbook.spreadsheetId, updates)
   clearInventoryWorkbookCache()
   workbook = await readInventoryWorkbook(includeCatalog)
@@ -4782,7 +4721,6 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
     prerequisites: "",
     edition: "",
     active: true,
-    modifiers: content.modifiers,
   }
 }
 
@@ -4795,7 +4733,6 @@ function inventoryItemForContent(content: StoredInventoryContent, indexedItem: I
     type: content.type || indexedItem.type,
     subtype: content.subtype || indexedItem.subtype,
     effect: content.effect || indexedItem.effect,
-    modifiers: content.modifiers || indexedItem.modifiers,
   }
 }
 
@@ -4909,7 +4846,7 @@ export async function copyCharacterInventory(sourceCharacterId: string, targetCh
       updatedAt: now,
       rowNumber: 0,
     }))
-  if (clonedContents.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), clonedContents.map(inventoryContentRow))
+  if (clonedContents.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), clonedContents.map(inventoryContentRow))
   clearInventoryWorkbookCache()
 }
 
@@ -5029,7 +4966,7 @@ export async function deleteCharacterInventoryContainer(characterId: string, con
 async function updateStoredInventoryContent(workbook: InventoryWorkbook, content: StoredInventoryContent) {
   await updateRange(
     workbook.spreadsheetId,
-    sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:M${content.rowNumber}`),
     [inventoryContentRow(content)],
   )
   workbook.contents = workbook.contents.map((candidate) => candidate.id === content.id ? content : candidate)
@@ -5068,7 +5005,7 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     if (!unlimitedContainer) throw new Error("INVENTORY_FULL")
     const nextIndex = workbook.contents.filter((content) => content.containerId === unlimitedContainer.id).reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, unlimitedContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), [inventoryContentRow(addedSlot)])
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     target = refreshed.contents.find((content) => content.id === addedSlot.id)
@@ -5133,7 +5070,7 @@ export async function setCharacterInventoryItemQuantity(characterId: string, slo
   const maximum = item?.maxQuantity ?? 99
   const nextQuantity = Math.max(0, Math.min(maximum, Math.trunc(quantity)))
   const updated: StoredInventoryContent = nextQuantity === 0
-    ? { ...content, itemId: "", quantity: 0, customName: "", customDescription: "", type: "", subtype: "", effect: "", equipped: false, modifiers: "", updatedAt: new Date().toISOString() }
+    ? { ...content, itemId: "", quantity: 0, customName: "", customDescription: "", type: "", subtype: "", effect: "", equipped: false, updatedAt: new Date().toISOString() }
     : { ...content, quantity: nextQuantity, updatedAt: new Date().toISOString() }
   await updateStoredInventoryContent(workbook, updated)
   return buildCharacterInventory(characterId, workbook)
@@ -5143,20 +5080,21 @@ export async function setCharacterInventoryItemEquipped(characterId: string, slo
   const workbook = await ensureCharacterInventoryStorage(characterId)
   const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === characterId)
   const container = content && workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
-  if (!content || !container || (!content.itemId && !content.customName)) {
+  const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+  if (!content || !container || (!content.itemId && !content.customName) || inventoryContainerCategory(container, typeById) !== "Armes") {
     throw new Error("INVENTORY_SLOT_NOT_FOUND")
   }
   await updateStoredInventoryContent(workbook, { ...content, equipped, updatedAt: new Date().toISOString() })
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string; modifiers: string }, mode: InventoryOwnerMode = "character") {
+export async function updateCharacterInventoryItem(characterId: string, slotId: string, input: { name: string; description: string; type: string; subtype: string; effect: string }, mode: InventoryOwnerMode = "character") {
   const workbook = await inventoryStorageFor(characterId, true, mode)
   const content = workbook.contents.find((candidate) => candidate.id === slotId && candidate.characterId === characterId)
   const container = content && workbook.containers.find((candidate) => candidate.id === content.containerId && !candidate.deletedAt)
   const name = input.name.trim()
   const type = input.type.trim() || "Objet"
-  if (!content || !container || (!content.itemId && !content.customName) || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200 || input.modifiers.length > 2000) {
+  if (!content || !container || (!content.itemId && !content.customName) || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) {
     throw new Error("INVALID_INVENTORY_ITEM")
   }
   const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate])))
@@ -5168,7 +5106,6 @@ export async function updateCharacterInventoryItem(characterId: string, slotId: 
     type,
     subtype: input.subtype.trim(),
     effect: input.effect.trim(),
-    modifiers: input.modifiers.trim(),
     updatedAt: new Date().toISOString(),
   })
   return buildCharacterInventory(characterId, workbook)
@@ -5195,7 +5132,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
   if (!target && targetCategory === "Esthétique") {
     const nextIndex = targets.reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, targetContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), [inventoryContentRow(addedSlot)])
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:M"), [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     targets = refreshed.contents.filter((content) => content.containerId === targetContainer.id).sort((left, right) => left.index - right.index)
@@ -5213,8 +5150,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     type: source.type,
     subtype: source.subtype,
     effect: source.effect,
-    modifiers: source.modifiers,
-    equipped: source.equipped,
+    equipped: targetCategory === "Armes" ? source.equipped : false,
     updatedAt: now,
   })
   await updateStoredInventoryContent(workbook, {
@@ -5226,7 +5162,6 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     type: "",
     subtype: "",
     effect: "",
-    modifiers: "",
     equipped: false,
     updatedAt: now,
   })
@@ -5273,8 +5208,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     type: source.type,
     subtype: source.subtype,
     effect: source.effect,
-    modifiers: source.modifiers,
-    equipped: Boolean(targetContainer) && source.equipped,
+    equipped: targetContainer ? inventoryContainerCategory(targetContainer, typeById) === "Armes" && source.equipped : false,
     updatedAt: now,
   }
   const updatedSource: StoredInventoryContent = {
@@ -5286,12 +5220,11 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     type: "",
     subtype: "",
     effect: "",
-    modifiers: "",
     equipped: false,
     updatedAt: now,
   }
   await updateRanges(workbook.spreadsheetId, [updatedTarget, updatedSource].map((content) => ({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:M${content.rowNumber}`),
     values: [inventoryContentRow(content)],
   })))
   workbook.contents = workbook.contents.map((content) => content.id === updatedTarget.id ? updatedTarget : content.id === updatedSource.id ? updatedSource : content)

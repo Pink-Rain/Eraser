@@ -9,8 +9,9 @@ function bounded(value: number, maximum: number) {
 export function nextSpellChargeValue(total: number, current: number, clickedIndex: number) {
   const maximum = bounded(total, 5)
   const available = bounded(current, maximum)
-  const filled = clickedIndex < available
-  return filled ? clickedIndex : clickedIndex + 1
+  if (clickedIndex === available - 1) return available - 1
+  if (clickedIndex === available) return available + 1
+  return available
 }
 
 function ChargeStar({ filled }: { filled: boolean }) {
@@ -25,8 +26,11 @@ export function SpellChargeStars({ total, current = total, accent = "currentColo
     {Array.from({ length: maximum }, (_, index) => {
       const filled = index < available
       const nextValue = nextSpellChargeValue(maximum, available, index)
-      if (!interactive) return <span key={index} className={`inline-flex ${filled ? "opacity-100" : "opacity-40"}`}><ChargeStar filled /></span>
-      return <button key={index} type="button" onClick={(event) => { event.stopPropagation(); onChange?.(nextValue) }} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-1 ${filled ? "opacity-100" : "opacity-40"}`} aria-label={`Régler à ${nextValue} charge${nextValue > 1 ? "s" : ""} sur ${maximum}`}>
+      const canSpend = interactive && nextValue === available - 1
+      const canRecover = interactive && nextValue === available + 1
+      const canChange = interactive && nextValue !== available
+      if (!interactive) return <span key={index} className="inline-flex"><ChargeStar filled /></span>
+      return <button key={index} type="button" disabled={!canChange} onClick={(event) => { event.stopPropagation(); if (canChange) onChange?.(nextValue) }} className="inline-flex rounded-sm p-0.5 transition enabled:hover:scale-110 enabled:focus-visible:outline enabled:focus-visible:outline-2 enabled:focus-visible:outline-offset-1 disabled:cursor-default disabled:opacity-55" aria-label={canSpend ? "Dépenser la prochaine charge" : canRecover ? "Récupérer la prochaine charge" : filled ? "Charge disponible" : "Charge indisponible"}>
         <ChargeStar filled={filled} />
       </button>
     })}

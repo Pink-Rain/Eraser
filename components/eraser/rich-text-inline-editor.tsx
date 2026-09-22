@@ -33,10 +33,6 @@ export function sanitizeRichText(html: string) {
     .replace(/javascript:/gi, "")
 }
 
-export function plainText(html: string) {
-  return html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>|<\/div>|<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").trim()
-}
-
 const textColors = ["#1f1b16", "#b3261e", "#7f1d1d", "#315b55", "#285f8f", "#6b4c9a", "#b7791f"]
 type RichTextCommand = "bold" | "italic" | "underline" | "createLink" | "foreColor"
 
@@ -100,7 +96,7 @@ function RichTextToolbar({ command, captureSelection, trailing }: { command: (na
   </div>
 }
 
-const editorClasses = "text-sm leading-6 outline-none empty:before:text-muted-foreground/50 empty:before:content-['Écrire…'] [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
+const editorClasses = "px-3 py-2 text-sm leading-6 outline-none empty:before:text-muted-foreground/50 empty:before:content-['Écrire…'] [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
 export function RichTextInlineEditor({ html, fallback, canEdit, onSave, className = "", placeholder = "Non renseigné" }: { html: string; fallback?: string; canEdit: boolean; onSave: (html: string) => Promise<void>; className?: string; placeholder?: string }) {
   const editor = useRef<HTMLDivElement>(null)
@@ -125,50 +121,30 @@ export function RichTextInlineEditor({ html, fallback, canEdit, onSave, classNam
   if (!editing) return <div onDoubleClick={canEdit ? () => setEditing(true) : undefined} title={canEdit ? "Double-cliquer pour modifier" : undefined} className={className} dangerouslySetInnerHTML={{ __html: safe || placeholder }} />
   return <div className="overflow-hidden rounded-xl border bg-background shadow-lg">
     <RichTextToolbar command={command} captureSelection={captureSelection} trailing={<><Button type="button" size="icon-xs" className="ml-auto" onClick={() => void save()} disabled={pending} title="Enregistrer">{pending ? <LoaderCircle className="animate-spin" /> : <Check />}</Button><Button type="button" size="icon-xs" variant="ghost" onClick={() => setEditing(false)} title="Annuler"><X /></Button></>} />
-    <div ref={editor} contentEditable suppressContentEditableWarning onMouseUp={captureSelection} onKeyUp={captureSelection} className={`min-h-24 px-3 py-2 ${editorClasses}`} />
+    <div ref={editor} contentEditable suppressContentEditableWarning onMouseUp={captureSelection} onKeyUp={captureSelection} className={`min-h-24 ${editorClasses}`} />
   </div>
 }
 
-// Toujours modifiable, comme une case Google Sheets : jamais de double-clic
-// pour faire apparaître une zone d'édition séparée. La mini barre de mise en
-// forme n'apparaît que pendant que la cellule a le focus, pour ne pas
-// encombrer visuellement tout le tableau quand plusieurs lignes sont visibles.
-export function RichTextEditorField({ value, onChange, className = "", variant = "field", ariaLabel }: { value: string; onChange: (html: string) => void; className?: string; variant?: "field" | "table"; ariaLabel?: string }) {
+export function RichTextEditorField({ value, onChange, className = "", variant = "field" }: { value: string; onChange: (html: string) => void; className?: string; variant?: "field" | "table" }) {
   const editor = useRef<HTMLDivElement>(null)
   const savedRange = useRef<Range | null>(null)
-  const [focused, setFocused] = useState(false)
+  const originalValue = useRef(value)
+  const [editing, setEditing] = useState(variant !== "table")
   const safe = sanitizeRichText(value)
 
   useEffect(() => {
-    if (editor.current && document.activeElement !== editor.current && editor.current.innerHTML !== safe) editor.current.innerHTML = safe
-  }, [safe])
+    if (editing && editor.current && document.activeElement !== editor.current && editor.current.innerHTML !== safe) editor.current.innerHTML = safe
+  }, [editing, safe])
 
   const captureSelection = () => rememberSelection(editor.current, savedRange)
   function emit() { onChange(sanitizeRichText(editor.current?.innerHTML || "")) }
   function command(name: RichTextCommand, value?: string) { if (applyRangeCommand(editor.current, savedRange, name, value)) emit() }
+  function beginEditing() { originalValue.current = value; setEditing(true) }
 
-  if (variant === "table") return <div className={`flex h-full flex-col overflow-hidden rounded-md border ${focused ? "border-input bg-background" : "border-transparent"} ${className}`}>
-    {focused && <RichTextToolbar command={command} captureSelection={captureSelection} />}
-    <div
-      ref={editor}
-      contentEditable
-      suppressContentEditableWarning
-      spellCheck
-      role="textbox"
-      aria-multiline="true"
-      aria-label={ariaLabel}
-      onFocus={() => setFocused(true)}
-      onBlur={() => setFocused(false)}
-      onInput={() => { emit(); captureSelection() }}
-      onMouseUp={captureSelection}
-      onKeyUp={captureSelection}
-      className={`eraser-autosize-cell min-h-9 flex-1 overflow-auto whitespace-pre-wrap break-words px-2 py-1.5 ${editorClasses}`}
-      style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
-    />
-  </div>
+  if (variant === "table" && !editing) return <div tabIndex={0} role="button" onDoubleClick={beginEditing} onKeyDown={(event) => { if (event.key === "Enter") beginEditing() }} title="Double-cliquer pour modifier" className={`h-full overflow-auto whitespace-pre-wrap break-words rounded-md px-2 py-1.5 outline-none focus-visible:ring-2 focus-visible:ring-ring ${className}`} style={{ overflowWrap: "anywhere", wordBreak: "break-word" }} dangerouslySetInnerHTML={{ __html: safe }} />
 
-  return <div className={`overflow-hidden rounded-xl border ${focused ? "border-ring ring-2 ring-ring/50" : ""} bg-background ${className}`}>
-    <RichTextToolbar command={command} captureSelection={captureSelection} />
-    <div ref={editor} contentEditable suppressContentEditableWarning spellCheck onFocus={() => setFocused(true)} onBlur={() => setFocused(false)} onInput={() => { emit(); captureSelection() }} onMouseUp={captureSelection} onKeyUp={captureSelection} className={`min-h-28 px-3 py-2 ${editorClasses}`} />
+  return <div className={`overflow-hidden rounded-xl border bg-background ${variant === "table" ? "h-full" : ""} ${className}`}>
+    <RichTextToolbar command={command} captureSelection={captureSelection} trailing={variant === "table" ? <><Button type="button" size="icon-xs" className="ml-auto" onMouseDown={(event) => event.preventDefault()} onClick={() => { emit(); setEditing(false) }} title="Terminer"><Check /></Button><Button type="button" size="icon-xs" variant="ghost" onMouseDown={(event) => event.preventDefault()} onClick={() => { onChange(originalValue.current); setEditing(false) }} title="Annuler"><X /></Button></> : undefined} />
+    <div ref={editor} contentEditable suppressContentEditableWarning onInput={() => { emit(); captureSelection() }} onMouseUp={captureSelection} onKeyUp={captureSelection} className={`${variant === "table" ? "max-h-[calc(100%-2.5rem)] min-h-16 overflow-auto" : "min-h-28"} ${editorClasses}`} />
   </div>
 }

@@ -32,7 +32,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; values?: unknown[]; html?: unknown[] }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; values?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
@@ -44,7 +44,7 @@ export async function POST(request: Request) {
     if (!body.fileId || !body.tabName) throw new Error("INVALID_OBJECT_INDEX")
     if (body.action === "add") await addObjectIndexRow(body.fileId, body.tabName)
     else if (body.action === "update" && typeof body.rowNumber === "number" && Array.isArray(body.values)) {
-      await updateObjectIndexRow(body.fileId, body.tabName, body.rowNumber, body.values.map((value) => String(value ?? "")), Array.isArray(body.html) ? body.html.map((value) => String(value ?? "")) : undefined)
+      await updateObjectIndexRow(body.fileId, body.tabName, body.rowNumber, body.values.map((value) => String(value ?? "")))
     } else if (body.action === "duplicate" && typeof body.rowNumber === "number") {
       await duplicateObjectIndexRow(body.fileId, body.tabName, body.rowNumber)
     } else if (body.action === "delete" && typeof body.rowNumber === "number") {
