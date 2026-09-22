@@ -1,35 +1,48 @@
-# Eraser 0.1.1-alpha.36 — persistance des magasins de bout en bout
+# Eraser 0.1.1-alpha.37 — écritures des magasins sur des lignes déterminées
 
-Cette préversion remplace le chemin de relecture encore défaillant qui
-empêchait de retrouver les magasins après leur écriture dans Google Sheets.
+Cette préversion corrige l’écriture elle-même. Les préversions précédentes
+fiabilisaient la relecture ; l’inspection de la feuille « Magasins » du Drive
+partagé montre que le problème se situait en amont.
+
+## Constat sur la feuille réelle
+
+- la feuille ne contient aucune ligne `latest:` : les derniers tirages de
+  campagne n’y sont jamais arrivés ;
+- aucune ligne de magasin n’y a été écrite depuis le 20/09, alors que les
+  feuilles PNJs, Campagnes et Relations ont bien été écrites depuis ;
+- les lignes libérées par une suppression ou un remplacement sont blanchies et
+  non retirées : la feuille est trouée (lignes vides au milieu des données).
 
 ## Cause corrigée
 
-- la relecture sans cache d’alpha.35 utilisait encore le même GET Google
-  Sheets ; dans le serveur desktop, ce GET pouvait toujours recevoir le
-  résultat antérieur à l’écriture ;
-- la ligne était alors introuvable pour le dernier tirage, les magasins
-  sauvegardés et le Créateur de session, car les trois vues passent par cette
-  même lecture.
+- les nouvelles lignes étaient confiées à `values.append`, qui doit deviner
+  seul où s’arrête le « tableau » à l’intérieur de `A:L`. Sur une feuille
+  trouée, cette détection n’est pas fiable, et le contrôle de cohérence
+  d’Eraser rejetait alors l’écriture entière ;
+- la relecture par `values:batchGetByDataFilter` renvoie la plage réellement
+  lue, mais le numéro de ligne d’un magasin restait déduit d’une constante
+  (`index + 2`). Une lecture décalée faisait écrire par-dessus la ligne
+  voisine ;
+- la vérification d’écriture relisait uniquement la plage renvoyée par Google,
+  donc un autre chemin que celui de l’affichage : le serveur pouvait annoncer
+  un succès pendant que la liste rechargée restait vide.
 
 ## Changements
 
-- les relectures Magasins utilisent désormais le POST officiel Google Sheets
-  `values:batchGetByDataFilter`, qui n’est pas cacheable comme l’ancien GET ;
-- la vérification continue de relire strictement la plage
-  `updates.updatedRange` et conserve `SHOPS_WRITE_NOT_PERSISTED` ;
-- après une sauvegarde, Eraser relit la collection des magasins sauvegardés et
-  exige d’y retrouver chaque ID ;
-- après un ajout au Créateur de session, Eraser exige de retrouver chaque ID
-  avec `inCampaign=true` et le bon PNJ lorsqu’il est renseigné ;
-- le dernier tirage est relu via une vue API dédiée qui conserve la séparation
-  des identifiants `latest:` ;
-- les listes affichées sont remplacées par les données réellement relues dans
-  Google Sheets, et non par un état local optimiste.
+- les nouvelles lignes réutilisent explicitement les lignes libres déjà
+  repérées à la lecture ; `values.append` ne reçoit plus que le surplus ;
+- le numéro de ligne est déduit de la plage que Google déclare avoir lue ;
+- la vérification d’écriture emprunte la même plage `A2:L` que
+  `listSavedShops` et `listLatestShops`, et transporte les plages écrites dans
+  son code d’erreur ;
+- le diagnostic d’écriture (Administration › Google Drive › « Tester aussi
+  l’écriture ») contrôle désormais que la ligne témoin est visible dans la
+  plage que l’application relit, et que les deux numéros de ligne concordent ;
+- `deleteSavedShops` échappe le nom d’onglet et écrit en `RAW`, comme le reste
+  du chemin magasins.
 
 ## Vérifications
 
-- format de `batchGetByDataFilter` vérifié contre la documentation Google ;
-- test CI couvrant le chemin POST de relecture, la vue `latest` et les
-  confirmations distinctes sauvegardé / Créateur de session ;
-- lint, build Vinext, build desktop et vérification du serveur embarqué.
+- lint, build Vinext et suite de tests (dont un test sur la déduction du
+  numéro de ligne à partir de la plage renvoyée par Google) ;
+- build desktop et vérification du serveur embarqué.

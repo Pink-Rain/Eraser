@@ -3022,6 +3022,33 @@ async function updateShopRows(spreadsheetId: string, writes: Array<{ range: stri
   }))
 }
 
+/**
+ * Les lignes libérées par une suppression ou un remplacement sont blanchies,
+ * pas retirées : la feuille se retrouve trouée. `values.append` doit alors
+ * deviner seul où s'arrête le « tableau » à l'intérieur de A:L, et il peut
+ * s'arrêter au premier trou. Or writeShopRows vient justement de lire toute la
+ * plage : il sait exactement quelles lignes sont libres. On les réutilise donc
+ * explicitement, et on ne laisse à l'append que le surplus.
+ */
+function freeShopRows(stored: Array<SavedShopRecord | null>, startRow: number, reserved: Set<number>) {
+  return stored.flatMap((shop, index) => {
+    const rowNumber = startRow + index
+    return shop || reserved.has(rowNumber) ? [] : [rowNumber]
+  })
+}
+
+async function placeShopRows(spreadsheetId: string, tabName: string, values: Array<Array<string | number | boolean>>, freeRows: number[]) {
+  if (!values.length) return []
+  const reused = values.slice(0, freeRows.length).map((row, index) => ({
+    range: sheetTabRange(tabName, `A${freeRows[index]}:L${freeRows[index]}`),
+    values: [row],
+  }))
+  return [
+    ...await updateShopRows(spreadsheetId, reused),
+    ...await appendShopRows(spreadsheetId, tabName, values.slice(freeRows.length)),
+  ]
+}
+
 async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
@@ -3045,20 +3072,24 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
     const receipts = await updateShopRows(sheet.spreadsheetId, replacements)
     await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
     const additions = shops.slice(targetRows.length)
-    return [...receipts, ...await appendShopRows(sheet.spreadsheetId, sheet.tabName, additions.map((shop) => shopRow(shop, pageLinked, null, options)))]
+    const freeRows = freeShopRows(stored, startRow, new Set(targetRows))
+    return [...receipts, ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, additions.map((shop) => shopRow(shop, pageLinked, null, options)), freeRows)]
   }
 
   const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
   const additions: Array<Array<string | number | boolean>> = []
+  const reserved = new Set<number>()
   for (const shop of shops) {
     const existing = existingById.get(shop.id)
     const values = shopRow(shop, pageLinked, existing?.shop ?? null, options)
-    if (existing) updates.push({ range: sheetTabRange(sheet.tabName, `A${existing.rowNumber}:L${existing.rowNumber}`), values: [values] })
-    else additions.push(values)
+    if (existing) {
+      reserved.add(existing.rowNumber)
+      updates.push({ range: sheetTabRange(sheet.tabName, `A${existing.rowNumber}:L${existing.rowNumber}`), values: [values] })
+    } else additions.push(values)
   }
   return [
     ...await updateShopRows(sheet.spreadsheetId, updates),
-    ...await appendShopRows(sheet.spreadsheetId, sheet.tabName, additions),
+    ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, additions, freeShopRows(stored, startRow, reserved)),
   ]
 }
 
