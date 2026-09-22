@@ -2,6 +2,8 @@ import { NextResponse } from "next/server"
 
 import {
   addObjectIndexRow,
+  addObjectIndexRowWithValues,
+  insertObjectIndexRow,
   deleteObjectIndexRow,
   duplicateObjectIndexRow,
   enrichObjectIndexTables,
@@ -33,7 +35,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; column?: number; html?: string; values?: unknown[] }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
@@ -49,7 +51,19 @@ export async function POST(request: Request) {
       await updateObjectIndexCell(body.fileId, body.tabName, body.rowNumber, body.column, body.html)
       return NextResponse.json({ ok: true })
     }
-    if (body.action === "add") await addObjectIndexRow(body.fileId, body.tabName)
+    // Plusieurs lignes se suppriment du bas vers le haut : retirer la première
+    // décalerait toutes les suivantes.
+    const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => typeof value === "number") : []
+    if (body.action === "add") {
+      if (Array.isArray(body.values)) await addObjectIndexRowWithValues(body.fileId, body.tabName, body.values.map((value) => String(value ?? "")))
+      else await addObjectIndexRow(body.fileId, body.tabName)
+    } else if (body.action === "insert" && typeof body.rowNumber === "number") {
+      await insertObjectIndexRow(body.fileId, body.tabName, body.rowNumber)
+    } else if (body.action === "delete" && rowNumbers.length) {
+      for (const row of [...rowNumbers].sort((left, right) => right - left)) await deleteObjectIndexRow(body.fileId, body.tabName, row)
+    } else if (body.action === "duplicate" && rowNumbers.length) {
+      for (const row of [...rowNumbers].sort((left, right) => right - left)) await duplicateObjectIndexRow(body.fileId, body.tabName, row)
+    }
     else if (body.action === "update" && typeof body.rowNumber === "number" && Array.isArray(body.values)) {
       await updateObjectIndexRow(body.fileId, body.tabName, body.rowNumber, body.values.map((value) => String(value ?? "")))
     } else if (body.action === "duplicate" && typeof body.rowNumber === "number") {

@@ -393,10 +393,41 @@ test("renders the shared sheet grid with pinned headers and editable cells", asy
   assert.match(html, /sticky top-0 z-20 flex h-\[calc\(100svh-3\.5rem-var\(--eraser-titlebar,0px\)\)\]/);
   // En-têtes de colonnes collés en haut du tableau.
   assert.match(html, /sticky top-0/);
-  assert.match(html, /Ligne/);
+  // La colonne « Ligne » a disparu : seule reste la poignée, et la première colonne
+  // de données est figée à gauche pour rester lisible pendant le défilement.
+  assert.doesNotMatch(html, /<th[^>]*>Ligne</);
+  assert.match(html, /Poignée de ligne/);
+  assert.match(html, /aria-label="Ligne 2"/);
+  assert.match(html, /left:30px/);
   // Toutes les cellules sont modifiables en permanence : aucun mode lecture.
   assert.equal((html.match(/contenteditable="true"/gi) || []).length, 2);
   assert.doesNotMatch(html, /<textarea/);
+});
+
+test("offers a ghost row only when the page can append one", async () => {
+  const { SheetGrid } = await vite.ssrLoadModule("/components/eraser/sheet-grid.tsx");
+  const props = {
+    layoutKey: "test:grid",
+    columns: [{ key: "nom", label: "Nom", width: 200, plain: true }],
+    rows: [{ key: "2", rowNumber: 2 }],
+    valueOf: () => "Épée",
+    onCommit: () => {},
+    empty: "Vide",
+  };
+  const without = renderToStaticMarkup(React.createElement(SheetGrid, props));
+  assert.doesNotMatch(without, /Ajouter une ligne/);
+  const withAppend = renderToStaticMarkup(React.createElement(SheetGrid, { ...props, rowCommands: { append: () => {} } }));
+  assert.match(withAppend, /Ajouter une ligne/);
+});
+
+test("keeps the tab bar out of the way on the website", async () => {
+  const source = await readFile(new URL("../components/eraser/app-tabs.tsx", import.meta.url), "utf8");
+  // Hors de l'application Windows, le clic droit doit rendre la main au navigateur :
+  // sans barre de titre, un onglet ouvert ici n'aurait nulle part où s'afficher.
+  assert.match(source, /dataset\.eraserTitlebar !== "true"/);
+  // Le nouvel onglet s'ouvre en arrière-plan : aucune navigation n'est déclenchée.
+  const open = source.slice(source.indexOf("const open = useCallback"), source.indexOf("const close = useCallback"));
+  assert.doesNotMatch(open, /router\.push/);
 });
 
 test("keeps rich text content out of React's hands", async () => {

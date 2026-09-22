@@ -298,7 +298,9 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
 export function RichTextView({ html, fallback = "", className = "" }: { html: string; fallback?: string; className?: string }) {
   const safe = sanitizeRichText(html || fallback)
   if (!safe.trim()) return null
-  return <div className={`${richTextRendering} ${className}`} dangerouslySetInnerHTML={{ __html: safe }} />
+  // Les cases à cocher d'un texte seulement affiché ne réagissent pas : sans éditeur
+  // derrière, un clic changerait la case à l'écran sans rien enregistrer.
+  return <div className={`${richTextRendering} [&_input]:pointer-events-none ${className}`} dangerouslySetInnerHTML={{ __html: safe }} />
 }
 
 /**

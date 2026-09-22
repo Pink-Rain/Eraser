@@ -908,13 +908,43 @@ export async function updateObjectIndexRow(fileId: string, tabName: string, rowN
   clearInventoryWorkbookCache()
 }
 
+/**
+ * Insère une ligne vide et la remplit, juste sous `afterRowNumber`. Contrairement à
+ * `addObjectIndexRow` qui ajoute à la fin, la ligne apparaît là où on l’a demandée —
+ * c’est ce qu’attend quelqu’un qui vient de Google Sheets.
+ */
+async function insertObjectIndexRowAfter(fileId: string, table: { sheetId: number; headers: string[] }, tabName: string, afterRowNumber: number, values: string[]) {
+  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + 1 }, inheritFromBefore: afterRowNumber > 1 } }] }),
+  })
+  const target = afterRowNumber + 1
+  await updateRange(fileId, sheetTabRange(tabName, `A${target}:${columnName(table.headers.length)}${target}`), [values])
+  clearObjectIndexTableCache()
+}
+
+export async function insertObjectIndexRow(fileId: string, tabName: string, afterRowNumber: number) {
+  const table = await validatedObjectIndexTable(fileId, tabName)
+  if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
+  const values = table.headers.map((header) => normalizedHeader(header) === "id" ? crypto.randomUUID() : "")
+  await insertObjectIndexRowAfter(fileId, table, tabName, afterRowNumber, values)
+}
+
+/** Ajoute une ligne à la fin, déjà remplie : c’est le formulaire « Ajouter un objet ». */
+export async function addObjectIndexRowWithValues(fileId: string, tabName: string, provided: string[]) {
+  const table = await validatedObjectIndexTable(fileId, tabName)
+  const values = table.headers.map((header, index) => normalizedHeader(header) === "id" && !String(provided[index] ?? "").trim() ? crypto.randomUUID() : String(provided[index] ?? ""))
+  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values])
+  clearObjectIndexTableCache()
+}
+
 export async function duplicateObjectIndexRow(fileId: string, tabName: string, rowNumber: number) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
   const values = table.headers.map((header, index) => normalizedHeader(header) === "id" ? crypto.randomUUID() : row.values[index] ?? "")
-  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values])
-  clearObjectIndexTableCache()
+  // La copie apparaît juste sous l’originale, comme dans Google Sheets.
+  await insertObjectIndexRowAfter(fileId, table, tabName, rowNumber, values)
 }
 
 export async function deleteObjectIndexRow(fileId: string, tabName: string, rowNumber: number) {

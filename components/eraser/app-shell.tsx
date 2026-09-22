@@ -59,6 +59,7 @@ import {
   SidebarTrigger,
 } from "@/components/ui/sidebar"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
+import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
@@ -330,6 +331,9 @@ export function AppShell({
 
   return (
     <PageLabelContext.Provider value={setCurrentPageLabel}>
+    {/* Les onglets enveloppent la barre de titre, qui les affiche, et toute la coque :
+        le clic droit sur un lien est capté au niveau du document. */}
+    <AppTabsProvider pathname={pathname} label={currentPageLabel}>
     {/* The sidebar is always dark; without this the OS-default light scrollbar
         shows up on top of it. Kept as an inline style tag (not globals.css)
         since historical CSS files must stay byte-identical to the site. */}
@@ -646,6 +650,7 @@ export function AppShell({
       </SidebarInset>
     </SidebarProvider>
     <GlobalTableChat user={{ uid: user.uid, role: user.role }} />
+    </AppTabsProvider>
     </PageLabelContext.Provider>
   )
 }

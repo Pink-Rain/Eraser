@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Minus, Pin, Square, X } from "lucide-react"
 
+import { AppTabStrip, useAppTabs } from "@/components/eraser/app-tabs"
 import type { DesktopWindowState } from "@/lib/desktop-bridge"
 
 const APP_TITLE = "Eraser - JDR"
@@ -22,6 +23,7 @@ const noDragStyle: AppRegionStyle = { WebkitAppRegion: "no-drag" }
 // and nothing about the page layout changes.
 export function DesktopTitlebar() {
   const [ready, setReady] = useState(false)
+  const tabs = useAppTabs()
   const [state, setState] = useState<DesktopWindowState>({ isMaximized: false, isPinned: false, isCollapsed: false })
   const lastMouseDownAt = useRef(0)
 
@@ -127,7 +129,10 @@ export function DesktopTitlebar() {
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/favicon.png" alt="" className="size-5 shrink-0 object-contain" style={noDragStyle} />
-        <span className="truncate text-xs font-medium tracking-wide">{APP_TITLE}</span>
+        {/* Dès qu'il y a plusieurs onglets, ce sont eux qui nomment la fenêtre. */}
+        {tabs && tabs.tabs.length > 1 && !state.isCollapsed
+          ? <AppTabStrip />
+          : <span className="truncate text-xs font-medium tracking-wide">{APP_TITLE}</span>}
         {!state.isCollapsed && (
           <div className="ml-auto flex items-center gap-0.5" style={noDragStyle} onMouseDown={(event) => event.stopPropagation()}>
             <button

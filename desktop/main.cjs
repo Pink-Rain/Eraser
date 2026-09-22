@@ -277,6 +277,9 @@ async function createWindow(url) {
     logLine(`[interface] Correcteur orthographique inchangé : ${error && error.message ? error.message : error}`)
   }
   mainWindow.webContents.on("context-menu", (_event, params) => {
+    // Sur un lien, c'est la page qui propose son menu (« ouvrir dans un nouvel
+    // onglet ») : le menu du système ferait double emploi par-dessus.
+    if (params.linkURL && !params.isEditable) return
     const items = []
     for (const suggestion of params.dictionarySuggestions || []) {
       items.push({ label: suggestion, click: () => mainWindow?.webContents.replaceMisspelling(suggestion) })

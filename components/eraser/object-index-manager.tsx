@@ -1,21 +1,11 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Boxes, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, Search, Sparkles, Trash2 } from "lucide-react"
+import { Check, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
-import {
-  AlertDialog,
-  AlertDialogAction,
-  AlertDialogCancel,
-  AlertDialogContent,
-  AlertDialogDescription,
-  AlertDialogFooter,
-  AlertDialogHeader,
-  AlertDialogTitle,
-  AlertDialogTrigger,
-} from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -25,13 +15,55 @@ function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
 }
 
+function normalize(header: string) {
+  return header.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
+}
+
 /** Les colonnes courtes restent étroites, les colonnes de récit prennent la place. */
 function columnWidthFor(header: string) {
-  const normalized = header.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
+  const normalized = normalize(header)
   if (/description|effet|note|prerequis|attribut/.test(normalized)) return 380
   if (/nom|titre|lien|image/.test(normalized)) return 220
   if (/nombre|poids|prix|encombrement|rarete|edition|actif|icone/.test(normalized)) return 120
   return 180
+}
+
+/** Les mêmes colonnes de récit se saisissent en texte enrichi dans le formulaire. */
+function isLongField(header: string) {
+  return /description|effet|note|prerequis|attribut/.test(normalize(header))
+}
+
+function isGeneratedField(header: string) {
+  return normalize(header) === "id"
+}
+
+/**
+ * Le formulaire d’ajout, construit à partir des colonnes du tableau choisi : chaque
+ * index d’objets a les siennes, il n’y a donc pas de formulaire figé à écrire.
+ */
+function ObjectForm({ headers, pending, onCancel, onSave }: { headers: string[]; pending: boolean; onCancel: () => void; onSave: (values: string[]) => void }) {
+  const [values, setValues] = useState<string[]>(() => headers.map(() => ""))
+  const set = (index: number, value: string) => setValues((current) => current.map((item, position) => position === index ? value : item))
+  const nameIndex = headers.findIndex((header) => /^nom|titre/.test(normalize(header)))
+  const named = nameIndex < 0 || values[nameIndex].trim().length > 0
+
+  return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm">
+    <div className="flex items-center justify-between gap-3">
+      <h3 className="font-display text-xl font-semibold">Nouvel objet</h3>
+      <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
+    </div>
+    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+      {headers.map((header, index) => isGeneratedField(header)
+        ? <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} placeholder="Généré si vide" /></label>
+        : isLongField(header)
+          ? <label key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField value={values[index]} onCommit={(html) => set(index, html)} /></label>
+          : <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} /></label>)}
+    </div>
+    <div className="mt-4 flex justify-end gap-2">
+      <Button type="button" variant="outline" onClick={onCancel}>Annuler</Button>
+      <Button type="button" onClick={() => onSave(values)} disabled={pending || !named}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
+    </div>
+  </section>
 }
 
 export function ObjectIndexManager({ initialTables, initialError }: { initialTables: ObjectIndexTable[]; initialError: string }) {
@@ -42,8 +74,8 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   )
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
-  const [notice, setNotice] = useState("")
   const [saving, setSaving] = useState(0)
+  const [creating, setCreating] = useState(false)
   // Incrémenté seulement quand les valeurs viennent du serveur : les cellules sont
   // alors remontées. La frappe, elle, ne doit jamais les remonter.
   const [version, setVersion] = useState(0)
@@ -113,25 +145,27 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     setVersion((current) => current + 1)
   }
 
-  async function mutate(action: "add" | "duplicate" | "delete" | "enrich" | "ensure-stack-limits", rowNumber?: number) {
-    if (!selected && action !== "enrich" && action !== "ensure-stack-limits") return
-    setPending(`${action}:${rowNumber ?? "new"}`); setError("")
+  async function mutate(body: Record<string, unknown>, label: string) {
+    if (!selected) return
+    setPending(label); setError("")
     const response = await fetch("/api/resources/object-indexes", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ action, fileId: selected?.fileId, tabName: selected?.tabName, rowNumber }),
+      body: JSON.stringify({ ...body, fileId: selected.fileId, tabName: selected.tabName }),
     })
-    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string; result?: { descriptionsAdded?: number; iconsAdded?: number; stackLimitsAdded?: number; columnsAdded?: number } }
+    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Enregistrement impossible.")
     localEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
-    if (payload.result?.stackLimitsAdded !== undefined) setNotice(`${payload.result.stackLimitsAdded} valeur(s) « Nombre max » ajoutées dans ${payload.result.columnsAdded || 0} nouveau(x) champ(s).`)
-    else if (payload.result) setNotice(`${payload.result.descriptionsAdded || 0} description(s) et ${payload.result.iconsAdded || 0} icône(s) ajoutées dans les cellules vides.`)
+    setCreating(false)
   }
 
   const busy = Boolean(pending)
+  // Trier ou filtrer détache l’ordre affiché de celui de la feuille : « insérer
+  // au-dessus » n’aurait plus de sens, l’entrée disparaît le temps du tri.
+  const inSheetOrder = !sort && !query.trim()
 
   return (
     <section className="flex flex-col gap-3">
@@ -145,16 +179,19 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
         </label>
         {selected && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
         <div className="flex flex-wrap gap-2">
-          {selected?.webViewLink && <Button asChild variant="outline"><a href={selected.webViewLink} target="_blank" rel="noreferrer">Google Sheets <ExternalLink /></a></Button>}
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
-          <Button type="button" onClick={() => void mutate("add")} disabled={!selected || busy}>{pending === "add:new" ? <LoaderCircle className="animate-spin" /> : <Plus />}Ajouter une ligne</Button>
-          <Button type="button" variant="secondary" onClick={() => void mutate("enrich")} disabled={!tables.length || busy}>{pending === "enrich:new" ? <LoaderCircle className="animate-spin" /> : <Sparkles />}Compléter</Button>
-          <Button type="button" variant="secondary" onClick={() => void mutate("ensure-stack-limits")} disabled={!tables.length || busy}>{pending === "ensure-stack-limits:new" ? <LoaderCircle className="animate-spin" /> : <Boxes />}Piles</Button>
+          <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
         </div>
       </div>
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
-      {notice && <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-2.5 text-sm">{notice}</p>}
+
+      {creating && selected && <ObjectForm
+        headers={selected.headers}
+        pending={pending === "add"}
+        onCancel={() => setCreating(false)}
+        onSave={(values) => void mutate({ action: "add", values: values.map((value, index) => isLongField(selected.headers[index]) ? value : richTextPlainText(value)) }, "add")}
+      />}
 
       {selected ? (
         <SheetGrid
@@ -167,18 +204,16 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
           onSort={setSort}
           disabled={busy}
           version={version}
+          addRowLabel="Ajouter une ligne vide"
+          rowCommands={{
+            append: () => void mutate({ action: "add" }, "add"),
+            insertBefore: inSheetOrder ? (rowKey) => void mutate({ action: "insert", rowNumber: Number(rowKey) - 1 }, "insert") : undefined,
+            insertAfter: inSheetOrder ? (rowKey) => void mutate({ action: "insert", rowNumber: Number(rowKey) }, "insert") : undefined,
+            duplicate: (rowKeys) => void mutate({ action: "duplicate", rowNumbers: rowKeys.map(Number) }, "duplicate"),
+            remove: (rowKeys) => void mutate({ action: "delete", rowNumbers: rowKeys.map(Number) }, "delete"),
+          }}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
           empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute sa première ligne."}
-          renderActions={(rowKey) => <div className="flex gap-1">
-            <Button type="button" size="icon-sm" variant="ghost" disabled={busy} onClick={() => void mutate("duplicate", Number(rowKey))} aria-label={`Dupliquer la ligne ${rowKey}`} title="Dupliquer"><Copy /></Button>
-            <AlertDialog>
-              <AlertDialogTrigger asChild><Button type="button" size="icon-sm" variant="ghost" disabled={busy} className="text-destructive" aria-label={`Supprimer la ligne ${rowKey}`} title="Supprimer"><Trash2 /></Button></AlertDialogTrigger>
-              <AlertDialogContent>
-                <AlertDialogHeader><AlertDialogTitle>Supprimer cette ligne ?</AlertDialogTitle><AlertDialogDescription>La ligne {rowKey} sera retirée du tableau Google Sheets « {selected.tabName} ».</AlertDialogDescription></AlertDialogHeader>
-                <AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate("delete", Number(rowKey))}>Supprimer</AlertDialogAction></AlertDialogFooter>
-              </AlertDialogContent>
-            </AlertDialog>
-          </div>}
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun Google Sheets n’a été trouvé dans le dossier « Objets ».</div> : null}
     </section>
