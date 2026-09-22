@@ -25,6 +25,7 @@ import {
   type ClassImageScriptAction,
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
+import { worldIndexDefinitions } from "@/lib/world-index-definitions"
 import { getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
@@ -366,7 +367,7 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
   return response
 }
 
-async function googleSheetsJson<T>(path: string, init?: RequestInit) {
+export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
   const response = await googleSheetsFetch(path, init)
   return response.json() as Promise<T>
 }
@@ -396,7 +397,7 @@ function cacheRangePromise(cacheKey: string, promise: Promise<string[][]>) {
   return promise
 }
 
-function clearSpreadsheetReadCache(spreadsheetId: string) {
+export function clearSpreadsheetReadCache(spreadsheetId: string) {
   const prefix = `${spreadsheetId}:`
   for (const key of rangeReadCache.keys()) {
     if (key.startsWith(prefix)) rangeReadCache.delete(key)
@@ -1858,7 +1859,7 @@ async function ensureClassImagesSynced() {
   }).onConflictDoNothing()
 }
 
-type StructuredSheetDefinition = {
+export type StructuredSheetDefinition = {
   key: JdrSheetKey
   name: string
   tabName: string
@@ -1988,6 +1989,17 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     headers: ["Titre", "Contenu"],
     columnWidths: [240, 720],
   },
+  // Index du monde (Ressources) : colonnes, onglets supplémentaires et liens entre
+  // index sont décrits dans lib/world-index-definitions.ts. Seul le premier onglet
+  // de chaque classeur est déclaré ici ; les suivants sont ajoutés par lib/world-indexes.ts.
+  ...Object.values(worldIndexDefinitions).map((index): StructuredSheetDefinition => ({
+    key: index.key,
+    name: index.sheetName,
+    tabName: index.tabs[0].name,
+    frozenColumns: 1,
+    headers: index.tabs[0].headers,
+    columnWidths: index.tabs[0].widths,
+  })),
   {
     key: "npcs",
     name: "PNJs",
@@ -2006,11 +2018,15 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
   },
 ]
 
-async function configureStructuredSheet(spreadsheetId: string, definition: StructuredSheetDefinition) {
-  const metadata = await googleSheetsJson<{
+/**
+ * Met en forme un onglet structuré : le premier du classeur par défaut, ou celui
+ * désigné par `targetSheetId` pour les classeurs à plusieurs onglets.
+ */
+export async function configureStructuredSheet(spreadsheetId: string, definition: StructuredSheetDefinition, targetSheetId?: number) {
+  const metadata = targetSheetId === undefined ? await googleSheetsJson<{
     sheets?: Array<{ properties?: { sheetId?: number } }>
-  }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties.sheetId`)
-  const sheetId = metadata.sheets?.[0]?.properties?.sheetId
+  }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties.sheetId`) : null
+  const sheetId = targetSheetId ?? metadata?.sheets?.[0]?.properties?.sheetId
   if (sheetId === undefined) throw new Error("SHEETS_METADATA_UNAVAILABLE")
 
   const requests: Array<Record<string, unknown>> = [
@@ -2122,7 +2138,7 @@ async function configureStructuredSheet(spreadsheetId: string, definition: Struc
   await updateRange(spreadsheetId, sheetTabRange(definition.tabName, `A1:${lastColumn}1`), [definition.headers])
 }
 
-function columnName(columnCount: number) {
+export function columnName(columnCount: number) {
   let current = columnCount
   let result = ""
   while (current > 0) {
@@ -2749,7 +2765,7 @@ const jdrSheetHeaderChecked = new Set<string>()
 // erreur d'analyse de plage, y compris l'ajout d'un personnage à une campagne.
 const verifiedJdrSheetTabs = new Set<string>()
 
-async function spreadsheetTabs(spreadsheetId: string) {
+export async function spreadsheetTabs(spreadsheetId: string) {
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(
     `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
   )
