@@ -72,12 +72,23 @@ function EntryForm({ headers, linked, itemLabel, pending, onCancel, onSave }: { 
   </section>
 }
 
+type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean }
+
+/**
+ * Les quatre pages d'index rendent ce composant au même endroit de l'arbre : sans clé,
+ * React le réutiliserait d'une page à l'autre et garderait l'état de la première
+ * visitée (ses données, son onglet, son tri). La clé repart de zéro à chaque index.
+ */
+export function WorldIndexManager(props: WorldIndexManagerProps) {
+  return <WorldIndexView key={props.indexKey} {...props} />
+}
+
 /**
  * Tableur d'un index du monde (créatures, lieux, religions, peuples), branché sur
  * son classeur Google Sheets. Les colonnes liées d'un index à l'autre se complètent
  * côté serveur ; le tableau se recharge quand un lien a touché l'index affiché.
  */
-export function WorldIndexManager({ indexKey, initialData, initialError, nameOpensDetails = false }: { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean }) {
+function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails = false }: WorldIndexManagerProps) {
   const definition = worldIndexDefinitions[indexKey]
   const [data, setData] = useState(initialData)
   const [tabName, setTabName] = usePersistentState(`eraser:world-index:${indexKey}:tab`, definition.tabs[0].name, (value): value is string => typeof value === "string")
