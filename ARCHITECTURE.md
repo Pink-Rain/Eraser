@@ -108,6 +108,61 @@ raccourcis existants.
 `electron-updater` vérifie les Releases au démarrage et toutes les six heures,
 télécharge en arrière-plan et installe au redémarrage ou à la fermeture.
 
+## Caches
+
+Rien ici n'est un cache HTTP : ce sont des variables de module, vivantes tant
+que le serveur local tourne, et vidées à sa fermeture. Elles existent parce que
+la source métier est distante — Google Sheets, Google Drive, le Worker partagé —
+et qu'une même page demande souvent la même chose plusieurs fois.
+
+Chacune a une portée et une durée propres. La règle est qu'un cache ne vide
+jamais un cache qu'il ne comprend pas : l'écriture qui invalide est toujours au
+plus près de la donnée qu'elle change.
+
+| Cache | Fichier | Durée | Vidé par |
+| --- | --- | --- | --- |
+| `rangeReadCache` | `lib/google-sheets.ts` | 3 min | toute écriture dans le classeur concerné (`clearSpreadsheetReadCache`) |
+| `objectIndexTableCache` | `lib/google-sheets.ts` | 5 min | `markObjectIndexFileStale` pour un classeur, `clearObjectIndexTableCache` pour tout l'index |
+| `staleObjectIndexFiles` | `lib/google-sheets.ts` | — | consommé par la lecture suivante de l'index |
+| `inventoryWorkbookCache` | `lib/google-sheets.ts` | 1 min | toute écriture d'inventaire, et tout changement de l'index d'objets |
+| `characterSheetCache` | `lib/google-sheets.ts` | 30 s | réécrit par l'enregistrement de la fiche |
+| `sheetRowCache` | `lib/google-sheets.ts` | 10 min | jamais : un identifiant ne change pas de ligne sans suppression |
+| `sheetRecordCache` | `lib/jdr-sheets.ts` | 5 min | la liaison d'une feuille |
+| `workbookFilesCache` | `lib/class-content.ts` | 1 min | l'actualisation demandée depuis l'Index des classes |
+| `sessionAccountCache` | `lib/site-auth.ts` | 30 s | tout changement de rôle ou de statut |
+| `remoteLinksCache` | `lib/identity-links.ts` | 30 s | l'écriture d'un lien d'identité |
+| `pointerCache`, `folderListing` | `lib/shared-media.ts` | 5 min | l'envoi d'un média |
+| `cachedAccessToken` | `lib/google-oauth.ts` | expiration du jeton | la révocation ou le changement de réglages OAuth |
+| `tokenCache` | `lib/google-service-account.ts` | expiration du jeton | — |
+
+Deux mécanismes voisins ne sont pas des caches mais des garde-fous, et se
+lisent comme tels : `pendingJdrSheetResolutions` déduplique deux résolutions
+simultanées de la même feuille, `missingJdrSheetRetryAt` empêche de redemander
+en boucle une feuille réellement absente.
+
+Côté client, une seule chose est conservée : les préférences d'interface dans
+`localStorage`, lues par `hooks/use-persistent-state.ts`. Ce ne sont jamais des
+données de jeu, uniquement l'état de l'affichage.
+
+### Ce qui n'est délibérément pas mis en cache
+
+Les magasins lisent Sheets par `readRangeFresh`, qui passe par un POST
+`batchGetByDataFilter`. Le serveur desktop sait dédupliquer deux GET identiques
+même avec `no-store` : après une écriture, la relecture recevait alors encore
+la réponse précédente. Ce chemin doit le rester.
+
+## Chemin critique de l'affichage
+
+La coque de `app/layout.tsx` est rendue à chaque navigation, y compris les
+navigations internes. Elle ne doit donc jamais attendre une lecture distante :
+les listes de la barre latérale lui sont transmises en vol et se remplissent
+quand elles arrivent. Y remettre un `await` retarderait le premier octet de
+toutes les pages, y compris celles qui n'ont pas besoin de ces listes.
+
+De la même façon, les préférences d'interface sont lues dès le premier rendu
+client par `useSyncExternalStore`, et non restaurées après peinture : une
+restauration différée coûte un rendu complet de plus et un saut visible.
+
 ## Dettes techniques suivies séparément
 
 - Rendre obligatoires l’URL et la clé du Worker pour les Releases distribuées.
