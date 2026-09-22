@@ -211,6 +211,9 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     if (initialInventory || controlled) return
     let active = true
     fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory(payload.inventory); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
+    // Le résumé arrive sans le catalogue : on le complète ensuite en tâche de fond,
+    // pour les objets rangés avant que leur mise en forme ne soit conservée.
+    fetch(inventoryEndpoint).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } })).then(({ response, payload }) => { if (active && response.ok && payload.inventory) { setOwnInventory(payload.inventory); setCatalogLoaded(true) } }).catch(() => { /* le résumé suffit à travailler */ })
     return () => { active = false }
   }, [controlled, initialInventory, inventoryEndpoint])
 

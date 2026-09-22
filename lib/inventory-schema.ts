@@ -108,8 +108,9 @@ export const inventoryWorkbookTabs = [
     headers: [
       "ID", "ID personnage", "ID contenant", "Emplacement", "ID objet", "Nombre", "Nom personnalisé",
       "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé", "Modificateurs",
+      "Nom mis en forme", "Description mise en forme", "Effet mis en forme",
     ],
-    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100, 320],
+    widths: [170, 190, 170, 110, 170, 100, 220, 360, 130, 150, 320, 170, 100, 320, 220, 360, 320],
   },
 ] as const
 

@@ -2203,7 +2203,7 @@ async function inventoryWorkbookProperties(spreadsheetId: string) {
 }
 
 async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
-  const syncKey = `inventory-workbook:v4:${spreadsheetId}`
+  const syncKey = `inventory-workbook:v5:${spreadsheetId}`
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (alreadySynced) return
 
@@ -4290,6 +4290,14 @@ type StoredInventoryContent = {
   updatedAt: string
   equipped: boolean
   modifiers: string
+  /**
+   * Copie mise en forme du texte de l'Index des objets. L'inventaire conserve déjà
+   * une copie du texte brut ; garder la version mise en forme à côté évite de relire
+   * tout le catalogue Drive à chaque ouverture de fiche pour afficher un mot en gras.
+   */
+  nameHtml: string
+  descriptionHtml: string
+  effectHtml: string
   rowNumber: number
 }
 
@@ -4458,7 +4466,7 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     sheetTabRange("Types de contenants", "A2:F"),
     sheetTabRange(inventoryContainerTab, "A2:I"),
     sheetTabRange(inventoryItemsTab, "A2:S"),
-    sheetTabRange(inventoryContentsTab, "A2:N"),
+    sheetTabRange(inventoryContentsTab, "A2:Q"),
   ]
   const parameters = new URLSearchParams()
   ranges.forEach((range) => parameters.append("ranges", range))
@@ -4504,6 +4512,9 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
       updatedAt: row[11] || "",
       equipped: sheetValueIsChecked(row[12]),
       modifiers: row[13] || "",
+      nameHtml: row[14] || "",
+      descriptionHtml: row[15] || "",
+      effectHtml: row[16] || "",
       rowNumber: index + 2,
     }] : []),
   }
@@ -4527,6 +4538,9 @@ function inventoryContentRow(content: StoredInventoryContent) {
     content.updatedAt,
     content.equipped ? "Oui" : "Non",
     content.modifiers,
+    content.nameHtml,
+    content.descriptionHtml,
+    content.effectHtml,
   ]
 }
 
@@ -4546,6 +4560,9 @@ function makeEmptyInventorySlot(characterId: string, containerId: string, index:
     updatedAt: new Date().toISOString(),
     equipped: false,
     modifiers: "",
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
     rowNumber: 0,
   }
 }
@@ -4594,7 +4611,7 @@ async function appendInventorySlots(
     }
   }
   if (rows.length) {
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), rows.map(inventoryContentRow))
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), rows.map(inventoryContentRow))
     clearInventoryWorkbookCache()
   }
 }
@@ -4758,7 +4775,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     range: sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`), values: [[now]],
   }))
   occupied.forEach((content, index) => updates.push({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
     values: [inventoryContentRow({ ...content, containerId: backpack!.id, index: index + 1, equipped: false, updatedAt: now })],
   }))
   const legacyRows: StoredInventoryContent[] = legacyItems.map((item, index) => ({
@@ -4766,7 +4783,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     id: `NPC-LEGACY-${npcId}-${item.id || index}`,
     quantity: item.quantity, customName: item.name, customDescription: item.notes, type: "Objet", updatedAt: now,
   })).filter((item) => !workbook.contents.some((content) => content.id === item.id))
-  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), legacyRows.map(inventoryContentRow))
+  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), legacyRows.map(inventoryContentRow))
   if (updates.length) await updateRanges(workbook.spreadsheetId, updates)
   clearInventoryWorkbookCache()
   workbook = await readInventoryWorkbook(includeCatalog)
@@ -4786,9 +4803,9 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
     id: content.itemId || `PERSONNALISE-${content.id}`,
     name: content.customName,
     description: content.customDescription,
-    nameHtml: "",
-    descriptionHtml: "",
-    effectHtml: "",
+    nameHtml: content.nameHtml,
+    descriptionHtml: content.descriptionHtml,
+    effectHtml: content.effectHtml,
     type: content.type,
     subtype: content.subtype,
     effect: content.effect,
@@ -4810,16 +4827,18 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
 
 function inventoryItemForContent(content: StoredInventoryContent, indexedItem: InventoryItemRecord | undefined) {
   if (!indexedItem) return customInventoryItem(content)
-  // Un texte réécrit dans l'inventaire est du texte brut : il remplace alors la
-  // version mise en forme venue de l'index, sinon l'ancienne resterait affichée.
+  // L'inventaire garde sa propre copie du texte et de sa mise en forme. Elle prime,
+  // car c'est elle qui reflète ce que la personne voit et modifie ; on ne retombe sur
+  // celle du catalogue que si l'emplacement n'en a pas encore (inventaires remplis
+  // avant que la mise en forme ne soit conservée).
   return {
     ...indexedItem,
     name: content.customName || indexedItem.name,
     description: content.customDescription || indexedItem.description,
     effect: content.effect || indexedItem.effect,
-    nameHtml: content.customName ? "" : indexedItem.nameHtml,
-    descriptionHtml: content.customDescription ? "" : indexedItem.descriptionHtml,
-    effectHtml: content.effect ? "" : indexedItem.effectHtml,
+    nameHtml: content.nameHtml || (content.customName && content.customName !== indexedItem.name ? "" : indexedItem.nameHtml),
+    descriptionHtml: content.descriptionHtml || (content.customDescription && content.customDescription !== indexedItem.description ? "" : indexedItem.descriptionHtml),
+    effectHtml: content.effectHtml || (content.effect && content.effect !== indexedItem.effect ? "" : indexedItem.effectHtml),
     type: content.type || indexedItem.type,
     subtype: content.subtype || indexedItem.subtype,
   }
@@ -4936,7 +4955,7 @@ export async function copyCharacterInventory(sourceCharacterId: string, targetCh
       updatedAt: now,
       rowNumber: 0,
     }))
-  if (clonedContents.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), clonedContents.map(inventoryContentRow))
+  if (clonedContents.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), clonedContents.map(inventoryContentRow))
   clearInventoryWorkbookCache()
 }
 
@@ -5056,7 +5075,7 @@ export async function deleteCharacterInventoryContainer(characterId: string, con
 async function updateStoredInventoryContent(workbook: InventoryWorkbook, content: StoredInventoryContent) {
   await updateRange(
     workbook.spreadsheetId,
-    sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
     [inventoryContentRow(content)],
   )
   workbook.contents = workbook.contents.map((candidate) => candidate.id === content.id ? content : candidate)
@@ -5102,7 +5121,7 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     if (!unlimitedContainer) throw new Error("INVENTORY_FULL")
     const nextIndex = workbook.contents.filter((content) => content.containerId === unlimitedContainer.id).reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, unlimitedContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), [inventoryContentRow(addedSlot)])
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     target = refreshed.contents.find((content) => content.id === addedSlot.id)
@@ -5118,6 +5137,9 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     type: item.type,
     subtype: item.subtype,
     effect: item.effect,
+    nameHtml: item.nameHtml,
+    descriptionHtml: item.descriptionHtml,
+    effectHtml: item.effectHtml,
     updatedAt: new Date().toISOString(),
   }
   await updateStoredInventoryContent(workbook, updated)
@@ -5151,6 +5173,9 @@ export async function createCharacterInventoryItem(
     type,
     subtype: input.subtype.trim(),
     effect: input.effect.trim(),
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
     updatedAt: new Date().toISOString(),
   })
   return buildCharacterInventory(characterId, workbook)
@@ -5167,7 +5192,7 @@ export async function setCharacterInventoryItemQuantity(characterId: string, slo
   const maximum = item?.maxQuantity ?? 99
   const nextQuantity = Math.max(0, Math.min(maximum, Math.trunc(quantity)))
   const updated: StoredInventoryContent = nextQuantity === 0
-    ? { ...content, itemId: "", quantity: 0, customName: "", customDescription: "", type: "", subtype: "", effect: "", equipped: false, modifiers: "", updatedAt: new Date().toISOString() }
+    ? { ...content, itemId: "", quantity: 0, customName: "", customDescription: "", type: "", subtype: "", effect: "", equipped: false, modifiers: "", nameHtml: "", descriptionHtml: "", effectHtml: "", updatedAt: new Date().toISOString() }
     : { ...content, quantity: nextQuantity, updatedAt: new Date().toISOString() }
   await updateStoredInventoryContent(workbook, updated)
   return buildCharacterInventory(characterId, workbook)
@@ -5217,6 +5242,9 @@ export async function updateCharacterInventoryItem(characterId: string, slotId: 
     type,
     subtype: input.subtype.trim(),
     effect: input.effect.trim(),
+    nameHtml: name === content.customName ? content.nameHtml : "",
+    descriptionHtml: input.description.trim() === content.customDescription ? content.descriptionHtml : "",
+    effectHtml: input.effect.trim() === content.effect ? content.effectHtml : "",
     updatedAt: new Date().toISOString(),
   })
   return buildCharacterInventory(characterId, workbook)
@@ -5243,7 +5271,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
   if (!target && targetCategory === "Esthétique") {
     const nextIndex = targets.reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, targetContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:N"), [inventoryContentRow(addedSlot)])
+    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     targets = refreshed.contents.filter((content) => content.containerId === targetContainer.id).sort((left, right) => left.index - right.index)
@@ -5263,6 +5291,9 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     effect: source.effect,
     equipped: targetCategory !== "Bourse" && source.equipped,
     modifiers: source.modifiers,
+    nameHtml: source.nameHtml,
+    descriptionHtml: source.descriptionHtml,
+    effectHtml: source.effectHtml,
     updatedAt: now,
   })
   await updateStoredInventoryContent(workbook, {
@@ -5276,6 +5307,9 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
     effect: "",
     equipped: false,
     modifiers: "",
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
     updatedAt: now,
   })
   return buildCharacterInventory(characterId, workbook)
@@ -5323,6 +5357,9 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     effect: source.effect,
     equipped: targetContainer ? inventoryContainerCategory(targetContainer, typeById) !== "Bourse" && source.equipped : false,
     modifiers: source.modifiers,
+    nameHtml: source.nameHtml,
+    descriptionHtml: source.descriptionHtml,
+    effectHtml: source.effectHtml,
     updatedAt: now,
   }
   const updatedSource: StoredInventoryContent = {
@@ -5336,10 +5373,13 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     effect: "",
     equipped: false,
     modifiers: "",
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
     updatedAt: now,
   }
   await updateRanges(workbook.spreadsheetId, [updatedTarget, updatedSource].map((content) => ({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:N${content.rowNumber}`),
+    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
     values: [inventoryContentRow(content)],
   })))
   workbook.contents = workbook.contents.map((content) => content.id === updatedTarget.id ? updatedTarget : content.id === updatedSource.id ? updatedSource : content)

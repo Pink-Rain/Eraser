@@ -478,6 +478,12 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory(payload.inventory) })
       .catch(() => { /* la fiche reste utilisable sans ses objets */ })
       .finally(() => { if (active) setInventoryLoading(false) })
+    // Puis le catalogue complet, en tâche de fond : il porte la mise en forme et les
+    // icônes des objets rangés avant qu'elles ne soient recopiées dans l'inventaire.
+    fetch(inventoryEndpoint)
+      .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
+      .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory(payload.inventory) })
+      .catch(() => { /* le résumé suffit à jouer */ })
     return () => { active = false }
   }, [initialInventory, inventoryEndpoint])
 

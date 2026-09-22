@@ -61,6 +61,30 @@ function rerollShopItem(items: ShopGeneratorItem[], shop: GeneratedShop) {
 
 const shopRichText = "[&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
+/**
+ * Les magasins enregistrés avant que la mise en forme ne soit conservée n'ont que du
+ * texte brut. On la retrouve dans le catalogue, tant que le texte n'a pas été réécrit
+ * entre-temps.
+ */
+export function shopItemsWithCatalogRichText<T extends { items: GeneratedShopItem[] }>(shops: T[], catalog: ShopGeneratorItem[]): T[] {
+  if (!catalog.length) return shops
+  const byId = new Map(catalog.map((item) => [item.id, item]))
+  return shops.map((shop) => ({
+    ...shop,
+    items: shop.items.map((item) => {
+      if (item.nameHtml || item.descriptionHtml || item.effectHtml) return item
+      const source = byId.get(item.id)
+      if (!source) return item
+      return {
+        ...item,
+        nameHtml: source.name === item.name ? source.nameHtml : "",
+        descriptionHtml: source.description === item.description ? source.descriptionHtml : "",
+        effectHtml: source.effect === item.effect ? source.effectHtml : "",
+      }
+    }),
+  }))
+}
+
 export function rerollShop(items: ShopGeneratorItem[], shop: GeneratedShop) {
   return { ...shop, items: drawItems(items, shop.key, itemCounts[shop.size]) }
 }
@@ -330,13 +354,13 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
 
 export function SavedShopCollection({ initialShops, pageLinked, npcs = [], generatorItems = [], mode = "saved" }: { initialShops: SavedShopRecord[]; pageLinked: string; npcs?: CampaignNpcRecord[]; generatorItems?: ShopGeneratorItem[]; mode?: "saved" | "locations" | "view" }) {
   const router = useRouter()
-  const [shops, setShops] = useState(initialShops); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [deleteTarget, setDeleteTarget] = useState<GeneratedShop | null>(null); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null)
+  const [shops, setShops] = useState(() => shopItemsWithCatalogRichText(initialShops, generatorItems)); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [deleteTarget, setDeleteTarget] = useState<GeneratedShop | null>(null); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null)
 
   async function reloadCollection(expected: GeneratedShop[] = []) {
     const loaded = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: mode === "locations" })
     if (expected.length) requirePersistedShops(expected, loaded, "Le magasin n’est pas retrouvé dans Google Sheets après son enregistrement.")
     const focusedId = new URLSearchParams(window.location.search).get("shop")
-    setShops(focusedId ? loaded.filter((shop) => shop.id === focusedId) : loaded)
+    setShops(shopItemsWithCatalogRichText(focusedId ? loaded.filter((shop) => shop.id === focusedId) : loaded, generatorItems))
     return loaded
   }
 

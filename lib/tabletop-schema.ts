@@ -88,6 +88,10 @@ export type TabletopShopDetail = {
     name: string
     description: string
     effect: string
+    /** Mise en forme d'origine de l'Index des objets, quand elle est connue. */
+    nameHtml?: string
+    descriptionHtml?: string
+    effectHtml?: string
     type: string
     subtype: string
     price: string

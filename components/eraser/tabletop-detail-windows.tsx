@@ -3,6 +3,7 @@
 /* eslint-disable @next/next/no-img-element -- portraits use authenticated, dynamic API URLs */
 
 import { ChevronDown, Heart, PackageOpen, Store, UserRound, X } from "lucide-react"
+import { sanitizeRichText } from "@/components/eraser/rich-text-inline-editor"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -26,6 +27,8 @@ type Props = {
   onClose: (id: string) => void
   onToggle: (id: string) => void
 }
+
+const detailRichText = "[&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
 function LifeBar({ current, total }: { current: number; total: number }) {
   const width = total > 0 ? Math.max(0, Math.min(100, current / total * 100)) : 0
@@ -77,10 +80,14 @@ function ShopContent({ shop }: { shop: TabletopShopDetail | null }) {
           <div className="flex items-start gap-2.5">
             <span className="grid size-8 shrink-0 place-items-center rounded-lg border bg-background text-sm">{item.icon || "◇"}</span>
             <div className="min-w-0 flex-1">
-              <div className="flex flex-wrap items-center gap-1.5"><p className="font-semibold">{item.name}</p><Badge variant="outline" className="text-[9px]">{rarityLabels[item.rarity]}</Badge></div>
+              <div className="flex flex-wrap items-center gap-1.5"><p className="font-semibold">{item.nameHtml?.trim() ? <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : item.name}</p><Badge variant="outline" className="text-[9px]">{rarityLabels[item.rarity]}</Badge></div>
               <p className="text-[10px] text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}</p>
-              {item.description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>}
-              {item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>}
+              {item.descriptionHtml?.trim()
+                ? <p className={`mt-1 text-xs leading-5 text-muted-foreground ${detailRichText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.descriptionHtml) }} />
+                : item.description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>}
+              {item.effectHtml?.trim()
+                ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /></p>
+                : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>}
             </div>
             {item.price && <Badge variant="secondary" className="shrink-0">{item.price}</Badge>}
           </div>
