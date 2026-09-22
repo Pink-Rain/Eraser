@@ -151,6 +151,23 @@ test("normalizes every Google Sheets primitive before the UI reads it", async ()
   );
 });
 
+test("derives the sheet row number from the range Google actually read", async () => {
+  const { sheetRangeStartRow } = await vite.ssrLoadModule(
+    "/lib/google-sheet-values.ts",
+  );
+  // Plage demandée par l'application pour lister les magasins.
+  assert.equal(sheetRangeStartRow("'Magasins'!A2:L"), 2);
+  // Plage renvoyée par Google après un append : c'est elle qui fait foi.
+  assert.equal(sheetRangeStartRow("Magasins!A57:L57"), 57);
+  // Une lecture décalée doit décaler le numéro de ligne, pas rester sur 2.
+  assert.equal(sheetRangeStartRow("Magasins!A9:L120"), 9);
+  // Un onglet dont le nom contient « ! » ne doit pas tromper la découpe.
+  assert.equal(sheetRangeStartRow("'Maga!sins'!A4:L4"), 4);
+  // Sans ligne explicite, aucune déduction possible.
+  assert.equal(sheetRangeStartRow("'Magasins'!A:L"), null);
+  assert.equal(sheetRangeStartRow(undefined), null);
+});
+
 test("spends and recovers spell charges only at the edge of the bar", async () => {
   const { nextSpellChargeValue, SpellChargeStars } = await vite.ssrLoadModule(
     "/components/eraser/spell-charges.tsx",

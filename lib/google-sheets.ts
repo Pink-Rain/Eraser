@@ -65,7 +65,7 @@ import {
 } from "@/lib/inventory-schema"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
-import { normalizeGoogleSheetRows, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
 
 export type CharacterRecord = {
@@ -428,13 +428,13 @@ export async function readRange(
  * plage demandée. Les magasins utilisent ce chemin pour leurs lectures et
  * pour la vérification de persistance.
  */
-async function readRangeFresh(
+async function readRangeFreshWithOffset(
   spreadsheetId: string,
   range: string,
   valueRenderOption: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA" = "FORMATTED_VALUE",
 ) {
   const payload = await googleSheetsJson<{
-    valueRanges?: Array<{ valueRange?: { values?: GoogleSheetCellValue[][] } }>
+    valueRanges?: Array<{ valueRange?: { range?: string; values?: GoogleSheetCellValue[][] } }>
   }>(`spreadsheets/${spreadsheetId}/values:batchGetByDataFilter`, {
     method: "POST",
     cache: "no-store",
@@ -445,7 +445,22 @@ async function readRangeFresh(
       dateTimeRenderOption: "FORMATTED_STRING",
     }),
   })
-  return normalizeGoogleSheetRows(payload.valueRanges?.[0]?.valueRange?.values)
+  const matched = payload.valueRanges?.[0]?.valueRange
+  return {
+    rows: normalizeGoogleSheetRows(matched?.values),
+    // Google renvoie la plage réellement lue. Elle ne commence pas forcément là
+    // où on l'a demandée, donc le numéro de ligne se déduit d'elle, jamais d'une
+    // constante : c'est ce décalage qui faisait écrire par-dessus la mauvaise ligne.
+    startRow: sheetRangeStartRow(matched?.range) ?? sheetRangeStartRow(range) ?? 1,
+  }
+}
+
+async function readRangeFresh(
+  spreadsheetId: string,
+  range: string,
+  valueRenderOption: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA" = "FORMATTED_VALUE",
+) {
+  return (await readRangeFreshWithOffset(spreadsheetId, range, valueRenderOption)).rows
 }
 
 async function readRanges(
@@ -2747,8 +2762,24 @@ async function testJdrSheetWrite(spreadsheetId: string, definition: StructuredSh
     writtenRange = write.updatedRange
     clearSpreadsheetReadCache(spreadsheetId)
     const rows = await readRangeFresh(spreadsheetId, writtenRange)
-    const confirmed = rows.some((row) => row[0] === marker)
-    if (!confirmed) return `\u00c9criture accept\u00e9e par Google dans ${writtenRange}, mais la ligne t\u00e9moin est introuvable \u00e0 la relecture.`
+    if (!rows.some((row) => row[0] === marker)) {
+      return `\u00c9criture accept\u00e9e par Google dans ${writtenRange}, mais la ligne t\u00e9moin est introuvable \u00e0 la relecture.`
+    }
+    // La relecture ci-dessus vise la plage écrite. L'application, elle, relit
+    // toujours la plage complète à partir de la ligne 2 : une ligne visible
+    // dans la première et absente de la seconde est exactement ce qui faisait
+    // échouer l'enregistrement après un succès annoncé. Le diagnostic doit donc
+    // contrôler les deux, et vérifier au passage le numéro de ligne renvoyé.
+    const listing = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(definition.tabName, `A2:${lastColumn}`))
+    const markerIndex = listing.rows.findIndex((row) => row[0] === marker)
+    if (markerIndex < 0) {
+      return `La ligne t\u00e9moin est lisible dans ${writtenRange}, mais absente de la plage ${definition.tabName}!A2:${lastColumn} que l'application relit. C'est ce d\u00e9calage qui emp\u00eache de retrouver les magasins apr\u00e8s leur enregistrement.`
+    }
+    const writtenRow = sheetRangeStartRow(writtenRange)
+    const listedRow = listing.startRow + markerIndex
+    if (writtenRow !== null && writtenRow !== listedRow) {
+      return `Google annonce la ligne ${writtenRow} (${writtenRange}) mais la relecture compl\u00e8te la place en ligne ${listedRow}. Les \u00e9critures suivantes viseraient la mauvaise ligne.`
+    }
     return ""
   } catch (error) {
     return error instanceof Error ? error.message : "UNKNOWN_ERROR"
@@ -2943,10 +2974,12 @@ export async function listLatestShops(pageLinked: string): Promise<GeneratedShop
 
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
   const receipts = await writeShopRows(pageLinked, shops, options)
-  // On relit la feuille pour vérifier que les lignes y sont vraiment. Sans ce
-  // contrôle, une écriture acceptée par Google mais sans effet (mauvais onglet,
-  // plage hors grille…) affichait « Magasin(s) sauvegardé(s) » alors que rien
-  // n'était enregistré : impossible à distinguer d'un succès côté utilisateur.
+  // La vérification relit la feuille par la plage complète « A2:L », celle que
+  // listSavedShops et listLatestShops utilisent. Relire seulement la plage
+  // renvoyée par l'écriture laissait passer le cas qui bloquait l'application :
+  // Google confirmait la ligne à l'endroit écrit, le serveur annonçait un
+  // succès, et la liste que l'interface recharge juste après ne la contenait
+  // pas. Vérifier par le même chemin que la lecture rend ce cas impossible.
   if (!shops.length) return []
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
@@ -2955,8 +2988,8 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
   for (const delay of delays) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
     clearSpreadsheetReadCache(sheet.spreadsheetId)
-    const written = await Promise.all(receipts.map((receipt) => readRangeFresh(sheet.spreadsheetId, receipt.range)))
-    storedById = new Map(written.flatMap((rows) => rows.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : [])))
+    const listed = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
+    storedById = new Map(listed.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : []))
     if (shops.every((shop) => storedById.has(shop.id))) break
   }
   const invalid = shops.filter((shop) => {
@@ -2966,7 +2999,7 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
     if (options.npcId !== undefined && stored.npcId !== options.npcId) return true
     return false
   })
-  if (invalid.length) throw new Error(`SHOPS_WRITE_NOT_PERSISTED:${invalid.length}/${shops.length}:${sheet.tabName}`)
+  if (invalid.length) throw new Error(`SHOPS_WRITE_NOT_PERSISTED:${invalid.length}/${shops.length}:${sheet.tabName}:${receipts.map((receipt) => receipt.range).join(",") || "aucune plage"}`)
   return shops.flatMap((shop) => {
     const stored = storedById.get(shop.id)
     return stored ? [stored] : []
@@ -2992,15 +3025,15 @@ async function updateShopRows(spreadsheetId: string, writes: Array<{ range: stri
 async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
-  const rows = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
+  const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
   const stored = rows.map(savedShopFromRow)
   const existingById = new Map<string, { shop: SavedShopRecord; rowNumber: number }>()
   stored.forEach((shop, index) => {
-    if (shop) existingById.set(shop.id, { shop, rowNumber: index + 2 })
+    if (shop) existingById.set(shop.id, { shop, rowNumber: startRow + index })
   })
 
   if (options.replace || options.replaceLatest) {
-    const targetRows = stored.flatMap((shop, index) => shop?.pageLinked === pageLinked && (!options.replaceLatest || shop.id.startsWith("latest:")) ? [index + 2] : [])
+    const targetRows = stored.flatMap((shop, index) => shop?.pageLinked === pageLinked && (!options.replaceLatest || shop.id.startsWith("latest:")) ? [startRow + index] : [])
     const replacements = shops.slice(0, targetRows.length).map((shop, index) => ({
       range: sheetTabRange(sheet.tabName, `A${targetRows[index]}:L${targetRows[index]}`),
       values: [shopRow(shop, pageLinked, null, options)],
@@ -3034,11 +3067,11 @@ export async function deleteSavedShops(pageLinked: string, shopIds: string[]) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
   const selectedIds = new Set(shopIds)
-  const rows = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
+  const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
   const clear = rows.flatMap((row, index) => row[1] === pageLinked && selectedIds.has(row[0])
-    ? [{ range: `${sheet.tabName}!A${index + 2}:L${index + 2}`, values: [Array(12).fill("")] }]
+    ? [{ range: sheetTabRange(sheet.tabName, `A${startRow + index}:L${startRow + index}`), values: [Array(12).fill("")] }]
     : [])
-  await updateRanges(sheet.spreadsheetId, clear)
+  await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
 }
 
 export async function copySavedShopsToPage(sourcePageLinked: string, targetPageLinked: string, shopIds: string[]) {
