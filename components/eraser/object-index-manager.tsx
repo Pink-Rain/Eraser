@@ -44,6 +44,9 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   const [error, setError] = useState(initialError)
   const [notice, setNotice] = useState("")
   const [saving, setSaving] = useState(0)
+  // Incrémenté seulement quand les valeurs viennent du serveur : les cellules sont
+  // alors remontées. La frappe, elle, ne doit jamais les remonter.
+  const [version, setVersion] = useState(0)
   const [query, setQuery] = useState("")
   const [sort, setSort] = usePersistentState<SheetGridSort>(
     "eraser:object-index:sort", null,
@@ -107,6 +110,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     if (!response.ok || !payload.tables) return setError(payload.error || "Actualisation impossible.")
     localEdits.current = {}
     setTables(payload.tables)
+    setVersion((current) => current + 1)
   }
 
   async function mutate(action: "add" | "duplicate" | "delete" | "enrich" | "ensure-stack-limits", rowNumber?: number) {
@@ -122,6 +126,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     if (!response.ok || !payload.tables) return setError(payload.error || "Enregistrement impossible.")
     localEdits.current = {}
     setTables(payload.tables)
+    setVersion((current) => current + 1)
     if (payload.result?.stackLimitsAdded !== undefined) setNotice(`${payload.result.stackLimitsAdded} valeur(s) « Nombre max » ajoutées dans ${payload.result.columnsAdded || 0} nouveau(x) champ(s).`)
     else if (payload.result) setNotice(`${payload.result.descriptionsAdded || 0} description(s) et ${payload.result.iconsAdded || 0} icône(s) ajoutées dans les cellules vides.`)
   }
@@ -129,7 +134,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   const busy = Boolean(pending)
 
   return (
-    <section className="flex min-h-0 flex-1 flex-col gap-3">
+    <section className="flex flex-col gap-3">
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-medium">
           Tableau à afficher
@@ -161,6 +166,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
           sort={sort}
           onSort={setSort}
           disabled={busy}
+          version={version}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
           empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute sa première ligne."}
           renderActions={(rowKey) => <div className="flex gap-1">

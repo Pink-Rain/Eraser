@@ -31,8 +31,8 @@ export default async function ClassIndexPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return <AuthenticatedShell pageLabel="Index des classes" roles={["admin", "mj"]}>
-    {/* Même disposition que l’Index des objets : seule la zone de tableau défile. */}
-    <div className="flex min-h-0 w-full flex-1 flex-col gap-3 px-4 py-4 sm:px-6">
+    {/* Même disposition que l’Index des objets : la page défile, le tableau se fige. */}
+    <div className="w-full px-4 pt-4 sm:px-6">
       <div className="shrink-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
         <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des classes</h1>

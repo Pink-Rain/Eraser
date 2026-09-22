@@ -18,6 +18,10 @@ export type InventoryItemRecord = {
   type: string
   subtype: string
   effect: string
+  /** Mise en forme d'origine (couleurs, gras, liens) quand l'objet vient de l'index. */
+  nameHtml: string
+  descriptionHtml: string
+  effectHtml: string
   maxQuantity: number
   weight: string
   price: string

@@ -213,6 +213,9 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   // Les enregistrements déclenchés par la frappe ne bloquent pas le tableau :
   // ils s'annoncent dans la barre d'outils et laissent les cellules modifiables.
   const [cellSaves, setCellSaves] = useState(0)
+  // Remonte les cellules seulement quand les lignes changent réellement (actualisation,
+  // création, suppression) : une frappe enregistrée ne doit rien remonter.
+  const [version, setVersion] = useState(0)
   const [query, setQuery] = useState("")
   const [tab, setTab] = usePersistentState(
     "eraser:class-index:tab", "classes",
@@ -229,16 +232,20 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   const selectedClass = data.classes.find((item) => item.id === selectedClassId) || data.classes[0]
   // La grille partagée gère largeurs, hauteurs et mise en forme : le composant
   // ne décrit plus que ses colonnes.
+  // Distance et charges ne concernent que les actifs : les colonnes disparaissent
+  // ailleurs plutôt que d'occuper la largeur pour rien.
   const spellColumns = useMemo<SheetGridColumn[]>(() => [
     { key: "name", label: "Nom", width: 220, plain: true, cellClassName: "text-sm font-semibold" },
     { key: "effect", label: "Effet", width: 380 },
     { key: "description", label: "Description", width: 380, cellClassName: "text-muted-foreground" },
     { key: "type", label: "Type", width: 150, plain: true },
     { key: "skills", label: "Compétences", width: 200, plain: true, cellClassName: "font-semibold text-[#b3261e]" },
-    { key: "distance", label: "Distance", width: 130, plain: true },
-    { key: "charges", label: "Charges", width: 110, plain: true },
+    ...(tab === "actifs" ? [
+      { key: "distance", label: "Distance", width: 130, plain: true },
+      { key: "charges", label: "Charges", width: 110, plain: true },
+    ] as SheetGridColumn[] : []),
     { key: "classes", label: "Classes et rangs", width: 280, custom: true, sortable: false },
-  ], [])
+  ], [tab])
 
   function updateSpells(updater: (spells: ClassSpell[]) => ClassSpell[]) {
     setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells) } })
@@ -265,6 +272,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
       const payload = await response.json() as { data?: ResourceData; error?: string }
       if (!response.ok || !payload.data) throw new Error(payload.error || "Actualisation impossible.")
       setData(payload.data)
+      setVersion((current) => current + 1)
     } catch (error) { setError(error instanceof Error ? error.message : "Actualisation impossible.") } finally { setPending(false) }
   }
 
@@ -278,6 +286,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     const result = await mutate({ action: "add", rowNumber: null, draft })
     if (result === false || !result) return
     updateSpells((spells) => [...spells, materialize(draft, result.rowNumber, result.id, result.tone)])
+    setVersion((current) => current + 1)
     setNewDraft(null)
   }
 
@@ -292,7 +301,9 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   async function remove(spell: ClassSpell) {
     const result = await mutate({ action: "delete", rowNumber: spell.rowNumber })
     if (result === false) return
+    // Les numéros de ligne suivants se décalent : les cellules doivent être remontées.
     updateSpells((spells) => spells.filter((item) => item.rowNumber !== spell.rowNumber).map((item) => item.rowNumber > spell.rowNumber ? { ...item, rowNumber: item.rowNumber - 1 } : item))
+    setVersion((current) => current + 1)
   }
 
   function startCreate(classId?: string, rank?: number) {
@@ -338,7 +349,8 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   // Même grille que l'Index des objets : en-têtes figés en haut, barre horizontale
   // en bas de l'écran, cellules toujours modifiables.
   const tableFor = (spells: ClassSpell[]) => <SheetGrid
-    layoutKey="eraser:class-index:spell-grid"
+    layoutKey={`eraser:class-index:spell-grid:${tab}`}
+    version={version}
     columns={spellColumns}
     rows={spells.map((spell) => ({ key: String(spell.rowNumber), rowNumber: spell.rowNumber }))}
     valueOf={valueOf}
@@ -364,17 +376,17 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     }}
   />
 
-  return <section className="flex min-h-0 flex-1 flex-col gap-3">
+  return <section className="flex flex-col gap-3">
     <datalist id="class-spell-types">{classSpellTypeSuggestions.map((type) => <option key={type} value={type} />)}</datalist>
     <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => setTab("duplicates")}><CopyCheck />Voir les doublons</Button>{data.file?.webViewLink && <Button asChild variant="outline"><a href={data.file.webViewLink} target="_blank" rel="noreferrer">Google Sheets <ExternalLink /></a></Button>}<Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
     {error && <p className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
-    <Tabs value={tab} onValueChange={setTab} className="flex min-h-0 flex-1 flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start"><TabsTrigger value="classes">Par classe</TabsTrigger><TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger><TabsTrigger value="bonus">Bonus</TabsTrigger><TabsTrigger value="duplicates">Doublons et ressemblances {data.similarities.length > 0 && <Badge variant="destructive">{data.similarities.length}</Badge>}</TabsTrigger></TabsList>
-      <TabsContent value="classes" className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
-      <TabsContent value="actifs" className="mt-3 flex min-h-0 flex-1 flex-col">{tableFor(filtered.filter((spell) => spell.category === "actif"))}</TabsContent>
-      <TabsContent value="passifs" className="mt-3 flex min-h-0 flex-1 flex-col">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
-      <TabsContent value="bonus" className="mt-3 flex min-h-0 flex-1 flex-col">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
-      <TabsContent value="duplicates" className="mt-3 min-h-0 flex-1 overflow-y-auto pr-1"><div className="space-y-3">{data.similarities.map((match) => { const left = data.spells.find((spell) => spell.id === match.leftId); const right = data.spells.find((spell) => spell.id === match.rightId); if (!left || !right) return null; return <article key={`${match.leftId}:${match.rightId}`} className="rounded-2xl border bg-card/70 p-4"><div className="flex items-center gap-2"><AlertTriangle className="size-4 text-amber-600" /><Badge variant={match.kind === "Doublon exact" ? "destructive" : "outline"}>{match.kind}</Badge><span className="text-xs text-muted-foreground">{Math.round(match.score * 100)} %</span></div><div className="mt-3 grid gap-3 md:grid-cols-2">{[left, right].map((spell) => <div key={spell.id} className="rounded-xl border p-3"><b>{spell.name}</b><p className="mt-1 text-xs font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</p><blockquote className="mt-2 border-l-2 pl-2 text-xs text-muted-foreground">{spell.effect || spell.description}</blockquote></div>)}</div></article> })}{!data.similarities.length && <div className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun doublon ni sort très proche détecté.</div>}</div></TabsContent>
+    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start"><TabsTrigger value="classes">Par classe</TabsTrigger><TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger><TabsTrigger value="bonus">Bonus</TabsTrigger><TabsTrigger value="duplicates">Doublons et ressemblances {data.similarities.length > 0 && <Badge variant="destructive">{data.similarities.length}</Badge>}</TabsTrigger></TabsList>
+      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
+      <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "actif"))}</TabsContent>
+      <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
+      <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
+      <TabsContent value="duplicates" className="mt-3"><div className="space-y-3">{data.similarities.map((match) => { const left = data.spells.find((spell) => spell.id === match.leftId); const right = data.spells.find((spell) => spell.id === match.rightId); if (!left || !right) return null; return <article key={`${match.leftId}:${match.rightId}`} className="rounded-2xl border bg-card/70 p-4"><div className="flex items-center gap-2"><AlertTriangle className="size-4 text-amber-600" /><Badge variant={match.kind === "Doublon exact" ? "destructive" : "outline"}>{match.kind}</Badge><span className="text-xs text-muted-foreground">{Math.round(match.score * 100)} %</span></div><div className="mt-3 grid gap-3 md:grid-cols-2">{[left, right].map((spell) => <div key={spell.id} className="rounded-xl border p-3"><b>{spell.name}</b><p className="mt-1 text-xs font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</p><blockquote className="mt-2 border-l-2 pl-2 text-xs text-muted-foreground">{spell.effect || spell.description}</blockquote></div>)}</div></article> })}{!data.similarities.length && <div className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun doublon ni sort très proche détecté.</div>}</div></TabsContent>
     </Tabs>
   </section>
 }

@@ -389,7 +389,9 @@ test("renders the shared sheet grid with pinned headers and editable cells", asy
       empty: "Vide",
     }),
   );
-  // En-têtes collés en haut, colonne « Ligne » collée à gauche.
+  // La grille se fige sous l'en-tête et occupe la hauteur visible restante.
+  assert.match(html, /sticky top-0 z-20 flex h-\[calc\(100svh-3\.5rem-var\(--eraser-titlebar,0px\)\)\]/);
+  // En-têtes de colonnes collés en haut du tableau.
   assert.match(html, /sticky top-0/);
   assert.match(html, /Ligne/);
   // Toutes les cellules sont modifiables en permanence : aucun mode lecture.

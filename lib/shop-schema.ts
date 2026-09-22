@@ -12,6 +12,10 @@ export type ShopGeneratorItem = {
   name: string
   description: string
   effect: string
+  /** Mise en forme d'origine de l'index des objets (couleurs, gras, liens). */
+  nameHtml: string
+  descriptionHtml: string
+  effectHtml: string
   type: string
   subtype: string
   price: string
@@ -85,6 +89,9 @@ export async function loadShopGeneratorItems() {
       name,
       description: cell(table.headers, row.values, ["Description", "Déscription"]),
       effect: cell(table.headers, row.values, ["Effet", "Effets", "Propriété", "Propriete"]),
+      nameHtml: cell(table.headers, row.html, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]),
+      descriptionHtml: cell(table.headers, row.html, ["Description", "Déscription"]),
+      effectHtml: cell(table.headers, row.html, ["Effet", "Effets", "Propriété", "Propriete"]),
       type: cell(table.headers, row.values, ["Type", "Catégorie", "Categorie"]) || table.tabName,
       subtype: cell(table.headers, row.values, ["Sous-type", "Sous type", "Subtype"]),
       price: cell(table.headers, row.values, ["Prix", "Valeur", "Coût", "Cout"]),

@@ -252,15 +252,29 @@ async function createWindow(url) {
   persistentSession.cookies.on("changed", () => {
     void persistentSession.cookies.flushStore()
   })
-  // Correcteur orthographique français : Electron souligne les fautes mais n'affiche
-  // aucun menu contextuel par défaut. On construit donc le nôtre pour que le clic
-  // droit propose enfin les corrections, comme dans un traitement de texte.
+  // Correcteur orthographique : Electron souligne les fautes mais n'affiche aucun
+  // menu contextuel par défaut. On construit donc le nôtre plus bas.
+  //
+  // La langue choisie par défaut est celle du système et son dictionnaire est déjà
+  // en place : on ne la remplace jamais, car imposer une langue dont le
+  // dictionnaire n'est pas encore téléchargé désactive le soulignement entièrement.
+  // On se contente d'ajouter le français quand il manque, et on revient en arrière
+  // si son téléchargement échoue.
   try {
-    const available = persistentSession.availableSpellCheckerLanguages || []
-    const wanted = ["fr-FR", "fr"].filter((language) => available.includes(language))
-    persistentSession.setSpellCheckerLanguages(wanted.length ? [wanted[0]] : ["fr"])
+    const current = persistentSession.getSpellCheckerLanguages() || []
+    if (!current.some((language) => language.toLowerCase().startsWith("fr"))) {
+      const available = persistentSession.availableSpellCheckerLanguages || []
+      const french = ["fr-FR", "fr"].find((language) => available.includes(language))
+      if (french) {
+        persistentSession.once("spellcheck-dictionary-download-failure", () => {
+          logLine("[interface] Dictionnaire français indisponible : retour à la langue du système.")
+          try { persistentSession.setSpellCheckerLanguages(current) } catch { /* langue système conservée */ }
+        })
+        persistentSession.setSpellCheckerLanguages([french, ...current])
+      }
+    }
   } catch (error) {
-    logLine(`[interface] Correcteur orthographique indisponible : ${error && error.message ? error.message : error}`)
+    logLine(`[interface] Correcteur orthographique inchangé : ${error && error.message ? error.message : error}`)
   }
   mainWindow.webContents.on("context-menu", (_event, params) => {
     const items = []

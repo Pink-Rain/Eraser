@@ -91,10 +91,22 @@ export function DesktopTitlebar() {
            so the rest of the app doesn't automatically make room for it. Pad/
            shrink the sidebar's own primitives by its height instead — targets
            their stable data-slot attributes rather than sidebar.tsx directly. */
+        /* Les pages qui se calent sur la hauteur visible (les index de ressources)
+           lisent cette variable ; elle vaut 0 hors de l'application Windows. */
+        html[data-eraser-titlebar="true"] { --eraser-titlebar: ${TITLEBAR_HEIGHT_PX}px; }
         html[data-eraser-titlebar="true"] body { padding-top: ${TITLEBAR_HEIGHT_PX}px; }
-        html[data-eraser-titlebar="true"] [data-slot="sidebar-wrapper"] { min-height: calc(100svh - ${TITLEBAR_HEIGHT_PX}px); }
+        /* La coque occupe exactement la place restante sous la barre : une hauteur
+           de 100svh y ajouterait celle de la barre et ferait défiler le document
+           entier, d'où une seconde barre de défilement et un bas de page coupé. */
+        html[data-eraser-titlebar="true"] [data-slot="sidebar-wrapper"],
+        html[data-eraser-titlebar="true"] [data-slot="sidebar-inset"] {
+          height: calc(100svh - ${TITLEBAR_HEIGHT_PX}px);
+          min-height: calc(100svh - ${TITLEBAR_HEIGHT_PX}px);
+          max-height: calc(100svh - ${TITLEBAR_HEIGHT_PX}px);
+        }
         html[data-eraser-titlebar="true"] [data-slot="sidebar-container"] { padding-top: ${TITLEBAR_HEIGHT_PX}px; }
-        html[data-eraser-titlebar="true"] [data-slot="sidebar-inset"] { min-height: calc(100svh - ${TITLEBAR_HEIGHT_PX}px); }
+        /* Le document lui-même ne défile jamais : seul le contenu de la coque le fait. */
+        html[data-eraser-titlebar="true"] body { overflow: hidden; }
         /* Belt-and-suspenders: the collapsed mini bar should never show a
            scrollbar even if the height math above is off by a pixel. */
         html[data-eraser-collapsed="true"] body { overflow: hidden; padding-top: 0; }

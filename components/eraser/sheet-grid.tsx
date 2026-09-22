@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { ArrowDownAZ, ArrowUpAZ, Bold, Italic, Link2, Palette, RotateCcw, Underline } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -50,29 +50,31 @@ const emptyLayout: SheetGridLayout = { columnWidths: {}, rowHeights: {} }
 type ActiveEditor = { node: HTMLElement; flush: () => void }
 
 /**
- * Une cellule de tableau qui se comporte comme Google Sheets : toujours modifiable,
- * jamais remplacée par une zone de saisie au clic, et enregistrée toute seule peu après
- * la frappe. Le contenu est piloté par le DOM et non par React tant que la cellule a le
- * focus, sinon chaque caractère replacerait le curseur au début.
+ * Cellule de tableau qui se comporte comme Google Sheets : toujours modifiable,
+ * enregistrée toute seule peu après la frappe.
+ *
+ * Elle est volontairement *non contrôlée*. Son contenu est posé une seule fois au
+ * montage puis appartient au navigateur : React n'y touche plus jamais. C'est la
+ * seule façon de garder le curseur, la sélection et le correcteur orthographique
+ * intacts pendant la frappe — toute réécriture, même identique, replace le curseur
+ * au début et casse la sélection en cours. Quand les données viennent réellement du
+ * serveur (actualisation, ajout ou suppression de ligne), la grille change son
+ * `version` : les cellules sont alors remontées avec la nouvelle valeur.
  */
-const SheetCell = memo(function SheetCell({ html, plain, disabled, onCommit, onActivate, className }: {
-  html: string
+const SheetCell = memo(function SheetCell({ initialHtml, plain, disabled, onCommit, onActivate, className }: {
+  initialHtml: string
   plain: boolean
   disabled: boolean
   onCommit: (value: string) => void
-  onActivate: (editor: ActiveEditor | null) => void
+  onActivate: (editor: ActiveEditor) => void
   className: string
 }) {
   const editor = useRef<HTMLDivElement>(null)
   const timer = useRef<number | null>(null)
-  // Le premier rendu porte déjà le contenu : la cellule n'apparaît jamais vide.
-  // Cette valeur ne change plus ensuite, React ne réécrit donc jamais la cellule
-  // dans le dos de la personne qui y tape ; l'effet ci-dessous s'en charge.
-  const [initialHtml] = useState(html)
-  const applied = useRef(html)
+  const applied = useRef(initialHtml)
   const commit = useRef(onCommit)
-  // Le rappel est relu à chaque rendu sans être une dépendance : la cellule garde
-  // son curseur même quand le parent se redessine.
+  // Le rappel est relu à chaque rendu sans être une dépendance : la cellule n'a
+  // jamais besoin d'être redessinée pour rester à jour.
   useEffect(() => { commit.current = onCommit })
 
   const flush = useCallback(() => {
@@ -85,19 +87,7 @@ const SheetCell = memo(function SheetCell({ html, plain, disabled, onCommit, onA
     commit.current(plain ? richTextPlainText(safe) : safe)
   }, [plain])
 
-  useEffect(() => {
-    const node = editor.current
-    if (!node) return
-    // La valeur distante ne réécrit jamais une cellule en cours d’édition.
-    if (document.activeElement === node) return
-    if (applied.current === html) return
-    applied.current = html
-    node.innerHTML = html
-  }, [html])
-
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
-
-  const remember = () => onActivate(editor.current ? { node: editor.current, flush } : null)
 
   return <div
     ref={editor}
@@ -107,26 +97,31 @@ const SheetCell = memo(function SheetCell({ html, plain, disabled, onCommit, onA
     role="textbox"
     aria-multiline="true"
     tabIndex={0}
-    onInput={() => { if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, 600) }}
+    onInput={() => { if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, 700) }}
     onBlur={flush}
-    onFocus={remember}
-    onMouseUp={remember}
-    onKeyUp={remember}
+    onFocus={() => { if (editor.current) onActivate({ node: editor.current, flush }) }}
     className={`min-h-full w-full whitespace-pre-wrap break-words rounded-md px-2 py-1.5 outline-none focus:bg-background focus:ring-2 focus:ring-ring/45 [&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc ${className}`}
     style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
     dangerouslySetInnerHTML={{ __html: initialHtml }}
   />
 })
 
-function SheetGridToolbar({ active, leading, trailing, onReset }: { active: ActiveEditor | null; leading?: ReactNode; trailing?: ReactNode; onReset: () => void }) {
+function SheetGridToolbar({ activeRef, ready, leading, trailing, onReset }: { activeRef: MutableRefObject<ActiveEditor | null>; ready: boolean; leading?: ReactNode; trailing?: ReactNode; onReset: () => void }) {
   const savedRange = useRef<Range | null>(null)
-  useEffect(() => { if (active) rememberRichTextSelection(active.node, savedRange) }, [active])
-  const keepSelection = (event: ReactMouseEvent) => { if (active) rememberRichTextSelection(active.node, savedRange); event.preventDefault() }
+  // La sélection est mémorisée au moment où l'on appuie sur un bouton : le
+  // `preventDefault` empêche la cellule de perdre le focus, donc la sélection
+  // survit au clic.
+  const keepSelection = (event: ReactMouseEvent) => {
+    const active = activeRef.current
+    if (active) rememberRichTextSelection(active.node, savedRange)
+    event.preventDefault()
+  }
   function command(name: RichTextCommand, value?: string) {
+    const active = activeRef.current
     if (!active) return
     if (applyRichTextCommand(active.node, savedRange, name, value)) active.flush()
   }
-  const disabled = !active
+  const disabled = !ready
   return <div className="flex flex-wrap items-center gap-1 border-b bg-card/95 px-2 py-1.5 backdrop-blur">
     {leading}
     {leading && <span className="mx-1 h-5 w-px bg-border" />}
@@ -138,12 +133,12 @@ function SheetGridToolbar({ active, leading, trailing, onReset }: { active: Acti
     <span className="flex items-center gap-1" aria-label="Couleur du texte">
       <Palette className="mr-0.5 size-3.5 text-muted-foreground" />
       {richTextColors.map((color) => <button key={color} type="button" disabled={disabled} onMouseDown={keepSelection} onClick={() => command("foreColor", color)} className="size-5 rounded-full border border-black/15 shadow-sm disabled:opacity-40" style={{ backgroundColor: color }} aria-label={`Texte ${color}`} title={`Couleur ${color}`} />)}
-      <label className="relative size-5 cursor-pointer overflow-hidden rounded-full border border-dashed border-muted-foreground/60" title="Choisir une autre couleur" onPointerDown={() => { if (active) rememberRichTextSelection(active.node, savedRange) }}>
+      <label className="relative size-5 cursor-pointer overflow-hidden rounded-full border border-dashed border-muted-foreground/60" title="Choisir une autre couleur" onPointerDown={() => { const active = activeRef.current; if (active) rememberRichTextSelection(active.node, savedRange) }}>
         <span className="absolute inset-0 grid place-items-center text-[11px] text-muted-foreground">+</span>
         <input type="color" disabled={disabled} className="absolute inset-0 size-full cursor-pointer opacity-0" onChange={(event) => command("foreColor", event.target.value)} aria-label="Autre couleur du texte" />
       </label>
     </span>
-    {!active && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans une cellule pour mettre en forme.</span>}
+    {!ready && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans une cellule pour mettre en forme.</span>}
     <span className="ml-auto flex items-center gap-1">
       {trailing}
       <Button type="button" size="sm" variant="ghost" onClick={onReset} title="Réinitialiser largeurs et hauteurs"><RotateCcw />Mise en page</Button>
@@ -153,7 +148,7 @@ function SheetGridToolbar({ active, leading, trailing, onReset }: { active: Acti
 
 export function SheetGrid({
   layoutKey, columns, rows, valueOf, onCommit, renderCustomCell, renderActions, actionsLabel = "Actions", actionsWidth = 150,
-  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false,
+  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, version = 0,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -171,10 +166,20 @@ export function SheetGrid({
   toolbarTrailing?: ReactNode
   empty: ReactNode
   disabled?: boolean
+  /** À incrémenter quand les valeurs viennent réellement du serveur : les cellules
+   *  sont alors remontées avec le nouveau contenu. Une frappe ne doit jamais le changer. */
+  version?: number
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
   const [preview, setPreview] = useState<{ columns: Record<string, number>; rows: Record<string, number> }>({ columns: {}, rows: {} })
-  const [active, setActive] = useState<ActiveEditor | null>(null)
+  // La cellule active vit dans une référence : la sélectionner ne redessine rien.
+  // Seul le passage « aucune cellule » → « une cellule » réveille la barre d'outils.
+  const activeRef = useRef<ActiveEditor | null>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
+  const activate = useCallback((editor: ActiveEditor) => {
+    activeRef.current = editor
+    setToolbarReady((current) => current || true)
+  }, [])
 
   const defaultWidths = useMemo(() => Object.fromEntries([...columns.map((column) => [column.key, column.width] as const), ["line", 72], ["actions", actionsWidth]]), [actionsWidth, columns])
   const columnWidth = (key: string) => preview.columns[key] ?? layout.columnWidths[key] ?? defaultWidths[key] ?? 200
@@ -224,8 +229,12 @@ export function SheetGrid({
   const headerCell = "sticky top-0 z-30 border-b border-r bg-muted px-2 py-2 text-left align-bottom font-semibold"
   const resizeHandle = "absolute inset-y-0 right-0 z-40 w-2 translate-x-1 cursor-col-resize touch-none"
 
-  return <div className="flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl border bg-background/60">
-    <SheetGridToolbar active={active} leading={toolbarLeading} trailing={toolbarTrailing} onReset={() => { setLayout(emptyLayout); setPreview({ columns: {}, rows: {} }) }} />
+  // La grille défile avec la page puis se fige sous l'en-tête de l'application : le
+  // titre, la recherche et les onglets s'effacent vers le haut, la barre d'outils et
+  // les noms de colonnes restent. La hauteur retire l'en-tête (3.5rem) et, sur
+  // l'application Windows, la barre de titre.
+  return <div className="sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))] flex-col overflow-hidden rounded-xl border bg-background/60">
+    <SheetGridToolbar activeRef={activeRef} ready={toolbarReady} leading={toolbarLeading} trailing={toolbarTrailing} onReset={() => { setLayout(emptyLayout); setPreview({ columns: {}, rows: {} }) }} />
     {/* Un seul conteneur défile, dans les deux sens : les en-têtes restent collés en haut
         de l’écran et la barre horizontale reste collée en bas, comme dans Google Sheets. */}
     <div className="min-h-0 flex-1 overflow-auto">
@@ -270,11 +279,12 @@ export function SheetGrid({
                 {column.custom
                   ? renderCustomCell?.(row.key, column.key)
                   : <SheetCell
-                      html={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
+                      key={`${version}:${column.key}`}
+                      initialHtml={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
                       plain={Boolean(column.plain)}
                       disabled={disabled}
                       onCommit={(value) => onCommit(row.key, column.key, value)}
-                      onActivate={setActive}
+                      onActivate={activate}
                       className={column.cellClassName || ""}
                     />}
               </td>)}

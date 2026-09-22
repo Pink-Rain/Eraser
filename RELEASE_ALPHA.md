@@ -1,45 +1,42 @@
-# Eraser 0.1.1-alpha.41 — les index se comportent enfin comme un tableur
+# Eraser 0.1.1-alpha.42 — fenêtre à la bonne taille et cellules réparées
 
-Les deux index de ressources partagent désormais le même tableau : mêmes cellules,
-même mise en forme, même comportement. Seul l’onglet « Par classe » garde sa
-présentation en fiches, puisqu’il ne montre pas la même chose.
+Cette préversion corrige la hauteur de la fenêtre, rend les cellules des index
+réellement modifiables et fait respecter la mise en forme des objets partout.
 
-## Index des objets et Index des classes
+## Corrigé
 
-- la barre d’outils de mise en forme et la ligne des colonnes restent collées en
-  haut de l’écran pendant tout le défilement ;
-- la barre de défilement horizontale reste en bas de l’écran, comme dans un
-  tableur, au lieu de suivre le bas du tableau ;
-- les cellules sont modifiables en permanence : plus aucune zone de saisie
-  n’apparaît au clic, et chaque cellule s’enregistre seule peu après la frappe
-  sans figer le tableau ;
-- le texte revient toujours à la ligne et c’est lui qui donne sa hauteur à la
-  ligne ; la jauge globale de hauteur a disparu. Une poignée sous le numéro de
-  ligne permet de fixer une hauteur à la main, et un double-clic revient à
-  l’ajustement automatique ;
-- l’Index des objets conserve et affiche enfin les couleurs, le gras, l’italique,
-  le souligné et les liens, comme l’Index des classes ; chaque cellule est
-  enregistrée individuellement, sans écraser ses voisines ;
-- « Classes et rangs » tient maintenant dans une cellule : chaque lien est une
-  pastille aux couleurs de la classe, avec son rang modifiable sur place, et un
-  seul bouton ouvre une liste de classes cherchable ;
-- les colonnes se redimensionnent toujours, et un bouton remet largeurs et
-  hauteurs à zéro ;
-- le clic droit sur un mot souligné en rouge propose enfin les corrections
-  orthographiques, avec « Ajouter au dictionnaire », couper, copier et coller.
+- la seconde barre de défilement disparaît vraiment : la coque de l’application
+  ne tenait pas compte de la barre de titre (icône, épingler, réduire, fermer) et
+  dépassait donc de sa hauteur. Le bas des pages et la barre de défilement
+  horizontale des tableaux étaient coupés pour la même raison ;
+- les cellules des index se modifient de nouveau : le curseur ne revient plus au
+  début, la sélection tient, et le texte saisi ne s’efface plus. Le contenu d’une
+  cellule appartient désormais entièrement au navigateur pendant la frappe ; il
+  n’est repris du serveur que lors d’une actualisation, d’un ajout ou d’une
+  suppression de ligne ;
+- les fautes sont de nouveau soulignées en rouge : la préversion précédente
+  imposait le français alors que son dictionnaire n’était pas encore téléchargé,
+  ce qui désactivait le correcteur. La langue du système est conservée, le
+  français n’est ajouté que s’il manque, et l’ajout est annulé si le
+  dictionnaire ne peut pas être récupéré. Le clic droit propose les corrections ;
+- « 0 » reste un modificateur d’objet valable.
 
-## Corrections
+## Modifié
 
-- « 0 » est accepté comme modificateur d’objet à part entière : le lien est
-  conservé et reste visible, il n’ajoute simplement rien au total ;
-- la seconde barre de défilement verticale apparue avec l’alpha.40 a disparu :
-  seule celle du contenu subsiste.
+- dans les index, la page défile normalement : le titre, la recherche et les
+  onglets s’effacent vers le haut, puis le tableau se fige sous l’en-tête et
+  occupe tout l’écran, barre d’outils et noms de colonnes compris. Le tableau
+  gagne ainsi toute la hauteur de la fenêtre ;
+- la mise en forme des objets (gras, couleurs, liens) est respectée partout où
+  ils apparaissent : inventaires de personnages, de PNJ et de campagne, résultats
+  de recherche d’objets et magasins. Réécrire un texte dans un inventaire y
+  remplace la mise en forme par du texte brut, comme attendu ;
+- l’Index des classes n’affiche plus les colonnes « Distance » et « Charges »
+  dans les onglets Passifs et Bonus, où elles ne servent pas.
 
 ## Vérifications
 
 - lint sans erreur ;
 - build Vinext complet ;
-- suite de tests d’interface au vert, avec trois nouveaux tests couvrant le
-  modificateur nul, la conversion texte enrichi / texte brut et le rendu de la
-  grille partagée ;
+- suite de tests d’interface au vert ;
 - serveur desktop construit et vérifié en HTTP 200.

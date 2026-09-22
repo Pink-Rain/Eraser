@@ -2961,6 +2961,11 @@ function savedShopFromRow(row: string[]): SavedShopRecord | null {
         name,
         description: typeof item.description === "string" ? item.description : "",
         effect: typeof item.effect === "string" ? item.effect : "",
+        // Les magasins enregistrés avant la mise en forme n'ont pas ces champs :
+        // ils retombent simplement sur leur texte brut.
+        nameHtml: typeof item.nameHtml === "string" ? item.nameHtml : "",
+        descriptionHtml: typeof item.descriptionHtml === "string" ? item.descriptionHtml : "",
+        effectHtml: typeof item.effectHtml === "string" ? item.effectHtml : "",
         type: typeof item.type === "string" ? item.type : "Objet",
         subtype: typeof item.subtype === "string" ? item.subtype : "",
         price: typeof item.price === "string" ? item.price : "",
@@ -4356,6 +4361,9 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
     const name = row[1]?.trim()
     if (!id || !name) return []
     return [{
+      nameHtml: "",
+      descriptionHtml: "",
+      effectHtml: "",
       id,
       name,
       description: row[2] || "",
@@ -4379,10 +4387,20 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
   })
 }
 
-function objectIndexCell(table: ObjectIndexTable, row: ObjectIndexRow, aliases: string[]) {
+function objectIndexColumn(table: ObjectIndexTable, aliases: string[]) {
   const expected = new Set(aliases.map(normalizedHeader))
-  const index = table.headers.findIndex((header) => expected.has(normalizedHeader(header)))
+  return table.headers.findIndex((header) => expected.has(normalizedHeader(header)))
+}
+
+function objectIndexCell(table: ObjectIndexTable, row: ObjectIndexRow, aliases: string[]) {
+  const index = objectIndexColumn(table, aliases)
   return index >= 0 ? row.values[index] || "" : ""
+}
+
+/** Même cellule, mise en forme comprise : les inventaires et magasins l'affichent telle quelle. */
+function objectIndexCellHtml(table: ObjectIndexTable, row: ObjectIndexRow, aliases: string[]) {
+  const index = objectIndexColumn(table, aliases)
+  return index >= 0 ? row.html?.[index] || "" : ""
 }
 
 function inferredObjectType(table: ObjectIndexTable) {
@@ -4407,6 +4425,9 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       type: objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table),
       subtype: objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"]),
       effect: objectIndexCell(table, row, ["Effet", "Effets"]),
+      nameHtml: objectIndexCellHtml(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]),
+      descriptionHtml: objectIndexCellHtml(table, row, ["Description", "Déscription"]),
+      effectHtml: objectIndexCellHtml(table, row, ["Effet", "Effets"]),
       maxQuantity: positiveInteger(objectIndexCell(table, row, ["Nombre max", "Quantité max", "Quantite max", "Maximum", "Max"]), 1),
       weight: objectIndexCell(table, row, ["Poids", "Masse"]),
       price: objectIndexCell(table, row, ["Prix", "Valeur", "Coût", "Cout"]),
@@ -4765,6 +4786,9 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
     id: content.itemId || `PERSONNALISE-${content.id}`,
     name: content.customName,
     description: content.customDescription,
+    nameHtml: "",
+    descriptionHtml: "",
+    effectHtml: "",
     type: content.type,
     subtype: content.subtype,
     effect: content.effect,
@@ -4786,13 +4810,18 @@ function customInventoryItem(content: StoredInventoryContent): InventoryItemReco
 
 function inventoryItemForContent(content: StoredInventoryContent, indexedItem: InventoryItemRecord | undefined) {
   if (!indexedItem) return customInventoryItem(content)
+  // Un texte réécrit dans l'inventaire est du texte brut : il remplace alors la
+  // version mise en forme venue de l'index, sinon l'ancienne resterait affichée.
   return {
     ...indexedItem,
     name: content.customName || indexedItem.name,
     description: content.customDescription || indexedItem.description,
+    effect: content.effect || indexedItem.effect,
+    nameHtml: content.customName ? "" : indexedItem.nameHtml,
+    descriptionHtml: content.customDescription ? "" : indexedItem.descriptionHtml,
+    effectHtml: content.effect ? "" : indexedItem.effectHtml,
     type: content.type || indexedItem.type,
     subtype: content.subtype || indexedItem.subtype,
-    effect: content.effect || indexedItem.effect,
   }
 }
 
