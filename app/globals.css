@@ -125,6 +125,15 @@ body {
   contain-intrinsic-size: auto 520px;
 }
 
+/* Cellules de tableau qui s'agrandissent avec leur contenu au lieu d'une
+   hauteur de ligne fixée globalement. Le navigateur calcule la hauteur à
+   partir du texte réellement replié, y compris quand une ligne est
+   redimensionnée manuellement (min-height prend alors le relais). */
+.eraser-autosize-cell {
+  field-sizing: content;
+  min-height: 2.25rem;
+}
+
 .admin-view-only {
   display: none !important;
 }

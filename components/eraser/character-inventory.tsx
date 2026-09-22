@@ -6,15 +6,14 @@ import { ArrowLeft, Backpack, Check, Coins, Gem, Link2, LoaderCircle, Minus, Mov
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
-import { Combobox, ComboboxContent, ComboboxEmpty, ComboboxInput, ComboboxItem, ComboboxList } from "@/components/ui/combobox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Progress } from "@/components/ui/progress"
 import { Textarea } from "@/components/ui/textarea"
-import { characterModifierTargets } from "@/lib/character-sheet-schema"
+import { characterModifierTargets, type CharacterModifierTarget } from "@/lib/character-sheet-schema"
 import { canItemGoInInventoryCategory, emptyCharacterInventory, parseItemModifiers, serializeItemModifiers, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventoryItemModifier, type InventorySlotRecord, type InventoryTransferTarget } from "@/lib/inventory-schema"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
@@ -129,8 +128,13 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   </article>
 }
 
+const modifierTargetGroups = (() => {
+  const map = new Map<string, CharacterModifierTarget[]>()
+  for (const target of characterModifierTargets) map.set(target.group, [...(map.get(target.group) || []), target])
+  return [...map.entries()]
+})()
+
 function ModifierRow({ modifier, onChange, onRemove }: { modifier: InventoryItemModifier; onChange: (next: InventoryItemModifier) => void; onRemove: () => void }) {
-  const selected = characterModifierTargets.find((target) => target.id === modifier.target) ?? null
   return <div className="flex items-center gap-1.5">
     <Input
       value={modifier.value > 0 ? `+${modifier.value}` : String(modifier.value)}
@@ -139,13 +143,12 @@ function ModifierRow({ modifier, onChange, onRemove }: { modifier: InventoryItem
       placeholder="+0"
       aria-label="Modificateur (+ ou -)"
     />
-    <Combobox items={characterModifierTargets} value={selected} onValueChange={(next) => onChange({ ...modifier, target: next?.id ?? "" })} itemToStringLabel={(target) => target?.label ?? ""}>
-      <ComboboxInput placeholder="Lié à…" className="h-8 min-w-0 flex-1" aria-label="Lié à une compétence ou caractéristique" />
-      <ComboboxContent>
-        <ComboboxEmpty>Aucun résultat.</ComboboxEmpty>
-        <ComboboxList>{(target: (typeof characterModifierTargets)[number]) => <ComboboxItem key={target.id} value={target}><span className="min-w-0 flex-1 truncate">{target.label}</span><span className="shrink-0 text-[10px] text-muted-foreground">{target.group}</span></ComboboxItem>}</ComboboxList>
-      </ComboboxContent>
-    </Combobox>
+    <div className="min-w-0 flex-1">
+      <NativeSelect value={modifier.target} onChange={(event) => onChange({ ...modifier, target: event.target.value })} className="h-8 w-full" aria-label="Lié à une compétence ou caractéristique">
+        <NativeSelectOption value="">Choisir…</NativeSelectOption>
+        {modifierTargetGroups.map(([group, targets]) => <NativeSelectOptGroup key={group} label={group}>{targets.map((target) => <NativeSelectOption key={target.id} value={target.id}>{target.label}</NativeSelectOption>)}</NativeSelectOptGroup>)}
+      </NativeSelect>
+    </div>
     <button type="button" onClick={onRemove} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer ce modificateur"><X className="size-3.5" /></button>
   </div>
 }
