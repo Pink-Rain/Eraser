@@ -4,10 +4,12 @@
  * 0.6.0 : « Synchroniser une session » ouvre le choix de session du compagnon.
  * 0.7.0 : portrait (avatar) et token rond séparés, fiches des personnages joueurs,
  * dossier du Journal au nom de la session synchronisée.
+ * 0.7.1 : les dossiers du Journal sont rangés par le compagnon (le Mod ne peut pas
+ * les modifier) ; chaque demande de synchro porte un identifiant unique.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.7.0';
+  var VERSION = '0.7.1';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
@@ -144,33 +146,6 @@ var EraserBridge = EraserBridge || (function () {
     };
   }
 
-  /* ---------- dossiers du Journal ---------- */
-  function journalTree() {
-    var raw = Campaign().get('journalfolder');
-    try { var tree = typeof raw === 'string' && raw ? JSON.parse(raw) : raw; return Array.isArray(tree) ? tree : []; }
-    catch (_error) { return []; }
-  }
-  function removeFromTree(nodes, id) {
-    for (var index = nodes.length - 1; index >= 0; index -= 1) {
-      var node = nodes[index];
-      if (node === id) nodes.splice(index, 1);
-      else if (node && typeof node === 'object' && Array.isArray(node.i)) removeFromTree(node.i, id);
-    }
-  }
-  // Range la fiche dans le dossier (créé à la racine au besoin), en la retirant d'ailleurs.
-  function moveToFolder(characterId, folderName) {
-    var name = String(folderName || '').trim();
-    if (!name) return;
-    var tree = journalTree();
-    removeFromTree(tree, characterId);
-    var folder = tree.filter(function (node) { return node && typeof node === 'object' && node.n === name && Array.isArray(node.i); })[0];
-    if (!folder) {
-      folder = { n: name, i: [], id: '-Eraser' + hash(name + Date.now()).replace(/[^A-Za-z0-9]/g, '') };
-      tree.push(folder);
-    }
-    folder.i.push(characterId);
-    Campaign().set('journalfolder', JSON.stringify(tree));
-  }
 
   function characterWithEraserId(eraserId) {
     var marker = findObjs({ _type: 'attribute', name: 'eraser_id', current: eraserId })[0];
@@ -333,7 +308,7 @@ var EraserBridge = EraserBridge || (function () {
             playersedit_name: true,
             showplayers_bar1: true,
             playersedit_bar1: true,
-            bar1_num_permission: 'editors'
+            bar1_num_permission: ''
           };
           if (hp) { props.bar1_link = hp.id; props.bar1_value = String(hp.get('current')); props.bar1_max = String(hp.get('max')); }
         } else {
@@ -420,7 +395,6 @@ var EraserBridge = EraserBridge || (function () {
     }
     if (payload.kind === 'shop') {
       var shop = upsertShop(payload.value);
-      if (payload.folder) moveToFolder(shop.character.id, payload.folder);
       return done(null, shop.meta);
     }
     if (payload.kind === 'character') {
@@ -434,7 +408,7 @@ var EraserBridge = EraserBridge || (function () {
     }
     if (payload.kind !== 'npc') return done(null, {});
     var result = upsertNpc(payload.value);
-    if (payload.folder) moveToFolder(result.character.id, payload.folder);
+
     // Le portrait doit d'abord arriver : le jeton sera construit à sa réception.
     if (result.meta.needsAvatar || result.meta.needsToken) return done(null, result.meta);
     syncDefaultToken(result.character, payload.value.id, {}, function (error, token) {
@@ -508,6 +482,9 @@ var EraserBridge = EraserBridge || (function () {
     whisper('<span data-eraser-event="hp">ERASER_HP:' + encode({ hitPoints: hitPoints }) + '</span>');
   }
 
+  // « heure_aléa » : le compagnon ignore les demandes antérieures à l'ouverture de sa page.
+  function requestId() { return Date.now().toString(36) + '_' + Math.floor(Math.random() * 1e9).toString(36); }
+
   function argument(content, prefix) { return content.slice(prefix.length).trim(); }
 
   function handle(message) {
@@ -517,8 +494,9 @@ var EraserBridge = EraserBridge || (function () {
     try {
       if (content === '!eraser' || content === '!eraser-status') return menu();
       if (content.indexOf('!eraser-ping ') === 0) return acknowledge(argument(content, '!eraser-ping '), { version: VERSION });
-      if (content === '!eraser-sync') return whisper('<span data-eraser-event="sync">ERASER_SYNC_REQUEST</span>');
-      if (content === '!eraser-sync-session') return whisper('<span data-eraser-event="sync-session">ERASER_SYNC_SESSION_REQUEST</span>');
+      // Un identifiant par demande : le compagnon ne rejoue jamais une demande déjà vue.
+      if (content === '!eraser-sync') return whisper('<span data-eraser-event="sync">ERASER_SYNC_REQUEST:' + requestId() + '</span>');
+      if (content === '!eraser-sync-session') return whisper('<span data-eraser-event="sync-session">ERASER_SYNC_SESSION_REQUEST:' + requestId() + '</span>');
       if (content === '!eraser-push-hp') return exportHp();
       if (content === '!eraser-tokens') return rebuildAllTokens();
       if (content === '!eraser-placeholder') {

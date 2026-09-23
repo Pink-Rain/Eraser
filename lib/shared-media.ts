@@ -165,8 +165,18 @@ export async function copySharedMedia(sourceKey: string, targetKey: string) {
   return true
 }
 
-/** Date de la version enregistrée dans Drive, ou `null` si le média n'existe pas. */
+/**
+ * Date de la version enregistrée dans Drive, ou `null` si le média n'existe pas.
+ * La liste du dossier est gardée cinq minutes : un média enregistré entre-temps
+ * (depuis un autre ordinateur, par exemple) est cherché directement avant de
+ * conclure qu'il n'existe pas.
+ */
 export async function sharedMediaVersion(key: string) {
   const pointer = await pointerFor(key).catch(() => null)
-  return pointer ? pointer.modifiedTime || "1" : null
+  if (pointer) return pointer.modifiedTime || "1"
+  const file = await findDriveFileByName(await folderId(), driveName(key)).catch(() => null)
+  if (!file) return null
+  const found: MediaPointer = { fileId: file.id, modifiedTime: file.modifiedTime || "", contentType: file.mimeType || "image/*" }
+  pointerCache.set(key, { expiresAt: Date.now() + POINTER_TTL_MS, pointer: found })
+  return found.modifiedTime || "1"
 }

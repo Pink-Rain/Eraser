@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.7.0';
+  const VERSION = '0.7.1';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -23,6 +23,23 @@
   const storageSet = (value) => new Promise((resolve) => chrome.storage.local.set(value, resolve));
   const runtimeMessage = (message) => new Promise((resolve) => chrome.runtime.sendMessage(message, resolve));
   const bridgeFetch = (options) => runtimeMessage({ type: 'eraser-fetch', ...options });
+
+  /* ---------- dossiers du Journal (via page.js, dans la page Roll20) ---------- */
+  function moveToJournalFolder(folder, ids) {
+    return new Promise((resolve, reject) => {
+      const requestId = rid();
+      const timer = setTimeout(() => { window.removeEventListener('message', listener); reject(new Error('La page Roll20 n’a pas répondu pour le dossier « ' + folder + ' ».')); }, 8000);
+      function listener(event) {
+        const data = event.data;
+        if (event.source !== window || !data || data.source !== 'eraser-page' || data.requestId !== requestId) return;
+        clearTimeout(timer);
+        window.removeEventListener('message', listener);
+        if (data.ok) resolve(data.moved || 0); else reject(new Error(data.error || 'Dossier impossible à créer.'));
+      }
+      window.addEventListener('message', listener);
+      window.postMessage({ source: 'eraser-companion', type: 'journal-folder', requestId, folder, ids }, '*');
+    });
+  }
 
   /* ---------- accusés de réception du Mod ---------- */
   function waitForAcknowledgement(id, timeoutMs = 12000, timeoutMessage) {
@@ -220,13 +237,14 @@
    * Renvoie { imported, portrait, token, failures, warnings }.
    */
   async function importWithImages(payload, kind, value, label, folder) {
-    const report = { imported: false, portrait: false, token: false, failures: [], warnings: [] };
+    const report = { imported: false, portrait: false, token: false, eraserToken: false, characterId: '', failures: [], warnings: [] };
     const bar = kind !== 'shop';
     let result;
     try {
       result = await importPayload({ campaign: payload.campaign, kind, value, folder: folder || '' });
       if (!result.characterId) throw new Error('Roll20 n’a pas confirmé la création de la fiche.');
       report.imported = true;
+      report.characterId = result.characterId;
     } catch (error) {
       report.failures.push(value.name + ' : import — ' + error.message);
       return report;
@@ -243,6 +261,7 @@
       status(label + ' (token)');
       try {
         const token = await uploadImage(result, value.tokenUrl, value.name, 'token', { bar });
+        report.eraserToken = true;
         if (token.token) report.token = true;
       } catch (error) { report.failures.push(value.name + ' : token — ' + error.message); }
     }
@@ -357,11 +376,14 @@
 
       const failures = [];
       const warnings = [];
-      let imported = 0, players = 0, tokens = 0, portraits = 0, shops = 0, done = 0;
-      const collect = (report) => {
+      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, portraits = 0, shops = 0, done = 0;
+      const filed = [];
+      const collect = (report, fileInFolder) => {
         failures.push(...report.failures); warnings.push(...report.warnings);
         if (report.portrait) portraits += 1;
         if (report.token) tokens += 1;
+        if (report.eraserToken) eraserTokens += 1;
+        if (fileInFolder && report.characterId) filed.push(report.characterId);
         return report.imported;
       };
 
@@ -373,17 +395,26 @@
       for (const npc of payload.npcs) {
         const label = 'PNJ ' + (++done) + '/' + total + ' — ' + npc.name;
         status(label);
-        if (collect(await importWithImages(payload, 'npc', npc, label, folder))) imported += 1;
+        if (collect(await importWithImages(payload, 'npc', npc, label, folder), true)) imported += 1;
       }
       for (const shop of payload.shops) {
         const label = 'Magasin ' + (++done) + '/' + total + ' — ' + shop.name;
         status(label);
-        if (collect(await importWithImages(payload, 'shop', shop, label, folder))) shops += 1;
+        if (collect(await importWithImages(payload, 'shop', shop, label, folder), true)) shops += 1;
+      }
+
+      // Les PNJs et magasins de la session vont dans son dossier ; les joueurs ne bougent pas.
+      let folderNote = '';
+      if (folder && filed.length) {
+        status('Rangement dans le dossier « ' + folder + ' »…');
+        try { folderNote = ' · ' + (await moveToJournalFolder(folder, filed)) + ' fiche(s) dans le dossier « ' + folder + ' »'; }
+        catch (error) { failures.push('Dossier « ' + folder + ' » — ' + error.message); }
       }
 
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
-      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » (dossier du Journal) · ' : '') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + seconds + ' s';
+      const withToken = characters.concat(payload.npcs, payload.shops).filter((entry) => entry.tokenUrl).length;
+      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s)' + folderNote + ' · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);
@@ -414,19 +445,41 @@
 
   /* ---------- observation du chat ---------- */
   const handledEvents = new Set();
+  // Les demandes déjà dans le chat à l'ouverture de la page sont anciennes : jamais rejouées.
+  const handledRequests = new Set();
+  const requestPattern = /ERASER_SYNC(_SESSION)?_REQUEST:([A-Za-z0-9]+)_([A-Za-z0-9]+)/g;
+  // Roll20 recharge l'historique du chat après l'ouverture : une demande plus
+  // ancienne que la page (à 30 s près pour l'écart d'horloge) n'est pas rejouée.
+  const pageOpenedAt = Date.now();
+  function primeRequests(root) { for (const match of String(root?.textContent || '').matchAll(requestPattern)) handledRequests.add(match[2] + '_' + match[3]); }
+  function newRequests(text) {
+    const found = [];
+    for (const match of String(text || '').matchAll(requestPattern)) {
+      const id = match[2] + '_' + match[3];
+      if (handledRequests.has(id)) continue;
+      handledRequests.add(id);
+      if (parseInt(match[2], 36) < pageOpenedAt - 30000) continue;
+      found.push(match[1] ? 'session' : 'all');
+    }
+    return found;
+  }
   function watchChat() {
     const observer = new MutationObserver((mutations) => {
       for (const mutation of mutations) for (const node of mutation.addedNodes) {
         const text = (node.nodeType === Node.TEXT_NODE ? node.parentElement?.textContent : node.textContent) || '';
         scanAcknowledgements(text);
         if (!IS_TOP) continue;
-        if (text.includes('ERASER_SYNC_REQUEST')) void syncAll();
-        if (text.includes('ERASER_SYNC_SESSION_REQUEST')) void openSessionPicker();
+        // Seul le texte ajouté compte pour une demande : relire le parent rejouait
+        // d'anciennes demandes « Tout synchroniser » restées dans le chat.
+        for (const request of newRequests(node.textContent || '')) {
+          if (request === 'session') void openSessionPicker(); else void syncAll();
+        }
         const hp = text.match(/ERASER_HP:([A-Za-z0-9_-]+)/);
         if (hp && !handledEvents.has(hp[1])) { handledEvents.add(hp[1]); void pushHp(hp[1]); }
         observeNestedRoots(observer, node);
       }
     });
+    primeRequests(document.body);
     observeChatRoot(observer, document.body);
     acknowledgementPoll = acknowledgementPoll || setInterval(() => { if (acknowledgements.size) scanAllChatRoots(); }, 300);
   }

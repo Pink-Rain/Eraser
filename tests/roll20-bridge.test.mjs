@@ -32,7 +32,7 @@ function roll20Runtime(source) {
 
 function encodePayload(value) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url") }
 
-test("Roll20 bridge 0.7.0 syncs schema-2 NPC fields without duplicates", async () => {
+test("Roll20 bridge 0.7.1 syncs schema-2 NPC fields without duplicates", async () => {
   const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
   const { handlers, objects, chatMessages } = roll20Runtime(source)
   const npc = {
@@ -82,9 +82,9 @@ test("public Roll20 Mod is identical and companion enforces schema 2", async () 
     readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
   ])
   assert.equal(publicSource, source)
-  assert.match(source, /VERSION = '0\.7\.0'/)
+  assert.match(source, /VERSION = '0\.7\.1'/)
   assert.match(content, /payload\?\.schema !== 2/)
-  assert.equal(JSON.parse(manifest).version, "0.7.0")
+  assert.equal(JSON.parse(manifest).version, "0.7.1")
 })
 
 test("Roll20 bridge offers session sync from its menu", async () => {
@@ -97,35 +97,63 @@ test("Roll20 bridge offers session sync from its menu", async () => {
   assert.doesNotMatch(chatMessages.at(-1), /ERASER_SYNC_REQUEST/)
 })
 
-test("Roll20 bridge files session NPCs in a folder and leaves player sheets alone", async () => {
+test("Roll20 bridge leaves folders to the companion and player sheets alone", async () => {
   const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
   const { handlers, objects, chatMessages, campaign } = roll20Runtime(source)
   const send = (payload) => handlers["chat:message"]({ type: "api", playerid: "gm", content: `!eraser-import ${encodePayload(payload)}` })
   const npc = { id: "npc-9", name: "Garde", portraitUrl: "", tokenUrl: "", currentHp: 5, totalHp: 5, constitution: 1, strength: 1, dexterity: 1, intelligence: 1, wisdom: 1, charisma: 1, playerNotes: "", gmNotes: "", inventory: [] }
+  send({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, folder: "1 - Le renouveau", syncId: "a" })
+  // Le Mod ne touche jamais au Journal : c'est la page Roll20 (page.js) qui range les fiches.
+  assert.equal(campaign.journalfolder, "[]")
 
-  // Un PNJ déjà rangé ailleurs est déplacé dans le dossier de la session.
-  send({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, syncId: "a" })
-  const npcSheet = [...objects.values()].find((object) => object.type === "character" && object.values.name === "Garde")
-  campaign.journalfolder = JSON.stringify([{ n: "Ancien dossier", i: [npcSheet.id], id: "old" }])
-  send({ campaign: { id: "camp-1", name: "Test" }, kind: "npc", value: npc, folder: "1 - Le renouveau", syncId: "b" })
-  const tree = JSON.parse(campaign.journalfolder)
-  assert.deepEqual(tree.find((node) => node.n === "Ancien dossier").i, [])
-  assert.deepEqual(tree.find((node) => node.n === "1 - Le renouveau").i, [npcSheet.id])
-
-  // Un joueur : créé une fois, jamais déplacé, réglages du MJ conservés.
   const player = { id: "char-1", name: "Aelis", portraitUrl: "", tokenUrl: "https://example.test/token?v=1", currentHp: 8, totalHp: 12 }
-  send({ campaign: { id: "camp-1", name: "Test" }, kind: "character", value: player, folder: "1 - Le renouveau", syncId: "c" })
+  send({ campaign: { id: "camp-1", name: "Test" }, kind: "character", value: player, syncId: "c" })
   const playerSheet = [...objects.values()].find((object) => object.type === "character" && object.values.name === "Aelis")
   assert.ok(playerSheet)
-  assert.equal(JSON.stringify(JSON.parse(campaign.journalfolder)).includes(playerSheet.id), false)
   playerSheet.set({ controlledby: "player-7", inplayerjournals: "player-7" })
   send({ campaign: { id: "camp-1", name: "Test" }, kind: "character", value: { ...player, name: "Aelis la Rôdeuse" }, syncId: "d" })
-  assert.equal([...objects.values()].filter((object) => object.type === "character" && object.values.controlledby === "player-7").length, 1)
   assert.equal(playerSheet.values.controlledby, "player-7")
   assert.equal(playerSheet.values.inplayerjournals, "player-7")
   assert.equal(playerSheet.values.name, "Aelis la Rôdeuse")
   const acknowledgement = chatMessages.filter((message) => message.includes("ERASER_ACK:d:")).at(-1)
   const meta = JSON.parse(Buffer.from(acknowledgement.match(/ERASER_ACK:d:([A-Za-z0-9_-]+)/)[1], "base64url").toString("utf8"))
   assert.equal(meta.needsToken, true)
+
+  // Chaque demande de synchro porte un identifiant horodaté unique.
+  handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser-sync" })
+  handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser-sync" })
+  const ids = chatMessages.flatMap((message) => [...message.matchAll(/ERASER_SYNC_REQUEST:([A-Za-z0-9]+_[A-Za-z0-9]+)/g)].map((match) => match[1]))
+  assert.equal(ids.length, 2)
+  assert.notEqual(ids[0], ids[1])
+  assert.ok(Math.abs(parseInt(ids[0].split("_")[0], 36) - Date.now()) < 5000)
   assert.equal(chatMessages.some((message) => message.includes("Erreur")), false)
+})
+
+test("companion files session sheets through the Roll20 page", async () => {
+  const [content, page, manifest] = await Promise.all([
+    readFile(new URL("../integrations/roll20/extension/content.js", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/page.js", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
+  ])
+  const scripts = JSON.parse(manifest).content_scripts
+  assert.ok(scripts.some((script) => script.world === "MAIN" && script.js.includes("page.js")))
+  assert.match(content, /moveToJournalFolder\(folder, filed\)/)
+
+  // page.js : retire les fiches de leurs anciens dossiers et crée celui de la session.
+  const listeners = []
+  let saved = null
+  const window = {
+    top: null,
+    Campaign: { get: () => JSON.stringify([{ n: "Ancien", id: "old", i: ["npc-sheet", "player-sheet"] }]), save: (value) => { saved = value } },
+    addEventListener: (_type, listener) => listeners.push(listener),
+    postMessage: (data) => replies.push(data),
+    generateUUID: () => "-new-folder",
+  }
+  window.top = window
+  const replies = []
+  vm.runInNewContext(page, { window, JSON, Array, Set, String, Math, Date })
+  listeners[0]({ source: window, data: { source: "eraser-companion", type: "journal-folder", requestId: "r1", folder: "1 - Le renouveau", ids: ["npc-sheet"] } })
+  const tree = JSON.parse(saved.journalfolder)
+  assert.deepEqual(tree, [{ n: "Ancien", id: "old", i: ["player-sheet"] }, { n: "1 - Le renouveau", id: "-new-folder", i: ["npc-sheet"] }])
+  assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{ source: "eraser-page", requestId: "r1", ok: true, moved: 1 }])
 })
