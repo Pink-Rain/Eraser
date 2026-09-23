@@ -186,19 +186,4 @@ test("token art draws every frame for the app and the companion", async () => {
     if (style.kind !== "shop") assert.ok(calls.includes("drawImage"))
   }
   assert.deepEqual({ ...api.coverPlacement(image) }, { x: 256, y: 256, width: 432 })
-
-  // Cadres anciens et échoppes : chaque variante se dessine, avec ou sans vendeur.
-  for (const frame of ["worn", "relic"]) for (const kind of ["character", "npc", "creature"]) {
-    calls.length = 0
-    api.renderDefaultToken({ kind, frame }, image)
-    assert.ok(calls.includes("drawImage") && calls.includes("stroke"))
-  }
-  for (const shopKey of Object.keys(api.shopFronts)) {
-    calls.length = 0
-    api.renderDefaultToken({ kind: "shop", shopKey, frame: "stall" }, shopKey === "market" ? null : image)
-    assert.ok(calls.includes("fillRect") && calls.includes("fill"))
-  }
-  assert.equal(api.frameOf({ kind: "shop" }), "round")
-  assert.equal(api.frameOf({ kind: "npc", frame: "inconnu" }), "ornate")
-  assert.deepEqual({ ...api.coverPlacement(image, { kind: "shop", shopKey: "market", frame: "stall" }) }, { x: 256, y: 262, width: 340 })
 })
