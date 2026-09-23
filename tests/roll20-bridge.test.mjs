@@ -32,7 +32,7 @@ function roll20Runtime(source) {
 
 function encodePayload(value) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url") }
 
-test("Roll20 bridge 0.7.1 syncs schema-2 NPC fields without duplicates", async () => {
+test("Roll20 bridge 0.7.2 syncs schema-2 NPC fields without duplicates", async () => {
   const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
   const { handlers, objects, chatMessages } = roll20Runtime(source)
   const npc = {
@@ -82,9 +82,9 @@ test("public Roll20 Mod is identical and companion enforces schema 2", async () 
     readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
   ])
   assert.equal(publicSource, source)
-  assert.match(source, /VERSION = '0\.7\.1'/)
+  assert.match(source, /VERSION = '0\.7\.2'/)
   assert.match(content, /payload\?\.schema !== 2/)
-  assert.equal(JSON.parse(manifest).version, "0.7.1")
+  assert.equal(JSON.parse(manifest).version, "0.7.2")
 })
 
 test("Roll20 bridge offers session sync from its menu", async () => {
@@ -156,4 +156,34 @@ test("companion files session sheets through the Roll20 page", async () => {
   const tree = JSON.parse(saved.journalfolder)
   assert.deepEqual(tree, [{ n: "Ancien", id: "old", i: ["player-sheet"] }, { n: "1 - Le renouveau", id: "-new-folder", i: ["npc-sheet"] }])
   assert.deepEqual(JSON.parse(JSON.stringify(replies)), [{ source: "eraser-page", requestId: "r1", ok: true, moved: 1 }])
+})
+
+test("token art draws every frame for the app and the companion", async () => {
+  const [art, manifest, content] = await Promise.all([
+    readFile(new URL("../integrations/roll20/extension/token-art.js", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
+    readFile(new URL("../integrations/roll20/extension/content.js", import.meta.url), "utf8"),
+  ])
+  assert.deepEqual(JSON.parse(manifest).content_scripts[0].js, ["token-art.js", "content.js"])
+  assert.match(content, /defaultTokenFile\(kind, value\)/)
+  const calls = []
+  const gradient = { addColorStop() {} }
+  const ctx = new Proxy({}, {
+    get: (_target, key) => key === "createLinearGradient" || key === "createRadialGradient" ? () => gradient : (...args) => { calls.push(key); return undefined },
+    set: () => true,
+  })
+  const canvas = { width: 0, height: 0, getContext: () => ctx }
+  const context = { document: { createElement: () => canvas }, Math, Object, globalThis: {} }
+  context.globalThis = context
+  vm.runInNewContext(art, context)
+  const api = context.EraserTokenArt
+  assert.deepEqual(Object.keys(api.shopFronts).sort(), ["alchemist", "antique", "armory", "black-market", "bookshop", "market", "tavern"])
+  const image = { width: 300, height: 400 }
+  for (const style of [{ kind: "character" }, { kind: "npc" }, { kind: "creature" }, { kind: "shop", shopKey: "tavern" }]) {
+    calls.length = 0
+    assert.equal(api.renderDefaultToken(style, style.kind === "shop" ? null : image), canvas)
+    assert.ok(calls.includes("arc") && calls.includes("fill"))
+    if (style.kind !== "shop") assert.ok(calls.includes("drawImage"))
+  }
+  assert.deepEqual({ ...api.coverPlacement(image) }, { x: 256, y: 256, width: 432 })
 })

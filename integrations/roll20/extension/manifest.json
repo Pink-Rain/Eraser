@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Eraser — Compagnon Roll20",
-  "version": "0.7.1",
+  "version": "0.7.2",
   "description": "Synchronise une campagne ou une session de l’application Eraser avec Roll20.",
   "permissions": [
     "storage"
@@ -19,6 +19,7 @@
         "https://app.roll20.net/editor/*"
       ],
       "js": [
+        "token-art.js",
         "content.js"
       ],
       "css": [

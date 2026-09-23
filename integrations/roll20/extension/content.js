@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.7.1';
+  const VERSION = '0.7.2';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -206,11 +206,36 @@
   }
 
   // role 'avatar' : le portrait de la fiche ; role 'token' : le token rond d'Eraser.
-  async function uploadImage(imported, url, name, role, options) {
-    const imageUrl = new URL(url, API).href;
-    const image = await runtimeMessage({ type: 'eraser-image', url: imageUrl });
-    if (!image?.ok) throw new Error(image?.error || (role === 'token' ? 'Le token Eraser n’a pas pu être téléchargé.' : 'Le portrait Eraser n’a pas pu être téléchargé.'));
-    const file = await toUploadableFile(image.dataUrl, name + (role === 'token' ? '-token' : ''));
+  async function downloadImage(url, what) {
+    const image = await runtimeMessage({ type: 'eraser-image', url: new URL(url, API).href });
+    if (!image?.ok) throw new Error(image?.error || 'Le ' + what + ' Eraser n’a pas pu être téléchargé.');
+    return image.dataUrl;
+  }
+
+  // Sans token préparé dans Eraser : l'avatar centré dans son cadre (token-art.js,
+  // le même dessin que l'éditeur de token de l'application).
+  async function defaultTokenFile(kind, value) {
+    const art = globalThis.EraserTokenArt;
+    if (!art) throw new Error('Le dessin des tokens est absent du compagnon.');
+    const style = kind === 'shop'
+      ? { kind: 'shop', shopKey: art.shopFronts[value.key] ? value.key : 'market' }
+      : { kind: kind === 'character' ? 'character' : 'npc' };
+    let image = null;
+    if (value.portraitUrl) {
+      const dataUrl = await downloadImage(value.portraitUrl, 'portrait');
+      image = new Image();
+      await new Promise((resolve, reject) => { image.onload = resolve; image.onerror = () => reject(new Error('Le portrait n’est pas une image lisible.')); image.src = dataUrl; });
+    }
+    const canvas = art.renderDefaultToken(style, image);
+    const blob = await new Promise((resolve) => canvas.toBlob(resolve, 'image/png'));
+    if (!blob) throw new Error('Le token par défaut n’a pas pu être dessiné.');
+    return new File([blob], (String(value.name || 'token').normalize('NFD').replace(/[\u0300-\u036f]/g, '').replace(/[^a-z0-9_-]+/gi, '-') || 'token') + '-token.png', { type: 'image/png' });
+  }
+
+  async function uploadImage(imported, source, name, role, options) {
+    const file = source instanceof File
+      ? source
+      : await toUploadableFile(await downloadImage(source, role === 'token' ? 'token' : 'portrait'), name + (role === 'token' ? '-token' : ''));
     const doneId = rid();
     const done = waitForAcknowledgement(doneId, 60000, 'Roll20 n’a pas renvoyé l’image importée en 60 s (upload bloqué ou table de jeu non visible).');
     try {
@@ -237,11 +262,15 @@
    * Renvoie { imported, portrait, token, failures, warnings }.
    */
   async function importWithImages(payload, kind, value, label, folder) {
-    const report = { imported: false, portrait: false, token: false, eraserToken: false, characterId: '', failures: [], warnings: [] };
+    const report = { imported: false, portrait: false, token: false, eraserToken: false, autoToken: false, characterId: '', failures: [], warnings: [] };
     const bar = kind !== 'shop';
+    // Aucun token préparé : le compagnon fabrique le token par défaut. Son empreinte
+    // suit le portrait, il est donc refait quand l'avatar change dans Eraser.
+    const automatic = !value.tokenUrl && (Boolean(value.portraitUrl) || kind === 'shop');
+    const sent = automatic ? { ...value, tokenUrl: 'auto1:' + (value.portraitUrl || 'shop:' + value.key) + ':' + (value.portraitVersion || '') } : value;
     let result;
     try {
-      result = await importPayload({ campaign: payload.campaign, kind, value, folder: folder || '' });
+      result = await importPayload({ campaign: payload.campaign, kind, value: sent, folder: folder || '' });
       if (!result.characterId) throw new Error('Roll20 n’a pas confirmé la création de la fiche.');
       report.imported = true;
       report.characterId = result.characterId;
@@ -260,8 +289,8 @@
     if (result.needsToken) {
       status(label + ' (token)');
       try {
-        const token = await uploadImage(result, value.tokenUrl, value.name, 'token', { bar });
-        report.eraserToken = true;
+        const token = await uploadImage(result, automatic ? await defaultTokenFile(kind, value) : value.tokenUrl, value.name, 'token', { bar });
+        if (automatic) report.autoToken = true; else report.eraserToken = true;
         if (token.token) report.token = true;
       } catch (error) { report.failures.push(value.name + ' : token — ' + error.message); }
     }
@@ -376,13 +405,14 @@
 
       const failures = [];
       const warnings = [];
-      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, portraits = 0, shops = 0, done = 0;
+      let imported = 0, players = 0, tokens = 0, eraserTokens = 0, autoTokens = 0, portraits = 0, shops = 0, done = 0;
       const filed = [];
       const collect = (report, fileInFolder) => {
         failures.push(...report.failures); warnings.push(...report.warnings);
         if (report.portrait) portraits += 1;
         if (report.token) tokens += 1;
         if (report.eraserToken) eraserTokens += 1;
+        if (report.autoToken) autoTokens += 1;
         if (fileInFolder && report.characterId) filed.push(report.characterId);
         return report.imported;
       };
@@ -414,7 +444,7 @@
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
       const withToken = characters.concat(payload.npcs, payload.shops).filter((entry) => entry.tokenUrl).length;
-      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s)' + folderNote + ' · ' + seconds + ' s';
+      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : 'Tout · ') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + eraserTokens + ' token(s) Eraser importé(s) sur ' + withToken + ' préparé(s) · ' + autoTokens + ' token(s) par défaut' + folderNote + ' · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);

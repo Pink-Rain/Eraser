@@ -112,6 +112,10 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
   const imageUrl = (kind: TokenKind, id: string, type: "portrait" | "token", version = "") =>
     `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(id)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}&kind=${kind}&type=${type}${version ? `&v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
   const portraitUrl = (npcId: string, portrait: string) => portrait ? imageUrl("npc", npcId, "portrait") : ""
+  // Version du portrait : le compagnon refait le token par défaut quand elle change.
+  const portraitVersion = async (key: string, portrait: string) => /^https?:\/\//i.test(portrait)
+    ? portrait
+    : await sharedMediaVersion(key).catch(() => null) || ""
   const tokenUrl = async (kind: TokenKind, id: string) => {
     const version = await tokenVersion(kind, id).catch(() => null)
     return version ? imageUrl(kind, id, "token", version) : ""
@@ -131,6 +135,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       name: character.name,
       portraitUrl: await characterHasPortrait(character.id, character.portrait) ? imageUrl("character", character.id, "portrait") : "",
       tokenUrl: await tokenUrl("character", character.id),
+      portraitVersion: await portraitVersion(`characters/${character.id}/portrait`, character.portrait),
       currentHp: character.currentHp,
       totalHp: character.totalHp,
     }))),
@@ -139,6 +144,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       name: npc.name,
       portraitUrl: portraitUrl(npc.id, npc.portrait),
       tokenUrl: await tokenUrl("npc", npc.id),
+      portraitVersion: npc.portrait ? await portraitVersion(`npcs/${npc.id}/portrait`, npc.portrait) : "",
       currentHp: npc.currentHp,
       totalHp: npc.totalHp,
       constitution: npc.constitution,
@@ -158,6 +164,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
         // La fiche Roll20 du magasin prend le portrait du vendeur et le token de la devanture.
         portraitUrl: seller ? portraitUrl(seller.id, seller.portrait) : "",
         tokenUrl: await tokenUrl("shop", shop.id),
+        portraitVersion: seller?.portrait ? await portraitVersion(`npcs/${seller.id}/portrait`, seller.portrait) : "",
         seller: seller ? { id: seller.id, name: seller.name, portraitUrl: portraitUrl(seller.id, seller.portrait) } : null,
       }
     })),

@@ -6,10 +6,11 @@
  * dossier du Journal au nom de la session synchronisée.
  * 0.7.1 : les dossiers du Journal sont rangés par le compagnon (le Mod ne peut pas
  * les modifier) ; chaque demande de synchro porte un identifiant unique.
+ * 0.7.2 : sans token préparé dans Eraser, le compagnon envoie un token par défaut.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.7.1';
+  var VERSION = '0.7.2';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
