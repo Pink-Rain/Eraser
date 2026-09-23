@@ -1,6 +1,6 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
@@ -123,6 +123,149 @@ function SheetGridToolbar({ targetRef, ready, leading, trailing, onReset }: { ta
     </span>
   </div>
 }
+
+/**
+ * Ce que le menu d'une ligne sait faire. Il ne se construit qu'à l'ouverture : il peut
+ * donc lire l'état courant de la grille sans obliger toutes les lignes à se redessiner.
+ */
+type SheetGridMenu = {
+  targetCount: (rowKey: string) => number
+  orderedTargets: (rowKey: string) => string[]
+  copyRows: (keys: string[], cut?: boolean) => Promise<void>
+  pasteRows: (startKey: string) => Promise<void>
+  clearRows: (keys: string[]) => void
+  askRemoval: (keys: string[]) => void
+  rowCommands?: SheetGridRowCommands
+  rowMenuExtras?: (rowKey: string) => ReactNode
+}
+
+const SheetGridMenuContext = createContext<SheetGridMenu | null>(null)
+
+function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: number }) {
+  const menu = useContext(SheetGridMenuContext)
+  if (!menu) return null
+  const { rowCommands } = menu
+  const count = menu.targetCount(rowKey)
+  const targets = () => menu.orderedTargets(rowKey)
+  return <>
+    <ContextMenuLabel>{count > 1 ? `${count} lignes sélectionnées` : `Ligne ${rowNumber}`}</ContextMenuLabel>
+    <ContextMenuItem onSelect={() => void menu.copyRows(targets())}><Copy />Copier<ContextMenuShortcut>Ctrl+C</ContextMenuShortcut></ContextMenuItem>
+    <ContextMenuItem onSelect={() => void menu.copyRows(targets(), true)}><Scissors />Couper<ContextMenuShortcut>Ctrl+X</ContextMenuShortcut></ContextMenuItem>
+    <ContextMenuItem onSelect={() => void menu.pasteRows(rowKey)}><ClipboardPaste />Coller ici<ContextMenuShortcut>Ctrl+V</ContextMenuShortcut></ContextMenuItem>
+    <ContextMenuItem onSelect={() => menu.clearRows(targets())}><Eraser />Vider le contenu<ContextMenuShortcut>Suppr</ContextMenuShortcut></ContextMenuItem>
+    {(rowCommands?.insertBefore || rowCommands?.insertAfter) && <>
+      <ContextMenuSeparator />
+      {rowCommands.insertBefore && <ContextMenuItem onSelect={() => rowCommands.insertBefore?.(rowKey)}><CornerDownLeft className="rotate-180" />Insérer une ligne au-dessus</ContextMenuItem>}
+      {rowCommands.insertAfter && <ContextMenuItem onSelect={() => rowCommands.insertAfter?.(rowKey)}><CornerDownLeft />Insérer une ligne en dessous</ContextMenuItem>}
+    </>}
+    {rowCommands?.duplicate && <ContextMenuItem onSelect={() => rowCommands.duplicate?.(targets())}><Copy />Dupliquer<ContextMenuShortcut>Ctrl+D</ContextMenuShortcut></ContextMenuItem>}
+    {rowCommands?.remove && <>
+      <ContextMenuSeparator />
+      <ContextMenuItem variant="destructive" onSelect={() => menu.askRemoval(targets())}><Trash2 />Supprimer<ContextMenuShortcut>Ctrl+Suppr</ContextMenuShortcut></ContextMenuItem>
+    </>}
+    {menu.rowMenuExtras?.(rowKey)}
+  </>
+}
+
+/** Les gestes d'une ligne. L'objet ne change jamais : une ligne n'a pas à se redessiner pour eux. */
+type SheetGridRowActions = {
+  select: (key: string, event: { shiftKey: boolean; ctrlKey: boolean; metaKey: boolean }) => void
+  selectForMenu: (key: string) => void
+  startRowResize: (event: ReactPointerEvent<HTMLSpanElement>, key: string, element: HTMLElement | null) => void
+  clearRowHeight: (key: string) => void
+  commit: (rowKey: string, columnKey: string, value: string) => void
+  activate: (editor: RichTextTarget, rowKey: string, columnKey: string) => void
+  startFill: (event: ReactPointerEvent<HTMLSpanElement>, rowKey: string, columnKey: string) => void
+}
+
+/**
+ * Une ligne de la grille. Elle ne se redessine que si ce qu'elle affiche change : son
+ * contenu, sa sélection, sa cellule active. Enregistrer une cellule ne redessine donc
+ * plus les centaines d'autres lignes du tableau.
+ */
+const SheetGridRowView = memo(function SheetGridRowView({
+  rowKey, rowNumber, rowIndex, columns, firstKey, manualHeight, selected, activeColumn, fillColumn,
+  version, writeTick, disabled, valueOf, renderCustomCell, actions,
+}: {
+  rowKey: string
+  rowNumber: number
+  rowIndex: number
+  columns: SheetGridColumn[]
+  firstKey: string | undefined
+  manualHeight: number | undefined
+  selected: boolean
+  activeColumn: string | null
+  fillColumn: string | null
+  version: number
+  writeTick: number
+  disabled: boolean
+  valueOf: (rowKey: string, columnKey: string) => string
+  renderCustomCell?: (rowKey: string, columnKey: string) => ReactNode
+  actions: SheetGridRowActions
+}) {
+  // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
+  // qui défile derrière elle. La teinte de sélection est posée par-dessus.
+  const cellBase = `relative border-b border-r bg-background p-1 align-top ${manualHeight ? "overflow-hidden" : ""}`
+  return <tr data-row-key={rowKey} data-row-index={rowIndex} style={manualHeight ? { height: manualHeight } : undefined}>
+    <ContextMenu>
+      <ContextMenuTrigger asChild>
+        <td
+          className={`sticky left-0 z-20 cursor-pointer border-b border-r bg-muted p-0 align-top ${selected ? "" : "hover:bg-accent"}`}
+          onPointerDown={(event) => { if (event.button === 0) actions.select(rowKey, event) }}
+          onContextMenu={() => actions.selectForMenu(rowKey)}
+          aria-label={`Ligne ${rowNumber}`}
+          title="Cliquer pour sélectionner la ligne, clic droit pour le menu"
+        >
+          {selected && <span className="pointer-events-none absolute inset-0 bg-primary/40" />}
+          <span className="pointer-events-none relative flex h-full min-h-8 items-start justify-center pt-2 text-[10px] leading-none text-muted-foreground/70">⠿</span>
+          <span
+            role="separator"
+            aria-label={`Redimensionner la ligne ${rowNumber}`}
+            title="Glisser pour fixer la hauteur, double-cliquer pour revenir à l’ajustement automatique"
+            onPointerDown={(event) => actions.startRowResize(event, rowKey, event.currentTarget.parentElement)}
+            onDoubleClick={() => actions.clearRowHeight(rowKey)}
+            className="absolute inset-x-0 bottom-0 z-30 h-1.5 translate-y-0.5 cursor-row-resize touch-none"
+          />
+        </td>
+      </ContextMenuTrigger>
+      <ContextMenuContent>
+        <SheetGridRowMenu rowKey={rowKey} rowNumber={rowNumber} />
+      </ContextMenuContent>
+    </ContextMenu>
+    {columns.map((column) => {
+      const isActive = activeColumn === column.key
+      return <td
+        key={column.key}
+        className={`${cellBase} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${column.key === firstKey ? "z-10" : ""}`}
+        style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
+      >
+        {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
+        {column.custom
+          ? renderCustomCell?.(rowKey, column.key)
+          : column.control
+            ? column.control(rowKey)
+            : <RichTextSurface
+                key={`${version}:${writeTick}:${column.key}`}
+                initialHtml={column.plain ? escapeRichText(valueOf(rowKey, column.key)) : sanitizeRichText(valueOf(rowKey, column.key))}
+                plain={Boolean(column.plain)}
+                disabled={disabled}
+                placeholder=""
+                delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
+                onCommit={(value) => actions.commit(rowKey, column.key, value)}
+                onActivate={(editor) => actions.activate(editor, rowKey, column.key)}
+                className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
+              />}
+        {isActive && !column.custom && !column.control && <span
+          role="separator"
+          aria-label="Recopier le contenu vers les lignes suivantes"
+          title="Tirer pour recopier le contenu"
+          onPointerDown={(event) => actions.startFill(event, rowKey, column.key)}
+          className="absolute -bottom-1 -right-1 z-30 size-2.5 cursor-crosshair rounded-[2px] border border-background bg-primary touch-none"
+        />}
+      </td>
+    })}
+  </tr>
+})
 
 export function SheetGrid({
   layoutKey, columns, rows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
@@ -351,6 +494,37 @@ export function SheetGrid({
     setLayout({ ...layout, rowHeights: next })
   }
 
+  const selectedSet = useMemo(() => new Set(selection), [selection])
+
+  // Les gestes des lignes passent par un objet stable qui appelle toujours la version
+  // la plus récente : sans lui, chaque ligne se redessinerait à chaque rendu.
+  const latest = useRef({ selectRow, startRowResize, clearRowHeight, startFill, onCommit, selection })
+  useLayoutEffect(() => { latest.current = { selectRow, startRowResize, clearRowHeight, startFill, onCommit, selection } })
+  const rowActions = useMemo<SheetGridRowActions>(() => ({
+    select: (key, event) => latest.current.selectRow(key, event),
+    selectForMenu: (key) => { if (!latest.current.selection.includes(key)) { anchor.current = key; setSelection([key]) } },
+    startRowResize: (event, key, element) => latest.current.startRowResize(event, key, element),
+    clearRowHeight: (key) => latest.current.clearRowHeight(key),
+    commit: (rowKey, columnKey, value) => latest.current.onCommit(rowKey, columnKey, value),
+    activate: (editor, rowKey, columnKey) => {
+      activate(editor)
+      setActiveCell((current) => current?.row === rowKey && current.column === columnKey ? current : { row: rowKey, column: columnKey })
+      setSelection((current) => current.length ? [] : current)
+    },
+    startFill: (event, rowKey, columnKey) => latest.current.startFill(event, rowKey, columnKey),
+  }), [activate])
+
+  const menu: SheetGridMenu = {
+    targetCount: (key) => targetRows(key).length,
+    orderedTargets,
+    copyRows,
+    pasteRows,
+    clearRows,
+    askRemoval: setPendingRemoval,
+    rowCommands,
+    rowMenuExtras,
+  }
+
   const headerCell = "sticky top-0 border-b border-r bg-muted px-2 py-2 text-left align-bottom font-semibold"
   const resizeHandle = "absolute inset-y-0 right-0 z-40 w-2 translate-x-1 cursor-col-resize touch-none"
   const firstKey = columns[0]?.key
@@ -359,7 +533,7 @@ export function SheetGrid({
   // titre, la recherche et les onglets s'effacent vers le haut, la barre d'outils et
   // les noms de colonnes restent. La hauteur retire l'en-tête (3.5rem) et, sur
   // l'application Windows, la barre de titre.
-  return <div className="sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))] flex-col overflow-hidden rounded-xl border bg-background/60">
+  return <SheetGridMenuContext.Provider value={menu}><div className="sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))] flex-col overflow-hidden rounded-xl border bg-background/60">
     <SheetGridToolbar
       targetRef={activeRef}
       ready={toolbarReady}
@@ -395,88 +569,24 @@ export function SheetGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => {
-            const manualHeight = rowHeight(row.key)
-            const selected = selection.includes(row.key)
-            // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
-            // qui défile derrière elle. La teinte de sélection est posée par-dessus.
-            const cellBase = `relative border-b border-r bg-background p-1 align-top ${manualHeight ? "overflow-hidden" : ""}`
-            return <tr key={row.key} data-row-key={row.key} style={manualHeight ? { height: manualHeight } : undefined}>
-              <ContextMenu>
-                <ContextMenuTrigger asChild>
-                  <td
-                    className={`sticky left-0 z-20 cursor-pointer border-b border-r bg-muted p-0 align-top ${selected ? "" : "hover:bg-accent"}`}
-                    onPointerDown={(event) => { if (event.button === 0) selectRow(row.key, event) }}
-                    onContextMenu={() => { if (!selection.includes(row.key)) { anchor.current = row.key; setSelection([row.key]) } }}
-                    aria-label={`Ligne ${row.rowNumber}`}
-                    title="Cliquer pour sélectionner la ligne, clic droit pour le menu"
-                  >
-                    {selected && <span className="pointer-events-none absolute inset-0 bg-primary/40" />}
-                    <span className="pointer-events-none relative flex h-full min-h-8 items-start justify-center pt-2 text-[10px] leading-none text-muted-foreground/70">⠿</span>
-                    <span
-                      role="separator"
-                      aria-label={`Redimensionner la ligne ${row.rowNumber}`}
-                      title="Glisser pour fixer la hauteur, double-cliquer pour revenir à l’ajustement automatique"
-                      onPointerDown={(event) => startRowResize(event, row.key, event.currentTarget.parentElement)}
-                      onDoubleClick={() => clearRowHeight(row.key)}
-                      className="absolute inset-x-0 bottom-0 z-30 h-1.5 translate-y-0.5 cursor-row-resize touch-none"
-                    />
-                  </td>
-                </ContextMenuTrigger>
-                <ContextMenuContent>
-                  <ContextMenuLabel>{targetRows(row.key).length > 1 ? `${targetRows(row.key).length} lignes sélectionnées` : `Ligne ${row.rowNumber}`}</ContextMenuLabel>
-                  <ContextMenuItem onSelect={() => void copyRows(orderedTargets(row.key))}><Copy />Copier<ContextMenuShortcut>Ctrl+C</ContextMenuShortcut></ContextMenuItem>
-                  <ContextMenuItem onSelect={() => void copyRows(orderedTargets(row.key), true)}><Scissors />Couper<ContextMenuShortcut>Ctrl+X</ContextMenuShortcut></ContextMenuItem>
-                  <ContextMenuItem onSelect={() => void pasteRows(row.key)}><ClipboardPaste />Coller ici<ContextMenuShortcut>Ctrl+V</ContextMenuShortcut></ContextMenuItem>
-                  <ContextMenuItem onSelect={() => clearRows(orderedTargets(row.key))}><Eraser />Vider le contenu<ContextMenuShortcut>Suppr</ContextMenuShortcut></ContextMenuItem>
-                  {(rowCommands?.insertBefore || rowCommands?.insertAfter) && <>
-                    <ContextMenuSeparator />
-                    {rowCommands.insertBefore && <ContextMenuItem onSelect={() => rowCommands.insertBefore?.(row.key)}><CornerDownLeft className="rotate-180" />Insérer une ligne au-dessus</ContextMenuItem>}
-                    {rowCommands.insertAfter && <ContextMenuItem onSelect={() => rowCommands.insertAfter?.(row.key)}><CornerDownLeft />Insérer une ligne en dessous</ContextMenuItem>}
-                  </>}
-                  {rowCommands?.duplicate && <ContextMenuItem onSelect={() => rowCommands.duplicate?.(orderedTargets(row.key))}><Copy />Dupliquer<ContextMenuShortcut>Ctrl+D</ContextMenuShortcut></ContextMenuItem>}
-                  {rowCommands?.remove && <>
-                    <ContextMenuSeparator />
-                    <ContextMenuItem variant="destructive" onSelect={() => setPendingRemoval(orderedTargets(row.key))}><Trash2 />Supprimer<ContextMenuShortcut>Ctrl+Suppr</ContextMenuShortcut></ContextMenuItem>
-                  </>}
-                  {rowMenuExtras?.(row.key)}
-                </ContextMenuContent>
-              </ContextMenu>
-              {columns.map((column) => {
-                const inFill = fill?.column === column.key && rowIndex >= fill.from && rowIndex <= fill.to
-                const isActive = activeCell?.row === row.key && activeCell.column === column.key
-                return <td
-                  key={column.key}
-                  className={`${cellBase} ${inFill ? "ring-2 ring-inset ring-primary/60" : ""} ${column.key === firstKey ? "z-10" : ""}`}
-                  style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
-                >
-                  {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
-                  {column.custom
-                    ? renderCustomCell?.(row.key, column.key)
-                    : column.control
-                      ? column.control(row.key)
-                      : <RichTextSurface
-                          key={`${version}:${writeTick}:${column.key}`}
-                          initialHtml={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
-                          plain={Boolean(column.plain)}
-                          disabled={disabled}
-                          placeholder=""
-                          delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
-                          onCommit={(value) => onCommit(row.key, column.key, value)}
-                          onActivate={(editor) => { activate(editor); setActiveCell({ row: row.key, column: column.key }); setSelection((current) => current.length ? [] : current) }}
-                          className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
-                        />}
-                  {isActive && !column.custom && !column.control && <span
-                    role="separator"
-                    aria-label="Recopier le contenu vers les lignes suivantes"
-                    title="Tirer pour recopier le contenu"
-                    onPointerDown={(event) => startFill(event, row.key, column.key)}
-                    className="absolute -bottom-1 -right-1 z-30 size-2.5 cursor-crosshair rounded-[2px] border border-background bg-primary touch-none"
-                  />}
-                </td>
-              })}
-            </tr>
-          })}
+          {rows.map((row, rowIndex) => <SheetGridRowView
+            key={row.key}
+            rowKey={row.key}
+            rowNumber={row.rowNumber}
+            rowIndex={rowIndex}
+            columns={columns}
+            firstKey={firstKey}
+            manualHeight={rowHeight(row.key)}
+            selected={selectedSet.has(row.key)}
+            activeColumn={activeCell?.row === row.key ? activeCell.column : null}
+            fillColumn={fill && rowIndex >= fill.from && rowIndex <= fill.to ? fill.column : null}
+            version={version}
+            writeTick={writeTick}
+            disabled={disabled}
+            valueOf={valueOf}
+            renderCustomCell={renderCustomCell}
+            actions={rowActions}
+          />)}
           {rowCommands?.append && Boolean(rows.length) && <tr>
             <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
             <td colSpan={columns.length} className="border-b p-0">
@@ -501,5 +611,5 @@ export function SheetGrid({
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
-  </div>
+  </div></SheetGridMenuContext.Provider>
 }

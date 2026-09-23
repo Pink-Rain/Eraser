@@ -100,7 +100,7 @@ function headersOf(firstRow: string[], tab: WorldIndexTabDefinition, width: numb
 /** Lecture avec la mise en forme : c'est ce qu'affiche et modifie le tableau. */
 async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: string): Promise<WorldIndexTable> {
   const tab = tabDefinition(key, tabName)
-  const sheet = await readFormattedSheet(spreadsheetId, [tab.name])
+  const sheet = await readFormattedSheet(spreadsheetId, [tab.name], { light: true })
   const width = Math.max(0, ...sheet.rows.map((row) => row?.length ?? 0))
   const headers = headersOf((sheet.rows[0] ?? []).map((cell) => cell?.value ?? ""), tab, width)
   const rows = sheet.rows.slice(1).flatMap((row, index) => row?.some((cell) => cell?.value.trim())
@@ -113,10 +113,62 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
   return { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows }
 }
 
-export async function getWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
+async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
   const tables = await Promise.all(worldIndexDefinitions[key].tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   return { key, webViewLink: sheet.webViewLink, tables }
+}
+
+/**
+ * Le contenu de chaque index, gardé en mémoire. Relire tout un classeur mis en forme
+ * prend plusieurs secondes : on ne le fait plus qu'à l'ouverture, sur « Actualiser »,
+ * après un changement de structure (ajout, suppression…) ou passé quelques minutes,
+ * pour voir ce qui a été modifié directement dans Sheets. Une cellule enregistrée
+ * depuis l'application est recopiée ici au lieu de tout relire.
+ */
+const WORLD_INDEX_CACHE_MS = 5 * 60_000
+const worldIndexCache = new Map<WorldIndexKey, { expiresAt: number; promise: Promise<WorldIndexData> }>()
+
+export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
+  const cached = worldIndexCache.get(key)
+  if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
+  const promise = loadWorldIndex(key)
+  worldIndexCache.set(key, { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise })
+  // Une lecture ratée ne doit pas rester en mémoire : la suivante réessaie.
+  promise.catch(() => { if (worldIndexCache.get(key)?.promise === promise) worldIndexCache.delete(key) })
+  return promise
+}
+
+function invalidateWorldIndexes(keys: Iterable<WorldIndexKey>) {
+  for (const key of keys) worldIndexCache.delete(key)
+}
+
+/** Les index qu'un changement dans `key` peut toucher par ses colonnes liées. */
+function linkedIndexes(key: WorldIndexKey) {
+  const keys = new Set<WorldIndexKey>([key])
+  for (const [left, right] of worldIndexLinks) {
+    if (left.index === key) keys.add(right.index)
+    if (right.index === key) keys.add(left.index)
+  }
+  return keys
+}
+
+function escapeCellHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br />")
+}
+
+/** Recopie dans la mémoire des cellules qu'on vient d'écrire dans Sheets. */
+async function patchCachedRow(key: WorldIndexKey, tabName: string, rowNumber: number, cells: Array<{ column: number; html: string }>) {
+  const entry = worldIndexCache.get(key)
+  if (!entry) return
+  const data = await entry.promise.catch(() => null)
+  const row = data?.tables.find((table) => table.tabName === tabName)?.rows.find((candidate) => candidate.rowNumber === rowNumber)
+  if (!row) return invalidateWorldIndexes([key])
+  for (const { column, html } of cells) {
+    const rich = /<[a-z]/i.test(html)
+    row.values[column] = rich ? htmlToRichText(html).text : html
+    row.html[column] = rich ? html : escapeCellHtml(html)
+  }
 }
 
 function columnOf(headers: string[], name: string) {
@@ -262,9 +314,12 @@ async function syncRowLinks(key: WorldIndexKey, tabName: string, rowNumber: numb
   }
 }
 
+/** L'onglet tel qu'il est en mémoire : pas besoin de relire tout le classeur pour écrire une cellule. */
 async function tableFor(key: WorldIndexKey, tabName: string) {
-  const sheet = await workbook(key)
-  return { sheet, table: await readTable(sheet.spreadsheetId, key, tabName) }
+  const [sheet, data] = await Promise.all([workbook(key), getWorldIndex(key)])
+  const table = data.tables.find((candidate) => candidate.tabName === tabName)
+  if (!table) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+  return { sheet, table }
 }
 
 /**
@@ -282,6 +337,7 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNum
     const touchesLinks = Boolean(linkedEnd) || (isNameColumn(header) && ends.length > 0)
     const before = touchesLinks ? await plainTable(key, tabName) : null
     await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html })
+    await patchCachedRow(key, tabName, rowNumber, [{ column, html }])
     const changed = new Set<WorldIndexKey>()
     if (!before) return []
     const oldName = rowName(before, rowNumber - 1)
@@ -304,6 +360,7 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNum
       }
     }
     await syncRowLinks(key, tabName, rowNumber, changed)
+    invalidateWorldIndexes(changed)
     return [...changed]
   })
 }
@@ -337,9 +394,10 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
     for (const [column, value] of html.entries()) {
       if (/<[a-z]/i.test(value)) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html: value })
     }
-    const changed = new Set<WorldIndexKey>()
+    const changed = new Set<WorldIndexKey>([key])
     await syncRowLinks(key, tabName, rowNumber, changed)
-    return [...changed]
+    invalidateWorldIndexes(changed)
+    return [...changed].filter((changedKey) => changedKey !== key)
   })
 }
 
@@ -362,6 +420,7 @@ export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, row
     })
   }
   clearSpreadsheetReadCache(sheet.spreadsheetId)
+  invalidateWorldIndexes([key])
   })
 }
 
@@ -394,6 +453,7 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNum
       return index > 0 ? index + 1 : rowNumber
     }).sort((left, right) => right - left)
     for (const rowNumber of freshNumbers) await deleteGoogleSheetRow(sheet.spreadsheetId, tabName, rowNumber, table.sheetId)
+    invalidateWorldIndexes(linkedIndexes(key))
   })
 }
 
@@ -410,6 +470,7 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
     const nameColumn = columnOf(table.headers, "Nom")
     const data: Array<{ range: string; values: string[][] }> = []
     const formatted: Array<{ column: number; html: string }> = []
+    const written = new Map<string, number>()
     for (const [header, raw] of Object.entries(fields)) {
       const column = columnOf(table.headers, header)
       if (column < 0) continue
@@ -419,7 +480,9 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
       // Texte enrichi : écrit avec sa mise en forme plutôt qu'avec ses balises.
       if (/<[a-z]/i.test(value)) { formatted.push({ column, html: value }); continue }
       const cell = `${columnName(column + 1)}${rowNumber}`
-      data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[value]] })
+      const range = sheetTabRange(tabName, `${cell}:${cell}`)
+      written.set(range, column)
+      data.push({ range, values: [[value]] })
     }
     if (data.length) {
       await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, {
@@ -434,6 +497,10 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
       if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
       for (const cell of formatted) await updateFormattedCell({ spreadsheetId: table.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
     }
+    await patchCachedRow(key, tabName, rowNumber, [
+      ...data.map((entry) => ({ column: written.get(entry.range) ?? -1, html: entry.values[0][0] })),
+      ...formatted,
+    ].filter((cell) => cell.column >= 0))
     return data.length + formatted.length
   })
 }
@@ -463,6 +530,7 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     }
     const { sheet, table } = await tableFor(key, fromTab)
     for (const rowNumber of moved.sort((left, right) => right - left)) await deleteGoogleSheetRow(sheet.spreadsheetId, fromTab, rowNumber, table.sheetId)
+    invalidateWorldIndexes([key])
   })
 }
 
@@ -492,6 +560,7 @@ export function renameCreatureSpells(oldNames: string[], newName: string) {
     if (data.length) {
       await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
       clearSpreadsheetReadCache(table.spreadsheetId)
+      invalidateWorldIndexes(["creatures"])
     }
     return data.length
   })

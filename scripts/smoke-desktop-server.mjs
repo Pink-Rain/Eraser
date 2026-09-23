@@ -49,7 +49,8 @@ try {
       PORT: String(port),
       ERASER_DESKTOP: "1",
       ERASER_DESKTOP_DATA_DIR: dataDirectory,
-      ERASER_MIGRATIONS_DIR: join(root, "drizzle"),
+      // Les migrations embarquées dans le serveur : celles qu'utilise une mise à jour sans réinstallation.
+      ERASER_MIGRATIONS_DIR: join(serverDirectory, "migrations"),
       GOOGLE_TOKEN_ENCRYPTION_KEY: "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA",
     },
     stdio: ["ignore", "pipe", "pipe"],

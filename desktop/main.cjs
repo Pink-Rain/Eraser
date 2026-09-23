@@ -2,9 +2,10 @@
 const { app, BrowserWindow, dialog, ipcMain, Menu, shell, session } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
-const { appendFileSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
+const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
 const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
+const hotUpdate = require("./hot-update.cjs")
 
 const LOCAL_PORT = 32147
 const PERSISTENT_PARTITION = "persist:eraser"
@@ -41,6 +42,13 @@ let serverProcess = null
 let startupLogPath = ""
 let updaterInitialized = false
 let updateCheckInProgress = false
+// Version réellement servie : celle de l'installation, ou celle d'un serveur mis à
+// jour sans réinstallation (desktop/hot-update.cjs).
+let runningVersion = app.getVersion()
+let runningHotBundle = false
+let restartingServer = false
+let hotUpdateDialogOpen = false
+let fullUpdateInProgress = false
 let isPinned = false
 let isCollapsed = false
 let collapseSavedBounds = null
@@ -116,6 +124,17 @@ async function waitForServer(url, attempts = 480) {
 }
 
 function serverPaths() {
+  const bundle = app.isPackaged ? hotUpdate.activeBundle() : null
+  if (bundle) {
+    const bundledMigrations = join(bundle.path, "migrations")
+    return {
+      directory: bundle.path,
+      migrations: existsSync(bundledMigrations) ? bundledMigrations : join(process.resourcesPath, "migrations"),
+      workingDirectory: process.resourcesPath,
+      version: bundle.version,
+      hot: true,
+    }
+  }
   if (app.isPackaged) {
     return {
       directory: join(process.resourcesPath, "eraser-server.asar"),
@@ -138,13 +157,16 @@ async function startServer() {
   const logsDirectory = join(userDataDirectory, "logs")
   startupLogPath = process.env.ERASER_STARTUP_LOG || join(logsDirectory, "eraser-startup.log")
   mkdirSync(dirname(startupLogPath), { recursive: true })
-  writeFileSync(startupLogPath, "", "utf8")
+  // Un redémarrage du serveur (mise à jour appliquée) garde le journal du démarrage.
+  if (!restartingServer) writeFileSync(startupLogPath, "", "utf8")
   const readyPath = process.env.ERASER_READY_FILE || join(userDataDirectory, "startup-ready.json")
   mkdirSync(dirname(readyPath), { recursive: true })
   rmSync(readyPath, { force: true })
   const paths = serverPaths()
+  runningVersion = paths.version || app.getVersion()
+  runningHotBundle = Boolean(paths.hot)
   const serverScript = join(paths.directory, "server.js")
-  logLine(`Démarrage d’Eraser ${app.getVersion()} sur 127.0.0.1:${port}.`)
+  logLine(`Démarrage d’Eraser ${runningVersion} sur 127.0.0.1:${port}${runningHotBundle ? ` (mise à jour sans réinstallation, enveloppe ${app.getVersion()})` : ""}.`)
   logLine(`Serveur : ${serverScript}`)
   const accounts = accountsConfig()
   logLine(
@@ -176,7 +198,7 @@ async function startServer() {
   serverProcess.stderr.on("data", (chunk) => logLine(`[service:error] ${String(chunk).trimEnd()}`))
   serverProcess.once("exit", (code) => {
     logLine(`Le service local s’est arrêté avec le code ${code ?? "inconnu"}.`)
-    if (code && mainWindow) {
+    if (code && mainWindow && !restartingServer) {
       void dialog.showErrorBox(
         "Eraser s’est arrêté",
         `Le service local s’est fermé (code ${code}).\n\nJournal : ${startupLogPath}`,
@@ -185,9 +207,80 @@ async function startServer() {
   })
   const url = `http://127.0.0.1:${port}`
   const status = await waitForServer(url)
-  writeFileSync(readyPath, JSON.stringify({ version: app.getVersion(), url, status, readyAt: new Date().toISOString() }, null, 2), "utf8")
+  writeFileSync(readyPath, JSON.stringify({ version: runningVersion, url, status, readyAt: new Date().toISOString() }, null, 2), "utf8")
   logLine(`Eraser est prêt (HTTP ${status}).`)
   return url
+}
+
+function stopServer() {
+  const child = serverProcess
+  if (!child || child.exitCode !== null || child.signalCode) return Promise.resolve()
+  return new Promise((resolve) => {
+    const timer = setTimeout(resolve, 5_000)
+    child.once("exit", () => { clearTimeout(timer); resolve() })
+    child.kill()
+  })
+}
+
+/**
+ * Démarre le serveur local. Si un serveur mis à jour sans réinstallation ne démarre
+ * pas, il est écarté et la version installée prend le relais : une mise à jour ratée
+ * ne doit jamais empêcher d'ouvrir Eraser.
+ */
+async function startServerSafely() {
+  try {
+    return await startServer()
+  } catch (error) {
+    if (!runningHotBundle) throw error
+    logLine(`[mise-à-jour:error] La version ${runningVersion} ne démarre pas (${error instanceof Error ? error.message : error}) : retour à la version installée.`)
+    hotUpdate.markFailed(runningVersion)
+    restartingServer = true
+    try {
+      await stopServer()
+      return await startServer()
+    } finally {
+      restartingServer = false
+    }
+  }
+}
+
+/** Remplace le serveur local par la version téléchargée et recharge la page affichée. */
+async function applyHotUpdate() {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  const current = mainWindow.webContents.getURL()
+  await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
+  restartingServer = true
+  let url
+  try {
+    await stopServer()
+    url = await startServerSafely()
+  } finally {
+    restartingServer = false
+  }
+  await mainWindow.loadURL(current.startsWith(url) ? current : url)
+  logLine(`Eraser ${runningVersion} est appliqué sans réinstallation.`)
+}
+
+async function offerHotUpdate(version) {
+  if (!mainWindow || mainWindow.isDestroyed() || hotUpdateDialogOpen) return
+  if (hotUpdate.compareVersions(version, runningVersion) <= 0) return
+  hotUpdateDialogOpen = true
+  try {
+    const choice = await dialog.showMessageBox(mainWindow, {
+      type: "info",
+      buttons: ["Appliquer maintenant", "Plus tard"],
+      defaultId: 0,
+      cancelId: 1,
+      title: "Mise à jour Eraser prête",
+      message: `Eraser ${version} est prêt.`,
+      detail: "Rien à réinstaller : la page se recharge en quelques secondes. Termine d’abord ce que tu es en train d’écrire.\n\n« Plus tard » l’appliquera à la prochaine ouverture d’Eraser.",
+    })
+    if (choice.response === 0) await applyHotUpdate()
+  } catch (error) {
+    logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    hotUpdateDialogOpen = false
+  }
 }
 
 function broadcastWindowState() {
@@ -345,26 +438,26 @@ function ensureUpdaterConfigured() {
   const { autoUpdater } = require("electron-updater")
   if (!updaterInitialized) {
     autoUpdater.allowPrerelease = true
-    autoUpdater.autoDownload = true
+    // L'installateur ne sert plus que lorsque l'enveloppe a changé : il n'est
+    // téléchargé qu'à la demande de runUpdateCheck, jamais d'office.
+    autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
-    autoUpdater.on("update-available", (info) => {
-      logLine(`Téléchargement automatique de la mise à jour ${info.version}.`)
-    })
     autoUpdater.on("update-downloaded", async (info) => {
-      logLine(`Mise à jour ${info.version} téléchargée et prête.`)
+      logLine(`Mise à jour complète ${info.version} téléchargée et prête.`)
       if (!mainWindow || mainWindow.isDestroyed()) return
       const install = await dialog.showMessageBox(mainWindow, {
         type: "info",
-        buttons: ["Redémarrer maintenant", "Installer à la fermeture"],
+        buttons: ["Redémarrer maintenant", "À la fermeture"],
         defaultId: 0,
         cancelId: 1,
         title: "Mise à jour Eraser prête",
-        message: `Eraser ${info.version} a été téléchargé automatiquement.`,
-        detail: "Tu n’as rien à réinstaller. Eraser peut redémarrer maintenant, ou installer la mise à jour quand tu le fermeras.",
+        message: `Eraser ${info.version} a été téléchargé.`,
+        detail: "Cette version modifie le cœur de l’application : Eraser se ferme, s’installe tout seul, sans assistant, puis se rouvre.",
       })
       if (install.response === 0) {
         await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
-        autoUpdater.quitAndInstall(false, true)
+        // Installation silencieuse (pas d'assistant), puis relance d'Eraser.
+        autoUpdater.quitAndInstall(true, true)
       }
     })
     autoUpdater.on("error", (error) => {
@@ -375,12 +468,47 @@ function ensureUpdaterConfigured() {
   return autoUpdater
 }
 
+/** L'installateur complet, pour les versions qui changent l'enveloppe. */
+async function startFullUpdate() {
+  if (fullUpdateInProgress) return
+  fullUpdateInProgress = true
+  try {
+    const autoUpdater = ensureUpdaterConfigured()
+    const result = await autoUpdater.checkForUpdates()
+    if (result?.updateInfo && hotUpdate.compareVersions(result.updateInfo.version, app.getVersion()) > 0) {
+      logLine(`Téléchargement de l’installation complète ${result.updateInfo.version}.`)
+      await autoUpdater.downloadUpdate()
+    }
+  } catch (error) {
+    logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
+  } finally {
+    fullUpdateInProgress = false
+  }
+}
+
+/**
+ * Une recherche de mise à jour, automatique ou demandée par le bouton : d'abord le
+ * serveur seul (quelques secondes, sans réinstaller), sinon l'installateur silencieux.
+ */
+async function runUpdateCheck() {
+  const found = await hotUpdate.check(runningVersion)
+  if (found.kind === "ready") {
+    logLine(`Mise à jour ${found.version} téléchargée : elle s’applique sans réinstallation.`)
+    void offerHotUpdate(found.version)
+    return { status: "ready", updateVersion: found.version }
+  }
+  if (found.kind === "full") {
+    void startFullUpdate()
+    return { status: "available", updateVersion: found.version }
+  }
+  return { status: "not-available" }
+}
+
 async function prepareUpdates() {
   if (!app.isPackaged || updateCheckInProgress || process.env.ERASER_UI_SMOKE_RESULT) return
   updateCheckInProgress = true
   try {
-    const autoUpdater = ensureUpdaterConfigured()
-    await autoUpdater.checkForUpdates()
+    await runUpdateCheck()
   } catch (error) {
     logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
   } finally {
@@ -388,40 +516,20 @@ async function prepareUpdates() {
   }
 }
 
-// Used by the sidebar's "Chercher les mises à jour" button: unlike
-// prepareUpdates() (fire-and-forget, used for the automatic periodic
-// check), this waits for electron-updater to actually determine whether an
-// update exists so the UI can say something more useful than "recherche en
-// cours" forever.
+// Le bouton « Chercher les mises à jour » : même procédure que la recherche
+// automatique, mais il attend la réponse pour l'afficher.
 async function checkForUpdatesWithStatus() {
-  if (!app.isPackaged) return { status: "unavailable", version: app.getVersion() }
-  const autoUpdater = ensureUpdaterConfigured()
-  return new Promise((resolve) => {
-    let settled = false
-    let timeoutId
-    const finish = (status, extra = {}) => {
-      if (settled) return
-      settled = true
-      clearTimeout(timeoutId)
-      autoUpdater.off("update-available", onAvailable)
-      autoUpdater.off("update-not-available", onNotAvailable)
-      autoUpdater.off("error", onError)
-      resolve({ status, version: app.getVersion(), ...extra })
-    }
-    const onAvailable = (info) => finish("available", { updateVersion: info.version })
-    const onNotAvailable = () => finish("not-available")
-    const onError = (error) => finish("error", { message: error instanceof Error ? error.message : String(error) })
-    autoUpdater.once("update-available", onAvailable)
-    autoUpdater.once("update-not-available", onNotAvailable)
-    autoUpdater.once("error", onError)
-    timeoutId = setTimeout(() => finish("timeout"), 20_000)
-    if (updateCheckInProgress) return // a background check is already running; just wait for it to settle above
-    updateCheckInProgress = true
-    autoUpdater
-      .checkForUpdates()
-      .catch((error) => finish("error", { message: error instanceof Error ? error.message : String(error) }))
-      .finally(() => { updateCheckInProgress = false })
-  })
+  if (!app.isPackaged) return { status: "unavailable", version: runningVersion }
+  let timeoutId
+  const timeout = new Promise((resolve) => { timeoutId = setTimeout(() => resolve({ status: "timeout" }), 180_000) })
+  try {
+    const result = await Promise.race([runUpdateCheck(), timeout])
+    return { version: runningVersion, ...result }
+  } catch (error) {
+    return { status: "error", version: runningVersion, message: error instanceof Error ? error.message : String(error) }
+  } finally {
+    clearTimeout(timeoutId)
+  }
 }
 
 async function runInstalledUiSmoke(url) {
@@ -554,7 +662,8 @@ app.on("second-instance", () => {
 app.whenReady().then(async () => {
   Menu.setApplicationMenu(null)
   try {
-    const url = await startServer()
+    hotUpdate.cleanup()
+    const url = await startServerSafely()
     await createWindow(url)
     await runInstalledUiSmoke(url)
     setTimeout(() => void prepareUpdates(), 10_000)

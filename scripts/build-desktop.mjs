@@ -1,6 +1,8 @@
 import { spawn } from "node:child_process"
-import { mkdir, readFile, rm, writeFile } from "node:fs/promises"
+import { createHash } from "node:crypto"
+import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises"
 import { join } from "node:path"
+import { gzipSync } from "node:zlib"
 import { createPackage } from "@electron/asar"
 
 const root = process.cwd()
@@ -47,6 +49,25 @@ if (patchedStaticCache === staticCacheSource) {
 }
 await writeFile(staticCacheRuntime, patchedStaticCache, "utf8")
 
+// Les migrations voyagent avec le serveur : une mise à jour sans réinstallation
+// (desktop/hot-update.cjs) apporte ainsi les siennes.
+await cp(join(root, "drizzle"), join(root, "dist", "standalone", "migrations"), { recursive: true })
+
 const archive = join(root, "dist", "eraser-server.asar")
 await createPackage(join(root, "dist", "standalone"), archive)
 console.log(`Serveur autonome emballé dans ${archive}`)
+
+// Le serveur seul, compressé, et sa description : c'est ce que télécharge une
+// installation existante pour se mettre à jour sans relancer l'installateur.
+const packageJson = JSON.parse(await readFile(join(root, "package.json"), "utf8"))
+const bytes = await readFile(archive)
+const updateFile = "eraser-update.asar.gz"
+await writeFile(join(root, "dist", updateFile), gzipSync(bytes, { level: 9 }))
+await writeFile(join(root, "dist", "eraser-update.json"), JSON.stringify({
+  version: packageJson.version,
+  shell: Number(packageJson.eraserShell) || 1,
+  file: updateFile,
+  sha256: createHash("sha256").update(bytes).digest("hex"),
+  size: bytes.length,
+}, null, 2))
+console.log(`Mise à jour sans réinstallation préparée : dist/${updateFile}`)

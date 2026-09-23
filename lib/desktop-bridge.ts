@@ -4,7 +4,8 @@
 // instead of each redeclaring a conflicting `declare global` block.
 
 export type UpdateCheckResult = {
-  status: "available" | "not-available" | "error" | "timeout" | "unavailable"
+  /** `ready` : le nouveau serveur est téléchargé et s'applique sans réinstallation. */
+  status: "ready" | "available" | "not-available" | "error" | "timeout" | "unavailable"
   version: string
   updateVersion?: string
   message?: string

@@ -519,14 +519,23 @@ function gridCellValue(cell: GoogleGridCell) {
   return entered?.formulaValue || ""
 }
 
-export async function readFormattedSheet(spreadsheetId: string, candidates: string[]): Promise<FormattedSheet> {
+/**
+ * Mise en forme du texte seulement : gras, italique, souligné, barré, lien, couleur.
+ * C'est tout ce que l'éditeur sait afficher ; la police, la taille et le fond de chaque
+ * cellule alourdissaient la réponse de Google sans servir à rien.
+ */
+const LIGHT_TEXT_FORMAT = "bold,italic,underline,strikethrough,link,foregroundColor,foregroundColorStyle"
+const LIGHT_CELL_FIELDS = `formattedValue,textFormatRuns(startIndex,format(${LIGHT_TEXT_FORMAT})),effectiveFormat.textFormat(${LIGHT_TEXT_FORMAT})`
+const FULL_CELL_FIELDS = "formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)"
+
+export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean } = {}): Promise<FormattedSheet> {
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
       const parameters = new URLSearchParams({
         includeGridData: "true",
         ranges: `'${candidate.replaceAll("'", "''")}'`,
-        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)))))",
+        fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${options.light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
       })
       const payload = await googleSheetsJson<{
         sheets?: Array<{

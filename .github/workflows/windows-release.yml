@@ -64,6 +64,11 @@ jobs:
           if ($content -notmatch "path:\s+Eraser-Setup.exe") {
             throw "latest.yml ne pointe pas vers l’installateur Eraser."
           }
+          $hot = Join-Path $PWD "dist/eraser-update.json"
+          if (-not (Test-Path $hot)) { throw "La mise à jour sans réinstallation (eraser-update.json) est absente." }
+          if (-not (Test-Path (Join-Path $PWD "dist/eraser-update.asar.gz"))) { throw "Le serveur compressé eraser-update.asar.gz est absent." }
+          $manifest = Get-Content $hot -Raw | ConvertFrom-Json
+          if ($manifest.version -ne $version) { throw "eraser-update.json ne correspond pas à la version $version." }
 
       - name: Tester l’installation et le démarrage
         shell: pwsh
@@ -135,6 +140,8 @@ jobs:
             release/Eraser-Setup.exe
             release/latest.yml
             release/*.blockmap
+            dist/eraser-update.json
+            dist/eraser-update.asar.gz
           if-no-files-found: error
 
       - name: Publier la Release GitHub
@@ -146,6 +153,8 @@ jobs:
             release/Eraser-Setup.exe
             release/latest.yml
             release/*.blockmap
+            dist/eraser-update.json
+            dist/eraser-update.asar.gz
 
       - name: Publier la préversion de migration
         if: github.ref == 'refs/heads/windows-app-migration' && contains(github.event.head_commit.message, '[publish alpha]')
@@ -158,6 +167,8 @@ jobs:
             "release/Eraser-Setup.exe" `
             "release/latest.yml" `
             "release/Eraser-Setup.exe.blockmap" `
+            "dist/eraser-update.json" `
+            "dist/eraser-update.asar.gz" `
             --repo $env:GITHUB_REPOSITORY `
             --target $env:GITHUB_SHA `
             --title "Eraser v$version" `

@@ -304,8 +304,11 @@ export function AppShell({
     try {
       const result = await window.eraserDesktop.checkForUpdates()
       switch (result.status) {
+        case "ready":
+          setUpdateNotice(`Eraser ${result.updateVersion || ""} est prêt : il s’applique en quelques secondes, sans réinstallation.`.replace("  ", " "))
+          break
         case "available":
-          setUpdateNotice(`Mise à jour ${result.updateVersion || ""} trouvée, téléchargement en cours…`.trim())
+          setUpdateNotice(`Mise à jour ${result.updateVersion || ""} trouvée : téléchargement en cours, elle s’installera toute seule, sans assistant.`.replace("  ", " "))
           break
         case "not-available":
           setUpdateNotice("Aucune mise à jour disponible, tu as déjà la dernière version.")

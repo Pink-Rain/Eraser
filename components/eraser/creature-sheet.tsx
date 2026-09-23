@@ -1,7 +1,7 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
-import { Check, Crosshair, ImagePlus, Link2, LoaderCircle, Plus, Search, Sparkles, X, Zap } from "lucide-react"
+import { memo, useEffect, useMemo, useState } from "react"
+import { Check, ChevronDown, Crosshair, ImagePlus, Link2, LoaderCircle, Plus, Search, Sparkles, X, Zap } from "lucide-react"
 
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
@@ -26,9 +26,9 @@ import {
 type SpellOption = Pick<ClassSpell, "id" | "name" | "category" | "type" | "effect" | "effectHtml" | "description" | "descriptionHtml" | "skills" | "distance" | "charges" | "tone">
 
 /** Les champs de la fiche, par en-tête de colonne dans la feuille. */
-const leftFields = ["Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire", "Extension"]
 const identityFields = ["Nom", "Rang", "Taille", "Poids", "Type", "Sous-type", "Dressable", "Organisation", "Comportement", "Langue"]
-const allFields = ["Portrait", ...leftFields, ...identityFields, ...creatureCharacteristics, creatureNoteHeader, "Sorts actifs", "Sorts passifs"]
+const placeFields = ["Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire"]
+const allFields = ["Portrait", ...identityFields, ...placeFields, ...creatureCharacteristics, creatureNoteHeader, "Sorts actifs", "Sorts passifs"]
 
 /** Valeur vide d'une liste : Radix n'accepte pas la chaîne vide comme valeur d'option. */
 const NONE = "__aucun__"
@@ -48,7 +48,7 @@ function isImageSource(value: string) {
  * reconnue sans être réécrite ; une valeur hors liste (« Donjon-Ruine ») reste
  * affichée et sélectionnable, pour ne jamais être effacée par mégarde.
  */
-export function CreatureChoiceSelect({ header, value, onChange, compact = false, disabled = false }: { header: string; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean }) {
+export function CreatureChoiceSelect({ header, value, onChange, compact = false, disabled = false, open, onOpenChange }: { header: string; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; open?: boolean; onOpenChange?: (open: boolean) => void }) {
   const options = creatureChoices[header] ?? []
   const trimmed = value.trim()
   const matched = matchCreatureChoice(trimmed, options)
@@ -65,7 +65,7 @@ export function CreatureChoiceSelect({ header, value, onChange, compact = false,
       </SelectPrimitive.Item>
     : <SelectItem key={option.value} value={option.value}>{option.value}</SelectItem>)
 
-  return <Select value={current || NONE} onValueChange={(next) => onChange(next === NONE ? "" : next)} disabled={disabled}>
+  return <Select value={current || NONE} onValueChange={(next) => onChange(next === NONE ? "" : next)} disabled={disabled} open={open} onOpenChange={onOpenChange}>
     <SelectTrigger
       size="sm"
       aria-label={header}
@@ -83,6 +83,48 @@ export function CreatureChoiceSelect({ header, value, onChange, compact = false,
     </SelectContent>
   </Select>
 }
+
+/**
+ * Valeur affichée tout de suite après un choix, sans attendre que le tableau entier se
+ * redessine. Elle s'efface dès que la ligne reçoit la valeur enregistrée.
+ */
+function useOptimistic(value: string) {
+  const [state, setState] = useState({ source: value, local: null as string | null })
+  if (state.source !== value) setState({ source: value, local: null })
+  const shown = state.source === value ? state.local ?? value : value
+  return [shown, (next: string) => setState({ source: value, local: next })] as const
+}
+
+/**
+ * Une liste du tableau des créatures. Fermée, ce n'est qu'un bouton : le vrai menu
+ * n'est monté qu'au clic. Des centaines de menus montés d'avance rendaient le tableau
+ * interminable à afficher.
+ */
+export const CreatureChoiceCell = memo(function CreatureChoiceCell({ header, value, disabled = false, onChange }: { header: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [shown, setShown] = useOptimistic(value)
+  if (open) return <CreatureChoiceSelect compact open header={header} value={shown} disabled={disabled} onOpenChange={(next) => { if (!next) setOpen(false) }} onChange={(next) => { setShown(next); setOpen(false); onChange(next) }} />
+  const matched = matchCreatureChoice(shown.trim(), creatureChoices[header] ?? [])
+  const label = matched?.value ?? shown.trim()
+  return <button
+    type="button"
+    aria-label={header}
+    disabled={disabled}
+    onClick={() => setOpen(true)}
+    className={`flex h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 text-left text-sm hover:border-input disabled:opacity-50 ${matched || !label ? "" : "italic text-muted-foreground"}`}
+  >
+    <span className="truncate">{label || "—"}</span>
+    <ChevronDown className="size-4 shrink-0 opacity-50" />
+  </button>
+})
+
+/** La case Dressable du tableau. */
+export const CreatureCheckCell = memo(function CreatureCheckCell({ label, value, disabled = false, onChange }: { label: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
+  const [shown, setShown] = useOptimistic(value)
+  return <span className="flex min-h-8 items-center justify-center">
+    <Checkbox aria-label={label} checked={isChecked(shown)} disabled={disabled} onCheckedChange={(checked) => { const next = checked === true ? "Oui" : "Non"; setShown(next); onChange(next) }} />
+  </span>
+})
 
 /** La fiche d'un sort choisi : tout ce que dit l'Index des classes, sauf les classes. */
 function SpellCard({ name, spell, onRemove }: { name: string; spell?: SpellOption; onRemove: () => void }) {
@@ -227,7 +269,7 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
         <DialogDescription>Fiche complète de la créature, enregistrée dans la feuille « Index des créatures ».</DialogDescription>
       </DialogHeader>
 
-      <div className="grid gap-6 md:grid-cols-[15rem_minmax(0,1fr)]">
+      <div className="grid gap-6 md:grid-cols-[14rem_minmax(0,1fr)]">
         <section className="grid content-start gap-3">
           <div className="grid aspect-[3/4] place-items-center overflow-hidden rounded-2xl border bg-muted/40">
             {isImageSource(fields.Portrait)
@@ -241,13 +283,6 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
           </label>
           <div className="relative"><Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={fields.Portrait} onChange={(event) => set("Portrait", event.target.value)} placeholder="…ou coller une URL" className="pl-8 text-xs" /></div>
 
-          <div className="mt-1 grid grid-cols-[minmax(0,1.15fr)_minmax(0,1fr)] items-end gap-2">
-            {choice("Emplacement principal")}
-            {choice("Rareté")}
-            {choice("Emplacement secondaire")}
-            {choice("Rareté secondaire")}
-          </div>
-          {text("Extension")}
         </section>
 
         <section className="grid content-start gap-3">
@@ -269,6 +304,9 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
             {choice("Organisation")}
             {choice("Comportement")}
             {choice("Langue")}
+          </div>
+          <div className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4">
+            {placeFields.map((name) => choice(name))}
           </div>
         </section>
       </div>

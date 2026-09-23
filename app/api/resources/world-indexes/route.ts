@@ -25,10 +25,12 @@ function errorMessage(error: unknown) {
 
 export async function GET(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  const key = new URL(request.url).searchParams.get("key")
+  const parameters = new URL(request.url).searchParams
+  const key = parameters.get("key")
   if (!isWorldIndexKey(key)) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
   try {
-    return NextResponse.json({ data: await getWorldIndex(key) })
+    // « Actualiser » relit Google Sheets ; sinon l'index gardé en mémoire suffit.
+    return NextResponse.json({ data: await getWorldIndex(key, { refresh: parameters.get("refresh") === "1" }) })
   } catch {
     return NextResponse.json({ error: "Cet index n’a pas pu être chargé depuis Google Sheets." }, { status: 502 })
   }

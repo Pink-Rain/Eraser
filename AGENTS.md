@@ -26,6 +26,25 @@
 - `electron-builder.yml` fixe notamment `executableName: Eraser`. Ne pas le
   renommer sans migration dédiée des raccourcis et de l’auto-update.
 
+## Mises à jour sans réinstallation
+
+- Chaque préversion publie, en plus de l’installateur, le serveur seul
+  (`eraser-update.asar.gz`, migrations comprises) et sa description
+  (`eraser-update.json` : version, empreinte SHA-256, version d’enveloppe).
+  `scripts/build-desktop.mjs` les produit, le workflow Windows les publie.
+- `desktop/hot-update.cjs` les télécharge dans `%APPDATA%/Eraser/updates`,
+  vérifie l’empreinte, puis `desktop/main.cjs` redémarre le serveur local sur
+  cette version et recharge la page. Un serveur téléchargé qui ne démarre pas
+  est écarté (`failed.json`) et la version installée reprend la main.
+- Le champ **`eraserShell`** de `package.json` est la version de l’enveloppe
+  (tout ce qui est dans `desktop/`, la version d’Electron, `electron-builder.yml`).
+  **L’incrémenter dès que l’un d’eux change** : les installations dont
+  l’enveloppe est plus ancienne passent alors par l’installateur, en mode
+  silencieux. Sans cet incrément, elles recevraient un serveur que leur
+  enveloppe ne sait pas faire tourner.
+- Le serveur ne doit jamais dépendre d’un changement de `desktop/` sans ce
+  même incrément.
+
 ## Données partagées et locales
 
 - `worker-accounts/` est le backend Cloudflare partagé actuel, pas un reste de

@@ -1,56 +1,68 @@
-# Eraser 0.1.1-alpha.52 — des listes déroulantes pour les créatures, un onglet Environnement pour les lieux
+# Eraser 0.1.1-alpha.53 — des index rapides et des mises à jour sans réinstallation
 
-## Index des lieux
+## Les index ne rament plus
 
-- Nouvel onglet **Environnement**, créé tout seul dans le classeur au premier
-  chargement. Rien n’est déplacé dans les onglets existants.
-- Les boutons d’onglets sont remplacés par une **liste déroulante**, comme dans
-  l’Index des objets. Elle s’ouvre sur **Tout**, qui réunit les lignes de tous
-  les onglets.
-- Dans la vue « Tout », une colonne **Onglet** indique où se trouve chaque lieu.
-  On peut y choisir un autre onglet pour l’y déplacer. « Ajouter un lieu »
-  demande dans quel onglet le ranger.
+Mesuré sur un Index des créatures de 300 lignes :
 
-## Index des créatures
+| | Avant | Maintenant |
+|---|---|---|
+| Afficher le tableau | 28 s | 1,5 s |
+| Choisir un rang | 16 s | moins d’une seconde |
+| Écrire dans une cellule | 24 s | 0,3 s |
+| Cocher « Dressable » | 13 s | 0,2 s |
 
-### Le tableau
+Ce qui a changé :
 
-- L’icône d’ouverture disparaît : **un clic sur le nom ouvre la fiche**.
-- Type, Sous-type, Rang, les deux Emplacements, les deux Raretés et
-  Comportement deviennent des **listes déroulantes**, directement dans le
-  tableau. Dressable devient une **case à cocher**.
-- Les valeurs déjà présentes dans la feuille sont reconnues même si elles sont
-  écrites un peu autrement (« Aggressif », « défensif », « Humanoïde
-  monstrueux »). Elles ne sont réécrites que si tu choisis une autre valeur. Une
-  valeur hors liste (« Donjon-Ruine », « / ») reste affichée en italique, rien
-  n’est effacé.
-- La seconde colonne « Comportement » de la feuille (restée vide) n’apparaît
-  plus en double.
+- **Chaque ligne du tableau se redessine seule.** Enregistrer une cellule ne
+  redessine plus les centaines d’autres lignes. Tous les index en profitent :
+  objets, classes, créatures, lieux, religions, peuples, langues.
+- **Les listes déroulantes du tableau ne sont montées qu’au clic.** Avant, il y
+  en avait environ 2 400 d’avance sur l’Index des créatures.
+- **Eraser garde les index du monde en mémoire.** Une cellule enregistrée ne
+  relit plus tout le classeur. Le classeur n’est relu qu’à l’ouverture, après
+  un ajout, une suppression ou un déplacement, sur « Actualiser », ou passé cinq
+  minutes, pour voir ce qui a été modifié directement dans Sheets.
+- **Google envoie moins de données.** Eraser ne demande plus que le texte et
+  sa mise en forme (gras, italique, souligné, barré, liens, couleur), sans la
+  police ni le fond de chaque cellule.
 
-### La fiche
+## La fiche des créatures
 
-- **À gauche** : l’image, l’emplacement principal et sa rareté, l’emplacement
-  secondaire et sa rareté, l’extension.
-- **À droite** : nom, rang, taille et poids ; type, sous-type et Dressable ;
-  organisation, comportement et langue. La famille de créatures qui parle
-  chaque langue s’affiche au survol de l’option, jamais écrite en dur.
-- **Dessous** : Force, Dextérité, Intelligence, **Sagesse**, Charisme, Vitesse,
-  Vitalité.
-- Une seule note : « Description, Histoire, Lore, Autre ».
-- **Actifs** et **Passifs** : chaque sort ajouté s’affiche en carte complète,
-  avec son type, ses charges, son effet, sa description, ses compétences et sa
-  distance, sans mention de classe.
+- Les emplacements et les raretés passent dans la colonne de droite, sous le
+  reste.
+- L’extension quitte la fiche et le formulaire d’ajout. Elle se règle
+  directement dans le tableau.
 
-Les colonnes Sagesse et Description sont ajoutées à droite de la feuille. Les
-anciennes colonnes (Environnement, Climat, Rencontre, Perception…) gardent
-leur contenu dans Sheets et restent hors du tableau.
+## Les mises à jour sans réinstallation
+
+Presque chaque version ne change que le cœur d’Eraser, pas sa fenêtre. Eraser
+télécharge donc désormais **seulement ce qui a changé** (environ 9 Mo),
+vérifie que le fichier est intact, puis propose **« Appliquer maintenant »** :
+la page se recharge en quelques secondes. Pas d’installateur, pas d’assistant,
+pas de redémarrage. « Plus tard » l’applique à la prochaine ouverture.
+
+- Le bouton **« Chercher les mises à jour »** suit la même procédure.
+- Si une version téléchargée refuse de démarrer, Eraser revient tout seul à la
+  version installée.
+- Quand une version touche la fenêtre elle-même (c’est rare), l’installateur
+  prend le relais, mais **en silence** : Eraser se ferme, s’installe et se
+  rouvre, sans assistant.
+
+**Une dernière fois :** cette version-ci arrive encore par l’ancien chemin,
+avec l’assistant d’installation, parce que c’est ton Eraser actuel qui
+l’installe. Les suivantes arriveront sans lui.
 
 ## Vérifications
 
-- dans un vrai navigateur : tableau à onze colonnes sans doublon, listes et
-  case à cocher qui enregistrent la bonne cellule, anciennes valeurs reconnues
-  ou conservées, fiche ouverte depuis le nom, info-bulle des langues, cartes de
-  sorts, envoi des seuls champs modifiés, vue « Tout » des lieux et filtre par
-  onglet ;
-- lint sans erreur, build Vinext complet, 20 tests d’interface au vert ;
-- serveur desktop construit et vérifié en HTTP 200.
+- dans un vrai navigateur : mesures avant et après sur 300 créatures ;
+  sélection de lignes, menu contextuel, duplication, poignée de recopie,
+  listes, case à cocher, fiche et vue « Tout » des lieux inchangés ;
+- dans Electron, face à un faux GitHub : téléchargement et vérification de
+  l’empreinte, fichier abîmé refusé, enveloppe trop ancienne renvoyée vers
+  l’installateur, serveur téléchargé qui démarre avec ses propres migrations ;
+- sur une copie installée d’Eraser : version téléchargée utilisée au
+  démarrage, version cassée écartée au profit de la version installée, et
+  mise à jour appliquée en pleine session (bouton « Appliquer maintenant »)
+  en moins d’une seconde ;
+- lint sans erreur, build complet, 20 tests d’interface au vert, serveur
+  desktop vérifié en HTTP 200.

@@ -1,9 +1,9 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { ArrowRightLeft, Check, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
-import { CreatureChoiceSelect, CreatureSheetDialog, isChecked } from "@/components/eraser/creature-sheet"
+import { CreatureCheckCell, CreatureChoiceCell, CreatureChoiceSelect, CreatureSheetDialog, isChecked } from "@/components/eraser/creature-sheet"
 import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
@@ -266,7 +266,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   async function refresh() {
     setPending("refresh"); setError("")
     const seq = ++requestSeq.current
-    const response = await fetch(`/api/resources/world-indexes?key=${indexKey}`, { cache: "no-store" })
+    const response = await fetch(`/api/resources/world-indexes?key=${indexKey}&refresh=1`, { cache: "no-store" })
     const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
     setPending("")
     if (!response.ok || !payload.data) return setError(payload.error || "Actualisation impossible.")
@@ -307,10 +307,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
         title="Ouvrir la fiche"
       >{richTextPlainText(valueOf(rowKey, header)) || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</button>
-      else if (creatureChoices[header]) column.control = (rowKey) => <CreatureChoiceSelect compact header={header} value={valueOf(rowKey, header)} disabled={busy} onChange={(value) => void commitCell(rowKey, header, value)} />
-      else if (foldName(header) === "dressable") column.control = (rowKey) => <span className="flex min-h-8 items-center justify-center">
-        <Checkbox aria-label="Dressable" checked={isChecked(valueOf(rowKey, header))} disabled={busy} onCheckedChange={(checked) => void commitCell(rowKey, header, checked === true ? "Oui" : "Non")} />
-      </span>
+      else if (creatureChoices[header]) column.control = (rowKey) => <CreatureChoiceCell header={header} value={valueOf(rowKey, header)} disabled={busy} onChange={(value) => void commitCell(rowKey, header, value)} />
+      else if (foldName(header) === "dressable") column.control = (rowKey) => <CreatureCheckCell label={header} value={valueOf(rowKey, header)} disabled={busy} onChange={(value) => void commitCell(rowKey, header, value)} />
       return column
     })
     if (showAll) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true })
@@ -331,6 +329,20 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       : rows
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
   }, [query, sort, viewTables])
+
+  // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
+  const moveRow = useRef(mutate)
+  useLayoutEffect(() => { moveRow.current = mutate })
+  const renderTabCell = useCallback((rowKey: string) => {
+    const { tabName: rowTab } = parseRowKey(rowKey)
+    return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void moveRow.current("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
+      <SelectTrigger size="sm" aria-label="Onglet" title="Changer d’onglet" className="h-8 w-full border-transparent bg-transparent px-2 text-muted-foreground shadow-none hover:border-input dark:bg-transparent"><SelectValue /></SelectTrigger>
+      <SelectContent position="popper">
+        <SelectItem value={rowTab}>{rowTab}</SelectItem>
+        {moveTargetsOf(rowTab).map((target) => <SelectItem key={target} value={target}>{target}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  }, [busy, moveTargetsOf])
 
   const detailsFound = details !== null ? locate(details) : null
   const hints = table ? linkHints(indexKey, table.tabName) : []
@@ -365,7 +377,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {creating && formTable && <EntryForm
         key={formTable.tabName}
         headers={formTable.headers}
-        visible={gridHeadersOf(formDefinition, formTable.headers)}
+        // L'extension se règle dans le tableau : elle n'a pas sa place dans le formulaire des créatures.
+        visible={gridHeadersOf(formDefinition, formTable.headers).filter((index) => !nameOpensDetails || foldName(formTable.headers[index]) !== "extension")}
         linked={linkedColumnsOf(indexKey, formTable.tabName)}
         itemLabel={formDefinition.itemLabel}
         pending={pending === "add"}
@@ -384,16 +397,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           rows={displayedRows}
           valueOf={valueOf}
           onCommit={(rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value)}
-          renderCustomCell={(rowKey) => {
-            const { tabName: rowTab } = parseRowKey(rowKey)
-            return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void mutate("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
-              <SelectTrigger size="sm" aria-label="Onglet" title="Changer d’onglet" className="h-8 w-full border-transparent bg-transparent px-2 text-muted-foreground shadow-none hover:border-input dark:bg-transparent"><SelectValue /></SelectTrigger>
-              <SelectContent position="popper">
-                <SelectItem value={rowTab}>{rowTab}</SelectItem>
-                {moveTargetsOf(rowTab).map((target) => <SelectItem key={target} value={target}>{target}</SelectItem>)}
-              </SelectContent>
-            </Select>
-          }}
+          renderCustomCell={renderTabCell}
           sort={sort}
           onSort={setSort}
           disabled={busy}
