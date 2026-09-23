@@ -68,6 +68,12 @@ Les définitions de feuilles et leur logique d’accès sont principalement dans
 `lib/jdr-sheets.ts` et `lib/google-sheets.ts`. La liaison recherche d’abord les
 fichiers existants afin de ne jamais dupliquer ni écraser les données.
 
+Les sessions du Créateur de session vivent dans la feuille « Sessions de
+campagne » (`lib/campaign-sessions.ts`). Une session garde seulement les
+identifiants de ses personnages, PNJs et magasins ; la colonne « Ajouté au
+créateur de session » des PNJs et magasins vaut « Oui » tant qu’ils figurent dans
+au moins une session.
+
 Les portraits, bannières et fonds de carte partagés passent par Google Drive.
 `lib/shared-media.ts` utilise le stockage local comme cache et sait migrer les
 anciens médias locaux sans remplacer Drive comme source partagée.

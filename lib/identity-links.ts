@@ -84,3 +84,9 @@ export async function linkLegacyIdentity(localUserId: string, legacyUid: string)
   })
   return getIdentityLink(localUserId)
 }
+
+/** Tous les liens connus : sert à retrouver le compte derrière un identifiant historique. */
+export async function listIdentityLinks(): Promise<Array<{ localUserId: string; legacyUid: string }>> {
+  if (remote()) return remoteLinks()
+  return getDb().select({ localUserId: userIdentityLinks.localUserId, legacyUid: userIdentityLinks.legacyUid }).from(userIdentityLinks)
+}

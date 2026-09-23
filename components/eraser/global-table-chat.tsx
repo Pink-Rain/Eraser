@@ -16,8 +16,31 @@ import { cn } from "@/lib/utils"
 type ChatUser = { uid: string; role: "admin" | "mj" | "joueur" }
 type ChatCampaign = { id: string; name: string }
 type ChatMember = { id: string; name: string; ownerUid: string }
+type ChatAccount = { uid: string; name: string }
 type ConnectionState = "connecting" | "ready" | "error"
-type Presence = { role: ChatUser["role"]; uid: string }
+type Presence = { role: ChatUser["role"]; uid: string; name: string }
+
+// Voir lib/tabletop-access.ts : un message à un compte ou un jet privé garde
+// l'audience « character » et préfixe son destinataire.
+const ACCOUNT_PREFIX = "account:"
+const PRIVATE_PREFIX = "self:"
+const PRIVATE_ROLL = /^\/rpriv[ée]\s+/i
+
+function foldName(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
+}
+
+/** Le destinataire écrit au début de `tail` : le nom le plus long gagne (« Léa » contre « Léa Morn »). */
+function targetAtStart<T extends { name: string }>(targets: T[], tail: string) {
+  const folded = foldName(tail)
+  return [...targets].sort((left, right) => right.name.length - left.name.length).find((candidate) => folded.startsWith(`${foldName(candidate.name)} `))
+}
+
+function audienceLabel(activity: TabletopActivityRecord) {
+  if (activity.audience === "gm") return "MJ seulement"
+  if (activity.recipientId.startsWith(PRIVATE_PREFIX)) return "Privé"
+  return `À ${activity.recipientName}`
+}
 
 const LAST_CAMPAIGN_KEY = "eraser:chat-campaign"
 
@@ -53,13 +76,16 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const [campaigns, setCampaigns] = useState<ChatCampaign[]>([])
   const [campaignId, setCampaignId] = useState("")
   const [members, setMembers] = useState<ChatMember[]>([])
+  const [accounts, setAccounts] = useState<ChatAccount[]>([])
+  const [online, setOnline] = useState<ChatAccount[]>([])
+  const [me, setMe] = useState<ChatAccount | null>(null)
   const [activities, setActivities] = useState<TabletopActivityRecord[]>([])
   const [connection, setConnection] = useState<ConnectionState>("connecting")
-  const [speakerId, setSpeakerId] = useState("")
   const [chatText, setChatText] = useState("")
   const [notice, setNotice] = useState("")
 
   const presenceRef = useRef<Map<string, Presence>>(new Map())
+  const myNameRef = useRef("")
   const membersRef = useRef<ChatMember[]>([])
   const realtimeRef = useRef<{ activity: (payload: TabletopActivityRecord) => void } | null>(null)
   const activityEndRef = useRef<HTMLDivElement>(null)
@@ -107,16 +133,18 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
 
   useEffect(() => {
     if (!campaignId) {
-      queueMicrotask(() => { setActivities([]); setMembers([]) })
+      queueMicrotask(() => { setActivities([]); setMembers([]); setAccounts([]) })
       return
     }
     let cancelled = false
     void fetch(`/api/campaign-chat?pageLinked=${encodeURIComponent(campaignId)}`)
-      .then((response) => responseJson<{ activities: TabletopActivityRecord[]; members: ChatMember[] }>(response))
+      .then((response) => responseJson<{ activities: TabletopActivityRecord[]; members: ChatMember[]; accounts?: ChatAccount[]; me?: ChatAccount }>(response))
       .then((payload) => {
         if (cancelled) return
         setActivities(payload.activities)
         setMembers(payload.members)
+        setAccounts(payload.accounts || [])
+        if (payload.me) setMe(payload.me)
       })
       .catch(() => { if (!cancelled) showNotice("Ce salon n’a pas pu être chargé.") })
     return () => { cancelled = true }
@@ -128,7 +156,8 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     let room: Room | null = null
     const presence = presenceRef.current
     presence.clear()
-    queueMicrotask(() => { if (!cancelled) setConnection("connecting") })
+    queueMicrotask(() => { if (!cancelled) { setConnection("connecting"); setOnline([]) } })
+    const refreshOnline = () => setOnline([...new Map([...presence.values()].filter((peer) => peer.name).map((peer) => [peer.uid, { uid: peer.uid, name: peer.name }])).values()])
     void import("trystero").then(({ joinRoom }) => {
       if (cancelled) return
       room = joinRoom({ appId: "com-eraser-jdr-chat-v1", password: campaignId }, roomId, { onJoinError: () => setConnection("error") })
@@ -142,13 +171,17 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       presenceAction.onMessage = (value, context) => {
         const record = dataRecord(value)
         if (!record || (record.role !== "admin" && record.role !== "mj" && record.role !== "joueur") || typeof record.uid !== "string") return
-        presence.set(context.peerId, { role: record.role, uid: record.uid })
+        presence.set(context.peerId, { role: record.role, uid: record.uid, name: typeof record.name === "string" ? record.name.slice(0, 120) : "" })
+        refreshOnline()
       }
-      room.onPeerJoin = (peerId) => { void presenceAction.send({ role: user.role, uid: user.uid } as JsonValue, { target: peerId }).catch(() => undefined) }
-      room.onPeerLeave = (peerId) => presence.delete(peerId)
+      room.onPeerJoin = (peerId) => { void presenceAction.send({ role: user.role, uid: user.uid, name: myNameRef.current } as JsonValue, { target: peerId }).catch(() => undefined) }
+      room.onPeerLeave = (peerId) => { presence.delete(peerId); refreshOnline() }
       realtimeRef.current = {
         activity: (payload) => {
-          const recipientUid = membersRef.current.find((member) => member.id === payload.recipientId)?.ownerUid
+          if (payload.audience === "character" && payload.recipientId.startsWith(PRIVATE_PREFIX)) return
+          const recipientUid = payload.recipientId.startsWith(ACCOUNT_PREFIX)
+            ? payload.recipientId.slice(ACCOUNT_PREFIX.length)
+            : membersRef.current.find((member) => member.id === payload.recipientId)?.ownerUid
           const targets = payload.audience === "public" ? undefined : [...presence]
             .filter(([, peer]) => payload.audience === "gm" ? peer.role === "admin" || peer.role === "mj" : Boolean(recipientUid && peer.uid === recipientUid))
             .map(([peerId]) => peerId)
@@ -166,17 +199,21 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     }
   }, [roomId, campaignId, user.role, user.uid])
 
-  const canManage = user.role === "admin" || user.role === "mj"
-  const ownedSpeakers = useMemo(() => members.filter((member) => member.ownerUid === user.uid), [members, user.uid])
-  const directTargets = useMemo(() => members.filter((member) => member.ownerUid !== user.uid), [members, user.uid])
-  const speaker = ownedSpeakers.find((member) => member.id === speakerId) || ownedSpeakers[0]
-  const speakerName = canManage ? "MJ" : speaker?.name || "Joueur"
+  // Le nom du compte, partout : plus de « MJ » ni de nom de personnage.
+  const speakerName = me?.name || "Joueur"
+  useEffect(() => { myNameRef.current = speakerName }, [speakerName])
+  // Les comptes de la campagne, plus ceux connectés en ce moment.
+  const directTargets = useMemo(() => {
+    const byUid = new Map<string, ChatAccount>()
+    for (const candidate of [...accounts, ...online]) if (candidate.uid !== user.uid && !byUid.has(candidate.uid)) byUid.set(candidate.uid, candidate)
+    return [...byUid.values()].sort((left, right) => left.name.localeCompare(right.name, "fr"))
+  }, [accounts, online, user.uid])
 
   const directCommandMatch = chatText.match(/^\/(r?joueur)\s+(.*)$/i)
   const directPrefix = directCommandMatch?.[1].toLocaleLowerCase("fr") === "rjoueur" ? "/rjoueur" : "/joueur"
   const directTail = directCommandMatch?.[2] ?? null
-  const directSelection = directTail === null ? null : directTargets.find((target) => directTail.toLocaleLowerCase("fr").startsWith(`${target.name.toLocaleLowerCase("fr")} `))
-  const directSuggestions = directTail === null || directSelection ? [] : directTargets.filter((target) => !directTail.trim() || target.name.toLocaleLowerCase("fr").includes(directTail.trim().toLocaleLowerCase("fr"))).slice(0, 8)
+  const directSelection = directTail === null ? null : targetAtStart(directTargets, directTail)
+  const directSuggestions = directTail === null || directSelection ? [] : directTargets.filter((target) => !directTail.trim() || foldName(target.name).includes(foldName(directTail.trim()))).slice(0, 8)
 
   async function publishActivity(activity: TabletopActivityRecord) {
     setActivities((current) => [...current.filter((item) => item.id !== activity.id), activity].slice(-200))
@@ -185,7 +222,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       const payload = await responseJson<{ activity: TabletopActivityRecord }>(await fetch("/api/campaign-chat", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ pageLinked: campaignId, speakerId: speaker?.id || "", ...activity }),
+        body: JSON.stringify({ pageLinked: campaignId, ...activity }),
       }))
       setActivities((current) => current.map((item) => item.id === activity.id ? payload.activity : item))
     } catch (error) {
@@ -209,13 +246,19 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
         kind = "dice"
         audience = "gm"
         diceExpression = raw.replace(/^\/rmj\s+/i, "")
+      } else if (PRIVATE_ROLL.test(raw)) {
+        kind = "dice"
+        audience = "character"
+        recipientId = `${PRIVATE_PREFIX}${user.uid}`
+        recipientName = "Privé"
+        diceExpression = raw.replace(PRIVATE_ROLL, "")
       } else if (/^\/rjoueur\s+/i.test(raw)) {
         const tail = raw.replace(/^\/rjoueur\s+/i, "")
-        const target = [...directTargets].sort((left, right) => right.name.length - left.name.length).find((candidate) => tail.toLocaleLowerCase("fr").startsWith(`${candidate.name.toLocaleLowerCase("fr")} `))
+        const target = targetAtStart(directTargets, tail)
         if (!target) throw new Error("TARGET")
         kind = "dice"
         audience = "character"
-        recipientId = target.id
+        recipientId = `${ACCOUNT_PREFIX}${target.uid}`
         recipientName = target.name
         diceExpression = tail.slice(target.name.length).trim()
       } else if (/^\/r\s+/i.test(raw)) {
@@ -226,10 +269,10 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
         content = raw.replace(/^\/mj\s+/i, "")
       } else if (/^\/joueur\s+/i.test(raw)) {
         const tail = raw.replace(/^\/joueur\s+/i, "")
-        const target = [...directTargets].sort((left, right) => right.name.length - left.name.length).find((candidate) => tail.toLocaleLowerCase("fr").startsWith(`${candidate.name.toLocaleLowerCase("fr")} `))
+        const target = targetAtStart(directTargets, tail)
         if (!target) throw new Error("TARGET")
         audience = "character"
-        recipientId = target.id
+        recipientId = `${ACCOUNT_PREFIX}${target.uid}`
         recipientName = target.name
         content = tail.slice(target.name.length).trim()
       }
@@ -242,7 +285,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       setChatText("")
       void publishActivity({ id: crypto.randomUUID(), mapId: roomId, kind, authorUid: user.uid, authorName: speakerName, text: content, diceExpression, diceResult, createdAt: new Date().toISOString(), audience, recipientId, recipientName })
     } catch {
-      showNotice("Commande invalide. Exemples : /r 1d20 + 5, /rmj 2d6, /joueur ou /rjoueur puis choisis un personnage.")
+      showNotice("Commande invalide. Exemples : /r 1d20 + 5, /rmj 2d6, /rprivé 1d100, /joueur ou /rjoueur puis choisis un compte.")
     }
   }
 
@@ -272,20 +315,13 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
               </NativeSelect>
             </div>
           )}
-          {!canManage && ownedSpeakers.length > 1 && (
-            <div className="border-b px-3 py-2">
-              <NativeSelect value={speaker?.id || ""} onChange={(event) => setSpeakerId(event.target.value)} aria-label="Personnage qui parle">
-                {ownedSpeakers.map((member) => <NativeSelectOption key={member.id} value={member.id}>{member.name}</NativeSelectOption>)}
-              </NativeSelect>
-            </div>
-          )}
           <div className="min-h-0 flex-1 space-y-2 overflow-y-auto p-3">
             {activities.map((activity) => (
               <div key={activity.id} className={cn("rounded-xl border p-2.5", activity.kind === "dice" ? "border-primary/20 bg-primary/6" : "bg-background/60")}>
                 <div className="flex items-center gap-1.5 text-xs font-semibold">
                   {activity.kind === "dice" && <Dices className="size-3.5 text-primary" />}
                   {activity.authorName}
-                  {activity.audience !== "public" && <Badge variant="outline" className="h-5 text-[9px]">{activity.audience === "gm" ? "MJ seulement" : `À ${activity.recipientName}`}</Badge>}
+                  {activity.audience !== "public" && <Badge variant="outline" className="h-5 text-[9px]">{audienceLabel(activity)}</Badge>}
                   <span className="ml-auto font-normal text-muted-foreground">{formatActivityTime(activity.createdAt)}</span>
                 </div>
                 {activity.kind === "dice"
@@ -301,7 +337,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
             {directSuggestions.length > 0 && (
               <div className="absolute bottom-full left-3 right-3 mb-1 max-h-48 overflow-y-auto rounded-xl border bg-popover p-1 shadow-xl">
                 {directSuggestions.map((target) => (
-                  <button type="button" key={target.id} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent" onClick={() => setChatText(`${directPrefix} ${target.name} `)}>
+                  <button type="button" key={target.uid} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-sm hover:bg-accent" onClick={() => setChatText(`${directPrefix} ${target.name} `)}>
                     <UserRound className="size-4 text-primary" /><span>{target.name}</span>
                   </button>
                 ))}
@@ -311,7 +347,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
               <Input value={chatText} onChange={(event) => setChatText(event.target.value)} maxLength={1200} placeholder="Message ou /r 1d20 + 5" disabled={!campaignId} />
               <Button type="submit" size="icon" disabled={!campaignId || !chatText.trim()}><Send /></Button>
             </div>
-            <p className="mt-1.5 text-[10px] text-muted-foreground">/r · /rmj · /mj · /joueur · /rjoueur puis choisir</p>
+            <p className="mt-1.5 text-[10px] text-muted-foreground">/r · /rmj · /rprivé · /mj · /joueur · /rjoueur puis choisir un compte</p>
           </form>
         </section>
       )}

@@ -35,3 +35,8 @@ export async function writeSharedRecord(scope: string, key: string, value: strin
   await call(scopePath(scope, key), { method: "POST", body: { value } })
 }
 
+
+export async function listSharedRecords(scope: string) {
+  const response = await call(`/shared/${encodeURIComponent(scope)}`, { method: "GET" })
+  return (response as { records: SharedRecord[] } | null)?.records ?? []
+}

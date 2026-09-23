@@ -2,7 +2,8 @@ import { NextResponse } from "next/server"
 
 import { saveTabletopActivity } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
-import { chatRoomId, getChatBootstrapForAccount, getTabletopSpeakerName, listChatCampaignsForAccount } from "@/lib/tabletop-access"
+import { chatAuthorName } from "@/lib/chat-accounts"
+import { accountRecipientPrefix, chatRoomId, getChatBootstrapForAccount, listChatCampaignsForAccount, privateRecipientPrefix } from "@/lib/tabletop-access"
 import type { TabletopActivityKind } from "@/lib/tabletop-schema"
 
 function text(value: unknown, maximum: number) {
@@ -38,7 +39,13 @@ export async function POST(request: Request) {
     if (!bootstrap) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
     const kind: TabletopActivityKind | null = body.kind === "chat" || body.kind === "dice" ? body.kind : null
     if (!kind) throw new Error("INVALID_ACTIVITY")
-    const authorName = await getTabletopSpeakerName(account, pageLinked, text(body.speakerId, 200))
+    // Où qu'on écrive, le chat affiche le nom du compte.
+    const authorName = chatAuthorName(account)
+    const audience = body.audience === "gm" || body.audience === "character" ? body.audience : "public" as "public" | "gm" | "character"
+    let recipientId = audience === "character" ? text(body.recipientId, 200) : ""
+    // Un jet privé n'appartient qu'à son auteur.
+    if (recipientId.startsWith(privateRecipientPrefix)) recipientId = `${privateRecipientPrefix}${account.uid}`
+    if (audience === "character" && (!recipientId || recipientId === accountRecipientPrefix)) throw new Error("INVALID_RECIPIENT")
     const activity = {
       id: text(body.id, 200) || crypto.randomUUID(),
       mapId: chatRoomId(pageLinked),
@@ -49,9 +56,9 @@ export async function POST(request: Request) {
       diceExpression: kind === "dice" ? text(body.diceExpression, 40) : "",
       diceResult: kind === "dice" ? text(body.diceResult, 500) : "",
       createdAt: new Date().toISOString(),
-      audience: body.audience === "gm" || body.audience === "character" ? body.audience : "public" as "public" | "gm" | "character",
-      recipientId: text(body.recipientId, 200),
-      recipientName: text(body.recipientName, 120),
+      audience,
+      recipientId,
+      recipientName: audience === "character" ? text(body.recipientName, 120) : "",
     }
     if (kind === "chat" && !activity.text) throw new Error("EMPTY_MESSAGE")
     await saveTabletopActivity(activity)

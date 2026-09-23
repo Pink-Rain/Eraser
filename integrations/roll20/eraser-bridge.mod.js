@@ -1,10 +1,11 @@
 /* Eraser Bridge for Roll20 — eraser-jdr.chatgpt.site
  * 0.5.0 : modèle PNJ simplifié, inventaire réel et payload schema 2
  * (setDefaultTokenForCharacter). Plus aucune automatisation de fiche.
+ * 0.6.0 : « Synchroniser une session » ouvre le choix de session du compagnon.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.5.0';
+  var VERSION = '0.6.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
@@ -382,6 +383,7 @@ var EraserBridge = EraserBridge || (function () {
     var linked = s.campaign ? html(s.campaign.name) : 'Aucune campagne liée';
     whisper('<div style="border:1px solid #6f5530;background:#f4ead6;padding:10px;border-radius:7px"><b>Eraser Bridge ' + VERSION + '</b><br><span style="font-size:11px">' + linked + '</span><hr>'
       + '<a href="!eraser-sync">Tout synchroniser</a><br>'
+      + '<a href="!eraser-sync-session">Synchroniser une session</a><br>'
       + '<a href="!eraser-push-hp">Renvoyer les PV vers Eraser</a><br>'
       + '<a href="!eraser-tokens">Revérifier les jetons par défaut</a><br>'
       + '<a href="!eraser-placeholder">Image par défaut = jeton sélectionné</a>' + (s.placeholder ? ' ✓' : '') + '<br>'
@@ -408,6 +410,7 @@ var EraserBridge = EraserBridge || (function () {
       if (content === '!eraser' || content === '!eraser-status') return menu();
       if (content.indexOf('!eraser-ping ') === 0) return acknowledge(argument(content, '!eraser-ping '), { version: VERSION });
       if (content === '!eraser-sync') return whisper('<span data-eraser-event="sync">ERASER_SYNC_REQUEST</span>');
+      if (content === '!eraser-sync-session') return whisper('<span data-eraser-event="sync-session">ERASER_SYNC_SESSION_REQUEST</span>');
       if (content === '!eraser-push-hp') return exportHp();
       if (content === '!eraser-tokens') return rebuildAllTokens();
       if (content === '!eraser-placeholder') {

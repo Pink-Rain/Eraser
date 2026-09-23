@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useEffect, useMemo, useState } from "react"
-import { ArrowLeft, Beaker, BookOpen, Bookmark, Check, ChevronDown, Dices, Download, Gem, Landmark, LibraryBig, Link2, LoaderCircle, MapPinned, PackageOpen, Pencil, RefreshCw, Save, Search, Send, Shield, Store, Trash2, UserRound, UtensilsCrossed } from "lucide-react"
+import { ArrowLeft, Beaker, BookOpen, Bookmark, Check, ChevronDown, CircleMinus, Dices, Download, Gem, Landmark, LibraryBig, Link2, LoaderCircle, MapPinned, PackageOpen, Pencil, RefreshCw, Save, Search, Send, Shield, Store, Trash2, UserRound, UtensilsCrossed } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { Badge } from "@/components/ui/badge"
@@ -15,6 +15,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
+import { patchSession, SessionPicker } from "@/components/eraser/session-picker"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, GeneratedShopItem, ReusablePageOption, SavedShopRecord, ShopGeneratorItem, ShopKey, ShopRarity, ShopSize } from "@/lib/shop-schema"
 
 export type { ShopGeneratorItem } from "@/lib/shop-schema"
@@ -258,9 +259,9 @@ function ShopCards({ shops, actions, pending, npcs = [], onSave, onSend, onAdd, 
         {onRename && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onRename(shop)} aria-label={`Nommer ${shop.name}`} title="Nommer"><Pencil /></Button>}
         {actions === "campaign" && <Button type="button" size="icon-sm" variant="outline" disabled={pending} onClick={() => onSave?.(shop)} aria-label={`Sauvegarder ${shop.name}`} title="Sauvegarder"><Bookmark /></Button>}
         {actions === "sandbox" && onSend && <Button type="button" size="icon-sm" variant="outline" disabled={pending} onClick={() => onSend(shop)} aria-label={`Envoyer ${shop.name} vers une campagne`} title="Vers une campagne"><Send /></Button>}
-        {onAdd && actions !== "locations" && <Button type="button" size="icon-sm" variant="outline" disabled={pending} onClick={() => onAdd(shop)} aria-label={`Ajouter ${shop.name} à la campagne`} title="Ajouter à la campagne"><MapPinned /></Button>}
+        {onAdd && actions !== "locations" && <Button type="button" size="icon-sm" variant="outline" disabled={pending} onClick={() => onAdd(shop)} aria-label={`Ajouter ${shop.name} à la session`} title="Ajouter à la session"><MapPinned /></Button>}
         {onLink && <Button type="button" size="icon-sm" variant="ghost" disabled={pending} onClick={() => onLink(shop)} aria-label={`Lier ${shop.name} à un PNJ`} title="Lier à un PNJ"><Link2 /></Button>}
-        {(actions === "saved" || actions === "locations") && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} onClick={() => onDelete?.(shop)} aria-label={`Supprimer ${shop.name}`} title="Supprimer"><Trash2 /></Button>}
+        {(actions === "saved" || actions === "locations") && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" disabled={pending} onClick={() => onDelete?.(shop)} aria-label={actions === "locations" ? `Retirer ${shop.name} de la session` : `Supprimer ${shop.name}`} title={actions === "locations" ? "Retirer de la session" : "Supprimer"}>{actions === "locations" ? <CircleMinus /> : <Trash2 />}</Button>}
       </div>}
     </header>
     {!collapsed && (shop.items.length ? <ul className="divide-y">{shop.items.map((item) => { const itemKey = `${shop.id}:${item.id}`; const expanded = expandedItems.has(itemKey); return <li key={item.id} className="px-4 py-2"><div className="grid grid-cols-[1.75rem_minmax(0,1fr)_auto_1.75rem_1.75rem] items-center gap-2"><span className="flex size-7 items-center justify-center rounded-md border bg-background text-sm">{item.icon || "◇"}</span><div className="min-w-0"><div className="flex min-w-0 flex-wrap items-center gap-1.5"><p className="truncate text-sm font-semibold">{item.nameHtml?.trim() ? <span className={shopRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : item.name}</p><Badge variant="outline" className={`px-1.5 py-0 text-[9px] ${rarityClasses[item.rarity]}`}>{rarityLabels[item.rarity]}</Badge></div><p className="mt-0.5 truncate text-[10px] text-muted-foreground"><span className="font-semibold text-foreground/65">{item.type || "Objet"}</span>{item.subtype ? ` · ${item.subtype}` : ""}</p></div><EditablePrice item={item} pending={pending} onCommit={onPriceChange ? (price) => onPriceChange(shop, item, price) : undefined} />{onReroll ? <RerollItemButton item={item} pending={pending} onReroll={(rarity) => onReroll(shop, item, rarity)} /> : <span />}<Button type="button" variant="ghost" size="icon-xs" aria-expanded={expanded} aria-label={expanded ? `Masquer les détails de ${item.name}` : `Afficher les détails de ${item.name}`} onClick={() => toggleItem(itemKey)}><ChevronDown className={`transition-transform ${expanded ? "rotate-180" : ""}`} /></Button></div>{expanded && <div className="ml-9 mt-2 grid gap-2 rounded-lg border bg-muted/30 px-3 py-2.5 text-xs leading-5"><div><p className="font-semibold text-foreground">Description</p>{item.descriptionHtml?.trim() ? <p className={`mt-0.5 text-muted-foreground ${shopRichText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.descriptionHtml) }} /> : <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{item.description || "Aucune description renseignée."}</p>}</div>{actions !== "locations" && <div><p className="font-semibold text-foreground">Effet</p>{item.effectHtml?.trim() ? <p className={`mt-0.5 text-muted-foreground ${shopRichText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /> : <p className="mt-0.5 whitespace-pre-wrap text-muted-foreground">{item.effect || "Aucun effet renseigné."}</p>}</div>}</div>}</li> })}</ul> : <div className="grid min-h-28 place-items-center p-5 text-center"><div><PackageOpen className="mx-auto size-6 text-muted-foreground/60" /><p className="mt-2 text-xs text-muted-foreground">Aucun objet compatible.</p></div></div>)}
@@ -268,22 +269,23 @@ function ShopCards({ shops, actions, pending, npcs = [], onSave, onSend, onAdd, 
 }
 
 /**
- * Ajouter au Créateur de session, ou lier à un PNJ. À l'ajout, le nom de chaque magasin
- * se modifie directement dans la fenêtre.
+ * Ajouter à une session du Créateur de session, ou lier à un PNJ. À l'ajout, le nom de
+ * chaque magasin se modifie directement dans la fenêtre.
  */
-function NpcDialog({ state, npcs, pending, onClose, onConfirm }: { state: { action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null; npcs: CampaignNpcRecord[]; pending: boolean; onClose: () => void; onConfirm: (npcId: string, names: Record<string, string>) => void }) {
-  const [withNpc, setWithNpc] = useState(false); const [query, setQuery] = useState(""); const [npcId, setNpcId] = useState("")
+function NpcDialog({ state, npcs, pending, campaignId, onClose, onConfirm }: { state: { action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null; npcs: CampaignNpcRecord[]; pending: boolean; campaignId?: string; onClose: () => void; onConfirm: (npcId: string, names: Record<string, string>, sessionId: string) => void }) {
+  const [withNpc, setWithNpc] = useState(false); const [query, setQuery] = useState(""); const [npcId, setNpcId] = useState(""); const [sessionId, setSessionId] = useState("")
   const [names, setNames] = useState<Record<string, string>>({})
   const filtered = useMemo(() => npcs.filter((npc) => !query.trim() || npc.name.toLocaleLowerCase("fr").includes(query.trim().toLocaleLowerCase("fr"))), [npcs, query]); const forceNpc = state?.action === "link-npc"
   const nameOf = (shop: GeneratedShop) => names[shop.id] ?? shop.name
   const namesValid = forceNpc || Boolean(state?.shops.every((shop) => nameOf(shop).trim()))
-  return <Dialog open={Boolean(state)} onOpenChange={(open) => { if (!open) { setNames({}); onClose() } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{forceNpc ? "Lier à un PNJ" : "Ajouter à la campagne"}</DialogTitle></DialogHeader>{state && <div className="space-y-4">
+  return <Dialog open={Boolean(state)} onOpenChange={(open) => { if (!open) { setNames({}); onClose() } }}><DialogContent className="max-w-2xl"><DialogHeader><DialogTitle>{forceNpc ? "Lier à un PNJ" : "Ajouter à la session"}</DialogTitle></DialogHeader>{state && <div className="space-y-4">
+    {!forceNpc && campaignId && <SessionPicker campaignId={campaignId} value={sessionId} onChange={setSessionId} />}
     <div className={`max-h-56 overflow-y-auto rounded-xl border bg-muted/35 p-3 text-sm ${forceNpc ? "" : "space-y-2"}`}>{state.shops.map((shop) => forceNpc
       ? <div key={shop.id} className="flex items-center justify-between gap-3 py-1"><span className="font-medium">{shop.name}</span><span className="text-xs text-muted-foreground">{shop.cityName} · {shop.size}</span></div>
       : <label key={shop.id} className="grid gap-1 text-xs font-semibold text-muted-foreground"><span className="flex justify-between gap-3"><span>Nom du magasin</span><span className="font-normal">{shop.cityName} · {shop.size}</span></span><Input value={nameOf(shop)} onChange={(event) => setNames((current) => ({ ...current, [shop.id]: event.target.value }))} className="bg-background text-sm font-medium text-foreground" maxLength={120} /></label>)}</div>
     {!forceNpc && <div className="flex gap-2"><Button type="button" variant={!withNpc ? "default" : "outline"} onClick={() => { setWithNpc(false); setNpcId("") }}><Check />Sans PNJ</Button><Button type="button" variant={withNpc ? "default" : "outline"} onClick={() => setWithNpc(true)}><UserRound />Lier à un PNJ</Button></div>}
     {(forceNpc || withNpc) && <div className="rounded-xl border p-3"><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ de la campagne…" /></div><div className="mt-2 max-h-52 space-y-1 overflow-y-auto">{filtered.length ? filtered.map((npc) => <button key={npc.id} type="button" onClick={() => setNpcId(npc.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left text-sm ${npcId === npc.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}><UserRound className="size-4" /><span className="flex-1 font-medium">{npc.name}</span></button>) : <p className="px-3 py-7 text-center text-sm text-muted-foreground">Aucun PNJ n’a encore été créé dans cette campagne.</p>}</div></div>}
-    <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => { setNames({}); onClose() }}>Annuler</Button><Button type="button" disabled={pending || !namesValid || ((forceNpc || withNpc) && !npcId)} onClick={() => { const chosen = forceNpc ? {} : Object.fromEntries(state.shops.map((shop) => [shop.id, nameOf(shop).trim()])); setNames({}); onConfirm(forceNpc || withNpc ? npcId : "", chosen) }}>{pending ? <LoaderCircle className="animate-spin" /> : forceNpc ? <Link2 /> : <MapPinned />}{forceNpc ? "Lier" : "Ajouter"}</Button></div>
+    <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => { setNames({}); onClose() }}>Annuler</Button><Button type="button" disabled={pending || !namesValid || ((forceNpc || withNpc) && !npcId) || (!forceNpc && Boolean(campaignId) && !sessionId)} onClick={() => { const chosen = forceNpc ? {} : Object.fromEntries(state.shops.map((shop) => [shop.id, nameOf(shop).trim()])); setNames({}); onConfirm(forceNpc || withNpc ? npcId : "", chosen, forceNpc ? "" : sessionId) }}>{pending ? <LoaderCircle className="animate-spin" /> : forceNpc ? <Link2 /> : <MapPinned />}{forceNpc ? "Lier" : "Ajouter"}</Button></div>
   </div>}</DialogContent></Dialog>
 }
 
@@ -317,7 +319,7 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
     setPending(false)
   }
 
-  async function run(action: "save" | "add-to-campaign" | "link-npc", chosen: GeneratedShop[], npcId = "", names: Record<string, string> = {}) {
+  async function run(action: "save" | "add-to-campaign" | "link-npc", chosen: GeneratedShop[], npcId = "", names: Record<string, string> = {}, sessionId = "") {
     setPending(true); setError(""); setNotice("")
     const selected = withNames(chosen, names)
     // Le tirage affiché prend aussitôt le nouveau nom.
@@ -330,8 +332,9 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
         if (action === "add-to-campaign" && !saved.inCampaign) return false
         return !npcId || saved.npcId === npcId
       })
+      if (action === "add-to-campaign" && sessionId) await patchSession(pageLinked, sessionId, { add: { shopIds: selected.map((shop) => shop.id) } })
       router.refresh()
-      setNotice(action === "save" ? "Magasin(s) sauvegardé(s)." : action === "link-npc" ? "Lien avec le PNJ enregistré." : "Magasin(s) ajouté(s) à la campagne.")
+      setNotice(action === "save" ? "Magasin(s) sauvegardé(s)." : action === "link-npc" ? "Lien avec le PNJ enregistré." : "Magasin(s) ajouté(s) à la session.")
       setDialog(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") }
     setPending(false)
@@ -395,20 +398,38 @@ export function ShopGenerator({ items, loadError = "", pageLinked = "bac-a-sable
   }
   return <div className="mt-7 space-y-5"><section className="overflow-hidden rounded-2xl border bg-card/85 shadow-sm"><div className="grid lg:grid-cols-[minmax(0,1fr)_22rem]"><div className="p-5 sm:p-6"><div className="flex items-center gap-3"><span className="flex size-10 items-center justify-center rounded-xl bg-primary text-primary-foreground"><Dices className="size-5" /></span><h2 className="font-display text-2xl font-semibold">Générer une ville marchande</h2></div><div className="mt-5 flex flex-col gap-3 sm:flex-row sm:items-end"><label className="grid flex-1 gap-1.5 text-sm font-medium">Taille de la ville<Select value={cityKey} onValueChange={(value) => { setCityKey(value as CityKey); setShops(null); setNotice("") }}><SelectTrigger className="h-11 w-full bg-background/70"><SelectValue /></SelectTrigger><SelectContent>{Object.entries(cityDefinitions).map(([key, definition]) => <SelectItem key={key} value={key}>{definition.name} · {definition.population}</SelectItem>)}</SelectContent></Select></label><Button className="h-11 px-5" onClick={() => void create()} disabled={!items.length || pending}>{pending ? <LoaderCircle className="animate-spin" /> : <Dices />}{shops ? "Relancer" : "Créer les magasins"}</Button></div></div><div className="border-t bg-primary/[0.045] p-5 lg:border-l lg:border-t-0 sm:p-6"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Sélection actuelle</p><p className="font-display mt-2 text-3xl font-semibold">{city.name}</p><p className="mt-1 text-sm text-muted-foreground">{city.population}</p><div className="mt-4 flex flex-wrap gap-1.5">{shopDefinitions.map((shop) => <Badge key={shop.key} variant="outline" className="bg-background/55">{shop.name} {city.chances[shop.key]}%</Badge>)}</div></div></div></section>
     {loadError && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{loadError}</p>}{error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}{notice && <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">{notice}</p>}
-    {campaignId && <div className="flex flex-wrap gap-2 rounded-xl border bg-card/65 p-3"><Button disabled={!shops?.length || pending} onClick={() => shops && void run("save", shops)}><Save />Sauvegarder les magasins</Button>{savedHref && <Button asChild variant="outline"><Link href={savedHref} prefetch={false}><LibraryBig />Voir les magasins sauvegardés</Link></Button>}{sourcePages.length > 0 && <Button variant="outline" disabled={pending} onClick={() => setImportOpen(true)}><Download />Récupérer des magasins</Button>}<Button disabled={!shops?.length || pending} variant="secondary" onClick={() => shops && setDialog({ action: "add-to-campaign", shops })}><MapPinned />Ajouter à la campagne</Button></div>}
+    {campaignId && <div className="flex flex-wrap gap-2 rounded-xl border bg-card/65 p-3"><Button disabled={!shops?.length || pending} onClick={() => shops && void run("save", shops)}><Save />Sauvegarder les magasins</Button>{savedHref && <Button asChild variant="outline"><Link href={savedHref} prefetch={false}><LibraryBig />Voir les magasins sauvegardés</Link></Button>}{sourcePages.length > 0 && <Button variant="outline" disabled={pending} onClick={() => setImportOpen(true)}><Download />Récupérer des magasins</Button>}<Button disabled={!shops?.length || pending} variant="secondary" onClick={() => shops && setDialog({ action: "add-to-campaign", shops })}><MapPinned />Ajouter à la session</Button></div>}
     {!campaignId && destinationPages.length > 0 && <div className="flex flex-wrap gap-2 rounded-xl border bg-card/65 p-3"><Button disabled={!shops?.length || pending} onClick={() => shops && setDestinationShops(shops)}><Send />Envoyer le tirage dans une campagne</Button></div>}
     {shops === null ? <section className="grid min-h-44 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><Store className="mx-auto size-8 text-primary/45" /><p className="font-display mt-3 text-xl font-semibold">Aucun tirage</p></div></section> : <section><div className="mb-3"><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Résultat du tirage</p><h2 className="font-display mt-1 text-3xl font-semibold">{shops.length} magasin{shops.length > 1 ? "s" : ""} · {city.name}</h2></div><ShopCards shops={shops} actions={campaignId ? "campaign" : "sandbox"} pending={pending} onSave={(shop) => void run("save", [shop])} onSend={destinationPages.length ? (shop) => setDestinationShops([shop]) : undefined} onAdd={campaignId ? (shop) => setDialog({ action: "add-to-campaign", shops: [shop] }) : undefined} onLink={campaignId ? (shop) => setDialog({ action: "link-npc", shops: [shop] }) : undefined} onRename={setRenameTarget} onReroll={(shop, item, rarity) => void rerollLine(shop, item, rarity)} onRerollShop={(shop) => void rerollWholeShop(shop)} /></section>}
-    {renameTarget && <RenameShopDialog key={renameTarget.id} shop={renameTarget} pending={pending} onClose={() => setRenameTarget(null)} onConfirm={(name) => void renameShop(name)} />}{destinationShops && <CampaignDestinationDialog shops={destinationShops} campaigns={destinationPages} pending={pending} onClose={() => setDestinationShops(null)} onConfirm={(destinationId) => void sendToCampaign(destinationId)} />}<NpcDialog state={dialog} npcs={npcs} pending={pending} onClose={() => setDialog(null)} onConfirm={(npcId, names) => dialog && void run(dialog.action, dialog.shops, npcId, names)} />{importOpen && <ImportShopsDialog open sourcePages={sourcePages} pending={pending} onClose={() => setImportOpen(false)} onImport={(source, ids) => void runImport(source, ids)} />}</div>
+    {renameTarget && <RenameShopDialog key={renameTarget.id} shop={renameTarget} pending={pending} onClose={() => setRenameTarget(null)} onConfirm={(name) => void renameShop(name)} />}{destinationShops && <CampaignDestinationDialog shops={destinationShops} campaigns={destinationPages} pending={pending} onClose={() => setDestinationShops(null)} onConfirm={(destinationId) => void sendToCampaign(destinationId)} />}<NpcDialog state={dialog} npcs={npcs} pending={pending} campaignId={campaignId} onClose={() => setDialog(null)} onConfirm={(npcId, names, sessionId) => dialog && void run(dialog.action, dialog.shops, npcId, names, sessionId)} />{importOpen && <ImportShopsDialog open sourcePages={sourcePages} pending={pending} onClose={() => setImportOpen(false)} onImport={(source, ids) => void runImport(source, ids)} />}</div>
 }
 
-export function SavedShopCollection({ initialShops, pageLinked, npcs = [], generatorItems = [], mode = "saved" }: { initialShops: SavedShopRecord[]; pageLinked: string; npcs?: CampaignNpcRecord[]; generatorItems?: ShopGeneratorItem[]; mode?: "saved" | "locations" | "view" }) {
+/** Les magasins d'une session : ses identifiants et ce qu'on fait en ajoutant ou retirant. */
+export type ShopSessionBinding = { ids: string[]; onAdd: (ids: string[]) => Promise<void>; onRemove: (id: string) => Promise<void> }
+
+/** « Ajouter un marché » : choisir parmi les magasins sauvegardés de la campagne. */
+function AddShopToSessionDialog({ open, candidates, pending, generatorHref, onClose, onAdd }: { open: boolean; candidates: GeneratedShop[]; pending: boolean; generatorHref: string; onClose: () => void; onAdd: (ids: string[]) => void }) {
+  const [selected, setSelected] = useState<Set<string>>(() => new Set())
+  const [query, setQuery] = useState("")
+  const normalizedQuery = query.trim().toLocaleLowerCase("fr")
+  const filtered = candidates.filter((shop) => !normalizedQuery || `${shop.name} ${shop.cityName}`.toLocaleLowerCase("fr").includes(normalizedQuery))
+  function toggle(id: string) { setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
+  function close() { setSelected(new Set()); setQuery(""); onClose() }
+  return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) close() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter un marché</DialogTitle></DialogHeader><div className="space-y-4"><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un magasin sauvegardé…" /></div><Button asChild variant="outline"><Link href={generatorHref} prefetch={false}><Dices />Générer des magasins</Link></Button></div><div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((shop) => { const Icon = shopDefinitions.find((definition) => definition.key === shop.key)?.Icon || Store; return <button key={shop.id} type="button" onClick={() => toggle(shop.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent ${selected.has(shop.id) ? "bg-primary/10" : ""}`}><Checkbox checked={selected.has(shop.id)} aria-label={`Sélectionner ${shop.name}`} /><Icon className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{shop.name}</span><span className="text-xs text-muted-foreground">{shop.cityName} · {shop.size}</span></button> }) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{candidates.length ? "Aucun magasin ne correspond." : "Aucun autre magasin sauvegardé dans la campagne. Génère-en depuis Magasin et fouille."}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Annuler</Button><Button type="button" disabled={pending || !selected.size} onClick={() => { onAdd([...selected]); setSelected(new Set()); setQuery("") }}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}Ajouter {selected.size || ""}</Button></div></div></DialogContent></Dialog>
+}
+
+export function SavedShopCollection({ initialShops, pageLinked, npcs = [], generatorItems = [], mode = "saved", session }: { initialShops: SavedShopRecord[]; pageLinked: string; npcs?: CampaignNpcRecord[]; generatorItems?: ShopGeneratorItem[]; mode?: "saved" | "session" | "view"; session?: ShopSessionBinding }) {
   const router = useRouter()
-  const [shops, setShops] = useState(() => shopItemsWithCatalogRichText(initialShops, generatorItems)); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [deleteTarget, setDeleteTarget] = useState<GeneratedShop | null>(null); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null)
+  const [shops, setShops] = useState(() => shopItemsWithCatalogRichText(initialShops, generatorItems)); const [pending, setPending] = useState(false); const [notice, setNotice] = useState(""); const [error, setError] = useState(""); const [dialog, setDialog] = useState<{ action: "add-to-campaign" | "link-npc"; shops: GeneratedShop[] } | null>(null); const [deleteTarget, setDeleteTarget] = useState<GeneratedShop | null>(null); const [renameTarget, setRenameTarget] = useState<GeneratedShop | null>(null); const [picking, setPicking] = useState(false)
+  const inSession = mode === "session" && session ? new Set(session.ids) : null
+  const shown = inSession ? shops.filter((shop) => inSession.has(shop.id)) : shops
+  const cardsMode = mode === "view" ? "none" : mode === "session" ? "locations" : "saved"
+  const canAddToSession = mode === "saved" && pageLinked !== "bac-a-sable"
 
   async function reloadCollection(expected: GeneratedShop[] = []) {
-    const loaded = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: mode === "locations" })
+    const loaded = await fetchPersistedShops<SavedShopRecord>(pageLinked)
     if (expected.length) requirePersistedShops(expected, loaded, "Le magasin n’est pas retrouvé dans Google Sheets après son enregistrement.")
-    const focusedId = new URLSearchParams(window.location.search).get("shop")
+    const focusedId = mode === "session" ? null : new URLSearchParams(window.location.search).get("shop")
     setShops(shopItemsWithCatalogRichText(focusedId ? loaded.filter((shop) => shop.id === focusedId) : loaded, generatorItems))
     return loaded
   }
@@ -420,20 +441,21 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
     setNotice(success)
   }
 
-  async function run(action: "add-to-campaign" | "link-npc", chosen: GeneratedShop[], npcId = "", names: Record<string, string> = {}) {
+  async function run(action: "add-to-campaign" | "link-npc", chosen: GeneratedShop[], npcId = "", names: Record<string, string> = {}, sessionId = "") {
     setPending(true); setError(""); setNotice("")
     const selected = withNames(chosen, names)
     try {
       await persistShops(action, pageLinked, selected, npcId)
-      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" || mode === "locations" })
+      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" })
       requirePersistedShops(selected, persisted, "Le magasin n’est pas retrouvé avec son état de campagne après l’enregistrement.", (candidate) => {
         const saved = candidate as SavedShopRecord
         if (action === "add-to-campaign" && !saved.inCampaign) return false
         return !npcId || saved.npcId === npcId
       })
+      if (action === "add-to-campaign" && sessionId) await patchSession(pageLinked, sessionId, { add: { shopIds: selected.map((shop) => shop.id) } })
       await reloadCollection()
       router.refresh()
-      setNotice(action === "add-to-campaign" ? "Ajouté à la campagne." : "Lien avec le PNJ enregistré.")
+      setNotice(action === "add-to-campaign" ? "Ajouté à la session." : "Lien avec le PNJ enregistré.")
       setDialog(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Enregistrement impossible.") }
     setPending(false)
@@ -442,13 +464,26 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
   async function remove(shop: GeneratedShop) {
     setPending(true); setError(""); setNotice("")
     try {
-      await persistShops(mode === "locations" ? "remove-from-campaign" : "delete", pageLinked, [shop])
-      const loaded = await reloadCollection()
-      if (loaded.some((candidate) => candidate.id === shop.id)) throw new Error(mode === "locations" ? "Le magasin apparaît encore dans le Créateur de session après son retrait." : "Le magasin existe encore après sa suppression.")
-      router.refresh()
-      setNotice(mode === "locations" ? "Magasin retiré de Lieux et rencontres." : "Magasin supprimé.")
+      if (mode === "session" && session) {
+        await session.onRemove(shop.id)
+        setNotice("Magasin retiré de la session.")
+      } else {
+        await persistShops("delete", pageLinked, [shop])
+        const loaded = await reloadCollection()
+        if (loaded.some((candidate) => candidate.id === shop.id)) throw new Error("Le magasin existe encore après sa suppression.")
+        router.refresh()
+        setNotice("Magasin supprimé.")
+      }
       setDeleteTarget(null)
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
+    setPending(false)
+  }
+
+  async function addSelected(ids: string[]) {
+    if (!session) return
+    setPending(true); setError(""); setNotice("")
+    try { await session.onAdd(ids); setPicking(false); setNotice(ids.length > 1 ? "Magasins ajoutés à la session." : "Magasin ajouté à la session.") }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Ajout impossible.") }
     setPending(false)
   }
 
@@ -492,7 +527,8 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
     const timer = window.setTimeout(() => document.querySelector(`[data-shop-id="${CSS.escape(id)}"]`)?.scrollIntoView({ behavior: "smooth", block: "center" }), 120)
     return () => window.clearTimeout(timer)
   }, [])
-  return <div className="space-y-4">{error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}{notice && <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">{notice}</p>}{shops.length ? <ShopCards shops={shops} actions={mode === "view" ? "none" : mode} pending={pending} npcs={npcs} onAdd={mode === "view" ? undefined : (shop) => setDialog({ action: "add-to-campaign", shops: [shop] })} onLink={mode === "view" ? undefined : (shop) => setDialog({ action: "link-npc", shops: [shop] })} onRename={mode === "view" ? undefined : setRenameTarget} onDelete={mode === "view" ? undefined : setDeleteTarget} onReroll={mode !== "view" && generatorItems.length ? (shop, item, rarity) => void rerollLine(shop, item, rarity) : undefined} onRerollShop={mode !== "view" && generatorItems.length ? (shop) => void rerollWholeShop(shop) : undefined} onPriceChange={mode === "saved" || mode === "locations" ? (shop, item, price) => void changePrice(shop, item, price) : undefined} /> : <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><LibraryBig className="mx-auto size-8 text-muted-foreground/60" /><p className="font-display mt-3 text-xl font-semibold">Aucun magasin</p></div></div>}{renameTarget && <RenameShopDialog key={renameTarget.id} shop={renameTarget} pending={pending} onClose={() => setRenameTarget(null)} onConfirm={(name) => void renameShop(name)} />}<NpcDialog state={dialog} npcs={npcs} pending={pending} onClose={() => setDialog(null)} onConfirm={(npcId, names) => dialog && void run(dialog.action, dialog.shops, npcId, names)} /><AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && !pending) setDeleteTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{mode === "locations" ? "Retirer ce magasin ?" : "Supprimer ce magasin ?"}</AlertDialogTitle><AlertDialogDescription>{deleteTarget ? mode === "locations" ? `${deleteTarget.name} sera retiré du Créateur de session, mais restera dans les magasins sauvegardés.` : `${deleteTarget.name} sera supprimé des magasins sauvegardés.` : "Cette action est définitive."}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={pending} onClick={() => deleteTarget && void remove(deleteTarget)}>{pending ? <LoaderCircle className="animate-spin" /> : <Trash2 />}{mode === "locations" ? "Retirer" : "Supprimer"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></div>
+  const editable = mode !== "view"
+  return <div className="space-y-4">{mode === "session" && <div className="flex justify-end"><Button type="button" onClick={() => setPicking(true)} disabled={pending}><Store />Ajouter un marché</Button></div>}{error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}{notice && <p className="rounded-xl border border-primary/20 bg-primary/5 px-4 py-3 text-sm text-primary">{notice}</p>}{shown.length ? <ShopCards shops={shown} actions={cardsMode} pending={pending} npcs={npcs} onAdd={canAddToSession ? (shop) => setDialog({ action: "add-to-campaign", shops: [shop] }) : undefined} onLink={editable ? (shop) => setDialog({ action: "link-npc", shops: [shop] }) : undefined} onRename={editable ? setRenameTarget : undefined} onDelete={editable ? setDeleteTarget : undefined} onReroll={editable && generatorItems.length ? (shop, item, rarity) => void rerollLine(shop, item, rarity) : undefined} onRerollShop={editable && generatorItems.length ? (shop) => void rerollWholeShop(shop) : undefined} onPriceChange={editable ? (shop, item, price) => void changePrice(shop, item, price) : undefined} /> : <div className="grid min-h-48 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><LibraryBig className="mx-auto size-8 text-muted-foreground/60" /><p className="font-display mt-3 text-xl font-semibold">{mode === "session" ? "Aucun magasin dans cette session" : "Aucun magasin"}</p></div></div>}{renameTarget && <RenameShopDialog key={renameTarget.id} shop={renameTarget} pending={pending} onClose={() => setRenameTarget(null)} onConfirm={(name) => void renameShop(name)} />}<NpcDialog state={dialog} npcs={npcs} pending={pending} campaignId={canAddToSession ? pageLinked : undefined} onClose={() => setDialog(null)} onConfirm={(npcId, names, sessionId) => dialog && void run(dialog.action, dialog.shops, npcId, names, sessionId)} />{mode === "session" && <AddShopToSessionDialog open={picking} candidates={inSession ? shops.filter((shop) => !inSession.has(shop.id)) : []} pending={pending} generatorHref={`/campagne/${encodeURIComponent(pageLinked)}/magasin-et-fouille`} onClose={() => setPicking(false)} onAdd={(ids) => void addSelected(ids)} />}<AlertDialog open={Boolean(deleteTarget)} onOpenChange={(open) => { if (!open && !pending) setDeleteTarget(null) }}><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>{mode === "session" ? "Retirer ce magasin ?" : "Supprimer ce magasin ?"}</AlertDialogTitle><AlertDialogDescription>{deleteTarget ? mode === "session" ? `${deleteTarget.name} sera retiré de cette session, mais restera dans les magasins sauvegardés.` : `${deleteTarget.name} sera supprimé des magasins sauvegardés.` : "Cette action est définitive."}</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel disabled={pending}>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" disabled={pending} onClick={() => deleteTarget && void remove(deleteTarget)}>{pending ? <LoaderCircle className="animate-spin" /> : mode === "session" ? <CircleMinus /> : <Trash2 />}{mode === "session" ? "Retirer" : "Supprimer"}</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog></div>
 }
 
 export function BackToShopGenerator({ href }: { href: string }) { return <Button asChild variant="ghost" className="-ml-3"><Link href={href}><ArrowLeft />Revenir à la création</Link></Button> }

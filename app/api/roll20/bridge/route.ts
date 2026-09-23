@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { roll20CampaignPayload, roll20LinkFromToken, updateRoll20HitPoints } from "@/lib/roll20-bridge"
+import { roll20CampaignPayload, roll20LinkFromToken, roll20SessionList, updateRoll20HitPoints } from "@/lib/roll20-bridge"
 
 const corsHeaders = {
   // This endpoint never accepts cookies: the campaign-specific bearer key is
@@ -24,15 +24,19 @@ export async function OPTIONS() {
 export async function GET(request: Request) {
   const link = await roll20LinkFromToken(tokenFrom(request))
   if (!link) return NextResponse.json({ error: "Liaison Eraser invalide ou révoquée." }, { status: 401, headers: corsHeaders })
+  const url = new URL(request.url)
   try {
-    const url = new URL(request.url)
+    if (url.searchParams.get("view") === "sessions") {
+      return NextResponse.json({ schema: 2, sessions: await roll20SessionList(link) }, { headers: corsHeaders })
+    }
     const payload = await roll20CampaignPayload(link, url.origin, {
       id: url.searchParams.get("gameId") || "",
       name: url.searchParams.get("gameName") || "",
-    })
+    }, (url.searchParams.get("session") || "").slice(0, 200))
     return NextResponse.json(payload, { headers: corsHeaders })
-  } catch {
-    return NextResponse.json({ error: "La campagne Eraser n’a pas pu être chargée." }, { status: 400, headers: corsHeaders })
+  } catch (error) {
+    const missingSession = error instanceof Error && error.message === "SESSION_NOT_FOUND"
+    return NextResponse.json({ error: missingSession ? "Cette session n’existe plus dans Eraser." : url.searchParams.get("view") === "sessions" ? "Les sessions Eraser n’ont pas pu être chargées." : "La campagne Eraser n’a pas pu être chargée." }, { status: missingSession ? 404 : 400, headers: corsHeaders })
   }
 }
 

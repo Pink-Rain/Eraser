@@ -5,6 +5,7 @@ import { roll20CampaignLinks } from "@/db/schema"
 import { getCampaignDashboard, listNpcBackpackSummaries, listNpcs, listSavedShops, saveNpcs } from "@/lib/google-sheets"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
+import { listCampaignSessions } from "@/lib/campaign-sessions"
 
 function bytesToBase64Url(bytes: Uint8Array) {
   let binary = ""
@@ -77,9 +78,27 @@ export async function roll20LinkFromImageToken(campaignId: string, imageToken: s
   return link ?? null
 }
 
-export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }) {
+/** Les sessions de la campagne liée, de la plus récente à la plus ancienne. */
+export async function roll20SessionList(link: typeof roll20CampaignLinks.$inferSelect) {
+  const sessions = await listCampaignSessions(link.campaignId)
+  return [...sessions].reverse().map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt, npcCount: session.npcIds.length, shopCount: session.shopIds.length }))
+}
+
+/**
+ * Sans `sessionId`, « Tout synchroniser » : tous les PNJs et magasins présents dans le
+ * Créateur de session. Avec, seulement ceux de cette session.
+ */
+export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }, sessionId = "") {
   const campaign = await getCampaignDashboard(null, link.campaignId)
-  const [npcs, shops] = await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
+  const session = sessionId ? (await listCampaignSessions(link.campaignId)).find((candidate) => candidate.id === sessionId) : null
+  if (sessionId && !session) throw new Error("SESSION_NOT_FOUND")
+  const [npcs, shops] = session
+    ? await Promise.all([listNpcs(link.campaignId), listSavedShops(link.campaignId)]).then(([allNpcs, allShops]) => {
+      const npcIds = new Set(session.npcIds)
+      const shopIds = new Set(session.shopIds)
+      return [allNpcs.filter((npc) => npcIds.has(npc.id)), allShops.filter((shop) => shopIds.has(shop.id))] as const
+    })
+    : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
   const inventories = await listNpcBackpackSummaries(npcs.map((npc) => npc.id))
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
   const portraitUrl = (npcId: string, portrait: string) => portrait
@@ -94,6 +113,7 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
   return {
     schema: 2,
     campaign: { id: campaign.id, name: campaign.name, updatedAt: campaign.updatedAt },
+    session: session ? { id: session.id, name: session.name } : null,
     npcs: npcs.map((npc) => ({
       id: npc.id,
       name: npc.name,

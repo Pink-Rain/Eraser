@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test, { after } from "node:test";
 import { readFile } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
+import { createRequire } from "node:module";
 
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
@@ -445,4 +446,25 @@ test("keeps rich text content out of React's hands", async () => {
   const others = await readFile(new URL("../components/eraser/sheet-grid.tsx", import.meta.url), "utf8");
   assert.match(others, /RichTextSurface/);
   assert.doesNotMatch(others, /contentEditable/);
+});
+
+test("renders the session creator with its sections", async () => {
+  const { SessionCreator } = await vite.ssrLoadModule("/components/eraser/session-creator.tsx");
+  const member = { id: "char-1", name: "Aelis", people: "Elfe", classes: "Rôdeuse", level: "3", honoraryTitle: "" };
+  const npc = { id: "npc-1", pageLinked: "camp-1", name: "Basile Orme", title: "", occupation: "Forgeron", people: "", portrait: "", currentHp: 10, totalHp: 20, speed: 10, constitution: 1, strength: 1, dexterity: 1, intelligence: 1, wisdom: 1, charisma: 1, playerNotes: "", gmNotes: "", inCampaign: true, important: false, createdByUid: "", createdAt: "2026-01-01", updatedAt: "" };
+  const session = { id: "s-1", campaignId: "camp-1", name: "Le col des brumes", bannerUrl: "", characterIds: ["char-1"], npcIds: ["npc-1"], shopIds: [], createdByUid: "", createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "" };
+  const { AppRouterContext } = createRequire(import.meta.url)("next/dist/shared/lib/app-router-context.shared-runtime.js");
+  const router = { push() {}, replace() {}, refresh() {}, prefetch() {}, back() {}, forward() {} };
+  const render = (sessions) => renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: router }, React.createElement(SessionCreator, { campaignId: "camp-1", initialSessions: sessions, initialSessionId: sessions[0]?.id || "", members: [member], npcs: [npc], shops: [], generatorItems: [] })));
+
+  const empty = render([]);
+  assert.match(empty, /Aucune session/);
+  assert.match(empty, /Créer une nouvelle session/);
+
+  const html = render([session]);
+  assert.match(html, /Le col des brumes/);
+  assert.match(html, /Aelis/);
+  assert.match(html, /Basile Orme/);
+  assert.match(html, /Ajouter un PNJ/);
+  assert.match(html, /Ajouter un marché/);
 });

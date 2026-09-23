@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.5.0';
+  const VERSION = '0.6.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -222,29 +222,82 @@
   }
   const gameName = () => document.title.replace(/\s*\|\s*Roll20.*$/i, '').trim() || 'Partie Roll20';
 
-  async function fetchCampaign() {
+  async function fetchCampaign(sessionId) {
     const token = await storageGet('eraserToken');
     if (!token) throw new Error('Colle d’abord la clé créée dans Eraser.');
-    const url = API + '?gameId=' + encodeURIComponent(gameId()) + '&gameName=' + encodeURIComponent(gameName());
+    const url = API + '?gameId=' + encodeURIComponent(gameId()) + '&gameName=' + encodeURIComponent(gameName()) + (sessionId ? '&session=' + encodeURIComponent(sessionId) : '');
     const response = await bridgeFetch({ url, headers: { authorization: 'Bearer ' + token } });
     if (!response?.ok) throw new Error(response?.payload?.error || 'Connexion à Eraser impossible.');
-    if (response.payload?.schema !== 2) throw new Error('Version de données Eraser incompatible (schema ' + (response.payload?.schema ?? 'absent') + '). Mets à jour l’application, le compagnon et le Mod en 0.5.0.');
+    if (response.payload?.schema !== 2) throw new Error('Version de données Eraser incompatible (schema ' + (response.payload?.schema ?? 'absent') + '). Mets à jour l’application, le compagnon et le Mod en ' + VERSION + '.');
     return response.payload;
   }
 
+  /* ---------- sessions ---------- */
+  let sessionList = [];
+
+  async function fetchSessions() {
+    const token = await storageGet('eraserToken');
+    if (!token) throw new Error('Colle d’abord la clé créée dans Eraser.');
+    const response = await bridgeFetch({ url: API + '?view=sessions', headers: { authorization: 'Bearer ' + token } });
+    if (!response?.ok) throw new Error(response?.payload?.error || 'Connexion à Eraser impossible.');
+    if (!Array.isArray(response.payload?.sessions)) throw new Error('Mets à jour l’application Eraser pour synchroniser une session.');
+    return response.payload.sessions;
+  }
+
+  function dateLabel(value) {
+    const date = new Date(value);
+    return Number.isNaN(date.getTime()) ? '' : date.toLocaleDateString('fr-FR', { day: 'numeric', month: 'short', year: 'numeric' });
+  }
+
+  // Menu déroulant : de la plus récente à la plus ancienne, filtré par la recherche.
+  function renderSessions() {
+    const select = document.getElementById('eraser-roll20-session');
+    const search = document.getElementById('eraser-roll20-session-search');
+    if (!select) return;
+    const query = (search?.value || '').trim().toLocaleLowerCase('fr');
+    const previous = select.value;
+    const visible = sessionList.filter((session) => !query || String(session.name).toLocaleLowerCase('fr').includes(query));
+    select.replaceChildren(...visible.map((session) => {
+      const option = document.createElement('option');
+      option.value = session.id;
+      const date = dateLabel(session.createdAt);
+      option.textContent = session.name + (date ? ' — ' + date : '') + ' (' + (session.npcCount || 0) + ' PNJ · ' + (session.shopCount || 0) + ' magasin(s))';
+      return option;
+    }));
+    if (!visible.length) {
+      const option = document.createElement('option');
+      option.value = ''; option.textContent = sessionList.length ? 'Aucune session ne correspond' : 'Aucune session dans Eraser';
+      select.append(option);
+    }
+    if (visible.some((session) => session.id === previous)) select.value = previous;
+  }
+
+  async function openSessionPicker() {
+    openPanel();
+    const box = document.getElementById('eraser-roll20-sessions');
+    if (!box) return;
+    box.hidden = false;
+    status('Chargement des sessions…');
+    try {
+      sessionList = await fetchSessions();
+      renderSessions();
+      status(sessionList.length ? 'Choisis la session à synchroniser.' : 'Aucune session : crée-en une dans le Créateur de session d’Eraser.', !sessionList.length);
+    } catch (error) { status(error.message || String(error), true); }
+  }
+
   /* ---------- synchronisation ---------- */
-  async function syncAll() {
+  async function syncAll(sessionId) {
     if (syncing || !IS_TOP) return;
     syncing = true; openPanel();
     const started = Date.now();
     try {
       status('Vérification du script Mod Roll20…');
       await checkModBridge();
-      status('Chargement de la campagne…');
-      const payload = await fetchCampaign();
+      status(sessionId ? 'Chargement de la session…' : 'Chargement de la campagne…');
+      const payload = await fetchCampaign(sessionId);
       if (!Array.isArray(payload.npcs) || !Array.isArray(payload.shops)) throw new Error('Eraser a renvoyé une campagne invalide. Vérifie la clé de liaison.');
       const total = payload.npcs.length + payload.shops.length;
-      if (!total) throw new Error('Eraser a renvoyé 0 PNJ et 0 magasin. Vérifie que les PNJ sont marqués « dans la campagne ».');
+      if (!total) throw new Error(payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun PNJ ni magasin.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
 
       const failures = [];
       const warnings = [];
@@ -292,7 +345,7 @@
 
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
-      const summary = imported + '/' + payload.npcs.length + ' PNJ · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + payload.shops.length + ' magasin(s) · ' + seconds + ' s';
+      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : '') + imported + '/' + payload.npcs.length + ' PNJ · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + payload.shops.length + ' magasin(s) · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);
@@ -330,6 +383,7 @@
         scanAcknowledgements(text);
         if (!IS_TOP) continue;
         if (text.includes('ERASER_SYNC_REQUEST')) void syncAll();
+        if (text.includes('ERASER_SYNC_SESSION_REQUEST')) void openSessionPicker();
         const hp = text.match(/ERASER_HP:([A-Za-z0-9_-]+)/);
         if (hp && !handledEvents.has(hp[1])) { handledEvents.add(hp[1]); void pushHp(hp[1]); }
         observeNestedRoots(observer, node);
@@ -364,7 +418,9 @@
     panel.id = 'eraser-roll20-panel';
     panel.innerHTML = '<div class="eraser-head"><strong>Eraser ↔ Roll20 <small style="opacity:.6">' + VERSION + '</small></strong><button type="button" data-close>×</button></div>'
       + '<label>Clé de liaison<input type="password" id="eraser-roll20-token" autocomplete="off" placeholder="era_…"></label>'
-      + '<div class="eraser-actions"><button type="button" data-save>Enregistrer la clé</button><button type="button" data-sync>Tout synchroniser</button><button type="button" data-hp>Renvoyer les PV</button><button type="button" data-reset>Effacer les imports Eraser / repartir de zéro</button></div>'
+      + '<div class="eraser-actions"><button type="button" data-save>Enregistrer la clé</button><button type="button" data-sync>Tout synchroniser</button><button type="button" data-sessions>Synchroniser une session</button></div>'
+      + '<div id="eraser-roll20-sessions" hidden><label>Session<input type="search" id="eraser-roll20-session-search" autocomplete="off" placeholder="Rechercher par nom…"></label><select id="eraser-roll20-session" aria-label="Session à synchroniser"></select><div class="eraser-actions"><button type="button" data-sync-session>Synchroniser cette session</button></div></div>'
+      + '<div class="eraser-actions"><button type="button" data-hp>Renvoyer les PV</button><button type="button" data-reset>Effacer les imports Eraser / repartir de zéro</button></div>'
       + '<p id="eraser-roll20-status">Prêt.</p>';
     document.body.append(button, panel);
     button.addEventListener('click', openPanel);
@@ -374,7 +430,14 @@
       if (!token.startsWith('era_')) return status('Cette clé n’est pas valide.', true);
       await storageSet({ eraserToken: token }); status('Clé enregistrée.');
     });
-    panel.querySelector('[data-sync]').addEventListener('click', syncAll);
+    panel.querySelector('[data-sync]').addEventListener('click', () => syncAll());
+    panel.querySelector('[data-sessions]').addEventListener('click', openSessionPicker);
+    panel.querySelector('#eraser-roll20-session-search').addEventListener('input', renderSessions);
+    panel.querySelector('[data-sync-session]').addEventListener('click', () => {
+      const sessionId = panel.querySelector('#eraser-roll20-session').value;
+      if (!sessionId) return status('Choisis d’abord une session.', true);
+      void syncAll(sessionId);
+    });
     panel.querySelector('[data-hp]').addEventListener('click', () => sendCommand('!eraser-push-hp').catch((error) => status(error.message, true)));
     panel.querySelector('[data-reset]').addEventListener('click', resetAllImports);
     panel.querySelector('#eraser-roll20-token').value = await storageGet('eraserToken');

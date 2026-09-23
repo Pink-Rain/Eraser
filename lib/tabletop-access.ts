@@ -9,6 +9,7 @@ import {
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
 import { identityUidsForUser } from "@/lib/identity-links"
+import { chatAccountsForCampaign, chatAuthorName } from "@/lib/chat-accounts"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -126,9 +127,20 @@ export async function listTabletopLibraryForAccount(account: AuthorizedUser, pag
   return entities.map((entity) => ({ ...entity, controllable: canManage || (entity.kind === "character" && identities.includes(entity.ownerUid)) }))
 }
 
+/**
+ * Destinataires du chat global. Pour rester compatibles avec les versions qui ne
+ * connaissent que l'audience « character », les messages adressés à un compte et
+ * les jets privés gardent cette audience et préfixent l'identifiant : une ancienne
+ * version n'y trouve aucun personnage et ne les montre donc qu'à leur auteur.
+ */
+export const accountRecipientPrefix = "account:"
+export const privateRecipientPrefix = "self:"
+
 function canSeeActivity(account: AuthorizedUser, identities: string[], activity: Awaited<ReturnType<typeof listTabletopActivities>>[number], ownedCharacterIds: Set<string>, isManager: boolean) {
   if (activity.audience === "public" || identities.includes(activity.authorUid)) return true
   if (activity.audience === "gm") return isManager
+  if (activity.recipientId.startsWith(privateRecipientPrefix)) return false
+  if (activity.recipientId.startsWith(accountRecipientPrefix)) return identities.includes(activity.recipientId.slice(accountRecipientPrefix.length))
   return ownedCharacterIds.has(activity.recipientId)
 }
 
@@ -180,7 +192,15 @@ export async function getChatBootstrapForAccount(account: AuthorizedUser, pageLi
   ])
   const ownedCharacterIds = new Set(members.filter((member) => identities.includes(member.ownerUid)).map((member) => member.id))
   const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
-  return { roomId, activities, members: members.map((member) => ({ id: member.id, name: member.name, ownerUid: member.ownerUid })), canManage: isManager }
+  const accounts = await chatAccountsForCampaign(account, pageLinked).catch(() => [])
+  return {
+    roomId,
+    activities,
+    members: members.map((member) => ({ id: member.id, name: member.name, ownerUid: member.ownerUid })),
+    accounts,
+    me: { uid: account.uid, name: chatAuthorName(account) },
+    canManage: isManager,
+  }
 }
 
 export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked: string, kind: "npc" | "character", id: string, patch: { currentHp?: unknown; totalHp?: unknown }) {

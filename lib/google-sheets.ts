@@ -431,7 +431,7 @@ export async function readRange(
  * plage demandée. Les magasins utilisent ce chemin pour leurs lectures et
  * pour la vérification de persistance.
  */
-async function readRangeFreshWithOffset(
+export async function readRangeFreshWithOffset(
   spreadsheetId: string,
   range: string,
   valueRenderOption: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA" = "FORMATTED_VALUE",
@@ -761,7 +761,7 @@ async function updateRangeAndReturnValues(
   return normalizeGoogleSheetRows(((await response.json()) as UpdateValuesResponse).updatedData?.values)
 }
 
-async function updateRanges(
+export async function updateRanges(
   spreadsheetId: string,
   data: Array<{ range: string; values: Array<Array<string | number | boolean>> }>,
   options: WriteValuesOptions = {},
@@ -1943,6 +1943,8 @@ const npcSheetHeaders = [
   "Titre",
 ]
 
+export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"]
+
 const npcSheetColumnWidths = [
   180, 190, 220, 180, 110, 110, 110, 100, 100, 110, 100, 100, 130, 120, 130, 120, 110,
   150, 120, 90, 100, 100, 360, 320, 420, 480, 190, 170, 170, 180, 170, 150, 190, 200,
@@ -2074,6 +2076,16 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     frozenColumns: 2,
     headers: npcSheetHeaders,
     columnWidths: npcSheetColumnWidths,
+  },
+  {
+    // Les sessions d'une campagne (Créateur de session). Les listes d'identifiants
+    // renvoient vers les feuilles Personnages, PNJs et Magasins.
+    key: "sessions",
+    name: "Sessions de campagne",
+    tabName: "Sessions",
+    frozenColumns: 3,
+    headers: sessionSheetHeaders,
+    columnWidths: [180, 180, 260, 320, 320, 320, 320, 190, 170, 170],
   },
   {
     key: "tabletop",

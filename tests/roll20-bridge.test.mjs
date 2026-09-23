@@ -31,7 +31,7 @@ function roll20Runtime(source) {
 
 function encodePayload(value) { return Buffer.from(JSON.stringify(value), "utf8").toString("base64url") }
 
-test("Roll20 bridge 0.5.0 syncs schema-2 NPC fields without duplicates", async () => {
+test("Roll20 bridge 0.6.0 syncs schema-2 NPC fields without duplicates", async () => {
   const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
   const { handlers, objects, chatMessages } = roll20Runtime(source)
   const npc = {
@@ -81,7 +81,17 @@ test("public Roll20 Mod is identical and companion enforces schema 2", async () 
     readFile(new URL("../integrations/roll20/extension/manifest.json", import.meta.url), "utf8"),
   ])
   assert.equal(publicSource, source)
-  assert.match(source, /VERSION = '0\.5\.0'/)
+  assert.match(source, /VERSION = '0\.6\.0'/)
   assert.match(content, /payload\?\.schema !== 2/)
-  assert.equal(JSON.parse(manifest).version, "0.5.0")
+  assert.equal(JSON.parse(manifest).version, "0.6.0")
+})
+
+test("Roll20 bridge offers session sync from its menu", async () => {
+  const source = await readFile(new URL("../integrations/roll20/eraser-bridge.mod.js", import.meta.url), "utf8")
+  const { handlers, chatMessages } = roll20Runtime(source)
+  handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser" })
+  assert.match(chatMessages.at(-1), /!eraser-sync-session/)
+  handlers["chat:message"]({ type: "api", playerid: "gm", content: "!eraser-sync-session" })
+  assert.match(chatMessages.at(-1), /ERASER_SYNC_SESSION_REQUEST/)
+  assert.doesNotMatch(chatMessages.at(-1), /ERASER_SYNC_REQUEST/)
 })
