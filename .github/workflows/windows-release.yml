@@ -85,8 +85,10 @@ jobs:
           # before its elevated inner installer has finished copying files, so the
           # executable isn't always on disk the instant -Wait returns. Poll briefly
           # instead of failing on the first check.
+          # 30 s ne suffisaient pas toujours sur les machines GitHub (échecs sur
+          # alpha.59 et alpha.62) : on attend jusqu'à 3 minutes.
           $executable = $null
-          $installDeadline = (Get-Date).AddSeconds(30)
+          $installDeadline = (Get-Date).AddMinutes(3)
           while ((Get-Date) -lt $installDeadline -and -not $executable) {
             $found = Get-ChildItem -Path $programsDir -Filter "Eraser.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $executable = $found.FullName }
