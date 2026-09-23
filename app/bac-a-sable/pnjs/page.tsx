@@ -5,6 +5,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { NpcManager } from "@/components/eraser/npc-manager"
 import { listAllCampaignsForAdmin, listCampaignsForMj, listNpcs } from "@/lib/google-sheets"
+import { npcIndexPage } from "@/lib/npc-pages"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -14,7 +15,7 @@ async function SandboxNpcsData({ accountUid, isAdmin }: { accountUid: string; is
     listNpcs("bac-a-sable"),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
   ])
-  return <NpcManager initialNpcs={npcs} pageLinked="bac-a-sable" sourcePages={campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))} />
+  return <NpcManager initialNpcs={npcs} pageLinked="bac-a-sable" sourcePages={[{ id: npcIndexPage, name: "Index des PNJ" }, ...campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]} />
 }
 
 export default async function SandboxNpcsPage() {

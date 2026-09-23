@@ -3,6 +3,7 @@
 import { memo, useEffect, useMemo, useState } from "react"
 import { Check, ChevronDown, Crosshair, ImagePlus, Link2, LoaderCircle, Plus, Search, Sparkles, X, Zap } from "lucide-react"
 
+import { CharacteristicInputs } from "@/components/eraser/characteristic-fields"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Button } from "@/components/ui/button"
@@ -308,23 +309,17 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
           <div className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4">
             {placeFields.map((name) => choice(name))}
           </div>
+          <label className="grid gap-1 text-xs font-semibold">
+            Description, Histoire, Lore, Autre :
+            <RichTextField value={initial[creatureNoteHeader] ?? ""} onCommit={(value) => set(creatureNoteHeader, value)} minHeight="min-h-28" />
+          </label>
         </section>
       </div>
 
       <section className="grid gap-2">
         <p className="text-xs font-semibold uppercase tracking-[.14em] text-muted-foreground">Caractéristiques</p>
-        <div className="grid grid-cols-4 gap-2 sm:grid-cols-7">
-          {creatureCharacteristics.map((name) => <label key={name} className="grid gap-1 rounded-xl border bg-background/50 p-2 text-center text-[11px] font-semibold">
-            {name}
-            <Input value={fields[name] ?? ""} onChange={(event) => set(name, event.target.value)} inputMode="numeric" className="h-9 text-center text-base font-semibold" />
-          </label>)}
-        </div>
+        <CharacteristicInputs values={fields} onChange={set} />
       </section>
-
-      <label className="grid gap-1 text-xs font-semibold">
-        Description, Histoire, Lore, Autre :
-        <RichTextField value={initial[creatureNoteHeader] ?? ""} onCommit={(value) => set(creatureNoteHeader, value)} minHeight="min-h-28" />
-      </label>
 
       <SpellPicker label="Actifs" icon={<Zap className="size-3.5" />} value={fields["Sorts actifs"]} options={activeSpells} loading={spellsLoading} onChange={(value) => set("Sorts actifs", value)} />
       <SpellPicker label="Passifs" icon={<Sparkles className="size-3.5" />} value={fields["Sorts passifs"]} options={passiveSpells} loading={spellsLoading} onChange={(value) => set("Sorts passifs", value)} />

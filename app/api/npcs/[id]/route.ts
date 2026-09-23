@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { getCampaignDashboard, getNpcById, saveNpc } from "@/lib/google-sheets"
+import { isNpcLibraryPage } from "@/lib/npc-pages"
 import { saveNpcPortrait } from "@/lib/npc-portraits"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -9,7 +10,7 @@ async function authorizedNpc(id: string) {
   if (!account) return null
   const npc = await getNpcById(id)
   if (!npc) return null
-  if (npc.pageLinked === "bac-a-sable") return { account, npc }
+  if (isNpcLibraryPage(npc.pageLinked)) return { account, npc }
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, npc.pageLinked).catch(() => null)
   return campaign ? { account, npc } : null
 }

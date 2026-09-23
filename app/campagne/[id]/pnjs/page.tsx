@@ -4,6 +4,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { NpcManager } from "@/components/eraser/npc-manager"
 import { getCampaignDashboard, listAllCampaignsForAdmin, listCampaignsForMj, listNpcs } from "@/lib/google-sheets"
+import { npcIndexPage } from "@/lib/npc-pages"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -13,7 +14,7 @@ async function CampaignNpcsData({ campaignId, accountUid, isAdmin }: { campaignI
     listNpcs(campaignId),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
   ])
-  const sourcePages = [{ id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.filter((item) => item.id !== campaignId).map((item) => ({ id: item.id, name: item.name }))]
+  const sourcePages = [{ id: npcIndexPage, name: "Index des PNJ" }, { id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.filter((item) => item.id !== campaignId).map((item) => ({ id: item.id, name: item.name }))]
   return <NpcManager initialNpcs={npcs} pageLinked={campaignId} sourcePages={sourcePages} />
 }
 

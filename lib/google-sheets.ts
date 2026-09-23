@@ -1883,11 +1883,13 @@ const npcSheetHeaders = [
   "Capacité de tir", "Capacité magique", "Force mentale", "Constitution", "Peuple", "Genre", "Âge",
   "Poids", "Taille", "Notes MJ", "Portrait", "Notes joueurs", "Inventaire JSON (archive)",
   "Ajouté au créateur de session", "Créé le", "Modifié le", "Dossier", "Dans le groupe joueur", "PNJ important", "Créé par",
+  // Ajoutée à la fin : aucune colonne existante ne bouge.
+  "Titre",
 ]
 
 const npcSheetColumnWidths = [
   180, 190, 220, 180, 110, 110, 110, 100, 100, 110, 100, 100, 130, 120, 130, 120, 110,
-  150, 120, 90, 100, 100, 360, 320, 420, 480, 190, 170, 170, 180, 170, 150, 190,
+  150, 120, 90, 100, 100, 360, 320, 420, 480, 190, 170, 170, 180, 170, 150, 190, 200,
 ]
 
 const tabletopWorkbookTabs = [
@@ -2161,7 +2163,7 @@ export function columnName(columnCount: number) {
 const npcSheetSchemaReady = new Set<string>()
 
 async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
-  const schemaKey = `${spreadsheetId}:${tabName}:v6`
+  const schemaKey = `${spreadsheetId}:${tabName}:v7`
   if (npcSheetSchemaReady.has(schemaKey)) return
   const persistentKey = `npc-sheet-schema:${schemaKey}`
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, persistentKey)).limit(1)
@@ -2192,7 +2194,7 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
     })
   }
 
-  const [headers = []] = await readRange(spreadsheetId, `${tabName}!A1:AG1`)
+  const [headers = []] = await readRange(spreadsheetId, `${tabName}!A1:AH1`)
   const alreadyCurrent = npcSheetHeaders.every((header, index) => headers[index] === header)
   if (!alreadyCurrent) {
     const rowOneContainsData = headers.some((value) => value.trim()) && headers[0] !== "ID"
@@ -2223,7 +2225,7 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
     const legacyRows = legacyV1
       ? await readRange(spreadsheetId, `${tabName}!A2:I`)
       : legacyV2 ? await readRange(spreadsheetId, `${tabName}!A2:AB`) : []
-    await updateRange(spreadsheetId, `${tabName}!A1:AG1`, [npcSheetHeaders])
+    await updateRange(spreadsheetId, `${tabName}!A1:AH1`, [npcSheetHeaders])
     if (legacyRows.length) {
       const migratedRows = legacyRows.map((row) => {
         if (!row[0]) return Array(npcSheetHeaders.length).fill("")
@@ -2242,7 +2244,7 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
         migrated[28] = row[8] || ""
         return migrated
       })
-      await updateRange(spreadsheetId, `${tabName}!A2:AG${legacyRows.length + 1}`, migratedRows)
+      await updateRange(spreadsheetId, `${tabName}!A2:AH${legacyRows.length + 1}`, migratedRows)
     }
   }
   npcSheetSchemaReady.add(schemaKey)
@@ -2981,7 +2983,7 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
   if (key === "inventory") await ensureInventoryWorkbookSchema(verified.spreadsheetId)
   if (key === "npcs") {
     if (existingFile) await ensureNpcSheetSchema(verified.spreadsheetId, verified.tabName)
-    else npcSheetSchemaReady.add(`${verified.spreadsheetId}:${verified.tabName}:v6`)
+    else npcSheetSchemaReady.add(`${verified.spreadsheetId}:${verified.tabName}:v7`)
   }
   if (!worldIndexKeys.has(key)) await ensureJdrSheetHeaderRow(verified, definition)
   return verified
@@ -3276,7 +3278,8 @@ function npcFromRow(row: string[]): CampaignNpcRecord | null {
   if (!row[0] || !row[1]) return null
   return {
     id: row[0], pageLinked: row[1], name: row[2] || "PNJ sans nom",
-    currentHp: npcNumber(row[4]), totalHp: npcNumber(row[5]),
+    title: row[33] || "", occupation: row[3] || "", people: row[17] || "",
+    currentHp: npcNumber(row[4]), totalHp: npcNumber(row[5]), speed: npcNumber(row[6]),
     strength: npcNumber(row[7]), dexterity: npcNumber(row[8]), intelligence: npcNumber(row[9]),
     wisdom: npcNumber(row[10]), charisma: npcNumber(row[11]), constitution: npcNumber(row[16]),
     gmNotes: row[22] || "", portrait: row[23] || "", playerNotes: row[24] || "",
@@ -3292,8 +3295,12 @@ function npcRow(npc: CampaignNpcRecord, pageLinked: string, original: string[] |
   values[0] = npc.id
   values[1] = pageLinked
   values[2] = npc.name
+  values[3] = npc.occupation
   values[4] = npc.currentHp
   values[5] = npc.totalHp
+  values[6] = npc.speed
+  values[17] = npc.people
+  values[33] = npc.title
   values[7] = npc.strength
   values[8] = npc.dexterity
   values[9] = npc.intelligence
@@ -3312,13 +3319,13 @@ function npcRow(npc: CampaignNpcRecord, pageLinked: string, original: string[] |
 
 export async function listNpcs(pageLinked: string, onlyInCampaign = false) {
   const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AG`)
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
   return rows.map(npcFromRow).filter((npc): npc is CampaignNpcRecord => Boolean(npc && npc.pageLinked === pageLinked && (!onlyInCampaign || npc.inCampaign)))
 }
 
 export async function getNpcById(id: string) {
   const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AG`)
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
   const row = rows.find((candidate) => candidate[0] === id)
   return row ? npcFromRow(row) : null
 }
@@ -3329,7 +3336,7 @@ export async function listCampaignNpcs(campaignId: string) {
 
 export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean } = {}) {
   const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AG`)
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
   const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
   const additions: Array<Array<string | number | boolean>> = []
   const saved: CampaignNpcRecord[] = []
@@ -3337,13 +3344,13 @@ export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], op
     const existingIndex = rows.findIndex((row) => row[0] === npc.id && row[1] === pageLinked)
     const original = existingIndex >= 0 ? rows[existingIndex] : null
     const values = npcRow(npc, pageLinked, original, options)
-    if (existingIndex >= 0) updates.push({ range: `${sheet.tabName}!A${existingIndex + 2}:AG${existingIndex + 2}`, values: [values] })
+    if (existingIndex >= 0) updates.push({ range: `${sheet.tabName}!A${existingIndex + 2}:AH${existingIndex + 2}`, values: [values] })
     else additions.push(values)
     const record = npcFromRow(values.map(String))
     if (record) saved.push(record)
   }
   await updateRanges(sheet.spreadsheetId, updates)
-  if (additions.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:AG`, additions)
+  if (additions.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:AH`, additions)
   return saved
 }
 
@@ -3356,9 +3363,9 @@ export async function deleteNpcs(pageLinked: string, npcIds: string[]) {
   if (!npcIds.length) return
   const sheet = await ensureJdrSheet("npcs")
   const selectedIds = new Set(npcIds)
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AG`)
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
   const clear = rows.flatMap((row, index) => row[1] === pageLinked && selectedIds.has(row[0])
-    ? [{ range: `${sheet.tabName}!A${index + 2}:AG${index + 2}`, values: [Array(npcSheetHeaders.length).fill("")] }]
+    ? [{ range: `${sheet.tabName}!A${index + 2}:AH${index + 2}`, values: [Array(npcSheetHeaders.length).fill("")] }]
     : [])
   await updateRanges(sheet.spreadsheetId, clear)
 }
@@ -4809,7 +4816,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
   }
 
   const npcSheet = await ensureJdrSheet("npcs")
-  const npcRows = await readRange(npcSheet.spreadsheetId, `${npcSheet.tabName}!A2:AG`)
+  const npcRows = await readRange(npcSheet.spreadsheetId, `${npcSheet.tabName}!A2:AH`)
   const legacyItems = npcInventoryFromCell(npcRows.find((row) => row[0] === npcId)?.[25])
   const activeIds = new Set(active.map((container) => container.id))
   const occupied = workbook.contents

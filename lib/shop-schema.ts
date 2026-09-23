@@ -47,9 +47,19 @@ export type CampaignNpcRecord = {
   id: string
   pageLinked: string
   name: string
+  /** « Titre » : comte, capitaine, grand prêtre… */
+  title: string
+  /** « Classe / métier » dans la feuille, « Fonction / classe / métier » à l'écran. */
+  occupation: string
+  /** Un nom de l'Index des peuples. */
+  people: string
   portrait: string
+  /** Vie actuelle : n'a de sens que pour un PNJ de campagne. */
   currentHp: number
+  /** « Vitalité » dans les caractéristiques. */
   totalHp: number
+  /** « Vitesse » dans les caractéristiques (colonne « Rapidité »). */
+  speed: number
   constitution: number
   strength: number
   dexterity: number

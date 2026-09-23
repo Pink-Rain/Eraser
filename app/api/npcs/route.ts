@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server"
 
 import { copyNpcsToPage, deleteNpcs, getCampaignDashboard, listNpcs, moveNpcsToPage, saveNpcs } from "@/lib/google-sheets"
+import { isNpcLibraryPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function canUsePage(pageLinked: string) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account || !pageLinked) return null
-  if (pageLinked === "bac-a-sable") return account
+  // Le bac à sable et l'Index des PNJ ne dépendent d'aucune campagne.
+  if (isNpcLibraryPage(pageLinked)) return account
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, pageLinked).catch(() => null)
   return campaign ? account : null
 }
@@ -29,8 +31,9 @@ function npcValue(value: unknown, pageLinked: string): CampaignNpcRecord | null 
   if (!id || !name) return null
   return {
     id, pageLinked, name,
+    title: shortText(candidate.title, 200), occupation: shortText(candidate.occupation, 200), people: shortText(candidate.people, 200),
     portrait: shortText(candidate.portrait, 1500),
-    currentHp: numberValue(candidate.currentHp), totalHp: numberValue(candidate.totalHp),
+    currentHp: numberValue(candidate.currentHp), totalHp: numberValue(candidate.totalHp), speed: numberValue(candidate.speed),
     constitution: numberValue(candidate.constitution),
     strength: numberValue(candidate.strength), dexterity: numberValue(candidate.dexterity), intelligence: numberValue(candidate.intelligence),
     wisdom: numberValue(candidate.wisdom), charisma: numberValue(candidate.charisma),
@@ -68,6 +71,11 @@ export async function POST(request: Request) {
         : await copyNpcsToPage(sourcePageLinked, pageLinked, body.npcIds)
       return NextResponse.json({ npcs })
     }
+    if (body.action === "duplicate") {
+      // La copie reste sur la même page (Index des PNJ) : portrait et sac à dos compris.
+      if (!Array.isArray(body.npcIds) || !body.npcIds.length || body.npcIds.length > 100 || !body.npcIds.every((id) => typeof id === "string")) throw new Error("INVALID_NPC_DUPLICATE")
+      return NextResponse.json({ npcs: await copyNpcsToPage(pageLinked, pageLinked, body.npcIds) })
+    }
     if (!Array.isArray(body.npcs) || !body.npcs.length || body.npcs.length > 100) throw new Error("INVALID_NPCS")
     const npcs = body.npcs.map((npc) => npcValue(npc, pageLinked))
     if (npcs.some((npc) => !npc)) throw new Error("INVALID_NPCS")
@@ -83,7 +91,7 @@ export async function POST(request: Request) {
         : body.action === "save"
           ? {}
           : null
-    if (!options || (body.action !== "save" && pageLinked === "bac-a-sable")) throw new Error("INVALID_NPC_ACTION")
+    if (!options || (body.action !== "save" && isNpcLibraryPage(pageLinked))) throw new Error("INVALID_NPC_ACTION")
     const saved = await saveNpcs(pageLinked, records, options)
     return NextResponse.json({ npcs: saved })
   } catch {

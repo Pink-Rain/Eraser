@@ -265,7 +265,10 @@ async function handleLogout(request: Request, env: Env) {
 }
 
 async function handleListAccounts(request: Request, env: Env) {
-  await requireAccount(request, env, ["admin"])
+  // Les MJ lisent la liste pour afficher le propriétaire de chaque personnage et de
+  // chaque campagne (Index des personnages et des campagnes). Seul un administrateur
+  // la modifie.
+  await requireAccount(request, env, ["admin", "mj"])
   const { results } = await env.DB.prepare("SELECT * FROM users ORDER BY created_at ASC").all<UserRow>()
   return json({ accounts: results.map(accountRecord) })
 }

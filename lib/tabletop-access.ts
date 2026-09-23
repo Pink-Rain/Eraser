@@ -1,3 +1,4 @@
+import { characteristicOrder, characteristicShort, npcCharacteristics } from "@/lib/characteristics"
 import {
   getCampaignDashboard, getCampaignForMj, getCampaignForPlayer, getCharacterSheet, getTabletopMap,
   listAllCampaignsForAdmin, listAvailableCampaignCharacters, listCampaignMembers, listCampaignNpcs,
@@ -94,10 +95,8 @@ export async function getTabletopNpcDetail(account: AuthorizedUser, mapId: strin
   const npc = npcs.find((candidate) => candidate.id === npcId)
   if (!npc) return null
   const canViewPrivate = await canManageTabletopPage(account, map.pageLinked)
-  const stats = [
-    ["Constitution", "CON", npc.constitution], ["Force", "FOR", npc.strength], ["Dextérité", "DEX", npc.dexterity],
-    ["Intelligence", "INT", npc.intelligence], ["Sagesse", "SAG", npc.wisdom], ["Charisme", "CHA", npc.charisma],
-  ].map(([label, short, value]) => ({ label: String(label), short: String(short), value: Number(value) || 0 }))
+  const values = npcCharacteristics(npc)
+  const stats = characteristicOrder.map((label) => ({ label, short: characteristicShort[label], value: Number(values[label]) || 0 }))
   return {
     id: npc.id,
     name: npc.name,

@@ -528,22 +528,14 @@ export function AppShell({
                       <NavSubLink href="/ressources/index-des-lieux" label="Index des lieux" active={pathname === "/ressources/index-des-lieux"} />
                       <NavSubLink href="/ressources/index-des-peuples" label="Index des peuples" active={pathname === "/ressources/index-des-peuples"} />
                       <NavSubLink href="/ressources/index-des-religions" label="Index des religions" active={pathname === "/ressources/index-des-religions"} />
+                      <NavSubLink href="/ressources/index-des-campagnes" label="Index des campagnes" active={pathname === "/ressources/index-des-campagnes"} />
+                      <NavSubLink href="/ressources/index-des-personnages" label="Index des personnages" active={pathname === "/ressources/index-des-personnages"} />
+                      <NavSubLink href="/ressources/index-des-pnjs" label="Index des PNJ" active={pathname === "/ressources/index-des-pnjs"} />
                     </NavSection>
                     <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable/")}>
                       <NavSubLink href="/bac-a-sable/tabletop" label="Tabletop" active={pathname === "/bac-a-sable/tabletop"} />
                       <NavSubLink href="/bac-a-sable/magasin" label="Magasin" active={pathname === "/bac-a-sable/magasin"} />
                       <NavSubLink href="/bac-a-sable/pnjs" label="PNJs" active={pathname === "/bac-a-sable/pnjs"} />
-                    </NavSection>
-                  </>
-                )}
-
-                {user.role === "admin" && viewRole === "admin" && (
-                  <>
-                    <NavSection label="Personnages" icon={CircleUserRound} active={pathname.startsWith("/administration/personnages")}>
-                      <NavSubLink href="/administration/personnages" label="Tous les personnages" active={pathname === "/administration/personnages"} />
-                    </NavSection>
-                    <NavSection label="Campagnes" icon={Map} active={pathname.startsWith("/administration/campagnes")}>
-                      <NavSubLink href="/administration/campagnes" label="Toutes les campagnes" active={pathname === "/administration/campagnes"} />
                     </NavSection>
                   </>
                 )}
