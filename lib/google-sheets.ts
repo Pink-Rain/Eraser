@@ -528,13 +528,14 @@ const LIGHT_TEXT_FORMAT = "bold,italic,underline,strikethrough,link,foregroundCo
 const LIGHT_CELL_FIELDS = `formattedValue,textFormatRuns(startIndex,format(${LIGHT_TEXT_FORMAT})),effectiveFormat.textFormat(${LIGHT_TEXT_FORMAT})`
 const FULL_CELL_FIELDS = "formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)"
 
-export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean } = {}): Promise<FormattedSheet> {
+/** `range` (sans l'onglet, ex. « A5:Z5 ») limite la lecture à une zone : une ligne se lit bien plus vite que la feuille. */
+export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; range?: string } = {}): Promise<FormattedSheet> {
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
       const parameters = new URLSearchParams({
         includeGridData: "true",
-        ranges: `'${candidate.replaceAll("'", "''")}'`,
+        ranges: `'${candidate.replaceAll("'", "''")}'${options.range ? `!${options.range}` : ""}`,
         fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${options.light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
       })
       const payload = await googleSheetsJson<{
@@ -597,6 +598,49 @@ export async function updateFormattedCell(input: {
       fields: "userEnteredValue,textFormatRuns",
     } }] }),
   })
+  clearSpreadsheetReadCache(input.spreadsheetId)
+}
+
+export type RowCellWrite = {
+  column: number
+  /** Texte simple : un nombre (« 12 », « 0.5 ») est écrit comme nombre, comme une saisie dans Sheets. */
+  value?: string
+  /** Texte mis en forme : remplace la valeur de la cellule et ses mises en forme de texte. */
+  html?: string
+  colors?: { background: string; foreground: string }
+}
+
+/**
+ * Écrit plusieurs cellules d'une même ligne en un seul appel à Google, au lieu d'un
+ * appel par valeur, par texte mis en forme puis par couleur.
+ */
+export async function updateRowCells(input: { spreadsheetId: string; sheetId: number; rowNumber: number; cells: RowCellWrite[] }) {
+  if (!Number.isInteger(input.rowNumber) || input.rowNumber < 1) throw new Error("INVALID_SHEET_CELL")
+  const requests = input.cells.flatMap((cell) => {
+    if (!Number.isInteger(cell.column) || cell.column < 0) throw new Error("INVALID_SHEET_CELL")
+    const range = { sheetId: input.sheetId, startRowIndex: input.rowNumber - 1, endRowIndex: input.rowNumber, startColumnIndex: cell.column, endColumnIndex: cell.column + 1 }
+    const value: Record<string, unknown> = {}
+    const fields: string[] = []
+    if (cell.html !== undefined) {
+      const richText = htmlToRichText(cell.html.slice(0, 50_000))
+      value.userEnteredValue = { stringValue: richText.text }
+      value.textFormatRuns = richText.runs
+      fields.push("userEnteredValue", "textFormatRuns")
+    } else if (cell.value !== undefined) {
+      const trimmed = cell.value.trim()
+      value.userEnteredValue = /^-?\d+(?:\.\d+)?$/.test(trimmed) ? { numberValue: Number(trimmed) } : { stringValue: cell.value }
+      fields.push("userEnteredValue")
+    }
+    const background = cell.colors ? hexColorToRgb(cell.colors.background) : null
+    const foreground = cell.colors ? hexColorToRgb(cell.colors.foreground) : null
+    if (background && foreground) {
+      value.userEnteredFormat = { backgroundColorStyle: { rgbColor: background }, textFormat: { foregroundColorStyle: { rgbColor: foreground } } }
+      fields.push("userEnteredFormat.backgroundColorStyle", "userEnteredFormat.textFormat.foregroundColorStyle")
+    }
+    return fields.length ? [{ updateCells: { range, rows: [{ values: [value] }], fields: fields.join(",") } }] : []
+  })
+  if (!requests.length) return
+  await googleSheetsJson(`spreadsheets/${input.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
   clearSpreadsheetReadCache(input.spreadsheetId)
 }
 

@@ -60,17 +60,22 @@ function jaccardSimilarity(a: Set<string>, b: Set<string>) {
   return common / (a.size + b.size - common)
 }
 
+/** Nom affiché d'un sort dont la cellule « Nom » est vide. */
+export const UNNAMED_CLASS_SPELL = "Sort sans nom"
+
 export function findClassSpellSimilarities(spells: Array<Pick<ClassSpell, "id" | "name" | "effect" | "description">>): SpellSimilarity[] {
   // Precompute normalization/tokenization once per spell instead of once per pair:
   // this loop is O(n²) by nature, and redoing string work inside it made large
   // spell tables (500+ rows) noticeably slow to load.
   const prepared = spells.map((spell) => {
     const text = `${spell.effect} ${spell.description}`.trim()
+    // Deux sorts sans titre ne se ressemblent pas pour autant : seul leur texte compte.
+    const name = spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name
     return {
       id: spell.id,
-      normalizedName: normalizeClassSpellText(spell.name),
+      normalizedName: normalizeClassSpellText(name),
       normalizedText: normalizeClassSpellText(text),
-      nameTokens: tokenSet(spell.name),
+      nameTokens: tokenSet(name),
       textTokens: tokenSet(text),
     }
   })
@@ -79,7 +84,7 @@ export function findClassSpellSimilarities(spells: Array<Pick<ClassSpell, "id" |
     const left = prepared[leftIndex]
     for (let rightIndex = leftIndex + 1; rightIndex < prepared.length; rightIndex += 1) {
       const right = prepared[rightIndex]
-      const sameName = left.normalizedName === right.normalizedName
+      const sameName = Boolean(left.normalizedName) && left.normalizedName === right.normalizedName
       const sameText = Boolean(left.normalizedText) && left.normalizedText === right.normalizedText
       const nameScore = jaccardSimilarity(left.nameTokens, right.nameTokens)
       const textScore = jaccardSimilarity(left.textTokens, right.textTokens)

@@ -16,7 +16,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { ClassSpell, ClassSpellDraft, SpellSimilarity } from "@/lib/class-content"
-import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills } from "@/lib/class-spell-utils"
+import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 import { groupSimilarities, SpellDuplicates, type SpellGroup } from "@/components/eraser/spell-duplicates"
 
@@ -38,7 +38,12 @@ function emptyDraft(): ClassSpellDraft {
 }
 
 function toDraft(spell: ClassSpell): ClassSpellDraft {
-  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === "Sort sans nom" ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, charges: spell.charges, classRanks: { ...spell.classRanks } }
+  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, charges: spell.charges, classRanks: { ...spell.classRanks } }
+}
+
+/** Un sort peut ne pas avoir de titre, mais pas être entièrement vide. */
+function hasContent(draft: ClassSpellDraft) {
+  return Boolean(draft.name.trim() || draft.effect.trim() || draft.description.trim())
 }
 
 function plainText(html: string) {
@@ -52,7 +57,7 @@ function searchText(spell: Pick<ClassSpell, "name" | "type" | "skillsRaw" | "eff
 function materialize(draft: ClassSpellDraft, rowNumber: number, id: string, tone?: { background: string; foreground: string }): ClassSpell {
   const category = classSpellCategory(draft.type)
   const classRanks = Object.fromEntries(Object.entries(draft.classRanks).flatMap(([classId, rank]) => Number.isInteger(rank) && rank !== null && rank >= 0 && rank <= 20 ? [[classId, rank]] : [])) as Record<string, number>
-  return { rowNumber, id, name: draft.name.trim(), effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, charges: draft.charges, classRanks, tone: tone || classSpellCategoryTones[category] }
+  return { rowNumber, id, name: draft.name.trim() || UNNAMED_CLASS_SPELL, effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, charges: draft.charges, classRanks, tone: tone || classSpellCategoryTones[category] }
 }
 
 function TypeGlyph({ category }: { category: ClassSpell["category"] }) {
@@ -141,7 +146,7 @@ function SpellForm({ initial, classes, spells, pending, title, onCancel, onSave 
     <div className="flex items-center justify-between gap-3"><h3 className="font-display text-xl font-semibold">{title}</h3><Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button></div>
     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
       <label className="grid gap-1 text-xs font-semibold">ID<Input value={draft.id} onChange={(event) => field("id", event.target.value)} placeholder="Généré si vide" /></label>
-      <label className="grid gap-1 text-xs font-semibold md:col-span-1 xl:col-span-2">Nom<Input value={draft.name} onChange={(event) => field("name", event.target.value)} /></label>
+      <label className="grid gap-1 text-xs font-semibold md:col-span-1 xl:col-span-2">Nom<Input value={draft.name} onChange={(event) => field("name", event.target.value)} placeholder="Sans titre" /></label>
       <label className="grid gap-1 text-xs font-semibold">Type exact<Input list="class-spell-types" value={draft.type} onChange={(event) => field("type", event.target.value)} /></label>
       <label className="grid gap-1 text-xs font-semibold">Compétences<Input value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} className="text-[#b3261e]" /></label>
       <label className="grid gap-1 text-xs font-semibold">Distance<Input value={draft.distance} onChange={(event) => field("distance", event.target.value)} /></label>
@@ -150,45 +155,80 @@ function SpellForm({ initial, classes, spells, pending, title, onCancel, onSave 
       <label className="grid gap-1 text-xs font-semibold md:col-span-2">Effet<RichTextField value={draft.effectHtml || draft.effect} onCommit={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} /></label>
       <label className="grid gap-1 text-xs font-semibold md:col-span-2">Description<RichTextField value={draft.descriptionHtml || draft.description} onCommit={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} /></label>
     </div>
-    <div className="mt-4 flex justify-end gap-2"><Button type="button" variant="outline" onClick={onCancel}>Annuler</Button><Button type="button" onClick={() => onSave(draft)} disabled={pending || !draft.name.trim()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button></div>
+    <div className="mt-4 flex justify-end gap-2"><Button type="button" variant="outline" onClick={onCancel}>Annuler</Button><Button type="button" onClick={() => onSave(draft)} disabled={pending || !hasContent(draft)}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button></div>
   </section>
 }
 
 const fieldInputClass = "border-transparent bg-transparent px-1.5 shadow-none focus-visible:border-input focus-visible:bg-background"
 
+type SaveStatus = "idle" | "saving" | "saved" | "error"
+
 // Chaque champ est toujours un input : cliquer dedans modifie seulement ce champ,
-// jamais toute la ligne (fini le mode "lecture" / "édition" qui changeait de mise
-// en page et causait des sauts d'affichage). Un bouton Enregistrer unique s'active
-// dès qu'un champ a changé, comme dans l'index des objets.
-function EditableSpell({ spell, classes, allSpells, similarities, pending, onSave, onDelete, onShowDuplicates }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; pending: boolean; onSave: (spell: ClassSpell, draft: ClassSpellDraft) => void; onDelete: (spell: ClassSpell) => void; onShowDuplicates: (spell: ClassSpell) => void }) {
+// jamais toute la ligne. Il n'y a plus de bouton Enregistrer : le sort s'enregistre
+// seul après une courte pause de frappe, quand on quitte la page ou change de classe,
+// et l'état de l'enregistrement s'affiche à la place du bouton.
+function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDelete, onShowDuplicates }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; onSave: (spell: ClassSpell, draft: ClassSpellDraft) => Promise<ClassSpell | null>; onDelete: (spell: ClassSpell) => void; onShowDuplicates: (spell: ClassSpell) => void }) {
   const [draft, setDraft] = useState(() => toDraft(spell))
+  const [status, setStatus] = useState<SaveStatus>("idle")
   const matchCount = similarities.filter((item) => item.leftId === spell.id || item.rightId === spell.id).length
   const [confirmDelete, setConfirmDelete] = useState(false)
   const tone = spell.tone.background ? spell.tone : classSpellCategoryTones[spell.category]
-  const persisted = useMemo(() => toDraft(spell), [spell])
-  const changed = JSON.stringify(draft) !== JSON.stringify(persisted)
+  const persisted = useMemo(() => JSON.stringify(toDraft(spell)), [spell])
+  const serialized = JSON.stringify(draft)
+  const changed = serialized !== persisted
   const field = <K extends keyof ClassSpellDraft>(key: K, value: ClassSpellDraft[K]) => setDraft((current) => ({ ...current, [key]: value }))
+  // Un seul envoi à la fois ; le dernier brouillon envoyé (ou refusé) n'est pas renvoyé.
+  const saving = useRef(false)
+  const lastSent = useRef<string | null>(null)
+  const latest = useRef({ spell, draft, changed, onSave })
+  useEffect(() => { latest.current = { spell, draft, changed, onSave } })
 
-  // Une ligne existante est enregistrée après une courte pause de frappe.
-  // Cela regroupe les changements et évite une requête Google par caractère.
-  // Le bouton reste disponible pour forcer immédiatement la sauvegarde.
+  const flush = useCallback(async () => {
+    const current = latest.current
+    if (!current.changed || saving.current) return
+    const sent = JSON.stringify(current.draft)
+    saving.current = true
+    lastSent.current = sent
+    setStatus("saving")
+    const saved = await current.onSave(current.spell, current.draft)
+    saving.current = false
+    setStatus(saved ? "saved" : "error")
+    // Le brouillon repart du sort tel qu'enregistré, s'il n'a pas bougé pendant l'envoi :
+    // sans cela, une différence de forme (espaces, ID généré) relançait un second envoi.
+    if (saved) setDraft((value) => JSON.stringify(value) === sent ? toDraft(saved) : value)
+  }, [])
+
+  // Une courte pause de frappe regroupe les changements en un seul envoi. Un envoi
+  // refusé n'est retenté qu'après une nouvelle modification (ou avec « Réessayer »).
   useEffect(() => {
-    if (!changed || pending || !draft.name.trim()) return
-    const timer = window.setTimeout(() => onSave(spell, draft), 700)
+    if (!changed || status === "saving" || (status === "error" && serialized === lastSent.current)) return
+    const timer = window.setTimeout(() => void flush(), 700)
     return () => window.clearTimeout(timer)
-  }, [changed, draft, onSave, pending, spell])
+  }, [changed, flush, serialized, status])
+
+  // Changer de classe, d'onglet ou de page ne perd pas une modification en attente.
+  useEffect(() => () => {
+    const current = latest.current
+    if (current.changed && !saving.current && JSON.stringify(current.draft) !== lastSent.current) void current.onSave(current.spell, current.draft)
+  }, [])
+
+  const statusLabel = status === "saving" || (changed && status !== "error")
+    ? <span className="flex items-center gap-1.5 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</span>
+    : status === "error" && changed
+      ? <span className="flex items-center gap-2 text-xs text-destructive">Non enregistré<Button type="button" size="sm" variant="outline" onClick={() => { lastSent.current = null; void flush() }}><RefreshCw />Réessayer</Button></span>
+      : status === "saved" ? <span className="flex items-center gap-1 text-xs text-emerald-700 dark:text-emerald-400"><Check className="size-3.5" />Enregistré</span> : null
   const actions = <>
-    <Button type="button" size="sm" disabled={pending || !changed || !draft.name.trim()} onClick={() => onSave(spell, draft)} title="Enregistrer">{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
+    {statusLabel}
     {matchCount > 0 && <Button type="button" size="sm" variant="outline" onClick={() => onShowDuplicates(spell)} title="Comparer et fusionner les sorts semblables"><CopyCheck />{matchCount} doublon{matchCount > 1 ? "s" : ""}</Button>}
     {confirmDelete ? <><Button type="button" size="sm" variant="destructive" onClick={() => onDelete(spell)}>Confirmer</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => setConfirmDelete(false)}><X /></Button></> : <Button type="button" size="icon-sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete(true)} title="Supprimer"><Trash2 /></Button>}
   </>
 
   return <article className="rounded-xl border bg-card/75 p-4 shadow-sm" style={{ borderColor: `${tone.background}66` }}>
     <div className="flex items-start gap-3">
-      <span className="mt-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><TypeGlyph category={spell.category} /></span>
+      <span className="mt-1.5 flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><TypeGlyph category={classSpellCategory(draft.type)} /></span>
       <div className="min-w-0 flex-1 space-y-2">
-        <Input aria-label="Nom du sort" value={draft.name} onChange={(event) => field("name", event.target.value)} className={`h-9 font-display text-lg font-semibold ${fieldInputClass}`} />
-        <Input list="class-spell-types" aria-label="Type" value={draft.type} onChange={(event) => field("type", event.target.value)} className={`h-7 w-fit min-w-28 rounded-full text-xs font-semibold ${fieldInputClass}`} style={{ backgroundColor: `${tone.background}1c` }} />
+        <Input aria-label="Nom du sort" value={draft.name} onChange={(event) => field("name", event.target.value)} placeholder="Sans titre" className={`h-9 font-display text-lg font-semibold placeholder:italic placeholder:font-normal ${fieldInputClass}`} />
+        <Input list="class-spell-types" aria-label="Type" value={draft.type} onChange={(event) => field("type", event.target.value)} placeholder="Type" className={`h-7 w-fit min-w-28 rounded-full text-xs font-semibold ${fieldInputClass}`} style={{ backgroundColor: `${tone.background}1c` }} />
         <blockquote className="border-l-2 pl-3 text-sm leading-6" style={{ borderColor: tone.background }}>
           <RichTextField value={draft.effectHtml || draft.effect} onCommit={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} />
           <RichTextField value={draft.descriptionHtml || draft.description} onCommit={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="mt-1 text-muted-foreground" />
@@ -201,9 +241,8 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, onSav
         <ClassLinksEditor compact draft={draft} classes={classes} spells={allSpells} rowNumber={spell.rowNumber} onChange={(classRanks) => field("classRanks", classRanks)} />
       </div>
     </div>
-    <div className="mt-3 flex flex-wrap justify-end gap-2">{actions}</div>
+    <div className="mt-3 flex min-h-8 flex-wrap items-center justify-end gap-2">{actions}</div>
   </article>
-
 }
 
 function SearchExisting({ classId, rank, spells, pending, onClose, onLink }: { classId: string; rank: number; spells: ClassSpell[]; pending: boolean; onClose: () => void; onLink: (spell: ClassSpell) => void }) {
@@ -323,10 +362,14 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     } catch (error) { setError(error instanceof Error ? error.message : "Actualisation impossible.") } finally { setPending(false) }
   }
 
+  /** Renvoie le sort tel qu'enregistré, ou `null` si Sheets l'a refusé. */
   async function save(spell: ClassSpell, draft: ClassSpellDraft, silent = false) {
-    const result = await mutate({ action: "update", rowNumber: spell.rowNumber, draft }, silent)
-    if (result === false) return
-    updateSpells((spells) => spells.map((item) => item.rowNumber === spell.rowNumber ? materialize(draft, result?.rowNumber || spell.rowNumber, result?.id || draft.id || spell.id, result?.tone) : item))
+    // L'ID attendu protège d'une ligne déplacée entre-temps directement dans Sheets.
+    const result = await mutate({ action: "update", rowNumber: spell.rowNumber, expectedId: spell.id, draft }, silent)
+    if (result === false) return null
+    const saved = materialize(draft, result?.rowNumber || spell.rowNumber, result?.id || draft.id || spell.id, result?.tone)
+    updateSpells((spells) => spells.map((item) => item.rowNumber === spell.rowNumber ? saved : item))
+    return saved
   }
 
   async function create(draft: ClassSpellDraft) {
@@ -373,7 +416,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     setNewDraft(draft)
   }
 
-  const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, pending, onSave: save, onDelete: remove, onShowDuplicates: showDuplicates }
+  const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, onSave: (spell: ClassSpell, draft: ClassSpellDraft) => save(spell, draft, true), onDelete: remove, onShowDuplicates: showDuplicates }
   const duplicateGroups = useMemo(() => groupSimilarities(data.spells, data.similarities).length, [data.similarities, data.spells])
   const spellByRow = useMemo(() => new Map(data.spells.map((spell) => [spell.rowNumber, spell])), [data.spells])
 
@@ -430,8 +473,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
       flushTimers.current.delete(rowNumber)
       const spell = latestSpells.current.find((item) => item.rowNumber === rowNumber)
       if (!spell || !finalEdits) return
-      const draft = draftWithEdits(spell, finalEdits)
-      if (draft.name.trim()) void save(spell, draft, true)
+      void save(spell, draftWithEdits(spell, finalEdits), true)
     }, 400))
   }
 
@@ -487,7 +529,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start"><TabsTrigger value="classes">Par classe</TabsTrigger><TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger><TabsTrigger value="bonus">Bonus</TabsTrigger><TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger></TabsList>
-      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
+      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "actif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
       <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>

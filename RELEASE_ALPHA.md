@@ -1,55 +1,45 @@
-# Eraser 0.1.1-alpha.56 — « Souhaitez-vous rester dans le passé ? »
+# Eraser 0.1.1-alpha.57 — Index des classes plus rapide
 
-## Les mises à jour s’annoncent dans Eraser
+Cette version arrive par la mise à jour sans réinstallation.
 
-Plus de boîte de dialogue Windows. Quand une mise à jour est téléchargée, le logo
-d’Eraser tourne sur lui-même au milieu de l’écran :
+## Index des classes, onglet « Par classe »
 
-> **Eraser est en changement.**
-> Souhaitez-vous rester dans le passé ?
+- **Les sorts sans titre s’affichent.** Une ligne de la feuille « Sorts de classe »
+  sans nom ni ID n’apparaissait nulle part. Elle est maintenant affichée dès
+  qu’elle contient un effet, une description ou une classe. Le champ du nom indique
+  « Sans titre », et un sort peut être enregistré sans titre.
+- Plusieurs sorts sans titre ne sont plus signalés comme doublons entre eux : seul
+  leur texte compte.
+- **Enregistrement plus rapide.** Avant, chaque modification relisait toute la
+  feuille des sorts avec sa mise en forme, relançait une recherche dans Drive puis
+  envoyait quatre écritures l’une après l’autre. Maintenant, Eraser relit seulement
+  les valeurs et la ligne modifiée, puis écrit en une seule fois les cellules qui
+  ont vraiment changé.
+- **Plus de double enregistrement.** Une petite différence de forme entre le sort
+  saisi et le sort enregistré (espaces, ID généré) relançait une seconde sauvegarde.
+  C’est corrigé : une modification = un envoi.
+- **Plus de bouton « Enregistrer » sur les cartes.** Le sort s’enregistre seul
+  après une courte pause de frappe, et aussi quand on change de classe ou de page.
+  À la place du bouton, la carte affiche « Enregistrement… », « Enregistré » ou
+  « Non enregistré » avec un bouton « Réessayer ». Les fenêtres de création
+  gardent leur bouton.
 
-- **Oui** : rien ne change. La mise à jour attend la prochaine ouverture d’Eraser.
-- **Non** : la mise à jour s’applique aussitôt.
+## Protection des données
 
-Cette version modifie la fenêtre d’Eraser elle-même. Elle s’installe donc une
-fois avec l’installateur, en silence (une dernière fenêtre Windows propose de
-redémarrer). Les suivantes reprennent la mise à jour sans réinstallation.
-
-## Magasins (campagne et bac à sable)
-
-- **Clic droit sur « Relancer cette ligne »** : on choisit la rareté de l’objet
-  tiré (Très commun, Commun, Rare, Très rare, Ultime). Si le magasin n’a aucun
-  autre objet de cette rareté, Eraser le dit au lieu de ne rien faire.
-- **« Ajouter à la campagne »** (vers le Créateur de session) : le nom de chaque
-  magasin se modifie directement dans la fenêtre.
-
-## Feuille de personnage
-
-- **Plus besoin d’Entrée** : une valeur modifiée s’enregistre dès qu’on clique
-  ailleurs ou que le survol d’une compétence se referme. On peut changer la stat,
-  la réussite critique et l’échec critique d’affilée : les trois sont gardées.
-  Échap annule. Même chose pour les points de vie, les titres et listes, et, dans
-  l’inventaire, les champs d’objet et la monnaie. Dans le tabletop, un dossier
-  renommé s’enregistre aussi en cliquant ailleurs.
-- Deux modifications rapprochées ne s’écrasent plus l’une l’autre.
-- **Actifs et passifs au survol d’une compétence** : l’actif affiche son nom avec
-  ses charges, et son type passe sous la description, dans la partie dépliable.
-  Le passif ne change pas. Un nom coupé s’affiche en entier au survol, par-dessus
-  l’étiquette ou les charges.
-- **Onglet Compétences** : « Cap de combat », « Cap de tir » et « Cap magique »
-  remplacent « Capacité … » dans les titres.
-- Corrigé : les compétences « Volonté … » ne s’abrégeaient pas en « Vol … ».
+- Des charges notées « ✦ » dans la feuille étaient effacées quand on enregistrait
+  le sort depuis Eraser. Elles sont maintenant conservées.
+- Une cellule qui ne change pas n’est plus réécrite : sa mise en forme ou sa
+  formule faite dans Sheets reste intacte.
+- Si la ligne d’un sort a bougé dans Sheets entre-temps (ligne insérée ou
+  supprimée), Eraser n’écrit rien et demande d’actualiser, au lieu d’écrire sur
+  le mauvais sort.
 
 ## Vérifications
 
-- dans Electron, sur une copie installée : mise à jour téléchargée, annonce dans
-  l’application, « Non » applique la nouvelle version en une seconde ;
-- dans un vrai navigateur :
-  - trois valeurs d’une compétence modifiées sans Entrée, puis survol refermé :
-    les trois sont enregistrées ; Échap n’enregistre rien ;
-  - titres « Cap » ;
-  - « Oui » et « Non » de l’annonce ;
-  - relance d’une ligne en « Ultime » ;
-  - nom modifié à l’ajout d’un magasin ;
+- dans un vrai navigateur : un sort sans titre affiché et modifié, un seul envoi
+  par modification, une frappe pendant un envoi bien enregistrée ensuite ;
+- enregistrement testé sur une copie simulée de la feuille des sorts : une seule
+  écriture limitée à la cellule modifiée, « ✦ » conservé, couleur du type reprise
+  au changement de catégorie, ligne déplacée détectée, ajout d’un sort sans titre ;
 - lint sans erreur, 20 tests d’interface au vert, serveur desktop vérifié en
   HTTP 200.

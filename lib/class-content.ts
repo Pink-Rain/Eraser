@@ -14,9 +14,10 @@ import {
   readFormattedSheet,
   readRange,
   updateFormattedCell,
-  updateCellColors,
   updateRange,
+  updateRowCells,
   type ClassRecord,
+  type RowCellWrite,
   type FormattedSheetCell,
 } from "@/lib/google-sheets"
 import { normalizeClassLabel } from "@/lib/class-utils"
@@ -27,6 +28,7 @@ import {
   findClassSpellSimilarities,
   MAX_CLASS_SPELLS_PER_RANK,
   splitClassSpellSkills,
+  UNNAMED_CLASS_SPELL,
 } from "@/lib/class-spell-utils"
 
 export type ClassSpecialty = {
@@ -117,7 +119,8 @@ type SpellWorkbook = {
   sheetId: number
   headers: string[]
   rows: string[][]
-  cells: FormattedSheetCell[][]
+  /** Mise en forme de chaque cellule. Absente quand seules les valeurs ont été lues. */
+  cells?: FormattedSheetCell[][]
   columns: SpellColumns
   classes: ClassRecord[]
   classColumns: Array<{ classId: string; column: number }>
@@ -271,12 +274,12 @@ export async function listClassPresentations(refresh = false) {
   }
 }
 
-async function spellWorkbook(refresh = false): Promise<SpellWorkbook> {
-  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(refresh), listClasses()])
-  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
-  const sheet = await readFormattedSheet(file.id, [SPELLS_TAB, "sorts", "Sort", "sort"])
-  const values = sheet.rows.map((row) => row.map((cell) => cell?.value || ""))
-  const headers = values[0] ?? []
+const SPELL_TAB_CANDIDATES = [SPELLS_TAB, "sorts", "Sort", "sort"]
+
+/** Onglet des sorts déjà reconnu, par classeur : un enregistrement n'a pas à le rechercher. */
+const spellTabs = new Map<string, { sheetId: number; tabName: string }>()
+
+function spellColumnsOf(headers: string[], classes: ClassRecord[]) {
   const columns: SpellColumns = {
     id: findColumn(headers, ["ID", "ID sort", "ID du sort"], ["id"]),
     name: findColumn(headers, ["Nom", "Nom du sort", "Sort"], ["nom", "sort"]),
@@ -292,7 +295,47 @@ async function spellWorkbook(refresh = false): Promise<SpellWorkbook> {
     const column = headers.findIndex((header) => header === characterClass.id || normalizeClassLabel(header) === normalizeClassLabel(characterClass.name))
     return column >= 0 ? [{ classId: characterClass.id, column }] : []
   })
-  return { file, sheetId: sheet.sheetId, headers, rows: values.slice(1), cells: sheet.rows.slice(1), columns, classes, classColumns, tabName: sheet.tabName }
+  return { columns, classColumns }
+}
+
+async function spellWorkbook(refresh = false): Promise<SpellWorkbook> {
+  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(refresh), listClasses()])
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  const sheet = await readFormattedSheet(file.id, SPELL_TAB_CANDIDATES)
+  spellTabs.set(file.id, { sheetId: sheet.sheetId, tabName: sheet.tabName })
+  const values = sheet.rows.map((row) => row.map((cell) => cell?.value || ""))
+  const headers = values[0] ?? []
+  return { file, sheetId: sheet.sheetId, headers, rows: values.slice(1), cells: sheet.rows.slice(1), classes, ...spellColumnsOf(headers, classes), tabName: sheet.tabName }
+}
+
+/**
+ * Ce qu'un enregistrement doit relire : les valeurs de la feuille, sans leur mise en
+ * forme (pour les ID et les rangs pleins), et la seule ligne modifiée avec la sienne.
+ * Le classeur et son onglet ne sont pas recherchés à nouveau dans Drive.
+ */
+async function spellWorkbookForSave(rowNumber: number | null) {
+  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(), listClasses()])
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  let tab = spellTabs.get(file.id)
+  if (!tab) {
+    const tabs = await spreadsheetTabs(file.id)
+    const found = SPELL_TAB_CANDIDATES.map((candidate) => tabs.find((item) => item.title === candidate)).find(Boolean)
+    if (!found || found.sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
+    tab = { sheetId: found.sheetId, tabName: found.title }
+    spellTabs.set(file.id, tab)
+  }
+  // Toujours relu : quelqu'un a pu modifier la feuille directement dans Sheets.
+  clearSpreadsheetReadCache(file.id)
+  const [values, row] = await Promise.all([
+    readRange(file.id, quoteTab(tab.tabName)),
+    rowNumber === null ? null : readFormattedSheet(file.id, [tab.tabName], { range: `${rowNumber}:${rowNumber}` }),
+  ])
+  const headers = values[0] ?? []
+  const rows = values.slice(1)
+  const cells: FormattedSheetCell[][] = []
+  if (rowNumber !== null && row) cells[rowNumber - 2] = row.rows[rowNumber - 1] ?? []
+  const workbook: SpellWorkbook = { file, sheetId: tab.sheetId, headers, rows, cells, classes, ...spellColumnsOf(headers, classes), tabName: tab.tabName }
+  return workbook
 }
 
 function cell(row: string[], column: number) {
@@ -302,17 +345,18 @@ function cell(row: string[], column: number) {
 function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedSheetCell[], rowNumber: number): ClassSpell | null {
   const id = cell(row, workbook.columns.id).trim()
   const name = cell(row, workbook.columns.name).trim()
-  if (!id && !name) return null
   const type = cell(row, workbook.columns.type).trim()
   const chargesValue = Number.parseInt(cell(row, workbook.columns.charges), 10)
   const classRanks = Object.fromEntries(workbook.classColumns.flatMap(({ classId, column }) => {
     const value = Number.parseInt(cell(row, column), 10)
     return Number.isInteger(value) && value >= 0 && value <= 20 ? [[classId, value]] : []
   }))
+  // Un sort sans titre (ni ID) reste un sort dès qu'il a un texte ou une classe.
+  if (!id && !name && !cell(row, workbook.columns.effect).trim() && !cell(row, workbook.columns.description).trim() && !Object.keys(classRanks).length) return null
   return {
     rowNumber,
     id: id || `LIGNE-${rowNumber}`,
-    name: name || "Sort sans nom",
+    name: name || UNNAMED_CLASS_SPELL,
     effect: cell(row, workbook.columns.effect),
     effectHtml: formattedCell(cells, workbook.columns.effect).html,
     description: cell(row, workbook.columns.description),
@@ -338,7 +382,7 @@ export async function listClassSpells(refresh = false) {
     file: workbook.file,
     headers: workbook.headers,
     classes: workbook.classes,
-    spells: workbook.rows.flatMap((row, index) => parseSpell(workbook, row, workbook.cells[index] ?? [], index + 2) ?? []),
+    spells: workbook.rows.flatMap((row, index) => parseSpell(workbook, row, workbook.cells?.[index] ?? [], index + 2) ?? []),
   }
 }
 
@@ -418,47 +462,113 @@ function assertAvailableClassRanks(workbook: SpellWorkbook, draft: ClassSpellDra
   }
 }
 
-function toneForType(workbook: SpellWorkbook, type: string) {
+/** Couleur de la colonne Type pour cette catégorie, reprise d'un sort existant de la même catégorie. */
+async function toneForType(workbook: SpellWorkbook, type: string) {
   const category = classSpellCategory(type)
-  for (let index = 0; index < workbook.rows.length; index += 1) {
-    if (classSpellCategory(cell(workbook.rows[index], workbook.columns.type)) !== category) continue
-    const formatted = formattedCell(workbook.cells[index] ?? [], workbook.columns.type)
+  const indexes = workbook.rows.flatMap((row, index) => classSpellCategory(cell(row, workbook.columns.type)) === category ? [index] : [])
+  const known = indexes.map((index) => formattedCell(workbook.cells?.[index] ?? [], workbook.columns.type)).find((formatted) => formatted.backgroundColor)
+  if (known) return { background: known.backgroundColor, foreground: known.foregroundColor || "#ffffff" }
+  // Lecture partielle : seule la colonne Type est relue avec sa mise en forme.
+  const typeColumn = columnName(workbook.columns.type + 1)
+  const sheet = indexes.length ? await readFormattedSheet(workbook.file.id, [workbook.tabName], { range: `${typeColumn}:${typeColumn}` }).catch(() => null) : null
+  for (const index of indexes) {
+    const formatted = formattedCell(sheet?.rows[index + 1] ?? [], workbook.columns.type)
     if (formatted.backgroundColor) return { background: formatted.backgroundColor, foreground: formatted.foregroundColor || "#ffffff" }
   }
   return classSpellCategoryTones[category]
 }
 
-export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string> } = {}) {
-  const workbook = options.workbook ?? await spellWorkbook(true)
+/**
+ * Les charges sans nombre (« ✦ ») ne sont pas modifiables dans Eraser : un sort
+ * enregistré sans charges les garde telles quelles au lieu de les effacer.
+ */
+function chargesCell(charges: number | null, current: string) {
+  if (charges !== null) return String(Math.max(0, Math.min(5, Math.trunc(charges))))
+  return current.trim() && !Number.isFinite(Number.parseInt(current, 10)) ? current : ""
+}
+
+function spellId(workbook: SpellWorkbook, index: number) {
+  return cell(workbook.rows[index] ?? [], workbook.columns.id).trim() || `LIGNE-${index + 2}`
+}
+
+/**
+ * Enregistre un sort. Seules les cellules qui changent sont écrites, toutes en un seul
+ * appel à Google : une cellule que Sheets met en forme autrement, ou une formule dans
+ * une colonne non modifiée, reste intacte.
+ * `expectedId` : l'ID que l'interface croit voir sur cette ligne. Si la feuille a
+ * bougé entre-temps (ligne supprimée ou insérée dans Sheets), rien n'est écrit.
+ */
+export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string>; expectedId?: string } = {}) {
+  const workbook = options.workbook ?? await spellWorkbookForSave(rowNumber)
   const ignoredIndexes = new Set([...(options.ignoredRows ?? [])].map((row) => row - 2))
   const existingIndex = rowNumber === null ? -1 : rowNumber - 2
   if (rowNumber !== null && (existingIndex < 0 || !workbook.rows[existingIndex])) throw new Error("CLASS_SPELL_NOT_FOUND")
-  const values = rowNumber === null ? workbook.headers.map(() => "") : workbook.headers.map((_, index) => workbook.rows[existingIndex][index] || "")
+  if (rowNumber !== null && options.expectedId && spellId(workbook, existingIndex) !== options.expectedId) throw new Error("CLASS_SPELL_MOVED")
+  const name = draft.name.trim()
+  // Un sort peut ne pas avoir de titre, mais une ligne neuve doit contenir quelque chose.
+  if (rowNumber === null && !name && !draft.effect.trim() && !draft.description.trim()) throw new Error("CLASS_SPELL_EMPTY")
   const id = draft.id.trim() || `SOR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
-  if (!draft.name.trim()) throw new Error("CLASS_SPELL_NAME_REQUIRED")
-  const duplicateId = workbook.rows.findIndex((row, index) => index !== existingIndex && !ignoredIndexes.has(index) && cell(row, workbook.columns.id).trim() === id)
-  if (duplicateId >= 0) throw new Error("CLASS_SPELL_ID_EXISTS")
+  const current = rowNumber === null ? null : workbook.rows[existingIndex]
+  const currentCells = rowNumber === null ? [] : workbook.cells?.[existingIndex] ?? []
+  const idChanged = !current || cell(current, workbook.columns.id).trim() !== id
+  if (idChanged) {
+    const duplicateId = workbook.rows.findIndex((row, index) => index !== existingIndex && !ignoredIndexes.has(index) && cell(row, workbook.columns.id).trim() === id)
+    if (duplicateId >= 0) throw new Error("CLASS_SPELL_ID_EXISTS")
+  }
   assertAvailableClassRanks(workbook, draft, existingIndex, ignoredIndexes)
-  values[workbook.columns.id] = id
-  values[workbook.columns.name] = draft.name.trim()
-  if (workbook.columns.effect >= 0) values[workbook.columns.effect] = draft.effect
-  if (workbook.columns.description >= 0) values[workbook.columns.description] = draft.description
-  values[workbook.columns.type] = draft.type
-  if (workbook.columns.skills >= 0) values[workbook.columns.skills] = draft.skillsRaw
-  if (workbook.columns.distance >= 0) values[workbook.columns.distance] = draft.distance
-  if (workbook.columns.charges >= 0) values[workbook.columns.charges] = draft.charges === null ? "" : String(Math.max(0, Math.min(5, Math.trunc(draft.charges))))
-  workbook.classColumns.forEach(({ classId, column }) => {
-    const rank = draft.classRanks[classId]
-    values[column] = rank === null || rank === undefined || !Number.isInteger(rank) || rank < 0 || rank > 20 ? "" : String(rank)
-  })
-  const targetRow = rowNumber ?? workbook.rows.length + 2
-  if (rowNumber === null) await appendRows(workbook.file.id, `${quoteTab(workbook.tabName)}!A:${columnName(workbook.headers.length)}`, [values])
-  else await updateRange(workbook.file.id, `${quoteTab(workbook.tabName)}!A${rowNumber}:${columnName(workbook.headers.length)}${rowNumber}`, [values])
-  if (workbook.columns.effect >= 0 && draft.effectHtml !== undefined) await updateFormattedCell({ spreadsheetId: workbook.file.id, sheetId: workbook.sheetId, rowNumber: targetRow, column: workbook.columns.effect, html: draft.effectHtml })
-  if (workbook.columns.description >= 0 && draft.descriptionHtml !== undefined) await updateFormattedCell({ spreadsheetId: workbook.file.id, sheetId: workbook.sheetId, rowNumber: targetRow, column: workbook.columns.description, html: draft.descriptionHtml })
-  const tone = toneForType(workbook, draft.type)
-  await updateCellColors({ spreadsheetId: workbook.file.id, sheetId: workbook.sheetId, rowNumber: targetRow, column: workbook.columns.type, background: tone.background, foreground: tone.foreground })
-  return { id, rowNumber: targetRow, tone }
+
+  const plain: Array<[number, string]> = [
+    [workbook.columns.id, id],
+    [workbook.columns.name, name],
+    [workbook.columns.type, draft.type],
+    [workbook.columns.skills, draft.skillsRaw],
+    [workbook.columns.distance, draft.distance],
+    [workbook.columns.charges, chargesCell(draft.charges, current ? cell(current, workbook.columns.charges) : "")],
+    ...workbook.classColumns.map(({ classId, column }): [number, string] => {
+      const rank = draft.classRanks[classId]
+      return [column, rank === null || rank === undefined || !Number.isInteger(rank) || rank < 0 || rank > 20 ? "" : String(rank)]
+    }),
+  ]
+  // Un texte mis en forme vide alors que le texte ne l'est pas : on garde le texte seul.
+  const rich = (text: string, html: string | undefined) => html !== undefined && (html.trim() || !text.trim()) ? html : undefined
+  const texts: Array<[number, string, string | undefined]> = [
+    [workbook.columns.effect, draft.effect, rich(draft.effect, draft.effectHtml)],
+    [workbook.columns.description, draft.description, rich(draft.description, draft.descriptionHtml)],
+  ]
+
+  const typeCell = formattedCell(currentCells, workbook.columns.type)
+  const sameCategory = current !== null && classSpellCategory(cell(current, workbook.columns.type)) === classSpellCategory(draft.type)
+  const keepTone = sameCategory && Boolean(typeCell.backgroundColor)
+  const tone = keepTone ? { background: typeCell.backgroundColor, foreground: typeCell.foregroundColor || "#ffffff" } : await toneForType(workbook, draft.type)
+
+  if (rowNumber === null) {
+    const values = workbook.headers.map(() => "")
+    for (const [column, value] of plain) if (column >= 0) values[column] = value
+    for (const [column, text] of texts) if (column >= 0) values[column] = text
+    const appended = await appendRows(workbook.file.id, `${quoteTab(workbook.tabName)}!A:${columnName(workbook.headers.length)}`, [values])
+    const targetRow = Number.parseInt(appended.updatedRange.match(/![A-Z]+(\d+)/)?.[1] || "", 10) || workbook.rows.length + 2
+    const formatting: RowCellWrite[] = [
+      ...texts.flatMap(([column, , html]) => column >= 0 && html ? [{ column, html }] : []),
+      { column: workbook.columns.type, colors: tone },
+    ]
+    await updateRowCells({ spreadsheetId: workbook.file.id, sheetId: workbook.sheetId, rowNumber: targetRow, cells: formatting })
+    return { id, rowNumber: targetRow, tone }
+  }
+
+  const writes: RowCellWrite[] = []
+  for (const [column, value] of plain) {
+    if (column < 0 || cell(current!, column) === value) continue
+    writes.push(column === workbook.columns.type && !keepTone ? { column, value, colors: tone } : { column, value })
+  }
+  for (const [column, text, html] of texts) {
+    if (column < 0) continue
+    const before = formattedCell(currentCells, column)
+    if (html !== undefined) { if (html !== before.html || text !== cell(current!, column)) writes.push({ column, html }) }
+    else if (text !== cell(current!, column)) writes.push({ column, value: text })
+  }
+  if (!keepTone && !writes.some((write) => write.column === workbook.columns.type)) writes.push({ column: workbook.columns.type, colors: tone })
+  await updateRowCells({ spreadsheetId: workbook.file.id, sheetId: workbook.sheetId, rowNumber, cells: writes })
+  return { id, rowNumber, tone }
 }
 
 export async function linkClassSpell(rowNumber: number, classId: string, rank: number | null) {
