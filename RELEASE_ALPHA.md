@@ -1,44 +1,55 @@
-# Eraser 0.1.1-alpha.55 — trier et filtrer comme dans Sheets
+# Eraser 0.1.1-alpha.56 — « Souhaitez-vous rester dans le passé ? »
 
-## Tous les index
+## Les mises à jour s’annoncent dans Eraser
 
-- **Clic droit sur le nom d’une colonne** : un menu comme celui de Google
-  Sheets, sans les couleurs.
-  - « Trier de A à Z », « Trier de Z à A », et « Retirer le tri ».
-  - **Filtrer par condition** : cellule vide ou non vide, le texte contient, ne
-    contient pas, commence par, se termine par, est exactement, et
-    supérieur / inférieur / égal à (en nombres quand c’est possible).
-  - **Filtrer par valeurs** : la liste des valeurs de la colonne à cocher, avec
-    recherche, « Sélectionner les N – Effacer » et « Affichage de N ».
-  - Une colonne filtrée porte un petit entonnoir. La barre d’outils indique
-    « N lignes sur M » avec « Retirer les filtres ». Les filtres restent en
-    place d’une visite à l’autre.
-- **Clic droit sur la poignée d’une ligne** : « Ajouter une ligne » et
-  « Ajouter plusieurs lignes… » (on choisit combien). Les lignes vides arrivent
-  juste sous la ligne choisie. Dans l’Index des classes, ce sont des sorts
-  « Nouveau sort » à renommer ; dans l’Index des PNJs, des « Nouveau PNJ ».
-- **Une ligne sur deux est à peine teintée**, pour suivre une ligne d’un coup
-  d’œil.
-- Une ligne vide entre deux lignes remplies reste affichée, comme dans Sheets.
+Plus de boîte de dialogue Windows. Quand une mise à jour est téléchargée, le logo
+d’Eraser tourne sur lui-même au milieu de l’écran :
 
-## Index des PNJs
+> **Eraser est en changement.**
+> Souhaitez-vous rester dans le passé ?
 
-- Le nom prend son **s** : « Index des PNJs ».
-- Deux onglets : **PNJs** et **PNJs Génériques**.
-- Colonne **Campagnes**, remplie toute seule : les campagnes où figure un PNJ du
-  même nom. Un clic ouvre la campagne. En vue administrateur, ou pour le MJ de
-  la campagne, elle s’ouvre en mode MJ. Pour un autre MJ, elle s’ouvre en mode
-  joueur : sans outils de MJ ni notes privées.
-- Colonne **Important**, une case à cocher. Elle correspond à la colonne
-  « PNJ important » déjà présente dans la feuille « PNJs ».
+- **Oui** : rien ne change. La mise à jour attend la prochaine ouverture d’Eraser.
+- **Non** : la mise à jour s’applique aussitôt.
+
+Cette version modifie la fenêtre d’Eraser elle-même. Elle s’installe donc une
+fois avec l’installateur, en silence (une dernière fenêtre Windows propose de
+redémarrer). Les suivantes reprennent la mise à jour sans réinstallation.
+
+## Magasins (campagne et bac à sable)
+
+- **Clic droit sur « Relancer cette ligne »** : on choisit la rareté de l’objet
+  tiré (Très commun, Commun, Rare, Très rare, Ultime). Si le magasin n’a aucun
+  autre objet de cette rareté, Eraser le dit au lieu de ne rien faire.
+- **« Ajouter à la campagne »** (vers le Créateur de session) : le nom de chaque
+  magasin se modifie directement dans la fenêtre.
+
+## Feuille de personnage
+
+- **Plus besoin d’Entrée** : une valeur modifiée s’enregistre dès qu’on clique
+  ailleurs ou que le survol d’une compétence se referme. On peut changer la stat,
+  la réussite critique et l’échec critique d’affilée : les trois sont gardées.
+  Échap annule. Même chose pour les points de vie, les titres et listes, et, dans
+  l’inventaire, les champs d’objet et la monnaie. Dans le tabletop, un dossier
+  renommé s’enregistre aussi en cliquant ailleurs.
+- Deux modifications rapprochées ne s’écrasent plus l’une l’autre.
+- **Actifs et passifs au survol d’une compétence** : l’actif affiche son nom avec
+  ses charges, et son type passe sous la description, dans la partie dépliable.
+  Le passif ne change pas. Un nom coupé s’affiche en entier au survol, par-dessus
+  l’étiquette ou les charges.
+- **Onglet Compétences** : « Cap de combat », « Cap de tir » et « Cap magique »
+  remplacent « Capacité … » dans les titres.
+- Corrigé : les compétences « Volonté … » ne s’abrégeaient pas en « Vol … ».
 
 ## Vérifications
 
-- dans un vrai navigateur : tri A→Z et Z→A depuis l’en-tête, filtre par
-  valeurs, filtre par condition (« Rang supérieur à 3 »), entonnoir et
-  compteur, lignes alternées, ajout de trois lignes sous la ligne choisie ;
-  Index des PNJs avec ses deux onglets, liens de campagne en mode MJ et
-  joueur, case « Important » enregistrée, « Nouveau PNJ » ajouté dans l’onglet
-  des génériques ;
+- dans Electron, sur une copie installée : mise à jour téléchargée, annonce dans
+  l’application, « Non » applique la nouvelle version en une seconde ;
+- dans un vrai navigateur :
+  - trois valeurs d’une compétence modifiées sans Entrée, puis survol refermé :
+    les trois sont enregistrées ; Échap n’enregistre rien ;
+  - titres « Cap » ;
+  - « Oui » et « Non » de l’annonce ;
+  - relance d’une ligne en « Ultime » ;
+  - nom modifié à l’ajout d’un magasin ;
 - lint sans erreur, 20 tests d’interface au vert, serveur desktop vérifié en
   HTTP 200.

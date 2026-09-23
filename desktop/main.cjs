@@ -47,7 +47,8 @@ let updateCheckInProgress = false
 let runningVersion = app.getVersion()
 let runningHotBundle = false
 let restartingServer = false
-let hotUpdateDialogOpen = false
+// La mise à jour téléchargée qui attend la réponse de l'utilisateur.
+let pendingUpdate = null
 let fullUpdateInProgress = false
 let isPinned = false
 let isCollapsed = false
@@ -261,25 +262,36 @@ async function applyHotUpdate() {
   logLine(`Eraser ${runningVersion} est appliqué sans réinstallation.`)
 }
 
-async function offerHotUpdate(version) {
-  if (!mainWindow || mainWindow.isDestroyed() || hotUpdateDialogOpen) return
+/**
+ * Une mise à jour est téléchargée : l'interface l'annonce elle-même (logo qui tourne,
+ * « Eraser est en changement. Souhaitez-vous rester dans le passé ? »). La réponse
+ * revient par « eraser:update-apply » ou « eraser:update-dismiss ». Elle reste en
+ * attente pour une page qui s'ouvrirait après l'annonce.
+ */
+function announceUpdate(update) {
+  pendingUpdate = update
+  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("eraser:update-ready", update)
+}
+
+function offerHotUpdate(version) {
   if (hotUpdate.compareVersions(version, runningVersion) <= 0) return
-  hotUpdateDialogOpen = true
+  announceUpdate({ kind: "hot", version })
+}
+
+async function applyPendingUpdate() {
+  const update = pendingUpdate
+  if (!update) return
+  pendingUpdate = null
   try {
-    const choice = await dialog.showMessageBox(mainWindow, {
-      type: "info",
-      buttons: ["Appliquer maintenant", "Plus tard"],
-      defaultId: 0,
-      cancelId: 1,
-      title: "Mise à jour Eraser prête",
-      message: `Eraser ${version} est prêt.`,
-      detail: "Rien à réinstaller : la page se recharge en quelques secondes. Termine d’abord ce que tu es en train d’écrire.\n\n« Plus tard » l’appliquera à la prochaine ouverture d’Eraser.",
-    })
-    if (choice.response === 0) await applyHotUpdate()
+    if (update.kind === "full") {
+      await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
+      // Installation silencieuse (pas d'assistant), puis relance d'Eraser.
+      ensureUpdaterConfigured().quitAndInstall(true, true)
+      return
+    }
+    await applyHotUpdate()
   } catch (error) {
     logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
-  } finally {
-    hotUpdateDialogOpen = false
   }
 }
 
@@ -442,23 +454,11 @@ function ensureUpdaterConfigured() {
     // téléchargé qu'à la demande de runUpdateCheck, jamais d'office.
     autoUpdater.autoDownload = false
     autoUpdater.autoInstallOnAppQuit = true
-    autoUpdater.on("update-downloaded", async (info) => {
+    autoUpdater.on("update-downloaded", (info) => {
       logLine(`Mise à jour complète ${info.version} téléchargée et prête.`)
-      if (!mainWindow || mainWindow.isDestroyed()) return
-      const install = await dialog.showMessageBox(mainWindow, {
-        type: "info",
-        buttons: ["Redémarrer maintenant", "À la fermeture"],
-        defaultId: 0,
-        cancelId: 1,
-        title: "Mise à jour Eraser prête",
-        message: `Eraser ${info.version} a été téléchargé.`,
-        detail: "Cette version modifie le cœur de l’application : Eraser se ferme, s’installe tout seul, sans assistant, puis se rouvre.",
-      })
-      if (install.response === 0) {
-        await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
-        // Installation silencieuse (pas d'assistant), puis relance d'Eraser.
-        autoUpdater.quitAndInstall(true, true)
-      }
+      // Même annonce que pour une mise à jour sans réinstallation ; « Non » (ne pas
+      // rester dans le passé) installe en silence et relance Eraser.
+      announceUpdate({ kind: "full", version: info.version })
     })
     autoUpdater.on("error", (error) => {
       logLine(`[mise-à-jour:error] ${error instanceof Error ? error.message : String(error)}`)
@@ -602,6 +602,10 @@ async function runInstalledUiSmoke(url) {
 }
 
 ipcMain.handle("eraser:check-for-updates", async () => checkForUpdatesWithStatus())
+ipcMain.handle("eraser:update-pending", () => pendingUpdate)
+ipcMain.handle("eraser:update-apply", () => applyPendingUpdate())
+// « Rester dans le passé » : la mise à jour attend la prochaine ouverture d'Eraser.
+ipcMain.handle("eraser:update-dismiss", () => { pendingUpdate = null })
 
 ipcMain.handle("eraser:window-get-state", () => ({
   isMaximized: mainWindow ? mainWindow.isMaximized() : false,

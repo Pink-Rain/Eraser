@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type S
 import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Link2, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
+import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -62,9 +63,12 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [pending, setPending] = useState(false)
-  async function save() { setPending(true); await onCommit(draft); setPending(false); setEditing(false) }
+  // Enregistré dès qu'on clique ailleurs, sans Entrée ; Échap annule.
+  const leave = useCommitOnLeave(editing && !multiline, draft, value, onCommit)
+  async function save() { setPending(true); const done = await leave.save(); setPending(false); if (done) setEditing(false) }
+  function cancel() { leave.cancel(); setDraft(value); setEditing(false) }
   function keyDown(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    if (event.key === "Escape") { setDraft(value); setEditing(false) }
+    if (event.key === "Escape") cancel()
     if (!multiline && event.key === "Enter") void save()
   }
   // L'objet garde la mise en forme saisie dans l'Index des objets ; la modifier
@@ -86,9 +90,9 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   </div>
   if (!editing) return <button type="button" onDoubleClick={() => { setDraft(value); setEditing(true) }} className={`min-w-0 text-left ${className}`} title={`Double-cliquer pour modifier ${label}`}>{display}</button>
   return <div className={`flex min-w-0 items-start gap-1 ${className}`}>
-    {multiline ? <Textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} className="min-h-16 border-0 bg-background/45 shadow-none" /> : <Input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} className="h-8 min-w-16 border-0 bg-background/45 px-2 shadow-none" />}
-    <button type="button" onClick={() => void save()} disabled={pending} className="flex size-8 shrink-0 items-center justify-center rounded-md text-primary hover:bg-primary/10" aria-label={`Enregistrer ${label}`}>{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button>
-    <button type="button" onClick={() => { setDraft(value); setEditing(false) }} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label="Annuler"><X className="size-3.5" /></button>
+    {multiline ? <Textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} className="min-h-16 border-0 bg-background/45 shadow-none" /> : <Input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} onBlur={() => void save()} className="h-8 min-w-16 border-0 bg-background/45 px-2 shadow-none" />}
+    <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} disabled={pending} className="flex size-8 shrink-0 items-center justify-center rounded-md text-primary hover:bg-primary/10" aria-label={`Enregistrer ${label}`}>{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button>
+    <button type="button" onMouseDown={(event) => event.preventDefault()} onClick={cancel} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label="Annuler"><X className="size-3.5" /></button>
   </div>
 }
 
@@ -165,8 +169,10 @@ function CurrencyLine({ slot, container, readOnly, mutate }: { slot: InventorySl
   const [expression, setExpression] = useState(String(slot.quantity))
   const [pending, setPending] = useState(false)
   function amountFromExpression(raw: string) { try { return evaluateRelativeExpression(raw, slot.quantity) } catch { return slot.quantity } }
-  async function save() { setPending(true); await mutate({ action: "set-currency", containerId: container.id, currency, amount: Math.max(0, Math.trunc(amountFromExpression(expression))) }, `currency:${slot.id}`); setPending(false); setEditing(false) }
-  return <div className="flex min-w-0 flex-1 flex-col items-center rounded-xl border border-[#b4874540] bg-background/35 px-3 py-2 text-center"><span className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{currency}</span>{readOnly ? <span className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]">{slot.quantity}</span> : editing ? <div className="mt-1 flex items-center gap-1"><Input autoFocus onFocus={(event) => event.currentTarget.select()} value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") setEditing(false) }} className="h-8 w-24 border-0 bg-background/45 text-center shadow-none" placeholder="-10%, *2…" /><button type="button" onClick={() => void save()} disabled={pending} className="flex size-8 items-center justify-center rounded-md text-[#b48745] hover:bg-[#b4874515]">{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button></div> : <button type="button" onClick={() => { setExpression(String(slot.quantity)); setEditing(true) }} className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]" title="Valeur, +10, -10%, *2 ou /3">{slot.quantity}</button>}</div>
+  // « -10 », « *2 »… s'applique aussi en cliquant ailleurs, sans Entrée.
+  const leave = useCommitOnLeave(editing, expression, String(slot.quantity), (next) => mutate({ action: "set-currency", containerId: container.id, currency, amount: Math.max(0, Math.trunc(amountFromExpression(next))) }, `currency:${slot.id}`))
+  async function save() { setPending(true); const done = await leave.save(); setPending(false); if (done) setEditing(false) }
+  return <div className="flex min-w-0 flex-1 flex-col items-center rounded-xl border border-[#b4874540] bg-background/35 px-3 py-2 text-center"><span className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{currency}</span>{readOnly ? <span className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]">{slot.quantity}</span> : editing ? <div className="mt-1 flex items-center gap-1"><Input autoFocus onFocus={(event) => event.currentTarget.select()} value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leave.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24 border-0 bg-background/45 text-center shadow-none" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} disabled={pending} className="flex size-8 items-center justify-center rounded-md text-[#b48745] hover:bg-[#b4874515]">{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button></div> : <button type="button" onClick={() => { setExpression(String(slot.quantity)); setEditing(true) }} className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]" title="Valeur, +10, -10%, *2 ou /3">{slot.quantity}</button>}</div>
 }
 
 type ContainerCardProps = { container: InventoryContainerRecord; inventory: CharacterInventoryRecord; pendingKey: string; searchOpen: boolean; catalogLoading: boolean; search: string; flat: boolean; readOnly: boolean; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; setSearch: (value: string) => void; setSearchOpen: (open: boolean) => void; onCreateItem: () => void; onEdit: () => void; ensureTargets: () => Promise<void>; mutate: Mutate }

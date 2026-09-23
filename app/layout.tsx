@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 
 import { AppShell } from "@/components/eraser/app-shell";
+import { UpdatePrompt } from "@/components/eraser/update-prompt";
 import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
 import "./globals.css";
@@ -41,7 +42,7 @@ export default async function RootLayout({
   }
   return (
     <html lang="fr">
-      <body className="antialiased">{content}</body>
+      <body className="antialiased">{content}<UpdatePrompt /></body>
     </html>
   );
 }

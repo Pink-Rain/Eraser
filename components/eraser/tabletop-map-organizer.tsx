@@ -144,6 +144,8 @@ export function TabletopMapOrganizer({
                           if (event.key === "Enter") void renameFolder(folder)
                           if (event.key === "Escape") setEditingId("")
                         }}
+                        // Cliquer ailleurs renomme aussi, sans Entrée.
+                        onBlur={() => { if (editingId === folder.id) void renameFolder(folder) }}
                         className="h-8"
                         maxLength={80}
                       />

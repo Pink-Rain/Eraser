@@ -11,6 +11,9 @@ export type UpdateCheckResult = {
   message?: string
 }
 
+/** Une mise à jour téléchargée qui attend « Oui » (rester) ou « Non » (l'appliquer). */
+export type PendingUpdate = { kind: "hot" | "full"; version: string }
+
 export type DesktopWindowState = {
   isMaximized: boolean
   isPinned: boolean
@@ -19,6 +22,11 @@ export type DesktopWindowState = {
 
 export type EraserDesktopBridge = {
   checkForUpdates: () => Promise<UpdateCheckResult>
+  /** Absents des enveloppes d'avant alpha.56 : l'annonce restait une boîte de dialogue. */
+  getPendingUpdate?: () => Promise<PendingUpdate | null>
+  applyUpdate?: () => Promise<void>
+  dismissUpdate?: () => Promise<void>
+  onUpdateReady?: (callback: (update: PendingUpdate) => void) => () => void
   windowGetState: () => Promise<DesktopWindowState>
   windowMinimize: () => Promise<void>
   windowToggleMaximize: () => Promise<void>
