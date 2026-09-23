@@ -1,17 +1,20 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Check, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
+import { ArrowRightLeft, Check, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
+import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
 import { Input } from "@/components/ui/input"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import {
   foldName,
+  gridHeadersOf,
   isLongColumn,
+  linkEndCovers,
   isNameColumn,
   linkedColumnsOf,
   worldIndexDefinitions,
@@ -37,15 +40,15 @@ function isValidSort(value: unknown): value is SheetGridSort {
 function linkHints(index: WorldIndexKey, tab: string) {
   return worldIndexLinks.flatMap(([left, right]) => {
     for (const [end, other] of [[left, right], [right, left]] as const) {
-      if (end.index !== index || end.tab !== tab) continue
-      const where = other.index === index && other.tab === tab ? "" : other.index === index ? ` (onglet ${other.tab})` : ` (${worldIndexDefinitions[other.index].title})`
+      if (!linkEndCovers(end, index, tab)) continue
+      const where = linkEndCovers(other, index, tab) ? "" : other.index === index ? ` (onglet ${other.tab})` : ` (${worldIndexDefinitions[other.index].title})`
       return [`« ${end.column} » ↔ « ${other.column} »${where}`]
     }
     return []
   })
 }
 
-function EntryForm({ headers, linked, itemLabel, pending, onCancel, onSave }: { headers: string[]; linked: string[]; itemLabel: string; pending: boolean; onCancel: () => void; onSave: (values: string[]) => void }) {
+function EntryForm({ headers, visible, linked, itemLabel, pending, onCancel, onSave }: { headers: string[]; visible: number[]; linked: string[]; itemLabel: string; pending: boolean; onCancel: () => void; onSave: (values: string[]) => void }) {
   const [values, setValues] = useState<string[]>(() => headers.map(() => ""))
   const set = (index: number, value: string) => setValues((current) => current.map((item, position) => position === index ? value : item))
   const nameIndex = headers.findIndex(isNameColumn)
@@ -58,7 +61,7 @@ function EntryForm({ headers, linked, itemLabel, pending, onCancel, onSave }: { 
       <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
     </div>
     <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {headers.map((header, index) => isLongColumn(header)
+      {visible.map((index) => [headers[index], index] as const).map(([header, index]) => isLongColumn(header)
         ? <label key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField value={values[index]} onCommit={(html) => set(index, html)} /></label>
         : <label key={header + index} className="grid gap-1 text-xs font-semibold">
             <span className="flex items-center gap-1">{header}{isLinked(header) && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}</span>
@@ -124,10 +127,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     else remount()
   }, [])
 
-  const columns = useMemo<SheetGridColumn[]>(() => (table?.headers ?? []).map((header, index) => ({
+  // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
+  const visible = useMemo(() => table ? gridHeadersOf(tabDefinition, table.headers) : [], [tabDefinition, table])
+  const columns = useMemo<SheetGridColumn[]>(() => visible.map((index) => [table!.headers[index], index] as const).map(([header, index]) => ({
     key: String(index),
     label: linked.some((column) => foldName(column) === foldName(header)) ? `${header} ↔` : header,
-    width: columnWidthFor(header, tabDefinition.widths[index]),
+    width: columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
     plain: !isLongColumn(header),
     cellClassName: isNameColumn(header) ? `font-semibold ${nameOpensDetails ? "pr-8" : ""}` : undefined,
     // Les noms et les colonnes liées déclenchent des liens : on attend la sortie de la
@@ -135,7 +140,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     commitDelay: isNameColumn(header) || linked.some((column) => foldName(column) === foldName(header)) ? Infinity : undefined,
     onOpen: nameOpensDetails && index === nameColumn ? (rowKey: string) => setDetails(Number(rowKey)) : undefined,
     openLabel: "Ouvrir la fiche",
-  })), [linked, nameColumn, nameOpensDetails, tabDefinition, table])
+  })), [linked, nameColumn, nameOpensDetails, tabDefinition, table, visible])
 
   const displayedRows = useMemo(() => {
     if (!table) return []
@@ -204,9 +209,15 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     applyData(payload.data, seq)
   }
 
+  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
+  const moveTargets = useMemo(() => {
+    if (!table) return []
+    const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
+    return definition.tabs.filter((tab) => tab.name !== table.tabName && signature(tab.headers) === signature(tabDefinition.headers)).map((tab) => tab.name)
+  }, [definition, table, tabDefinition])
+
   const busy = Boolean(pending)
   const detailsRow = details !== null ? table?.rows.find((row) => row.rowNumber === details) : undefined
-  const detailsName = detailsRow && nameColumn >= 0 ? detailsRow.values[nameColumn] : ""
   const hints = table ? linkHints(indexKey, table.tabName) : []
 
   return (
@@ -240,6 +251,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {creating && table && <EntryForm
         key={table.tabName}
         headers={table.headers}
+        visible={visible}
         linked={linked}
         itemLabel={tabDefinition.itemLabel}
         pending={pending === "add"}
@@ -264,21 +276,29 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             duplicate: (rowKeys) => void mutate({ action: "duplicate", rowNumbers: rowKeys.map(Number) }, "duplicate"),
             remove: (rowKeys) => void mutate({ action: "delete", rowNumbers: rowKeys.map(Number) }, "delete"),
           }}
+          rowMenuExtras={moveTargets.length ? (rowKey) => <>
+            <ContextMenuSeparator />
+            <ContextMenuLabel className="flex items-center gap-1.5"><ArrowRightLeft className="size-3.5" />Déplacer vers</ContextMenuLabel>
+            {moveTargets.map((target) => <ContextMenuItem key={target} onSelect={() => void mutate({ action: "move", rowNumbers: [Number(rowKey)], toTab: target }, "move")}>{target}</ContextMenuItem>)}
+          </> : undefined}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
           empty={table.rows.length ? "Aucune ligne ne correspond à la recherche." : `Ce tableau est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Le classeur « {definition.sheetName} » n’a pas pu être préparé.</div> : null}
 
-      {nameOpensDetails && <Dialog open={Boolean(detailsRow)} onOpenChange={(open) => { if (!open) setDetails(null) }}>
-        <DialogContent className="sm:max-w-2xl">
-          <DialogHeader>
-            <DialogTitle className="font-display text-2xl">{detailsName || "Sans nom"}</DialogTitle>
-            <DialogDescription className="sr-only">Fiche détaillée</DialogDescription>
-          </DialogHeader>
-          {/* La fiche détaillée sera construite ici. */}
-          <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Les détails de cette fiche arrivent bientôt.</div>
-        </DialogContent>
-      </Dialog>}
+      {nameOpensDetails && detailsRow && table && <CreatureSheetDialog
+        key={`${version}:${detailsRow.rowNumber}`}
+        open
+        headers={table.headers}
+        values={detailsRow.values}
+        html={detailsRow.html}
+        onClose={() => setDetails(null)}
+        onSave={async (fields) => {
+          if (!Object.keys(fields).length) return
+          const payload = await post({ action: "update-fields", rowNumber: detailsRow.rowNumber, fields })
+          if (payload.data) applyData(payload.data, payload.seq)
+        }}
+      />}
     </section>
   )
 }

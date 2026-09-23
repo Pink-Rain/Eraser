@@ -521,6 +521,7 @@ export function AppShell({
                       <NavSubLink href="/ressources/index-des-classes" label="Index des classes" active={pathname === "/ressources/index-des-classes"} />
                       <NavSubLink href="/ressources/index-des-objets" label="Index des objets" active={pathname === "/ressources/index-des-objets"} />
                       <NavSubLink href="/ressources/index-des-creatures" label="Index des créatures" active={pathname === "/ressources/index-des-creatures"} />
+                      <NavSubLink href="/ressources/index-des-langues" label="Index des langues" active={pathname === "/ressources/index-des-langues"} />
                       <NavSubLink href="/ressources/index-des-lieux" label="Index des lieux" active={pathname === "/ressources/index-des-lieux"} />
                       <NavSubLink href="/ressources/index-des-peuples" label="Index des peuples" active={pathname === "/ressources/index-des-peuples"} />
                       <NavSubLink href="/ressources/index-des-religions" label="Index des religions" active={pathname === "/ressources/index-des-religions"} />

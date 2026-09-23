@@ -102,7 +102,7 @@ export const userIdentityLinks = sqliteTable(
 )
 
 export const jdrGoogleSheets = sqliteTable("jdr_google_sheets", {
-  key: text("key", { enum: ["classes", "characters", "campaigns", "campaign_characters", "character_relations", "admin_todos", "inventory", "shops", "npcs", "tabletop", "vocabulary", "creatures", "places", "religions", "peoples"] }).primaryKey(),
+  key: text("key", { enum: ["classes", "characters", "campaigns", "campaign_characters", "character_relations", "admin_todos", "inventory", "shops", "npcs", "tabletop", "vocabulary", "creatures", "places", "religions", "peoples", "languages"] }).primaryKey(),
   spreadsheetId: text("spreadsheet_id").notNull(),
   name: text("name").notNull(),
   tabName: text("tab_name").notNull(),

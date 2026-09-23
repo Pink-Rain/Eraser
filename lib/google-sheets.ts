@@ -619,7 +619,7 @@ export async function updateCellColors(input: {
   clearSpreadsheetReadCache(input.spreadsheetId)
 }
 
-async function ensureSheetColumnCount(spreadsheetId: string, tabName: string, minimum: number) {
+export async function ensureSheetColumnCount(spreadsheetId: string, tabName: string, minimum: number) {
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }> }>(
     `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`,
   )
@@ -2940,6 +2940,8 @@ export async function diagnoseJdrSheets(withWriteTest = false): Promise<JdrSheet
   }))
 }
 
+const worldIndexKeys = new Set<string>(Object.keys(worldIndexDefinitions))
+
 export async function ensureJdrSheet(key: JdrSheetKey) {
   if (key === "tabletop") return ensureTabletopWorkbook()
   const stored = await getJdrSheet(key)
@@ -2948,7 +2950,9 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
     const existing = knownDefinition ? await verifyJdrSheetTab(stored, knownDefinition) : stored
     if (key === "inventory") await ensureInventoryWorkbookSchema(existing.spreadsheetId)
     if (key === "npcs") await ensureNpcSheetSchema(existing.spreadsheetId, existing.tabName)
-    if (knownDefinition) await ensureJdrSheetHeaderRow(existing, knownDefinition)
+    // Les index du monde gèrent leurs en-têtes par nom (lib/world-indexes.ts) : une
+    // colonne ajoutée s'écrit à la suite au lieu d'insérer une nouvelle ligne d'en-têtes.
+    if (knownDefinition && !worldIndexKeys.has(key)) await ensureJdrSheetHeaderRow(existing, knownDefinition)
     return existing
   }
   const definition = jdrSheetDefinitions.find((item) => item.key === key)
@@ -2970,7 +2974,7 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
     if (existingFile) await ensureNpcSheetSchema(verified.spreadsheetId, verified.tabName)
     else npcSheetSchemaReady.add(`${verified.spreadsheetId}:${verified.tabName}:v6`)
   }
-  await ensureJdrSheetHeaderRow(verified, definition)
+  if (!worldIndexKeys.has(key)) await ensureJdrSheetHeaderRow(verified, definition)
   return verified
 }
 

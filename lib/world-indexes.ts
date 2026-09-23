@@ -4,6 +4,7 @@ import {
   configureStructuredSheet,
   deleteGoogleSheetRow,
   ensureJdrSheet,
+  ensureSheetColumnCount,
   googleSheetsJson,
   readFormattedSheet,
   readRange,
@@ -16,6 +17,8 @@ import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import {
   foldName,
   isNameColumn,
+  linkEndCovers,
+  linkEndTabs,
   splitNames,
   worldIndexDefinitions,
   worldIndexLinks,
@@ -44,19 +47,23 @@ async function workbook(key: WorldIndexKey) {
   const sheet = await ensureJdrSheet(key)
   if (!sheet) throw new Error("WORLD_INDEX_SHEET_UNAVAILABLE")
   const definition = worldIndexDefinitions[key]
-  const readyKey = `${sheet.spreadsheetId}:${key}`
-  if (definition.tabs.length > 1 && !readyWorkbooks.has(readyKey)) {
+  const readyKey = `${sheet.spreadsheetId}:${key}:${definition.tabs.map((tab) => `${tab.name}=${tab.headers.join("|")}`).join(";")}`
+  if (!readyWorkbooks.has(readyKey)) {
     const existing = await spreadsheetTabs(sheet.spreadsheetId)
-    for (const tab of definition.tabs.slice(1)) await ensureExtraTab(sheet.spreadsheetId, key, tab, existing)
+    for (const tab of definition.tabs) await ensureTab(sheet.spreadsheetId, key, tab, existing)
     readyWorkbooks.add(readyKey)
   }
   return sheet
 }
 
-async function ensureExtraTab(spreadsheetId: string, key: WorldIndexKey, tab: WorldIndexTabDefinition, existing: Array<{ sheetId?: number; title: string }>) {
+/**
+ * Un onglet et ses colonnes. Les colonnes sont retrouvées par leur nom : celles qui
+ * manquent sont ajoutées à droite des existantes, sans toucher à ce qui est déjà
+ * rempli ni à l'ordre choisi dans Sheets.
+ */
+async function ensureTab(spreadsheetId: string, key: WorldIndexKey, tab: WorldIndexTabDefinition, existing: Array<{ sheetId?: number; title: string }>) {
   const structure = { key, name: worldIndexDefinitions[key].sheetName, tabName: tab.name, frozenColumns: 1, headers: tab.headers, columnWidths: tab.widths }
-  const found = existing.find((candidate) => candidate.title === tab.name)
-  if (!found) {
+  if (!existing.some((candidate) => candidate.title === tab.name)) {
     const reply = await googleSheetsJson<{ replies?: Array<{ addSheet?: { properties?: { sheetId?: number } } }> }>(`spreadsheets/${spreadsheetId}:batchUpdate`, {
       method: "POST",
       body: JSON.stringify({ requests: [{ addSheet: { properties: { title: tab.name, gridProperties: { rowCount: 1000, columnCount: tab.headers.length, frozenRowCount: 1, frozenColumnCount: 1 } } } }] }),
@@ -66,9 +73,17 @@ async function ensureExtraTab(spreadsheetId: string, key: WorldIndexKey, tab: Wo
     await configureStructuredSheet(spreadsheetId, structure, sheetId)
     return
   }
-  // Onglet présent mais vide (créé à la main) : on pose seulement les en-têtes.
-  const [firstRow = []] = await readRange(spreadsheetId, sheetTabRange(tab.name, `A1:${columnName(tab.headers.length)}1`))
-  if (!firstRow.some((value) => value.trim())) await updateRange(spreadsheetId, sheetTabRange(tab.name, `A1:${columnName(tab.headers.length)}1`), [tab.headers], { valueInputOption: "RAW" })
+  clearSpreadsheetReadCache(spreadsheetId)
+  const [firstRow = []] = await readRange(spreadsheetId, sheetTabRange(tab.name, "A1:AZ1"))
+  let used = firstRow.length
+  while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
+  const present = new Set(firstRow.slice(0, used).map(foldName))
+  const missing = tab.headers.filter((header) => !present.has(foldName(header)))
+  if (!missing.length) return
+  await ensureSheetColumnCount(spreadsheetId, tab.name, used + missing.length)
+  const from = columnName(used + 1)
+  const to = columnName(used + missing.length)
+  await updateRange(spreadsheetId, sheetTabRange(tab.name, `${from}1:${to}1`), [missing], { valueInputOption: "RAW" })
 }
 
 function tabDefinition(key: WorldIndexKey, tabName: string) {
@@ -176,20 +191,31 @@ async function writeNewRow(table: PlainTable, tabName: string, values: string[])
   return rowIndex + 1
 }
 
+/** La ligne `name` parmi les onglets couverts par `end` ; -1 si elle n'existe nulle part. */
+async function locateLinked(end: WorldIndexLinkEnd, name: string) {
+  const tabs = linkEndTabs(end)
+  for (const tab of tabs) {
+    const table = await plainTable(end.index, tab)
+    const rowIndex = findRowByName(table, name)
+    if (rowIndex > 0) return { tab, table, rowIndex }
+  }
+  // Absente : elle sera créée dans le premier onglet couvert.
+  return { tab: tabs[0], table: await plainTable(end.index, tabs[0]), rowIndex: -1 }
+}
+
 /** Inscrit `value` dans la colonne `end` de la ligne `targetName`, créée au besoin. */
 async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string) {
-  const table = await plainTable(end.index, end.tab)
+  const { tab, table, rowIndex } = await locateLinked(end, targetName)
   const nameColumn = columnOf(table.headers, "Nom")
   const linkColumn = columnOf(table.headers, end.column)
   if (nameColumn < 0 || linkColumn < 0) return false
-  const rowIndex = findRowByName(table, targetName)
   if (rowIndex > 0) {
     const current = splitNames(table.rows[rowIndex][linkColumn] || "")
     if (current.some((name) => foldName(name) === foldName(value))) return false
-    await writeCell(table, end.tab, rowIndex, linkColumn, [...current, value].join(", "))
+    await writeCell(table, tab, rowIndex, linkColumn, [...current, value].join(", "))
     return true
   }
-  await writeNewRow(table, end.tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : ""))
+  await writeNewRow(table, tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : ""))
   return true
 }
 
@@ -198,27 +224,26 @@ async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string
  * `replacement`. Seul le lien bouge : l'entité d'en face n'est jamais supprimée.
  */
 async function removeLink(end: WorldIndexLinkEnd, targetName: string, value: string, replacement?: string) {
-  const table = await plainTable(end.index, end.tab)
+  const { tab, table, rowIndex } = await locateLinked(end, targetName)
   const linkColumn = columnOf(table.headers, end.column)
-  const rowIndex = findRowByName(table, targetName)
   if (linkColumn < 0 || rowIndex <= 0) return false
   const current = splitNames(table.rows[rowIndex][linkColumn] || "")
   if (!current.some((name) => foldName(name) === foldName(value))) return false
   const next = replacement
     ? splitNames(current.map((name) => foldName(name) === foldName(value) ? replacement : name).join(", "))
     : current.filter((name) => foldName(name) !== foldName(value))
-  await writeCell(table, end.tab, rowIndex, linkColumn, next.join(", "))
+  await writeCell(table, tab, rowIndex, linkColumn, next.join(", "))
   return true
 }
 
 /** Les colonnes liées d'un onglet, chacune avec la colonne qui lui répond. */
 function linkEndsOf(key: WorldIndexKey, tabName: string) {
-  return worldIndexLinks.flatMap((pair) => ([[pair[0], pair[1]], [pair[1], pair[0]]] as const).filter(([end]) => end.index === key && end.tab === tabName))
+  return worldIndexLinks.flatMap((pair) => ([[pair[0], pair[1]], [pair[1], pair[0]]] as const).filter(([end]) => linkEndCovers(end, key, tabName)))
 }
 
 function isSelfLink(key: WorldIndexKey, tabName: string, other: WorldIndexLinkEnd, target: string, name: string) {
   // Un peuple n'est pas son propre ancêtre.
-  return other.index === key && other.tab === tabName && foldName(target) === foldName(name)
+  return linkEndCovers(other, key, tabName) && foldName(target) === foldName(name)
 }
 
 /** Propage les colonnes liées d'une ligne vers les index d'en face. */
@@ -355,7 +380,7 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNum
       for (const [end, other] of linkEndsOf(key, tabName)) {
         for (const target of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
           // Une ligne supprimée en même temps n'a pas besoin d'être nettoyée.
-          if (other.index === key && other.tab === tabName && deletedNames.has(foldName(target))) continue
+          if (linkEndCovers(other, key, tabName) && deletedNames.has(foldName(target))) continue
           await removeLink(other, target, name)
         }
       }
@@ -368,5 +393,74 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNum
       return index > 0 ? index + 1 : rowNumber
     }).sort((left, right) => right - left)
     for (const rowNumber of freshNumbers) await deleteGoogleSheetRow(sheet.spreadsheetId, tabName, rowNumber, table.sheetId)
+  })
+}
+
+/**
+ * Plusieurs colonnes d'une même ligne, nommées par leur en-tête : c'est la fiche d'une
+ * créature, dont la plupart des champs ne sont pas affichés dans le tableau. Seules les
+ * valeurs modifiées sont écrites, pour ne pas effacer la mise en forme des autres.
+ */
+export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowNumber: number, fields: Record<string, string>) {
+  return serialized(async () => {
+    const table = await plainTable(key, tabName)
+    const rowIndex = rowNumber - 1
+    if (rowIndex < 1 || !table.rows[rowIndex]?.some((value) => value.trim())) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+    const nameColumn = columnOf(table.headers, "Nom")
+    const data: Array<{ range: string; values: string[][] }> = []
+    const formatted: Array<{ column: number; html: string }> = []
+    for (const [header, raw] of Object.entries(fields)) {
+      const column = columnOf(table.headers, header)
+      if (column < 0) continue
+      const value = String(raw ?? "").slice(0, 50_000)
+      if (column === nameColumn && !value.trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
+      if ((table.rows[rowIndex][column] ?? "") === value) continue
+      // Texte enrichi : écrit avec sa mise en forme plutôt qu'avec ses balises.
+      if (/<[a-z]/i.test(value)) { formatted.push({ column, html: value }); continue }
+      const cell = `${columnName(column + 1)}${rowNumber}`
+      data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[value]] })
+    }
+    if (data.length) {
+      await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, {
+        method: "POST",
+        body: JSON.stringify({ valueInputOption: "RAW", data }),
+      })
+      clearSpreadsheetReadCache(table.spreadsheetId)
+    }
+    if (formatted.length) {
+      const tabs = await spreadsheetTabs(table.spreadsheetId)
+      const sheetId = tabs.find((tab) => tab.title === tabName)?.sheetId
+      if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+      for (const cell of formatted) await updateFormattedCell({ spreadsheetId: table.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
+    }
+    return data.length + formatted.length
+  })
+}
+
+/**
+ * Déplace des lignes vers un autre onglet du même index (un lieu créé par un lien
+ * arrive dans le premier onglet, on le range ensuite). Les colonnes sont recopiées
+ * par leur nom, la ligne d'origine est ensuite retirée. Les liens suivent d'eux-mêmes :
+ * ils désignent une entité par son nom, quel que soit son onglet.
+ */
+export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: string, rowNumbers: number[]) {
+  return serialized(async () => {
+    if (fromTab === toTab) return
+    tabDefinition(key, toTab)
+    const source = await plainTable(key, fromTab)
+    const target = await plainTable(key, toTab)
+    const moved: number[] = []
+    for (const rowNumber of [...new Set(rowNumbers)].sort((left, right) => left - right)) {
+      const row = source.rows[rowNumber - 1]
+      if (rowNumber < 2 || !row?.some((value) => value.trim())) continue
+      const values = target.headers.map((header) => {
+        const column = columnOf(source.headers, header)
+        return column >= 0 ? row[column] ?? "" : ""
+      })
+      await writeNewRow(target, toTab, values)
+      moved.push(rowNumber)
+    }
+    const { sheet, table } = await tableFor(key, fromTab)
+    for (const rowNumber of moved.sort((left, right) => right - left)) await deleteGoogleSheetRow(sheet.spreadsheetId, fromTab, rowNumber, table.sheetId)
   })
 }

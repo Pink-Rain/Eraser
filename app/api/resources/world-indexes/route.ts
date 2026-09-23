@@ -7,7 +7,9 @@ import {
   duplicateWorldIndexRows,
   getWorldIndex,
   isWorldIndexKey,
+  moveWorldIndexRows,
   updateWorldIndexCell,
+  updateWorldIndexFields,
 } from "@/lib/world-indexes"
 
 async function authorized() {
@@ -35,7 +37,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[] }
+    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; fields?: Record<string, unknown>; toTab?: string }
     if (!isWorldIndexKey(body.key) || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const key = body.key
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
@@ -48,6 +50,10 @@ export async function POST(request: Request) {
     if (body.action === "add" && Array.isArray(body.values)) changed = await addWorldIndexRow(key, body.tabName, body.values.map((value) => String(value ?? "")))
     else if (body.action === "duplicate" && rowNumbers.length) await duplicateWorldIndexRows(key, body.tabName, rowNumbers)
     else if (body.action === "delete" && rowNumbers.length) await deleteWorldIndexRows(key, body.tabName, rowNumbers)
+    else if (body.action === "move" && rowNumbers.length && typeof body.toTab === "string") await moveWorldIndexRows(key, body.tabName, body.toTab, rowNumbers)
+    else if (body.action === "update-fields" && typeof body.rowNumber === "number" && body.fields && typeof body.fields === "object") {
+      await updateWorldIndexFields(key, body.tabName, body.rowNumber, Object.fromEntries(Object.entries(body.fields).map(([header, value]) => [header, String(value ?? "")])))
+    }
     else throw new Error("INVALID_WORLD_INDEX_ACTION")
     return NextResponse.json({ ok: true, changed, data: await getWorldIndex(key) })
   } catch (error) {
