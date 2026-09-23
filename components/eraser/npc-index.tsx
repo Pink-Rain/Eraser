@@ -1,26 +1,35 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { memo, useCallback, useMemo, useRef, useState } from "react"
+import Link from "next/link"
 import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { blankNpc, ImportNpcsDialog, importNpcs, NpcForm, PeopleSelect, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { npcIndexPage } from "@/lib/npc-pages"
+import { foldNpcName, npcIndexTabs } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
+
+/** Une campagne où figure un PNJ du même nom, et le mode dans lequel elle s'ouvre. */
+export type NpcCampaignLink = { id: string; name: string; manage: boolean }
 
 /** Les colonnes du tableau ; le reste de la fiche s'ouvre d'un clic sur le nom. */
 const fields = [
   { key: "name", label: "Nom", width: 240 },
-  { key: "title", label: "Titre", width: 200 },
-  { key: "people", label: "Peuple", width: 220 },
-  { key: "occupation", label: "Fonction / classe / métier", width: 260 },
+  { key: "title", label: "Titre", width: 190 },
+  { key: "people", label: "Peuple", width: 210 },
+  { key: "occupation", label: "Fonction / classe / métier", width: 240 },
+  { key: "campaigns", label: "Campagnes", width: 260 },
+  { key: "important", label: "Important", width: 110 },
 ] as const
 
-type FieldKey = (typeof fields)[number]["key"]
+type TextField = "name" | "title" | "people" | "occupation"
+
+const textFields = new Set<string>(["name", "title", "people", "occupation"])
 
 function isValidSort(value: unknown): value is SheetGridSort {
   if (value === null) return true
@@ -29,13 +38,42 @@ function isValidSort(value: unknown): value is SheetGridSort {
   return typeof candidate.column === "string" && (candidate.direction === "asc" || candidate.direction === "desc")
 }
 
+function isTab(value: unknown): value is string {
+  return typeof value === "string" && npcIndexTabs.some((tab) => tab.id === value)
+}
+
+/** Les campagnes d'un PNJ, chacune cliquable : en mode MJ si on la mène, en mode joueur sinon. */
+const CampaignLinks = memo(function CampaignLinks({ links }: { links: NpcCampaignLink[] }) {
+  if (!links.length) return <span className="flex min-h-8 items-center px-2 text-xs text-muted-foreground">—</span>
+  return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1">
+    {links.map((campaign) => <Link
+      key={campaign.id}
+      href={`/campagne/${encodeURIComponent(campaign.id)}`}
+      title={campaign.manage ? "Ouvrir en mode MJ" : "Ouvrir en mode joueur"}
+      className={`rounded-full border px-2 py-0.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground ${campaign.manage ? "border-primary/40 text-primary" : "text-muted-foreground"}`}
+    >{campaign.name}</Link>)}
+  </span>
+})
+
+const ImportantCell = memo(function ImportantCell({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
+  const [shown, setShown] = useState<boolean | null>(null)
+  return <span className="flex min-h-8 items-center justify-center">
+    <Checkbox aria-label="Important" checked={shown ?? checked} disabled={disabled} onCheckedChange={(next) => { setShown(next === true); onChange(next === true) }} />
+  </span>
+})
+
 /**
- * L'Index des PNJ : une bibliothèque de PNJ hors de toute campagne, rangée dans la
- * feuille « PNJs » comme les autres. Une campagne ou le bac à sable y récupère ceux dont
- * elle a besoin, et inversement.
+ * L'Index des PNJs : deux bibliothèques de PNJ hors de toute campagne (les PNJs et les
+ * PNJs génériques), rangées dans la feuille « PNJs » comme les autres. La colonne
+ * Campagnes montre, sans rien saisir, les campagnes où figure un PNJ du même nom.
  */
-export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNpcRecord[]; sourcePages: ReusablePageOption[] }) {
+export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
+  initialNpcs: CampaignNpcRecord[]
+  sourcePages: ReusablePageOption[]
+  campaignsByName: Record<string, NpcCampaignLink[]>
+}) {
   const [npcs, setNpcs] = useState(initialNpcs)
+  const [tab, setTab] = usePersistentState<string>("eraser:npc-index:tab", npcIndexTabs[0].id, isTab)
   const [editing, setEditing] = useState<CampaignNpcRecord | null>(null)
   const [importing, setImporting] = useState(false)
   const [pending, setPending] = useState(false)
@@ -48,47 +86,62 @@ export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNp
   // partent chacune de la précédente, sans effacer l'autre.
   const latest = useRef(new Map(initialNpcs.map((npc) => [npc.id, npc])))
 
-  const replace = useCallback((saved: CampaignNpcRecord[], remount = false) => {
+  const campaignsOf = useCallback((npc: CampaignNpcRecord | undefined) => npc ? campaignsByName[foldNpcName(npc.name)] ?? [] : [], [campaignsByName])
+
+  /** Enregistre des PNJ reçus du serveur ; `after` place les nouveaux sous cette ligne. */
+  const replace = useCallback((saved: CampaignNpcRecord[], remount = false, after?: string) => {
     for (const npc of saved) latest.current.set(npc.id, npc)
     setNpcs((current) => {
       const byId = new Map(saved.map((npc) => [npc.id, npc]))
       const kept = current.map((npc) => byId.get(npc.id) ?? npc)
       const added = saved.filter((npc) => !current.some((item) => item.id === npc.id))
-      return [...added, ...kept]
+      if (!added.length) return kept
+      const position = after ? kept.findIndex((npc) => npc.id === after) : -1
+      return position < 0 ? [...added, ...kept] : [...kept.slice(0, position + 1), ...added, ...kept.slice(position + 1)]
     })
     if (remount) setVersion((current) => current + 1)
   }, [])
 
-  const rows = useMemo(() => {
-    const folded = query.trim().toLocaleLowerCase("fr")
-    const filtered = npcs.filter((npc) => !folded || `${npc.name} ${npc.title} ${npc.people} ${npc.occupation}`.toLocaleLowerCase("fr").includes(folded))
-    const sorted = sort
-      ? [...filtered].sort((left, right) => String(left[sort.column as FieldKey] ?? "").localeCompare(String(right[sort.column as FieldKey] ?? ""), "fr", { sensitivity: "base", numeric: true }) * (sort.direction === "asc" ? 1 : -1))
-      : filtered
-    return sorted.map((npc, index) => ({ key: npc.id, rowNumber: index + 1 }))
-  }, [npcs, query, sort])
-
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     const npc = latest.current.get(rowKey)
-    return npc ? String(npc[columnKey as FieldKey] ?? "") : ""
-  }, [])
+    if (!npc) return ""
+    if (columnKey === "campaigns") return campaignsOf(npc).map((campaign) => campaign.name).join(", ")
+    if (columnKey === "important") return npc.important ? "Oui" : "Non"
+    return textFields.has(columnKey) ? npc[columnKey as TextField] : ""
+  }, [campaignsOf])
 
-  const commit = useCallback(async (rowKey: string, columnKey: string, value: string) => {
-    const npc = latest.current.get(rowKey)
-    if (!npc || !fields.some((field) => field.key === columnKey)) return
-    const next = { ...npc, [columnKey]: value.trim() }
-    if (columnKey === "name" && !next.name) return
-    latest.current.set(rowKey, next)
+  const rows = useMemo(() => {
+    const folded = foldNpcName(query)
+    const filtered = npcs.filter((npc) => npc.pageLinked === tab && (!folded || foldNpcName(`${npc.name} ${npc.title} ${npc.people} ${npc.occupation}`).includes(folded)))
+    const plain = (npc: CampaignNpcRecord, column: string) => column === "campaigns" ? campaignsOf(npc).map((campaign) => campaign.name).join(", ") : column === "important" ? (npc.important ? "Oui" : "Non") : textFields.has(column) ? npc[column as TextField] : ""
+    const sorted = sort
+      ? [...filtered].sort((left, right) => plain(left, sort.column).localeCompare(plain(right, sort.column), "fr", { sensitivity: "base", numeric: true }) * (sort.direction === "asc" ? 1 : -1))
+      : filtered
+    return sorted.map((npc, index) => ({ key: npc.id, rowNumber: index + 1 }))
+  }, [campaignsOf, npcs, query, sort, tab])
+
+  const save = useCallback(async (next: CampaignNpcRecord, remount: boolean) => {
+    latest.current.set(next.id, next)
     setSaving((current) => current + 1)
     try {
-      // Une liste déroulante n'est pas une cellule de texte : sa ligne est redessinée.
-      replace(await persistNpcs("save", npcIndexPage, [next]), columnKey === "people")
+      replace(await persistNpcs("save", next.pageLinked, [next]), remount)
       setError("")
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
     }
     setSaving((current) => current - 1)
   }, [replace])
+
+  const commit = useCallback(async (rowKey: string, columnKey: string, value: string) => {
+    const npc = latest.current.get(rowKey)
+    if (!npc) return
+    if (columnKey === "important") return save({ ...npc, important: /^(oui|vrai|true|x|1)$/i.test(value.trim()) }, false)
+    if (!textFields.has(columnKey)) return
+    const next = { ...npc, [columnKey]: value.trim() }
+    if (columnKey === "name" && !next.name) return
+    // Une liste déroulante n'est pas une cellule de texte : sa ligne est redessinée.
+    await save(next, columnKey === "people" || columnKey === "name")
+  }, [save])
 
   const columns = useMemo<SheetGridColumn[]>(() => fields.map((field) => {
     const column: SheetGridColumn = { key: field.key, label: field.label, width: field.width, plain: true, cellClassName: field.key === "name" ? "font-semibold" : undefined }
@@ -99,8 +152,10 @@ export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNp
       title="Ouvrir la fiche"
     >{valueOf(rowKey, "name") || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</button>
     if (field.key === "people") column.control = (rowKey) => <PeopleSelect compact value={valueOf(rowKey, "people")} onChange={(value) => void commit(rowKey, "people", value)} />
+    if (field.key === "campaigns") column.control = (rowKey) => <CampaignLinks links={campaignsOf(latest.current.get(rowKey))} />
+    if (field.key === "important") column.control = (rowKey) => <ImportantCell checked={latest.current.get(rowKey)?.important ?? false} disabled={pending} onChange={(checked) => void commit(rowKey, "important", checked ? "Oui" : "Non")} />
     return column
-  }), [commit, valueOf])
+  }), [campaignsOf, commit, pending, valueOf])
 
   async function run(task: () => Promise<void>) {
     setPending(true); setError("")
@@ -108,20 +163,28 @@ export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNp
     setPending(false)
   }
 
-  function save(npc: CampaignNpcRecord, portrait?: File) {
+  function saveSheet(npc: CampaignNpcRecord, portrait?: File) {
     void run(async () => {
-      const [saved] = await persistNpcs("save", npcIndexPage, [npc])
+      const [saved] = await persistNpcs("save", npc.pageLinked, [npc])
       replace([portrait ? await uploadNpcPortrait(saved.id, portrait) : saved], true)
       setEditing(null)
     })
   }
 
+  function insertRows(rowKey: string, count: number) {
+    void run(async () => {
+      // Un PNJ a besoin d'un nom : les lignes arrivent en « Nouveau PNJ », à renommer.
+      const created = Array.from({ length: count }, () => ({ ...blankNpc(tab), name: "Nouveau PNJ" }))
+      replace(await persistNpcs("save", tab, created), true, rowKey)
+    })
+  }
+
   function duplicate(ids: string[]) {
     void run(async () => {
-      const response = await fetch("/api/npcs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "duplicate", pageLinked: npcIndexPage, npcIds: ids }) })
+      const response = await fetch("/api/npcs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "duplicate", pageLinked: tab, npcIds: ids }) })
       const payload = (await response.json().catch(() => ({}))) as { npcs?: CampaignNpcRecord[]; error?: string }
       if (!response.ok) throw new Error(payload.error || "Duplication impossible.")
-      replace(payload.npcs ?? [], true)
+      replace(payload.npcs ?? [], true, ids.at(-1))
     })
   }
 
@@ -129,26 +192,39 @@ export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNp
     void run(async () => {
       const targets = ids.flatMap((id) => latest.current.get(id) ?? [])
       if (!targets.length) return
-      await persistNpcs("delete", npcIndexPage, targets)
+      await persistNpcs("delete", tab, targets)
       for (const id of ids) latest.current.delete(id)
       setNpcs((current) => current.filter((npc) => !ids.includes(npc.id)))
       setVersion((current) => current + 1)
     })
   }
 
+  const tabSources = [...npcIndexTabs.filter((candidate) => candidate.id !== tab).map((candidate) => ({ id: candidate.id, name: `Index des PNJs · ${candidate.label}` })), ...sourcePages]
+  const count = (id: string) => npcs.filter((npc) => npc.pageLinked === id).length
+
   return <section className="mt-4 flex flex-col gap-3">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+      <div role="tablist" aria-label="Onglets" className="flex gap-1 self-start rounded-xl border bg-card/70 p-1">
+        {npcIndexTabs.map((candidate) => <button
+          key={candidate.id}
+          type="button"
+          role="tab"
+          aria-selected={candidate.id === tab}
+          onClick={() => { setTab(candidate.id); setEditing(null) }}
+          className={`rounded-lg px-4 py-1.5 text-sm font-medium transition-colors ${candidate.id === tab ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted hover:text-foreground"}`}
+        >{candidate.label}<span className="ml-1.5 text-xs opacity-70">{count(candidate.id)}</span></button>)}
+      </div>
       <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher un PNJ…" className="pl-9" /></div>
       <div className="flex flex-wrap gap-2 lg:ml-auto">
-        {sourcePages.length > 0 && <Button type="button" variant="outline" onClick={() => setImporting(true)} disabled={pending}><Download />Récupérer</Button>}
-        <Button type="button" onClick={() => setEditing(blankNpc(npcIndexPage))} disabled={pending}><Plus />Créer un PNJ</Button>
+        <Button type="button" variant="outline" onClick={() => setImporting(true)} disabled={pending}><Download />Récupérer</Button>
+        <Button type="button" onClick={() => setEditing(blankNpc(tab))} disabled={pending}><Plus />Créer un PNJ</Button>
       </div>
     </div>
 
     {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 
     <SheetGrid
-      layoutKey="eraser:npc-index:grid"
+      layoutKey={`eraser:npc-index:grid:${tab}`}
       columns={columns}
       rows={rows}
       valueOf={valueOf}
@@ -158,20 +234,24 @@ export function NpcIndex({ initialNpcs, sourcePages }: { initialNpcs: CampaignNp
       disabled={pending}
       version={version}
       addRowLabel="Créer un PNJ"
-      rowCommands={{ append: () => setEditing(blankNpc(npcIndexPage)), duplicate, remove }}
+      rowCommands={{ append: () => setEditing(blankNpc(tab)), insertRows, duplicate, remove }}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
-      empty={npcs.length ? "Aucun PNJ ne correspond à la recherche." : "L’index est vide. Crée un PNJ ou récupère ceux d’une campagne."}
+      empty={npcs.some((npc) => npc.pageLinked === tab) ? "Aucun PNJ ne correspond à la recherche." : "Cet onglet est vide. Crée un PNJ ou récupère ceux d’une campagne."}
     />
 
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>
       {editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
         <DialogHeader><DialogTitle className="font-display text-3xl">{editing.createdAt ? editing.name : "Créer un PNJ"}</DialogTitle></DialogHeader>
-        <NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={save} />
+        <NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={saveSheet} />
       </DialogContent>}
     </Dialog>
 
-    <ImportNpcsDialog open={importing} sourcePages={sourcePages} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void run(async () => {
-      replace(await importNpcs(npcIndexPage, source, ids, transferMode), true)
+    <ImportNpcsDialog key={tab} open={importing} sourcePages={tabSources} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void run(async () => {
+      replace(await importNpcs(tab, source, ids, transferMode), true)
+      if (transferMode === "move") {
+        // Un déplacement depuis l'autre onglet l'y retire.
+        setNpcs((current) => current.filter((npc) => npc.pageLinked !== source || !ids.includes(npc.id)))
+      }
       setImporting(false)
     })} />
   </section>

@@ -69,6 +69,8 @@ export type CampaignNpcRecord = {
   playerNotes: string
   gmNotes: string
   inCampaign: boolean
+  /** Colonne « PNJ important » de la feuille. */
+  important: boolean
   createdByUid: string
   createdAt: string
   updatedAt: string

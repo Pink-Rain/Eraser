@@ -8,7 +8,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 async function canUsePage(pageLinked: string) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account || !pageLinked) return null
-  // Le bac à sable et l'Index des PNJ ne dépendent d'aucune campagne.
+  // Le bac à sable et l'Index des PNJs ne dépendent d'aucune campagne.
   if (isNpcLibraryPage(pageLinked)) return account
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, pageLinked).catch(() => null)
   return campaign ? account : null
@@ -39,7 +39,7 @@ function npcValue(value: unknown, pageLinked: string): CampaignNpcRecord | null 
     wisdom: numberValue(candidate.wisdom), charisma: numberValue(candidate.charisma),
     playerNotes: shortText(candidate.playerNotes ?? candidate.description, 5000),
     gmNotes: shortText(candidate.gmNotes ?? candidate.other, 5000),
-    inCampaign: Boolean(candidate.inCampaign), createdByUid: shortText(candidate.createdByUid, 200),
+    inCampaign: Boolean(candidate.inCampaign), important: Boolean(candidate.important), createdByUid: shortText(candidate.createdByUid, 200),
     createdAt: shortText(candidate.createdAt, 80), updatedAt: shortText(candidate.updatedAt, 80),
   }
 }
@@ -72,7 +72,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ npcs })
     }
     if (body.action === "duplicate") {
-      // La copie reste sur la même page (Index des PNJ) : portrait et sac à dos compris.
+      // La copie reste sur la même page (Index des PNJs) : portrait et sac à dos compris.
       if (!Array.isArray(body.npcIds) || !body.npcIds.length || body.npcIds.length > 100 || !body.npcIds.every((id) => typeof id === "string")) throw new Error("INVALID_NPC_DUPLICATE")
       return NextResponse.json({ npcs: await copyNpcsToPage(pageLinked, pageLinked, body.npcIds) })
     }

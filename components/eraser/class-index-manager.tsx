@@ -455,6 +455,12 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     addRowLabel="Créer un sort"
     rowCommands={{
       append: () => startCreate(),
+      // Un sort a besoin d'un nom : les nouvelles lignes s'appellent « Nouveau sort »,
+      // du même type que la ligne choisie, et se renomment directement dans le tableau.
+      insertRows: (rowKey, count) => void (async () => {
+        const reference = spellByRow.get(Number(rowKey))
+        for (let index = 0; index < count; index += 1) await create({ ...emptyDraft(), name: "Nouveau sort", type: reference?.type || "Passif" })
+      })(),
       duplicate: (rowKeys) => void duplicateRows(rowKeys),
       remove: (rowKeys) => void removeRows(rowKeys),
     }}

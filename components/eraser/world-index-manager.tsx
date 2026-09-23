@@ -405,6 +405,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           addRowLabel={`Ajouter ${showAll ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
           rowCommands={{
             append: () => setCreating(true),
+            insertRows: (rowKey, count) => { const { tabName: rowTab, rowNumber } = parseRowKey(rowKey); void mutate("insert", [rowKey], "insert", { tabName: rowTab, rowNumber, count }) },
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
           }}

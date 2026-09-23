@@ -35,10 +35,16 @@ export default async function CampaignDashboardPage({ params }: { params: Promis
   if (!account) redirect("/connexion")
 
   const { id } = await params
-  const canManage = account.role === "admin" || account.role === "mj"
-  const campaign = await (account.role === "joueur"
+  let canManage = account.role === "admin" || account.role === "mj"
+  let campaign = await (account.role === "joueur"
     ? getCampaignForPlayer(account.uid, id)
     : getCampaignDashboard(account.role === "admin" ? null : account.uid, id)).catch(() => null)
+  // Un MJ qui ne mène pas cette campagne (lien de l'Index des PNJs) la voit comme un
+  // joueur : sans outils de MJ ni notes privées.
+  if (!campaign && account.role === "mj") {
+    campaign = await getCampaignDashboard(null, id).catch(() => null)
+    canManage = false
+  }
   if (!campaign) notFound()
 
   return (

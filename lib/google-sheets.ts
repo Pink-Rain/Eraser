@@ -822,6 +822,7 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
         const usedWidth = Math.max(1, ...cells.map((row) => row.length))
         const rawHeaders = cells[0] ?? []
         const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.value.trim() || `Colonne ${index + 1}`)
+        const lastFilled = lastFilledRow(cells.slice(1))
         return {
           fileId: file.id,
           fileName: file.name,
@@ -829,7 +830,9 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
           sheetId: sheet.sheetId,
           tabName: sheet.tabName,
           headers,
-          rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim())
+          // Les lignes vides entre deux lignes remplies restent affichées, comme dans
+          // Sheets : ce sont celles qu'on vient d'insérer.
+          rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim()) || index < lastFilled
             ? [{
                 rowNumber: index + 2,
                 values: headers.map((_, column) => row[column]?.value ?? ""),
@@ -853,6 +856,12 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
 export async function refreshObjectIndexTables() {
   clearObjectIndexTableCache()
   return listObjectIndexTables()
+}
+
+/** Position de la dernière ligne qui contient quelque chose. */
+function lastFilledRow(rows: Array<Array<{ value: string } | undefined> | undefined>) {
+  for (let index = rows.length - 1; index >= 0; index -= 1) if (rows[index]?.some((cell) => cell?.value.trim())) return index
+  return -1
 }
 
 function clearObjectIndexTableCache() {
@@ -924,20 +933,23 @@ export async function updateObjectIndexRow(fileId: string, tabName: string, rowN
  * `addObjectIndexRow` qui ajoute à la fin, la ligne apparaît là où on l’a demandée —
  * c’est ce qu’attend quelqu’un qui vient de Google Sheets.
  */
-async function insertObjectIndexRowAfter(fileId: string, table: { sheetId: number; headers: string[] }, tabName: string, afterRowNumber: number, values: string[]) {
+async function insertObjectIndexRowAfter(fileId: string, table: { sheetId: number; headers: string[] }, tabName: string, afterRowNumber: number, values: string[][]) {
   await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
     method: "POST",
-    body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + 1 }, inheritFromBefore: afterRowNumber > 1 } }] }),
+    body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + values.length }, inheritFromBefore: afterRowNumber > 1 } }] }),
   })
   const target = afterRowNumber + 1
-  await updateRange(fileId, sheetTabRange(tabName, `A${target}:${columnName(table.headers.length)}${target}`), [values])
+  // Des lignes entièrement vides n'ont rien à écrire (et une plage vide serait refusée).
+  if (values.some((row) => row.some(Boolean))) await updateRange(fileId, sheetTabRange(tabName, `A${target}:${columnName(table.headers.length)}${target + values.length - 1}`), values)
   clearObjectIndexTableCache()
 }
 
-export async function insertObjectIndexRow(fileId: string, tabName: string, afterRowNumber: number) {
+/** Des lignes vides sous `afterRowNumber` ; chacune reçoit un identifiant s'il y a une colonne ID. */
+export async function insertObjectIndexRow(fileId: string, tabName: string, afterRowNumber: number, count = 1) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  const values = table.headers.map((header) => normalizedHeader(header) === "id" ? crypto.randomUUID() : "")
+  const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
+  const values = Array.from({ length: rows }, () => table.headers.map((header) => normalizedHeader(header) === "id" ? crypto.randomUUID() : ""))
   await insertObjectIndexRowAfter(fileId, table, tabName, afterRowNumber, values)
 }
 
@@ -955,7 +967,7 @@ export async function duplicateObjectIndexRow(fileId: string, tabName: string, r
   if (!row) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
   const values = table.headers.map((header, index) => normalizedHeader(header) === "id" ? crypto.randomUUID() : row.values[index] ?? "")
   // La copie apparaît juste sous l’originale, comme dans Google Sheets.
-  await insertObjectIndexRowAfter(fileId, table, tabName, rowNumber, values)
+  await insertObjectIndexRowAfter(fileId, table, tabName, rowNumber, [values])
 }
 
 export async function deleteObjectIndexRow(fileId: string, tabName: string, rowNumber: number) {
@@ -3283,7 +3295,7 @@ function npcFromRow(row: string[]): CampaignNpcRecord | null {
     strength: npcNumber(row[7]), dexterity: npcNumber(row[8]), intelligence: npcNumber(row[9]),
     wisdom: npcNumber(row[10]), charisma: npcNumber(row[11]), constitution: npcNumber(row[16]),
     gmNotes: row[22] || "", portrait: row[23] || "", playerNotes: row[24] || "",
-    inCampaign: sheetValueIsChecked(row[26]), createdAt: row[27] || "", updatedAt: row[28] || "",
+    inCampaign: sheetValueIsChecked(row[26]), important: sheetValueIsChecked(row[31]), createdAt: row[27] || "", updatedAt: row[28] || "",
     createdByUid: row[32] || "",
   }
 }
@@ -3311,6 +3323,8 @@ function npcRow(npc: CampaignNpcRecord, pageLinked: string, original: string[] |
   values[23] = npc.portrait
   values[24] = npc.playerNotes
   values[26] = (options.inCampaign ?? npc.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non"
+  // Une ancienne version de l'application n'envoie pas ce champ : la valeur de la feuille est gardée.
+  values[31] = (npc.important ?? current?.important ?? false) ? "Oui" : "Non"
   values[27] = current?.createdAt || npc.createdAt || now
   values[28] = now
   values[32] = npc.createdByUid || current?.createdByUid || ""
@@ -3321,6 +3335,14 @@ export async function listNpcs(pageLinked: string, onlyInCampaign = false) {
   const sheet = await ensureJdrSheet("npcs")
   const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
   return rows.map(npcFromRow).filter((npc): npc is CampaignNpcRecord => Boolean(npc && npc.pageLinked === pageLinked && (!onlyInCampaign || npc.inCampaign)))
+}
+
+/** Tous les PNJ, toutes pages confondues : l'Index des PNJs y cherche les campagnes de chacun. */
+export async function listAllNpcs() {
+  const sheet = await ensureJdrSheet("npcs")
+  if (!sheet) return []
+  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:AH`)
+  return rows.map(npcFromRow).filter((npc): npc is CampaignNpcRecord => Boolean(npc))
 }
 
 export async function getNpcById(id: string) {

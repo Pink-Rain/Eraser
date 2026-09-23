@@ -208,7 +208,8 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
           rowCommands={{
             append: () => void mutate({ action: "add" }, "add"),
             insertBefore: inSheetOrder ? (rowKey) => void mutate({ action: "insert", rowNumber: Number(rowKey) - 1 }, "insert") : undefined,
-            insertAfter: inSheetOrder ? (rowKey) => void mutate({ action: "insert", rowNumber: Number(rowKey) }, "insert") : undefined,
+            // Les lignes vides arrivent sous celle-ci dans la feuille, quel que soit le tri affiché.
+            insertRows: (rowKey, count) => void mutate({ action: "insert", rowNumber: Number(rowKey), count }, "insert"),
             duplicate: (rowKeys) => void mutate({ action: "duplicate", rowNumbers: rowKeys.map(Number) }, "duplicate"),
             remove: (rowKeys) => void mutate({ action: "delete", rowNumbers: rowKeys.map(Number) }, "delete"),
           }}

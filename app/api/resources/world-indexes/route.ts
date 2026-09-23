@@ -5,6 +5,7 @@ import {
   addWorldIndexRow,
   deleteWorldIndexRows,
   duplicateWorldIndexRows,
+  insertWorldIndexRows,
   getWorldIndex,
   isWorldIndexKey,
   moveWorldIndexRows,
@@ -39,7 +40,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; fields?: Record<string, unknown>; toTab?: string }
+    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; fields?: Record<string, unknown>; toTab?: string; count?: number }
     if (!isWorldIndexKey(body.key) || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const key = body.key
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
@@ -50,6 +51,7 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true, changed, data: changed.includes(key) ? await getWorldIndex(key) : undefined })
     }
     if (body.action === "add" && Array.isArray(body.values)) changed = await addWorldIndexRow(key, body.tabName, body.values.map((value) => String(value ?? "")))
+    else if (body.action === "insert" && typeof body.rowNumber === "number") await insertWorldIndexRows(key, body.tabName, body.rowNumber, typeof body.count === "number" ? body.count : 1)
     else if (body.action === "duplicate" && rowNumbers.length) await duplicateWorldIndexRows(key, body.tabName, rowNumbers)
     else if (body.action === "delete" && rowNumbers.length) await deleteWorldIndexRows(key, body.tabName, rowNumbers)
     else if (body.action === "move" && rowNumbers.length && typeof body.toTab === "string") await moveWorldIndexRows(key, body.tabName, body.toTab, rowNumbers)

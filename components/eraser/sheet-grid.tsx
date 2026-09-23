@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -14,6 +14,10 @@ import {
   AlertDialogTitle,
 } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
+import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Popover, PopoverAnchor, PopoverContent } from "@/components/ui/popover"
+import { ColumnMenu, filterIsActive, isGridFilters, passesFilter, sortValues, type ColumnFilter, type GridFilters } from "@/components/eraser/sheet-grid-filter"
 import {
   ContextMenu,
   ContextMenuContent,
@@ -73,9 +77,10 @@ export type SheetGridSort = { column: string; direction: "asc" | "desc" } | null
 export type SheetGridRowCommands = {
   /** La ligne fantôme au bas du tableau. */
   append?: () => void
-  /** Insertion en place. N'est proposée que si l'ordre affiché est celui de la feuille. */
-  insertAfter?: (rowKey: string) => void
+  /** Insertion en place, au-dessus de la ligne. */
   insertBefore?: (rowKey: string) => void
+  /** « Ajouter une ligne » et « Ajouter plusieurs lignes » : les lignes vides arrivent sous celle-ci. */
+  insertRows?: (rowKey: string, count: number) => void
   duplicate?: (rowKeys: string[]) => void
   remove?: (rowKeys: string[]) => void
 }
@@ -135,6 +140,7 @@ type SheetGridMenu = {
   pasteRows: (startKey: string) => Promise<void>
   clearRows: (keys: string[]) => void
   askRemoval: (keys: string[]) => void
+  askInsertRows: (key: string) => void
   rowCommands?: SheetGridRowCommands
   rowMenuExtras?: (rowKey: string) => ReactNode
 }
@@ -153,10 +159,11 @@ function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: nu
     <ContextMenuItem onSelect={() => void menu.copyRows(targets(), true)}><Scissors />Couper<ContextMenuShortcut>Ctrl+X</ContextMenuShortcut></ContextMenuItem>
     <ContextMenuItem onSelect={() => void menu.pasteRows(rowKey)}><ClipboardPaste />Coller ici<ContextMenuShortcut>Ctrl+V</ContextMenuShortcut></ContextMenuItem>
     <ContextMenuItem onSelect={() => menu.clearRows(targets())}><Eraser />Vider le contenu<ContextMenuShortcut>Suppr</ContextMenuShortcut></ContextMenuItem>
-    {(rowCommands?.insertBefore || rowCommands?.insertAfter) && <>
+    {(rowCommands?.insertBefore || rowCommands?.insertRows) && <>
       <ContextMenuSeparator />
+      {rowCommands.insertRows && <ContextMenuItem onSelect={() => rowCommands.insertRows?.(rowKey, 1)}><Plus />Ajouter une ligne</ContextMenuItem>}
+      {rowCommands.insertRows && <ContextMenuItem onSelect={() => menu.askInsertRows(rowKey)}><ListPlus />Ajouter plusieurs lignes…</ContextMenuItem>}
       {rowCommands.insertBefore && <ContextMenuItem onSelect={() => rowCommands.insertBefore?.(rowKey)}><CornerDownLeft className="rotate-180" />Insérer une ligne au-dessus</ContextMenuItem>}
-      {rowCommands.insertAfter && <ContextMenuItem onSelect={() => rowCommands.insertAfter?.(rowKey)}><CornerDownLeft />Insérer une ligne en dessous</ContextMenuItem>}
     </>}
     {rowCommands?.duplicate && <ContextMenuItem onSelect={() => rowCommands.duplicate?.(targets())}><Copy />Dupliquer<ContextMenuShortcut>Ctrl+D</ContextMenuShortcut></ContextMenuItem>}
     {rowCommands?.remove && <>
@@ -185,7 +192,7 @@ type SheetGridRowActions = {
  */
 const SheetGridRowView = memo(function SheetGridRowView({
   rowKey, rowNumber, rowIndex, columns, firstKey, manualHeight, selected, activeColumn, fillColumn,
-  version, writeTick, disabled, valueOf, renderCustomCell, actions,
+  version, writeTick, disabled, valueOf, renderCustomCell, actions, striped,
 }: {
   rowKey: string
   rowNumber: number
@@ -202,10 +209,13 @@ const SheetGridRowView = memo(function SheetGridRowView({
   valueOf: (rowKey: string, columnKey: string) => string
   renderCustomCell?: (rowKey: string, columnKey: string) => ReactNode
   actions: SheetGridRowActions
+  /** Une ligne sur deux, à peine teintée, pour suivre une ligne d'un coup d'œil. */
+  striped: boolean
 }) {
   // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
   // qui défile derrière elle. La teinte de sélection est posée par-dessus.
-  const cellBase = `relative border-b border-r bg-background p-1 align-top ${manualHeight ? "overflow-hidden" : ""}`
+  // Teinte opaque : les colonnes figées recouvrent celles qui défilent.
+  const cellBase = `relative border-b border-r p-1 align-top ${striped ? "bg-[color-mix(in_oklab,var(--background)_95%,var(--foreground))]" : "bg-background"} ${manualHeight ? "overflow-hidden" : ""}`
   return <tr data-row-key={rowKey} data-row-index={rowIndex} style={manualHeight ? { height: manualHeight } : undefined}>
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -268,7 +278,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
 })
 
 export function SheetGrid({
-  layoutKey, columns, rows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
+  layoutKey, columns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, version = 0,
 }: {
   layoutKey: string
@@ -309,6 +319,32 @@ export function SheetGrid({
   const [notice, setNotice] = useState("")
   // Google Sheets a son historique, pas nous : une suppression se confirme.
   const [pendingRemoval, setPendingRemoval] = useState<string[] | null>(null)
+  // « Ajouter plusieurs lignes » : la ligne visée et le nombre demandé.
+  const [insertFor, setInsertFor] = useState<string | null>(null)
+  const [insertCount, setInsertCount] = useState("5")
+
+  // Tri et filtres du menu d'en-tête. La page trie elle-même quand elle le sait
+  // (onSort) ; sinon la grille trie. Les filtres sont gardés d'une visite à l'autre.
+  const [internalSort, setInternalSort] = useState<SheetGridSort>(null)
+  const activeSort = onSort ? sort ?? null : internalSort
+  const changeSort = onSort ?? setInternalSort
+  const [filters, setFilters] = usePersistentState<GridFilters>(`${layoutKey}:filters`, {}, isGridFilters)
+  const [menuColumn, setMenuColumn] = useState<string | null>(null)
+  const plainOf = useCallback((rowKey: string, columnKey: string) => richTextPlainText(valueOf(rowKey, columnKey)).replace(/\s+/g, " ").trim(), [valueOf])
+  const activeFilters = useMemo(() => Object.entries(filters).filter(([key, filter]) => filterIsActive(filter) && columns.some((column) => column.key === key)), [columns, filters])
+  const rows = useMemo(() => {
+    const filtered = activeFilters.length ? sourceRows.filter((row) => activeFilters.every(([key, filter]) => passesFilter(filter, plainOf(row.key, key)))) : sourceRows
+    if (onSort || !internalSort) return filtered
+    const direction = internalSort.direction === "asc" ? 1 : -1
+    return [...filtered].sort((left, right) => sortValues(plainOf(left.key, internalSort.column), plainOf(right.key, internalSort.column)) * direction)
+  }, [activeFilters, internalSort, onSort, plainOf, sourceRows])
+  const setFilter = useCallback((key: string, filter: ColumnFilter | null) => {
+    const next = { ...filters }
+    if (filter) next[key] = filter
+    else delete next[key]
+    setFilters(next)
+  }, [filters, setFilters])
+  const columnValues = useCallback((key: string) => [...new Set(sourceRows.map((row) => plainOf(row.key, key)))].sort(sortValues), [plainOf, sourceRows])
 
   const activate = useCallback((editor: RichTextTarget) => {
     activeRef.current = editor
@@ -521,6 +557,7 @@ export function SheetGrid({
     pasteRows,
     clearRows,
     askRemoval: setPendingRemoval,
+    askInsertRows: (key) => { setInsertFor(key); setInsertCount("5") },
     rowCommands,
     rowMenuExtras,
   }
@@ -538,7 +575,10 @@ export function SheetGrid({
       targetRef={activeRef}
       ready={toolbarReady}
       leading={toolbarLeading}
-      trailing={<>{notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}</>}
+      trailing={<>
+        {activeFilters.length > 0 && <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Filter className="size-3 fill-current text-primary" />{rows.length} ligne{rows.length > 1 ? "s" : ""} sur {sourceRows.length}<button type="button" className="text-primary underline" onClick={() => setFilters({})}>Retirer les filtres</button></span>}
+        {notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}
+      </>}
       onReset={() => { setLayout(emptyLayout); setPreview({ columns: {}, rows: {} }) }}
     />
     {/* Un seul conteneur défile, dans les deux sens : les en-têtes restent collés en haut
@@ -553,19 +593,44 @@ export function SheetGrid({
         <thead>
           <tr>
             <th className={`${headerCell} left-0 z-50 p-0`}><span className="sr-only">Poignée de ligne</span></th>
-            {columns.map((column) => <th
-              key={column.key}
-              className={`${headerCell} relative ${column.key === firstKey ? "z-40" : "z-30"}`}
-              style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
-            >
-              {column.sortable !== false && onSort
-                ? <button type="button" onClick={() => onSort(sort?.column === column.key ? (sort.direction === "asc" ? { column: column.key, direction: "desc" } : null) : { column: column.key, direction: "asc" })} className="flex w-full items-center justify-between gap-1 whitespace-normal break-words text-left hover:text-primary" title="Trier sur cette colonne">
-                    <span>{column.label}</span>
-                    {sort?.column === column.key ? (sort.direction === "asc" ? <ArrowDownAZ className="size-3.5 shrink-0" /> : <ArrowUpAZ className="size-3.5 shrink-0" />) : null}
-                  </button>
-                : <span className="block whitespace-normal break-words">{column.label}</span>}
-              <span role="separator" aria-label={`Redimensionner la colonne ${column.label}`} onPointerDown={(event) => startColumnResize(event, column.key, column.minWidth ?? 80, column.maxWidth ?? 900)} className={resizeHandle} />
-            </th>)}
+            {columns.map((column) => {
+              const filtered = filterIsActive(filters[column.key])
+              const sortable = column.sortable !== false
+              const direction = activeSort?.column === column.key ? activeSort.direction : null
+              return <th
+                key={column.key}
+                className={`${headerCell} relative ${column.key === firstKey ? "z-40" : "z-30"}`}
+                style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
+                // Clic droit : tri et filtres, comme dans Google Sheets.
+                onContextMenu={(event) => { if (column.custom) return; event.preventDefault(); setMenuColumn(column.key) }}
+                title={column.custom ? undefined : "Clic droit pour trier ou filtrer"}
+              >
+                <div className="flex items-center gap-1">
+                  {sortable
+                    ? <button type="button" onClick={() => changeSort(direction === "asc" ? { column: column.key, direction: "desc" } : direction === "desc" ? null : { column: column.key, direction: "asc" })} className="flex min-w-0 flex-1 items-center justify-between gap-1 whitespace-normal break-words text-left hover:text-primary">
+                        <span>{column.label}</span>
+                        {direction ? (direction === "asc" ? <ArrowDownAZ className="size-3.5 shrink-0" /> : <ArrowUpAZ className="size-3.5 shrink-0" />) : null}
+                      </button>
+                    : <span className="block min-w-0 flex-1 whitespace-normal break-words">{column.label}</span>}
+                  {filtered && <button type="button" onClick={() => setMenuColumn(column.key)} className="shrink-0 rounded p-0.5 text-primary hover:bg-primary/10" aria-label={`Filtre sur ${column.label}`} title="Filtre actif"><Filter className="size-3.5 fill-current" /></button>}
+                </div>
+                {!column.custom && <Popover open={menuColumn === column.key} onOpenChange={(open) => { if (!open) setMenuColumn(null) }}>
+                  <PopoverAnchor asChild><span aria-hidden className="pointer-events-none absolute inset-x-0 bottom-0 h-0" /></PopoverAnchor>
+                  {menuColumn === column.key && <PopoverContent align="start" className="w-auto p-2">
+                    <ColumnMenu
+                      label={column.label}
+                      values={columnValues(column.key)}
+                      filter={filters[column.key]}
+                      sortDirection={direction}
+                      onSort={(next) => changeSort(next ? { column: column.key, direction: next } : null)}
+                      onApply={(filter) => setFilter(column.key, filter)}
+                      onClose={() => setMenuColumn(null)}
+                    />
+                  </PopoverContent>}
+                </Popover>}
+                <span role="separator" aria-label={`Redimensionner la colonne ${column.label}`} onPointerDown={(event) => startColumnResize(event, column.key, column.minWidth ?? 80, column.maxWidth ?? 900)} className={resizeHandle} />
+              </th>
+            })}
           </tr>
         </thead>
         <tbody>
@@ -586,6 +651,7 @@ export function SheetGrid({
             valueOf={valueOf}
             renderCustomCell={renderCustomCell}
             actions={rowActions}
+            striped={rowIndex % 2 === 1}
           />)}
           {rowCommands?.append && Boolean(rows.length) && <tr>
             <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
@@ -597,8 +663,28 @@ export function SheetGrid({
           </tr>}
         </tbody>
       </table>
-      {!rows.length && <div className="px-5 py-12 text-center text-sm text-muted-foreground">{empty}</div>}
+      {!rows.length && <div className="px-5 py-12 text-center text-sm text-muted-foreground">{sourceRows.length ? "Aucune ligne ne correspond aux filtres." : empty}</div>}
     </div>
+    <Dialog open={insertFor !== null} onOpenChange={(open) => { if (!open) setInsertFor(null) }}>
+      <DialogContent className="sm:max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Ajouter plusieurs lignes</DialogTitle>
+          <DialogDescription>Les lignes vides arrivent juste sous la ligne choisie.</DialogDescription>
+        </DialogHeader>
+        <form className="grid gap-4" onSubmit={(event) => {
+          event.preventDefault()
+          const count = Math.max(1, Math.min(100, Math.trunc(Number(insertCount)) || 0))
+          if (insertFor) rowCommands?.insertRows?.(insertFor, count)
+          setInsertFor(null)
+        }}>
+          <label className="grid gap-1.5 text-sm font-medium">Nombre de lignes<Input autoFocus type="number" min={1} max={100} value={insertCount} onChange={(event) => setInsertCount(event.target.value)} /></label>
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={() => setInsertFor(null)}>Annuler</Button>
+            <Button type="submit"><ListPlus />Ajouter</Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
     <AlertDialog open={Boolean(pendingRemoval)} onOpenChange={(open) => { if (!open) setPendingRemoval(null) }}>
       <AlertDialogContent>
         <AlertDialogHeader>

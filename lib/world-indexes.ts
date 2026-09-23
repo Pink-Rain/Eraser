@@ -103,11 +103,16 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
   const sheet = await readFormattedSheet(spreadsheetId, [tab.name], { light: true })
   const width = Math.max(0, ...sheet.rows.map((row) => row?.length ?? 0))
   const headers = headersOf((sheet.rows[0] ?? []).map((cell) => cell?.value ?? ""), tab, width)
-  const rows = sheet.rows.slice(1).flatMap((row, index) => row?.some((cell) => cell?.value.trim())
+  const body = sheet.rows.slice(1)
+  let lastFilled = body.length - 1
+  while (lastFilled >= 0 && !body[lastFilled]?.some((cell) => cell?.value.trim())) lastFilled -= 1
+  // Une ligne vide entre deux lignes remplies reste affichée, comme dans Sheets : c'est
+  // souvent une ligne qu'on vient d'insérer pour la remplir.
+  const rows = body.flatMap((row, index) => index <= lastFilled
     ? [{
         rowNumber: index + 2,
-        values: headers.map((_, column) => row[column]?.value ?? ""),
-        html: headers.map((_, column) => row[column]?.html ?? ""),
+        values: headers.map((_, column) => row?.[column]?.value ?? ""),
+        html: headers.map((_, column) => row?.[column]?.html ?? ""),
       }]
     : [])
   return { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows }
@@ -398,6 +403,28 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
     await syncRowLinks(key, tabName, rowNumber, changed)
     invalidateWorldIndexes(changed)
     return [...changed].filter((changedKey) => changedKey !== key)
+  })
+}
+
+/**
+ * « Ajouter une ligne » ou « plusieurs » : des lignes vides juste sous `afterRowNumber`,
+ * avec la mise en forme de la ligne du dessus. La mémoire est décalée au lieu d'être
+ * relue : des lignes vides en fin de tableau n'y seraient sinon plus visibles.
+ */
+export function insertWorldIndexRows(key: WorldIndexKey, tabName: string, afterRowNumber: number, count: number) {
+  return serialized(async () => {
+    const { sheet, table } = await tableFor(key, tabName)
+    const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
+    if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+    await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + rows }, inheritFromBefore: afterRowNumber > 1 } }] }),
+    })
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    for (const row of table.rows) if (row.rowNumber > afterRowNumber) row.rowNumber += rows
+    const position = table.rows.findIndex((row) => row.rowNumber > afterRowNumber)
+    const blanks = Array.from({ length: rows }, (_, offset) => ({ rowNumber: afterRowNumber + offset + 1, values: table.headers.map(() => ""), html: table.headers.map(() => "") }))
+    table.rows.splice(position < 0 ? table.rows.length : position, 0, ...blanks)
   })
 }
 

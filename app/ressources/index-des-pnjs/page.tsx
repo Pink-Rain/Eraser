@@ -3,41 +3,62 @@ import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
-import { NpcIndex } from "@/components/eraser/npc-index"
-import { listAllCampaignsForAdmin, listCampaignsForMj, listNpcs } from "@/lib/google-sheets"
-import { npcIndexPage } from "@/lib/npc-pages"
-import type { CampaignNpcRecord } from "@/lib/shop-schema"
+import { NpcIndex, type NpcCampaignLink } from "@/components/eraser/npc-index"
+import { listAllCampaignsForAdmin, listAllNpcs, listCampaignsForMj } from "@/lib/google-sheets"
+import { identityUidsForUser } from "@/lib/identity-links"
+import { foldNpcName, isNpcLibraryPage, npcIndexTabs } from "@/lib/npc-pages"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-async function NpcIndexData({ accountUid, isAdmin }: { accountUid: string; isAdmin: boolean }) {
-  let npcs: CampaignNpcRecord[] = []
-  let campaigns: Array<{ id: string; name: string }> = []
+async function loadNpcIndex(accountUid: string, isAdmin: boolean) {
   try {
-    ;[npcs, campaigns] = await Promise.all([
-      listNpcs(npcIndexPage),
-      isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
+    const [npcs, allCampaigns, ownCampaigns, identities] = await Promise.all([
+      listAllNpcs(),
+      listAllCampaignsForAdmin(),
+      isAdmin ? Promise.resolve([]) : listCampaignsForMj(accountUid),
+      identityUidsForUser(accountUid),
     ])
+    const campaignById = new Map(allCampaigns.map((campaign) => [campaign.id, campaign]))
+    const owned = new Set([...ownCampaigns.map((campaign) => campaign.id), ...allCampaigns.filter((campaign) => identities.includes(campaign.mjUid)).map((campaign) => campaign.id)])
+    // Chaque campagne où figure un PNJ du même nom. Un administrateur l'ouvre en mode
+    // MJ ; un MJ aussi s'il la mène, en mode joueur sinon.
+    const campaignsByName: Record<string, NpcCampaignLink[]> = {}
+    for (const npc of npcs) {
+      if (isNpcLibraryPage(npc.pageLinked)) continue
+      const campaign = campaignById.get(npc.pageLinked)
+      if (!campaign) continue
+      const list = campaignsByName[foldNpcName(npc.name)] ||= []
+      if (!list.some((item) => item.id === campaign.id)) list.push({ id: campaign.id, name: campaign.name, manage: isAdmin || owned.has(campaign.id) })
+    }
+    for (const list of Object.values(campaignsByName)) list.sort((left, right) => left.name.localeCompare(right.name, "fr"))
+    const library = npcs.filter((npc) => npcIndexTabs.some((tab) => tab.id === npc.pageLinked))
+    const sourceCampaigns = isAdmin ? allCampaigns : ownCampaigns
+    const sourcePages = [{ id: "bac-a-sable", name: "Bac à sable" }, ...sourceCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]
+    return { library, sourcePages, campaignsByName }
   } catch (reason) {
     console.error("NPC_INDEX_LOAD_FAILED", reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
-    return <p className="mt-6 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">La feuille « PNJs » n’a pas pu être chargée depuis Google Drive.</p>
+    return null
   }
-  const sourcePages = [{ id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]
-  return <NpcIndex initialNpcs={npcs} sourcePages={sourcePages} />
+}
+
+async function NpcIndexData({ accountUid, isAdmin }: { accountUid: string; isAdmin: boolean }) {
+  const data = await loadNpcIndex(accountUid, isAdmin)
+  if (!data) return <p className="mt-6 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">La feuille « PNJs » n’a pas pu être chargée depuis Google Drive.</p>
+  return <NpcIndex initialNpcs={data.library} sourcePages={data.sourcePages} campaignsByName={data.campaignsByName} />
 }
 
 export default async function NpcIndexPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return (
-    <AuthenticatedShell pageLabel="Index des PNJ" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="Index des PNJs" roles={["admin", "mj"]}>
       <div className="w-full px-4 pt-4 sm:px-6">
         <div className="shrink-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
-          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des PNJ</h1>
+          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des PNJs</h1>
         </div>
-        <Suspense fallback={<DeferredContentLoading label="Chargement des PNJ…" />}>
+        <Suspense fallback={<DeferredContentLoading label="Chargement des PNJs…" />}>
           <NpcIndexData accountUid={account.uid} isAdmin={account.role === "admin"} />
         </Suspense>
       </div>

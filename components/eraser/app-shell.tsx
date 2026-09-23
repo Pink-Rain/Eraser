@@ -530,7 +530,7 @@ export function AppShell({
                       <NavSubLink href="/ressources/index-des-religions" label="Index des religions" active={pathname === "/ressources/index-des-religions"} />
                       <NavSubLink href="/ressources/index-des-campagnes" label="Index des campagnes" active={pathname === "/ressources/index-des-campagnes"} />
                       <NavSubLink href="/ressources/index-des-personnages" label="Index des personnages" active={pathname === "/ressources/index-des-personnages"} />
-                      <NavSubLink href="/ressources/index-des-pnjs" label="Index des PNJ" active={pathname === "/ressources/index-des-pnjs"} />
+                      <NavSubLink href="/ressources/index-des-pnjs" label="Index des PNJs" active={pathname === "/ressources/index-des-pnjs"} />
                     </NavSection>
                     <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable/")}>
                       <NavSubLink href="/bac-a-sable/tabletop" label="Tabletop" active={pathname === "/bac-a-sable/tabletop"} />

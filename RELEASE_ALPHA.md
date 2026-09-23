@@ -1,60 +1,44 @@
-# Eraser 0.1.1-alpha.54 — l’Index des PNJ, et des caractéristiques en couleur
+# Eraser 0.1.1-alpha.55 — trier et filtrer comme dans Sheets
 
-Première version livrée **sans réinstallation** : Eraser la télécharge, puis
-propose « Appliquer maintenant ».
+## Tous les index
 
-## Ressources
+- **Clic droit sur le nom d’une colonne** : un menu comme celui de Google
+  Sheets, sans les couleurs.
+  - « Trier de A à Z », « Trier de Z à A », et « Retirer le tri ».
+  - **Filtrer par condition** : cellule vide ou non vide, le texte contient, ne
+    contient pas, commence par, se termine par, est exactement, et
+    supérieur / inférieur / égal à (en nombres quand c’est possible).
+  - **Filtrer par valeurs** : la liste des valeurs de la colonne à cocher, avec
+    recherche, « Sélectionner les N – Effacer » et « Affichage de N ».
+  - Une colonne filtrée porte un petit entonnoir. La barre d’outils indique
+    « N lignes sur M » avec « Retirer les filtres ». Les filtres restent en
+    place d’une visite à l’autre.
+- **Clic droit sur la poignée d’une ligne** : « Ajouter une ligne » et
+  « Ajouter plusieurs lignes… » (on choisit combien). Les lignes vides arrivent
+  juste sous la ligne choisie. Dans l’Index des classes, ce sont des sorts
+  « Nouveau sort » à renommer ; dans l’Index des PNJs, des « Nouveau PNJ ».
+- **Une ligne sur deux est à peine teintée**, pour suivre une ligne d’un coup
+  d’œil.
+- Une ligne vide entre deux lignes remplies reste affichée, comme dans Sheets.
 
-- **Index des personnages** et **Index des campagnes** : les anciennes pages
-  « Tous les personnages » et « Toutes les campagnes » quittent
-  l’Administration pour Ressources, et les MJ y ont accès. Seul un
-  administrateur voit l’adresse e-mail des propriétaires et peut les changer
-  (« Attribuer à »). Les anciens liens mènent aux nouvelles pages.
-- Les rubriques « Personnages » et « Campagnes » disparaissent du menu.
-- **Index des PNJ** : nouveau tableau avec Nom, Titre, Peuple et
-  Fonction / classe / métier. Un clic sur le nom ouvre la fiche complète. Le
-  peuple se choisit dans l’Index des peuples. L’index est une bibliothèque de
-  PNJ hors campagne : une campagne ou le bac à sable peut y **récupérer** un PNJ
-  (copie ou déplacement), et l’index peut récupérer ceux d’une campagne.
+## Index des PNJs
 
-## La fiche des PNJ, partout
-
-- Nouveaux champs : **Titre**, **Fonction / classe / métier**, **Peuple**.
-- Les caractéristiques sont celles des créatures : Force, Dextérité,
-  Intelligence, Sagesse, Charisme, **Vitesse** et **Vitalité**. La Vitalité
-  est la vie totale du PNJ, la Vitesse sa rapidité. La Constitution quitte la
-  fiche, mais sa valeur reste dans Sheets.
-- **Vie actuelle et Sac à dos n’existent que pour un PNJ de campagne.** Dans
-  le bac à sable et l’Index des PNJ, la fiche ne les montre plus, et un PNJ
-  arrive en campagne avec toute sa vie.
-- Le tabletop affiche les mêmes sept caractéristiques, dans les mêmes couleurs.
-
-## Couleurs des caractéristiques
-
-Comme dans la fiche de personnage : Force, Dextérité, Intelligence, Sagesse et
-Charisme en **bleu**, Vitesse et Vitalité en **orange**. Créatures, PNJ et
-tabletop partagent le même bloc.
-
-## Fiche des créatures
-
-- « Description, Histoire, Lore, Autre » passe dans la colonne de droite, sous
-  les emplacements.
-
-## Dans Google Sheets
-
-- La feuille « PNJs » reçoit une colonne **« Titre »**, ajoutée à la fin.
-  Aucune colonne existante ne bouge. Fonction, Peuple et Vitesse réutilisent
-  les colonnes « Classe / métier », « Peuple » et « Rapidité », déjà remplies
-  pour plusieurs PNJ.
-- L’annuaire de comptes partagé laisse désormais les MJ lire la liste des
-  comptes, pour afficher les propriétaires dans les deux nouveaux index.
+- Le nom prend son **s** : « Index des PNJs ».
+- Deux onglets : **PNJs** et **PNJs Génériques**.
+- Colonne **Campagnes**, remplie toute seule : les campagnes où figure un PNJ du
+  même nom. Un clic ouvre la campagne. En vue administrateur, ou pour le MJ de
+  la campagne, elle s’ouvre en mode MJ. Pour un autre MJ, elle s’ouvre en mode
+  joueur : sans outils de MJ ni notes privées.
+- Colonne **Important**, une case à cocher. Elle correspond à la colonne
+  « PNJ important » déjà présente dans la feuille « PNJs ».
 
 ## Vérifications
 
-- dans un vrai navigateur : note de la créature à droite ; bleu et orange des
-  caractéristiques ; fiche PNJ du bac à sable sans vie actuelle ni sac à dos,
-  fiche de campagne avec ; Vitalité enregistrée comme vie totale ; Index des
-  PNJ à quatre colonnes, peuple choisi dans l’Index des peuples et enregistré,
-  fiche ouverte depuis le nom ;
+- dans un vrai navigateur : tri A→Z et Z→A depuis l’en-tête, filtre par
+  valeurs, filtre par condition (« Rang supérieur à 3 »), entonnoir et
+  compteur, lignes alternées, ajout de trois lignes sous la ligne choisie ;
+  Index des PNJs avec ses deux onglets, liens de campagne en mode MJ et
+  joueur, case « Important » enregistrée, « Nouveau PNJ » ajouté dans l’onglet
+  des génériques ;
 - lint sans erreur, 20 tests d’interface au vert, serveur desktop vérifié en
   HTTP 200.

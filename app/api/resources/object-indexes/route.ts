@@ -35,7 +35,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[] }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; count?: number; column?: number; html?: string; values?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
@@ -58,7 +58,7 @@ export async function POST(request: Request) {
       if (Array.isArray(body.values)) await addObjectIndexRowWithValues(body.fileId, body.tabName, body.values.map((value) => String(value ?? "")))
       else await addObjectIndexRow(body.fileId, body.tabName)
     } else if (body.action === "insert" && typeof body.rowNumber === "number") {
-      await insertObjectIndexRow(body.fileId, body.tabName, body.rowNumber)
+      await insertObjectIndexRow(body.fileId, body.tabName, body.rowNumber, typeof body.count === "number" ? body.count : 1)
     } else if (body.action === "delete" && rowNumbers.length) {
       for (const row of [...rowNumbers].sort((left, right) => right - left)) await deleteObjectIndexRow(body.fileId, body.tabName, row)
     } else if (body.action === "duplicate" && rowNumbers.length) {

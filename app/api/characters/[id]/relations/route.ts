@@ -93,7 +93,7 @@ async function enrichedRelations(
 
 function blankNpc(pageLinked: string, name: string, createdByUid: string): CampaignNpcRecord {
   return {
-    id: crypto.randomUUID(), pageLinked, name, title: "", occupation: "", people: "", portrait: "", currentHp: 0, totalHp: 0, speed: 0,
+    id: crypto.randomUUID(), pageLinked, name, title: "", occupation: "", people: "", important: false, portrait: "", currentHp: 0, totalHp: 0, speed: 0,
     constitution: 0, strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0,
     playerNotes: "", gmNotes: "", inCampaign: false, createdByUid, createdAt: "", updatedAt: "",
   }

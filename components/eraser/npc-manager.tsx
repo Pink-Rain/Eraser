@@ -27,7 +27,7 @@ export function blankNpc(pageLinked: string): CampaignNpcRecord {
   return {
     id: crypto.randomUUID(), pageLinked, name: "", title: "", occupation: "", people: "", portrait: "", currentHp: 0, totalHp: 0, speed: 0,
     constitution: 0, strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0,
-    playerNotes: "", gmNotes: "", inCampaign: false, createdByUid: "", createdAt: "", updatedAt: "",
+    playerNotes: "", gmNotes: "", inCampaign: false, important: false, createdByUid: "", createdAt: "", updatedAt: "",
   }
 }
 
@@ -139,7 +139,7 @@ const textLabel = "grid gap-1.5 text-xs font-semibold text-muted-foreground"
 
 /**
  * La fiche d'un PNJ, partout où on en crée ou en modifie un. La vie actuelle et le sac
- * à dos n'existent que pour un PNJ de campagne : dans le bac à sable ou l'Index des PNJ,
+ * à dos n'existent que pour un PNJ de campagne : dans le bac à sable ou l'Index des PNJs,
  * la Vitalité suffit.
  */
 export function NpcForm({ npc, pending, onClose, onSave }: { npc: CampaignNpcRecord; pending: boolean; onClose: () => void; onSave: (npc: CampaignNpcRecord, portrait?: File) => void }) {
