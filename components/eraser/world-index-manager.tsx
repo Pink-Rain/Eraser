@@ -111,8 +111,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
    * Données fraîches du serveur. Remonter les cellules pendant la frappe renverrait le
    * curseur au début : si une cellule a le focus, on attend qu'elle le perde.
    */
-  const applyData = useCallback((next: WorldIndexData) => {
-    const remount = () => { localEdits.current = {}; setData(next); setVersion((current) => current + 1) }
+  // Les réponses peuvent revenir dans le désordre : seule la plus récente s'affiche,
+  // une réponse plus ancienne ramènerait l'état d'avant.
+  const requestSeq = useRef(0)
+  const appliedSeq = useRef(0)
+  const applyData = useCallback((next: WorldIndexData, seq: number) => {
+    if (seq < appliedSeq.current) return
+    appliedSeq.current = seq
+    const remount = () => { if (seq < appliedSeq.current) return; localEdits.current = {}; setData(next); setVersion((current) => current + 1) }
     const active = document.activeElement
     if (active instanceof HTMLElement && active.isContentEditable) active.addEventListener("blur", () => window.setTimeout(remount, 0), { once: true })
     else remount()
@@ -123,8 +129,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     label: linked.some((column) => foldName(column) === foldName(header)) ? `${header} ↔` : header,
     width: columnWidthFor(header, tabDefinition.widths[index]),
     plain: !isLongColumn(header),
-    custom: nameOpensDetails && index === nameColumn,
-    cellClassName: isNameColumn(header) ? "font-semibold" : undefined,
+    cellClassName: isNameColumn(header) ? `font-semibold ${nameOpensDetails ? "pr-8" : ""}` : undefined,
+    // Les noms et les colonnes liées déclenchent des liens : on attend la sortie de la
+    // cellule, sinon un nom à moitié tapé (« Yfl ») créerait une entité.
+    commitDelay: isNameColumn(header) || linked.some((column) => foldName(column) === foldName(header)) ? Infinity : undefined,
+    onOpen: nameOpensDetails && index === nameColumn ? (rowKey: string) => setDetails(Number(rowKey)) : undefined,
+    openLabel: "Ouvrir la fiche",
   })), [linked, nameColumn, nameOpensDetails, tabDefinition, table])
 
   const displayedRows = useMemo(() => {
@@ -147,6 +157,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [table])
 
   const post = useCallback(async (body: Record<string, unknown>) => {
+    const seq = ++requestSeq.current
     const response = await fetch("/api/resources/world-indexes", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -154,7 +165,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     })
     const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; changed?: string[]; error?: string }
     if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
-    return payload
+    return { ...payload, seq }
   }, [indexKey, table?.tabName])
 
   const commitCell = useCallback(async (rowKey: string, columnKey: string, value: string) => {
@@ -164,7 +175,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     try {
       const payload = await post({ action: "update-cell", rowNumber: Number(rowKey), column: Number(columnKey), html: value })
       setError("")
-      if (payload.data) applyData(payload.data)
+      if (payload.data) applyData(payload.data, payload.seq)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cette cellule n’a pas pu être enregistrée.")
     }
@@ -175,7 +186,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     setPending(label); setError("")
     try {
       const payload = await post(body)
-      if (payload.data) applyData(payload.data)
+      if (payload.data) applyData(payload.data, payload.seq)
       setCreating(false)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
@@ -185,11 +196,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   async function refresh() {
     setPending("refresh"); setError("")
+    const seq = ++requestSeq.current
     const response = await fetch(`/api/resources/world-indexes?key=${indexKey}`, { cache: "no-store" })
     const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
     setPending("")
     if (!response.ok || !payload.data) return setError(payload.error || "Actualisation impossible.")
-    applyData(payload.data)
+    applyData(payload.data, seq)
   }
 
   const busy = Boolean(pending)
@@ -242,12 +254,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           rows={displayedRows}
           valueOf={valueOf}
           onCommit={(rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value)}
-          renderCustomCell={(rowKey) => {
-            const name = valueOf(rowKey, String(nameColumn))
-            return <button type="button" onClick={() => setDetails(Number(rowKey))} className="w-full rounded-md px-2 py-1.5 text-left font-semibold text-primary underline-offset-4 hover:underline" title="Ouvrir la fiche">
-              {name || <span className="font-normal italic text-muted-foreground">Sans nom</span>}
-            </button>
-          }}
           sort={sort}
           onSort={setSort}
           disabled={busy}
@@ -269,17 +275,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             <DialogTitle className="font-display text-2xl">{detailsName || "Sans nom"}</DialogTitle>
             <DialogDescription className="sr-only">Fiche détaillée</DialogDescription>
           </DialogHeader>
-          {detailsRow && <label className="grid gap-1 text-xs font-semibold">
-            Nom
-            <Input
-              key={`${version}:${detailsRow.rowNumber}`}
-              defaultValue={detailsName}
-              onBlur={(event) => {
-                const name = event.target.value.trim()
-                if (name && name !== detailsName) void commitCell(String(detailsRow.rowNumber), String(nameColumn), name).then(() => refresh())
-              }}
-            />
-          </label>}
           {/* La fiche détaillée sera construite ici. */}
           <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Les détails de cette fiche arrivent bientôt.</div>
         </DialogContent>

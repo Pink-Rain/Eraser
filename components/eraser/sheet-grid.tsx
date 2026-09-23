@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, ExternalLink, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -47,6 +47,15 @@ export type SheetGridColumn = {
   /** Classes appliquées au contenu de la cellule (couleur, graisse…). */
   cellClassName?: string
   sortable?: boolean
+  /**
+   * Délai avant l'enregistrement pendant la frappe. `Infinity` n'enregistre qu'à la
+   * sortie de la cellule : utile quand chaque enregistrement déclenche des effets
+   * (un nom à moitié tapé ne doit rien créer).
+   */
+  commitDelay?: number
+  /** Petit bouton dans la cellule, pour ouvrir une fiche liée à la ligne. */
+  onOpen?: (rowKey: string) => void
+  openLabel?: string
 }
 
 export type SheetGridRow = { key: string; rowNumber: number }
@@ -447,10 +456,18 @@ export function SheetGrid({
                         plain={Boolean(column.plain)}
                         disabled={disabled}
                         placeholder=""
+                        delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
                         onCommit={(value) => onCommit(row.key, column.key, value)}
                         onActivate={(editor) => { activate(editor); setActiveCell({ row: row.key, column: column.key }); setSelection((current) => current.length ? [] : current) }}
                         className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
                       />}
+                  {column.onOpen && !column.custom && <button
+                    type="button"
+                    onClick={() => column.onOpen?.(row.key)}
+                    className="absolute right-1 top-1.5 z-20 grid size-6 place-items-center rounded-md border bg-background/90 text-muted-foreground shadow-sm hover:bg-primary hover:text-primary-foreground"
+                    aria-label={column.openLabel || "Ouvrir la fiche"}
+                    title={column.openLabel || "Ouvrir la fiche"}
+                  ><ExternalLink className="size-3.5" /></button>}
                   {isActive && !column.custom && <span
                     role="separator"
                     aria-label="Recopier le contenu vers les lignes suivantes"

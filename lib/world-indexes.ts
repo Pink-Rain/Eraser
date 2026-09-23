@@ -1,5 +1,4 @@
 import {
-  appendRows,
   clearSpreadsheetReadCache,
   columnName,
   configureStructuredSheet,
@@ -108,59 +107,133 @@ function columnOf(headers: string[], name: string) {
   return headers.findIndex((header) => foldName(header) === foldName(name))
 }
 
-/** Valeurs brutes d'un onglet : suffisantes pour les liens, et mises en cache par readRange. */
+/**
+ * Les écritures liées passent une par une. Deux cellules enregistrées coup sur coup
+ * cherchaient sinon la même entité en même temps, ne la trouvaient ni l'une ni
+ * l'autre, et la créaient deux fois. Le serveur tourne dans un seul processus
+ * (l'application Windows) : une file en mémoire suffit.
+ */
+let linkQueue: Promise<unknown> = Promise.resolve()
+
+function serialized<T>(task: () => Promise<T>): Promise<T> {
+  const run = linkQueue.then(task, task)
+  linkQueue = run.catch(() => undefined)
+  return run
+}
+
+/**
+ * Valeurs brutes d'un onglet, relues depuis Google à chaque fois : une entité ajoutée
+ * à la main dans Sheets doit être vue tout de suite, sinon elle serait recréée.
+ */
 async function plainTable(key: WorldIndexKey, tabName: string) {
   const sheet = await workbook(key)
   const tab = tabDefinition(key, tabName)
+  clearSpreadsheetReadCache(sheet.spreadsheetId)
   const rows = await readRange(sheet.spreadsheetId, sheetTabRange(tabName, "A1:AZ"))
   const headers = headersOf(rows[0] ?? [], tab, Math.max(0, ...rows.map((row) => row.length)))
   return { spreadsheetId: sheet.spreadsheetId, headers, rows }
 }
 
+type PlainTable = Awaited<ReturnType<typeof plainTable>>
+
+function rowName(table: PlainTable, rowIndex: number) {
+  const nameColumn = columnOf(table.headers, "Nom")
+  return nameColumn >= 0 ? (table.rows[rowIndex]?.[nameColumn] || "").replace(/\s+/g, " ").trim() : ""
+}
+
+function findRowByName(table: PlainTable, name: string) {
+  const nameColumn = columnOf(table.headers, "Nom")
+  if (nameColumn < 0) return -1
+  return table.rows.findIndex((row, index) => index > 0 && foldName(row[nameColumn] || "") === foldName(name))
+}
+
+async function writeCell(table: PlainTable, tabName: string, rowIndex: number, column: number, value: string) {
+  const cell = `${columnName(column + 1)}${rowIndex + 1}`
+  await updateRange(table.spreadsheetId, sheetTabRange(tabName, `${cell}:${cell}`), [[value]], { valueInputOption: "RAW" })
+  ;(table.rows[rowIndex] ||= [])[column] = value
+}
+
 /**
- * Inscrit `value` dans la colonne `end` de la ligne nommée `targetName`, ou crée
- * cette ligne si elle n'existe pas. Ne retire jamais rien : effacer un lien d'un côté
- * laisse l'autre intact, pour ne perdre aucune saisie.
+ * Écrit une ligne complète juste sous la dernière ligne remplie, en colonne A. L'ajout
+ * « append » de Google devine lui-même où commence le tableau et pouvait décaler les
+ * valeurs d'une ou plusieurs colonnes : on choisit la ligne nous-mêmes.
  */
+async function writeNewRow(table: PlainTable, tabName: string, values: string[]) {
+  let rowIndex = table.rows.length
+  while (rowIndex > 1 && !(table.rows[rowIndex - 1] ?? []).some((value) => value.trim())) rowIndex -= 1
+  const range = sheetTabRange(tabName, `A${rowIndex + 1}:${columnName(values.length)}${rowIndex + 1}`)
+  try {
+    await updateRange(table.spreadsheetId, range, [values], { valueInputOption: "RAW" })
+  } catch {
+    // La grille est pleine : on lui ajoute des lignes puis on réessaie.
+    const tabs = await spreadsheetTabs(table.spreadsheetId)
+    const sheetId = tabs.find((tab) => tab.title === tabName)?.sheetId
+    if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+    await googleSheetsJson(`spreadsheets/${table.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ appendDimension: { sheetId, dimension: "ROWS", length: 500 } }] }) })
+    await updateRange(table.spreadsheetId, range, [values], { valueInputOption: "RAW" })
+  }
+  table.rows[rowIndex] = [...values]
+  return rowIndex + 1
+}
+
+/** Inscrit `value` dans la colonne `end` de la ligne `targetName`, créée au besoin. */
 async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string) {
-  const { spreadsheetId, headers, rows } = await plainTable(end.index, end.tab)
-  const nameColumn = columnOf(headers, "Nom")
-  const linkColumn = columnOf(headers, end.column)
+  const table = await plainTable(end.index, end.tab)
+  const nameColumn = columnOf(table.headers, "Nom")
+  const linkColumn = columnOf(table.headers, end.column)
   if (nameColumn < 0 || linkColumn < 0) return false
-  const rowIndex = rows.findIndex((row, index) => index > 0 && foldName(row[nameColumn] || "") === foldName(targetName))
+  const rowIndex = findRowByName(table, targetName)
   if (rowIndex > 0) {
-    const current = splitNames(rows[rowIndex][linkColumn] || "")
+    const current = splitNames(table.rows[rowIndex][linkColumn] || "")
     if (current.some((name) => foldName(name) === foldName(value))) return false
-    const cell = `${columnName(linkColumn + 1)}${rowIndex + 1}`
-    await updateRange(spreadsheetId, sheetTabRange(end.tab, `${cell}:${cell}`), [[[...current, value].join(", ")]], { valueInputOption: "RAW" })
+    await writeCell(table, end.tab, rowIndex, linkColumn, [...current, value].join(", "))
     return true
   }
-  const values = headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : "")
-  await appendRows(spreadsheetId, sheetTabRange(end.tab, `A:${columnName(headers.length)}`), [values], { valueInputOption: "RAW" })
+  await writeNewRow(table, end.tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : ""))
   return true
 }
 
-/** Propage les colonnes liées d'une ligne vers les index d'en face. Renvoie les index modifiés. */
-async function syncRowLinks(key: WorldIndexKey, tabName: string, rowNumber: number) {
-  const { headers, rows } = await plainTable(key, tabName)
-  const row = rows[rowNumber - 1]
-  const nameColumn = columnOf(headers, "Nom")
-  const name = row && nameColumn >= 0 ? (row[nameColumn] || "").replace(/\s+/g, " ").trim() : ""
-  const changed = new Set<WorldIndexKey>()
-  if (!name) return changed
-  for (const pair of worldIndexLinks) {
-    for (const [end, other] of [[pair[0], pair[1]], [pair[1], pair[0]]] as const) {
-      if (end.index !== key || end.tab !== tabName) continue
-      const column = columnOf(headers, end.column)
-      if (column < 0) continue
-      for (const target of splitNames(row[column] || "")) {
-        // Un peuple n'est pas son propre ancêtre.
-        if (other.index === key && other.tab === tabName && foldName(target) === foldName(name)) continue
-        if (await addLink(other, target, name)) changed.add(other.index)
-      }
+/**
+ * Retire `value` de la colonne `end` de la ligne `targetName`, ou l'y renomme en
+ * `replacement`. Seul le lien bouge : l'entité d'en face n'est jamais supprimée.
+ */
+async function removeLink(end: WorldIndexLinkEnd, targetName: string, value: string, replacement?: string) {
+  const table = await plainTable(end.index, end.tab)
+  const linkColumn = columnOf(table.headers, end.column)
+  const rowIndex = findRowByName(table, targetName)
+  if (linkColumn < 0 || rowIndex <= 0) return false
+  const current = splitNames(table.rows[rowIndex][linkColumn] || "")
+  if (!current.some((name) => foldName(name) === foldName(value))) return false
+  const next = replacement
+    ? splitNames(current.map((name) => foldName(name) === foldName(value) ? replacement : name).join(", "))
+    : current.filter((name) => foldName(name) !== foldName(value))
+  await writeCell(table, end.tab, rowIndex, linkColumn, next.join(", "))
+  return true
+}
+
+/** Les colonnes liées d'un onglet, chacune avec la colonne qui lui répond. */
+function linkEndsOf(key: WorldIndexKey, tabName: string) {
+  return worldIndexLinks.flatMap((pair) => ([[pair[0], pair[1]], [pair[1], pair[0]]] as const).filter(([end]) => end.index === key && end.tab === tabName))
+}
+
+function isSelfLink(key: WorldIndexKey, tabName: string, other: WorldIndexLinkEnd, target: string, name: string) {
+  // Un peuple n'est pas son propre ancêtre.
+  return other.index === key && other.tab === tabName && foldName(target) === foldName(name)
+}
+
+/** Propage les colonnes liées d'une ligne vers les index d'en face. */
+async function syncRowLinks(key: WorldIndexKey, tabName: string, rowNumber: number, changed: Set<WorldIndexKey>) {
+  const table = await plainTable(key, tabName)
+  const name = rowName(table, rowNumber - 1)
+  if (!name) return
+  for (const [end, other] of linkEndsOf(key, tabName)) {
+    const column = columnOf(table.headers, end.column)
+    if (column < 0) continue
+    for (const target of splitNames(table.rows[rowNumber - 1]?.[column] || "")) {
+      if (isSelfLink(key, tabName, other, target, name)) continue
+      if (await addLink(other, target, name)) changed.add(other.index)
     }
   }
-  return changed
 }
 
 async function tableFor(key: WorldIndexKey, tabName: string) {
@@ -168,36 +241,85 @@ async function tableFor(key: WorldIndexKey, tabName: string) {
   return { sheet, table: await readTable(sheet.spreadsheetId, key, tabName) }
 }
 
-function triggersLinks(key: WorldIndexKey, tabName: string, header: string) {
-  return isNameColumn(header) || worldIndexLinks.some((pair) => pair.some((end) => end.index === key && end.tab === tabName && foldName(end.column) === foldName(header)))
-}
+/**
+ * Une cellule, avec sa mise en forme. Si elle est liée, l'autre côté suit : noms
+ * ajoutés inscrits (et créés au besoin), noms effacés retirés, entité renommée
+ * renommée partout où elle est citée. Renvoie les index modifiés par les liens.
+ */
+export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNumber: number, column: number, html: string) {
+  return serialized(async () => {
+    const { sheet, table } = await tableFor(key, tabName)
+    if (!table.rows.some((row) => row.rowNumber === rowNumber) || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+    const header = table.headers[column]
+    const ends = linkEndsOf(key, tabName)
+    const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(header))
+    const touchesLinks = Boolean(linkedEnd) || (isNameColumn(header) && ends.length > 0)
+    const before = touchesLinks ? await plainTable(key, tabName) : null
+    await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html })
+    const changed = new Set<WorldIndexKey>()
+    if (!before) return []
+    const oldName = rowName(before, rowNumber - 1)
+    const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
 
-/** Une cellule, avec sa mise en forme. Renvoie les index que les liens ont modifiés. */
-export async function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNumber: number, column: number, html: string) {
-  const { sheet, table } = await tableFor(key, tabName)
-  if (!table.rows.some((row) => row.rowNumber === rowNumber) || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
-  await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html })
-  return triggersLinks(key, tabName, table.headers[column]) ? [...await syncRowLinks(key, tabName, rowNumber)] : []
+    if (linkedEnd && oldName) {
+      // Noms effacés de la cellule : l'autre côté les oublie aussi.
+      const [end, other] = linkedEnd
+      const kept = new Set(splitNames(newValue).map(foldName))
+      for (const removed of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
+        if (!kept.has(foldName(removed)) && await removeLink(other, removed, oldName)) changed.add(other.index)
+      }
+    }
+    if (isNameColumn(header) && oldName && newValue && foldName(oldName) !== foldName(newValue)) {
+      // Entité renommée : chaque ligne qui la citait reçoit le nouveau nom.
+      for (const [end, other] of ends) {
+        for (const target of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
+          if (await removeLink(other, target, oldName, newValue)) changed.add(other.index)
+        }
+      }
+    }
+    await syncRowLinks(key, tabName, rowNumber, changed)
+    return [...changed]
+  })
 }
 
 /** Le formulaire d'ajout : les valeurs arrivent en HTML, les cellules gardent leur mise en forme. */
-export async function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: string[]) {
-  const { sheet, table } = await tableFor(key, tabName)
-  const html = table.headers.map((_, index) => String(provided[index] ?? "").slice(0, 50_000))
-  const plain = html.map((value) => htmlToRichText(value).text)
-  const nameColumn = columnOf(table.headers, "Nom")
-  if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
-  const result = await appendRows(sheet.spreadsheetId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [plain], { valueInputOption: "RAW" })
-  const rowNumber = Number(result.updatedRange.match(/![A-Z]+(\d+)/)?.[1])
-  if (!Number.isInteger(rowNumber)) throw new Error("WORLD_INDEX_APPEND_FAILED")
-  for (const [column, value] of html.entries()) {
-    if (/<[a-z]/i.test(value)) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html: value })
-  }
-  return [...await syncRowLinks(key, tabName, rowNumber)]
+export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: string[]) {
+  return serialized(async () => {
+    const { sheet, table } = await tableFor(key, tabName)
+    const html = table.headers.map((_, index) => String(provided[index] ?? "").slice(0, 50_000))
+    const plain = html.map((value) => htmlToRichText(value).text)
+    const nameColumn = columnOf(table.headers, "Nom")
+    if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
+    const current = await plainTable(key, tabName)
+    // Une entité du même nom existe déjà (créée par un lien, par exemple) : on la
+    // complète au lieu d'en créer une seconde.
+    const existing = nameColumn >= 0 ? findRowByName(current, plain[nameColumn]) : -1
+    let rowNumber: number
+    if (existing > 0) {
+      rowNumber = existing + 1
+      for (const [column, value] of plain.entries()) {
+        if (column === nameColumn || !value.trim()) continue
+        const previous = current.rows[existing][column] || ""
+        const merged = linkEndsOf(key, tabName).some(([end]) => foldName(end.column) === foldName(table.headers[column]))
+          ? splitNames(`${previous}, ${value}`).join(", ")
+          : value
+        await writeCell(current, tabName, existing, column, merged)
+      }
+    } else {
+      rowNumber = await writeNewRow(current, tabName, plain)
+    }
+    for (const [column, value] of html.entries()) {
+      if (/<[a-z]/i.test(value)) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html: value })
+    }
+    const changed = new Set<WorldIndexKey>()
+    await syncRowLinks(key, tabName, rowNumber, changed)
+    return [...changed]
+  })
 }
 
 /** La copie apparaît juste sous l'originale, mise en forme comprise. */
-export async function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
+export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
+  return serialized(async () => {
   const { sheet, table } = await tableFor(key, tabName)
   for (const rowNumber of [...rowNumbers].sort((left, right) => right - left)) {
     if (!table.rows.some((row) => row.rowNumber === rowNumber)) continue
@@ -214,13 +336,37 @@ export async function duplicateWorldIndexRows(key: WorldIndexKey, tabName: strin
     })
   }
   clearSpreadsheetReadCache(sheet.spreadsheetId)
+  })
 }
 
-/** Du bas vers le haut : retirer une ligne décale toutes les suivantes. */
-export async function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
-  const { sheet, table } = await tableFor(key, tabName)
-  for (const rowNumber of [...rowNumbers].sort((left, right) => right - left)) {
-    if (!table.rows.some((row) => row.rowNumber === rowNumber)) continue
-    await deleteGoogleSheetRow(sheet.spreadsheetId, tabName, rowNumber, table.sheetId)
-  }
+/**
+ * Du bas vers le haut : retirer une ligne décale toutes les suivantes. Avant, l'entité
+ * supprimée est retirée des colonnes liées qui la citaient.
+ */
+export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
+  return serialized(async () => {
+    const { sheet, table } = await tableFor(key, tabName)
+    const before = await plainTable(key, tabName)
+    const targets = [...new Set(rowNumbers)].filter((rowNumber) => table.rows.some((row) => row.rowNumber === rowNumber)).sort((left, right) => right - left)
+    const deletedNames = new Set(targets.map((rowNumber) => foldName(rowName(before, rowNumber - 1))))
+    for (const rowNumber of targets) {
+      const name = rowName(before, rowNumber - 1)
+      if (!name) continue
+      for (const [end, other] of linkEndsOf(key, tabName)) {
+        for (const target of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
+          // Une ligne supprimée en même temps n'a pas besoin d'être nettoyée.
+          if (other.index === key && other.tab === tabName && deletedNames.has(foldName(target))) continue
+          await removeLink(other, target, name)
+        }
+      }
+    }
+    // Les lignes ont pu bouger pendant le nettoyage : on les retrouve par leur nom.
+    const fresh = await plainTable(key, tabName)
+    const freshNumbers = targets.map((rowNumber) => {
+      const name = rowName(before, rowNumber - 1)
+      const index = name ? findRowByName(fresh, name) : rowNumber - 1
+      return index > 0 ? index + 1 : rowNumber
+    }).sort((left, right) => right - left)
+    for (const rowNumber of freshNumbers) await deleteGoogleSheetRow(sheet.spreadsheetId, tabName, rowNumber, table.sheetId)
+  })
 }
