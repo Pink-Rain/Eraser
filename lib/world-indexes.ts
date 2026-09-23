@@ -8,6 +8,7 @@ import {
   googleSheetsJson,
   readFormattedSheet,
   readRange,
+  resolveJdrSheet,
   sheetTabRange,
   spreadsheetTabs,
   updateFormattedCell,
@@ -462,5 +463,36 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     }
     const { sheet, table } = await tableFor(key, fromTab)
     for (const rowNumber of moved.sort((left, right) => right - left)) await deleteGoogleSheetRow(sheet.spreadsheetId, fromTab, rowNumber, table.sheetId)
+  })
+}
+
+/**
+ * Après une fusion de sorts : les créatures qui citaient un sort supprimé citent
+ * désormais le sort gardé. Ne crée jamais le classeur des créatures s'il n'existe pas.
+ */
+export function renameCreatureSpells(oldNames: string[], newName: string) {
+  return serialized(async () => {
+    const stored = await resolveJdrSheet("creatures")
+    if (!stored || !oldNames.length || !newName.trim()) return 0
+    const table = await plainTable("creatures", worldIndexDefinitions.creatures.tabs[0].name)
+    const replaced = new Set(oldNames.map(foldName))
+    const data: Array<{ range: string; values: string[][] }> = []
+    for (const header of ["Sorts actifs", "Sorts passifs"]) {
+      const column = columnOf(table.headers, header)
+      if (column < 0) continue
+      table.rows.forEach((row, index) => {
+        if (index === 0) return
+        const names = splitNames(row[column] || "")
+        if (!names.some((name) => replaced.has(foldName(name)))) return
+        const next = splitNames(names.map((name) => replaced.has(foldName(name)) ? newName : name).join(", ")).join(", ")
+        const cell = `${columnName(column + 1)}${index + 1}`
+        data.push({ range: sheetTabRange(worldIndexDefinitions.creatures.tabs[0].name, `${cell}:${cell}`), values: [[next]] })
+      })
+    }
+    if (data.length) {
+      await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+      clearSpreadsheetReadCache(table.spreadsheetId)
+    }
+    return data.length
   })
 }

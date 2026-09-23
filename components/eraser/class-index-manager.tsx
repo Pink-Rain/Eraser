@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { AlertTriangle, Check, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
+import { Check, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
@@ -18,9 +18,20 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { ClassSpell, ClassSpellDraft, SpellSimilarity } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
+import { groupSimilarities, SpellDuplicates, type SpellGroup } from "@/components/eraser/spell-duplicates"
 
 type ResourceData = { classes: ClassRecord[]; spells: ClassSpell[]; similarities: SpellSimilarity[]; headers: string[]; file: { id: string; name: string; webViewLink?: string } | null }
 type MutationResult = { id: string; rowNumber: number; tone: { background: string; foreground: string } } | null
+
+function pairKey(left: string, right: string) {
+  return [left, right].sort().join("|")
+}
+
+/** Les paires que le serveur a écartées : calculées localement, absentes de sa liste. */
+function ignoredPairsOf(data: ResourceData) {
+  const reported = new Set(data.similarities.map((match) => pairKey(match.leftId, match.rightId)))
+  return new Set(findClassSpellSimilarities(data.spells).map((match) => pairKey(match.leftId, match.rightId)).filter((key) => !reported.has(key)))
+}
 
 function emptyDraft(): ClassSpellDraft {
   return { id: "", name: "", effect: "", effectHtml: "", description: "", descriptionHtml: "", type: "Passif", skillsRaw: "", distance: "", charges: null, classRanks: {} }
@@ -143,20 +154,15 @@ function SpellForm({ initial, classes, spells, pending, title, onCancel, onSave 
   </section>
 }
 
-function Similarities({ spell, allSpells, similarities }: { spell: ClassSpell; allSpells: ClassSpell[]; similarities: SpellSimilarity[] }) {
-  const matches = similarities.filter((item) => item.leftId === spell.id || item.rightId === spell.id)
-  return <div className="mt-3 rounded-xl border border-amber-500/25 bg-amber-500/5 p-3"><p className="text-xs font-semibold">Doublons et ressemblances — {matches.length}</p><div className="mt-2 space-y-2">{matches.map((match) => { const otherId = match.leftId === spell.id ? match.rightId : match.leftId; const other = allSpells.find((item) => item.id === otherId); return other ? <div key={`${match.leftId}:${match.rightId}`} className="rounded-lg border bg-background/55 px-3 py-2 text-xs"><div className="flex flex-wrap items-center gap-2"><b>{other.name}</b><Badge variant={match.kind === "Doublon exact" ? "destructive" : "outline"}>{match.kind}</Badge><span className="text-muted-foreground">{Math.round(match.score * 100)} %</span></div><blockquote className="mt-1 border-l-2 pl-2 text-muted-foreground">{other.effect || other.description || "Aucun texte"}</blockquote></div> : null })}{!matches.length && <p className="text-xs text-muted-foreground">Aucune correspondance détectée.</p>}</div></div>
-}
-
 const fieldInputClass = "border-transparent bg-transparent px-1.5 shadow-none focus-visible:border-input focus-visible:bg-background"
 
 // Chaque champ est toujours un input : cliquer dedans modifie seulement ce champ,
 // jamais toute la ligne (fini le mode "lecture" / "édition" qui changeait de mise
 // en page et causait des sauts d'affichage). Un bouton Enregistrer unique s'active
 // dès qu'un champ a changé, comme dans l'index des objets.
-function EditableSpell({ spell, classes, allSpells, similarities, pending, onSave, onDelete }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; pending: boolean; onSave: (spell: ClassSpell, draft: ClassSpellDraft) => void; onDelete: (spell: ClassSpell) => void }) {
+function EditableSpell({ spell, classes, allSpells, similarities, pending, onSave, onDelete, onShowDuplicates }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; pending: boolean; onSave: (spell: ClassSpell, draft: ClassSpellDraft) => void; onDelete: (spell: ClassSpell) => void; onShowDuplicates: (spell: ClassSpell) => void }) {
   const [draft, setDraft] = useState(() => toDraft(spell))
-  const [showMatches, setShowMatches] = useState(false)
+  const matchCount = similarities.filter((item) => item.leftId === spell.id || item.rightId === spell.id).length
   const [confirmDelete, setConfirmDelete] = useState(false)
   const tone = spell.tone.background ? spell.tone : classSpellCategoryTones[spell.category]
   const persisted = useMemo(() => toDraft(spell), [spell])
@@ -173,7 +179,7 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, onSav
   }, [changed, draft, onSave, pending, spell])
   const actions = <>
     <Button type="button" size="sm" disabled={pending || !changed || !draft.name.trim()} onClick={() => onSave(spell, draft)} title="Enregistrer">{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
-    <Button type="button" size="sm" variant="outline" onClick={() => setShowMatches((current) => !current)} title="Voir les doublons et ressemblances"><CopyCheck />Doublons</Button>
+    {matchCount > 0 && <Button type="button" size="sm" variant="outline" onClick={() => onShowDuplicates(spell)} title="Comparer et fusionner les sorts semblables"><CopyCheck />{matchCount} doublon{matchCount > 1 ? "s" : ""}</Button>}
     {confirmDelete ? <><Button type="button" size="sm" variant="destructive" onClick={() => onDelete(spell)}>Confirmer</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => setConfirmDelete(false)}><X /></Button></> : <Button type="button" size="icon-sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete(true)} title="Supprimer"><Trash2 /></Button>}
   </>
 
@@ -196,7 +202,6 @@ function EditableSpell({ spell, classes, allSpells, similarities, pending, onSav
       </div>
     </div>
     <div className="mt-3 flex flex-wrap justify-end gap-2">{actions}</div>
-    {showMatches && <Similarities spell={spell} allSpells={allSpells} similarities={similarities} />}
   </article>
 
 }
@@ -228,7 +233,12 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     (v): v is string => typeof v === "string",
   )
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
-  const [similarityFor, setSimilarityFor] = useState<ClassSpell | null>(null)
+  // Sort dont on veut voir le groupe de doublons, et sort ouvert dans l'éditeur.
+  const [duplicateFocus, setDuplicateFocus] = useState<string | null>(null)
+  const [editing, setEditing] = useState<ClassSpell | null>(null)
+  const [notice, setNotice] = useState("")
+  // Paires marquées « pas des doublons » : le calcul local ne doit pas les ramener.
+  const ignoredPairs = useRef(ignoredPairsOf(initialData))
   // Les colonnes modifiées coup sur coup partent ensemble : un seul enregistrement par
   // ligne. Seules les valeurs saisies sont gardées ici, jamais le sort lui-même : le
   // brouillon est reconstruit au dernier moment à partir de l'état courant.
@@ -259,7 +269,32 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
   ], [tab])
 
   function updateSpells(updater: (spells: ClassSpell[]) => ClassSpell[]) {
-    setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells) } })
+    setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells).filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) } })
+  }
+
+  function showDuplicates(spell: ClassSpell) {
+    setDuplicateFocus(spell.id)
+    setTab("duplicates")
+  }
+
+  async function merge(keep: ClassSpell, removed: ClassSpell[], draft: ClassSpellDraft) {
+    const result = await mutate({ action: "merge", keep: { rowNumber: keep.rowNumber, id: keep.id }, remove: removed.map((spell) => ({ rowNumber: spell.rowNumber, id: spell.id })), draft }) as (MutationResult & { creatures?: number }) | false
+    if (result === false) return false
+    await refresh()
+    setDuplicateFocus(null)
+    setNotice(`Fusion faite : « ${draft.name} » est conservé, ${removed.length} sort${removed.length > 1 ? "s" : ""} supprimé${removed.length > 1 ? "s" : ""}${result?.creatures ? `, ${result.creatures} fiche${result.creatures > 1 ? "s" : ""} de créature mise${result.creatures > 1 ? "s" : ""} à jour` : ""}.`)
+    return true
+  }
+
+  async function ignore(group: SpellGroup) {
+    const pairs = group.pairs.map((pair) => [pair.leftId, pair.rightId] as [string, string])
+    const result = await mutate({ action: "ignore", pairs })
+    if (result === false) return false
+    pairs.forEach(([left, right]) => ignoredPairs.current.add(pairKey(left, right)))
+    setData((current) => ({ ...current, similarities: current.similarities.filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) }))
+    setDuplicateFocus(null)
+    setNotice("Ces sorts ne seront plus proposés comme doublons.")
+    return true
   }
 
   async function mutate(body: Record<string, unknown>, silent = false): Promise<MutationResult | false> {
@@ -282,6 +317,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
       const response = await fetch("/api/resources/class-index?refresh=1", { cache: "no-store" })
       const payload = await response.json() as { data?: ResourceData; error?: string }
       if (!response.ok || !payload.data) throw new Error(payload.error || "Actualisation impossible.")
+      ignoredPairs.current = ignoredPairsOf(payload.data)
       setData(payload.data)
       setVersion((current) => current + 1)
     } catch (error) { setError(error instanceof Error ? error.message : "Actualisation impossible.") } finally { setPending(false) }
@@ -337,7 +373,8 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     setNewDraft(draft)
   }
 
-  const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, pending, onSave: save, onDelete: remove }
+  const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, pending, onSave: save, onDelete: remove, onShowDuplicates: showDuplicates }
+  const duplicateGroups = useMemo(() => groupSimilarities(data.spells, data.similarities).length, [data.similarities, data.spells])
   const spellByRow = useMemo(() => new Map(data.spells.map((spell) => [spell.rowNumber, spell])), [data.spells])
 
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
@@ -426,7 +463,7 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
       if (!spell) return null
       return <>
         <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => setSimilarityFor(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem>
+        <ContextMenuItem onSelect={() => showDuplicates(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem>
       </>
     }}
   />
@@ -435,19 +472,20 @@ export function ClassIndexManager({ initialData, initialError }: { initialData: 
     <datalist id="class-spell-types">{classSpellTypeSuggestions.map((type) => <option key={type} value={type} />)}</datalist>
     <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
     {error && <p className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
-    <Dialog open={Boolean(similarityFor)} onOpenChange={(open) => { if (!open) setSimilarityFor(null) }}>
-      <DialogContent className="max-w-xl">
-        <DialogHeader><DialogTitle>Doublons et ressemblances — {similarityFor?.name}</DialogTitle></DialogHeader>
-        {similarityFor && <Similarities spell={similarityFor} allSpells={data.spells} similarities={data.similarities} />}
+    {notice && <p className="flex shrink-0 items-center gap-2 rounded-xl border border-emerald-600/25 bg-emerald-600/5 px-4 py-2.5 text-sm text-emerald-800 dark:text-emerald-300"><Check className="size-4" />{notice}<button type="button" onClick={() => setNotice("")} className="ml-auto text-muted-foreground hover:text-foreground" aria-label="Fermer"><X className="size-4" /></button></p>}
+    <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open) setEditing(null) }}>
+      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-4xl">
+        <DialogHeader><DialogTitle>Modifier « {editing?.name} »</DialogTitle></DialogHeader>
+        {editing && <SpellForm key={`${editing.rowNumber}:${editing.id}`} initial={toDraft(editing)} classes={data.classes} spells={data.spells} pending={pending} title={`Ligne ${editing.rowNumber}`} onCancel={() => setEditing(null)} onSave={(draft) => void save(editing, draft).then(() => setEditing(null))} />}
       </DialogContent>
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
-    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start"><TabsTrigger value="classes">Par classe</TabsTrigger><TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger><TabsTrigger value="bonus">Bonus</TabsTrigger><TabsTrigger value="duplicates">Doublons et ressemblances {data.similarities.length > 0 && <Badge variant="destructive">{data.similarities.length}</Badge>}</TabsTrigger></TabsList>
+    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start"><TabsTrigger value="classes">Par classe</TabsTrigger><TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger><TabsTrigger value="bonus">Bonus</TabsTrigger><TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger></TabsList>
       <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${spell.id}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "actif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
       <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
-      <TabsContent value="duplicates" className="mt-3"><div className="space-y-3">{data.similarities.map((match) => { const left = data.spells.find((spell) => spell.id === match.leftId); const right = data.spells.find((spell) => spell.id === match.rightId); if (!left || !right) return null; return <article key={`${match.leftId}:${match.rightId}`} className="rounded-2xl border bg-card/70 p-4"><div className="flex items-center gap-2"><AlertTriangle className="size-4 text-amber-600" /><Badge variant={match.kind === "Doublon exact" ? "destructive" : "outline"}>{match.kind}</Badge><span className="text-xs text-muted-foreground">{Math.round(match.score * 100)} %</span></div><div className="mt-3 grid gap-3 md:grid-cols-2">{[left, right].map((spell) => <div key={spell.id} className="rounded-xl border p-3"><b>{spell.name}</b><p className="mt-1 text-xs font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</p><blockquote className="mt-2 border-l-2 pl-2 text-xs text-muted-foreground">{spell.effect || spell.description}</blockquote></div>)}</div></article> })}{!data.similarities.length && <div className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun doublon ni sort très proche détecté.</div>}</div></TabsContent>
+      <TabsContent value="duplicates" className="mt-3"><SpellDuplicates key={duplicateFocus ?? "tous"} spells={data.spells} classes={data.classes} similarities={data.similarities} focusSpellId={duplicateFocus} pending={pending} onMerge={merge} onIgnore={ignore} onEdit={setEditing} onDelete={remove} /></TabsContent>
     </Tabs>
   </section>
 }

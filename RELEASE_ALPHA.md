@@ -1,44 +1,38 @@
-# Eraser 0.1.1-alpha.50 — langues, lieux en onglets et fiches de créatures
+# Eraser 0.1.1-alpha.51 — des doublons de sorts qu’on peut vraiment traiter
 
-## Ressources → Index des langues
+L’onglet **Doublons** de l’Index des classes est entièrement repensé.
 
-Nouveau classeur **« Index des langues »** : Nom, Lieu, Peuple, Langue-mère,
-Langue-fille. Toutes les colonnes sont liées :
+## Des groupes, pas des paires
 
-- **Langue-mère ↔ Langue-fille**, dans les deux sens ;
-- **Lieu** ↔ la nouvelle colonne **Langues** de l’Index des lieux ;
-- **Peuple** ↔ la nouvelle colonne **Langues** de l’Index des peuples.
+Les sorts semblables sont regroupés : si A ressemble à B et B à C, les trois se
+comparent ensemble. La liste de gauche se filtre par type de ressemblance
+(doublon exact, même description, même nom, très proche) et par recherche.
 
-Comme ailleurs, un nom inconnu crée l’entrée manquante.
+## Une comparaison côte à côte
 
-## Index des lieux en cinq onglets
+Chaque sort du groupe a sa colonne, avec :
 
-**Zone géographique, Pays, Régions, Villes, Points d’intérêt**, avec les mêmes
-colonnes. L’ancien onglet « Lieux » devient « Zone géographique » : rien n’est
-perdu.
+- **d’où il vient** : ses classes et ses rangs, aux couleurs de chaque classe ;
+- son ID et sa ligne dans la feuille ;
+- tous ses champs, ceux qui diffèrent étant surlignés ;
+- **Modifier** (l’éditeur complet) et **Supprimer**.
 
-Un lieu créé par un lien (depuis un peuple ou une langue) arrive dans « Zone
-géographique ». Clic droit sur la poignée de la ligne → **Déplacer vers** pour
-le ranger dans le bon onglet. Les liens le retrouvent où qu’il soit.
+## La fusion champ par champ
 
-## Fiche des créatures
+1. Choisis le sort à **garder**.
+2. Pour chaque champ qui diffère, clique la version à conserver.
+3. Les **classes et rangs sont réunis** sur le sort gardé ; si une même classe a
+   deux rangs, tu choisis lequel.
+4. **Fusionner** : le sort gardé est mis à jour, les autres sont supprimés.
 
-Le petit bouton dans le nom ouvre désormais une **fiche complète**, pré-remplie
-avec ce que la ligne contient déjà :
+Les créatures qui utilisaient un sort supprimé passent automatiquement au sort
+gardé. Si la feuille a changé entre-temps, rien n’est écrit et l’application
+demande d’actualiser.
 
-- portrait (image importée ou URL) ;
-- Nom, Rang, Environnement, Type, Climat, Sous-type, Sous-type secondaire,
-  Dressable (case à cocher) ;
-- Organisation, Comportement, Rencontre (texte enrichi) ;
-- Langue (suggestions tirées de l’Index des langues), Taille, Poids ;
-- caractéristiques : Force, Dextérité, Intelligence, Perception, Charisme,
-  Vitesse, Vitalité ;
-- **sorts actifs** et **sorts passifs**, choisis dans l’Index des classes.
+## « Ce ne sont pas des doublons »
 
-Ces nouvelles colonnes sont ajoutées à droite dans la feuille « Index des
-créatures » ; le tableau de l’application garde ses onze colonnes.
+Un faux positif ne revient plus : il est noté dans un onglet **« Doublons
+ignorés »** de la feuille des sorts.
 
-## Sous le capot
-
-Ajouter des colonnes à une feuille existante ne décale plus rien : les colonnes
-sont retrouvées par leur nom, les manquantes s’ajoutent à droite.
+Le bouton **Doublons** d’un sort (et le menu d’une ligne) ouvre directement son
+groupe ; il n’apparaît que si le sort a des doublons.

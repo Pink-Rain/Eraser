@@ -6,7 +6,10 @@ import {
 } from "@/lib/google-drive"
 import {
   appendRows,
+  clearSpreadsheetReadCache,
   deleteGoogleSheetRow,
+  googleSheetsJson,
+  spreadsheetTabs,
   listClasses,
   readFormattedSheet,
   readRange,
@@ -393,20 +396,25 @@ export type ClassSpellDraft = Pick<ClassSpell, "id" | "name" | "effect" | "descr
   classRanks: Record<string, number | null>
 }
 
-function classRankCount(workbook: SpellWorkbook, classId: string, rank: number, excludedIndex: number) {
+function classRankCount(workbook: SpellWorkbook, classId: string, rank: number, excluded: number | Set<number>) {
   const target = workbook.classColumns.find((item) => item.classId === classId)
   if (!target) return 0
-  return workbook.rows.reduce((total, row, index) => index === excludedIndex ? total : total + (Number.parseInt(cell(row, target.column), 10) === rank ? 1 : 0), 0)
+  const skip = typeof excluded === "number" ? new Set([excluded]) : excluded
+  return workbook.rows.reduce((total, row, index) => skip.has(index) ? total : total + (Number.parseInt(cell(row, target.column), 10) === rank ? 1 : 0), 0)
 }
 
-function assertAvailableClassRanks(workbook: SpellWorkbook, draft: ClassSpellDraft, existingIndex: number) {
+/**
+ * Les rangs visés ont-ils encore de la place ? `ignored` : lignes qui ne comptent pas
+ * (celles qu'une fusion va supprimer).
+ */
+function assertAvailableClassRanks(workbook: SpellWorkbook, draft: ClassSpellDraft, existingIndex: number, ignored: Set<number> = new Set()) {
   for (const { classId, column } of workbook.classColumns) {
     const rank = draft.classRanks[classId]
     if (rank === null || rank === undefined) continue
     if (!Number.isInteger(rank) || rank < 0 || rank > 20) throw new Error("CLASS_RANK_INVALID")
     const existingRank = existingIndex >= 0 ? Number.parseInt(cell(workbook.rows[existingIndex], column), 10) : Number.NaN
     if (existingRank === rank) continue
-    if (classRankCount(workbook, classId, rank, existingIndex) >= MAX_CLASS_SPELLS_PER_RANK) throw new Error(`CLASS_RANK_FULL:${classId}:${rank}`)
+    if (classRankCount(workbook, classId, rank, new Set([existingIndex, ...ignored])) >= MAX_CLASS_SPELLS_PER_RANK) throw new Error(`CLASS_RANK_FULL:${classId}:${rank}`)
   }
 }
 
@@ -420,16 +428,17 @@ function toneForType(workbook: SpellWorkbook, type: string) {
   return classSpellCategoryTones[category]
 }
 
-export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft) {
-  const workbook = await spellWorkbook(true)
+export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string> } = {}) {
+  const workbook = options.workbook ?? await spellWorkbook(true)
+  const ignoredIndexes = new Set([...(options.ignoredRows ?? [])].map((row) => row - 2))
   const existingIndex = rowNumber === null ? -1 : rowNumber - 2
   if (rowNumber !== null && (existingIndex < 0 || !workbook.rows[existingIndex])) throw new Error("CLASS_SPELL_NOT_FOUND")
   const values = rowNumber === null ? workbook.headers.map(() => "") : workbook.headers.map((_, index) => workbook.rows[existingIndex][index] || "")
   const id = draft.id.trim() || `SOR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`
   if (!draft.name.trim()) throw new Error("CLASS_SPELL_NAME_REQUIRED")
-  const duplicateId = workbook.rows.findIndex((row, index) => index !== existingIndex && cell(row, workbook.columns.id).trim() === id)
+  const duplicateId = workbook.rows.findIndex((row, index) => index !== existingIndex && !ignoredIndexes.has(index) && cell(row, workbook.columns.id).trim() === id)
   if (duplicateId >= 0) throw new Error("CLASS_SPELL_ID_EXISTS")
-  assertAvailableClassRanks(workbook, draft, existingIndex)
+  assertAvailableClassRanks(workbook, draft, existingIndex, ignoredIndexes)
   values[workbook.columns.id] = id
   values[workbook.columns.name] = draft.name.trim()
   if (workbook.columns.effect >= 0) values[workbook.columns.effect] = draft.effect
@@ -475,7 +484,65 @@ export function findSpellSimilarities(spells: ClassSpell[]) {
   return findClassSpellSimilarities(spells)
 }
 
+/**
+ * Paires de sorts marquées « ce ne sont pas des doublons ». Elles vivent dans un onglet
+ * du classeur des sorts, pour être partagées et visibles dans Sheets comme le reste.
+ */
+const IGNORED_PAIRS_TAB = "Doublons ignorés"
+
+function pairKey(left: string, right: string) {
+  return [left, right].sort().join("|")
+}
+
+async function ignoredSpellPairs(fileId: string) {
+  const tabs = await spreadsheetTabs(fileId)
+  if (!tabs.some((tab) => tab.title === IGNORED_PAIRS_TAB)) return new Set<string>()
+  const rows = await readRange(fileId, `${quoteTab(IGNORED_PAIRS_TAB)}!A2:B`)
+  return new Set(rows.filter((row) => row[0] && row[1]).map((row) => pairKey(row[0].trim(), row[1].trim())))
+}
+
+export async function ignoreSpellPairs(pairs: Array<[string, string]>) {
+  const { file } = await spellWorkbook(true)
+  const tabs = await spreadsheetTabs(file.id)
+  if (!tabs.some((tab) => tab.title === IGNORED_PAIRS_TAB)) {
+    await googleSheetsJson(`spreadsheets/${file.id}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: IGNORED_PAIRS_TAB, gridProperties: { rowCount: 500, columnCount: 3, frozenRowCount: 1 } } } }] }),
+    })
+    await updateRange(file.id, `${quoteTab(IGNORED_PAIRS_TAB)}!A1:C1`, [["Sort 1", "Sort 2", "Ignoré le"]])
+  }
+  const known = await ignoredSpellPairs(file.id)
+  const now = new Date().toISOString()
+  const fresh = pairs.filter(([left, right]) => left && right && left !== right && !known.has(pairKey(left, right)))
+  if (fresh.length) await appendRows(file.id, `${quoteTab(IGNORED_PAIRS_TAB)}!A:C`, fresh.map(([left, right]) => [left, right, now]), { valueInputOption: "RAW" })
+  clearSpreadsheetReadCache(file.id)
+}
+
 export async function listClassResources(refresh = false) {
   const data = await listClassSpells(refresh)
-  return { ...data, similarities: findSpellSimilarities(data.spells) }
+  const ignored = await ignoredSpellPairs(data.file.id).catch(() => new Set<string>())
+  return { ...data, similarities: findSpellSimilarities(data.spells).filter((match) => !ignored.has(pairKey(match.leftId, match.rightId))) }
+}
+
+/**
+ * Fusionne des sorts en un seul. Le sort gardé reçoit le brouillon choisi champ par
+ * champ (classes et rangs réunis compris), puis les autres lignes sont supprimées.
+ * Chaque ligne est vérifiée par son ID : si la feuille a bougé entre-temps, rien
+ * n'est écrit.
+ */
+export async function mergeClassSpells(keep: { rowNumber: number; id: string }, removed: Array<{ rowNumber: number; id: string }>, draft: ClassSpellDraft) {
+  const workbook = await spellWorkbook(true)
+  const check = (target: { rowNumber: number; id: string }) => {
+    const row = workbook.rows[target.rowNumber - 2]
+    const id = row ? cell(row, workbook.columns.id).trim() || `LIGNE-${target.rowNumber}` : ""
+    if (id !== target.id) throw new Error("CLASS_SPELL_MOVED")
+  }
+  check(keep)
+  removed.forEach(check)
+  const removedRows = removed.map((item) => item.rowNumber).filter((row) => row !== keep.rowNumber)
+  const removedNames = removedRows.map((row) => cell(workbook.rows[row - 2], workbook.columns.name).trim()).filter(Boolean)
+  const result = await saveClassSpell(keep.rowNumber, draft, { workbook, ignoredRows: new Set(removedRows) })
+  for (const row of [...removedRows].sort((left, right) => right - left)) await deleteGoogleSheetRow(workbook.file.id, workbook.tabName, row, workbook.sheetId)
+  clearSpreadsheetReadCache(workbook.file.id)
+  return { ...result, removedNames, keptName: draft.name.trim() }
 }
