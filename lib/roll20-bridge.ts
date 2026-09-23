@@ -2,7 +2,10 @@ import { and, eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
 import { roll20CampaignLinks } from "@/db/schema"
-import { getCampaignDashboard, listNpcBackpackSummaries, listNpcs, listSavedShops, saveNpcs } from "@/lib/google-sheets"
+import { getCampaignDashboard, listCampaignMembers, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopCharacterEntitiesByIds, saveNpcs } from "@/lib/google-sheets"
+import { readCharacterPortrait } from "@/lib/character-portraits"
+import { sharedMediaVersion } from "@/lib/shared-media"
+import { readToken, tokenVersion, type TokenKind } from "@/lib/tokens"
 import { readNpcPortrait } from "@/lib/npc-portraits"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
@@ -99,11 +102,20 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       return [allNpcs.filter((npc) => npcIds.has(npc.id)), allShops.filter((shop) => shopIds.has(shop.id))] as const
     })
     : await Promise.all([listNpcs(link.campaignId, true), listSavedShops(link.campaignId, true)])
-  const inventories = await listNpcBackpackSummaries(npcs.map((npc) => npc.id))
+  // Les personnages joueurs : ceux de la session, ou tous ceux de la campagne.
+  const characterIds = session ? session.characterIds : (await listCampaignMembers(link.campaignId)).map((member) => member.id)
+  const [inventories, characters] = await Promise.all([
+    listNpcBackpackSummaries(npcs.map((npc) => npc.id)),
+    listTabletopCharacterEntitiesByIds(characterIds),
+  ])
   const npcById = new Map(npcs.map((npc) => [npc.id, npc]))
-  const portraitUrl = (npcId: string, portrait: string) => portrait
-    ? `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(npcId)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}`
-    : ""
+  const imageUrl = (kind: TokenKind, id: string, type: "portrait" | "token", version = "") =>
+    `${origin}/api/roll20/bridge/portrait/${encodeURIComponent(id)}?campaign=${encodeURIComponent(link.campaignId)}&key=${encodeURIComponent(link.imageToken)}&kind=${kind}&type=${type}${version ? `&v=${encodeURIComponent(version.replace(/[^0-9A-Za-z]/g, ""))}` : ""}`
+  const portraitUrl = (npcId: string, portrait: string) => portrait ? imageUrl("npc", npcId, "portrait") : ""
+  const tokenUrl = async (kind: TokenKind, id: string) => {
+    const version = await tokenVersion(kind, id).catch(() => null)
+    return version ? imageUrl(kind, id, "token", version) : ""
+  }
   const now = new Date().toISOString()
   await getDb().update(roll20CampaignLinks).set({
     roll20GameId: (game.id || link.roll20GameId).slice(0, 200),
@@ -114,10 +126,19 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
     schema: 2,
     campaign: { id: campaign.id, name: campaign.name, updatedAt: campaign.updatedAt },
     session: session ? { id: session.id, name: session.name } : null,
-    npcs: npcs.map((npc) => ({
+    characters: await Promise.all(characters.map(async (character) => ({
+      id: character.id,
+      name: character.name,
+      portraitUrl: await characterHasPortrait(character.id, character.portrait) ? imageUrl("character", character.id, "portrait") : "",
+      tokenUrl: await tokenUrl("character", character.id),
+      currentHp: character.currentHp,
+      totalHp: character.totalHp,
+    }))),
+    npcs: await Promise.all(npcs.map(async (npc) => ({
       id: npc.id,
       name: npc.name,
       portraitUrl: portraitUrl(npc.id, npc.portrait),
+      tokenUrl: await tokenUrl("npc", npc.id),
       currentHp: npc.currentHp,
       totalHp: npc.totalHp,
       constitution: npc.constitution,
@@ -129,11 +150,17 @@ export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$in
       playerNotes: npc.playerNotes,
       gmNotes: npc.gmNotes,
       inventory: inventories[npc.id] || [],
-    })),
-    shops: shops.map((shop) => {
+    }))),
+    shops: await Promise.all(shops.map(async (shop) => {
       const seller = npcById.get(shop.npcId)
-      return { ...shop, seller: seller ? { id: seller.id, name: seller.name, portraitUrl: portraitUrl(seller.id, seller.portrait) } : null }
-    }),
+      return {
+        ...shop,
+        // La fiche Roll20 du magasin prend le portrait du vendeur et le token de la devanture.
+        portraitUrl: seller ? portraitUrl(seller.id, seller.portrait) : "",
+        tokenUrl: await tokenUrl("shop", shop.id),
+        seller: seller ? { id: seller.id, name: seller.name, portraitUrl: portraitUrl(seller.id, seller.portrait) } : null,
+      }
+    })),
   }
 }
 
@@ -151,13 +178,46 @@ export async function updateRoll20HitPoints(link: typeof roll20CampaignLinks.$in
   return changed.length
 }
 
-export async function roll20NpcPortrait(campaignId: string, npcId: string, imageToken: string) {
+/**
+ * Portraits et tokens envoyés à Roll20. La clé d'image de la liaison sert de preuve,
+ * et l'élément doit appartenir à la campagne liée.
+ */
+export async function roll20Image(campaignId: string, kind: string, id: string, type: string, imageToken: string) {
   const link = await roll20LinkFromImageToken(campaignId, imageToken)
   if (!link) return null
-  const npc = (await listNpcs(campaignId)).find((candidate) => candidate.id === npcId)
-  if (!npc?.portrait) return null
-  const object = await readNpcPortrait(npcId)
-  if (object) return { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" }
-  if (/^https:\/\//i.test(npc.portrait)) return { redirect: npc.portrait }
+  if (kind === "npc") {
+    const npc = (await listNpcs(campaignId)).find((candidate) => candidate.id === id)
+    if (!npc) return null
+    if (type === "token") return tokenImage("npc", id)
+    if (!npc.portrait) return null
+    const object = await readNpcPortrait(id)
+    if (object) return { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" }
+    if (/^https:\/\//i.test(npc.portrait)) return { redirect: npc.portrait }
+    return null
+  }
+  if (kind === "character") {
+    if (!(await listCampaignMembers(campaignId)).some((member) => member.id === id)) return null
+    if (type === "token") return tokenImage("character", id)
+    const [character] = await listTabletopCharacterEntitiesByIds([id])
+    const object = await readCharacterPortrait(id)
+    if (object) return { body: object.body, contentType: object.httpMetadata?.contentType || "image/jpeg" }
+    if (character && /^https:\/\//i.test(character.portrait)) return { redirect: character.portrait }
+    return null
+  }
+  if (kind === "shop" && type === "token") {
+    if (!(await listSavedShops(campaignId)).some((shop) => shop.id === id)) return null
+    return tokenImage("shop", id)
+  }
   return null
+}
+
+/** Un portrait importé dans Drive, ou une adresse https collée dans la fiche. */
+async function characterHasPortrait(id: string, portrait: string) {
+  if (/^https:\/\//i.test(portrait)) return true
+  return Boolean(await sharedMediaVersion(`characters/${id}/portrait`).catch(() => null))
+}
+
+async function tokenImage(kind: TokenKind, id: string) {
+  const object = await readToken(kind, id)
+  return object ? { body: object.body, contentType: object.httpMetadata?.contentType || "image/png" } : null
 }

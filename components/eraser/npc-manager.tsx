@@ -21,6 +21,7 @@ import { CharacteristicBadges, CharacteristicInputs } from "@/components/eraser/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { npcCharacteristicKeys, npcCharacteristics, type CharacteristicName } from "@/lib/characteristics"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
+import { TokenButton } from "@/components/eraser/token-editor"
 import { isNpcLibraryPage, npcBelongsToCampaign } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
 
@@ -172,6 +173,7 @@ export function NpcForm({ npc, pending, onClose, onSave }: { npc: CampaignNpcRec
           <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />Importer</span>
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => choosePortrait(event.target.files?.[0])} />
         </label>
+        <TokenButton kind="npc" ownerId={draft.id} name={draft.name} source={portraitPreview || draft.portrait} style={{ kind: "npc" }} disabledReason={portraitPreview || draft.portrait ? "" : "Ajoute d’abord un avatar"} />
         <Label className={textLabel}>Avatar (URL)<Input type="url" value={draft.portrait} onChange={(event) => update("portrait", event.target.value)} placeholder="https://…" /></Label>
       </div>
       <div className="grid content-start gap-4 sm:grid-cols-2">

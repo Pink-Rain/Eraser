@@ -1,57 +1,52 @@
-# Eraser 0.1.1-alpha.58 — Sessions de campagne
+# Eraser 0.1.1-alpha.59 — Tokens et Roll20 0.7.0
 
-Cette version arrive par la mise à jour sans réinstallation.
+Cette version arrive par la mise à jour sans réinstallation. Le compagnon Roll20
+et le script Mod passent en 0.7.0 : mets à jour les deux depuis la page Roll20
+de la campagne.
+
+## Tokens
+
+- Un bouton discret **« Token »** apparaît sous l’avatar : fiche de personnage,
+  fiche d’un PNJ (partout où on la modifie), fiche d’une créature et fenêtre
+  « Modifier le magasin ». Ouvert depuis une fenêtre, il s’affiche par-dessus
+  sans la fermer.
+- La fenêtre montre l’avatar dans un cercle au cadre ancien : **doré** pour les
+  joueurs, **cuivré** pour les PNJs, **argenté** pour les créatures. On glisse
+  l’image pour la recentrer, on tire un coin (ou la molette) pour la
+  redimensionner sans la déformer, puis « Enregistrer le token ».
+- **Magasins** : le cadre est une devanture d’échoppe, avec un auvent rayé et une
+  enseigne propres à chaque type (marché, librairie, antiquaire, armurerie,
+  marché noir, alchimiste, taverne). Avec un vendeur, son portrait est dans la
+  devanture ; sans vendeur, le fond prend les couleurs du magasin.
+- Le token est enregistré dans le Drive partagé (image ronde avec sa bordure).
+  Le bouton en affiche l’aperçu.
+- Une créature a besoin d’une image importée (pas seulement une URL collée) pour
+  avoir un token.
+
+## Roll20 0.7.0
+
+- Chaque fiche reçoit **l’avatar en portrait** et **le token rond comme jeton
+  par défaut**.
+- **Personnages joueurs** : « Tout synchroniser » et « Synchroniser une session »
+  créent aussi leurs fiches (nom, PV, portrait, token). Le MJ les attribue à la
+  main : aux synchronisations suivantes, le contrôle, les journaux et l’endroit où
+  la fiche est rangée ne sont jamais modifiés.
+- **Synchroniser une session** range ses PNJs et magasins dans un **dossier du
+  Journal au nom de la session**, en y déplaçant ceux qui existaient déjà. Les
+  fiches des joueurs restent là où elles sont.
+- Le menu déroulant des sessions du compagnon est de nouveau lisible.
 
 ## Créateur de session
 
-- **Plusieurs sessions par campagne.** En haut de la page, un menu déroulant liste
-  les sessions dans l’ordre de création, à côté du bouton « + Créer une nouvelle
-  session ». Un titre, « Créer », et la page de la nouvelle session s’ouvre.
-- **Bannière** : chaque session peut avoir son image (enregistrée dans le Drive
-  partagé, comme les bannières de campagne).
-- **Joueurs** : les personnages joueurs de la campagne sont ajoutés
-  automatiquement. Le MJ peut en retirer ou en rajouter.
-- **PNJs** : « Ajouter un PNJ » propose les PNJs de la campagne (avec recherche)
-  ou d’en créer un nouveau. On peut les modifier ou les retirer de la session.
-- **Magasins** : « Ajouter un marché » propose les magasins sauvegardés de la
-  campagne (avec recherche). Relance, prix, nom et vendeur se modifient sur place ;
-  un magasin peut être retiré de la session.
-- La session peut aussi être renommée ou supprimée. Supprimer une session ne
-  supprime ni ses PNJs ni ses magasins.
-- **Rien de ce qui était préparé n’est perdu** : la première session créée dans
-  une campagne reprend les PNJs et magasins qui étaient dans l’ancien Créateur de
-  session.
-- Les sessions sont enregistrées dans une nouvelle feuille Google
-  « Sessions de campagne » (créée seulement si elle n’existe pas déjà dans le Drive).
-
-## « Ajouter à la session »
-
-- Sur les pages PNJs, Magasin et fouille et Magasins sauvegardés, « Ajouter à la
-  campagne » devient **« Ajouter à la session »**. Une petite fenêtre liste les
-  sessions de la plus récente à la plus ancienne (la dernière créée est choisie
-  d’office), avec une recherche par nom et un bouton « Créer une session ».
-
-## Roll20 — compagnon et script Mod 0.6.0
-
-- Nouveau choix **« Synchroniser une session »** dans le compagnon navigateur et
-  dans le menu du script Mod (`!eraser`). Il ouvre un menu déroulant des sessions,
-  de la plus récente à la plus ancienne, avec recherche par nom, puis synchronise
-  seulement les PNJs et magasins de cette session.
-- « Tout synchroniser » reprend tout ce qui est dans au moins une session.
-- **Mettre à jour les deux** depuis la page Roll20 de la campagne : le compagnon
-  et le script Mod doivent être en 0.6.0.
-
-## Chat
-
-- Le chat en bas à droite affiche désormais **le nom du compte** de la personne
-  qui écrit, sur toutes les pages (plus « MJ » ni le nom d’un personnage).
-- **/joueur** et **/rjoueur** proposent les noms des comptes de la campagne (son
-  MJ et les propriétaires de ses personnages, plus les comptes connectés).
-- Nouveau **/rprivé** (ou /rprive) : un jet de dés visible uniquement par soi.
+- Les cartes des joueurs affichent le titre, la classe et le peuple choisis
+  (plus le texte brut enregistré dans la feuille).
+- Les magasins sont fermés par défaut. Ouvrir ou fermer un magasin fait de même
+  avec celui qui est sur la même ligne.
 
 ## Vérifications
 
 - lint sans erreur, build de production et build desktop réussis, serveur desktop
   vérifié en HTTP 200 ;
-- 21 tests d’interface (dont le rendu du Créateur de session) et 3 tests du pont
-  Roll20 au vert (dont le nouveau choix « Synchroniser une session » du Mod).
+- 22 tests d’interface et 4 tests du pont Roll20 au vert (dont le dossier de
+  session, et une fiche joueur qui garde son contrôle et ses journaux) ;
+- cadres dorés, cuivrés, argentés et devantures dessinés et vérifiés à l’écran.

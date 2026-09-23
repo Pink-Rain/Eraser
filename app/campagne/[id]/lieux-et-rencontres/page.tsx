@@ -6,6 +6,7 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { SessionCreator } from "@/components/eraser/session-creator"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
 import { getCampaignDashboard, listCampaignMembers, listNpcs, listSavedShops } from "@/lib/google-sheets"
+import { displayedMultipleValue } from "@/lib/multiple-values"
 import { loadShopGeneratorItems } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -24,7 +25,14 @@ async function SessionCreatorData({ campaignId, sessionId }: { campaignId: strin
     campaignId={campaignId}
     initialSessions={sessions}
     initialSessionId={selected}
-    members={members.map((member) => ({ id: member.id, name: member.name, people: member.people, classes: member.classes, level: member.level, honoraryTitle: member.honoraryTitle }))}
+    members={members.map((member) => ({
+      id: member.id,
+      name: member.name,
+      people: displayedMultipleValue(member.people, "all"),
+      classes: displayedMultipleValue(member.classes, "all"),
+      level: member.level,
+      honoraryTitle: displayedMultipleValue(member.honoraryTitle),
+    }))}
     npcs={npcs}
     shops={shops}
     generatorItems={generatorItems}

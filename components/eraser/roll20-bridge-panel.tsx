@@ -77,7 +77,7 @@ export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: str
       <header>
         <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Pont de campagne</p>
         <h1 className="mt-2 font-display text-4xl font-semibold">Roll20</h1>
-        <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">Synchronise en une fois les PNJ et magasins de cette campagne, ou seulement ceux d’une session. À la fin d’une session, les PV peuvent revenir de Roll20 vers Eraser.</p>
+        <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">Synchronise en une fois les personnages joueurs, PNJ et magasins de cette campagne, ou seulement ceux d’une session (rangés dans un dossier du Journal à son nom). Chaque fiche reçoit son portrait et son token. À la fin d’une session, les PV peuvent revenir de Roll20 vers Eraser.</p>
       </header>
 
       {error && <Alert variant="destructive"><AlertTitle>La liaison n’a pas été modifiée</AlertTitle><AlertDescription>{error}</AlertDescription></Alert>}
@@ -113,13 +113,13 @@ export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: str
         <Card>
           <CardHeader><CardTitle>Installation</CardTitle><CardDescription>Les deux éléments sont nécessaires : le compagnon communique avec Eraser, le script modifie la partie Roll20.</CardDescription></CardHeader>
           <CardContent className="space-y-3">
-            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-roll20-companion.zip" download><Download />1. Compagnon Chrome v0.6.0 (application)</a></Button>
-            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-bridge.mod.js" download><Download />2. Script Mod Roll20 v0.6.0</a></Button>
+            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-roll20-companion.zip" download><Download />1. Compagnon Chrome v0.7.0 (application)</a></Button>
+            <Button asChild className="w-full justify-start" variant="secondary"><a href="/roll20/eraser-bridge.mod.js" download><Download />2. Script Mod Roll20 v0.7.0</a></Button>
             <ol className="space-y-2 pl-5 text-sm leading-6 text-muted-foreground">
               <li className="list-decimal">Télécharge le compagnon, décompresse le fichier ZIP et conserve le dossier obtenu.</li>
               <li className="list-decimal">Dans Chrome, ouvre « chrome://extensions », active le mode développeur, clique sur « Charger l’extension non empaquetée », puis sélectionne ce dossier.</li>
               <li className="list-decimal">Télécharge le script Mod. Dans les paramètres de ta partie Roll20, ouvre « Mod Scripts », crée un nouveau script, colle tout son contenu et enregistre.</li>
-              <li className="list-decimal">Attends que la console Mod affiche « Eraser Bridge 0.6.0 prêt ».</li>
+              <li className="list-decimal">Attends que la console Mod affiche « Eraser Bridge 0.7.0 prêt ».</li>
               <li className="list-decimal">Ouvre ensuite la partie Roll20, clique sur « Eraser », puis colle la clé de liaison créée sur cette page.</li>
               <li className="list-decimal">Utilise « Tout synchroniser », « Synchroniser une session » (choisis la session dans le menu déroulant, de la plus récente à la plus ancienne, avec recherche par nom) ou « Renvoyer les PV ».</li>
             </ol>
@@ -127,7 +127,7 @@ export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: str
         </Card>
       </div>
 
-      <Alert><ShieldCheck /><AlertTitle>Règles de synchronisation</AlertTitle><AlertDescription>Eraser reste la source des profils, statistiques, descriptions et magasins. Roll20 renvoie seulement les PV. Les éléments sont reliés par leur identifiant Eraser pour être mis à jour sans doublon.</AlertDescription></Alert>
+      <Alert><ShieldCheck /><AlertTitle>Règles de synchronisation</AlertTitle><AlertDescription>Eraser reste la source des profils, statistiques, descriptions et magasins. Roll20 renvoie seulement les PV des PNJ. Les fiches des joueurs ne sont jamais déplacées et gardent les réglages du MJ (contrôle, journaux). Les éléments sont reliés par leur identifiant Eraser pour être mis à jour sans doublon.</AlertDescription></Alert>
     </div>
   )
 }

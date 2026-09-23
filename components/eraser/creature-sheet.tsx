@@ -5,6 +5,7 @@ import { Check, ChevronDown, Crosshair, ImagePlus, Link2, LoaderCircle, Plus, Se
 
 import { CharacteristicInputs } from "@/components/eraser/characteristic-fields"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { TokenButton } from "@/components/eraser/token-editor"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -192,6 +193,11 @@ function SpellPicker({ label, icon, value, options, loading, onChange }: { label
  * créatures, pré-remplie avec ce que la ligne contient déjà, et enregistre toutes les
  * colonnes de la feuille — y compris celles que le tableau n'affiche pas.
  */
+/** Le token d'une créature suit l'image importée dans Drive (elle n'a pas d'autre identifiant). */
+function creatureTokenId(portrait: string) {
+  return portrait.match(/\/api\/resources\/creature-portraits\/([\w-]+)/)?.[1] || ""
+}
+
 export function CreatureSheetDialog({ open, headers, values, html, onClose, onSave }: {
   open: boolean
   headers: string[]
@@ -283,6 +289,7 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
             <span className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{uploading ? <LoaderCircle className="size-4 animate-spin" /> : <ImagePlus className="size-4" />}Importer une image</span>
           </label>
           <div className="relative"><Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={fields.Portrait} onChange={(event) => set("Portrait", event.target.value)} placeholder="…ou coller une URL" className="pl-8 text-xs" /></div>
+          <TokenButton kind="creature" ownerId={creatureTokenId(fields.Portrait)} name={fields.Nom} source={isImageSource(fields.Portrait) ? fields.Portrait : ""} style={{ kind: "creature" }} disabledReason={creatureTokenId(fields.Portrait) ? "" : "Importe d’abord l’image de la créature"} />
 
         </section>
 

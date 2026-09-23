@@ -2,14 +2,16 @@
  * 0.5.0 : modèle PNJ simplifié, inventaire réel et payload schema 2
  * (setDefaultTokenForCharacter). Plus aucune automatisation de fiche.
  * 0.6.0 : « Synchroniser une session » ouvre le choix de session du compagnon.
+ * 0.7.0 : portrait (avatar) et token rond séparés, fiches des personnages joueurs,
+ * dossier du Journal au nom de la session synchronisée.
  */
 var EraserBridge = EraserBridge || (function () {
   'use strict';
-  var VERSION = '0.6.0';
+  var VERSION = '0.7.0';
   var SCRIPT = 'Eraser';
   var BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/';
   var PORTRAIT_WINDOW_MS = 90000;
-  var pendingPortrait = null; // { characterId, eraserId, portraitHash, doneId, expires }
+  var pendingPortrait = null; // { characterId, eraserId, hash, role, tokenFollows, bar, doneId, expires }
 
   // Propriétés de graphic reprises depuis un jeton par défaut existant (réglages du MJ conservés).
   var TOKEN_KEYS = [
@@ -30,12 +32,12 @@ var EraserBridge = EraserBridge || (function () {
   ];
 
   function freshState() {
-    return { version: VERSION, campaign: null, npcs: {}, shops: {}, chunks: {}, portraits: {}, tokens: {}, names: {}, placeholder: '' };
+    return { version: VERSION, campaign: null, npcs: {}, shops: {}, characters: {}, chunks: {}, portraits: {}, tokens: {}, tokenHashes: {}, tokenImages: {}, names: {}, placeholder: '' };
   }
 
   function ensureState() {
     var s = state.EraserBridge = state.EraserBridge || freshState();
-    ['npcs', 'shops', 'chunks', 'portraits', 'tokens', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
+    ['npcs', 'shops', 'characters', 'chunks', 'portraits', 'tokens', 'tokenHashes', 'tokenImages', 'names'].forEach(function (key) { s[key] = s[key] || {}; });
     s.placeholder = s.placeholder || '';
     s.version = VERSION;
   }
@@ -120,8 +122,54 @@ var EraserBridge = EraserBridge || (function () {
 
   function eraserIdForCharacter(characterId) {
     ensureState();
-    var npcs = state.EraserBridge.npcs;
-    return Object.keys(npcs).filter(function (id) { return npcs[id] === characterId; })[0] || '';
+    var s = state.EraserBridge;
+    var found = '';
+    [s.npcs, s.characters, s.shops].forEach(function (map) {
+      if (!found) found = Object.keys(map).filter(function (id) { return map[id] === characterId; })[0] || '';
+    });
+    return found;
+  }
+
+  // Un seul endroit décide s'il faut renvoyer le portrait ou le token : leur adresse change
+  // quand l'image change dans Eraser.
+  function imageNeeds(eraserId, portraitUrl, tokenUrl) {
+    var s = state.EraserBridge;
+    var portraitHash = hash(portraitUrl || '');
+    var tokenHash = hash(tokenUrl || '');
+    return {
+      portraitHash: portraitHash,
+      tokenHash: tokenHash,
+      needsAvatar: Boolean(portraitUrl) && s.portraits[eraserId] !== portraitHash,
+      needsToken: Boolean(tokenUrl) && s.tokenHashes[eraserId] !== tokenHash
+    };
+  }
+
+  /* ---------- dossiers du Journal ---------- */
+  function journalTree() {
+    var raw = Campaign().get('journalfolder');
+    try { var tree = typeof raw === 'string' && raw ? JSON.parse(raw) : raw; return Array.isArray(tree) ? tree : []; }
+    catch (_error) { return []; }
+  }
+  function removeFromTree(nodes, id) {
+    for (var index = nodes.length - 1; index >= 0; index -= 1) {
+      var node = nodes[index];
+      if (node === id) nodes.splice(index, 1);
+      else if (node && typeof node === 'object' && Array.isArray(node.i)) removeFromTree(node.i, id);
+    }
+  }
+  // Range la fiche dans le dossier (créé à la racine au besoin), en la retirant d'ailleurs.
+  function moveToFolder(characterId, folderName) {
+    var name = String(folderName || '').trim();
+    if (!name) return;
+    var tree = journalTree();
+    removeFromTree(tree, characterId);
+    var folder = tree.filter(function (node) { return node && typeof node === 'object' && node.n === name && Array.isArray(node.i); })[0];
+    if (!folder) {
+      folder = { n: name, i: [], id: '-Eraser' + hash(name + Date.now()).replace(/[^A-Za-z0-9]/g, '') };
+      tree.push(folder);
+    }
+    folder.i.push(characterId);
+    Campaign().set('journalfolder', JSON.stringify(tree));
   }
 
   function characterWithEraserId(eraserId) {
@@ -156,16 +204,42 @@ var EraserBridge = EraserBridge || (function () {
     upsertAttribute(character.id, 'pv', npc.currentHp, npc.totalHp);
     [['constitution', npc.constitution], ['force', npc.strength], ['dexterite', npc.dexterity], ['intelligence', npc.intelligence], ['sagesse', npc.wisdom], ['charisme', npc.charisma]]
       .forEach(function (entry) { upsertAttribute(character.id, entry[0], entry[1]); });
-    var portraitHash = hash(npc.portraitUrl || '');
+    var needs = imageNeeds(npc.id, npc.portraitUrl, npc.tokenUrl);
     return {
       character: character,
       meta: {
         characterId: character.id,
         eraserId: npc.id,
-        portraitHash: portraitHash,
-        needsAvatar: Boolean(npc.portraitUrl) && s.portraits[npc.id] !== portraitHash,
+        portraitHash: needs.portraitHash,
+        tokenHash: needs.tokenHash,
+        needsAvatar: needs.needsAvatar,
+        needsToken: needs.needsToken,
         created: created
       }
+    };
+  }
+
+  // Personnage joueur : créé une fois, puis seuls le nom et les PV suivent Eraser.
+  // Journaux, contrôle et dossier choisis par le MJ ne sont jamais touchés.
+  function upsertPlayer(player) {
+    var s = state.EraserBridge;
+    var character = s.characters[player.id] && getObj('character', s.characters[player.id]);
+    if (!character) character = characterWithEraserId(player.id);
+    var created = false;
+    if (!character) {
+      character = createObj('character', { name: player.name, inplayerjournals: '', controlledby: '' });
+      s.tokens[player.id] = false;
+      s.portraits[player.id] = '';
+      created = true;
+    }
+    s.characters[player.id] = character.id;
+    character.set({ name: player.name });
+    upsertAttribute(character.id, 'eraser_id', player.id);
+    upsertAttribute(character.id, 'pv', player.currentHp, player.totalHp);
+    var needs = imageNeeds(player.id, player.portraitUrl, player.tokenUrl);
+    return {
+      character: character,
+      meta: { characterId: character.id, eraserId: player.id, portraitHash: needs.portraitHash, tokenHash: needs.tokenHash, needsAvatar: needs.needsAvatar, needsToken: needs.needsToken, created: created }
     };
   }
 
@@ -187,7 +261,11 @@ var EraserBridge = EraserBridge || (function () {
     }
     character.set({ name: 'Boutique — ' + shop.name, bio: shopBio(shop), gmnotes: '', inplayerjournals: 'all' });
     upsertAttribute(character.id, 'eraser_id', shop.id);
-    return character;
+    var needs = imageNeeds(shop.id, shop.portraitUrl, shop.tokenUrl);
+    return {
+      character: character,
+      meta: { characterId: character.id, eraserId: shop.id, portraitHash: needs.portraitHash, tokenHash: needs.tokenHash, needsAvatar: needs.needsAvatar, needsToken: needs.needsToken, bar: false }
+    };
   }
 
   /* ---------- jeton par défaut ---------- */
@@ -229,10 +307,13 @@ var EraserBridge = EraserBridge || (function () {
     character.get('_defaulttoken', function (json) {
       try {
         var existing = parseToken(json);
-        var hp = hpAttribute(character);
+        // Un magasin n'a pas de PV : pas de barre liée.
+        var withBar = options.bar !== false;
+        var hp = withBar ? hpAttribute(character) : null;
         var name = character.get('name') || '';
         var initialize = !existing || !s.tokens[eraserId];
-        var image = cleanImgsrc(options.image) || cleanImgsrc(character.get('avatar')) || (existing && cleanImgsrc(existing.imgsrc)) || cleanImgsrc(s.placeholder);
+        // Le token rond d'Eraser passe avant l'avatar.
+        var image = cleanImgsrc(options.image) || cleanImgsrc(s.tokenImages[eraserId]) || cleanImgsrc(character.get('avatar')) || (existing && cleanImgsrc(existing.imgsrc)) || cleanImgsrc(s.placeholder);
         if (!image) return done(null, { token: false, reason: 'aucune image dans ta bibliothèque Roll20 pour ce jeton' });
 
         var props;
@@ -244,9 +325,6 @@ var EraserBridge = EraserBridge || (function () {
             width: existing && existing.width || 70,
             height: existing && existing.height || 70,
             represents: character.id,
-            bar1_link: hp.id,
-            bar1_value: String(hp.get('current')),
-            bar1_max: String(hp.get('max')),
             // Réglages de départ (premier import uniquement) :
             // Nom affiché · Nom : Voir oui / Modifier oui
             // Barre 1 : Voir oui / Modifier oui / texte visible pour les éditeurs
@@ -257,6 +335,7 @@ var EraserBridge = EraserBridge || (function () {
             playersedit_bar1: true,
             bar1_num_permission: 'editors'
           };
+          if (hp) { props.bar1_link = hp.id; props.bar1_value = String(hp.get('current')); props.bar1_max = String(hp.get('max')); }
         } else {
           props = existing;
           props.imgsrc = cleanImgsrc(props.imgsrc) || image;
@@ -264,8 +343,8 @@ var EraserBridge = EraserBridge || (function () {
           if (options.image && !sameImage(props.imgsrc, options.image)) { props.imgsrc = cleanImgsrc(options.image); changed = true; }
           // Nom : mis à jour seulement si le MJ ne l'a pas personnalisé.
           if (props.name !== name && (!props.name || props.name === s.names[eraserId])) { props.name = name; changed = true; }
-          if (!props.bar1_link) { props.bar1_link = hp.id; changed = true; }
-          if (props.bar1_link === hp.id) { props.bar1_value = String(hp.get('current')); props.bar1_max = String(hp.get('max')); }
+          if (hp && !props.bar1_link) { props.bar1_link = hp.id; changed = true; }
+          if (hp && props.bar1_link === hp.id) { props.bar1_value = String(hp.get('current')); props.bar1_max = String(hp.get('max')); }
         }
 
         if (changed) writeDefaultToken(character, props);
@@ -283,7 +362,10 @@ var EraserBridge = EraserBridge || (function () {
     pendingPortrait = {
       characterId: payload.characterId,
       eraserId: payload.eraserId,
-      portraitHash: payload.portraitHash,
+      hash: payload.hash || payload.portraitHash,
+      role: payload.role === 'token' ? 'token' : 'avatar',
+      tokenFollows: Boolean(payload.tokenFollows),
+      bar: payload.bar !== false,
       doneId: payload.doneId,
       expires: Date.now() + PORTRAIT_WINDOW_MS
     };
@@ -302,9 +384,20 @@ var EraserBridge = EraserBridge || (function () {
 
     var character = getObj('character', job.characterId);
     if (!character) return complete(job.doneId, new Error('Fiche disparue pendant l’upload.'));
+    var s = state.EraserBridge;
+    if (job.role === 'token') {
+      // Le token rond devient l'image du jeton par défaut ; le portrait reste celui de la fiche.
+      s.tokenImages[job.eraserId] = image;
+      s.tokenHashes[job.eraserId] = job.hash;
+      return syncDefaultToken(character, job.eraserId, { image: image, bar: job.bar }, function (error, result) {
+        complete(job.doneId, error, Object.assign({ tokenImage: true }, result || {}));
+      });
+    }
     character.set('avatar', avatarFromImgsrc(image));
-    state.EraserBridge.portraits[job.eraserId] = job.portraitHash;
-    syncDefaultToken(character, job.eraserId, { image: image }, function (error, result) {
+    s.portraits[job.eraserId] = job.hash;
+    // Le token arrive juste après, ou existe déjà : le jeton ne prend pas l'avatar.
+    if (job.tokenFollows || s.tokenImages[job.eraserId]) return complete(job.doneId, null, { avatar: true });
+    syncDefaultToken(character, job.eraserId, { image: image, bar: job.bar }, function (error, result) {
       complete(job.doneId, error, Object.assign({ avatar: true }, result || {}));
     });
   }
@@ -325,11 +418,25 @@ var EraserBridge = EraserBridge || (function () {
       if (state.EraserBridge.campaign && state.EraserBridge.campaign.id !== payload.campaign.id) throw new Error('Cette partie est déjà liée à une autre campagne Eraser. Utilise « Effacer les imports » avant de changer.');
       state.EraserBridge.campaign = payload.campaign;
     }
-    if (payload.kind === 'shop') return done(null, { characterId: upsertShop(payload.value).id });
+    if (payload.kind === 'shop') {
+      var shop = upsertShop(payload.value);
+      if (payload.folder) moveToFolder(shop.character.id, payload.folder);
+      return done(null, shop.meta);
+    }
+    if (payload.kind === 'character') {
+      // Les personnages joueurs restent toujours là où le MJ les a rangés.
+      var player = upsertPlayer(payload.value);
+      if (player.meta.needsAvatar || player.meta.needsToken) return done(null, player.meta);
+      return syncDefaultToken(player.character, payload.value.id, {}, function (error, token) {
+        if (error) return done(null, Object.assign(player.meta, { token: false, reason: error.message || String(error) }));
+        done(null, Object.assign(player.meta, token));
+      });
+    }
     if (payload.kind !== 'npc') return done(null, {});
     var result = upsertNpc(payload.value);
+    if (payload.folder) moveToFolder(result.character.id, payload.folder);
     // Le portrait doit d'abord arriver : le jeton sera construit à sa réception.
-    if (result.meta.needsAvatar) return done(null, result.meta);
+    if (result.meta.needsAvatar || result.meta.needsToken) return done(null, result.meta);
     syncDefaultToken(result.character, payload.value.id, {}, function (error, token) {
       if (error) return done(null, Object.assign(result.meta, { token: false, reason: error.message || String(error) }));
       done(null, Object.assign(result.meta, token));
@@ -340,17 +447,18 @@ var EraserBridge = EraserBridge || (function () {
     ensureState();
     var character = getObj('character', payload.characterId);
     if (!character) return done(new Error('Fiche Roll20 introuvable.'));
-    syncDefaultToken(character, payload.eraserId || eraserIdForCharacter(character.id), {}, done);
+    syncDefaultToken(character, payload.eraserId || eraserIdForCharacter(character.id), { bar: payload.bar }, done);
   }
 
   function rebuildAllTokens() {
     ensureState();
-    var ids = Object.keys(state.EraserBridge.npcs);
+    var s = state.EraserBridge;
+    var ids = Object.keys(s.npcs).concat(Object.keys(s.characters));
     var ok = 0, skipped = [];
     (function next() {
       var eraserId = ids.shift();
       if (!eraserId) return whisper('Jetons par défaut vérifiés : ' + ok + ' OK' + (skipped.length ? '<br>Sans image : ' + skipped.map(html).join(', ') : ''));
-      var character = getObj('character', state.EraserBridge.npcs[eraserId]);
+      var character = getObj('character', s.npcs[eraserId] || s.characters[eraserId]);
       if (!character) return next();
       syncDefaultToken(character, eraserId, {}, function (error, result) {
         if (!error && result && result.token) ok += 1;
@@ -467,7 +575,8 @@ var EraserBridge = EraserBridge || (function () {
     on('change:character:avatar', function (character) {
       var eraserId = eraserIdForCharacter(character.id);
       var image = cleanImgsrc(character.get('avatar'));
-      if (!eraserId || !image) return;
+      // Un token rond venu d'Eraser reste l'image du jeton.
+      if (!eraserId || !image || state.EraserBridge.tokenImages[eraserId] || state.EraserBridge.shops[eraserId]) return;
       syncDefaultToken(character, eraserId, { image: image }, function (error) {
         if (error) whisper('Jeton de ' + html(character.get('name')) + ' : ' + html(error.message));
       });

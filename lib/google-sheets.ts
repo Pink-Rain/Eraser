@@ -40,6 +40,7 @@ import {
   type GoogleTextFormatRun,
 } from "@/lib/google-sheet-rich-text"
 import { copyNpcPortrait } from "@/lib/npc-portraits"
+import { copyToken } from "@/lib/tokens"
 import {
   characterCriticalValueIndex,
   characterCharacteristics,
@@ -3460,6 +3461,7 @@ export async function copyNpcsToPage(sourcePageLinked: string, targetPageLinked:
       if (copied) portrait = `/api/npcs/portrait/${encodeURIComponent(id)}`
     }
     await copyCharacterInventory(npc.id, id)
+    await copyToken("npc", npc.id, id)
     copies.push({ ...npc, id, pageLinked: targetPageLinked, portrait, inCampaign: false, createdAt: "", updatedAt: "" })
   }
   return copies.length ? saveNpcs(targetPageLinked, copies) : []

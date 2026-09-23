@@ -164,3 +164,9 @@ export async function copySharedMedia(sourceKey: string, targetKey: string) {
   await putSharedMedia(targetKey, bytes, source.httpMetadata?.contentType || "image/png")
   return true
 }
+
+/** Date de la version enregistrée dans Drive, ou `null` si le média n'existe pas. */
+export async function sharedMediaVersion(key: string) {
+  const pointer = await pointerFor(key).catch(() => null)
+  return pointer ? pointer.modifiedTime || "1" : null
+}

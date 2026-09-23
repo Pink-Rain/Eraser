@@ -1,6 +1,6 @@
 (function () {
   'use strict';
-  const VERSION = '0.6.0';
+  const VERSION = '0.7.0';
   const API = 'http://127.0.0.1:32147/api/roll20/bridge';
   const IS_TOP = window.top === window;
   let syncing = false;
@@ -188,15 +188,24 @@
     for (const type of ['dragenter', 'dragover', 'drop']) spot.target.dispatchEvent(new DragEvent(type, init));
   }
 
-  async function uploadPortrait(imported, npc) {
-    const portraitUrl = new URL(npc.portraitUrl, API).href;
-    const image = await runtimeMessage({ type: 'eraser-image', url: portraitUrl });
-    if (!image?.ok) throw new Error(image?.error || 'Le portrait Eraser n’a pas pu être téléchargé.');
-    const file = await toUploadableFile(image.dataUrl, npc.name);
+  // role 'avatar' : le portrait de la fiche ; role 'token' : le token rond d'Eraser.
+  async function uploadImage(imported, url, name, role, options) {
+    const imageUrl = new URL(url, API).href;
+    const image = await runtimeMessage({ type: 'eraser-image', url: imageUrl });
+    if (!image?.ok) throw new Error(image?.error || (role === 'token' ? 'Le token Eraser n’a pas pu être téléchargé.' : 'Le portrait Eraser n’a pas pu être téléchargé.'));
+    const file = await toUploadableFile(image.dataUrl, name + (role === 'token' ? '-token' : ''));
     const doneId = rid();
     const done = waitForAcknowledgement(doneId, 60000, 'Roll20 n’a pas renvoyé l’image importée en 60 s (upload bloqué ou table de jeu non visible).');
     try {
-      await command('!eraser-expect-portrait', { characterId: imported.characterId, eraserId: imported.eraserId, portraitHash: imported.portraitHash, doneId }, 10000);
+      await command('!eraser-expect-portrait', {
+        characterId: imported.characterId,
+        eraserId: imported.eraserId,
+        hash: role === 'token' ? imported.tokenHash : imported.portraitHash,
+        role,
+        tokenFollows: Boolean(options?.tokenFollows),
+        bar: options?.bar !== false,
+        doneId,
+      }, 10000);
       dropFileOnTabletop(file);
       return await done;
     } catch (error) {
@@ -204,6 +213,50 @@
       await sendCommand('!eraser-cancel-portrait').catch(() => {});
       throw error;
     }
+  }
+
+  /**
+   * Importe une fiche puis, si besoin, son portrait et son token.
+   * Renvoie { imported, portrait, token, failures, warnings }.
+   */
+  async function importWithImages(payload, kind, value, label, folder) {
+    const report = { imported: false, portrait: false, token: false, failures: [], warnings: [] };
+    const bar = kind !== 'shop';
+    let result;
+    try {
+      result = await importPayload({ campaign: payload.campaign, kind, value, folder: folder || '' });
+      if (!result.characterId) throw new Error('Roll20 n’a pas confirmé la création de la fiche.');
+      report.imported = true;
+    } catch (error) {
+      report.failures.push(value.name + ' : import — ' + error.message);
+      return report;
+    }
+    if (result.needsAvatar) {
+      status(label + ' (portrait)');
+      try {
+        const portrait = await uploadImage(result, value.portraitUrl, value.name, 'avatar', { tokenFollows: result.needsToken, bar });
+        report.portrait = true;
+        if (portrait.token) report.token = true;
+      } catch (error) { report.failures.push(value.name + ' : portrait — ' + error.message); }
+    }
+    if (result.needsToken) {
+      status(label + ' (token)');
+      try {
+        const token = await uploadImage(result, value.tokenUrl, value.name, 'token', { bar });
+        if (token.token) report.token = true;
+      } catch (error) { report.failures.push(value.name + ' : token — ' + error.message); }
+    }
+    if (!report.token && (result.needsAvatar || result.needsToken) && kind !== 'shop') {
+      // Image manquante : on configure quand même le jeton (image existante ou image par défaut).
+      try {
+        const fallback = await command('!eraser-token', { characterId: result.characterId, eraserId: result.eraserId, bar }, 12000);
+        if (fallback.token) report.token = true; else report.warnings.push(value.name + ' : jeton en attente — ' + fallback.reason);
+      } catch (tokenError) { report.failures.push(value.name + ' : jeton — ' + tokenError.message); }
+    } else if (!result.needsAvatar && !result.needsToken && kind !== 'shop') {
+      if (result.token) report.token = true;
+      else report.warnings.push(value.name + ' : jeton en attente — ' + (result.reason || 'raison inconnue'));
+    }
+    return report;
   }
 
   /* ---------- panneau ---------- */
@@ -296,56 +349,41 @@
       status(sessionId ? 'Chargement de la session…' : 'Chargement de la campagne…');
       const payload = await fetchCampaign(sessionId);
       if (!Array.isArray(payload.npcs) || !Array.isArray(payload.shops)) throw new Error('Eraser a renvoyé une campagne invalide. Vérifie la clé de liaison.');
-      const total = payload.npcs.length + payload.shops.length;
-      if (!total) throw new Error(payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun PNJ ni magasin.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
+      const characters = Array.isArray(payload.characters) ? payload.characters : [];
+      const total = characters.length + payload.npcs.length + payload.shops.length;
+      if (!payload.npcs.length && !payload.shops.length && !characters.length) throw new Error(payload.session ? 'La session « ' + payload.session.name + ' » ne contient aucun joueur, PNJ ni magasin.' : 'Eraser a renvoyé 0 PNJ et 0 magasin. Ajoute des PNJ ou des magasins à une session dans le Créateur de session.');
+      // Une session range ses PNJs et magasins dans un dossier à son nom (les joueurs ne bougent pas).
+      const folder = payload.session ? payload.session.name : '';
 
       const failures = [];
       const warnings = [];
-      let imported = 0, tokens = 0, portraits = 0, done = 0;
+      let imported = 0, players = 0, tokens = 0, portraits = 0, shops = 0, done = 0;
+      const collect = (report) => {
+        failures.push(...report.failures); warnings.push(...report.warnings);
+        if (report.portrait) portraits += 1;
+        if (report.token) tokens += 1;
+        return report.imported;
+      };
 
+      for (const character of characters) {
+        const label = 'Joueur ' + (++done) + '/' + total + ' — ' + character.name;
+        status(label);
+        if (collect(await importWithImages(payload, 'character', character, label, ''))) players += 1;
+      }
       for (const npc of payload.npcs) {
         const label = 'PNJ ' + (++done) + '/' + total + ' — ' + npc.name;
         status(label);
-        let result;
-        try {
-          result = await importPayload({ campaign: payload.campaign, kind: 'npc', value: npc });
-          if (!result.characterId) throw new Error('Roll20 n’a pas confirmé la création de la fiche.');
-          imported += 1;
-        } catch (error) {
-          failures.push(npc.name + ' : import — ' + error.message);
-          continue;
-        }
-
-        if (result.needsAvatar) {
-          status(label + ' (portrait)');
-          try {
-            const portrait = await uploadPortrait(result, npc);
-            portraits += 1;
-            if (portrait.token) tokens += 1;
-          } catch (error) {
-            failures.push(npc.name + ' : portrait — ' + error.message);
-            // Sans portrait, on configure quand même le jeton (image existante ou image par défaut).
-            try {
-              const fallback = await command('!eraser-token', { characterId: result.characterId, eraserId: result.eraserId }, 12000);
-              if (fallback.token) tokens += 1; else warnings.push(npc.name + ' : jeton en attente — ' + fallback.reason);
-            } catch (tokenError) { failures.push(npc.name + ' : jeton — ' + tokenError.message); }
-          }
-        } else if (result.token) {
-          tokens += 1;
-        } else {
-          warnings.push(npc.name + ' : jeton en attente — ' + (result.reason || 'raison inconnue'));
-        }
+        if (collect(await importWithImages(payload, 'npc', npc, label, folder))) imported += 1;
       }
-
       for (const shop of payload.shops) {
-        status('Magasin ' + (++done) + '/' + total + ' — ' + shop.name);
-        try { await importPayload({ campaign: payload.campaign, kind: 'shop', value: shop }); }
-        catch (error) { failures.push(shop.name + ' : import — ' + error.message); }
+        const label = 'Magasin ' + (++done) + '/' + total + ' — ' + shop.name;
+        status(label);
+        if (collect(await importWithImages(payload, 'shop', shop, label, folder))) shops += 1;
       }
 
       await sendCommand('!eraser-import-done');
       const seconds = Math.round((Date.now() - started) / 1000);
-      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » · ' : '') + imported + '/' + payload.npcs.length + ' PNJ · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + payload.shops.length + ' magasin(s) · ' + seconds + ' s';
+      const summary = (payload.session ? 'Session « ' + payload.session.name + ' » (dossier du Journal) · ' : '') + players + '/' + characters.length + ' joueur(s) · ' + imported + '/' + payload.npcs.length + ' PNJ · ' + shops + '/' + payload.shops.length + ' magasin(s) · ' + tokens + ' jeton(s) OK · ' + portraits + ' portrait(s) importé(s) · ' + seconds + ' s';
       if (failures.length) status('Synchronisation incomplète — ' + summary + '\n\n' + failures.concat(warnings).join('\n'), true);
       else if (warnings.length) status('Synchronisation faite — ' + summary + '\n\n' + warnings.join('\n') + '\n\nAstuce : sélectionne un jeton puis « !eraser-placeholder » pour donner une image par défaut aux PNJ sans portrait.', false);
       else status('Synchronisation terminée — ' + summary);

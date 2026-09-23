@@ -468,3 +468,15 @@ test("renders the session creator with its sections", async () => {
   assert.match(html, /Ajouter un PNJ/);
   assert.match(html, /Ajouter un marché/);
 });
+
+test("shows a light Token button and the formatted player titles", async () => {
+  const { TokenButton } = await vite.ssrLoadModule("/components/eraser/token-editor.tsx");
+  const html = renderToStaticMarkup(React.createElement(TokenButton, { kind: "npc", ownerId: "npc-1", name: "Basile", source: "/api/npcs/portrait/npc-1", style: { kind: "npc" } }));
+  assert.match(html, /Token/);
+  assert.match(html, /\/api\/tokens\/npc\/npc-1/);
+
+  const { displayedMultipleValue } = await vite.ssrLoadModule("/lib/multiple-values.ts");
+  assert.equal(displayedMultipleValue('{"values":["Le barbu","L\'ivrogne du coin"],"selected":"L\'ivrogne du coin"}'), "L'ivrogne du coin");
+  assert.equal(displayedMultipleValue('["Chamane"]', "all"), "Chamane");
+  assert.equal(displayedMultipleValue("Haut-homme"), "Haut-homme");
+});

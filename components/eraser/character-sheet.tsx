@@ -6,6 +6,7 @@ import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, Gra
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
+import { TokenButton } from "@/components/eraser/token-editor"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
@@ -588,7 +589,8 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: `${campaignAccent}55` }}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${campaignAccent}, ${campaignAccent}66 58%, transparent)` }} />
       <div className="flex flex-col gap-6 lg:flex-row">
-        <label className="group relative flex aspect-[3/4] w-40 shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-muted text-muted-foreground shadow-inner sm:w-52 lg:w-56 xl:w-64">
+        <div className="flex w-40 shrink-0 flex-col gap-1 sm:w-52 lg:w-56 xl:w-64">
+        <label className="group relative flex aspect-[3/4] w-full shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-muted text-muted-foreground shadow-inner">
           {values[characterNarrativeStart + 1] ? <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={values[characterNarrativeStart + 1]} alt={`Portrait de ${character.name}`} decoding="async" fetchPriority="high" className="size-full object-cover" />
@@ -596,6 +598,8 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
           <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />{portraitPending ? "Envoi…" : "Changer"}</span>
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => changePortrait(event.target.files?.[0])} />
         </label>
+        <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
+        </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div><p className="text-[10px] font-semibold uppercase tracking-[.28em]" style={{ color: campaignAccent }}>Identité</p><InlineEdit label="Nom" value={values[0]} onCommit={(value) => commit(0, value)}><h1 className="mt-1 font-display text-4xl font-semibold tracking-tight sm:text-6xl">{values[0] || "Sans nom"}</h1></InlineEdit>{activeTitle && <p className="mt-1 font-display text-lg" style={{ color: campaignAccent }}>{activeTitle}</p>}</div>
