@@ -1,28 +1,49 @@
-# Eraser 0.1.1-alpha.61 — Tokens par défaut dans Roll20
+# Eraser 0.1.1-alpha.62 — Sessions réparées et nouveaux cadres à l’essai
 
-Cette version arrive par la mise à jour sans réinstallation. Le compagnon Roll20
-et le script Mod passent en **0.7.2** : mets à jour les deux depuis la page
-Roll20 de la campagne (pour le compagnon, remplace le contenu du dossier puis
-clique sur « Actualiser » dans chrome://extensions).
+Cette version arrive par la mise à jour sans réinstallation. Rien à changer côté
+Roll20.
 
-## Tokens automatiques
+## Correction : « Les sessions Eraser n’ont pas pu être chargées »
 
-- Plus besoin de passer par le bouton « Token » pour chaque fiche : un joueur,
-  un PNJ ou un magasin **sans token préparé dans Eraser** reçoit dans Roll20 un
-  **token par défaut**, avec l’avatar centré dans son cadre (doré, cuivré ou
-  devanture du magasin). Un magasin sans vendeur reçoit sa devanture seule.
-- Un token réglé à la main dans Eraser reste toujours prioritaire.
-- Le token par défaut est refait automatiquement quand l’avatar change dans
-  Eraser.
-- Le dessin des cadres a une seule source, partagée par l’éditeur de token de
-  l’application et par le compagnon : les tokens automatiques sont identiques à
-  ceux de l’éditeur.
-- Le résumé de fin compte les « token(s) par défaut » à part.
+- Après une suppression faite à la main dans Google (onglet « Sessions »
+  supprimé ou renommé, classeur « Sessions de campagne » effacé), Eraser gardait
+  en mémoire l’ancienne feuille et ne pouvait plus lire les sessions, dans
+  l’application comme dans le compagnon Roll20.
+- Maintenant, si la lecture échoue, Eraser revérifie la feuille : il recrée
+  l’onglet manquant, ou retrouve le classeur par son nom dans Drive (il n’en crée
+  un nouveau que s’il a vraiment disparu), puis relit. Aucune donnée n’est
+  modifiée.
+- Si le compagnon affiche encore une erreur, son message indique désormais le
+  code technique entre parenthèses.
+
+## Style du cadre dans la fenêtre « Token »
+
+La fenêtre « Token » propose maintenant plusieurs styles, avec un aperçu de
+chacun sur l’image en cours. Les cadres par défaut ne changent pas tant qu’on
+n’en a pas choisi d’autres.
+
+- **Joueurs, PNJs, créatures** :
+  - **Orné** : le cadre actuel (perles et losanges) ;
+  - **Ancien** : un anneau de métal martelé, sobre, usé, au bord ébréché, avec
+    un voile sépia sur l’image ;
+  - **Relique** : deux fins anneaux fendus, rongés par la patine (vert-de-gris
+    pour le cuivre, noirci pour l’argent), avec quatre clous.
+  L’or, le cuivre et l’argent restent la couleur de chaque type.
+- **Magasins** :
+  - **Médaillon** : la devanture ronde actuelle ;
+  - **Échoppe** : un vrai étal de marché, pas rond, dans un style ancien et
+    patiné : poteaux et comptoir en planches, écriteau du métier, et un toit
+    différent par magasin (auvent festonné rouge pour le marché, auvent à
+    franges bleu pour la librairie, tente rayée pour l’antiquaire, toit de
+    bardeaux et bannière pour l’armurerie, toile rapiécée et trouée pour le
+    marché noir, fanions pour l’alchimiste, chaume pour la taverne). Le vendeur
+    se tient derrière le comptoir ; sans vendeur, le fond prend les couleurs du
+    magasin.
 
 ## Vérifications
 
 - lint sans erreur, build de production et build desktop réussis, serveur desktop
   vérifié en HTTP 200 ;
-- 22 tests d’interface et 6 tests du pont Roll20 au vert (dont le dessin des
-  quatre cadres par le fichier partagé) ;
-- tokens par défaut dessinés et vérifiés à l’écran.
+- 22 tests d’interface et 6 tests du pont Roll20 au vert (dont chaque nouveau
+  cadre et chaque échoppe) ;
+- tous les cadres dessinés et vérifiés à l’écran.

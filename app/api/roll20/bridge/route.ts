@@ -36,7 +36,9 @@ export async function GET(request: Request) {
     return NextResponse.json(payload, { headers: corsHeaders })
   } catch (error) {
     const missingSession = error instanceof Error && error.message === "SESSION_NOT_FOUND"
-    return NextResponse.json({ error: missingSession ? "Cette session n’existe plus dans Eraser." : url.searchParams.get("view") === "sessions" ? "Les sessions Eraser n’ont pas pu être chargées." : "La campagne Eraser n’a pas pu être chargée." }, { status: missingSession ? 404 : 400, headers: corsHeaders })
+    // Le code technique aide à comprendre une panne (feuille Google absente, autorisation expirée…).
+    const code = error instanceof Error && error.message ? ` (${error.message.slice(0, 160)})` : ""
+    return NextResponse.json({ error: missingSession ? "Cette session n’existe plus dans Eraser." : (url.searchParams.get("view") === "sessions" ? "Les sessions Eraser n’ont pas pu être chargées." : "La campagne Eraser n’a pas pu être chargée.") + code }, { status: missingSession ? 404 : 400, headers: corsHeaders })
   }
 }
 

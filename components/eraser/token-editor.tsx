@@ -17,7 +17,8 @@ import "@/integrations/roll20/extension/token-art.js"
 type Placement = { x: number; y: number; width: number }
 type TokenImage = HTMLImageElement | null
 
-export type TokenStyle = { kind: Exclude<TokenKind, "shop"> } | { kind: "shop"; shopKey: ShopKey }
+/** `frame` : le cadre choisi (Orné, Ancien, Relique ; Médaillon ou Échoppe pour un magasin). */
+export type TokenStyle = ({ kind: Exclude<TokenKind, "shop"> } | { kind: "shop"; shopKey: ShopKey }) & { frame?: string }
 
 type TokenArt = {
   SIZE: number
@@ -26,11 +27,26 @@ type TokenArt = {
   shopFronts: Record<ShopKey, { stripes: [string, string]; background: string; sign: string; label: string }>
   drawToken: (ctx: CanvasRenderingContext2D, style: TokenStyle, image: TokenImage, placement: Placement, editing: boolean) => void
   corners: (placement: Placement, height: number) => Array<readonly [number, number]>
-  coverPlacement: (image: HTMLImageElement) => Placement
+  coverPlacement: (image: HTMLImageElement, style?: TokenStyle) => Placement
+  frameOptions: Record<TokenKind, Array<{ id: string; label: string }>>
+  frameOf: (style: TokenStyle) => string
 }
 
 const art = (globalThis as unknown as { EraserTokenArt: TokenArt }).EraserTokenArt
-const { SIZE, CENTER, INNER, drawToken, corners, coverPlacement } = art
+const { SIZE, CENTER, INNER, drawToken, corners, coverPlacement, frameOptions } = art
+
+/** Aperçu d'un cadre avec l'image en cours, pour choisir. */
+function FrameThumbnail({ style, image, selected, label, onSelect }: { style: TokenStyle; image: TokenImage; selected: boolean; label: string; onSelect: () => void }) {
+  const ref = useRef<HTMLCanvasElement>(null)
+  useEffect(() => {
+    const context = ref.current?.getContext("2d")
+    if (context) drawToken(context, style, image, image ? coverPlacement(image, style) : { x: CENTER, y: CENTER, width: INNER * 2 }, false)
+  }, [style, image])
+  return <button type="button" onClick={onSelect} aria-pressed={selected} className={cn("grid justify-items-center gap-1 rounded-xl border p-1.5 text-[11px] font-medium transition", selected ? "border-primary bg-primary/10 text-foreground" : "border-transparent text-muted-foreground hover:bg-muted")}>
+    <canvas ref={ref} width={SIZE} height={SIZE} className="size-16" />
+    {label}
+  </button>
+}
 export const shopFronts = art.shopFronts
 
 /* ---------- chargement de l'avatar ---------- */
@@ -78,6 +94,9 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
   const [currentVisible, setCurrentVisible] = useState(true)
+  const options = frameOptions[style.kind] ?? []
+  const [frame, setFrame] = useState(style.frame || options[0]?.id || "")
+  const framed = { ...style, frame } as TokenStyle
   const [openedAt] = useState(() => Date.now())
   const drag = useRef<{ mode: "move" | "resize"; startX: number; startY: number; start: Placement; startDistance: number } | null>(null)
 
@@ -92,7 +111,7 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
         release = loaded.release
         if (!alive) return release()
         setImage(loaded.image)
-        setPlacement(coverPlacement(loaded.image))
+        setPlacement(coverPlacement(loaded.image, framed))
       })
       .catch((caught) => { if (alive) { setImage(null); setError(caught instanceof Error ? caught.message : "L’avatar n’a pas pu être chargé.") } })
       .finally(() => { if (alive) setLoading(false) })
@@ -101,8 +120,8 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
 
   useEffect(() => {
     const context = canvasRef.current?.getContext("2d")
-    if (context) drawToken(context, style, image, placement, true)
-  }, [style, image, placement, open])
+    if (context) drawToken(context, { ...style, frame } as TokenStyle, image, placement, true)
+  }, [style, frame, image, placement, open])
 
   const point = useCallback((event: { clientX: number; clientY: number }) => {
     const rect = canvasRef.current?.getBoundingClientRect()
@@ -144,7 +163,7 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
       canvas.width = SIZE; canvas.height = SIZE
       const context = canvas.getContext("2d")
       if (!context) throw new Error("Le navigateur ne peut pas préparer le token.")
-      drawToken(context, style, image, placement, false)
+      drawToken(context, framed, image, placement, false)
       const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"))
       if (!blob) throw new Error("Le token n’a pas pu être préparé.")
       const form = new FormData()
@@ -185,11 +204,19 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={`/api/tokens/${kind}/${encodeURIComponent(ownerId)}?t=${openedAt}`} alt="" className="size-24 object-contain" onError={() => setCurrentVisible(false)} />
           </div>}
-          {image && <Button type="button" variant="outline" size="sm" onClick={() => setPlacement(coverPlacement(image))}><Crosshair />Recentrer</Button>}
+          {image && <Button type="button" variant="outline" size="sm" onClick={() => setPlacement(coverPlacement(image, framed))}><Crosshair />Recentrer</Button>}
           {!source && style.kind === "shop" && <p>Sans vendeur, la devanture garde les couleurs du magasin.</p>}
           {!source && style.kind !== "shop" && <p>Ajoute d’abord un avatar pour le cadrer.</p>}
         </div>
       </div>
+      {options.length > 1 && <div>
+        <p className="mb-1 text-xs font-semibold text-muted-foreground">Style du cadre</p>
+        <div className="flex flex-wrap gap-1">{options.map((option) => <FrameThumbnail key={option.id} label={option.label} image={image} selected={frame === option.id} style={{ ...style, frame: option.id } as TokenStyle} onSelect={() => {
+          setFrame(option.id)
+          // Passer du cercle à l'échoppe change la zone à couvrir : on recadre.
+          if (image) setPlacement(coverPlacement(image, { ...style, frame: option.id } as TokenStyle))
+        }} />)}</div>
+      </div>}
       {error && <p className="text-sm text-destructive">{error}</p>}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" disabled={saving} onClick={onClose}>Annuler</Button>
@@ -216,7 +243,7 @@ export function TokenButton({ kind, ownerId, name, source, style, className, dis
     <Button type="button" variant="ghost" size="sm" className={cn("w-full gap-2 text-muted-foreground hover:text-foreground", className)} disabled={Boolean(disabledReason) || !ownerId} title={disabledReason || "Préparer le token rond"} onClick={(event) => { event.preventDefault(); event.stopPropagation(); setOpen(true) }}>
       {hasToken
         // eslint-disable-next-line @next/next/no-img-element
-        ? <img key={version} src={`/api/tokens/${kind}/${encodeURIComponent(ownerId)}${version ? `?v=${version}` : ""}`} alt="" className="size-5 rounded-full object-cover" onError={() => setHasToken(false)} />
+        ? <img key={version} src={`/api/tokens/${kind}/${encodeURIComponent(ownerId)}${version ? `?v=${version}` : ""}`} alt="" className={cn("size-5 object-cover", kind === "shop" ? "rounded-sm object-contain" : "rounded-full")} onError={() => setHasToken(false)} />
         : <CircleDot className="size-4" />}
       Token
     </Button>

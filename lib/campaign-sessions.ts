@@ -6,6 +6,7 @@ import {
   listNpcs,
   listSavedShops,
   readRangeFreshWithOffset,
+  repairJdrSheet,
   saveGeneratedShops,
   saveNpcs,
   sheetTabRange,
@@ -76,9 +77,21 @@ async function sessionsSheet() {
 }
 
 async function readSessionRows() {
-  const sheet = await sessionsSheet()
-  const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A2:${LAST_COLUMN}`))
-  return { sheet, rows, startRow }
+  const read = async () => {
+    const sheet = await sessionsSheet()
+    const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A2:${LAST_COLUMN}`))
+    return { sheet, rows, startRow }
+  }
+  try {
+    return await read()
+  } catch (error) {
+    // Onglet « Sessions » supprimé ou classeur effacé à la main : on revérifie la
+    // feuille (onglet recréé, ou classeur retrouvé par son nom dans Drive), puis on
+    // relit une seule fois.
+    console.error("SESSIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    await repairJdrSheet("sessions")
+    return read()
+  }
 }
 
 /** Ordre de création : la première session créée en premier. */

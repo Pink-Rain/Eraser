@@ -50,3 +50,12 @@ export async function saveJdrSheet(input: Omit<JdrSheetRecord, "createdAt" | "up
   sheetRecordCache.delete(input.key)
   return getJdrSheet(input.key)
 }
+
+/**
+ * Oublie le lien local vers une feuille (jamais la feuille elle-même) : la prochaine
+ * lecture la retrouve par son nom dans Drive, ou la crée si elle a vraiment disparu.
+ */
+export async function forgetJdrSheet(key: JdrSheetKey) {
+  await getDb().delete(jdrGoogleSheets).where(eq(jdrGoogleSheets.key, key))
+  sheetRecordCache.delete(key)
+}

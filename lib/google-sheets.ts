@@ -26,7 +26,7 @@ import {
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
 import { worldIndexDefinitions } from "@/lib/world-index-definitions"
-import { getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
+import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
@@ -2844,6 +2844,26 @@ const jdrSheetHeaderChecked = new Set<string>()
 // d'onglet inexistant : chaque lecture et chaque écriture échouaient avec une
 // erreur d'analyse de plage, y compris l'ajout d'un personnage à une campagne.
 const verifiedJdrSheetTabs = new Set<string>()
+
+/**
+ * Réparation après une modification faite à la main dans Drive ou Sheets (onglet
+ * supprimé ou renommé, classeur supprimé). Les vérifications gardées en mémoire
+ * sont oubliées ; si le classeur n'existe plus, son lien local l'est aussi.
+ * Aucune donnée n'est modifiée ni supprimée.
+ */
+export async function repairJdrSheet(key: JdrSheetKey) {
+  const stored = await getJdrSheet(key)
+  for (const cache of [verifiedJdrSheetTabs, jdrSheetHeaderChecked]) {
+    for (const entry of [...cache]) if (entry.endsWith(`:${key}`)) cache.delete(entry)
+  }
+  if (!stored) return
+  clearSpreadsheetReadCache(stored.spreadsheetId)
+  const exists = await spreadsheetTabs(stored.spreadsheetId).then(() => true).catch((error) => {
+    const code = error instanceof Error ? error.message : ""
+    return !/^SHEETS_API_ERROR:404/.test(code)
+  })
+  if (!exists) await forgetJdrSheet(key)
+}
 
 export async function spreadsheetTabs(spreadsheetId: string) {
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(
