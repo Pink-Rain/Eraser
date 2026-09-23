@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, ExternalLink, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -53,9 +53,12 @@ export type SheetGridColumn = {
    * (un nom à moitié tapé ne doit rien créer).
    */
   commitDelay?: number
-  /** Petit bouton dans la cellule, pour ouvrir une fiche liée à la ligne. */
-  onOpen?: (rowKey: string) => void
-  openLabel?: string
+  /**
+   * Contrôle affiché à la place du texte (liste déroulante, case à cocher, nom
+   * cliquable). Contrairement à `custom`, la colonne reste une colonne de texte :
+   * copier, coller, vider et trier continuent de passer par sa valeur.
+   */
+  control?: (rowKey: string) => ReactNode
 }
 
 export type SheetGridRow = { key: string; rowNumber: number }
@@ -450,25 +453,20 @@ export function SheetGrid({
                   {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
                   {column.custom
                     ? renderCustomCell?.(row.key, column.key)
-                    : <RichTextSurface
-                        key={`${version}:${writeTick}:${column.key}`}
-                        initialHtml={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
-                        plain={Boolean(column.plain)}
-                        disabled={disabled}
-                        placeholder=""
-                        delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
-                        onCommit={(value) => onCommit(row.key, column.key, value)}
-                        onActivate={(editor) => { activate(editor); setActiveCell({ row: row.key, column: column.key }); setSelection((current) => current.length ? [] : current) }}
-                        className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
-                      />}
-                  {column.onOpen && !column.custom && <button
-                    type="button"
-                    onClick={() => column.onOpen?.(row.key)}
-                    className="absolute right-1 top-1.5 z-20 grid size-6 place-items-center rounded-md border bg-background/90 text-muted-foreground shadow-sm hover:bg-primary hover:text-primary-foreground"
-                    aria-label={column.openLabel || "Ouvrir la fiche"}
-                    title={column.openLabel || "Ouvrir la fiche"}
-                  ><ExternalLink className="size-3.5" /></button>}
-                  {isActive && !column.custom && <span
+                    : column.control
+                      ? column.control(row.key)
+                      : <RichTextSurface
+                          key={`${version}:${writeTick}:${column.key}`}
+                          initialHtml={column.plain ? escapeRichText(valueOf(row.key, column.key)) : sanitizeRichText(valueOf(row.key, column.key))}
+                          plain={Boolean(column.plain)}
+                          disabled={disabled}
+                          placeholder=""
+                          delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
+                          onCommit={(value) => onCommit(row.key, column.key, value)}
+                          onActivate={(editor) => { activate(editor); setActiveCell({ row: row.key, column: column.key }); setSelection((current) => current.length ? [] : current) }}
+                          className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
+                        />}
+                  {isActive && !column.custom && !column.control && <span
                     role="separator"
                     aria-label="Recopier le contenu vers les lignes suivantes"
                     title="Tirer pour recopier le contenu"

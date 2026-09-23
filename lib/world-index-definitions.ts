@@ -25,23 +25,80 @@ export type WorldIndexDefinition = {
   sheetName: string
   title: string
   path: string
+  /** « un lieu » : ce qu'on ajoute depuis la vue « Tout », quel que soit l'onglet. */
+  itemLabel?: string
   tabs: WorldIndexTabDefinition[]
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
-export const creatureGridHeaders = ["Nom", "Type", "Sous-type", "Rang", "Dressable", "Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire", "Agressivité", "Extension"]
+export const creatureGridHeaders = ["Nom", "Type", "Sous-type", "Rang", "Dressable", "Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire", "Comportement", "Extension"]
 
 /** Caractéristiques d'une créature, dans l'ordre de la fiche. */
-export const creatureCharacteristics = ["Force", "Dextérité", "Intelligence", "Perception", "Charisme", "Vitesse", "Vitalité"]
+export const creatureCharacteristics = ["Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Vitesse", "Vitalité"]
+
+/** La seule note de la fiche. */
+export const creatureNoteHeader = "Description"
 
 /**
  * Colonnes remplies par la fiche d'une créature. Elles vivent dans Sheets, à la suite
  * des colonnes de l'index, mais ne s'affichent pas dans le tableau de l'application.
+ * Les anciennes colonnes (Environnement, Climat, Rencontre, Perception…) restent
+ * listées : sorties de la fiche, elles gardent leur contenu dans Sheets et restent
+ * hors du tableau.
  */
 export const creatureSheetOnlyHeaders = [
-  "Portrait", "Environnement", "Climat", "Sous-type secondaire", "Organisation", "Comportement", "Rencontre",
-  "Langue", "Taille", "Poids", ...creatureCharacteristics, "Sorts actifs", "Sorts passifs",
+  "Portrait", "Environnement", "Climat", "Sous-type secondaire", "Organisation", "Rencontre",
+  "Langue", "Taille", "Poids", "Force", "Dextérité", "Intelligence", "Perception", "Charisme", "Vitesse", "Vitalité",
+  "Sorts actifs", "Sorts passifs", "Sagesse", creatureNoteHeader,
 ]
+
+export type CreatureChoice = { value: string; hint?: string }
+
+const choices = (values: string[]): CreatureChoice[] => values.map((value) => ({ value }))
+
+export const creatureLocations = choices(["Marais", "Désert", "Savane", "Jungle", "Forêt", "Forêt noir", "Donjon", "Ville", "Caverne", "Montagne", "Aquatique", "Plaine", "Maison"])
+export const creatureRarities = choices(["Très commun", "Commun", "Rare", "Très rare", "Ultime", "Légendaire"])
+
+/** Les listes fermées de la fiche, par en-tête de colonne. */
+export const creatureChoices: Record<string, CreatureChoice[]> = {
+  "Rang": choices(["1", "2", "3", "4", "5"]),
+  "Type": choices(["Animal", "Artificiel", "Extérieur", "Humanoïdes monstrueux", "Mort-vivant", "Spectrale", "Végétale", "Vermine"]),
+  "Sous-type": choices(["Destrier", "Amphibien", "Aquatique", "Arachnide", "Bois", "Carnivore", "Cervidé", "Crustacé", "Démoniaque", "Divin", "Familier", "Félin", "Fermier", "Feu", "Fixe", "Golem", "Insecte", "Nim'Or", "Nuée", "Ombre", "Parasite", "Reptile", "Rongeur", "Sable", "Toxique", "Vase", "Volatile"]),
+  "Emplacement principal": creatureLocations,
+  "Rareté": creatureRarities,
+  "Emplacement secondaire": creatureLocations,
+  "Rareté secondaire": creatureRarities,
+  "Organisation": choices(["Solitaire 1", "Groupe 2", "Meute 3", "Nuée 4"]),
+  "Comportement": choices(["Agressif", "Défensif", "Pacifiste"]),
+  // Les familles qui parlent chaque langue s'affichent au survol.
+  "Langue": [
+    { value: "Anoumagus", hint: "Destrier, Volatile, Carnivore, Cervidé" },
+    { value: "Félinos", hint: "Félin, Rongeur" },
+    { value: "Reptaïl", hint: "Reptile, Amphibien" },
+    { value: "Shaâil", hint: "Ombre" },
+    { value: "Arak", hint: "Arachnide" },
+    { value: "Kléovias", hint: "Crustacé, Insecte, Parasite" },
+    { value: "Nashilien", hint: "Aquatique" },
+    { value: "Hépoien", hint: "Démoniaque" },
+  ],
+}
+
+/**
+ * Forme comparable d'un choix : accents, casse, pluriel et lettres doublées ignorés.
+ * La feuille écrit « Aggressif », « défensif » ou « Humanoïde monstrueux » : ce sont
+ * bien les choix « Agressif », « Défensif » et « Humanoïdes monstrueux ».
+ */
+function choiceKey(value: string) {
+  return foldName(value).replace(/[^a-z0-9' ]+/g, " ").split(" ").filter(Boolean)
+    .map((word) => word.replace(/(.)\1+/g, "$1").replace(/(?<=..)s$/, "")).join(" ")
+}
+
+/** Le choix de la liste qui correspond à une valeur de la feuille, s'il y en a un. */
+export function matchCreatureChoice(value: string, options: CreatureChoice[]) {
+  const key = choiceKey(value)
+  if (!key) return undefined
+  return options.find((option) => choiceKey(option.value) === key)
+}
 
 /** Les onglets de l'Index des lieux, du plus vaste au plus précis. */
 export const placeTabs = [
@@ -50,6 +107,8 @@ export const placeTabs = [
   ["Régions", "une région"],
   ["Villes", "une ville"],
   ["Points d'intérêt", "un point d'intérêt"],
+  // Ajouté après les autres : le premier onglet reste celui où un lien crée un lieu manquant.
+  ["Environnement", "un environnement"],
 ] as const
 
 export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> = {
@@ -62,7 +121,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
       name: "Créatures",
       itemLabel: "une créature",
       headers: [...creatureGridHeaders, ...creatureSheetOnlyHeaders],
-      widths: [220, 150, 150, 90, 110, 200, 110, 200, 140, 120, 130, ...creatureSheetOnlyHeaders.map((header) => /portrait|sorts|comportement|organisation|rencontre/i.test(header) ? 260 : 130)],
+      widths: [240, 170, 160, 90, 100, 190, 140, 190, 150, 140, 120, ...creatureSheetOnlyHeaders.map((header) => /portrait|sorts|description|organisation|rencontre/i.test(header) ? 260 : 130)],
       gridHeaders: creatureGridHeaders,
     }],
   },
@@ -71,6 +130,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     sheetName: "Index des lieux",
     title: "Index des lieux",
     path: "/ressources/index-des-lieux",
+    itemLabel: "un lieu",
     tabs: placeTabs.map(([name, itemLabel]) => ({
       name,
       itemLabel,
@@ -171,12 +231,23 @@ export function linkedColumnsOf(index: WorldIndexKey, tab: string) {
 }
 
 export function isLongColumn(header: string) {
-  return /description|note|histoire|autre|comportement|organisation|rencontre/.test(foldName(header))
+  return /description|note|histoire|autre|organisation|rencontre/.test(foldName(header))
 }
 
-/** Les colonnes montrées dans le tableau d'un onglet, parmi celles de la feuille. */
+/**
+ * Les colonnes montrées dans le tableau d'un onglet, parmi celles de la feuille. Une
+ * colonne en double dans Sheets (deux « Comportement ») n'apparaît qu'une fois : c'est
+ * la première qui est lue et écrite.
+ */
 export function gridHeadersOf(tab: WorldIndexTabDefinition, sheetHeaders: string[]) {
   if (!tab.gridHeaders) return sheetHeaders.map((_, index) => index)
-  const hidden = new Set(tab.headers.filter((header) => !tab.gridHeaders!.some((visible) => foldName(visible) === foldName(header))).map(foldName))
-  return sheetHeaders.flatMap((header, index) => hidden.has(foldName(header)) ? [] : [index])
+  const visible = new Set(tab.gridHeaders.map(foldName))
+  const hidden = new Set(tab.headers.map(foldName).filter((header) => !visible.has(header)))
+  const seen = new Set<string>()
+  return sheetHeaders.flatMap((header, index) => {
+    const folded = foldName(header)
+    if (hidden.has(folded) || seen.has(folded)) return []
+    seen.add(folded)
+    return [index]
+  })
 }

@@ -1,38 +1,56 @@
-# Eraser 0.1.1-alpha.51 — des doublons de sorts qu’on peut vraiment traiter
+# Eraser 0.1.1-alpha.52 — des listes déroulantes pour les créatures, un onglet Environnement pour les lieux
 
-L’onglet **Doublons** de l’Index des classes est entièrement repensé.
+## Index des lieux
 
-## Des groupes, pas des paires
+- Nouvel onglet **Environnement**, créé tout seul dans le classeur au premier
+  chargement. Rien n’est déplacé dans les onglets existants.
+- Les boutons d’onglets sont remplacés par une **liste déroulante**, comme dans
+  l’Index des objets. Elle s’ouvre sur **Tout**, qui réunit les lignes de tous
+  les onglets.
+- Dans la vue « Tout », une colonne **Onglet** indique où se trouve chaque lieu.
+  On peut y choisir un autre onglet pour l’y déplacer. « Ajouter un lieu »
+  demande dans quel onglet le ranger.
 
-Les sorts semblables sont regroupés : si A ressemble à B et B à C, les trois se
-comparent ensemble. La liste de gauche se filtre par type de ressemblance
-(doublon exact, même description, même nom, très proche) et par recherche.
+## Index des créatures
 
-## Une comparaison côte à côte
+### Le tableau
 
-Chaque sort du groupe a sa colonne, avec :
+- L’icône d’ouverture disparaît : **un clic sur le nom ouvre la fiche**.
+- Type, Sous-type, Rang, les deux Emplacements, les deux Raretés et
+  Comportement deviennent des **listes déroulantes**, directement dans le
+  tableau. Dressable devient une **case à cocher**.
+- Les valeurs déjà présentes dans la feuille sont reconnues même si elles sont
+  écrites un peu autrement (« Aggressif », « défensif », « Humanoïde
+  monstrueux »). Elles ne sont réécrites que si tu choisis une autre valeur. Une
+  valeur hors liste (« Donjon-Ruine », « / ») reste affichée en italique, rien
+  n’est effacé.
+- La seconde colonne « Comportement » de la feuille (restée vide) n’apparaît
+  plus en double.
 
-- **d’où il vient** : ses classes et ses rangs, aux couleurs de chaque classe ;
-- son ID et sa ligne dans la feuille ;
-- tous ses champs, ceux qui diffèrent étant surlignés ;
-- **Modifier** (l’éditeur complet) et **Supprimer**.
+### La fiche
 
-## La fusion champ par champ
+- **À gauche** : l’image, l’emplacement principal et sa rareté, l’emplacement
+  secondaire et sa rareté, l’extension.
+- **À droite** : nom, rang, taille et poids ; type, sous-type et Dressable ;
+  organisation, comportement et langue. La famille de créatures qui parle
+  chaque langue s’affiche au survol de l’option, jamais écrite en dur.
+- **Dessous** : Force, Dextérité, Intelligence, **Sagesse**, Charisme, Vitesse,
+  Vitalité.
+- Une seule note : « Description, Histoire, Lore, Autre ».
+- **Actifs** et **Passifs** : chaque sort ajouté s’affiche en carte complète,
+  avec son type, ses charges, son effet, sa description, ses compétences et sa
+  distance, sans mention de classe.
 
-1. Choisis le sort à **garder**.
-2. Pour chaque champ qui diffère, clique la version à conserver.
-3. Les **classes et rangs sont réunis** sur le sort gardé ; si une même classe a
-   deux rangs, tu choisis lequel.
-4. **Fusionner** : le sort gardé est mis à jour, les autres sont supprimés.
+Les colonnes Sagesse et Description sont ajoutées à droite de la feuille. Les
+anciennes colonnes (Environnement, Climat, Rencontre, Perception…) gardent
+leur contenu dans Sheets et restent hors du tableau.
 
-Les créatures qui utilisaient un sort supprimé passent automatiquement au sort
-gardé. Si la feuille a changé entre-temps, rien n’est écrit et l’application
-demande d’actualiser.
+## Vérifications
 
-## « Ce ne sont pas des doublons »
-
-Un faux positif ne revient plus : il est noté dans un onglet **« Doublons
-ignorés »** de la feuille des sorts.
-
-Le bouton **Doublons** d’un sort (et le menu d’une ligne) ouvre directement son
-groupe ; il n’apparaît que si le sort a des doublons.
+- dans un vrai navigateur : tableau à onze colonnes sans doublon, listes et
+  case à cocher qui enregistrent la bonne cellule, anciennes valeurs reconnues
+  ou conservées, fiche ouverte depuis le nom, info-bulle des langues, cartes de
+  sorts, envoi des seuls champs modifiés, vue « Tout » des lieux et filtre par
+  onglet ;
+- lint sans erreur, build Vinext complet, 20 tests d’interface au vert ;
+- serveur desktop construit et vérifié en HTTP 200.
