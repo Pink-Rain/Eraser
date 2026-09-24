@@ -336,7 +336,7 @@ export function RichTextToolbar({ targetRef, ready, compact = false, leading, tr
  * appartient au navigateur. Pour repartir d'une autre valeur, il faut la remonter
  * (une `key` différente), jamais lui passer une nouvelle propriété.
  */
-export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plain = false, disabled = false, placeholder = "Écrire…", delay = 700, onCommit, onActivate, className = "" }: {
+export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plain = false, disabled = false, placeholder = "Écrire…", delay = 700, onCommit, onActivate, className = "", ariaLabel }: {
   initialHtml: string
   /** Le contenu est renvoyé en texte brut, sans mise en forme. */
   plain?: boolean
@@ -346,6 +346,8 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
   onCommit: (value: string) => void
   onActivate?: (target: RichTextTarget) => void
   className?: string
+  /** Nom de la zone pour les lecteurs d'écran, puisqu'elle ne peut pas être dans un <label>. */
+  ariaLabel?: string
 }) {
   const editor = useRef<HTMLDivElement>(null)
   const timer = useRef<number | null>(null)
@@ -385,6 +387,7 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
     spellCheck
     role="textbox"
     aria-multiline="true"
+    aria-label={ariaLabel}
     tabIndex={0}
     data-placeholder={placeholder}
     onInput={() => { if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, delay) }}
@@ -409,13 +412,36 @@ export function RichTextView({ html, fallback = "", className = "" }: { html: st
  * Un champ autonome : sa barre d'outils et sa zone de saisie. C'est la forme utilisée
  * partout hors tableaux (notes, récits, descriptions d'objets, fiches de PNJ…).
  */
-export function RichTextField({ value, onCommit, plain = false, disabled = false, placeholder, label, minHeight = "min-h-24", toolbar = "focus", className = "", trailing }: {
+/**
+ * Un champ enrichi ne doit pas être placé dans un <label> : le navigateur renvoie
+ * chaque clic du texte au premier bouton de la barre (« Gras »), ce qui fait sauter le
+ * curseur et glisse des mises en forme, et le Label de l'interface bloque le
+ * double-clic sur un mot. Les champs sont donc posés dans un <div> ; ces deux gardes
+ * protègent en plus un champ qui se retrouverait malgré tout dans un label.
+ */
+function keepClicksInField(event: ReactMouseEvent<HTMLDivElement>) {
+  // Une case à cocher du texte ou la pastille de couleur (un label propre à la barre)
+  // gardent leur comportement ; ailleurs, le clic reste au champ.
+  const inner = (event.target as HTMLElement).closest?.("input, label")
+  if (inner && event.currentTarget.contains(inner)) return
+  event.preventDefault()
+}
+
+function keepMultiClickSelection(event: ReactMouseEvent<HTMLDivElement>) {
+  // Double et triple clic sélectionnent un mot ou un paragraphe : un label parent ne
+  // doit pas les annuler.
+  if (event.detail > 1) event.stopPropagation()
+}
+
+export function RichTextField({ value, onCommit, plain = false, disabled = false, placeholder, label, ariaLabel, minHeight = "min-h-24", toolbar = "focus", className = "", trailing }: {
   value: string
   onCommit: (value: string) => void
   plain?: boolean
   disabled?: boolean
   placeholder?: string
   label?: string
+  /** Nom du champ pour les lecteurs d'écran (le titre visible est posé à côté, hors label). */
+  ariaLabel?: string
   minHeight?: string
   /** « focus » n'affiche la barre que lorsque le champ est utilisé, « always » la garde. */
   toolbar?: "focus" | "always"
@@ -429,7 +455,11 @@ export function RichTextField({ value, onCommit, plain = false, disabled = false
   const showToolbar = !disabled && (toolbar === "always" || active)
 
   return <div
-    className={`overflow-hidden rounded-xl border bg-background/45 ${className}`}
+    // Graisse normale : posé sous un titre en demi-gras, le texte en héritait, et le
+    // bouton « Gras » le prenait pour du gras et le retirait au lieu de l'ajouter.
+    className={`overflow-hidden rounded-xl border bg-background/45 font-normal ${className}`}
+    onClick={keepClicksInField}
+    onMouseDown={keepMultiClickSelection}
     onFocusCapture={() => setActive(true)}
     onBlurCapture={(event) => {
       const next = event.relatedTarget as HTMLElement | null
@@ -449,6 +479,7 @@ export function RichTextField({ value, onCommit, plain = false, disabled = false
       placeholder={placeholder}
       onCommit={onCommit}
       onActivate={(target) => { targetRef.current = target; setActive(true); setReady(true) }}
+      ariaLabel={ariaLabel || label}
       className={`${minHeight} px-3 py-2 text-sm leading-6`}
     />
   </div>

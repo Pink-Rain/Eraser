@@ -56,7 +56,7 @@ function ObjectForm({ headers, pending, onCancel, onSave }: { headers: string[];
       {headers.map((header, index) => isGeneratedField(header)
         ? <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} placeholder="Généré si vide" /></label>
         : isLongField(header)
-          ? <label key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField value={values[index]} onCommit={(html) => set(index, html)} /></label>
+          ? <div key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField ariaLabel={header} value={values[index]} onCommit={(html) => set(index, html)} /></div>
           : <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} /></label>)}
     </div>
     <div className="mt-4 flex justify-end gap-2">

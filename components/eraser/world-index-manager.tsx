@@ -108,7 +108,7 @@ function EntryForm({ headers, visible, linked, itemLabel, pending, controls, tab
         if (controls && creatureChoices[header]) return <div key={header + index} className="grid gap-1 text-xs font-semibold"><span>{header}</span><CreatureChoiceSelect header={header} value={values[index]} onChange={(value) => set(index, value)} /></div>
         if (controls && foldName(header) === "dressable") return <label key={header + index} className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isChecked(values[index])} onCheckedChange={(checked) => set(index, checked === true ? "Oui" : "Non")} />{header}</label>
         return isLongColumn(header)
-          ? <label key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField value={values[index]} onCommit={(html) => set(index, html)} /></label>
+          ? <div key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField ariaLabel={header} value={values[index]} onCommit={(html) => set(index, html)} /></div>
           : <label key={header + index} className="grid gap-1 text-xs font-semibold">
               <span className="flex items-center gap-1">{header}{isLinked(header) && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}</span>
               <Input autoFocus={index === nameIndex} value={values[index]} onChange={(event) => set(index, event.target.value)} placeholder={isLinked(header) ? "Noms séparés par des virgules" : undefined} />

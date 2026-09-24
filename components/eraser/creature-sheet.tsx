@@ -316,10 +316,10 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
           <div className="grid grid-cols-2 items-end gap-3 lg:grid-cols-4">
             {placeFields.map((name) => choice(name))}
           </div>
-          <label className="grid gap-1 text-xs font-semibold">
+          <div className="grid gap-1 text-xs font-semibold">
             Description, Histoire, Lore, Autre :
-            <RichTextField value={initial[creatureNoteHeader] ?? ""} onCommit={(value) => set(creatureNoteHeader, value)} minHeight="min-h-28" />
-          </label>
+            <RichTextField ariaLabel="Description, Histoire, Lore, Autre" value={initial[creatureNoteHeader] ?? ""} onCommit={(value) => set(creatureNoteHeader, value)} minHeight="min-h-28" />
+          </div>
         </section>
       </div>
 

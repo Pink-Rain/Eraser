@@ -442,7 +442,7 @@ body {
 }
 
 /*
- * Fiche de personnage à terre : sous 0 PV elle passe en gris, à moins la vie
+ * Fiche de personnage à terre : à 0 PV ou moins elle passe en gris, à moins la vie
  * totale en rouge. Un simple filtre, sans toucher aux clics ni à la mise en page.
  */
 .character-life {

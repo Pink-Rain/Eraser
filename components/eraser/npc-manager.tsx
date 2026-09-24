@@ -196,9 +196,9 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
         <Label className={textLabel}>Fonction / classe / métier<Input value={draft.occupation} onChange={(event) => update("occupation", event.target.value)} /></Label>
         <div className={textLabel}><span>Peuple</span><PeopleSelect value={draft.people} onChange={(value) => update("people", value)} /></div>
         {inCampaign && <NumberField label="Vie actuelle" value={draft.currentHp} onChange={(value) => update("currentHp", value)} />}
-        <Label className={`${textLabel} sm:col-span-2`}>Notes <span className="font-normal">Visible pour les joueurs</span><RichTextField value={draft.playerNotes} onCommit={(html) => update("playerNotes", html)} minHeight="min-h-28" /></Label>
-        {!index && <Label className={`${textLabel} sm:col-span-2`}>Notes MJ <span className="font-normal">Visible uniquement par le MJ</span><RichTextField value={draft.gmNotes} onCommit={(html) => update("gmNotes", html)} minHeight="min-h-28" /></Label>}
-        <Label className={`${textLabel} sm:col-span-2`}>Description, Histoire, Lore, Autre <span className="font-normal">Visible par les MJ, dans l’Index des PNJs</span><RichTextField value={draft.lore} onCommit={(html) => update("lore", html)} minHeight="min-h-28" /></Label>
+        <div className={`${textLabel} sm:col-span-2 leading-none`}>Notes <span className="font-normal">Visible pour les joueurs</span><RichTextField ariaLabel="Notes" value={draft.playerNotes} onCommit={(html) => update("playerNotes", html)} minHeight="min-h-28" /></div>
+        {!index && <div className={`${textLabel} sm:col-span-2 leading-none`}>Notes MJ <span className="font-normal">Visible uniquement par le MJ</span><RichTextField ariaLabel="Notes MJ" value={draft.gmNotes} onCommit={(html) => update("gmNotes", html)} minHeight="min-h-28" /></div>}
+        <div className={`${textLabel} sm:col-span-2 leading-none`}>Description, Histoire, Lore, Autre <span className="font-normal">Visible par les MJ, dans l’Index des PNJs</span><RichTextField ariaLabel="Description, Histoire, Lore, Autre" value={draft.lore} onCommit={(html) => update("lore", html)} minHeight="min-h-28" /></div>
       </div>
     </section>
     <section className="grid gap-2">

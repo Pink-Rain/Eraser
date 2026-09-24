@@ -480,3 +480,46 @@ test("shows a light Token button and the formatted player titles", async () => {
   assert.equal(displayedMultipleValue('["Chamane"]', "all"), "Chamane");
   assert.equal(displayedMultipleValue("Haut-homme"), "Haut-homme");
 });
+
+test("greys a character sheet from 0 HP and turns it red at minus the total", async () => {
+  const { characterLifeState } = await vite.ssrLoadModule("/lib/character-life.ts");
+  assert.equal(characterLifeState("12", "50"), "alive");
+  assert.equal(characterLifeState("0", "50"), "down");
+  assert.equal(characterLifeState("", "50"), "down");
+  assert.equal(characterLifeState("-49", "50"), "down");
+  assert.equal(characterLifeState("-50", "50"), "dead");
+  assert.equal(characterLifeState("-80", "50"), "dead");
+  // Vie totale pas encore renseignée : la fiche reste normale.
+  assert.equal(characterLifeState("0", "0"), "alive");
+  assert.equal(characterLifeState("", ""), "alive");
+  assert.equal(characterLifeState("-5", ""), "down");
+});
+
+test("keeps every rich text editor out of a label", async () => {
+  // Dans un <label>, chaque clic du texte part au bouton « Gras » de la barre (le
+  // curseur saute) et le Label de l'interface bloque le double-clic sur un mot.
+  const { readdir } = await import("node:fs/promises");
+  const offenders = [];
+  for (const folder of ["components", "app"]) {
+    const files = (await readdir(new URL(`../${folder}/`, import.meta.url), { recursive: true })).filter((file) => file.endsWith(".tsx"));
+    for (const file of files) {
+      if (file.endsWith("rich-text.tsx")) continue;
+      const source = await readFile(new URL(`../${folder}/${file}`, import.meta.url), "utf8");
+      for (const field of source.matchAll(/<RichTextField\b/g)) {
+        const before = source.slice(0, field.index);
+        const opened = Math.max(before.lastIndexOf("<label"), before.lastIndexOf("<Label"));
+        const closed = Math.max(before.lastIndexOf("</label>"), before.lastIndexOf("</Label>"));
+        if (opened > closed) offenders.push(`${folder}/${file}:${before.split("\n").length}`);
+      }
+    }
+  }
+  assert.deepEqual(offenders, []);
+});
+
+test("names rich text fields and resets their weight", async () => {
+  const { RichTextField } = await vite.ssrLoadModule("/components/eraser/rich-text.tsx");
+  const html = renderToStaticMarkup(React.createElement(RichTextField, { value: "<p>Bonjour</p>", onCommit() {}, ariaLabel: "Notes MJ" }));
+  assert.match(html, /role="textbox"/);
+  assert.match(html, /aria-label="Notes MJ"/);
+  assert.match(html, /font-normal/);
+});
