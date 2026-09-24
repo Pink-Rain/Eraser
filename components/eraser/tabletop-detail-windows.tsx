@@ -2,6 +2,8 @@
 
 /* eslint-disable @next/next/no-img-element -- portraits use authenticated, dynamic API URLs */
 
+import dynamic from "next/dynamic"
+
 import { characteristicColor } from "@/lib/characteristics"
 import { ChevronDown, Heart, PackageOpen, Store, UserRound, X } from "lucide-react"
 import { RichTextView, sanitizeRichText } from "@/components/eraser/rich-text"
@@ -9,6 +11,10 @@ import { RichTextView, sanitizeRichText } from "@/components/eraser/rich-text"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail } from "@/lib/tabletop-schema"
+
+const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
+  loading: () => <div className="min-h-20 animate-pulse rounded-xl border border-dashed bg-muted/20" />,
+})
 
 const rarityLabels = { "very-common": "Très commun", common: "Commun", rare: "Rare", "very-rare": "Très rare", ultimate: "Ultime" }
 
@@ -113,7 +119,8 @@ function NpcContent({ npc, entity }: { npc: TabletopNpcDetail | null; entity: Ta
       <LifeBar current={detail.currentHp} total={detail.totalHp} />
       {detail.playerNotes && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Notes</p><RichTextView html={detail.playerNotes} className="mt-1 text-sm leading-6 text-muted-foreground" /></div>}
       {detail.stats.length > 0 && <div className="grid grid-cols-7 gap-1.5">{detail.stats.map((stat) => <div key={stat.short} title={stat.label} className="rounded-lg border px-1 py-2 text-center" style={{ backgroundColor: `${characteristicColor(stat.label)}14`, borderColor: `${characteristicColor(stat.label)}55` }}><p className="text-[9px] font-bold" style={{ color: characteristicColor(stat.label) }}>{stat.short}</p><p className="font-display font-semibold tabular-nums">{stat.value}</p></div>)}</div>}
-      {detail.inventory.length > 0 && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Inventaire</p><div className="mt-2 space-y-1">{detail.inventory.map((item) => <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-background/55 px-2.5 py-2 text-sm"><span className="min-w-0 flex-1 truncate font-medium">{item.name}</span><Badge variant="outline">×{item.quantity}</Badge></div>)}</div></div>}
+      {npc?.canEditInventory ? <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Sac à dos</p><div className="mt-2"><CharacterInventory characterId={npc.id} endpoint={`/api/npcs/${encodeURIComponent(npc.id)}/inventory`} mode="npc" /></div></div>
+        : detail.inventory.length > 0 && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Inventaire</p><div className="mt-2 space-y-1">{detail.inventory.map((item) => <div key={item.id} className="flex items-center gap-2 rounded-lg border bg-background/55 px-2.5 py-2 text-sm"><span className="min-w-0 flex-1 truncate font-medium">{item.name}</span><Badge variant="outline">×{item.quantity}</Badge></div>)}</div></div>}
       {detail.gmNotes && <div><p className="text-[11px] font-semibold uppercase tracking-wider text-primary/70">Notes MJ</p><RichTextView html={detail.gmNotes} className="mt-1 text-sm leading-6 text-muted-foreground" /></div>}
     </div>
   )
@@ -124,7 +131,7 @@ export function TabletopDetailWindows({ windows, onClose, onToggle }: Props) {
   const collapsed = windows.filter((window) => window.collapsed)
   return (
     <>
-      <div className="pointer-events-none fixed inset-x-4 bottom-20 z-[1180] flex max-h-[calc(100svh-7rem)] flex-row-reverse flex-wrap items-end gap-3 overflow-y-auto">
+      <div className="tabletop-detail-windows pointer-events-none fixed inset-x-4 bottom-20 z-[1180] flex max-h-[calc(100svh-7rem)] flex-row-reverse flex-wrap items-end gap-3 overflow-y-auto">
         {expanded.map((window) => (
           <section key={window.id} className="pointer-events-auto w-[min(25rem,calc(100vw-2rem))] shrink-0 overflow-hidden rounded-2xl border bg-card/97 shadow-2xl backdrop-blur">
             <WindowHeader window={window} onClose={() => onClose(window.id)} onToggle={() => onToggle(window.id)} />

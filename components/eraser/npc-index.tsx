@@ -11,11 +11,25 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { foldNpcName, npcIndexTabs } from "@/lib/npc-pages"
+import { foldNpcName, genericNpcIndexPage, isNpcLibraryPage, npcIndexPage, npcIndexTabs } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
 
 /** Une campagne où figure un PNJ du même nom, et le mode dans lequel elle s'ouvre. */
 export type NpcCampaignLink = { id: string; name: string; manage: boolean }
+
+/** La page où vit un PNJ, et si ce MJ peut le modifier depuis l'index. */
+export type NpcPageLink = NpcCampaignLink & { editable: boolean }
+
+/** Les PNJs génériques ont leur onglet ; tous les autres, campagnes comprises, sont dans « PNJs ». */
+function tabOf(npc: CampaignNpcRecord) {
+  return npc.pageLinked === genericNpcIndexPage ? genericNpcIndexPage : npcIndexPage
+}
+
+function groupByPage(npcs: CampaignNpcRecord[]) {
+  const groups = new Map<string, CampaignNpcRecord[]>()
+  for (const npc of npcs) groups.set(npc.pageLinked, [...(groups.get(npc.pageLinked) ?? []), npc])
+  return groups
+}
 
 /** Les colonnes du tableau ; le reste de la fiche s'ouvre d'un clic sur le nom. */
 const fields = [
@@ -48,7 +62,7 @@ const CampaignLinks = memo(function CampaignLinks({ links }: { links: NpcCampaig
   return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1">
     {links.map((campaign) => <Link
       key={campaign.id}
-      href={`/campagne/${encodeURIComponent(campaign.id)}`}
+      href={campaign.id === "bac-a-sable" ? "/bac-a-sable/pnjs" : `/campagne/${encodeURIComponent(campaign.id)}`}
       title={campaign.manage ? "Ouvrir en mode MJ" : "Ouvrir en mode joueur"}
       className={`rounded-full border px-2 py-0.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground ${campaign.manage ? "border-primary/40 text-primary" : "text-muted-foreground"}`}
     >{campaign.name}</Link>)}
@@ -63,14 +77,20 @@ const ImportantCell = memo(function ImportantCell({ checked, disabled, onChange 
 })
 
 /**
- * L'Index des PNJs : deux bibliothèques de PNJ hors de toute campagne (les PNJs et les
- * PNJs génériques), rangées dans la feuille « PNJs » comme les autres. La colonne
- * Campagnes montre, sans rien saisir, les campagnes où figure un PNJ du même nom.
+ * L'Index des PNJs : tous les PNJ, rangés dans la feuille « PNJs ». L'onglet « PNJs »
+ * réunit la bibliothèque, le bac à sable et chaque campagne ; « PNJs Génériques » garde
+ * les siens. La colonne Campagnes montre la campagne d'un PNJ de campagne, et pour un
+ * PNJ de la bibliothèque les campagnes où figure un PNJ du même nom.
+ *
+ * Les notes MJ, la vie actuelle et le sac à dos n'existent que dans la campagne : ils ne
+ * sont ni affichés ni envoyés ici, et l'enregistrement depuis l'index ne les touche pas.
+ * Un PNJ d'une campagne que ce MJ ne mène pas se consulte sans se modifier.
  */
-export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
+export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
   initialNpcs: CampaignNpcRecord[]
   sourcePages: ReusablePageOption[]
   campaignsByName: Record<string, NpcCampaignLink[]>
+  pages: Record<string, NpcPageLink>
 }) {
   const [npcs, setNpcs] = useState(initialNpcs)
   const [tab, setTab] = usePersistentState<string>("eraser:npc-index:tab", npcIndexTabs[0].id, isTab)
@@ -86,7 +106,14 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
   // partent chacune de la précédente, sans effacer l'autre.
   const latest = useRef(new Map(initialNpcs.map((npc) => [npc.id, npc])))
 
-  const campaignsOf = useCallback((npc: CampaignNpcRecord | undefined) => npc ? campaignsByName[foldNpcName(npc.name)] ?? [] : [], [campaignsByName])
+  const campaignsOf = useCallback((npc: CampaignNpcRecord | undefined) => {
+    if (!npc) return []
+    if (isNpcLibraryPage(npc.pageLinked) && npc.pageLinked !== "bac-a-sable") return campaignsByName[foldNpcName(npc.name)] ?? []
+    const page = pages[npc.pageLinked]
+    return page ? [page] : []
+  }, [campaignsByName, pages])
+  const editable = useCallback((npc: CampaignNpcRecord | undefined) => Boolean(npc && (pages[npc.pageLinked]?.editable ?? true)), [pages])
+  const lockedMessage = useCallback((npc: CampaignNpcRecord) => `${npc.name} appartient à la campagne « ${pages[npc.pageLinked]?.name ?? "?"} », que tu ne mènes pas : il se consulte ici sans se modifier.`, [pages])
 
   /** Enregistre des PNJ reçus du serveur ; `after` place les nouveaux sous cette ligne. */
   const replace = useCallback((saved: CampaignNpcRecord[], remount = false, after?: string) => {
@@ -112,7 +139,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
 
   const rows = useMemo(() => {
     const folded = foldNpcName(query)
-    const filtered = npcs.filter((npc) => npc.pageLinked === tab && (!folded || foldNpcName(`${npc.name} ${npc.title} ${npc.people} ${npc.occupation}`).includes(folded)))
+    const filtered = npcs.filter((npc) => tabOf(npc) === tab && (!folded || foldNpcName(`${npc.name} ${npc.title} ${npc.people} ${npc.occupation}`).includes(folded)))
     const plain = (npc: CampaignNpcRecord, column: string) => column === "campaigns" ? campaignsOf(npc).map((campaign) => campaign.name).join(", ") : column === "important" ? (npc.important ? "Oui" : "Non") : textFields.has(column) ? npc[column as TextField] : ""
     const sorted = sort
       ? [...filtered].sort((left, right) => plain(left, sort.column).localeCompare(plain(right, sort.column), "fr", { sensitivity: "base", numeric: true }) * (sort.direction === "asc" ? 1 : -1))
@@ -124,7 +151,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
     latest.current.set(next.id, next)
     setSaving((current) => current + 1)
     try {
-      replace(await persistNpcs("save", next.pageLinked, [next]), remount)
+      replace(await persistNpcs("save-index", next.pageLinked, [next]), remount)
       setError("")
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
@@ -135,13 +162,18 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
   const commit = useCallback(async (rowKey: string, columnKey: string, value: string) => {
     const npc = latest.current.get(rowKey)
     if (!npc) return
+    if (!editable(npc)) {
+      setError(lockedMessage(npc))
+      setVersion((current) => current + 1)
+      return
+    }
     if (columnKey === "important") return save({ ...npc, important: /^(oui|vrai|true|x|1)$/i.test(value.trim()) }, false)
     if (!textFields.has(columnKey)) return
     const next = { ...npc, [columnKey]: value.trim() }
     if (columnKey === "name" && !next.name) return
     // Une liste déroulante n'est pas une cellule de texte : sa ligne est redessinée.
     await save(next, columnKey === "people" || columnKey === "name")
-  }, [save])
+  }, [editable, lockedMessage, save])
 
   const columns = useMemo<SheetGridColumn[]>(() => fields.map((field) => {
     const column: SheetGridColumn = { key: field.key, label: field.label, width: field.width, plain: true, cellClassName: field.key === "name" ? "font-semibold" : undefined }
@@ -151,11 +183,11 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
       className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
       title="Ouvrir la fiche"
     >{valueOf(rowKey, "name") || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</button>
-    if (field.key === "people") column.control = (rowKey) => <PeopleSelect compact value={valueOf(rowKey, "people")} onChange={(value) => void commit(rowKey, "people", value)} />
+    if (field.key === "people") column.control = (rowKey) => <PeopleSelect compact disabled={!editable(latest.current.get(rowKey))} value={valueOf(rowKey, "people")} onChange={(value) => void commit(rowKey, "people", value)} />
     if (field.key === "campaigns") column.control = (rowKey) => <CampaignLinks links={campaignsOf(latest.current.get(rowKey))} />
-    if (field.key === "important") column.control = (rowKey) => <ImportantCell checked={latest.current.get(rowKey)?.important ?? false} disabled={pending} onChange={(checked) => void commit(rowKey, "important", checked ? "Oui" : "Non")} />
+    if (field.key === "important") column.control = (rowKey) => <ImportantCell checked={latest.current.get(rowKey)?.important ?? false} disabled={pending || !editable(latest.current.get(rowKey))} onChange={(checked) => void commit(rowKey, "important", checked ? "Oui" : "Non")} />
     return column
-  }), [campaignsOf, commit, pending, valueOf])
+  }), [campaignsOf, commit, editable, pending, valueOf])
 
   async function run(task: () => Promise<void>) {
     setPending(true); setError("")
@@ -165,7 +197,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
 
   function saveSheet(npc: CampaignNpcRecord, portrait?: File) {
     void run(async () => {
-      const [saved] = await persistNpcs("save", npc.pageLinked, [npc])
+      const [saved] = await persistNpcs("save-index", npc.pageLinked, [npc])
       replace([portrait ? await uploadNpcPortrait(saved.id, portrait) : saved], true)
       setEditing(null)
     })
@@ -181,18 +213,30 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
 
   function duplicate(ids: string[]) {
     void run(async () => {
-      const response = await fetch("/api/npcs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "duplicate", pageLinked: tab, npcIds: ids }) })
-      const payload = (await response.json().catch(() => ({}))) as { npcs?: CampaignNpcRecord[]; error?: string }
-      if (!response.ok) throw new Error(payload.error || "Duplication impossible.")
-      replace(payload.npcs ?? [], true, ids.at(-1))
+      // Une copie arrive toujours dans l'onglet ouvert : depuis une campagne, c'est une
+      // récupération (portrait et sac à dos compris) vers la bibliothèque.
+      const targets = ids.flatMap((id) => latest.current.get(id) ?? [])
+      for (const [page, group] of groupByPage(targets)) {
+        const npcIds = group.map((npc) => npc.id)
+        if (page === tab) {
+          const response = await fetch("/api/npcs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "duplicate", pageLinked: tab, npcIds }) })
+          const payload = (await response.json().catch(() => ({}))) as { npcs?: CampaignNpcRecord[]; error?: string }
+          if (!response.ok) throw new Error(payload.error || "Duplication impossible.")
+          replace(payload.npcs ?? [], true, ids.at(-1))
+        } else {
+          replace(await importNpcs(tab, page, npcIds, "copy"), true, ids.at(-1))
+        }
+      }
     })
   }
 
   function remove(ids: string[]) {
     void run(async () => {
       const targets = ids.flatMap((id) => latest.current.get(id) ?? [])
+      const locked = targets.find((npc) => !editable(npc))
+      if (locked) throw new Error(lockedMessage(locked))
       if (!targets.length) return
-      await persistNpcs("delete", tab, targets)
+      for (const [page, group] of groupByPage(targets)) await persistNpcs("delete", page, group)
       for (const id of ids) latest.current.delete(id)
       setNpcs((current) => current.filter((npc) => !ids.includes(npc.id)))
       setVersion((current) => current + 1)
@@ -200,7 +244,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
   }
 
   const tabSources = [...npcIndexTabs.filter((candidate) => candidate.id !== tab).map((candidate) => ({ id: candidate.id, name: `Index des PNJs · ${candidate.label}` })), ...sourcePages]
-  const count = (id: string) => npcs.filter((npc) => npc.pageLinked === id).length
+  const count = (id: string) => npcs.filter((npc) => tabOf(npc) === id).length
 
   return <section className="mt-4 flex flex-col gap-3">
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
@@ -236,13 +280,14 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
       addRowLabel="Créer un PNJ"
       rowCommands={{ append: () => setEditing(blankNpc(tab)), insertRows, duplicate, remove }}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
-      empty={npcs.some((npc) => npc.pageLinked === tab) ? "Aucun PNJ ne correspond à la recherche." : "Cet onglet est vide. Crée un PNJ ou récupère ceux d’une campagne."}
+      empty={npcs.some((npc) => tabOf(npc) === tab) ? "Aucun PNJ ne correspond à la recherche." : "Cet onglet est vide. Crée un PNJ ou récupère ceux d’une campagne."}
     />
 
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>
       {editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl">
         <DialogHeader><DialogTitle className="font-display text-3xl">{editing.createdAt ? editing.name : "Créer un PNJ"}</DialogTitle></DialogHeader>
-        <NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={saveSheet} />
+        {!editable(editing) && <p className="rounded-xl border border-amber-400/40 bg-amber-50 px-4 py-3 text-sm text-amber-900">{lockedMessage(editing)}</p>}
+        <NpcForm index key={editing.id} npc={editing} pending={pending} locked={!editable(editing)} onClose={() => setEditing(null)} onSave={saveSheet} />
       </DialogContent>}
     </Dialog>
 
@@ -251,6 +296,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName }: {
       if (transferMode === "move") {
         // Un déplacement depuis l'autre onglet l'y retire.
         setNpcs((current) => current.filter((npc) => npc.pageLinked !== source || !ids.includes(npc.id)))
+        for (const id of ids) latest.current.delete(id)
       }
       setImporting(false)
     })} />

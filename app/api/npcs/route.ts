@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { copyNpcsToPage, deleteNpcs, getCampaignDashboard, listNpcs, moveNpcsToPage, saveNpcs } from "@/lib/google-sheets"
+import { copyNpcsToPage, deleteNpcs, getCampaignDashboard, listAllNpcs, listNpcs, moveNpcsToPage, saveNpcs } from "@/lib/google-sheets"
 import { isNpcLibraryPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -39,7 +39,9 @@ function npcValue(value: unknown, pageLinked: string): CampaignNpcRecord | null 
     wisdom: numberValue(candidate.wisdom), charisma: numberValue(candidate.charisma),
     playerNotes: shortText(candidate.playerNotes ?? candidate.description, 5000),
     gmNotes: shortText(candidate.gmNotes ?? candidate.other, 5000),
-    inCampaign: Boolean(candidate.inCampaign), important: Boolean(candidate.important), createdByUid: shortText(candidate.createdByUid, 200),
+    lore: shortText(candidate.lore, 5000),
+    inCampaign: Boolean(candidate.inCampaign), inPlayerGroup: Boolean(candidate.inPlayerGroup),
+    important: Boolean(candidate.important), createdByUid: shortText(candidate.createdByUid, 200),
     createdAt: shortText(candidate.createdAt, 80), updatedAt: shortText(candidate.updatedAt, 80),
   }
 }
@@ -84,15 +86,32 @@ export async function POST(request: Request) {
       await deleteNpcs(pageLinked, records.map((npc) => npc.id))
       return NextResponse.json({ ok: true })
     }
+    if (body.action === "save-index") {
+      // L'Index des PNJs ne connaît ni les notes MJ, ni la vie actuelle, ni le groupe :
+      // ils sont repris de la feuille pour ne jamais être effacés depuis l'index.
+      const existing = new Map((await listAllNpcs()).map((npc) => [npc.id, npc]))
+      const merged = records.map((npc) => {
+        const current = existing.get(npc.id)
+        if (current && current.pageLinked !== pageLinked) throw new Error("NPC_PAGE_MISMATCH")
+        if (!current && !isNpcLibraryPage(pageLinked)) throw new Error("NPC_NOT_FOUND")
+        return current
+          ? { ...npc, gmNotes: current.gmNotes, currentHp: current.currentHp, inCampaign: current.inCampaign, inPlayerGroup: current.inPlayerGroup, createdByUid: current.createdByUid || npc.createdByUid }
+          : { ...npc, gmNotes: "", currentHp: npc.totalHp, inCampaign: false, inPlayerGroup: false }
+      })
+      return NextResponse.json({ npcs: await saveNpcs(pageLinked, merged) })
+    }
     const options = body.action === "add-to-campaign"
       ? { inCampaign: true }
       : body.action === "remove-from-campaign"
         ? { inCampaign: false }
-        : body.action === "save"
+        : body.action === "save" || body.action === "add-to-group" || body.action === "remove-from-group"
           ? {}
           : null
     if (!options || (body.action !== "save" && isNpcLibraryPage(pageLinked))) throw new Error("INVALID_NPC_ACTION")
-    const saved = await saveNpcs(pageLinked, records, options)
+    const grouped = body.action === "add-to-group" ? records.map((npc) => ({ ...npc, inPlayerGroup: true }))
+      : body.action === "remove-from-group" ? records.map((npc) => ({ ...npc, inPlayerGroup: false }))
+        : records
+    const saved = await saveNpcs(pageLinked, grouped, options)
     return NextResponse.json({ npcs: saved })
   } catch {
     return NextResponse.json({ error: "Les PNJ n’ont pas pu être enregistrés." }, { status: 400 })

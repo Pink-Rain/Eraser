@@ -58,6 +58,7 @@ import {
   SidebarProvider,
   SidebarTrigger,
 } from "@/components/ui/sidebar"
+import { internalAppPath } from "@/lib/app-links"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
@@ -190,6 +191,22 @@ export function AppShell({
   const todosLoadingRef = useRef(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateNotice, setUpdateNotice] = useState("")
+
+  // Un lien vers une page d'Eraser écrit dans un texte enrichi est un simple <a> :
+  // on l'ouvre sur place, comme un lien du menu, au lieu de recharger toute l'appli.
+  useEffect(() => {
+    function openAppLink(event: MouseEvent) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey || event.shiftKey || event.altKey) return
+      const anchor = (event.target as Element | null)?.closest?.("a[href]")
+      if (!(anchor instanceof HTMLAnchorElement) || anchor.target === "_blank" || anchor.closest("[contenteditable='true']")) return
+      const href = internalAppPath(anchor.getAttribute("href") || "")
+      if (!href) return
+      event.preventDefault()
+      router.push(href)
+    }
+    document.addEventListener("click", openAppLink)
+    return () => document.removeEventListener("click", openAppLink)
+  }, [router])
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -478,7 +495,8 @@ export function AppShell({
                         <NavSubLink href={`${campaignHref}/roll20`} label="Roll20" active={pathname === `${campaignHref}/roll20`} />
                         <NavSubLink href={`${campaignHref}/lieux-et-rencontres`} label="Créateur de session" active={pathname === `${campaignHref}/lieux-et-rencontres`} />
                         <NavSubLink nested href={`${campaignHref}/evenements`} label="Événements" active={pathname === `${campaignHref}/evenements`} />
-                        <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins et fouilles" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
+                        <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
+                        <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
                         <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
                       </>
                     })()}

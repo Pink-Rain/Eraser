@@ -109,6 +109,7 @@ export async function getTabletopNpcDetail(account: AuthorizedUser, mapId: strin
     stats,
     inventory: inventories[npc.id] || [],
     canViewPrivate,
+    canEditInventory: canViewPrivate || (npc.inPlayerGroup && map.pageLinked !== "bac-a-sable"),
   }
 }
 

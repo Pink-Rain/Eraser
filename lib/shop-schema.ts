@@ -69,6 +69,10 @@ export type CampaignNpcRecord = {
   playerNotes: string
   gmNotes: string
   inCampaign: boolean
+  /** « Dans le groupe joueur » : le PNJ voyage avec le groupe, les joueurs le voient. */
+  inPlayerGroup: boolean
+  /** « Histoire / Lore » : la note de fond, comme celle des créatures. */
+  lore: string
   /** Colonne « PNJ important » de la feuille. */
   important: boolean
   createdByUid: string

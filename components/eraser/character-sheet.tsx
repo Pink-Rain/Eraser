@@ -218,6 +218,17 @@ function sheetNumber(value: string) {
 }
 
 /** Affiche un total en y ajoutant les modificateurs d’objets, sans toucher à la valeur de la feuille. */
+/**
+ * Sous 0 PV, la fiche passe en gris ; à moins la vie totale ou en dessous, en rouge.
+ * Seul un filtre change : tout reste cliquable.
+ */
+function characterLifeState(current: string, total: string): "alive" | "down" | "dead" {
+  const currentNumber = Number.parseFloat(String(current ?? "").replace(",", "."))
+  const totalNumber = Number.parseFloat(String(total ?? "").replace(",", "."))
+  if (!Number.isFinite(currentNumber) || currentNumber >= 0) return "alive"
+  return Number.isFinite(totalNumber) && totalNumber > 0 && currentNumber <= -totalNumber ? "dead" : "down"
+}
+
 function totalWithModifier(raw: string, modifier: number, fallback = "0") {
   if (!modifier) return raw || fallback
   const parsed = Number.parseFloat(String(raw ?? "").replace(",", "."))
@@ -584,8 +595,12 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
   }
 
   const activeCharacterTab = characterTabs.find((tab) => tab.id === activeTab) ?? characterTabs[0]
+  const lifeState = characterLifeState(values[9], totalWithModifier(values[10], modifierForValue(10)))
 
-  return <div className="w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties}>
+  return <div data-life={lifeState} className="character-life w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle sous 0" : undefined}>
+    {/* Bichromie rouge sang de la fiche « morte » : la luminosité de chaque point devient
+        un rouge, du plus sombre au rose pâle, comme le gris le fait pour une fiche à terre. */}
+    <svg aria-hidden="true" width="0" height="0" className="pointer-events-none absolute"><filter id="eraser-life-dead" colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values="0.1318 0.4434 0.0448 0 0.35 0.1446 0.4863 0.0491 0 0.02 0.1382 0.4649 0.0469 0 0.03 0 0 0 1 0" /></filter></svg>
     <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: `${campaignAccent}55` }}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${campaignAccent}, ${campaignAccent}66 58%, transparent)` }} />
       <div className="flex flex-col gap-6 lg:flex-row">

@@ -440,3 +440,32 @@ body {
 .eraser-measure-label::before {
   display: none;
 }
+
+/*
+ * Fiche de personnage à terre : sous 0 PV elle passe en gris, à moins la vie
+ * totale en rouge. Un simple filtre, sans toucher aux clics ni à la mise en page.
+ */
+.character-life {
+  transition: filter 0.6s ease;
+}
+
+.character-life[data-life="down"] {
+  filter: grayscale(1);
+}
+
+.character-life[data-life="dead"] {
+  filter: url(#eraser-life-dead);
+}
+
+/*
+ * Les fenêtres de détail du tabletop flottent très haut (z 1180). Tant qu'elles sont
+ * là, les menus et fenêtres ouverts depuis leur contenu (sac à dos d'un PNJ) passent
+ * au-dessus au lieu de s'ouvrir dessous.
+ */
+body:has(.tabletop-detail-windows) :is([data-slot="dialog-overlay"], [data-slot="dialog-content"], [data-slot="alert-dialog-overlay"], [data-slot="alert-dialog-content"]) {
+  z-index: 1300;
+}
+
+body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
+  z-index: 1350 !important;
+}

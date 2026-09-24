@@ -1,3 +1,5 @@
+import { APP_ORIGIN, internalAppPath } from "@/lib/app-links"
+
 export type GoogleRgbColor = {
   red?: number
   green?: number
@@ -29,6 +31,9 @@ function escapeHtml(value: string) {
 
 function safeLink(value: string | undefined) {
   if (!value) return ""
+  // Une page d'Eraser : Sheets veut une adresse complète, celle du serveur local.
+  const internal = internalAppPath(value.replace(/&amp;/g, "&"))
+  if (internal) return `${APP_ORIGIN}${internal}`
   try {
     const url = new URL(value)
     return ["http:", "https:"].includes(url.protocol) ? url.toString() : ""
@@ -78,7 +83,9 @@ function wrapFormattedText(value: string, format: GoogleTextFormat = {}) {
   if (format.underline) html = `<u>${html}</u>`
   if (format.strikethrough) html = `<s>${html}</s>`
   const href = safeLink(format.link?.uri)
-  if (href) html = `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${html}</a>`
+  const internal = href ? internalAppPath(href) : ""
+  if (internal) html = `<a href="${escapeHtml(internal)}">${html}</a>`
+  else if (href) html = `<a href="${escapeHtml(href)}" target="_blank" rel="noreferrer">${html}</a>`
   const color = googleColorToHex(textColor(format))
   if (color) html = `<span style="color:${color}">${html}</span>`
   return html

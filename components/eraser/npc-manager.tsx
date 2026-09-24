@@ -1,13 +1,13 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ChevronDown, CircleMinus, Dices, Download, ImagePlus, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Trash2, UserRound } from "lucide-react"
+import { Backpack, ChevronDown, CircleMinus, Dices, Download, ImagePlus, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Trash2, UserRound, UsersRound } from "lucide-react"
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { RichTextField } from "@/components/eraser/rich-text"
+import { RichTextField, RichTextView } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -29,7 +29,7 @@ export function blankNpc(pageLinked: string): CampaignNpcRecord {
   return {
     id: crypto.randomUUID(), pageLinked, name: "", title: "", occupation: "", people: "", portrait: "", currentHp: 0, totalHp: 0, speed: 0,
     constitution: 0, strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0,
-    playerNotes: "", gmNotes: "", inCampaign: false, important: false, createdByUid: "", createdAt: "", updatedAt: "",
+    playerNotes: "", gmNotes: "", lore: "", inCampaign: false, inPlayerGroup: false, important: false, createdByUid: "", createdAt: "", updatedAt: "",
   }
 }
 
@@ -45,7 +45,7 @@ function randomNpc(pageLinked: string): CampaignNpcRecord {
   }
 }
 
-export async function persistNpcs(action: "save" | "add-to-campaign" | "remove-from-campaign" | "delete", pageLinked: string, npcs: CampaignNpcRecord[]) {
+export async function persistNpcs(action: "save" | "save-index" | "add-to-campaign" | "remove-from-campaign" | "add-to-group" | "remove-from-group" | "delete", pageLinked: string, npcs: CampaignNpcRecord[]) {
   const response = await fetch("/api/npcs", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action, pageLinked, npcs }) })
   const payload = (await response.json()) as { npcs?: CampaignNpcRecord[]; error?: string }
   if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
@@ -140,15 +140,29 @@ export function PeopleSelect({ value, onChange, compact = false, disabled = fals
 const textLabel = "grid gap-1.5 text-xs font-semibold text-muted-foreground"
 
 /**
+ * Le sac à dos d'un PNJ de campagne, hors de sa fiche : en pleine partie, c'est la seule
+ * chose qu'on modifie sans rouvrir le formulaire. Chargé seulement une fois déplié.
+ */
+export function NpcBackpack({ npc, defaultOpen = false, className = "" }: { npc: CampaignNpcRecord; defaultOpen?: boolean; className?: string }) {
+  const [open, setOpen] = useState(defaultOpen)
+  if (!npc.createdAt) return null
+  return <Collapsible open={open} onOpenChange={setOpen} className={className}>
+    <CollapsibleTrigger asChild><button type="button" className="flex w-full items-center justify-between gap-2 px-4 py-3 text-sm font-medium hover:bg-muted/35" aria-expanded={open}><span className="flex items-center gap-2"><Backpack className="size-4 text-primary" />Sac à dos</span><ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} /></button></CollapsibleTrigger>
+    <CollapsibleContent className="border-t p-3">{open && <CharacterInventory characterId={npc.id} endpoint={`/api/npcs/${encodeURIComponent(npc.id)}/inventory`} mode="npc" />}</CollapsibleContent>
+  </Collapsible>
+}
+
+/**
  * La fiche d'un PNJ, partout où on en crée ou en modifie un. La vie actuelle et le sac
  * à dos n'existent que pour un PNJ de campagne : dans le bac à sable ou l'Index des PNJs,
- * la Vitalité suffit.
+ * la Vitalité suffit. Dans l'Index, que tous les MJ consultent, les notes MJ restent
+ * cachées : elles appartiennent à la campagne du PNJ.
  */
-export function NpcForm({ npc, pending, onClose, onSave }: { npc: CampaignNpcRecord; pending: boolean; onClose: () => void; onSave: (npc: CampaignNpcRecord, portrait?: File) => void }) {
+export function NpcForm({ npc, pending, onClose, onSave, index = false, locked = false }: { npc: CampaignNpcRecord; pending: boolean; onClose: () => void; onSave: (npc: CampaignNpcRecord, portrait?: File) => void; index?: boolean; locked?: boolean }) {
   const [draft, setDraft] = useState(npc)
   const [portraitFile, setPortraitFile] = useState<File>()
   const [portraitPreview, setPortraitPreview] = useState("")
-  const inCampaign = npcBelongsToCampaign(draft)
+  const inCampaign = npcBelongsToCampaign(draft) && !index
   function update<K extends keyof CampaignNpcRecord>(key: K, value: CampaignNpcRecord[K]) { setDraft((current) => ({ ...current, [key]: value })) }
   function choosePortrait(file?: File) { if (!file) return; setPortraitFile(file); const reader = new FileReader(); reader.onload = () => setPortraitPreview(typeof reader.result === "string" ? reader.result : ""); reader.readAsDataURL(file) }
   const characteristics = Object.fromEntries(Object.entries(npcCharacteristics(draft)).map(([name, value]) => [name, String(value)]))
@@ -183,7 +197,8 @@ export function NpcForm({ npc, pending, onClose, onSave }: { npc: CampaignNpcRec
         <div className={textLabel}><span>Peuple</span><PeopleSelect value={draft.people} onChange={(value) => update("people", value)} /></div>
         {inCampaign && <NumberField label="Vie actuelle" value={draft.currentHp} onChange={(value) => update("currentHp", value)} />}
         <Label className={`${textLabel} sm:col-span-2`}>Notes <span className="font-normal">Visible pour les joueurs</span><RichTextField value={draft.playerNotes} onCommit={(html) => update("playerNotes", html)} minHeight="min-h-28" /></Label>
-        <Label className={`${textLabel} sm:col-span-2`}>Notes MJ <span className="font-normal">Visible uniquement par le MJ</span><RichTextField value={draft.gmNotes} onCommit={(html) => update("gmNotes", html)} minHeight="min-h-28" /></Label>
+        {!index && <Label className={`${textLabel} sm:col-span-2`}>Notes MJ <span className="font-normal">Visible uniquement par le MJ</span><RichTextField value={draft.gmNotes} onCommit={(html) => update("gmNotes", html)} minHeight="min-h-28" /></Label>}
+        <Label className={`${textLabel} sm:col-span-2`}>Description, Histoire, Lore, Autre <span className="font-normal">Visible par les MJ, dans l’Index des PNJs</span><RichTextField value={draft.lore} onCommit={(html) => update("lore", html)} minHeight="min-h-28" /></Label>
       </div>
     </section>
     <section className="grid gap-2">
@@ -191,22 +206,49 @@ export function NpcForm({ npc, pending, onClose, onSave }: { npc: CampaignNpcRec
       <CharacteristicInputs values={characteristics} onChange={setCharacteristic} />
     </section>
     {inCampaign && <section className="rounded-2xl border p-4">
-      <div className="mb-4"><h3 className="font-display text-lg font-semibold">Sac à dos</h3><p className="text-xs text-muted-foreground">L’unique inventaire du PNJ.</p></div>
+      <div className="mb-4"><h3 className="font-display text-lg font-semibold">Sac à dos</h3><p className="text-xs text-muted-foreground">L’unique inventaire du PNJ. Il se modifie aussi sans ouvrir la fiche, depuis la carte du PNJ.</p></div>
       {draft.createdAt ? <CharacterInventory characterId={draft.id} endpoint={`/api/npcs/${encodeURIComponent(draft.id)}/inventory`} mode="npc" /> : <p className="rounded-xl border border-dashed px-4 py-7 text-center text-sm text-muted-foreground">Sauvegarde d’abord le PNJ, puis rouvre sa fiche pour remplir son Sac à dos.</p>}
     </section>}
     <div className="flex justify-end gap-2">
       <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
-      <Button type="button" disabled={pending || !draft.name.trim()} onClick={save}>{pending ? <LoaderCircle className="animate-spin" /> : <Save />}Sauvegarder</Button>
+      <Button type="button" disabled={pending || locked || !draft.name.trim()} onClick={save}>{pending ? <LoaderCircle className="animate-spin" /> : <Save />}Sauvegarder</Button>
     </div>
   </div>
 }
 
 type NpcCardAction = { kind: "add-to-session" } | { kind: "remove-from-session" } | { kind: "none" }
 
-function NpcCard({ npc, pending, mode, action, onEdit, onAction, onDelete }: { npc: CampaignNpcRecord; pending: boolean; mode: "manage" | "session"; action: NpcCardAction; onEdit: () => void; onAction: () => void; onDelete: () => void }) {
-  const hp = npc.totalHp > 0 ? Math.min(100, (npc.currentHp / npc.totalHp) * 100) : 0
+function NpcCard({ npc, pending, mode, action, onEdit, onAction, onToggleGroup, onDelete }: { npc: CampaignNpcRecord; pending: boolean; mode: "manage" | "session"; action: NpcCardAction; onEdit: () => void; onAction: () => void; onToggleGroup: () => void; onDelete: () => void }) {
+  const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
   const campaignNpc = npcBelongsToCampaign(npc)
-  return <article className="overflow-hidden rounded-2xl border bg-card/75 shadow-sm"><div className="grid gap-4 p-4 sm:grid-cols-[7rem_minmax(0,1fr)]"><div className="aspect-[4/5] overflow-hidden rounded-xl border bg-muted/40">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} className="size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-10 text-primary/25" /></div>}</div><div className="min-w-0 space-y-3"><div className="flex items-start justify-between gap-3"><div><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[npc.title, npc.occupation, npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p></div><div className="flex gap-1"><Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} title="Modifier" aria-label={`Modifier ${npc.name}`}><Pencil /></Button>{action.kind === "add-to-session" && <Button type="button" variant="ghost" size="icon-sm" onClick={onAction} disabled={pending} title="Ajouter à la session" aria-label={`Ajouter ${npc.name} à la session`}><MapPinned /></Button>}{action.kind === "remove-from-session" && <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" onClick={onAction} disabled={pending} title="Retirer de la session" aria-label={`Retirer ${npc.name} de la session`}><CircleMinus /></Button>}{mode === "manage" && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={pending} aria-label={`Supprimer ${npc.name}`}><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Supprimer « {npc.name} » ?</AlertDialogTitle><AlertDialogDescription>Cette suppression est définitive.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onDelete}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}</div></div>{campaignNpc && <Progress value={hp} className="h-2" />}<CharacteristicBadges values={npcCharacteristics(npc)} /></div></div><Collapsible><CollapsibleTrigger asChild><button type="button" className="flex w-full items-center justify-between border-t px-4 py-3 text-sm font-medium hover:bg-muted/35"><span>{campaignNpc ? "Notes et Sac à dos" : "Notes"}</span><ChevronDown className="size-4" /></button></CollapsibleTrigger><CollapsibleContent className="space-y-4 border-t p-4"><section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h4><p className="whitespace-pre-wrap text-sm">{npc.playerNotes || "Aucune note."}</p></section><section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes MJ</h4><p className="whitespace-pre-wrap text-sm">{npc.gmNotes || "Aucune note MJ."}</p></section>{campaignNpc && <section><h4 className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sac à dos</h4><CharacterInventory characterId={npc.id} endpoint={`/api/npcs/${encodeURIComponent(npc.id)}/inventory`} mode="npc" readOnly /></section>}</CollapsibleContent></Collapsible></article>
+  return <article className="overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
+    <div className="grid gap-4 p-4 sm:grid-cols-[7rem_minmax(0,1fr)]">
+      <div className="aspect-[4/5] overflow-hidden rounded-xl border bg-muted/40">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} className="size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-10 text-primary/25" /></div>}</div>
+      <div className="min-w-0 space-y-3">
+        <div className="flex items-start justify-between gap-3">
+          <div><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[npc.title, npc.occupation, npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p>{campaignNpc && npc.inPlayerGroup && <p className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"><UsersRound className="size-3" />Groupe</p>}</div>
+          <div className="flex gap-1">
+            <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} title="Modifier" aria-label={`Modifier ${npc.name}`}><Pencil /></Button>
+            {campaignNpc && <Button type="button" variant={npc.inPlayerGroup ? "secondary" : "ghost"} size="icon-sm" onClick={onToggleGroup} disabled={pending} title={npc.inPlayerGroup ? "Retirer des PNJs du groupe" : "Ajouter aux PNJs du groupe"} aria-label={npc.inPlayerGroup ? `Retirer ${npc.name} des PNJs du groupe` : `Ajouter ${npc.name} aux PNJs du groupe`} aria-pressed={npc.inPlayerGroup}><UsersRound className={npc.inPlayerGroup ? "text-primary" : ""} /></Button>}
+            {action.kind === "add-to-session" && <Button type="button" variant="ghost" size="icon-sm" onClick={onAction} disabled={pending} title="Ajouter à la session" aria-label={`Ajouter ${npc.name} à la session`}><MapPinned /></Button>}
+            {action.kind === "remove-from-session" && <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" onClick={onAction} disabled={pending} title="Retirer de la session" aria-label={`Retirer ${npc.name} de la session`}><CircleMinus /></Button>}
+            {mode === "manage" && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={pending} aria-label={`Supprimer ${npc.name}`}><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Supprimer « {npc.name} » ?</AlertDialogTitle><AlertDialogDescription>Cette suppression est définitive.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onDelete}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
+          </div>
+        </div>
+        {campaignNpc && <Progress value={hp} className="h-2" />}
+        <CharacteristicBadges values={npcCharacteristics(npc)} />
+      </div>
+    </div>
+    <Collapsible>
+      <CollapsibleTrigger asChild><button type="button" className="flex w-full items-center justify-between border-t px-4 py-3 text-sm font-medium hover:bg-muted/35"><span>Notes</span><ChevronDown className="size-4" /></button></CollapsibleTrigger>
+      <CollapsibleContent className="space-y-4 border-t p-4">
+        <section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h4>{npc.playerNotes ? <RichTextView html={npc.playerNotes} className="text-sm" /> : <p className="text-sm text-muted-foreground">Aucune note.</p>}</section>
+        <section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes MJ</h4>{npc.gmNotes ? <RichTextView html={npc.gmNotes} className="text-sm" /> : <p className="text-sm text-muted-foreground">Aucune note MJ.</p>}</section>
+        {npc.lore && <section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Histoire, Lore</h4><RichTextView html={npc.lore} className="text-sm" /></section>}
+      </CollapsibleContent>
+    </Collapsible>
+    {campaignNpc && <NpcBackpack npc={npc} className="border-t" />}
+  </article>
 }
 
 /** Les PNJs d'une session : les identifiants de la session et ce qu'on fait en ajoutant ou retirant. */
@@ -235,8 +277,9 @@ export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "
   async function addToSession(sessionId: string) { if (!sessionTarget) return; setPending(true); setError(""); setNotice(""); try { await patchSession(pageLinked, sessionId, { add: { npcIds: [sessionTarget.id] } }); setNotice(`${sessionTarget.name} a été ajouté à la session.`); setSessionTarget(null) } catch (caught) { setError(caught instanceof Error ? caught.message : "Ajout impossible.") } finally { setPending(false) } }
   async function addSelected(ids: string[]) { if (!session) return; setPending(true); setError(""); try { await session.onAdd(ids); setPicking(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Ajout impossible.") } finally { setPending(false) } }
   async function removeFromSession(npc: CampaignNpcRecord) { if (!session) return; setPending(true); setError(""); try { await session.onRemove(npc.id) } catch (caught) { setError(caught instanceof Error ? caught.message : "Retrait impossible.") } finally { setPending(false) } }
+  async function toggleGroup(npc: CampaignNpcRecord) { setPending(true); setError(""); try { const [saved] = await persistNpcs(npc.inPlayerGroup ? "remove-from-group" : "add-to-group", pageLinked, [npc]); setNpcs((current) => current.map((item) => item.id === saved.id ? saved : item)) } catch (caught) { setError(caught instanceof Error ? caught.message : "Modification impossible.") } finally { setPending(false) } }
   async function remove(npc: CampaignNpcRecord) { setPending(true); setError(""); try { await persistNpcs("delete", pageLinked, [npc]); setNpcs((current) => current.filter((item) => item.id !== npc.id)) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") } finally { setPending(false) } }
   async function importSelected(sourcePageLinked: string, ids: string[], transferMode: "copy" | "move") { setPending(true); setError(""); try { const imported = await importNpcs(pageLinked, sourcePageLinked, ids, transferMode); setNpcs((current) => [...imported, ...current]); setImporting(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Import impossible.") } finally { setPending(false) } }
   const cardAction = (): NpcCardAction => mode === "session" ? { kind: "remove-from-session" } : canAddToSession ? { kind: "add-to-session" } : { kind: "none" }
-  return <div className="space-y-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ…" /></div>{mode === "manage" && <div className="flex gap-2">{sourcePages.length > 0 && <Button type="button" variant="outline" onClick={() => setImporting(true)}><Download />Récupérer</Button>}<Button type="button" variant="outline" onClick={() => setEditing(randomNpc(pageLinked))}><Dices />Générer un PNJ</Button><Button type="button" onClick={() => setEditing(blankNpc(pageLinked))}><Plus />Créer un PNJ</Button></div>}{mode === "session" && <Button type="button" onClick={() => setPicking(true)} disabled={pending}><Plus />Ajouter un PNJ</Button>}</div>{error && <p className="text-sm text-destructive">{error}</p>}{notice && <p className="text-sm text-primary">{notice}</p>}<div className="grid gap-4 xl:grid-cols-2">{filtered.map((npc) => <NpcCard key={npc.id} npc={npc} pending={pending} mode={mode} action={cardAction()} onEdit={() => setEditing(npc)} onAction={() => mode === "session" ? void removeFromSession(npc) : setSessionTarget(npc)} onDelete={() => void remove(npc)} />)}{!filtered.length && <p className="col-span-full rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{mode === "session" ? "Aucun PNJ dans cette session." : "Aucun PNJ."}</p>}</div><Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>{editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle>{editing.createdAt ? `Modifier ${editing.name}` : "Créer un PNJ"}</DialogTitle></DialogHeader><NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={(npc, portrait) => void save(npc, portrait)} /></DialogContent>}</Dialog><ImportNpcsDialog open={importing} sourcePages={sourcePages} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void importSelected(source, ids, transferMode)} />{canAddToSession && <AddToSessionDialog open={Boolean(sessionTarget)} campaignId={pageLinked} subject={sessionTarget ? `Choisis la session où ajouter ${sessionTarget.name}.` : ""} pending={pending} onClose={() => setSessionTarget(null)} onConfirm={(sessionId) => void addToSession(sessionId)} />}{mode === "session" && <AddNpcToSessionDialog open={picking} candidates={inSession ? npcs.filter((npc) => !inSession.has(npc.id)) : []} pending={pending} onClose={() => setPicking(false)} onAdd={(ids) => void addSelected(ids)} onCreate={() => { setPicking(false); setEditing(blankNpc(pageLinked)) }} />}</div>
+  return <div className="space-y-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ…" /></div>{mode === "manage" && <div className="flex gap-2">{sourcePages.length > 0 && <Button type="button" variant="outline" onClick={() => setImporting(true)}><Download />Récupérer</Button>}<Button type="button" variant="outline" onClick={() => setEditing(randomNpc(pageLinked))}><Dices />Générer un PNJ</Button><Button type="button" onClick={() => setEditing(blankNpc(pageLinked))}><Plus />Créer un PNJ</Button></div>}{mode === "session" && <Button type="button" onClick={() => setPicking(true)} disabled={pending}><Plus />Ajouter un PNJ</Button>}</div>{error && <p className="text-sm text-destructive">{error}</p>}{notice && <p className="text-sm text-primary">{notice}</p>}<div className="grid gap-4 xl:grid-cols-2">{filtered.map((npc) => <NpcCard key={npc.id} npc={npc} pending={pending} mode={mode} action={cardAction()} onEdit={() => setEditing(npc)} onAction={() => mode === "session" ? void removeFromSession(npc) : setSessionTarget(npc)} onToggleGroup={() => void toggleGroup(npc)} onDelete={() => void remove(npc)} />)}{!filtered.length && <p className="col-span-full rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{mode === "session" ? "Aucun PNJ dans cette session." : "Aucun PNJ."}</p>}</div><Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>{editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle>{editing.createdAt ? `Modifier ${editing.name}` : "Créer un PNJ"}</DialogTitle></DialogHeader><NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={(npc, portrait) => void save(npc, portrait)} /></DialogContent>}</Dialog><ImportNpcsDialog open={importing} sourcePages={sourcePages} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void importSelected(source, ids, transferMode)} />{canAddToSession && <AddToSessionDialog open={Boolean(sessionTarget)} campaignId={pageLinked} subject={sessionTarget ? `Choisis la session où ajouter ${sessionTarget.name}.` : ""} pending={pending} onClose={() => setSessionTarget(null)} onConfirm={(sessionId) => void addToSession(sessionId)} />}{mode === "session" && <AddNpcToSessionDialog open={picking} candidates={inSession ? npcs.filter((npc) => !inSession.has(npc.id)) : []} pending={pending} onClose={() => setPicking(false)} onAdd={(ids) => void addSelected(ids)} onCreate={() => { setPicking(false); setEditing(blankNpc(pageLinked)) }} />}</div>
 }

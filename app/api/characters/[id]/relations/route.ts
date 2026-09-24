@@ -52,7 +52,7 @@ async function relationCandidates(access: NonNullable<Awaited<ReturnType<typeof 
   const groups = await Promise.all(access.campaigns.map(async (campaign) => {
     const [npcs, characters] = await Promise.all([listNpcs(campaign.id), listCampaignMembers(campaign.id)])
     const visibleNpcs = access.account.role === "joueur"
-      ? npcs.filter((npc) => npc.inCampaign || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
+      ? npcs.filter((npc) => npc.inCampaign || npc.inPlayerGroup || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
       : npcs
     const npcCandidates: RelationCandidate[] = visibleNpcs.map((npc) => ({
       id: npc.id, kind: "npc", name: npc.name, portrait: npc.portrait, people: "", description: npc.playerNotes,
@@ -95,7 +95,7 @@ function blankNpc(pageLinked: string, name: string, createdByUid: string): Campa
   return {
     id: crypto.randomUUID(), pageLinked, name, title: "", occupation: "", people: "", important: false, portrait: "", currentHp: 0, totalHp: 0, speed: 0,
     constitution: 0, strength: 0, dexterity: 0, intelligence: 0, wisdom: 0, charisma: 0,
-    playerNotes: "", gmNotes: "", inCampaign: false, createdByUid, createdAt: "", updatedAt: "",
+    playerNotes: "", gmNotes: "", lore: "", inCampaign: false, inPlayerGroup: false, createdByUid, createdAt: "", updatedAt: "",
   }
 }
 

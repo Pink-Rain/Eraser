@@ -23,10 +23,11 @@ async function CampaignDashboardData({
 }) {
   const [members, groupNpcs] = await Promise.all([
     listCampaignMembers(campaign.id),
-    listNpcs(campaign.id, true),
+    listNpcs(campaign.id).then((npcs) => npcs.filter((npc) => npc.inPlayerGroup)),
   ])
   const identities = await identityUidsForUser(accountUid)
-  const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "" }))
+  // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
+  const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
   return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
 }
 

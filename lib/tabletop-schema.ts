@@ -111,6 +111,8 @@ export type TabletopNpcDetail = {
   stats: Array<{ label: string; short: string; value: number }>
   inventory: Array<{ id: string; name: string; quantity: number; notes: string }>
   canViewPrivate: boolean
+  /** Le MJ, ou un joueur pour un PNJ du groupe : le sac à dos se modifie depuis la fenêtre. */
+  canEditInventory?: boolean
 }
 
 export type TabletopSnapshot = {

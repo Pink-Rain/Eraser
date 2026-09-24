@@ -1,9 +1,11 @@
 "use client"
 
-import { memo, useCallback, useEffect, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react"
-import { Bold, Check, Eraser, Heading2, Italic, Link2, List, ListChecks, ListOrdered, Minus, Palette, Strikethrough, Underline, X } from "lucide-react"
+import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react"
+import { Bold, Check, Eraser, ExternalLink, FileText, Heading2, Italic, Link2, List, ListChecks, ListOrdered, LoaderCircle, Minus, Palette, Search, Strikethrough, Underline, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { internalAppPath, type AppLinkTarget } from "@/lib/app-links"
 import { normalizeCssColorToHex } from "@/lib/google-sheet-rich-text"
 
 /**
@@ -43,6 +45,9 @@ export function sanitizeRichText(html: string) {
     .replace(/<input\b[^>]*>/gi, (tag) => `<input type="checkbox"${/\schecked(?:\s|=|>)/i.test(tag) ? " checked" : ""}>`)
     .replace(new RegExp(`<(?!/?(?:${allowedTags})\\b)[^>]*>`, "gi"), "")
     .replace(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>/gi, (_, href: string) => {
+      // Une page d'Eraser : lien relatif, ouvert sur place.
+      const internal = internalAppPath(href.replace(/&amp;/g, "&"))
+      if (internal) return `<a href="${internal.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}">`
       try {
         const url = new URL(href)
         return ["http:", "https:"].includes(url.protocol) ? `<a href="${url.toString().replace(/"/g, "&quot;")}" target="_blank" rel="noreferrer">` : "<a>"
@@ -100,8 +105,8 @@ export function rememberRichTextSelection(node: HTMLElement | null, saved: Mutab
   if (range) saved.current = range.cloneRange()
 }
 
-function restoreSelection(node: HTMLElement, saved: MutableRefObject<Range | null>) {
-  if (selectionInside(node)) return
+function restoreSelection(node: HTMLElement, saved: MutableRefObject<Range | null>, force = false) {
+  if (!force && selectionInside(node)) return
   const range = saved.current
   if (!range || !node.contains(range.commonAncestorContainer)) return
   const selection = window.getSelection()
@@ -142,12 +147,15 @@ function toggleHeading(node: HTMLElement) {
   document.execCommand("formatBlock", false, "h2")
 }
 
-/** Renvoie vrai si la commande a modifié le contenu. */
-export function runRichTextCommand(target: RichTextTarget | null, saved: MutableRefObject<Range | null>, name: RichTextCommand, value?: string) {
+/** Renvoie vrai si la commande a modifié le contenu. `label` : texte du lien quand rien n'est sélectionné. */
+export function runRichTextCommand(target: RichTextTarget | null, saved: MutableRefObject<Range | null>, name: RichTextCommand, value?: string, label?: string) {
   if (!target) return false
   const { node } = target
+  // Revenir d'ailleurs (le sélecteur de lien) remet le curseur au début du champ :
+  // la sélection mémorisée l'emporte alors sur celle que le navigateur vient de poser.
+  const hadFocus = node.contains(document.activeElement)
   node.focus()
-  restoreSelection(node, saved)
+  restoreSelection(node, saved, !hadFocus)
   try {
     document.execCommand("styleWithCSS", false, name === "color" ? "true" : "false")
     if (name === "bold") document.execCommand("bold")
@@ -167,11 +175,20 @@ export function runRichTextCommand(target: RichTextTarget | null, saved: Mutable
       document.execCommand("foreColor", false, color)
     } else if (name === "link") {
       if (!value) return false
-      try {
-        const url = new URL(value)
-        if (!["http:", "https:"].includes(url.protocol)) return false
-        document.execCommand("createLink", false, url.toString())
-      } catch { return false }
+      let href = internalAppPath(value)
+      if (!href) {
+        try {
+          const url = new URL(value)
+          if (!["http:", "https:"].includes(url.protocol)) return false
+          href = url.toString()
+        } catch { return false }
+      }
+      // Sans texte sélectionné, le lien est inséré avec le nom de la page.
+      const selection = window.getSelection()
+      if (!selection?.rangeCount || selection.getRangeAt(0).collapsed) {
+        const text = escapeRichText(label || href)
+        document.execCommand("insertHTML", false, `<a href="${href.replace(/&/g, "&amp;").replace(/"/g, "&quot;")}">${text}</a>&nbsp;`)
+      } else document.execCommand("createLink", false, href)
     }
   } catch { return false }
   rememberRichTextSelection(node, saved)
@@ -181,6 +198,91 @@ export function runRichTextCommand(target: RichTextTarget | null, saved: Mutable
 
 function commandActive(name: "bold" | "italic" | "underline" | "strikeThrough") {
   try { return document.queryCommandState(name) } catch { return false }
+}
+
+/** Les pages liables, chargées une fois puis gardées deux minutes pour tous les éditeurs. */
+let linkTargets: { at: number; promise: Promise<AppLinkTarget[]> } | null = null
+
+function loadLinkTargets() {
+  if (linkTargets && Date.now() - linkTargets.at < 120_000) return linkTargets.promise
+  const promise = fetch("/api/link-targets")
+    .then((response) => response.ok ? response.json() as Promise<{ targets?: AppLinkTarget[] }> : { targets: [] })
+    .then((payload) => payload.targets ?? [])
+    .catch(() => { linkTargets = null; return [] as AppLinkTarget[] })
+  linkTargets = { at: Date.now(), promise }
+  return promise
+}
+
+function foldLinkText(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
+}
+
+/**
+ * Le bouton « Lien » : une recherche parmi les pages d'Eraser (campagnes et leurs pages,
+ * personnages, classes, index, règles), ou une adresse web collée. Le texte sélectionné
+ * devient le lien ; sans sélection, le nom de la page est inséré.
+ */
+function RichTextLinkPicker({ disabled, onPrepare, onPick }: { disabled: boolean; onPrepare: () => void; onPick: (href: string, label: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const [targets, setTargets] = useState<AppLinkTarget[] | null>(null)
+  const [highlight, setHighlight] = useState(0)
+  useEffect(() => {
+    if (!open) return
+    let alive = true
+    void loadLinkTargets().then((loaded) => { if (alive) setTargets(loaded) })
+    return () => { alive = false }
+  }, [open])
+  const folded = foldLinkText(query)
+  const external = /^https?:\/\/\S+$/i.test(query.trim()) ? query.trim() : /^www\.\S+$/i.test(query.trim()) ? `https://${query.trim()}` : ""
+  const results = useMemo(() => {
+    if (!targets) return []
+    const words = folded.split(/\s+/).filter(Boolean)
+    return targets.filter((target) => {
+      const haystack = foldLinkText(`${target.label} ${target.hint ?? ""} ${target.group}`)
+      return words.every((word) => haystack.includes(word))
+    }).slice(0, 60)
+  }, [folded, targets])
+  const options = [...(external ? [{ label: external, href: external, group: "Adresse web" } as AppLinkTarget] : []), ...results]
+  function choose(target: AppLinkTarget) {
+    setOpen(false)
+    setQuery("")
+    onPick(target.href, target.hint ? `${target.label} (${target.hint})` : target.label)
+  }
+  return <Popover open={open} onOpenChange={(next) => { if (next) onPrepare(); setOpen(next); if (!next) setQuery("") }}>
+    <PopoverTrigger asChild>
+      <Button type="button" size="icon-xs" variant="ghost" disabled={disabled} onMouseDown={(event) => { onPrepare(); event.preventDefault() }} title="Lien vers une page ou une adresse"><Link2 /></Button>
+    </PopoverTrigger>
+    <PopoverContent align="start" className="w-80 p-2" data-rich-text-popover="" onCloseAutoFocus={(event) => event.preventDefault()}>
+      <div className="relative"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><input
+        autoFocus
+        value={query}
+        onChange={(event) => { setQuery(event.target.value); setHighlight(0) }}
+        onKeyDown={(event) => {
+          if (event.key === "ArrowDown") { event.preventDefault(); setHighlight((current) => Math.min(options.length - 1, current + 1)) }
+          if (event.key === "ArrowUp") { event.preventDefault(); setHighlight((current) => Math.max(0, current - 1)) }
+          if (event.key === "Enter") { event.preventDefault(); const option = options[highlight]; if (option) choose(option) }
+        }}
+        placeholder="Rechercher une page, ou coller une adresse…"
+        className="h-9 w-full rounded-md border bg-background pl-8 pr-2 text-sm outline-none focus:ring-2 focus:ring-ring/40"
+      /></div>
+      <div className="mt-2 max-h-72 overflow-y-auto">
+        {targets === null && !external ? <div className="grid min-h-20 place-items-center"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div>
+          : options.length ? options.map((option, index) => <button
+            key={`${option.group}:${option.href}`}
+            type="button"
+            onMouseDown={(event) => event.preventDefault()}
+            onMouseEnter={() => setHighlight(index)}
+            onClick={() => choose(option)}
+            className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${index === highlight ? "bg-accent" : ""}`}
+          >
+            {option.group === "Adresse web" ? <ExternalLink className="size-3.5 shrink-0 text-muted-foreground" /> : <FileText className="size-3.5 shrink-0 text-muted-foreground" />}
+            <span className="min-w-0 flex-1"><span className="block truncate">{option.label}</span><span className="block truncate text-[11px] text-muted-foreground">{option.hint ? `${option.group} · ${option.hint}` : option.group}</span></span>
+          </button>)
+            : <p className="px-2 py-5 text-center text-xs text-muted-foreground">Aucune page ne correspond. Colle une adresse commençant par https:// pour un lien externe.</p>}
+      </div>
+    </PopoverContent>
+  </Popover>
 }
 
 export function RichTextToolbar({ targetRef, ready, compact = false, leading, trailing, className = "" }: {
@@ -214,7 +316,7 @@ export function RichTextToolbar({ targetRef, ready, compact = false, leading, tr
     <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("orderedList")} title="Liste numérotée"><ListOrdered /></Button>
     <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("checkbox")} title="Case à cocher"><ListChecks /></Button>
     <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("rule")} title="Ligne de séparation"><Minus /></Button>
-    <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => { const href = window.prompt("Adresse du lien"); if (href) run("link", href) }} title="Lien"><Link2 /></Button>
+    <RichTextLinkPicker disabled={off} onPrepare={() => rememberRichTextSelection(targetRef.current?.node ?? null, saved)} onPick={(href, label) => { runRichTextCommand(targetRef.current, saved, "link", href, label); refresh((tick) => tick + 1) }} />
     <span className="mx-1 h-5 w-px bg-border" />
     <span className="flex items-center gap-1" aria-label="Couleur du texte">
       <Palette className="mr-0.5 size-3.5 text-muted-foreground" />
@@ -329,7 +431,11 @@ export function RichTextField({ value, onCommit, plain = false, disabled = false
   return <div
     className={`overflow-hidden rounded-xl border bg-background/45 ${className}`}
     onFocusCapture={() => setActive(true)}
-    onBlurCapture={(event) => { if (!event.currentTarget.contains(event.relatedTarget as Node | null)) setActive(false) }}
+    onBlurCapture={(event) => {
+      const next = event.relatedTarget as HTMLElement | null
+      // Le sélecteur de lien s'ouvre hors du champ : la barre reste affichée.
+      if (!event.currentTarget.contains(next) && !next?.closest?.("[data-rich-text-popover]")) setActive(false)
+    }}
   >
     {(showToolbar || label) && <div className="flex flex-wrap items-center gap-1 border-b bg-card/60 px-2 py-1">
       {label && <span className="mr-1 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{label}</span>}
