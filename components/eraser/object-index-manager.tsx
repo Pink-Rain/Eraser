@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Check, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
+import { Check, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
@@ -74,6 +74,7 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   )
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
+  const [notice, setNotice] = useState("")
   const [saving, setSaving] = useState(0)
   const [creating, setCreating] = useState(false)
   // Incrémenté seulement quand les valeurs viennent du serveur : les cellules sont
@@ -145,6 +146,24 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     setVersion((current) => current + 1)
   }
 
+  /** Pose les icônes croquis dans la colonne « Icône » de tous les index. */
+  async function syncIcons() {
+    setPending("icons"); setError(""); setNotice("")
+    const response = await fetch("/api/resources/object-indexes", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ action: "sync-icons" }),
+    })
+    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; result?: { iconsUpdated?: number }; error?: string }
+    setPending("")
+    if (!response.ok || !payload.tables) return setError(payload.error || "Les icônes n’ont pas pu être mises à jour.")
+    localEdits.current = {}
+    setTables(payload.tables)
+    setVersion((current) => current + 1)
+    const count = payload.result?.iconsUpdated ?? 0
+    setNotice(count ? `${count} icône${count > 1 ? "s" : ""} mise${count > 1 ? "s" : ""} à jour dans Google Sheets. Les icônes choisies à la main n’ont pas été touchées.` : "Toutes les icônes sont déjà à jour.")
+  }
+
   async function mutate(body: Record<string, unknown>, label: string) {
     if (!selected) return
     setPending(label); setError("")
@@ -180,11 +199,13 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
         {selected && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+          <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplace les icônes posées par Eraser par les icônes croquis ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
         </div>
       </div>
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
+      {notice && <p className="rounded-xl border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">{notice}</p>}
 
       {creating && selected && <ObjectForm
         headers={selected.headers}

@@ -1,6 +1,6 @@
 {
   "name": "eraser-jdr",
-  "version": "0.1.1-alpha.65",
+  "version": "0.1.1-alpha.66",
   "eraserShell": 2,
   "private": true,
   "main": "desktop/main.cjs",
@@ -12,7 +12,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:ci": "node --test tests/ui-components.test.mjs",
+    "test:ci": "node --test tests/ui-components.test.mjs tests/object-icons.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "desktop:build": "node scripts/build-desktop.mjs",

@@ -3,6 +3,7 @@ import {
   googleServiceConfigured,
   runtimeEnv,
 } from "@/lib/google-service-account"
+import { isGeneratedObjectIcon, resolvedObjectIcon, suggestedObjectIcon } from "@/lib/object-icons"
 import { cache } from "react"
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import { getDb } from "@/db"
@@ -1037,57 +1038,6 @@ export async function deleteGoogleSheetRow(spreadsheetId: string, tabName: strin
   clearSpreadsheetReadCache(spreadsheetId)
 }
 
-const generatedObjectIcons = new Set(["💍", "📿", "🍴", "🛡️", "⚔️", "🧪", "📜", "📚", "🔧", "💣", "💎", "🧰", "📦", "🏹", "🗡️", "🔪", "🪓", "🔨", "🪄", "🔫", "🔱", "🪖", "🥋", "🦺", "🥾", "🧤", "🧥", "🪢", "📖", "📕", "⛏️", "🛠️", "🪵", "🌿", "🧵", "🍲", "🗝️", "🎒", "🪨", "👑", "🥽", "🎭", "🏮"])
-
-function suggestedObjectIcon(name: string, type: string, subtype: string) {
-  const value = normalizedHeader(`${subtype} ${name} ${type}`)
-  if (/arquebuse|pistolet|revolver|fusil|mousquet|carabine|tromblon|pepperbox|arme a feu|arme a poudre|poudre noire/.test(value)) return "🔫"
-  if (/arc|longbow|shortbow/.test(value)) return "🏹"
-  if (/arbalete/.test(value)) return "🏹"
-  if (/epee|rapiere|sabre|katana|glaive|lame/.test(value)) return "🗡️"
-  if (/dague|couteau|poignard/.test(value)) return "🔪"
-  if (/hache/.test(value)) return "🪓"
-  if (/marteau|maillet|masse/.test(value)) return "🔨"
-  if (/baguette|baton|sceptre/.test(value)) return "🪄"
-  if (/fronde/.test(value)) return "🪨"
-  if (/lance|hallebarde|arme d hast|trident/.test(value)) return "🔱"
-  if (/anneau|bague/.test(value)) return "💍"
-  if (/collier|amulette|pendentif/.test(value)) return "📿"
-  if (/fourchette|couverts?/.test(value)) return "🍴"
-  if (/bouclier/.test(value)) return "🛡️"
-  if (/casque|heaume/.test(value)) return "🪖"
-  if (/couronne|diademe|tiare/.test(value)) return "👑"
-  if (/lunette|monocle|viseur/.test(value)) return "🥽"
-  if (/masque/.test(value)) return "🎭"
-  if (/lanterne|lampe/.test(value)) return "🏮"
-  if (/armure legere|leger/.test(value)) return "🥋"
-  if (/armure lourde|lourd/.test(value)) return "🛡️"
-  if (/armure|equipement moyen|moyen/.test(value)) return "🦺"
-  if (/botte|chaussure/.test(value)) return "🥾"
-  if (/gant|gantelet/.test(value)) return "🧤"
-  if (/cape|manteau/.test(value)) return "🧥"
-  if (/ceinture/.test(value)) return "🪢"
-  if (/potion|elixir|fiole|consommable/.test(value)) return "🧪"
-  if (/parchemin|sortilege/.test(value)) return "📜"
-  if (/grimoire/.test(value)) return "📖"
-  if (/livre|ouvrage|manuel/.test(value)) return "📕"
-  if (/pioche/.test(value)) return "⛏️"
-  if (/pelle/.test(value)) return "🛠️"
-  if (/outil/.test(value)) return "🔧"
-  if (/bombe|grenade/.test(value)) return "💣"
-  if (/gemme|pierre|cristal/.test(value)) return "💎"
-  if (/bois|branche|planche/.test(value)) return "🪵"
-  if (/minerai|metal|lingot/.test(value)) return "⛏️"
-  if (/plante|herbe|fleur/.test(value)) return "🌿"
-  if (/tissu|etoffe|fibre/.test(value)) return "🧵"
-  if (/ingredient|nourriture|aliment/.test(value)) return "🍲"
-  if (/clef|cle/.test(value)) return "🗝️"
-  if (/outil|ressource|materiau/.test(value)) return "🧰"
-  if (/arme/.test(value)) return "⚔️"
-  if (/equipement/.test(value)) return "🎒"
-  return "📦"
-}
-
 const oldGeneratedDescriptions = new Set([
   "Une sphère bleu pâle, veinée de givre ; son cœur tinte doucement lorsqu’on la remue.",
   "Une petite coque dense, marquée de fines rainures et d’un mécanisme aussi simple qu’inquiétant.",
@@ -1203,7 +1153,7 @@ export async function refineGeneratedObjectDescriptions() {
       if (iconColumn >= 0) {
         const currentIcon = (row.values[iconColumn] || "").trim()
         const icon = suggestedObjectIcon(name, type, subtype)
-        if ((!currentIcon || generatedObjectIcons.has(currentIcon)) && currentIcon !== icon) {
+        if (isGeneratedObjectIcon(currentIcon) && currentIcon !== icon) {
           updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[icon]] })
         }
       }
@@ -1245,7 +1195,7 @@ export async function enrichObjectIndexTables() {
         descriptionsAdded += 1
       }
       const currentIcon = (row.values[iconColumn] || "").trim()
-      if (!currentIcon || generatedObjectIcons.has(currentIcon)) {
+      if (isGeneratedObjectIcon(currentIcon) && currentIcon !== suggestedObjectIcon(name, type, subtype)) {
         updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[suggestedObjectIcon(name, type, subtype)]] })
         iconsAdded += 1
       }
@@ -1254,6 +1204,36 @@ export async function enrichObjectIndexTables() {
   }
   clearObjectIndexTableCache()
   return { descriptionsAdded, iconsAdded }
+}
+
+/**
+ * Réécrit la colonne « Icône » des index avec les icônes croquis d'Eraser.
+ * Seules les icônes posées par Eraser (émojis générés, cases vides, anciennes
+ * clés) changent ; une icône choisie à la main n'est jamais touchée.
+ */
+export async function syncObjectIndexIcons() {
+  const tables = await listObjectIndexTables()
+  let iconsUpdated = 0
+  for (const table of tables) {
+    const iconColumn = table.headers.findIndex((header) => ["icone", "icon"].includes(normalizedHeader(header)))
+    if (iconColumn < 0) continue
+    const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
+    for (const row of table.rows) {
+      const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
+      if (!name) continue
+      const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
+      const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
+      const currentIcon = (row.values[iconColumn] || "").trim()
+      const icon = suggestedObjectIcon(name, type, subtype)
+      if (isGeneratedObjectIcon(currentIcon) && currentIcon !== icon) {
+        updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[icon]] })
+        iconsUpdated += 1
+      }
+    }
+    await updateRanges(table.fileId, updates)
+  }
+  clearObjectIndexTableCache()
+  return { iconsUpdated }
 }
 
 function suggestedObjectStackLimit(name: string, type: string, subtype: string) {
@@ -4562,7 +4542,7 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
       price: row[8] || "",
       bulk: row[9] || "",
       image: row[10] || "",
-      icon: !row[18] || generatedObjectIcons.has(row[18]) ? suggestedObjectIcon(name, row[3] || "Objet", row[4] || "") : row[18],
+      icon: resolvedObjectIcon(row[18], name, row[3] || "Objet", row[4] || ""),
       notes: row[11] || "",
       link: row[12] || "",
       rarity: row[13] || "",
@@ -4622,7 +4602,7 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       image: objectIndexCell(table, row, ["Image", "Illustration", "URL image"]),
       icon: (() => {
         const storedIcon = objectIndexCell(table, row, ["Icône", "Icone", "Icon"])
-        return !storedIcon || generatedObjectIcons.has(storedIcon) ? suggestedObjectIcon(name, objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table), objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])) : storedIcon
+        return resolvedObjectIcon(storedIcon, name, objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table), objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"]))
       })(),
       notes: objectIndexCell(table, row, ["Notes", "Note"]),
       link: objectIndexCell(table, row, ["Lien", "URL"]),

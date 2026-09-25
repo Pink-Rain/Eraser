@@ -7,6 +7,7 @@ import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { ObjectIcon } from "@/components/eraser/object-icon"
 import { sanitizeRichText } from "@/components/eraser/rich-text"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { InventoryTransferTarget } from "@/lib/inventory-schema"
@@ -152,8 +153,6 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
   const [moving, setMoving] = useState(false)
   const result = searchResults.find((candidate) => candidate.key === draw.result)
   const name = item?.name || draw.itemName
-  const visual = item?.icon || ""
-  const visualIsImage = /^(?:https?:\/\/|\/)/i.test(visual)
   return <article className={`rounded-2xl border bg-card/80 p-4 shadow-sm transition ${fresh ? "ring-2 ring-primary/40" : ""} ${draw.pinned ? "border-primary/45" : ""}`}>
     <div className="flex flex-wrap items-center gap-1.5 text-xs">
       <Badge variant="outline" className={resultStyles[draw.result].badge}>{result?.label}</Badge>
@@ -163,10 +162,9 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
       <span className="ml-auto tabular-nums text-muted-foreground">{timeLabel(draw.at)}</span>
     </div>
     {draw.itemId ? <div className="mt-3 flex items-start gap-3">
-      <div className="flex size-11 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage
-        // eslint-disable-next-line @next/next/no-img-element
-        ? <img src={visual} alt="" loading="lazy" decoding="async" className="size-full object-cover" />
-        : visual ? <span className="text-xl" aria-hidden="true">{visual}</span> : <PackageOpen className="size-4" />}</div>
+      <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{item
+        ? <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />
+        : <PackageOpen className="size-4" />}</div>
       <div className="min-w-0 flex-1">
         <p className="font-display text-lg font-semibold leading-tight">{item?.nameHtml?.trim() ? <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : name}</p>
         {item && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}{item.price ? ` · ${item.price}` : ""}</p>}

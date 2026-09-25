@@ -10,6 +10,7 @@ import {
   ensureObjectIndexStackLimits,
   listObjectIndexTables,
   refreshObjectIndexTables,
+  syncObjectIndexIcons,
   updateObjectIndexCell,
   updateObjectIndexRow,
 } from "@/lib/google-sheets"
@@ -38,6 +39,10 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; count?: number; column?: number; html?: string; values?: unknown[] }
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
+      return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
+    }
+    if (body.action === "sync-icons") {
+      const result = await syncObjectIndexIcons()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })
     }
     if (body.action === "ensure-stack-limits") {
