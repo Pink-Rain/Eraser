@@ -310,16 +310,35 @@ export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord 
 let identityIndexSyncPromise: Promise<unknown> | null = null
 let identityIndexSyncedAt = 0
 const IDENTITY_INDEX_SYNC_TTL_MS = 60_000
+// Une page n'attend pas plus longtemps la resynchronisation : au-delà, elle
+// s'affiche avec l'index local et la synchro se termine en arrière-plan.
+const IDENTITY_INDEX_SYNC_WAIT_MS = 2_500
 
-async function ensureIdentityIndexes() {
-  if (Date.now() - identityIndexSyncedAt < IDENTITY_INDEX_SYNC_TTL_MS) return
+async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: number } = {}) {
+  if (Date.now() - identityIndexSyncedAt < (options.maxAgeMs ?? IDENTITY_INDEX_SYNC_TTL_MS)) return
   if (!identityIndexSyncPromise) {
     identityIndexSyncPromise = syncExistingIdentityIndexes()
       .then(() => { identityIndexSyncedAt = Date.now() })
       .catch((error) => console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
       .finally(() => { identityIndexSyncPromise = null })
   }
-  await identityIndexSyncPromise
+  if (options.waitMs === undefined) {
+    await identityIndexSyncPromise
+    return
+  }
+  await Promise.race([identityIndexSyncPromise, new Promise((resolve) => setTimeout(resolve, options.waitMs))])
+}
+
+/**
+ * Les personnages, campagnes et liens « personnage ↔ campagne » sont écrits par
+ * toutes les installations dans les feuilles partagées. L'index local n'était
+ * resynchronisé que s'il était vide ou qu'un identifiant y manquait : un
+ * personnage créé chez un joueur restait invisible pour un autre MJ, et un
+ * joueur ne voyait jamais la campagne où un MJ l'avait ajouté. Désormais, les
+ * lectures qui en dépendent le rafraîchissent au plus une fois par minute.
+ */
+function refreshIdentityIndexes() {
+  return ensureIdentityIndexes({ waitMs: IDENTITY_INDEX_SYNC_WAIT_MS })
 }
 
 async function charactersSource() {
@@ -1356,6 +1375,7 @@ export async function ensureObjectIndexStackLimits() {
 }
 
 async function listCharactersForUserUncached(uid: string) {
+  await refreshIdentityIndexes()
   const db = getDb()
   const identityUids = await identityUidsForUser(uid)
   let characters = await db.select().from(characterIndex)
@@ -1396,6 +1416,7 @@ export async function getCharacterForUser(uid: string, id: string) {
 }
 
 async function getCharacterByIdUncached(id: string) {
+  await refreshIdentityIndexes()
   const read = async () => (await getDb().select().from(characterIndex)
     .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1))[0]
   let character = await read()
@@ -1427,6 +1448,7 @@ async function decorateCharacters<T extends { id: string; ownerUid: string; name
 }
 
 async function listCampaignsForMjUncached(uid: string) {
+  await refreshIdentityIndexes()
   const db = getDb()
   const identityUids = await identityUidsForUser(uid)
   let campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
@@ -1468,6 +1490,7 @@ export async function getCampaignForPlayer(uid: string, id: string) {
 }
 
 async function getCharacterForMjUncached(uid: string, id: string) {
+  await refreshIdentityIndexes()
   const identityUids = await identityUidsForUser(uid)
   const read = async () => (await getDb().select({ character: characterIndex }).from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
@@ -2765,12 +2788,13 @@ export async function syncExistingIdentityIndexes() {
     charactersSource(),
     resolveJdrSheet("campaign_characters"),
   ])
+  let relationsRead = false
   const [campaignRows, characterRows, relationRows] = await Promise.all([
-    campaignSource ? readRange(campaignSource.spreadsheetId, campaignSource.range).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
-    characterSource ? readRange(characterSource.spreadsheetId, characterSource.range).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+    campaignSource ? readRangeFresh(campaignSource.spreadsheetId, campaignSource.range).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+    characterSource ? readRangeFresh(characterSource.spreadsheetId, characterSource.range).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
     // Le nom de cet onglet contient des espaces ("Personnages par campagne") : il doit être
     // entre quotes dans la notation A1, sinon l'API Sheets renvoie une erreur de parsing.
-    relationSource ? readRange(relationSource.spreadsheetId, sheetTabRange(relationSource.tabName, "A:B")).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+    relationSource ? readRangeFresh(relationSource.spreadsheetId, sheetTabRange(relationSource.tabName, "A:B")).then((rows) => { relationsRead = true; return rows }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
   ])
   const now = new Date().toISOString()
   const db = getDb()
@@ -2829,6 +2853,18 @@ export async function syncExistingIdentityIndexes() {
   for (const row of relationRows.slice(1)) {
     if (!row[0] || !row[1] || linkKeys.has(`${row[0]}::${row[1]}`)) continue
     await db.insert(campaignCharacters).values({ campaignId: row[0], characterId: row[1] }).onConflictDoNothing()
+  }
+
+  // La feuille « Personnages des campagnes » fait foi : un personnage qu'un MJ a
+  // retiré de sa campagne depuis une autre installation disparaît aussi d'ici.
+  // Seulement si la feuille a bien été lue (en-tête compris) : une lecture en
+  // échec ou vide ne doit jamais vider l'index local.
+  if (relationsRead && relationRows.length > 0) {
+    const sharedKeys = new Set(relationRows.slice(1).filter((row) => row[0] && row[1]).map((row) => `${row[0]}::${row[1]}`))
+    for (const link of existingLinks) {
+      if (sharedKeys.has(`${link.campaignId}::${link.characterId}`)) continue
+      await db.delete(campaignCharacters).where(and(eq(campaignCharacters.campaignId, link.campaignId), eq(campaignCharacters.characterId, link.characterId)))
+    }
   }
   return { campaigns: Math.max(0, campaignRows.length - 1), characters: Math.max(0, characterRows.length - 1) }
 }
@@ -4162,6 +4198,7 @@ export async function updateCampaignForMj(mjUid: string | null, id: string, patc
 }
 
 export async function listCampaignMembers(campaignId: string) {
+  await refreshIdentityIndexes()
   const read = () => getDb().select().from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .where(and(eq(campaignCharacters.campaignId, campaignId), isNull(characterIndex.deletedAt)))
@@ -4231,12 +4268,11 @@ export async function listInventoryTransferTargets(
 }
 
 export async function listAvailableCampaignCharacters() {
-  const read = () => getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(200)
-  let rows = await read()
-  if (!rows.length) {
-    await ensureIdentityIndexes()
-    rows = await read()
-  }
+  // Le MJ ouvre la liste pour y trouver un personnage qui vient souvent d'être
+  // créé ailleurs : on relit les feuilles partagées à chaque ouverture (sauf
+  // si une relecture date de quelques secondes).
+  await ensureIdentityIndexes({ maxAgeMs: 5_000 })
+  const rows = await getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500)
   return decorateCharacters(rows)
 }
 

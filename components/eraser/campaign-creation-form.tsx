@@ -1,6 +1,6 @@
 "use client"
 
-import { useState, type FormEvent } from "react"
+import { useRef, useState, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { LoaderCircle, Map, Save } from "lucide-react"
 
@@ -20,9 +20,14 @@ export function CampaignCreationForm() {
   const [accentColor, setAccentColor] = useState("#927640")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  // Verrou immédiat : un double Entrée partait avant que le bouton ne se désactive
+  // et créait deux campagnes identiques.
+  const sending = useRef(false)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (sending.current) return
+    sending.current = true
     setPending(true)
     setError("")
     const response = await fetch("/api/campaigns", {
@@ -31,7 +36,7 @@ export function CampaignCreationForm() {
       body: JSON.stringify({ name, description, bannerUrl, accentColor }),
     })
     const payload = (await response.json()) as { error?: string; campaign?: CampaignRecord }
-    if (!response.ok || !payload.campaign) { setPending(false); return setError(payload.error || "La campagne n’a pas pu être créée.") }
+    if (!response.ok || !payload.campaign) { sending.current = false; setPending(false); return setError(payload.error || "La campagne n’a pas pu être créée.") }
     if (bannerFile) {
       const form = new FormData()
       form.append("banner", bannerFile)

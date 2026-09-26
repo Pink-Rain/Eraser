@@ -83,11 +83,11 @@ export function CampaignDashboard({
   const [addingCharacter, setAddingCharacter] = useState(false)
   const [availableCharacters, setAvailableCharacters] = useState<CharacterRecord[]>([])
   const [availableLoading, setAvailableLoading] = useState(false)
-  const [availableLoaded, setAvailableLoaded] = useState(false)
   const [availableError, setAvailableError] = useState("")
   const [characterId, setCharacterId] = useState("")
   const selectedCharacter = availableCharacters.find((item) => item.id === characterId)
-  const [duplicate, setDuplicate] = useState(true)
+  // Un personnage peut être dans plusieurs campagnes : l'ajouter ne le copie que sur demande.
+  const [duplicate, setDuplicate] = useState(false)
   const [selectedCharacterId, setSelectedCharacterId] = useState("")
   const [removeTarget, setRemoveTarget] = useState<CampaignMemberRecord | null>(null)
   const [removing, setRemoving] = useState(false)
@@ -169,7 +169,6 @@ export function CampaignDashboard({
       if (!response.ok || !payload.removed) throw new Error(payload.error || "Le personnage n’a pas pu être retiré.")
       setMemberWarning(payload.warning || "")
       setMembers((current) => current.filter((member) => member.id !== character.id))
-      setAvailableLoaded(false)
       setRemoveTarget(null)
     } catch (caught) {
       setAvailableError(caught instanceof Error ? caught.message : "Le personnage n’a pas pu être retiré.")
@@ -184,7 +183,8 @@ export function CampaignDashboard({
       return
     }
     setAddingCharacter(true)
-    if (availableLoaded || availableLoading) return
+    // Relu à chaque ouverture : un joueur a pu créer son personnage entre-temps.
+    if (availableLoading) return
     setAvailableLoading(true)
     setAvailableError("")
     try {
@@ -192,7 +192,6 @@ export function CampaignDashboard({
       const payload = (await response.json()) as { characters?: CharacterRecord[]; error?: string }
       if (!response.ok || !payload.characters) throw new Error(payload.error || "Chargement impossible.")
       setAvailableCharacters(payload.characters)
-      setAvailableLoaded(true)
     } catch (caught) {
       setAvailableError(caught instanceof Error ? caught.message : "Les personnages n’ont pas pu être chargés.")
     } finally {
@@ -245,14 +244,14 @@ export function CampaignDashboard({
           <div className="flex items-center justify-between gap-4"><h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><Users className="size-5" />Personnages joueurs</h2>{canManage && <Button onClick={() => void toggleCharacterPicker()}>{addingCharacter ? <X /> : <Plus />}{addingCharacter ? "Fermer" : "Ajouter"}</Button>}</div>
           {canManage && addingCharacter && (
             <div className="mt-5 grid gap-4 rounded-xl border bg-background/60 p-4 sm:grid-cols-[1fr_auto]">
-              <NativeSelect className="w-full" value={characterId} disabled={availableLoading} onChange={(event) => { const id = event.target.value; setCharacterId(id); const character = availableCharacters.find((item) => item.id === id); setDuplicate(Boolean(character?.campaigns.length)) }}>
+              <NativeSelect className="w-full" value={characterId} disabled={availableLoading} onChange={(event) => { setCharacterId(event.target.value); setDuplicate(false) }}>
                 <NativeSelectOption value="">Choisir un personnage</NativeSelectOption>
-                {availableCharacters.map((character) => <NativeSelectOption key={character.id} value={character.id}>{character.name}{character.campaigns.length ? ` — ${character.campaigns.map((item) => item.name).join(", ")}` : " — sans campagne"}</NativeSelectOption>)}
+                {availableCharacters.filter((character) => !members.some((member) => member.id === character.id)).map((character) => <NativeSelectOption key={character.id} value={character.id}>{character.name}{character.campaigns.length ? ` — ${character.campaigns.map((item) => item.name).join(", ")}` : " — sans campagne"}</NativeSelectOption>)}
               </NativeSelect>
               <Button onClick={addCharacter} disabled={!characterId || availableLoading}>{availableLoading ? <span className="size-4 animate-spin rounded-full border-2 border-current border-t-transparent" /> : <Plus />}{availableLoading ? "Chargement…" : "Ajouter"}</Button>
               {availableError && <p className="text-sm text-destructive sm:col-span-2">{availableError}</p>}
               {selectedCharacter?.campaigns.length ? (
-                <label className="flex items-center gap-2 text-sm sm:col-span-2"><Checkbox checked={duplicate} onCheckedChange={(checked) => setDuplicate(checked === true)} />Dupliquer le personnage et ajouter la copie</label>
+                <label className="flex items-center gap-2 text-sm sm:col-span-2"><Checkbox checked={duplicate} onCheckedChange={(checked) => setDuplicate(checked === true)} />Ajouter une copie séparée plutôt que le personnage lui-même (il reste aussi dans ses autres campagnes)</label>
               ) : null}
             </div>
           )}

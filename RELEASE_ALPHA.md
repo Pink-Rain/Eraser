@@ -1,54 +1,50 @@
-# Eraser 0.1.1-alpha.73 — Sorts personnels, objets reçus, Journal en colonnes
+# Eraser 0.1.1-alpha.74 — Personnages et campagnes : le circuit réparé
 
 Cette version arrive par la mise à jour sans réinstallation. Rien à changer côté
 Roll20.
 
-## Sorts des classes
+## Ce qui n’allait pas
 
-- Onglet « Par classe » : dans chaque carte, le champ **Compétences** est encadré
-  de rouge léger, **Distance** de gris léger et **Charges** de violet léger.
-- Un petit **rail vertical des rangs** (C, 1 à 20) reste au bord droit de l’écran :
-  un clic amène au rang, le rang affiché est mis en avant, les rangs vides sont
-  grisés.
+Chaque installation d’Eraser garde une copie locale de la liste des personnages,
+des campagnes et des liens « personnage ↔ campagne ». Cette copie n’était relue
+dans Google Sheets que lorsqu’elle était vide ou qu’un personnage y manquait :
 
-## Fiche de personnage
+- un MJ ne voyait pas les personnages créés par les joueurs après sa première
+  synchronisation (un autre MJ, lui, pouvait les voir) ;
+- un joueur ne voyait jamais sur sa fiche la campagne où un MJ l’avait ajouté,
+  même après actualisation ;
+- ajouter à une campagne un personnage déjà dans une autre campagne en créait
+  une **copie** par défaut : la campagne recevait la copie, pas le personnage du
+  joueur.
 
-- **Sorts personnels** : dans l’onglet Sorts, un double-clic sur le nom, l’effet, la
-  description, le type, les compétences, la distance ou les charges d’un sort le
-  modifie **pour ce personnage seulement**. L’index des sorts ne change pas. Un sort
-  modifié porte l’étiquette « Personnalisé » ; « Version de l’index » le remet comme
-  avant.
-- **Retirer un sort** : la corbeille d’un sort le retire de la fiche (avec
-  confirmation). Les sorts retirés restent listés sous les capacités, un clic les
-  rétablit.
-- Ces changements sont rangés avec les choix de classe du personnage, dans sa ligne
-  de la feuille : rien de nouveau n’est créé dans Google Sheets.
-- **Journal** : les relations sont présentées en trois colonnes (Allié·es,
-  Connaissances, Ennemi·es) avec un mini-portrait, le peuple et un niveau coloré,
-  plus soutenu quand la relation est forte. Le carnet de notes passe en dessous, sur
-  toute la largeur.
-- Le « + » des onglets ne propose plus que **Invocation** et **Compagnon**. Les
-  onglets déjà ajoutés restent en place.
+## Ce qui change
 
-## Objets reçus
+- Les listes de personnages et de campagnes se remettent à jour depuis Google
+  Sheets au plus une fois par minute, et relisent la feuille directement (sans
+  cache). Une page n’attend jamais plus de 2,5 secondes : au-delà, elle s’affiche
+  et la mise à jour finit en arrière-plan.
+- « Ajouter » un personnage à une campagne relit les feuilles à chaque
+  ouverture : un personnage tout juste créé par un joueur y apparaît. Ceux déjà
+  dans la campagne ne sont plus proposés.
+- Un personnage peut être dans **plusieurs campagnes** : l’ajouter ne le copie
+  plus. La case « Ajouter une copie séparée » reste disponible, décochée.
+- Un personnage retiré d’une campagne disparaît aussi de cette campagne chez le
+  joueur. La feuille « Personnages des campagnes » fait foi. Elle n’est prise en
+  compte que si elle a bien été lue, pour qu’une panne réseau ne vide jamais la
+  liste.
+- Créer une campagne ou un personnage ne peut plus partir deux fois (double
+  Entrée ou double clic).
 
-- Quand un joueur ou un MJ t’envoie un objet (depuis un inventaire, un PNJ,
-  l’inventaire de campagne ou une Fouille), une petite carte apparaît : « Maëlle
-  vous a envoyé 2 × Corde — Reçu par Lina ». L’inventaire ouvert se met à jour tout
-  seul.
-- L’alerte passe par le serveur de comptes partagé et arrive en une quinzaine de
-  secondes au plus (plus vite quand tu reviens sur la fenêtre). Elle n’est montrée
-  qu’une fois.
+## À savoir
 
-## Chat
-
-- Une petite pastille rouge apparaît sur le bouton du chat quand un message arrive
-  dans le salon suivi alors que le chat est fermé. Elle disparaît à l’ouverture.
+- Les liens déjà enregistrés dans Google Sheets apparaîtront d’eux-mêmes après la
+  mise à jour, chez le MJ comme chez les joueurs.
+- Si un ajout précédent a créé une copie du personnage dans une campagne, la
+  copie reste : tu peux la retirer de la campagne et ajouter le personnage
+  d’origine.
 
 ## Vérifications
 
-- dans un vrai navigateur, avec des données d’exemple : relations en colonnes,
-  carte d’objet reçu, sorts modifiés au double-clic (la carte s’ouvre toujours au
-  clic simple), sort retiré puis rétabli, rail des rangs et champs encadrés ;
-- un sort personnalisé garde l’index intact ;
+- la feuille « Personnages des campagnes » a été relue dans le Drive pour
+  confirmer le diagnostic ;
 - lint sans erreur, tests au vert, build et serveur desktop vérifiés en HTTP 200.

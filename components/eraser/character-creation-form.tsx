@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type DragEvent, type FormEvent } from "react"
+import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
 import { Check, CircleUserRound, ImagePlus, Link2, LoaderCircle, Search, Sparkles, Upload, WandSparkles, X } from "lucide-react"
 
@@ -35,6 +35,8 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
   const [failedPreview, setFailedPreview] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  // Verrou immédiat contre un double envoi (deux personnages identiques).
+  const sending = useRef(false)
 
   // L’aperçu d’un fichier importé est une URL locale à libérer quand il change.
   const filePreview = useMemo(() => portraitFile ? URL.createObjectURL(portraitFile) : "", [portraitFile])
@@ -69,6 +71,8 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     if (!name.trim()) return setError("Le nom du personnage est obligatoire.")
+    if (sending.current) return
+    sending.current = true
     setPending(true)
     setError("")
     const values = Array<string>(characterValueHeaders.length).fill("")
@@ -88,6 +92,7 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
       }
       const payload = (await response.json()) as { error?: string; character?: { id: string } }
       if (!response.ok || !payload.character) {
+        sending.current = false
         setPending(false)
         return setError(payload.error || "Le personnage n’a pas pu être créé.")
       }
@@ -96,6 +101,7 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
       announceCreatedCharacter({ id: payload.character.id, ownerUid: "", name: values[0], subtitle: values[1], updatedAt: new Date().toISOString(), campaigns: [] })
       router.push(`/personnage/${encodeURIComponent(payload.character.id)}`)
     } catch {
+      sending.current = false
       setPending(false)
       setError("Le personnage n’a pas pu être créé.")
     }
