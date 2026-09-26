@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
 import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
@@ -226,14 +226,37 @@ function totalWithModifier(raw: string, modifier: number, fallback = "0") {
   return String(Math.round((parsed + modifier) * 100) / 100)
 }
 
-/** Un même objet peut viser une compétence et sa caractéristique : on additionne ses apports. */
+/**
+ * Un même objet peut viser une compétence et sa caractéristique : on additionne ses apports.
+ * Un apport à un seuil critique reste sur sa propre ligne, étiquetée.
+ */
 function mergeLinkedItems(...lists: LinkedModifierItem[][]) {
   const merged = new Map<string, LinkedModifierItem>()
   for (const entry of lists.flat()) {
-    const existing = merged.get(entry.slotId)
-    merged.set(entry.slotId, existing ? { ...existing, amount: existing.amount + entry.amount } : entry)
+    const key = `${entry.slotId}:${entry.tag ?? ""}`
+    const existing = merged.get(key)
+    merged.set(key, existing ? { ...existing, amount: existing.amount + entry.amount } : entry)
   }
   return [...merged.values()]
+}
+
+const tagLinkedItems = (tag: string, ...lists: LinkedModifierItem[][]) => lists.flat().map((item) => ({ ...item, tag }))
+
+/**
+ * Place un panneau de survol sous son déclencheur, ou au-dessus quand la fenêtre
+ * n’a pas la place en dessous et qu’il y en a davantage au-dessus.
+ */
+function useFlipPlacement() {
+  const anchorRef = useRef<HTMLDivElement>(null)
+  const [above, setAbove] = useState(false)
+  const measure = useCallback((panel: HTMLElement | null) => {
+    const anchor = anchorRef.current
+    if (!panel || !anchor) return
+    const rect = anchor.getBoundingClientRect()
+    const spaceBelow = window.innerHeight - rect.bottom
+    setAbove(spaceBelow < panel.offsetHeight + 12 && rect.top > spaceBelow)
+  }, [])
+  return { anchorRef, above, measure }
 }
 
 type SlotToggle = { pendingSlot: string; onToggle: (slotId: string, equipped: boolean) => void }
@@ -249,9 +272,10 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
   return <div className="mt-2 border-t pt-2" style={{ borderColor }}>
     <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Backpack className="size-3" />Objets liés</p>
     <div className="space-y-1">
-      {items.map((entry) => <label key={entry.slotId} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
+      {items.map((entry) => <label key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
         <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
         <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
+        {entry.tag && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.tag}</span>}
         <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"} ${entry.equipped ? "" : "opacity-40"}`}>{formatModifierAmount(entry.amount)}</span>
       </label>)}
     </div>
@@ -262,10 +286,11 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
 /** Entoure une carte non dépliable (vie, folie, caractéristique…) d’un survol listant ses objets liés. */
 function ModifierHoverShell({ items, toggle, title, color, total, children }: { items: LinkedModifierItem[]; toggle: SlotToggle; title: string; color: string; total?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
+  const { anchorRef, above, measure } = useFlipPlacement()
   if (!items.length) return <>{children}</>
-  return <div className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+  return <div ref={anchorRef} className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     {children}
-    {open && <div className="absolute left-1/2 top-[calc(100%-3px)] z-40 w-60 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl" style={{ borderColor: `${color}66` }}>
+    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-60 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl`} style={{ borderColor: `${color}66` }}>
       <p className="font-display text-sm font-semibold" style={{ color }}>{title}</p>
       <LinkedItemsPanel items={items} toggle={toggle} borderColor={`${color}40`} total={total} />
     </div>}
@@ -292,11 +317,12 @@ function SkillRow({ skillIndex, values, color, commit, abilities, charges, setCh
     totalWithModifier(values[characterSkillValueIndex(skillIndex, 8)], failureModifier, "—"),
   ]
   const metricModifiers = [statModifier, successModifier, failureModifier]
-  return <div className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+  const { anchorRef, above, measure } = useFlipPlacement()
+  return <div ref={anchorRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     <button type="button" onClick={() => setOpen((current) => !current)} className={`grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border }}>
       <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}</span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? "text-foreground" : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
     </button>
-    {open && <div className="absolute left-2 right-2 top-[calc(100%-2px)] z-30 rounded-xl border bg-popover p-3 text-popover-foreground shadow-2xl" style={{ borderColor: color.border }}>
+    {open && <div ref={measure} className={`absolute left-2 right-2 ${above ? "bottom-[calc(100%-2px)]" : "top-[calc(100%-2px)]"} z-30 rounded-xl border bg-popover p-3 text-popover-foreground shadow-2xl`} style={{ borderColor: color.border }}>
       <p className="mb-2 font-display text-sm font-semibold" style={{ color: color.accent }}>{shortName}</p><div className="mb-2 grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Calcul</span><span>B/M</span><span>Mod.</span></div>
       {[{ label: "Stat", bonus: 0 }, { label: "Réussite critique", bonus: 3 }, { label: "Échec critique", bonus: 6 }].map((line, lineIndex) => {
         const bonusIndex = characterSkillValueIndex(skillIndex, line.bonus)
@@ -317,14 +343,33 @@ function SkillRow({ skillIndex, values, color, commit, abilities, charges, setCh
   </div>
 }
 
+/**
+ * En-tête coloré d’une caractéristique. Son survol montre les seuils critiques propres à la
+ * caractéristique et les objets liés, au-dessus quand la place manque en dessous.
+ */
+function CharacteristicHeader({ group, groupIndex, color, values, commit, statModifier, criticalModifiers, linkedItems, toggle }: { group: (typeof characterSkillGroups)[number]; groupIndex: number; color: (typeof palette)[number]; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
+  const { anchorRef, above, measure } = useFlipPlacement()
+  const panelRef = useRef<HTMLDivElement>(null)
+  const place = () => measure(panelRef.current)
+  return <div ref={anchorRef} onMouseEnter={place} onFocusCapture={place} className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}>
+    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={group.characteristic}>{skillGroupTitle(group.characteristic)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit><ModifierBadge amount={statModifier} plain /></span></div>
+    <div ref={panelRef} className={`pointer-events-none absolute left-3 right-3 z-40 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${above ? "bottom-[calc(100%-2px)] -translate-y-1" : "top-[calc(100%-2px)] translate-y-1"}`} style={{ borderColor: color.border }}>
+      <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
+      <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}<ModifierBadge amount={criticalModifiers[kind]} /></p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
+      <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={totalWithModifier(values[group.characteristicIndex], statModifier)} />
+    </div>
+  </div>
+}
+
 function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color, values, commit, compact = false, modifier = 0, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const definitionIndex = characterSecondaryCalculatedFields.findIndex((field) => field.valueIndex === fieldIndex)
   const bonusIndex = characterSecondaryCalculationValueIndex(definitionIndex, "bonus")
   const total = totalWithModifier(values[fieldIndex], modifier)
-  return <div className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+  const { anchorRef, above, measure } = useFlipPlacement()
+  return <div ref={anchorRef} className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
     <button type="button" onClick={() => setOpen((current) => !current)} className={`flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} font-semibold tabular-nums`} style={{ color }}>{total}</span></button>
-    {open && <div className="absolute left-1/2 top-[calc(100%-3px)] z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl" style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{modifier ? formatModifierAmount(modifier) : "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
+    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{modifier ? formatModifierAmount(modifier) : "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
 
@@ -560,18 +605,62 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     <div className="sm:col-span-2 xl:col-span-5"><CombinedCalculatedCard label="Critique" groupColor="#d19466" fields={[{ ...calculatedSecondary[5], shortLabel: "Échec" }, { ...calculatedSecondary[6], shortLabel: "Réussite" }]} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>
   </div>
 
+  const successLabel = "Réussite crit."
+  const failureLabel = "Échec crit."
+
+  /**
+   * Une caractéristique et ses compétences. Les seuils critiques d’une compétence cumulent
+   * les objets liés au seuil global, à celui de la caractéristique et au sien.
+   */
+  function renderSkillGroup(group: (typeof characterSkillGroups)[number], groupIndex: number) {
+    const color = palette[groupIndex]
+    const characteristicId = characteristicModifierTargetId(group.characteristic)
+    const characteristicCritical = { success: characterCriticalValueIndex(groupIndex, "success"), failure: characterCriticalValueIndex(groupIndex, "failure") }
+    return <article key={group.characteristic} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
+      <CharacteristicHeader
+        group={group}
+        groupIndex={groupIndex}
+        color={color}
+        values={values}
+        commit={commit}
+        statModifier={modifierForValue(group.characteristicIndex)}
+        criticalModifiers={{ success: modifierForValue(characteristicCritical.success), failure: modifierForValue(characteristicCritical.failure) }}
+        linkedItems={mergeLinkedItems(linkedForValue(group.characteristicIndex), tagLinkedItems(successLabel, linkedForValue(characteristicCritical.success)), tagLinkedItems(failureLabel, linkedForValue(characteristicCritical.failure)))}
+        toggle={slotToggle}
+      />
+      <div className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] gap-1 px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Compétence</span><span className="text-center">Stat</span><span className="text-center">RC</span><span className="text-center">EC</span></div>
+      {group.skills.map((_, localIndex) => {
+        const skillIndex = skillOffsetByGroup[groupIndex] + localIndex
+        const skillName = characterSkills[skillIndex].name
+        const successIndexes = [23, characteristicCritical.success, characterSkillValueIndex(skillIndex, 5)]
+        const failureIndexes = [22, characteristicCritical.failure, characterSkillValueIndex(skillIndex, 8)]
+        return <SkillRow
+          key={skillName}
+          skillIndex={skillIndex}
+          values={values}
+          color={color}
+          commit={commit}
+          abilities={linkedAbilities(skillName)}
+          charges={classChoiceState.charges}
+          setCharges={updateSpellCharges}
+          skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(skillName))}
+          characteristicModifier={modifierTotalFor(modifierIndex, characteristicId)}
+          successModifier={successIndexes.reduce((total, index) => total + modifierForValue(index), 0)}
+          failureModifier={failureIndexes.reduce((total, index) => total + modifierForValue(index), 0)}
+          linkedItems={mergeLinkedItems(
+            linkedItemsFor(modifierIndex, skillModifierTargetId(skillName)),
+            linkedItemsFor(modifierIndex, characteristicId),
+            tagLinkedItems(successLabel, ...successIndexes.map(linkedForValue)),
+            tagLinkedItems(failureLabel, ...failureIndexes.map(linkedForValue)),
+          )}
+          toggle={slotToggle}
+        />
+      })}
+    </article>
+  }
+
   function renderSkillsContent() { return <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-5">
-    {characterSkillGroups.map((group, groupIndex) => {
-      const color = palette[groupIndex]
-      return <article key={group.characteristic} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
-        <div className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}>
-          <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={group.characteristic}>{skillGroupTitle(group.characteristic)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit><ModifierBadge amount={modifierForValue(group.characteristicIndex)} plain /></span></div>
-          <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-2px)] z-40 translate-y-1 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" style={{ borderColor: color.border }}><p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p><div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}</p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div><LinkedItemsPanel items={linkedForValue(group.characteristicIndex)} toggle={slotToggle} borderColor={color.border} total={totalWithModifier(values[group.characteristicIndex], modifierForValue(group.characteristicIndex))} /></div>
-        </div>
-        <div className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] gap-1 px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Compétence</span><span className="text-center">Stat</span><span className="text-center">RC</span><span className="text-center">EC</span></div>
-        {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name))} characteristicModifier={modifierTotalFor(modifierIndex, characteristicModifierTargetId(group.characteristic))} successModifier={modifierForValue(23)} failureModifier={modifierForValue(22)} linkedItems={mergeLinkedItems(linkedItemsFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name)), linkedItemsFor(modifierIndex, characteristicModifierTargetId(group.characteristic)))} toggle={slotToggle} /> })}
-      </article>
-    })}
+    {characterSkillGroups.map(renderSkillGroup)}
   </div> }
 
   function renderTabContent(tab: CharacterTab) {
@@ -659,21 +748,7 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       </div>
       <div className="mb-4 mt-9"><p className="text-[10px] font-semibold uppercase tracking-[.25em] text-primary/70">Aptitudes</p><h3 className="font-display text-2xl font-semibold">Caractéristiques principales & compétences</h3></div>
       <div className="grid items-start gap-4 md:grid-cols-2 xl:grid-cols-5">
-        {characterSkillGroups.map((group, groupIndex) => {
-          const color = palette[groupIndex]
-          return <article key={group.characteristic} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
-            <div className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}>
-              <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={group.characteristic}>{skillGroupTitle(group.characteristic)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={group.characteristic} value={values[group.characteristicIndex]} onCommit={(value) => commit(group.characteristicIndex, value)}><span className="text-2xl font-bold tabular-nums">{values[group.characteristicIndex] || "0"}</span></InlineEdit><ModifierBadge amount={modifierForValue(group.characteristicIndex)} plain /></span></div>
-              <div className="pointer-events-none absolute left-3 right-3 top-[calc(100%-2px)] z-40 translate-y-1 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100" style={{ borderColor: color.border }}>
-                <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{group.characteristic}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
-                <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = characterCriticalValueIndex(groupIndex, kind); return <div key={kind}><p className="mb-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}</p><InlineEdit numeric singleClick compact label={`${group.characteristic} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
-                <LinkedItemsPanel items={linkedForValue(group.characteristicIndex)} toggle={slotToggle} borderColor={color.border} total={totalWithModifier(values[group.characteristicIndex], modifierForValue(group.characteristicIndex))} />
-              </div>
-            </div>
-            <div className="grid grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] gap-1 px-3 py-2 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Compétence</span><span className="text-center">Stat</span><span className="text-center">RC</span><span className="text-center">EC</span></div>
-            {group.skills.map((_, localIndex) => { const skillIndex = skillOffsetByGroup[groupIndex] + localIndex; return <SkillRow key={characterSkills[skillIndex].name} skillIndex={skillIndex} values={values} color={color} commit={commit} abilities={linkedAbilities(characterSkills[skillIndex].name)} charges={classChoiceState.charges} setCharges={updateSpellCharges} skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name))} characteristicModifier={modifierTotalFor(modifierIndex, characteristicModifierTargetId(group.characteristic))} successModifier={modifierForValue(23)} failureModifier={modifierForValue(22)} linkedItems={mergeLinkedItems(linkedItemsFor(modifierIndex, skillModifierTargetId(characterSkills[skillIndex].name)), linkedItemsFor(modifierIndex, characteristicModifierTargetId(group.characteristic)))} toggle={slotToggle} /> })}
-          </article>
-        })}
+        {characterSkillGroups.map(renderSkillGroup)}
       </div>
       </div>}
     </section>

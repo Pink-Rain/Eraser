@@ -10,25 +10,51 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import {
   formatModifierAmount,
   hasModifierAmount,
+  itemModifierAspectLabels,
   itemModifierTargets,
   itemModifierTargetById,
+  joinModifierTarget,
   parseModifierAmount,
   serializeItemModifiers,
+  splitModifierTarget,
   type ItemModifier,
+  type ItemModifierAspect,
 } from "@/lib/item-modifiers"
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").trim()
 }
 
-const targetGroups = [...new Set(itemModifierTargets.map((target) => target.group))]
+// La liste ne propose que les cibles de base : les seuils critiques d’une caractéristique
+// ou d’une compétence se choisissent ensuite, avec les boutons sous la cible.
+const baseTargets = itemModifierTargets.filter((target) => target.kind !== "critique")
+const targetGroups = [...new Set(baseTargets.map((target) => target.group))]
+const aspects: ItemModifierAspect[] = ["stat", "reussite", "echec"]
+const aspectTones: Record<ItemModifierAspect, string> = {
+  stat: "border-primary/40 bg-primary/10 text-primary",
+  reussite: "border-emerald-500/40 bg-emerald-500/12 text-emerald-600 dark:text-emerald-300",
+  echec: "border-rose-500/40 bg-rose-500/12 text-rose-600 dark:text-rose-300",
+}
+
+function AspectPicker({ value, onChange }: { value: ItemModifierAspect; onChange: (aspect: ItemModifierAspect) => void }) {
+  return <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Ce que l’objet modifie">
+    {aspects.map((aspect) => <button
+      key={aspect}
+      type="button"
+      role="radio"
+      aria-checked={value === aspect}
+      onClick={() => onChange(aspect)}
+      className={`rounded-full border px-2 py-0.5 text-[11px] font-medium transition ${value === aspect ? aspectTones[aspect] : "border-transparent text-muted-foreground hover:bg-accent/60"}`}
+    >{itemModifierAspectLabels[aspect]}</button>)}
+  </div>
+}
 
 function TargetPicker({ value, onChange }: { value: string; onChange: (target: string) => void }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const search = normalized(query)
   const matches = useMemo(
-    () => itemModifierTargets.filter((target) => !search || normalized(`${target.label} ${target.group}`).includes(search)),
+    () => baseTargets.filter((target) => !search || normalized(`${target.label} ${target.group}`).includes(search)),
     [search],
   )
   const selected = itemModifierTargetById.get(value)
@@ -85,9 +111,13 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
   }
 
   return <>
-      <p className="-mt-1 text-xs leading-5 text-muted-foreground">Ces modificateurs ne comptent dans les totaux que lorsque la case de l’objet est cochée.</p>
+      <p className="-mt-1 text-xs leading-5 text-muted-foreground">Ces modificateurs ne comptent dans les totaux que lorsque la case de l’objet est cochée. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.</p>
       <div className="grid gap-2">
-        {draft.map((entry, index) => <div key={index} className="grid grid-cols-[5rem_minmax(0,1fr)_2rem] items-center gap-2">
+        {draft.map((entry, index) => {
+          const { baseId, aspect } = splitModifierTarget(entry.target)
+          const base = itemModifierTargetById.get(baseId)
+          const hasCritical = base?.kind === "caracteristique" || base?.kind === "competence"
+          return <div key={index} className="grid grid-cols-[5rem_minmax(0,1fr)_2rem] items-start gap-x-2 gap-y-1.5">
           <Input
             value={entry.value}
             onChange={(event) => update(index, { value: event.target.value })}
@@ -96,14 +126,16 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
             className="h-9 text-center font-semibold tabular-nums"
             aria-label={`Modificateur ${index + 1}`}
           />
-          <TargetPicker value={entry.target} onChange={(target) => update(index, { target })} />
+          <TargetPicker value={baseId} onChange={(target) => update(index, { target: joinModifierTarget(target, aspect) })} />
           <button
             type="button"
             onClick={() => setDraft((current) => current.length > 1 ? current.filter((_, entryIndex) => entryIndex !== index) : [{ value: "", target: "" }])}
-            className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+            className="mt-0.5 flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
             aria-label={`Retirer le lien ${index + 1}`}
           ><X className="size-3.5" /></button>
-        </div>)}
+          {hasCritical && <div className="col-start-2 col-end-4"><AspectPicker value={aspect} onChange={(next) => update(index, { target: joinModifierTarget(baseId, next) })} /></div>}
+        </div>
+        })}
       </div>
       <div className="flex flex-wrap items-center justify-between gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={() => setDraft((current) => [...current, { value: "", target: "" }])}><Plus />Ajouter un lien</Button>

@@ -1,9 +1,12 @@
-import { characterSkillGroups, characterSkillValueIndex, characterSkills } from "@/lib/character-sheet-schema"
+import { characterCriticalValueIndex, characterSkillGroups, characterSkillValueIndex, characterSkills } from "@/lib/character-sheet-schema"
 import type { InventoryContainerRecord } from "@/lib/inventory-schema"
 
 export type ItemModifier = { value: string; target: string }
 
-export type ItemModifierTargetKind = "valeur" | "calcul" | "caracteristique" | "competence"
+export type ItemModifierTargetKind = "valeur" | "calcul" | "caracteristique" | "competence" | "critique"
+
+/** Ce qu’un lien vise sur une caractéristique ou une compétence : sa valeur ou l’un de ses seuils critiques. */
+export type ItemModifierAspect = "stat" | "reussite" | "echec"
 
 export type ItemModifierTarget = {
   id: string
@@ -12,7 +15,12 @@ export type ItemModifierTarget = {
   kind: ItemModifierTargetKind
   valueIndex: number
   skillIndex: number
+  /** Pour un seuil critique : la caractéristique ou la compétence d’origine. */
+  baseId?: string
+  aspect?: ItemModifierAspect
 }
+
+export const itemModifierAspectLabels: Record<ItemModifierAspect, string> = { stat: "Valeur", reussite: "Réussite critique", echec: "Échec critique" }
 
 const directTargets: Array<{ id: string; label: string; valueIndex: number }> = [
   { id: "vie", label: "Vie", valueIndex: 10 },
@@ -34,20 +42,55 @@ const calculatedTargets: Array<{ id: string; label: string; valueIndex: number }
 
 export const characteristicModifierTargetId = (characteristic: string) => `carac:${characteristic}`
 export const skillModifierTargetId = (skill: string) => `comp:${skill}`
+/** « crit-reussite:carac:Force », « crit-echec:comp:Parade »… */
+export const criticalModifierTargetId = (baseId: string, aspect: Exclude<ItemModifierAspect, "stat">) => `crit-${aspect}:${baseId}`
+
+function criticalTargets(base: { id: string; label: string; group: string }, valueIndex: (aspect: "reussite" | "echec") => number, skillIndex: number): ItemModifierTarget[] {
+  return (["reussite", "echec"] as const).map((aspect) => ({
+    id: criticalModifierTargetId(base.id, aspect),
+    label: `${base.label} · ${aspect === "reussite" ? "réussite critique" : "échec critique"}`,
+    group: base.group,
+    kind: "critique" as const,
+    valueIndex: valueIndex(aspect),
+    skillIndex,
+    baseId: base.id,
+    aspect,
+  }))
+}
 
 export const itemModifierTargets: ItemModifierTarget[] = [
   ...directTargets.map((target) => ({ ...target, group: "Général", kind: "valeur" as const, skillIndex: -1 })),
   ...calculatedTargets.map((target) => ({ ...target, group: "Général", kind: "calcul" as const, skillIndex: -1 })),
-  ...characterSkillGroups.flatMap((group) => [
-    { id: characteristicModifierTargetId(group.characteristic), label: group.characteristic, group: group.characteristic, kind: "caracteristique" as const, valueIndex: group.characteristicIndex, skillIndex: -1 },
-    ...group.skills.map((skill) => {
-      const skillIndex = characterSkills.findIndex((candidate) => candidate.name === skill)
-      return { id: skillModifierTargetId(skill), label: skill, group: group.characteristic, kind: "competence" as const, valueIndex: characterSkillValueIndex(skillIndex, 2), skillIndex }
-    }),
-  ]),
+  ...characterSkillGroups.flatMap((group, groupIndex) => {
+    const characteristic = { id: characteristicModifierTargetId(group.characteristic), label: group.characteristic, group: group.characteristic }
+    return [
+      { ...characteristic, kind: "caracteristique" as const, valueIndex: group.characteristicIndex, skillIndex: -1 },
+      ...criticalTargets(characteristic, (aspect) => characterCriticalValueIndex(groupIndex, aspect === "reussite" ? "success" : "failure"), -1),
+      ...group.skills.flatMap((skill) => {
+        const skillIndex = characterSkills.findIndex((candidate) => candidate.name === skill)
+        const base = { id: skillModifierTargetId(skill), label: skill, group: group.characteristic }
+        return [
+          { ...base, kind: "competence" as const, valueIndex: characterSkillValueIndex(skillIndex, 2), skillIndex },
+          ...criticalTargets(base, (aspect) => characterSkillValueIndex(skillIndex, aspect === "reussite" ? 5 : 8), skillIndex),
+        ]
+      }),
+    ]
+  }),
 ]
 
 export const itemModifierTargetById = new Map(itemModifierTargets.map((target) => [target.id, target]))
+
+/** La cible choisie dans la liste (caractéristique, compétence…) et l’aspect visé. */
+export function splitModifierTarget(id: string): { baseId: string; aspect: ItemModifierAspect } {
+  const target = itemModifierTargetById.get(id)
+  return target?.baseId && target.aspect ? { baseId: target.baseId, aspect: target.aspect } : { baseId: id, aspect: "stat" }
+}
+
+export function joinModifierTarget(baseId: string, aspect: ItemModifierAspect) {
+  if (aspect === "stat" || !baseId) return baseId
+  const id = criticalModifierTargetId(baseId, aspect)
+  return itemModifierTargetById.has(id) ? id : baseId
+}
 
 export function itemModifierTargetLabel(id: string) {
   return itemModifierTargetById.get(id)?.label || id
@@ -96,6 +139,8 @@ export function serializeItemModifiers(modifiers: ItemModifier[]) {
 
 export type LinkedModifierItem = {
   slotId: string
+  /** Ce que l’objet modifie quand ce n’est pas la valeur principale (« Réussite critique »…). */
+  tag?: string
   name: string
   equipped: boolean
   containerName: string

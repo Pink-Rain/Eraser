@@ -1,14 +1,41 @@
 "use client"
 
-import { Clock3, LogOut, ShieldX } from "lucide-react"
+import { useState } from "react"
+import { Clock3, LoaderCircle, LogOut, RefreshCw, ShieldX } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import type { AccountRecord } from "@/lib/auth-types"
 
 export function AccountGate({ account }: { account: AccountRecord }) {
+  const [checking, setChecking] = useState(false)
+  const [notice, setNotice] = useState("")
+
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" })
     window.location.href = "/connexion"
+  }
+
+  // Relit le compte auprès du serveur (sans cache) : si un administrateur a validé
+  // l'accès, la page complète est rechargée pour ouvrir l'application.
+  async function refresh() {
+    setChecking(true)
+    setNotice("")
+    try {
+      const response = await fetch("/api/auth/status", { cache: "no-store" })
+      if (response.status === 401) {
+        window.location.href = "/connexion"
+        return
+      }
+      const payload = (await response.json().catch(() => ({}))) as { status?: string; role?: string | null }
+      if (payload.status === "actif" && payload.role) {
+        window.location.reload()
+        return
+      }
+      setNotice(payload.status === "suspendu" ? "Ce compte est suspendu." : "Toujours en attente : aucun rôle n’a encore été attribué.")
+    } catch {
+      setNotice("Impossible de vérifier pour l’instant. Réessaie dans un moment.")
+    }
+    setChecking(false)
   }
 
   const suspended = account.status === "suspendu"
@@ -30,10 +57,17 @@ export function AccountGate({ account }: { account: AccountRecord }) {
             : "Un administrateur doit encore attribuer un rôle Admin, MJ ou Joueur à ce compte."}
         </p>
         <p className="mt-3 text-sm text-muted-foreground">{account.email}</p>
-        <Button variant="outline" className="mt-7" onClick={signOut}>
-          <LogOut className="size-4" />
-          Se déconnecter
-        </Button>
+        <div className="mt-7 flex flex-wrap items-center justify-center gap-3">
+          <Button onClick={refresh} disabled={checking}>
+            {checking ? <LoaderCircle className="size-4 animate-spin" /> : <RefreshCw className="size-4" />}
+            Actualiser
+          </Button>
+          <Button variant="outline" onClick={signOut}>
+            <LogOut className="size-4" />
+            Se déconnecter
+          </Button>
+        </div>
+        <p className="mt-4 min-h-5 text-sm text-muted-foreground" role="status">{notice}</p>
       </section>
     </main>
   )

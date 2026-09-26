@@ -3,7 +3,7 @@
  * Ce fichier ne dépend de rien côté serveur : l'interface s'en sert aussi pour savoir
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
-export type WorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages"
+export type WorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials"
 
 export type WorldIndexTabDefinition = {
   name: string
@@ -170,6 +170,56 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
       itemLabel: "une langue",
       headers: ["Nom", "Lieu", "Peuple", "Langue-mère", "Langue-fille"],
       widths: [220, 240, 240, 220, 220],
+    }],
+  },
+  // Quatre index préparés, à remplir : chacun a son propre classeur, créé la première
+  // fois qu'on ouvre sa page (et relié s'il existe déjà sous ce nom dans Drive).
+  states: {
+    key: "states",
+    sheetName: "Index des états",
+    title: "États",
+    path: "/ressources/index-des-etats",
+    tabs: [{
+      name: "États",
+      itemLabel: "un état",
+      headers: ["Nom", "Type", "Effet", "Durée", "Cumul", "Fin de l'état", "Description", "Note"],
+      widths: [220, 140, 380, 140, 110, 260, 380, 280],
+    }],
+  },
+  runes: {
+    key: "runes",
+    sheetName: "Index des runes",
+    title: "Runes",
+    path: "/ressources/index-des-runes",
+    tabs: [{
+      name: "Runes",
+      itemLabel: "une rune",
+      headers: ["Nom", "Type", "Élément", "Effet", "Se pose sur", "Rareté", "Description", "Note"],
+      widths: [220, 140, 140, 380, 200, 130, 380, 280],
+    }],
+  },
+  attributes: {
+    key: "attributes",
+    sheetName: "Index des attributs",
+    title: "Attributs",
+    path: "/ressources/index-des-attributs",
+    tabs: [{
+      name: "Attributs",
+      itemLabel: "un attribut",
+      headers: ["Nom", "Type", "Effet", "Description", "Note"],
+      widths: [220, 160, 420, 380, 280],
+    }],
+  },
+  materials: {
+    key: "materials",
+    sheetName: "Index des matériaux",
+    title: "Matériaux",
+    path: "/ressources/index-des-materiaux",
+    tabs: [{
+      name: "Matériaux",
+      itemLabel: "un matériau",
+      headers: ["Nom", "Type", "Rareté", "Emplacement principal", "Emplacement secondaire", "Propriétés", "Description", "Note"],
+      widths: [220, 150, 130, 200, 200, 320, 380, 280],
     }],
   },
 }

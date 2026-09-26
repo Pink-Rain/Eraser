@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm"
 import { getDb } from "@/db"
 import { jdrGoogleSheets } from "@/db/schema"
 
-export type JdrSheetKey = "classes" | "characters" | "campaigns" | "campaign_characters" | "character_relations" | "admin_todos" | "inventory" | "shops" | "npcs" | "tabletop" | "vocabulary" | "creatures" | "places" | "religions" | "peoples" | "languages" | "sessions"
+export type JdrSheetKey = "classes" | "characters" | "campaigns" | "campaign_characters" | "character_relations" | "admin_todos" | "inventory" | "shops" | "npcs" | "tabletop" | "vocabulary" | "creatures" | "places" | "religions" | "peoples" | "languages" | "sessions" | "states" | "runes" | "attributes" | "materials"
 
 export type JdrSheetRecord = {
   key: JdrSheetKey

@@ -2,7 +2,7 @@
  * Les pages de la section « Index » (anciennement « Ressources »). Les adresses
  * restent sous /ressources pour que les liens existants continuent de fonctionner.
  */
-export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-creatures"
+export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-creatures" | "etats" | "runes" | "attributs" | "materiaux"
 
 export type IndexPage = { key: IndexPageKey; href: string; label: string; description: string }
 
@@ -11,6 +11,10 @@ export const indexHomeHref = "/ressources"
 export const indexPages: IndexPage[] = ([
   { key: "campagnes", href: "/ressources/index-des-campagnes", label: "Campagnes", description: "Toutes les campagnes, leurs MJ et leurs joueurs." },
   { key: "classes", href: "/ressources/index-des-classes", label: "Sorts des classes", description: "Les sorts de chaque classe, rang par rang." },
+  { key: "etats", href: "/ressources/index-des-etats", label: "États", description: "Les états et altérations, leurs effets et leur durée." },
+  { key: "runes", href: "/ressources/index-des-runes", label: "Runes", description: "Les runes, leur élément et ce qu’elles apportent." },
+  { key: "attributs", href: "/ressources/index-des-attributs", label: "Attributs", description: "Les attributs des armes, armures et objets." },
+  { key: "materiaux", href: "/ressources/index-des-materiaux", label: "Matériaux", description: "Les matériaux, où les trouver et leurs propriétés." },
   { key: "sorts-creatures", href: "/ressources/sorts-des-creatures", label: "Sorts des créatures", description: "Les sorts actifs et passifs des créatures." },
   { key: "creatures", href: "/ressources/index-des-creatures", label: "Créatures", description: "Le bestiaire, ses caractéristiques et ses sorts." },
   { key: "langues", href: "/ressources/index-des-langues", label: "Langues", description: "Les langues parlées dans le monde." },

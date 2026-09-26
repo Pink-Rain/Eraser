@@ -160,6 +160,11 @@ function forgetCachedSessions() {
   sessionAccountCache.clear()
 }
 
+/** Oublie le compte mis en cache pour cette session : la prochaine lecture interroge le Worker. */
+export function forgetSessionAccount(token: string) {
+  sessionAccountCache.delete(token)
+}
+
 export async function accountFromSession(token: string) {
   const remote = remoteAccountsConfig(env)
   if (remote) {
