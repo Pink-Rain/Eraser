@@ -1,11 +1,13 @@
-import type { ReactNode } from "react"
+"use client"
 
-import { objectIconSource, resolvedObjectIcon } from "@/lib/object-icons"
+import { useState, type ReactNode } from "react"
+
+import { objectIconImage } from "@/lib/object-icons"
 
 /**
- * Icône d'un objet : l'icône croquis d'Eraser, ou l'émoji choisi à la main.
- * Les anciennes icônes générées (émojis) sont remplacées à l'affichage, y compris
- * dans les magasins déjà enregistrés.
+ * Icône d'un objet : ce que contient sa case « Icône » (image du Drive, adresse
+ * d'image, émoji). Une case vide ou une ancienne icône générée prend l'icône
+ * d'Eraser ; une image qui ne se charge pas aussi.
  */
 export function ObjectIcon({ icon, name, type, subtype, className = "size-full", emojiClassName = "text-xl", fallback = null }: {
   icon?: string
@@ -16,13 +18,14 @@ export function ObjectIcon({ icon, name, type, subtype, className = "size-full",
   emojiClassName?: string
   fallback?: ReactNode
 }) {
-  const value = resolvedObjectIcon(icon, name, type || "", subtype || "")
-  const source = objectIconSource(value)
-  // Une adresse d'image saisie à la main s'affiche telle quelle.
-  // eslint-disable-next-line @next/next/no-img-element
-  if (/^(?:https?:\/\/|\/)/i.test(value)) return <img src={value} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} className={`${className} object-cover`} />
-  // eslint-disable-next-line @next/next/no-img-element
-  if (source) return <img src={source} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} className={`${className} object-contain`} />
+  const image = objectIconImage(icon, name, type || "", subtype || "")
+  const [failed, setFailed] = useState("")
+  if (image) {
+    const src = failed === image.src ? image.fallback : image.src
+    // eslint-disable-next-line @next/next/no-img-element
+    return <img src={src} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} onError={() => { if (src !== image.fallback) setFailed(image.src) }} className={`${className} object-contain`} />
+  }
+  const value = (icon || "").trim()
   if (value) return <span className={emojiClassName} aria-hidden="true">{value}</span>
   return <>{fallback}</>
 }

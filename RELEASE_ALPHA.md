@@ -1,27 +1,26 @@
-# Eraser 0.1.1-alpha.66 — Icônes d’objets au croquis
+# Eraser 0.1.1-alpha.67 — Icônes d’objets sur le Drive et dans les index
 
 Cette version arrive par la mise à jour sans réinstallation. Rien à changer côté
 Roll20.
 
-- Les objets ont de nouvelles icônes dessinées à l’encre, dans l’esprit dark
-  fantasy : 82 armes et 49 catégories d’objets (écrits, équipement,
-  ingrédients, alchimie, divers). Elles remplacent les émojis dans les
-  inventaires, la recherche d’objets, les fouilles et les magasins, y compris
-  les magasins déjà enregistrés.
-- Choix de l’icône : une arme est reconnue à son nom ; un autre objet à son
-  sous-type, ou à son nom quand le sous-type est vide, « Autre » ou « / ».
-  Faute d’équivalent, Eraser prend l’icône la plus proche.
-- Une icône choisie à la main (un autre émoji, une image) est toujours
-  respectée.
-- Index des objets : le bouton « Mettre à jour les icônes » écrit les nouvelles
-  icônes dans la colonne « Icône » des Google Sheets. Seules les icônes posées
-  par Eraser changent.
-- Les icônes sont un peu plus grandes dans les inventaires, les fouilles et les
-  magasins.
+- Les icônes d’objets vivent désormais sur le Drive, dans le dossier
+  « icone objet » (créé seulement s’il n’existe pas déjà).
+- La colonne « Icône » des index d’objets reçoit l’image elle-même : elle
+  s’affiche aussi dans Google Sheets. Eraser remplit tout seul les cases vides
+  ou qui tenaient une ancienne icône générée ; une icône choisie à la main
+  n’est jamais remplacée.
+- Les objets affichent ce que contient leur case « Icône » : une image du Drive,
+  une adresse d’image, une formule =IMAGE(…) ou un émoji. Une case vide prend
+  l’icône d’Eraser correspondante.
+- Index des objets : chaque case « Icône » montre l’image et un bouton pour en
+  importer une autre ; l’image importée va dans le dossier « icone objet » et
+  s’affiche partout (inventaires, fouilles, magasins).
+- Les images du dossier « icone objet » sont lisibles par lien : c’est ce qui
+  permet à Google Sheets de les afficher.
 
 ## Vérifications
 
 - lint sans erreur, build de production et build desktop réussis, serveur desktop
   vérifié en HTTP 200 ;
-- tests d’interface et 3 nouveaux tests des icônes (choix sur des lignes réelles
-  des index, remplacement des anciennes icônes, présence des 131 images) au vert.
+- tests d’interface et tests des icônes au vert (choix d’icône, lecture de la
+  case, images présentes dans l’archive du serveur).

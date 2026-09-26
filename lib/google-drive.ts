@@ -189,6 +189,15 @@ export async function uploadDriveFile(input: {
   return payloadJson
 }
 
+/** Lisible par toute personne qui a le lien : Google Sheets en a besoin pour afficher =IMAGE(). */
+export async function shareDriveFileWithLink(fileId: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) throw new Error("INVALID_DRIVE_FILE_ID")
+  await driveJson(`files/${encodeURIComponent(fileId)}/permissions?fields=id`, {
+    method: "POST",
+    body: JSON.stringify({ role: "reader", type: "anyone" }),
+  })
+}
+
 export async function createGoogleSpreadsheet(name: string) {
   const normalizedName = name.trim()
   if (!normalizedName || normalizedName.length > 120) throw new Error("INVALID_SHEET_NAME")

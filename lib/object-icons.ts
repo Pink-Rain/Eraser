@@ -388,17 +388,58 @@ export function isGeneratedObjectIcon(icon: string) {
   return !value || LEGACY_GENERATED_OBJECT_ICONS.has(value) || value.startsWith(OBJECT_ICON_PREFIX)
 }
 
-/** Icône à afficher : celle saisie à la main, sinon celle d'Eraser. */
-export function resolvedObjectIcon(icon: string | undefined, name: string, type: string, subtype: string) {
-  const value = (icon || "").trim()
-  if (value.startsWith(OBJECT_ICON_PREFIX) && OBJECT_ICON_KEYS.has(value.slice(OBJECT_ICON_PREFIX.length))) return value
-  if (isGeneratedObjectIcon(value)) return suggestedObjectIcon(name, type, subtype)
-  return value
+/** Nom du fichier d'une icône d'Eraser dans le dossier « icone objet » du Drive. */
+export function objectIconDriveFileName(key: string) {
+  return `${key.replace("/", " - ")}.webp`
 }
 
-/** Adresse de l'image d'une icône Eraser, ou chaîne vide pour un émoji. */
-export function objectIconSource(icon: string) {
-  if (!icon.startsWith(OBJECT_ICON_PREFIX)) return ""
-  const key = icon.slice(OBJECT_ICON_PREFIX.length)
-  return OBJECT_ICON_KEYS.has(key) ? `/icones/objets/${key}.webp` : ""
+/** Clé d'une icône d'Eraser d'après son nom de fichier sur le Drive. */
+export function objectIconKeyFromDriveFileName(name: string) {
+  const key = name.replace(/\.webp$/i, "").replace(" - ", "/")
+  return OBJECT_ICON_KEYS.has(key) ? key : ""
+}
+
+/** Adresse d'un fichier Drive que Google Sheets sait afficher dans =IMAGE(). */
+export function driveImageUrl(fileId: string) {
+  return `https://drive.google.com/thumbnail?id=${fileId}&sz=w256`
+}
+
+/** Contenu de la case « Icône » : l'image elle-même, visible dans Google Sheets. */
+export function driveImageFormula(fileId: string) {
+  return `=IMAGE("${driveImageUrl(fileId)}")`
+}
+
+const DRIVE_FILE_PATTERNS = [/\/file\/d\/([A-Za-z0-9_-]+)/, /\/d\/([A-Za-z0-9_-]{20,})/, /[?&]id=([A-Za-z0-9_-]+)/, /\/api\/items\/icons\/([A-Za-z0-9_-]+)/]
+
+/** Identifiant Drive contenu dans une case (formule =IMAGE, lien de partage…). */
+export function objectIconDriveFileId(value: string) {
+  if (!/drive\.google\.com|googleusercontent\.com|\/api\/items\/icons\//.test(value)) return ""
+  for (const pattern of DRIVE_FILE_PATTERNS) {
+    const match = value.match(pattern)
+    if (match?.[1]) return match[1]
+  }
+  return ""
+}
+
+/**
+ * Image à afficher pour une case « Icône » :
+ * - une image du Drive passe par Eraser (qui la lit avec son accès Google) ;
+ * - une adresse d'image (ou =IMAGE("…")) s'affiche telle quelle ;
+ * - une case vide ou une ancienne icône générée prend l'icône d'Eraser.
+ * Renvoie `null` pour un émoji ou un texte saisi à la main.
+ */
+export function objectIconImage(icon: string | undefined, name: string, type: string, subtype: string): { src: string; fallback: string } | null {
+  const value = (icon || "").trim()
+  const fallback = `/icones/objets/${suggestedObjectIconKey(name, type, subtype)}.webp`
+  if (value.startsWith(OBJECT_ICON_PREFIX)) {
+    const key = value.slice(OBJECT_ICON_PREFIX.length)
+    return { src: OBJECT_ICON_KEYS.has(key) ? `/icones/objets/${key}.webp` : fallback, fallback }
+  }
+  if (isGeneratedObjectIcon(value)) return { src: fallback, fallback }
+  const driveId = objectIconDriveFileId(value)
+  if (driveId) return { src: `/api/items/icons/${driveId}`, fallback }
+  const formulaUrl = value.match(/^=IMAGE\(\s*"([^"]+)"/i)?.[1]
+  const url = formulaUrl || value
+  if (/^https?:\/\//i.test(url) || url.startsWith("/")) return { src: url, fallback }
+  return null
 }

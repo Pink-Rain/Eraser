@@ -51,16 +51,31 @@ test("choisit l'icône d'après le nom des armes et le sous-type des objets", ()
   }
 });
 
-test("remplace les anciennes icônes générées mais garde celles choisies à la main", () => {
-  assert.equal(icons.resolvedObjectIcon("🏹", "Arbalète", "Arme à distance", "Arbalète"), "eraser:armes/arbalete");
-  assert.equal(icons.resolvedObjectIcon("", "Bombe", "Consommable", "Autre"), "eraser:divers/bombe");
-  assert.equal(icons.resolvedObjectIcon("🐉", "Arbalète", "Arme à distance", "Arbalète"), "🐉");
-  assert.equal(icons.resolvedObjectIcon("eraser:divers/bombe", "Arbalète", "Arme à distance", "Arbalète"), "eraser:divers/bombe");
-  assert.equal(icons.objectIconSource("eraser:armes/katana"), "/icones/objets/armes/katana.webp");
-  assert.equal(icons.objectIconSource("🐉"), "");
+test("affiche ce que contient la case « Icône »", () => {
+  const drive = icons.driveImageFormula("1AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+  assert.equal(drive, '=IMAGE("https://drive.google.com/thumbnail?id=1AbCdEfGhIjKlMnOpQrStUvWxYz012345&sz=w256")');
+  // Image du Drive posée par Eraser ou importée à la main : servie par Eraser.
+  assert.equal(icons.objectIconImage(drive, "Arbalète", "Arme à distance", "Arbalète").src, "/api/items/icons/1AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+  assert.equal(icons.objectIconImage("https://drive.google.com/file/d/1AbCdEfGhIjKlMnOpQrStUvWxYz012345/view", "Arbalète", "", "").src, "/api/items/icons/1AbCdEfGhIjKlMnOpQrStUvWxYz012345");
+  // Adresse d'image quelconque, en formule ou en texte.
+  assert.equal(icons.objectIconImage('=IMAGE("https://exemple.fr/dague.png")', "Dague", "", "").src, "https://exemple.fr/dague.png");
+  // Case vide ou ancien émoji généré : l'icône d'Eraser.
+  assert.equal(icons.objectIconImage("", "Bombe", "Consommable", "Autre").src, "/icones/objets/divers/bombe.webp");
+  assert.equal(icons.objectIconImage("🏹", "Arbalète", "Arme à distance", "Arbalète").src, "/icones/objets/armes/arbalete.webp");
+  // Émoji choisi à la main : gardé tel quel.
+  assert.equal(icons.objectIconImage("🐉", "Arbalète", "Arme à distance", "Arbalète"), null);
+  assert.equal(icons.isGeneratedObjectIcon(drive), false);
+  assert.equal(icons.objectIconKeyFromDriveFileName(icons.objectIconDriveFileName("armes/katana")), "armes/katana");
 });
 
 test("chaque icône possède son image", async () => {
   assert.equal(icons.OBJECT_ICON_KEYS.size, 131);
   for (const key of icons.OBJECT_ICON_KEYS) await access(new URL(`../public/icones/objets/${key}.webp`, import.meta.url));
+});
+
+test("le serveur retrouve les images à envoyer sur le Drive", async () => {
+  const assets = await vite.ssrLoadModule("/lib/object-icon-assets.ts");
+  const bytes = await assets.bundledIconBytes("armes/katana");
+  assert.ok(bytes.byteLength > 1000);
+  assert.equal(new TextDecoder().decode(new Uint8Array(bytes).slice(8, 12)), "WEBP");
 });

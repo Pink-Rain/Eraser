@@ -3,7 +3,8 @@ import {
   googleServiceConfigured,
   runtimeEnv,
 } from "@/lib/google-service-account"
-import { isGeneratedObjectIcon, resolvedObjectIcon, suggestedObjectIcon } from "@/lib/object-icons"
+import { driveImageFormula, isGeneratedObjectIcon, objectIconDriveFileId, suggestedObjectIconKey } from "@/lib/object-icons"
+import { ensureObjectIconsOnDrive } from "@/lib/object-icon-drive"
 import { cache } from "react"
 import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm"
 import { getDb } from "@/db"
@@ -512,7 +513,11 @@ async function readCellNotes(spreadsheetId: string, range: string) {
   )
 }
 
-function gridCellValue(cell: GoogleGridCell) {
+function gridCellValue(cell: GoogleGridCell, keepImageFormula = false) {
+  // Une image (=IMAGE) n'a pas de texte : les index d'objets gardent la formule,
+  // qui dit où est l'image de la colonne « Icône ».
+  const formula = cell.userEnteredValue?.formulaValue
+  if (keepImageFormula && formula && /^=IMAGE\(/i.test(formula)) return formula
   if (cell.formattedValue !== undefined) return String(cell.formattedValue)
   const entered = cell.userEnteredValue
   if (entered?.stringValue !== undefined) return entered.stringValue
@@ -860,7 +865,7 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
           for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
             const target = cells[startRow + rowOffset] ||= []
             for (const [columnOffset, cell] of (row.values ?? []).entries()) {
-              const value = gridCellValue(cell)
+              const value = gridCellValue(cell, true)
               target[startColumn + columnOffset] = { value, html: richTextHtml(value, cell.textFormatRuns, cell.effectiveFormat?.textFormat) }
             }
           }
@@ -896,6 +901,7 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
+  scheduleObjectIndexIconSync(tables)
   return tables
 }
 
@@ -1150,13 +1156,6 @@ export async function refineGeneratedObjectDescriptions() {
           }
         }
       }
-      if (iconColumn >= 0) {
-        const currentIcon = (row.values[iconColumn] || "").trim()
-        const icon = suggestedObjectIcon(name, type, subtype)
-        if (isGeneratedObjectIcon(currentIcon) && currentIcon !== icon) {
-          updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[icon]] })
-        }
-      }
     }
     await updateRanges(table.fileId, updates)
   }
@@ -1194,46 +1193,90 @@ export async function enrichObjectIndexTables() {
         updates.push({ range: sheetTabRange(table.tabName, `${columnName(descriptionColumn + 1)}${row.rowNumber}`), values: [[suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}`)]] })
         descriptionsAdded += 1
       }
-      const currentIcon = (row.values[iconColumn] || "").trim()
-      if (isGeneratedObjectIcon(currentIcon) && currentIcon !== suggestedObjectIcon(name, type, subtype)) {
-        updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[suggestedObjectIcon(name, type, subtype)]] })
-        iconsAdded += 1
-      }
     }
     await updateRanges(table.fileId, updates)
   }
   clearObjectIndexTableCache()
+  iconsAdded = (await syncObjectIndexIcons()).iconsUpdated
   return { descriptionsAdded, iconsAdded }
 }
 
+const OBJECT_INDEX_NAME_ALIASES = ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]
+
+function objectIndexIconColumn(table: ObjectIndexTable) {
+  return table.headers.findIndex((header) => ["icone", "icon"].includes(normalizedHeader(header)))
+}
+
+/** Cases « Icône » qu'Eraser peut remplir : vides, ou tenant une ancienne icône générée. */
+function objectIndexRowsNeedingIcon(table: ObjectIndexTable) {
+  const iconColumn = objectIndexIconColumn(table)
+  if (iconColumn < 0) return []
+  return table.rows.flatMap((row) => {
+    const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
+    if (!name || !isGeneratedObjectIcon(row.values[iconColumn] || "")) return []
+    const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
+    const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
+    return [{ row, iconColumn, key: suggestedObjectIconKey(name, type, subtype) }]
+  })
+}
+
 /**
- * Réécrit la colonne « Icône » des index avec les icônes croquis d'Eraser.
- * Seules les icônes posées par Eraser (émojis générés, cases vides, anciennes
- * clés) changent ; une icône choisie à la main n'est jamais touchée.
+ * Remplit la colonne « Icône » des index avec les images du dossier « icone objet »
+ * du Drive (envoyées au premier passage). Seules les cases vides ou tenant une
+ * ancienne icône générée changent : une icône choisie à la main n'est jamais touchée.
  */
 export async function syncObjectIndexIcons() {
   const tables = await listObjectIndexTables()
+  const pending = tables.map((table) => ({ table, rows: objectIndexRowsNeedingIcon(table) })).filter(({ rows }) => rows.length)
+  if (!pending.length) return { iconsUpdated: 0 }
+  const fileIds = await ensureObjectIconsOnDrive(pending.flatMap(({ rows }) => rows.map(({ key }) => key)))
   let iconsUpdated = 0
-  for (const table of tables) {
-    const iconColumn = table.headers.findIndex((header) => ["icone", "icon"].includes(normalizedHeader(header)))
-    if (iconColumn < 0) continue
-    const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-    for (const row of table.rows) {
-      const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
-      if (!name) continue
-      const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
-      const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
-      const currentIcon = (row.values[iconColumn] || "").trim()
-      const icon = suggestedObjectIcon(name, type, subtype)
-      if (isGeneratedObjectIcon(currentIcon) && currentIcon !== icon) {
-        updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[icon]] })
-        iconsUpdated += 1
-      }
-    }
+  for (const { table, rows } of pending) {
+    const updates = rows.flatMap(({ row, iconColumn, key }) => {
+      const fileId = fileIds.get(key)
+      return fileId ? [{ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[driveImageFormula(fileId)]] }] : []
+    })
     await updateRanges(table.fileId, updates)
+    iconsUpdated += updates.length
   }
   clearObjectIndexTableCache()
   return { iconsUpdated }
+}
+
+let objectIconSyncRunning = false
+let objectIconSyncAttemptAt = 0
+
+/** Passage automatique, au plus toutes les dix minutes, seulement s'il reste des cases à remplir. */
+function scheduleObjectIndexIconSync(tables: ObjectIndexTable[]) {
+  if (objectIconSyncRunning || Date.now() - objectIconSyncAttemptAt < 10 * 60_000) return
+  if (!tables.some((table) => objectIndexRowsNeedingIcon(table).length)) return
+  objectIconSyncRunning = true
+  objectIconSyncAttemptAt = Date.now()
+  runInBackground(syncObjectIndexIcons().finally(() => { objectIconSyncRunning = false }), "OBJECT_ICON_SYNC_FAILED")
+}
+
+/** Pose une image importée à la main dans la case « Icône » d'une ligne. */
+export async function setObjectIndexIcon(fileId: string, tabName: string, rowNumber: number, driveFileId: string) {
+  const table = await validatedObjectIndexTable(fileId, tabName)
+  const iconColumn = objectIndexIconColumn(table)
+  if (iconColumn < 0) throw new Error("OBJECT_INDEX_ICON_COLUMN_MISSING")
+  if (!table.rows.some((row) => row.rowNumber === rowNumber)) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
+  await updateRanges(fileId, [{ range: sheetTabRange(tabName, `${columnName(iconColumn + 1)}${rowNumber}`), values: [[driveImageFormula(driveFileId)]] }])
+  clearObjectIndexTableCache()
+}
+
+/** Images du Drive citées dans une colonne « Icône » : Eraser accepte de les afficher. */
+export async function objectIndexIconDriveFileIds() {
+  const ids = new Set<string>()
+  for (const table of await listObjectIndexTables()) {
+    const iconColumn = objectIndexIconColumn(table)
+    if (iconColumn < 0) continue
+    for (const row of table.rows) {
+      const id = objectIconDriveFileId(row.values[iconColumn] || "")
+      if (id) ids.add(id)
+    }
+  }
+  return ids
 }
 
 function suggestedObjectStackLimit(name: string, type: string, subtype: string) {
@@ -4542,7 +4585,7 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
       price: row[8] || "",
       bulk: row[9] || "",
       image: row[10] || "",
-      icon: resolvedObjectIcon(row[18], name, row[3] || "Objet", row[4] || ""),
+      icon: row[18] || "",
       notes: row[11] || "",
       link: row[12] || "",
       rarity: row[13] || "",
@@ -4602,7 +4645,7 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       image: objectIndexCell(table, row, ["Image", "Illustration", "URL image"]),
       icon: (() => {
         const storedIcon = objectIndexCell(table, row, ["Icône", "Icone", "Icon"])
-        return resolvedObjectIcon(storedIcon, name, objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table), objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"]))
+        return storedIcon
       })(),
       notes: objectIndexCell(table, row, ["Notes", "Note"]),
       link: objectIndexCell(table, row, ["Lien", "URL"]),
