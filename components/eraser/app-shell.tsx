@@ -13,12 +13,12 @@ import {
   FlaskConical,
   Home,
   LibraryBig,
-  LogOut,
   Map,
   Plus,
   RefreshCw,
   Search,
   ScrollText,
+  Settings2,
   ShieldCheck,
   Trash2,
   UserRound,
@@ -62,6 +62,7 @@ import {
 import { internalAppPath } from "@/lib/app-links"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
+import { AccountAvatar, AccountDialog } from "@/components/eraser/account-dialog"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
@@ -202,6 +203,8 @@ export function AppShell({
   const pathname = usePathname()
   const router = useRouter()
   const { isFavorite: isFavoriteIndex } = useIndexFavorites()
+  const [accountOpen, setAccountOpen] = useState(false)
+  const [avatarVersion, setAvatarVersion] = useState(0)
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
   const [viewRole, setViewRole] = useState<SiteRole>(initialViewRole)
@@ -637,27 +640,20 @@ export function AppShell({
         <SidebarFooter className="border-t border-sidebar-border p-3">
           <SidebarMenu>
             <SidebarMenuItem>
-              <SidebarMenuButton size="lg" tooltip="Mon compte">
-                <div className="flex size-8 items-center justify-center rounded-lg bg-sidebar-accent text-xs font-semibold uppercase text-[#d7b77f]">
-                  {(user.displayName || user.email).slice(0, 2)}
-                </div>
+              {/* Le compte s’ouvre d’un clic : avatar, pseudo, e-mail, mot de passe, déconnexion. */}
+              <SidebarMenuButton size="lg" tooltip="Mon compte" onClick={() => setAccountOpen(true)} aria-haspopup="dialog">
+                <AccountAvatar user={user} version={avatarVersion} className="size-8 shrink-0" />
                 <div className="min-w-0 flex-1 text-left">
                   <span className="block truncate font-medium">{user.displayName || user.email}</span>
                   <span className="block truncate text-xs text-sidebar-foreground/55">
                     {roleLabels[user.role]}
                   </span>
                 </div>
+                <Settings2 className="ml-auto size-4 text-sidebar-foreground/45 group-data-[collapsible=icon]:hidden" />
               </SidebarMenuButton>
             </SidebarMenuItem>
           </SidebarMenu>
-          <Button
-            variant="ghost"
-            onClick={signOut}
-            className="w-full justify-start gap-2 text-sidebar-foreground/70 hover:bg-sidebar-accent hover:text-sidebar-accent-foreground group-data-[collapsible=icon]:size-8 group-data-[collapsible=icon]:p-2"
-          >
-            <LogOut className="size-4" />
-            <span className="group-data-[collapsible=icon]:hidden">Se déconnecter</span>
-          </Button>
+          {accountOpen && <AccountDialog open onOpenChange={setAccountOpen} user={user} roleLabel={roleLabels[user.role]} avatarVersion={avatarVersion} onAvatarChange={() => setAvatarVersion(Date.now())} onSignOut={() => void signOut()} />}
         </SidebarFooter>
       </Sidebar>
 

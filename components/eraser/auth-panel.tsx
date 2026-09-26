@@ -3,13 +3,20 @@
 import { FormEvent, useEffect, useRef, useState } from "react"
 import { LoaderCircle } from "lucide-react"
 
-import { Alert, AlertDescription } from "@/components/ui/alert"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import { cn } from "@/lib/utils"
+
 type AuthMode = "login" | "register"
 
+/**
+ * Connexion et création de compte, sans rien d’autre. Les deux formulaires restent
+ * dans la page (l’inactif est masqué) : le test de l’installation Windows remplit
+ * directement `form[action="/api/auth/register"]` et attend `data-eraser-auth-ready`.
+ */
 export function AuthPanel({ initialError }: { initialError?: string }) {
+  const [mode, setMode] = useState<AuthMode>("login")
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState<string | null>(initialError ?? null)
   const [isError, setIsError] = useState(Boolean(initialError))
@@ -19,7 +26,13 @@ export function AuthPanel({ initialError }: { initialError?: string }) {
     panelRef.current?.setAttribute("data-eraser-auth-ready", "true")
   }, [])
 
-  async function submit(mode: AuthMode, event: FormEvent<HTMLFormElement>) {
+  function switchMode(next: AuthMode) {
+    setMode(next)
+    setMessage(null)
+    setIsError(false)
+  }
+
+  async function submit(formMode: AuthMode, event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setBusy(true)
     setMessage(null)
@@ -27,7 +40,7 @@ export function AuthPanel({ initialError }: { initialError?: string }) {
 
     const form = new FormData(event.currentTarget)
     try {
-      const response = await fetch(`/api/auth/${mode}`, {
+      const response = await fetch(`/api/auth/${formMode}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
@@ -37,18 +50,12 @@ export function AuthPanel({ initialError }: { initialError?: string }) {
           adminCode: String(form.get("adminCode") ?? "").trim(),
         }),
       })
-      const result = (await response.json()) as {
-        ok?: boolean
-        message?: string
-        error?: string
-      }
+      const result = (await response.json()) as { ok?: boolean; message?: string; error?: string }
       if (!response.ok || !result.ok) {
-        throw new Error(result.error ?? (mode === "register" ? "La création du compte a échoué." : "La connexion a échoué."))
+        throw new Error(result.error ?? (formMode === "register" ? "La création du compte a échoué." : "La connexion a échoué."))
       }
       setMessage(result.message ?? "Connexion réussie.")
-      window.setTimeout(() => {
-        window.location.href = "/"
-      }, 500)
+      window.setTimeout(() => { window.location.href = "/" }, 400)
     } catch (error) {
       setIsError(true)
       setMessage(error instanceof Error ? error.message : "Une erreur est survenue.")
@@ -58,109 +65,49 @@ export function AuthPanel({ initialError }: { initialError?: string }) {
   }
 
   return (
-    <div
-      ref={panelRef}
-      className="rounded-3xl border bg-card/95 p-5 shadow-[0_24px_80px_rgb(65_44_24/0.12)] sm:p-7"
-      data-eraser-auth-ready="false"
-    >
-      <section>
-        <h2 className="font-display text-2xl font-semibold">Se connecter</h2>
-        <p className="mt-1 text-sm text-muted-foreground">Utilise l’adresse et le mot de passe de ton profil.</p>
-        <AuthForm mode="login" busy={busy} onSubmit={(event) => submit("login", event)} />
-      </section>
-
-      <div className="my-6 flex items-center gap-3" aria-hidden="true">
-        <span className="h-px flex-1 bg-border" />
-        <span className="text-xs font-semibold uppercase tracking-[0.16em] text-muted-foreground">ou</span>
-        <span className="h-px flex-1 bg-border" />
+    <div ref={panelRef} data-eraser-auth-ready="false" className="w-full">
+      <div className="grid grid-cols-2 gap-1 rounded-xl border bg-background/60 p-1" role="tablist" aria-label="Connexion ou création de compte">
+        {([["login", "Se connecter"], ["register", "Créer un compte"]] as const).map(([value, label]) => (
+          <button
+            key={value}
+            type="button"
+            role="tab"
+            aria-selected={mode === value}
+            onClick={() => switchMode(value)}
+            className={cn("rounded-lg px-3 py-2 text-sm font-medium transition", mode === value ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground")}
+          >
+            {label}
+          </button>
+        ))}
       </div>
 
-      <details className="group rounded-2xl border bg-background/55 p-4">
-        <summary className="cursor-pointer list-none font-medium marker:hidden">
-          Créer un nouveau compte
-          <span className="ml-2 text-sm font-normal text-muted-foreground group-open:hidden">Afficher le formulaire</span>
-        </summary>
-        <div className="pt-4">
-          <AuthForm mode="register" busy={busy} onSubmit={(event) => submit("register", event)} />
-        </div>
-      </details>
+      <AuthForm mode="login" hidden={mode !== "login"} busy={busy} onSubmit={(event) => submit("login", event)} />
+      <AuthForm mode="register" hidden={mode !== "register"} busy={busy} onSubmit={(event) => submit("register", event)} />
 
       {message && (
-        <Alert
-          className={`mt-5 ${
-            isError
-              ? "border-destructive/35 bg-destructive/5 text-destructive"
-              : "border-[#52665c]/30 bg-[#52665c]/6 text-[#34493f]"
-          }`}
-        >
-          <AlertDescription>{message}</AlertDescription>
-        </Alert>
+        <p className={cn("mt-4 rounded-lg px-3 py-2 text-center text-sm", isError ? "bg-destructive/8 text-destructive" : "bg-[#52665c]/8 text-[#34493f]")} role={isError ? "alert" : "status"}>
+          {message}
+        </p>
       )}
-
-      <p className="mt-5 text-center text-xs leading-5 text-muted-foreground">
-        Le compte appartient uniquement à Eraser. Aucune connexion ChatGPT
-        n’est utilisée et les mots de passe ne sont jamais enregistrés dans Google Sheets.
-      </p>
     </div>
   )
 }
 
-function AuthForm({
-  mode,
-  busy,
-  onSubmit,
-}: {
-  mode: AuthMode
-  busy: boolean
-  onSubmit: (event: FormEvent<HTMLFormElement>) => void
-}) {
+function AuthForm({ mode, hidden, busy, onSubmit }: { mode: AuthMode; hidden: boolean; busy: boolean; onSubmit: (event: FormEvent<HTMLFormElement>) => void }) {
+  const [adminCodeOpen, setAdminCodeOpen] = useState(false)
   return (
-    <form
-      action={`/api/auth/${mode}`}
-      className="mt-4 space-y-4"
-      method="post"
-      onSubmit={onSubmit}
-    >
+    <form action={`/api/auth/${mode}`} method="post" onSubmit={onSubmit} hidden={hidden} className="mt-6 space-y-4">
       {mode === "register" && (
-        <>
-          <div className="space-y-2">
-            <Label htmlFor="displayName">Nom affiché</Label>
-            <Input
-              id="displayName"
-              name="displayName"
-              autoComplete="name"
-              placeholder="Le nom visible dans l’application"
-              minLength={2}
-              maxLength={80}
-              required
-            />
-          </div>
-          <div className="space-y-2">
-            <Label htmlFor="adminCode">Code administrateur</Label>
-            <Input
-              id="adminCode"
-              name="adminCode"
-              autoComplete="off"
-              placeholder="Facultatif"
-            />
-            <p className="text-xs text-muted-foreground">
-              Laisse vide sauf si un code de création administrateur t’a été transmis.
-            </p>
-          </div>
-        </>
+        <div className="space-y-1.5">
+          <Label htmlFor="displayName">Pseudo</Label>
+          <Input id="displayName" name="displayName" autoComplete="nickname" minLength={2} maxLength={80} required className="h-11" />
+        </div>
       )}
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor={`${mode}-email`}>Adresse e-mail</Label>
-        <Input
-          id={`${mode}-email`}
-          name="email"
-          type="email"
-          autoComplete="email"
-          placeholder="nom@exemple.fr"
-          required
-        />
+        <Input id={`${mode}-email`} name="email" type="email" autoComplete="email" required className="h-11" />
       </div>
-      <div className="space-y-2">
+      <div className="space-y-1.5">
         <Label htmlFor={`${mode}-password`}>Mot de passe</Label>
         <Input
           id={`${mode}-password`}
@@ -168,15 +115,24 @@ function AuthForm({
           type="password"
           autoComplete={mode === "login" ? "current-password" : "new-password"}
           minLength={8}
+          placeholder={mode === "register" ? "8 caractères minimum" : undefined}
           required
+          className="h-11"
         />
-        {mode === "register" && (
-          <p className="text-xs text-muted-foreground">8 caractères minimum.</p>
-        )}
       </div>
-      <Button type="submit" size="lg" className="w-full" disabled={busy}>
+      {mode === "register" && (adminCodeOpen ? (
+        <div className="space-y-1.5">
+          <Label htmlFor="adminCode">Code administrateur</Label>
+          <Input id="adminCode" name="adminCode" autoComplete="off" className="h-11" />
+        </div>
+      ) : (
+        <button type="button" onClick={() => setAdminCodeOpen(true)} className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">
+          J’ai un code administrateur
+        </button>
+      ))}
+      <Button type="submit" size="lg" className="h-11 w-full" disabled={busy}>
         {busy && <LoaderCircle className="size-4 animate-spin" />}
-        {mode === "register" ? "Créer mon compte" : "Me connecter"}
+        {mode === "register" ? "Créer mon compte" : "Se connecter"}
       </Button>
     </form>
   )

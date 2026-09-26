@@ -1,4 +1,4 @@
-import { and, asc, count, eq, gt } from "drizzle-orm"
+import { and, asc, count, eq, gt, ne } from "drizzle-orm"
 import { env } from "cloudflare:workers"
 
 import { getDb } from "@/db"
@@ -247,4 +247,50 @@ export async function deleteAccount(uid: string, adminUid: string, sessionToken?
   } catch {
     throw new Error("ACCOUNT_REFERENCED")
   }
+}
+
+export type OwnProfileUpdate = { displayName?: string; email?: string; currentPassword?: string; newPassword?: string }
+
+/**
+ * Modifie son propre compte. Pseudo libre ; e-mail et mot de passe demandent le mot
+ * de passe actuel. Un nouveau mot de passe ferme les autres sessions du compte.
+ */
+export async function updateOwnProfile(uid: string, sessionToken: string, input: OwnProfileUpdate) {
+  forgetCachedSessions()
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    const response = await remoteAccountsFetch(remote, "/account/profile", { method: "POST", body: input, token: sessionToken })
+    return (response as { account: AccountRecord }).account
+  }
+
+  const db = getDb()
+  const [user] = await db.select().from(users).where(eq(users.id, uid)).limit(1)
+  if (!user) throw new Error("ACCOUNT_NOT_FOUND")
+  const displayName = input.displayName === undefined ? user.displayName : input.displayName.trim()
+  const email = input.email === undefined ? user.email : input.email.trim().toLowerCase()
+  const newPassword = input.newPassword ?? ""
+  if (displayName.length < 2 || displayName.length > 80) throw new Error("INVALID_DISPLAY_NAME")
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) throw new Error("INVALID_EMAIL")
+  if (newPassword && (newPassword.length < 8 || newPassword.length > 200)) throw new Error("INVALID_NEW_PASSWORD")
+  const sensitive = email !== user.email || Boolean(newPassword)
+  if (sensitive && !(await passwordMatches(input.currentPassword ?? "", user.passwordSalt, user.passwordHash))) {
+    throw new Error("INVALID_CURRENT_PASSWORD")
+  }
+  if (email !== user.email) {
+    const [taken] = await db.select({ id: users.id }).from(users).where(eq(users.email, email)).limit(1)
+    if (taken && taken.id !== uid) throw new Error("EMAIL_EXISTS")
+  }
+  const now = new Date().toISOString()
+  const passwordData = newPassword ? await hashPassword(newPassword) : null
+  await db.update(users).set({
+    displayName,
+    email,
+    ...(passwordData ? { passwordHash: passwordData.hash, passwordSalt: passwordData.salt } : {}),
+    updatedAt: now,
+  }).where(eq(users.id, uid))
+  if (passwordData) {
+    await db.delete(sessions).where(and(eq(sessions.userId, uid), ne(sessions.tokenHash, await sha256(sessionToken))))
+  }
+  const [updated] = await db.select().from(users).where(eq(users.id, uid)).limit(1)
+  return accountRecord(updated)
 }

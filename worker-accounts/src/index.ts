@@ -264,6 +264,44 @@ async function handleLogout(request: Request, env: Env) {
   return json({ ok: true })
 }
 
+/**
+ * Chacun modifie son propre compte : pseudo librement, e-mail et mot de passe
+ * seulement avec le mot de passe actuel. Un nouveau mot de passe ferme les autres
+ * sessions ; celle qui fait la demande reste ouverte.
+ */
+async function handleUpdateOwnProfile(request: Request, env: Env) {
+  const account = await requireAccount(request, env)
+  const body = await readJson<{ displayName?: string; email?: string; currentPassword?: string; newPassword?: string }>(request)
+  const displayName = body.displayName === undefined ? account.display_name : body.displayName.trim()
+  const email = body.email === undefined ? account.email : body.email.trim().toLowerCase()
+  const newPassword = body.newPassword ?? ""
+  if (displayName.length < 2 || displayName.length > 80) throw new HttpError(400, "INVALID_DISPLAY_NAME")
+  if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email) || email.length > 200) throw new HttpError(400, "INVALID_EMAIL")
+  if (newPassword && (newPassword.length < 8 || newPassword.length > 200)) throw new HttpError(400, "INVALID_NEW_PASSWORD")
+  const sensitive = email !== account.email || Boolean(newPassword)
+  if (sensitive && !(await passwordMatches(body.currentPassword ?? "", account.password_salt, account.password_hash))) {
+    throw new HttpError(403, "INVALID_CURRENT_PASSWORD")
+  }
+  if (email !== account.email) {
+    const taken = await env.DB.prepare("SELECT id FROM users WHERE email = ?1 AND id <> ?2").bind(email, account.id).first()
+    if (taken) throw new HttpError(409, "EMAIL_EXISTS")
+  }
+  const now = new Date().toISOString()
+  if (newPassword) {
+    const passwordData = await hashPassword(newPassword)
+    await env.DB.prepare("UPDATE users SET display_name = ?1, email = ?2, password_hash = ?3, password_salt = ?4, updated_at = ?5 WHERE id = ?6")
+      .bind(displayName, email, passwordData.hash, passwordData.salt, now, account.id).run()
+    const header = request.headers.get("authorization") || ""
+    const currentHash = await sha256(header.slice(7))
+    await env.DB.prepare("DELETE FROM sessions WHERE user_id = ?1 AND token_hash <> ?2").bind(account.id, currentHash).run()
+  } else {
+    await env.DB.prepare("UPDATE users SET display_name = ?1, email = ?2, updated_at = ?3 WHERE id = ?4")
+      .bind(displayName, email, now, account.id).run()
+  }
+  const updated = await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(account.id).first<UserRow>()
+  return json({ account: accountRecord(updated!) })
+}
+
 async function handleListAccounts(request: Request, env: Env) {
   // Les MJ lisent la liste pour afficher le propriétaire de chaque personnage et de
   // chaque campagne (Index des personnages et des campagnes). Seul un administrateur
@@ -588,6 +626,7 @@ const worker = {
       if (method === "GET" && path === "/session") return await handleSession(request, env)
       if (method === "POST" && path === "/logout") return await handleLogout(request, env)
       if (method === "GET" && path === "/accounts") return await handleListAccounts(request, env)
+      if (method === "POST" && path === "/account/profile") return await handleUpdateOwnProfile(request, env)
 
       const accessMatch = path.match(/^\/accounts\/([^/]+)\/access$/)
       if (method === "POST" && accessMatch) return await handleUpdateAccess(request, env, decodeURIComponent(accessMatch[1]))
