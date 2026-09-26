@@ -15,7 +15,7 @@ async function SandboxNpcsData({ accountUid, isAdmin }: { accountUid: string; is
     listNpcs("bac-a-sable"),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
   ])
-  return <NpcManager initialNpcs={npcs} pageLinked="bac-a-sable" sourcePages={[...npcIndexTabs.map((tab) => ({ id: tab.id, name: `Index des PNJs · ${tab.label}` })), ...campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]} />
+  return <NpcManager initialNpcs={npcs} pageLinked="bac-a-sable" sourcePages={[...npcIndexTabs.map((tab) => ({ id: tab.id, name: `PNJs · ${tab.label}` })), ...campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]} />
 }
 
 export default async function SandboxNpcsPage() {

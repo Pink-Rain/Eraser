@@ -130,8 +130,8 @@ export function PeopleSelect({ value, onChange, compact = false, disabled = fals
     <SelectTrigger size="sm" aria-label="Peuple" className={compact ? "h-8 w-full border-transparent bg-transparent px-2 shadow-none hover:border-input dark:bg-transparent" : "h-10 w-full bg-background/75"}><SelectValue placeholder="—" /></SelectTrigger>
     <SelectContent position="popper" className="max-h-72">
       <SelectItem value={NO_PEOPLE} className="text-muted-foreground">—</SelectItem>
-      {legacy && <SelectItem value={legacy} className="italic text-muted-foreground" title="Absent de l’Index des peuples">{legacy}</SelectItem>}
-      {names === null && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Index des peuples…</p>}
+      {legacy && <SelectItem value={legacy} className="italic text-muted-foreground" title="Absent de l’index Peuples">{legacy}</SelectItem>}
+      {names === null && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Peuples…</p>}
       {options.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
     </SelectContent>
   </Select>
@@ -198,7 +198,7 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
         {inCampaign && <NumberField label="Vie actuelle" value={draft.currentHp} onChange={(value) => update("currentHp", value)} />}
         <div className={`${textLabel} sm:col-span-2 leading-none`}>Notes <span className="font-normal">Visible pour les joueurs</span><RichTextField ariaLabel="Notes" value={draft.playerNotes} onCommit={(html) => update("playerNotes", html)} minHeight="min-h-28" /></div>
         {!index && <div className={`${textLabel} sm:col-span-2 leading-none`}>Notes MJ <span className="font-normal">Visible uniquement par le MJ</span><RichTextField ariaLabel="Notes MJ" value={draft.gmNotes} onCommit={(html) => update("gmNotes", html)} minHeight="min-h-28" /></div>}
-        <div className={`${textLabel} sm:col-span-2 leading-none`}>Description, Histoire, Lore, Autre <span className="font-normal">Visible par les MJ, dans l’Index des PNJs</span><RichTextField ariaLabel="Description, Histoire, Lore, Autre" value={draft.lore} onCommit={(html) => update("lore", html)} minHeight="min-h-28" /></div>
+        <div className={`${textLabel} sm:col-span-2 leading-none`}>Description, Histoire, Lore, Autre <span className="font-normal">Visible par les MJ, dans l’index PNJs</span><RichTextField ariaLabel="Description, Histoire, Lore, Autre" value={draft.lore} onCommit={(html) => update("lore", html)} minHeight="min-h-28" /></div>
       </div>
     </section>
     <section className="grid gap-2">

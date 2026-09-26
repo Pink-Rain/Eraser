@@ -45,7 +45,7 @@ async function loadNpcIndex(accountUid: string, isAdmin: boolean) {
     for (const npc of visible) {
       if (pages[npc.pageLinked]) continue
       const link = linkTo(npc.pageLinked)
-      pages[npc.pageLinked] = link ? { ...link, editable: link.manage } : { id: npc.pageLinked, name: npc.pageLinked === "bac-a-sable" ? "Bac à sable" : "Index des PNJs", manage: true, editable: true }
+      pages[npc.pageLinked] = link ? { ...link, editable: link.manage } : { id: npc.pageLinked, name: npc.pageLinked === "bac-a-sable" ? "Bac à sable" : "PNJs", manage: true, editable: true }
     }
     const sourceCampaigns = isAdmin ? allCampaigns : ownCampaigns
     const sourcePages = [{ id: "bac-a-sable", name: "Bac à sable" }, ...sourceCampaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))]
@@ -66,11 +66,11 @@ export default async function NpcIndexPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return (
-    <AuthenticatedShell pageLabel="Index des PNJs" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="PNJs" roles={["admin", "mj"]}>
       <div className="w-full px-4 pt-4 sm:px-6">
         <div className="shrink-0">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Ressources</p>
-          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Index des PNJs</h1>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Index</p>
+          <h1 className="font-display text-2xl font-semibold sm:text-3xl">PNJs</h1>
         </div>
         <Suspense fallback={<DeferredContentLoading label="Chargement des PNJs…" />}>
           <NpcIndexData accountUid={account.uid} isAdmin={account.role === "admin"} />

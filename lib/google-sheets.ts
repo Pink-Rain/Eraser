@@ -896,13 +896,50 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
       return { tables: [] as ObjectIndexTable[], error }
     }
   }))
-  const tables = results.flatMap((result) => result.tables)
+  const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
   const firstError = results.find((result) => result.error)?.error
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
   scheduleObjectIndexIconSync(tables)
   return tables
+}
+
+const blankObjectIndexHeader = /^Colonne \d+$/
+
+/**
+ * Une feuille dont la ligne d'en-têtes est vide (ou incomplète) n'avait pas de colonne
+ * « Nom » : tous ses objets disparaissaient du catalogue, des inventaires et des
+ * magasins. Les en-têtes manquants sont repris des autres index, qui partagent la même
+ * disposition (Nom, Description, Type…). Rien n'est écrit dans la feuille.
+ */
+function fillMissingObjectIndexHeaders(tables: ObjectIndexTable[]) {
+  const votes: Array<Map<string, number>> = []
+  for (const table of tables) {
+    table.headers.forEach((header, index) => {
+      if (blankObjectIndexHeader.test(header)) return
+      const counts = votes[index] ||= new Map()
+      counts.set(header, (counts.get(header) ?? 0) + 1)
+    })
+  }
+  const nameAliases = new Set(["nom", "nom de l objet", "objet", "arme", "equipement", "ressource", "livre", "titre"])
+  return tables.map((table) => {
+    if (!table.headers.some((header) => blankObjectIndexHeader.test(header))) return table
+    // Un nom en double reste possible (une « Description » ajoutée en fin de tableau) :
+    // la recherche de colonne prend la première, celle qui contient vraiment le texte.
+    const headers = table.headers.map((header, index) => {
+      if (!blankObjectIndexHeader.test(header)) return header
+      const candidates = [...(votes[index]?.entries() ?? [])].sort((left, right) => right[1] - left[1])
+      return candidates[0]?.[0] || header
+    })
+    if (!headers.some((header) => nameAliases.has(normalizedHeader(header))) && blankObjectIndexHeader.test(table.headers[0] ?? "")) headers[0] = "Nom"
+    return { ...table, headers }
+  })
+}
+
+/** « #REF! », « #N/A »… : une formule cassée dans Sheets, pas une vraie valeur. */
+function isSheetErrorValue(value: string) {
+  return /^#(REF!|N\/A|VALUE!|NAME\?|DIV\/0!|NUM!|NULL!|ERROR!)$/i.test(value.trim())
 }
 
 export async function refreshObjectIndexTables() {
@@ -4288,13 +4325,19 @@ export async function removeCharacterFromCampaign(mjUid: string | null, campaign
   return { id: characterId, sharedError }
 }
 
-export async function createCharacterForUser(uid: string, values: string[]) {
+/** Seuils critiques d'un nouveau personnage : le joueur peut ensuite les modifier. */
+export const defaultCharacterCriticalFailure = "96"
+export const defaultCharacterCriticalSuccess = "5"
+
+export async function createCharacterForUser(uid: string, input: string[], id: string = crypto.randomUUID()) {
+  const values = Array.from({ length: Math.max(input.length, 24) }, (_, index) => input[index] ?? "")
   const name = values[0]?.trim()
   if (!name || name.length > 120) throw new Error("INVALID_CHARACTER_NAME")
+  if (!values[22]?.trim()) values[22] = defaultCharacterCriticalFailure
+  if (!values[23]?.trim()) values[23] = defaultCharacterCriticalSuccess
   const sheet = await ensureJdrSheet("characters")
   if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-  const id = crypto.randomUUID()
   const cells = [id, uid, ...values.slice(0, characterValueHeaders.length)]
   while (cells.length < characterSheetHeaders.length) cells.push("")
   await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`, [cells])
@@ -4585,7 +4628,7 @@ function parseInventoryItemRows(rows: string[][]): InventoryItemRecord[] {
       price: row[8] || "",
       bulk: row[9] || "",
       image: row[10] || "",
-      icon: row[18] || "",
+      icon: isSheetErrorValue(row[18] || "") ? "" : row[18] || "",
       notes: row[11] || "",
       link: row[12] || "",
       rarity: row[13] || "",
@@ -4644,8 +4687,9 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       bulk: objectIndexCell(table, row, ["Encombrement"]),
       image: objectIndexCell(table, row, ["Image", "Illustration", "URL image"]),
       icon: (() => {
+        // Une case vide ou en erreur (« #REF! ») prend l'icône d'Eraser à l'affichage.
         const storedIcon = objectIndexCell(table, row, ["Icône", "Icone", "Icon"])
-        return storedIcon
+        return isSheetErrorValue(storedIcon) ? "" : storedIcon
       })(),
       notes: objectIndexCell(table, row, ["Notes", "Note"]),
       link: objectIndexCell(table, row, ["Lien", "URL"]),

@@ -1,26 +1,48 @@
-# Eraser 0.1.1-alpha.67 — Icônes d’objets sur le Drive et dans les index
+# Eraser 0.1.1-alpha.68 — Objets retrouvés, nouvelle création de personnage, section Index
 
 Cette version arrive par la mise à jour sans réinstallation. Rien à changer côté
 Roll20.
 
-- Les icônes d’objets vivent désormais sur le Drive, dans le dossier
-  « icone objet » (créé seulement s’il n’existe pas déjà).
-- La colonne « Icône » des index d’objets reçoit l’image elle-même : elle
-  s’affiche aussi dans Google Sheets. Eraser remplit tout seul les cases vides
-  ou qui tenaient une ancienne icône générée ; une icône choisie à la main
-  n’est jamais remplacée.
-- Les objets affichent ce que contient leur case « Icône » : une image du Drive,
-  une adresse d’image, une formule =IMAGE(…) ou un émoji. Une case vide prend
-  l’icône d’Eraser correspondante.
-- Index des objets : chaque case « Icône » montre l’image et un bouton pour en
-  importer une autre ; l’image importée va dans le dossier « icone objet » et
-  s’affiche partout (inventaires, fouilles, magasins).
-- Les images du dossier « icone objet » sont lisibles par lien : c’est ce qui
-  permet à Google Sheets de les afficher.
+## Inventaires : les objets manquants sont de retour
+
+- **Corde, Tableau, Bougie, Torche, Lanterne… sont de nouveau disponibles** dans les
+  inventaires des personnages, des campagnes et des PNJ, ainsi que dans les magasins.
+  La feuille « Index Objet » du dossier Objets a une ligne d’en-têtes vide sur ses
+  dix premières colonnes : Eraser n’y trouvait pas de colonne « Nom » et ignorait
+  tout le fichier (185 objets). Les en-têtes manquants sont maintenant repris des
+  autres index d’objets, qui ont la même disposition (Nom, Description, Type…).
+  La ligne d’en-têtes n’est pas modifiée : tu peux la remplir quand tu veux. Comme
+  pour les autres index, sa colonne « Icône » vide reçoit ensuite les icônes d’Eraser.
+- Une case « Icône » en erreur (« #REF! », formule cassée dans Sheets) affiche
+  l’icône d’Eraser au lieu du texte « #REF! ».
+- La liste d’ajout d’un objet est triée par ordre alphabétique et montre jusqu’à
+  80 objets au lieu de 20, avec le nombre d’objets restants à affiner par la recherche.
+
+## Création de personnage
+
+- Nouveau formulaire, réduit à l’essentiel : **portrait** (image importée, glissée
+  ou lien), **nom**, **peuple** (proposés depuis l’index des peuples, ou saisie libre)
+  et **classe**, choisie parmi de petites cartes illustrées aux couleurs de chaque
+  classe. Le reste de la fiche se remplit ensuite depuis la fiche du personnage.
+- Un nouveau personnage démarre avec **réussite critique à 5** et **échec critique
+  à 96**. Le joueur peut les modifier ensuite sur sa fiche.
+
+## Index (anciennement Ressources)
+
+- La section « Ressources » du menu s’appelle maintenant **Index**, et ses pages
+  perdent le préfixe : « Index des objets » devient « Objets », « Index des
+  créatures » devient « Créatures », etc. Les noms des feuilles Google ne changent pas.
+- **Index est aussi une page** : clique sur son titre dans le menu (la flèche
+  ouvre toujours la liste). Elle présente chaque index sous forme de carte avec
+  son icône, dans l’esprit de la page Classe des règles, par ordre alphabétique.
+- Chaque carte a une **étoile** : étoilée, elle est dans « Index » et dans le menu ;
+  sans étoile, elle passe dans « Index secondaire » et quitte le menu (elle reste
+  accessible depuis la page Index). Tout est étoilé au départ.
 
 ## Vérifications
 
-- lint sans erreur, build de production et build desktop réussis, serveur desktop
-  vérifié en HTTP 200 ;
-- tests d’interface et tests des icônes au vert (choix d’icône, lecture de la
-  case, images présentes dans l’archive du serveur).
+- en-têtes déduits testés sur les vraies en-têtes des cinq index d’objets : la
+  colonne « Nom » de « Index Objet » est retrouvée, Corde et Tableaux compris ;
+- page Index et formulaire de création rendus dans un vrai navigateur ; retirer
+  une étoile range la carte dans « Index secondaire » et la retire du menu ;
+- lint sans erreur, tests au vert, build et serveur desktop vérifiés en HTTP 200.

@@ -243,7 +243,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
     })
   }
 
-  const tabSources = [...npcIndexTabs.filter((candidate) => candidate.id !== tab).map((candidate) => ({ id: candidate.id, name: `Index des PNJs · ${candidate.label}` })), ...sourcePages]
+  const tabSources = [...npcIndexTabs.filter((candidate) => candidate.id !== tab).map((candidate) => ({ id: candidate.id, name: `PNJs · ${candidate.label}` })), ...sourcePages]
   const count = (id: string) => npcs.filter((npc) => tabOf(npc) === id).length
 
   return <section className="mt-4 flex flex-col gap-3">

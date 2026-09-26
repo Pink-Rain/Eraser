@@ -50,6 +50,7 @@ import {
   SidebarHeader,
   SidebarInset,
   SidebarMenu,
+  SidebarMenuAction,
   SidebarMenuButton,
   SidebarMenuItem,
   SidebarMenuSub,
@@ -62,6 +63,8 @@ import { internalAppPath } from "@/lib/app-links"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
+import { useIndexFavorites } from "@/components/eraser/index-favorites"
+import { indexHomeHref, indexPages } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { cn } from "@/lib/utils"
@@ -121,23 +124,44 @@ function NavSection({
   label,
   icon: Icon,
   active,
+  href,
+  pageActive = false,
   children,
 }: {
   label: string
   icon: typeof BookOpen
   active: boolean
+  /** Une section peut aussi être une page : le titre y mène, la flèche ouvre la liste. */
+  href?: string
+  pageActive?: boolean
   children: ReactNode
 }) {
   return (
     <Collapsible defaultOpen={active} className="group/collapsible">
       <SidebarMenuItem>
-        <CollapsibleTrigger asChild>
-          <SidebarMenuButton tooltip={label} className="h-10">
-            <Icon />
-            <span>{label}</span>
-            <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
-          </SidebarMenuButton>
-        </CollapsibleTrigger>
+        {href ? (
+          <>
+            <SidebarMenuButton asChild tooltip={label} isActive={pageActive} className="h-10 pr-9">
+              <IntentLink href={href}>
+                <Icon />
+                <span>{label}</span>
+              </IntentLink>
+            </SidebarMenuButton>
+            <CollapsibleTrigger asChild>
+              <SidebarMenuAction className="top-2.5" aria-label={`Afficher ou masquer ${label}`}>
+                <ChevronDown className="transition-transform group-data-[state=open]/collapsible:rotate-180" />
+              </SidebarMenuAction>
+            </CollapsibleTrigger>
+          </>
+        ) : (
+          <CollapsibleTrigger asChild>
+            <SidebarMenuButton tooltip={label} className="h-10">
+              <Icon />
+              <span>{label}</span>
+              <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
+            </SidebarMenuButton>
+          </CollapsibleTrigger>
+        )}
         <CollapsibleContent>
           <SidebarMenuSub>{children}</SidebarMenuSub>
         </CollapsibleContent>
@@ -177,6 +201,7 @@ export function AppShell({
 }) {
   const pathname = usePathname()
   const router = useRouter()
+  const { isFavorite: isFavoriteIndex } = useIndexFavorites()
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
   const [viewRole, setViewRole] = useState<SiteRole>(initialViewRole)
@@ -538,17 +563,11 @@ export function AppShell({
 
                 {(user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj") && (
                   <>
-                    <NavSection label="Ressources" icon={LibraryBig} active={pathname.startsWith("/ressources")}>
-                      <NavSubLink href="/ressources/index-des-classes" label="Index des classes" active={pathname === "/ressources/index-des-classes"} />
-                      <NavSubLink href="/ressources/index-des-objets" label="Index des objets" active={pathname === "/ressources/index-des-objets"} />
-                      <NavSubLink href="/ressources/index-des-creatures" label="Index des créatures" active={pathname === "/ressources/index-des-creatures"} />
-                      <NavSubLink href="/ressources/index-des-langues" label="Index des langues" active={pathname === "/ressources/index-des-langues"} />
-                      <NavSubLink href="/ressources/index-des-lieux" label="Index des lieux" active={pathname === "/ressources/index-des-lieux"} />
-                      <NavSubLink href="/ressources/index-des-peuples" label="Index des peuples" active={pathname === "/ressources/index-des-peuples"} />
-                      <NavSubLink href="/ressources/index-des-religions" label="Index des religions" active={pathname === "/ressources/index-des-religions"} />
-                      <NavSubLink href="/ressources/index-des-campagnes" label="Index des campagnes" active={pathname === "/ressources/index-des-campagnes"} />
-                      <NavSubLink href="/ressources/index-des-personnages" label="Index des personnages" active={pathname === "/ressources/index-des-personnages"} />
-                      <NavSubLink href="/ressources/index-des-pnjs" label="Index des PNJs" active={pathname === "/ressources/index-des-pnjs"} />
+                    <NavSection label="Index" icon={LibraryBig} href={indexHomeHref} pageActive={pathname === indexHomeHref} active={pathname.startsWith(indexHomeHref)}>
+                      {/* Les index étoilés, par ordre alphabétique ; les autres restent sur la page Index. */}
+                      {indexPages.filter((page) => isFavoriteIndex(page.key) || pathname === page.href).map((page) => (
+                        <NavSubLink key={page.key} href={page.href} label={page.label} active={pathname === page.href} />
+                      ))}
                     </NavSection>
                     <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable/")}>
                       <NavSubLink href="/bac-a-sable/tabletop" label="Tabletop" active={pathname === "/bac-a-sable/tabletop"} />

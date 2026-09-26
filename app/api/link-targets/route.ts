@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import type { AppLinkTarget } from "@/lib/app-links"
 import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listCampaignsForMj, listCharactersForUser, listClassOptions } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+import { indexHomeHref, indexPages } from "@/lib/index-pages"
 
 /**
  * Les pages vers lesquelles un texte enrichi peut pointer, pour le sélecteur de lien de
@@ -25,12 +26,8 @@ export async function GET() {
     { label: "Hors combat", href: "/regles/hors-combat", group: "Règles" },
   ]
   if (manager) {
-    for (const [slug, label] of [
-      ["index-des-classes", "Index des classes"], ["index-des-objets", "Index des objets"], ["index-des-creatures", "Index des créatures"],
-      ["index-des-langues", "Index des langues"], ["index-des-lieux", "Index des lieux"], ["index-des-peuples", "Index des peuples"],
-      ["index-des-religions", "Index des religions"], ["index-des-campagnes", "Index des campagnes"], ["index-des-personnages", "Index des personnages"],
-      ["index-des-pnjs", "Index des PNJs"],
-    ]) targets.push({ label, href: `/ressources/${slug}`, group: "Ressources" })
+    targets.push({ label: "Index", href: indexHomeHref, group: "Index" })
+    for (const page of indexPages) targets.push({ label: page.label, href: page.href, group: "Index" })
     targets.push(
       { label: "Tabletop", href: "/bac-a-sable/tabletop", group: "Bac à sable" },
       { label: "Magasin", href: "/bac-a-sable/magasin", group: "Bac à sable" },

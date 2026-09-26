@@ -115,7 +115,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
   creatures: {
     key: "creatures",
     sheetName: "Index des créatures",
-    title: "Index des créatures",
+    title: "Créatures",
     path: "/ressources/index-des-creatures",
     tabs: [{
       name: "Créatures",
@@ -128,7 +128,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
   places: {
     key: "places",
     sheetName: "Index des lieux",
-    title: "Index des lieux",
+    title: "Lieux",
     path: "/ressources/index-des-lieux",
     itemLabel: "un lieu",
     tabs: placeTabs.map(([name, itemLabel]) => ({
@@ -141,7 +141,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
   religions: {
     key: "religions",
     sheetName: "Index des religions",
-    title: "Index des religions",
+    title: "Religions",
     path: "/ressources/index-des-religions",
     tabs: [
       { name: "Religions", itemLabel: "une religion", headers: ["Nom", "Divinités", "Description", "Note"], widths: [220, 260, 420, 320] },
@@ -151,7 +151,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
   peoples: {
     key: "peoples",
     sheetName: "Index des peuples",
-    title: "Index des peuples",
+    title: "Peuples",
     path: "/ressources/index-des-peuples",
     tabs: [{
       name: "Peuples",
@@ -163,7 +163,7 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
   languages: {
     key: "languages",
     sheetName: "Index des langues",
-    title: "Index des langues",
+    title: "Langues",
     path: "/ressources/index-des-langues",
     tabs: [{
       name: "Langues",

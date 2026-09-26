@@ -14,7 +14,7 @@ async function CampaignNpcsData({ campaignId, accountUid, isAdmin }: { campaignI
     listNpcs(campaignId),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
   ])
-  const sourcePages = [...npcIndexTabs.map((tab) => ({ id: tab.id, name: `Index des PNJs · ${tab.label}` })), { id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.filter((item) => item.id !== campaignId).map((item) => ({ id: item.id, name: item.name }))]
+  const sourcePages = [...npcIndexTabs.map((tab) => ({ id: tab.id, name: `PNJs · ${tab.label}` })), { id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.filter((item) => item.id !== campaignId).map((item) => ({ id: item.id, name: item.name }))]
   return <NpcManager initialNpcs={npcs} pageLinked={campaignId} sourcePages={sourcePages} />
 }
 

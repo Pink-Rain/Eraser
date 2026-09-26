@@ -138,7 +138,7 @@ function SpellCard({ name, spell, onRemove }: { name: string; spell?: SpellOptio
       {spell?.type && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ backgroundColor: spell.tone.background, color: spell.tone.foreground }}>{spell.type}</span>}
       {spell?.category === "actif" && <SpellChargeStars total={spell.charges} accent={accent} />}
     </header>
-    {!spell && <p className="mt-1 text-xs text-muted-foreground">Ce sort n’est pas (ou plus) dans l’Index des classes.</p>}
+    {!spell && <p className="mt-1 text-xs text-muted-foreground">Ce sort n’est pas (ou plus) dans l’index Classes.</p>}
     {spell && (spell.effect || spell.description) && <div className="mt-2 grid gap-1 leading-6">
       {spell.effect && <div className="font-medium [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
       {spell.description && <div className="text-muted-foreground [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}

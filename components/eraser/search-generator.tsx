@@ -174,12 +174,12 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
         {item && (item.effectHtml?.trim()
           ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /></p>
           : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>)}
-        {!item && <p className="mt-1 text-xs text-muted-foreground">Cet objet n’est plus dans l’Index des objets.</p>}
+        {!item && <p className="mt-1 text-xs text-muted-foreground">Cet objet n’est plus dans l’index Objets.</p>}
         {draw.elsewhere && <p className="mt-1.5 text-[11px] italic text-muted-foreground">Trouvé hors de ce lieu : aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’y est répertorié.</p>}
         {draw.givenTo && <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800"><Check className="size-3" />Donné à {draw.givenTo}</p>}
       </div>
     </div> : <div className="mt-3 rounded-xl border border-dashed px-4 py-4 text-sm text-muted-foreground">
-      <p>Aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’est répertorié pour « {draw.place} » dans l’Index des objets.</p>
+      <p>Aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’est répertorié pour « {draw.place} » dans l’index Objets.</p>
       <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => onElsewhere(draw.id)}><Shuffle />Prendre un objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} d’un autre lieu</Button>
     </div>}
     <div className="mt-3 flex items-center justify-end gap-1 border-t pt-2">
