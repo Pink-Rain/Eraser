@@ -90,8 +90,8 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
         setPending(false)
         return setError(payload.error || "Le personnage n’a pas pu être créé.")
       }
+      // La fiche s’ouvre dès l’enregistrement ; le bouton reste en attente jusque-là.
       router.push(`/personnage/${encodeURIComponent(payload.character.id)}`)
-      router.refresh()
     } catch {
       setPending(false)
       setError("Le personnage n’a pas pu être créé.")
@@ -195,8 +195,10 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
                     </div>
                   )}
                 </div>
-                <div className="grid max-h-[26rem] grid-cols-2 gap-2.5 overflow-y-auto rounded-xl p-0.5 sm:grid-cols-3 xl:grid-cols-4 2xl:grid-cols-5">
-                  <button type="button" onClick={() => setClassName("")} className={`flex min-h-32 flex-col items-center justify-center gap-2 rounded-xl border border-dashed px-3 py-4 text-center text-xs transition ${!className ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground hover:border-primary/40"}`}>
+                {/* Toutes les classes restent visibles, en petites cartes de même hauteur :
+                    une grille à hauteur limitée écrasait les lignes après la première. */}
+                <div className="grid auto-rows-fr grid-cols-[repeat(auto-fill,minmax(6.25rem,1fr))] gap-2">
+                  <button type="button" onClick={() => setClassName("")} aria-pressed={!className} className={`flex flex-col items-center justify-center gap-1.5 rounded-xl border border-dashed px-2 py-3 text-center text-[11px] leading-4 transition ${!className ? "border-primary bg-primary/5 text-primary" : "text-muted-foreground hover:border-primary/40"}`}>
                     <Sparkles className="size-5 opacity-70" />À choisir plus tard
                   </button>
                   {visibleClasses.map((item) => {
@@ -208,17 +210,16 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
                         type="button"
                         onClick={() => setClassName(active ? "" : item.name)}
                         aria-pressed={active}
-                        className="group relative flex flex-col overflow-hidden rounded-xl border bg-background/40 text-left transition hover:-translate-y-0.5 hover:shadow-md"
-                        style={{ borderColor: active ? color : undefined, boxShadow: active ? `0 0 0 2px ${item.accent ? `${item.accent}55` : "var(--ring)"}` : undefined }}
+                        title={item.name}
+                        className="group relative flex flex-col items-center rounded-xl border bg-background/40 px-1.5 pb-2 pt-2.5 text-center transition hover:-translate-y-0.5 hover:shadow-md"
+                        style={{ borderColor: active ? color : undefined, boxShadow: active ? `0 0 0 2px ${item.accent ? `${item.accent}55` : "var(--ring)"}` : undefined, backgroundColor: active && item.accent ? `${item.accent}10` : undefined }}
                       >
-                        <div className="relative aspect-square overflow-hidden px-3 pt-3">
-                          <ClassImage src={item.imageUrl} alt="" className="size-full object-contain transition duration-500 group-hover:scale-[1.04]" fallbackClassName="[&_span]:hidden" />
-                          {active && <span className="absolute right-2 top-2 flex size-5 items-center justify-center rounded-full text-white" style={{ backgroundColor: color }}><Check className="size-3" /></span>}
+                        <div className="size-12 shrink-0">
+                          <ClassImage src={item.imageUrl} alt="" className="size-full object-contain transition duration-500 group-hover:scale-[1.06]" fallbackClassName="rounded-full bg-muted/60 [&_span]:hidden [&_svg]:size-4" />
                         </div>
-                        <div className="px-2.5 pb-2.5 pt-1.5 text-center">
-                          <p className="truncate font-display text-sm font-semibold" style={{ color: item.accent || undefined }}>{item.name}</p>
-                          {item.type && <p className="truncate text-[10px] uppercase tracking-wider text-muted-foreground">{item.type}</p>}
-                        </div>
+                        {active && <span className="absolute right-1.5 top-1.5 flex size-4.5 items-center justify-center rounded-full text-white" style={{ backgroundColor: color }}><Check className="size-3" /></span>}
+                        <p className="mt-1.5 line-clamp-2 font-display text-xs font-semibold leading-[1.15rem]" style={{ color: item.accent || undefined }}>{item.name}</p>
+                        {item.type && <p className="mt-0.5 truncate text-[9px] uppercase tracking-wider text-muted-foreground">{item.type}</p>}
                       </button>
                     )
                   })}

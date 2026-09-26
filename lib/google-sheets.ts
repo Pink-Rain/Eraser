@@ -1473,13 +1473,17 @@ async function getCharacterForMjUncached(uid: string, id: string) {
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id))
     .where(and(eq(characterIndex.id, id), inArray(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1))[0]
-  let row = await read()
-  if (!row) {
+  // Un MJ joue aussi : ses propres personnages lui restent ouverts, même hors de ses
+  // campagnes (sinon la fiche qu'il vient de créer répondait « introuvable »).
+  const readOwn = async () => (await getDb().select().from(characterIndex)
+    .where(and(eq(characterIndex.id, id), inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).limit(1))[0]
+  let character = (await read())?.character ?? await readOwn()
+  if (!character) {
     await ensureIdentityIndexes()
-    row = await read()
+    character = (await read())?.character ?? await readOwn()
   }
-  if (!row) return null
-  return (await decorateCharacters([row.character]))[0] ?? null
+  if (!character) return null
+  return (await decorateCharacters([character]))[0] ?? null
 }
 
 export const getCharacterForMj = cache(getCharacterForMjUncached)
