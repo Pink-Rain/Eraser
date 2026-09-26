@@ -74,29 +74,40 @@ jobs:
         shell: pwsh
         run: |
           $installer = Join-Path $PWD "release/Eraser-Setup.exe"
-          Start-Process -FilePath $installer -ArgumentList "/S" -Wait
-          $programsDir = Join-Path $env:LOCALAPPDATA "Programs"
+          $setup = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+          Write-Host "Installateur terminé (code $($setup.ExitCode))."
+          # L'installateur assisté (non one-click) peut se relancer lui-même : -Wait
+          # rend la main quand le premier processus sort, pas quand la copie est
+          # finie. On attend donc aussi ses processus enfants encore actifs.
+          $setupDeadline = (Get-Date).AddMinutes(5)
+          while ((Get-Date) -lt $setupDeadline -and (Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -like "Eraser-Setup*" -or $_.ProcessName -like "Un_*" })) {
+            Start-Sleep -Seconds 2
+          }
           # Search rather than assume "Programs/Eraser/Eraser.exe": the install
           # folder name follows productName (currently "Eraser - JDR"), while
           # win.executableName pins the .exe itself to "Eraser.exe" so existing
           # shortcuts keep working. Searching avoids re-hardcoding that folder
           # name here every time productName changes.
-          # The assisted (non one-click) NSIS installer's launched process can exit
-          # before its elevated inner installer has finished copying files, so the
-          # executable isn't always on disk the instant -Wait returns. Poll briefly
-          # instead of failing on the first check.
-          # 30 s ne suffisaient pas toujours sur les machines GitHub (échecs sur
-          # alpha.59 et alpha.62) : on attend jusqu'à 3 minutes.
+          # Selon la machine GitHub, l'installation silencieuse se fait pour
+          # l'utilisateur (LOCALAPPDATA\Programs) ou pour la machine (Program
+          # Files) : on cherche aux deux endroits, jusqu'à 5 minutes (3 ne
+          # suffisaient plus sur alpha.71).
+          $searchRoots = @((Join-Path $env:LOCALAPPDATA "Programs"), $env:ProgramFiles, ${env:ProgramFiles(x86)}) | Where-Object { $_ -and (Test-Path $_) }
           $executable = $null
-          $installDeadline = (Get-Date).AddMinutes(3)
+          $installDeadline = (Get-Date).AddMinutes(5)
           while ((Get-Date) -lt $installDeadline -and -not $executable) {
-            $found = Get-ChildItem -Path $programsDir -Filter "Eraser.exe" -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1
+            $found = Get-ChildItem -Path $searchRoots -Filter "Eraser.exe" -Recurse -Depth 2 -ErrorAction SilentlyContinue | Select-Object -First 1
             if ($found) { $executable = $found.FullName }
             else { Start-Sleep -Seconds 2 }
           }
           if (-not $executable) {
+            Write-Host "Dossiers d'installation inspectés :"
+            foreach ($root in $searchRoots) { Write-Host "- $root"; Get-ChildItem -Path $root -Directory -ErrorAction SilentlyContinue | ForEach-Object { Write-Host "    $($_.Name)" } }
+            Write-Host "Processus encore actifs liés à l'installation :"
+            Get-Process -ErrorAction SilentlyContinue | Where-Object { $_.ProcessName -match "Eraser|Setup|Un_" } | ForEach-Object { Write-Host "    $($_.ProcessName) ($($_.Id))" }
             throw "Eraser.exe est introuvable après l’installation."
           }
+          Write-Host "Eraser installé : $executable"
           $env:ERASER_READY_FILE = Join-Path $PWD "eraser-startup-ready.json"
           $env:ERASER_STARTUP_LOG = Join-Path $PWD "eraser-startup.log"
           $env:ERASER_UI_SMOKE_RESULT = Join-Path $PWD "eraser-ui-smoke.json"
