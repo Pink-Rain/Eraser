@@ -1,10 +1,12 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
+import { InlineEdit } from "@/components/eraser/inline-edit"
+import { useInventoryReceived } from "@/components/eraser/item-notifications"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -16,7 +18,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Textarea } from "@/components/ui/textarea"
 import {
   characterCriticalValueIndex,
   characterClassChoicesIndex,
@@ -61,6 +62,10 @@ const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
   { type: "invocation", label: "Invocation" }, { type: "compagnon", label: "Compagnon" },
 ]
 
+// Le « + » n’ajoute que des onglets supplémentaires ; les quatre de base sont toujours là.
+// Un onglet déjà ajouté d’un autre type reste affiché.
+const addableTabTypes = tabTypes.filter((tab) => tab.type === "invocation" || tab.type === "compagnon")
+
 const baseCharacterTabs: CharacterTab[] = tabTypes.slice(0, 4).map((tab) => ({ ...tab, id: `base-${tab.type}`, removable: false }))
 
 // characterSkillGroups never changes at runtime, so this offset table is computed
@@ -104,16 +109,6 @@ const palette = [
   { accent: "#397f88", soft: "#397f8818", border: "#397f8855" },
 ]
 
-type InlineEditProps = {
-  label: string
-  value: string
-  onCommit: (value: string) => Promise<void>
-  compact?: boolean
-  multiline?: boolean
-  numeric?: boolean
-  singleClick?: boolean
-  children?: ReactNode
-}
 
 function Stepper({ label, value, onCommit }: { label: string; value: string; onCommit: (value: string) => Promise<void> }) {
   const numeric = Number.parseFloat(value || "0") || 0
@@ -154,35 +149,6 @@ function calculateExpression(expression: string, fallback: number) {
   try { return evaluateRelativeExpression(expression, fallback) } catch { return fallback }
 }
 
-function InlineEdit({ label, value, onCommit, compact, multiline, numeric, singleClick, children }: InlineEditProps) {
-  const [editing, setEditing] = useState(false)
-  const [draft, setDraft] = useState(value)
-  const [pending, setPending] = useState(false)
-  // Enregistré dès qu'on clique ailleurs ou que le survol se referme, sans Entrée.
-  const leave = useCommitOnLeave(editing, draft, value, onCommit)
-
-  function start() { setDraft(value); setEditing(true) }
-
-  async function save() {
-    setPending(true)
-    const done = await leave.save()
-    setPending(false)
-    if (done) setEditing(false)
-  }
-
-  function cancel() { leave.cancel(); setDraft(value); setEditing(false) }
-
-  function keyDown(event: KeyboardEvent<HTMLInputElement | HTMLTextAreaElement>) {
-    if (event.key === "Escape") cancel()
-    if (!multiline && event.key === "Enter") void save()
-  }
-
-  // Les boutons gardent le focus dans le champ : cliquer dessus ne déclenche pas d'enregistrement par perte du focus.
-  const keepFocus = (event: React.MouseEvent) => event.preventDefault()
-  if (editing) return <div className={compact ? "flex min-w-0 items-center gap-1" : "flex items-start gap-1"}>{multiline ? <Textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} onBlur={() => void save()} className="min-h-24" /> : <Input autoFocus type={numeric ? "number" : "text"} value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={keyDown} onBlur={() => void save()} className={compact ? "h-8 min-w-16 px-2" : "h-9"} />}<button type="button" onMouseDown={keepFocus} onClick={() => void save()} disabled={pending} className="flex size-8 shrink-0 items-center justify-center rounded-md text-primary hover:bg-primary/10" aria-label={`Enregistrer ${label}`}>{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button><button type="button" onMouseDown={keepFocus} onClick={cancel} className="flex size-8 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label="Annuler"><X className="size-3.5" /></button></div>
-
-  return <button type="button" onClick={singleClick ? start : undefined} onDoubleClick={!singleClick ? start : undefined} className="min-w-0 text-left" title={singleClick ? "Cliquer pour modifier" : "Double-cliquer pour modifier"}>{children ?? <span className={value ? "" : "text-muted-foreground/55"}>{value || "Non renseigné"}</span>}</button>
-}
 
 /**
  * Carnet de notes et récits de la fiche. Même moteur d'édition que partout ailleurs :
@@ -517,6 +483,14 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
     void commit(characterClassChoicesIndex, JSON.stringify({ ...classChoiceState, charges: { ...classChoiceState.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } }))
   }
 
+  // Un objet envoyé à ce personnage : l'inventaire affiché se met à jour tout seul.
+  useInventoryReceived([character.id], () => {
+    fetch(`${inventoryEndpoint}?summary=1`)
+      .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
+      .then(({ ok, payload }) => { if (ok && payload.inventory) setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] })) })
+      .catch(() => { /* la notification a suffi */ })
+  })
+
   useEffect(() => {
     if (initialInventory) return
     let active = true
@@ -669,7 +643,7 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
     if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} />
-    if (tab.type === "journal") return <div className="grid items-start gap-7 xl:grid-cols-[minmax(0,1.35fr)_minmax(22rem,.65fr)]"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><aside className="min-w-0"><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></aside></div>
+    if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }
 
@@ -766,7 +740,7 @@ export function CharacterSheet({ initialCharacter, classes, classSpells, initial
       <DialogContent>
         <DialogHeader><DialogTitle>Ajouter un onglet</DialogTitle></DialogHeader>
         <div className="grid gap-4 pt-2">
-          <label className="grid gap-1.5 text-sm font-medium">Type d’onglet<NativeSelect value={newTabType} onChange={(event) => setNewTabType(event.target.value as CharacterTabType)}>{tabTypes.map((tab) => <NativeSelectOption key={tab.type} value={tab.type}>{tab.label}</NativeSelectOption>)}</NativeSelect></label>
+          <label className="grid gap-1.5 text-sm font-medium">Type d’onglet<NativeSelect value={newTabType} onChange={(event) => setNewTabType(event.target.value as CharacterTabType)}>{addableTabTypes.map((tab) => <NativeSelectOption key={tab.type} value={tab.type}>{tab.label}</NativeSelectOption>)}</NativeSelect></label>
           <Button type="button" onClick={() => void addCharacterTab()}><Plus />Ajouter l’onglet</Button>
         </div>
       </DialogContent>

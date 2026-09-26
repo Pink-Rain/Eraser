@@ -15,7 +15,7 @@ export function sharedStoreAvailable() {
   return Boolean(remoteAccountsConfig(env))
 }
 
-async function call(path: string, init: { method: "GET" | "POST"; body?: unknown }) {
+async function call(path: string, init: { method: "GET" | "POST" | "DELETE"; body?: unknown }) {
   const config = remoteAccountsConfig(env)
   if (!config) return null
   const token = await currentAuthToken().catch(() => undefined)
@@ -33,6 +33,10 @@ export async function readSharedRecord(scope: string, key: string) {
 
 export async function writeSharedRecord(scope: string, key: string, value: string) {
   await call(scopePath(scope, key), { method: "POST", body: { value } })
+}
+
+export async function deleteSharedRecord(scope: string, key: string) {
+  await call(scopePath(scope, key), { method: "DELETE" })
 }
 
 

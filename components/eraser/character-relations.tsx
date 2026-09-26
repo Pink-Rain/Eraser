@@ -47,15 +47,34 @@ function normalized(value: string) {
   return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
 }
 
-function RelationLine({ relation, pending, onUpdate, onDelete }: { relation: Relation; pending: boolean; onUpdate: (body: Record<string, unknown>) => Promise<void>; onDelete: () => Promise<void> }) {
+/** Mini-portrait rond ; l'icône reste si l'image manque ou ne charge pas. */
+function RelationAvatar({ relation, color }: { relation: Relation; color: string }) {
+  const [failed, setFailed] = useState("")
+  const showImage = relation.portrait && failed !== relation.portrait
+  return <span className="relative flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-full text-muted-foreground ring-2" style={{ backgroundColor: `${color}14`, ["--tw-ring-color" as string]: `${color}40` }}>
+    {showImage
+      // eslint-disable-next-line @next/next/no-img-element
+      ? <img src={relation.portrait} alt="" loading="lazy" decoding="async" onError={() => setFailed(relation.portrait)} className="size-full object-cover" />
+      : relation.targetKind === "npc" ? <UserRound className="size-4" style={{ color }} /> : <Users className="size-4" style={{ color }} />}
+  </span>
+}
+
+function RelationLine({ relation, color, pending, onUpdate, onDelete }: { relation: Relation; color: string; pending: boolean; onUpdate: (body: Record<string, unknown>) => Promise<void>; onDelete: () => Promise<void> }) {
   const [notes, setNotes] = useState(relation.personalNotes)
   const [editingLevel, setEditingLevel] = useState(false)
   const [editingTarget, setEditingTarget] = useState(false)
   const [targetDraft, setTargetDraft] = useState({ name: relation.name, people: relation.people, description: relation.description, portrait: relation.portrait })
-  return <div className="group/row grid grid-cols-[3rem_minmax(0,1fr)_1.75rem] items-center gap-2 border-t border-border/45 py-1.5 first:border-t-0">
-    {editingLevel ? <NativeSelect autoFocus value={String(relation.level)} disabled={pending} onBlur={() => setEditingLevel(false)} onChange={(event) => { void onUpdate({ action: "update", relationId: relation.id, level: Number(event.target.value), personalNotes: relation.personalNotes }); setEditingLevel(false) }} className="h-7 border-0 bg-background/60 px-1 text-xs font-semibold shadow-none" aria-label={`Niveau de relation avec ${relation.name}`}>{levels.map((level) => <NativeSelectOption key={level} value={String(level)}>{level > 0 ? `+${level}` : level}</NativeSelectOption>)}</NativeSelect> : <button type="button" onClick={() => setEditingLevel(true)} className="h-7 rounded-md text-sm font-semibold tabular-nums hover:bg-muted" title="Cliquer pour modifier">{relation.level > 0 ? `+${relation.level}` : relation.level}</button>}
+  // Plus la relation est forte, plus la pastille du niveau est soutenue.
+  const intensity = ["14", "22", "33", "48"][Math.min(3, Math.abs(relation.level))]
+  const levelControl = editingLevel
+    ? <NativeSelect autoFocus value={String(relation.level)} disabled={pending} onBlur={() => setEditingLevel(false)} onChange={(event) => { void onUpdate({ action: "update", relationId: relation.id, level: Number(event.target.value), personalNotes: relation.personalNotes }); setEditingLevel(false) }} className="h-7 w-16 border-0 bg-background/60 px-1 text-xs font-semibold shadow-none" aria-label={`Niveau de relation avec ${relation.name}`}>{levels.map((level) => <NativeSelectOption key={level} value={String(level)}>{level > 0 ? `+${level}` : level}</NativeSelectOption>)}</NativeSelect>
+    : <button type="button" onClick={() => setEditingLevel(true)} className="min-w-9 rounded-full px-2 py-0.5 text-xs font-bold tabular-nums transition hover:brightness-110" style={{ backgroundColor: `${color}${intensity}`, color }} title="Cliquer pour modifier le niveau">{relation.level > 0 ? `+${relation.level}` : relation.level}</button>
+  return <div className="group/row flex items-center gap-2.5 rounded-xl px-2 py-1.5 transition-colors hover:bg-muted/35">
     <HoverCard openDelay={180} closeDelay={450}>
-      <HoverCardTrigger asChild><button type="button" className="min-w-0 truncate text-left text-sm font-medium hover:text-primary">{relation.name}</button></HoverCardTrigger>
+      <HoverCardTrigger asChild><button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
+        <RelationAvatar relation={relation} color={color} />
+        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium group-hover/row:text-primary">{relation.name}</span>{(relation.people || relation.campaignName) && <span className="block truncate text-[11px] text-muted-foreground">{relation.people || relation.campaignName}</span>}</span>
+      </button></HoverCardTrigger>
       <HoverCardContent align="start" className="w-80 space-y-4 rounded-2xl p-4">
         <div className="flex gap-3"><div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted text-muted-foreground">{relation.portrait ? <img src={relation.portrait} alt={`Portrait de ${relation.name}`} loading="lazy" decoding="async" className="size-full object-cover" /> : relation.targetKind === "npc" ? <UserRound className="size-6" /> : <Users className="size-6" />}</div><div className="min-w-0"><p className="font-display text-lg font-semibold leading-tight">{relation.name}</p><p className="mt-1 text-xs text-muted-foreground">{relation.targetKind === "npc" ? "PNJ" : "Joueur·euse"}{relation.campaignName ? ` · ${relation.campaignName}` : ""}</p>{relation.people && <p className="mt-2 text-sm">{relation.people}</p>}</div></div>
         {relation.description && <RichTextView html={relation.description} className="text-sm leading-6 text-muted-foreground" />}
@@ -64,7 +83,8 @@ function RelationLine({ relation, pending, onUpdate, onDelete }: { relation: Rel
         <div className="flex justify-end"><Button type="button" size="sm" disabled={pending || notes === relation.personalNotes} onClick={() => onUpdate({ action: "update", relationId: relation.id, level: relation.level, personalNotes: notes })}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer la note</Button></div>
       </HoverCardContent>
     </HoverCard>
-    <button type="button" disabled={pending} onClick={() => void onDelete()} className="flex size-7 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100 focus:opacity-100" aria-label={`Supprimer la relation avec ${relation.name}`}><Trash2 className="size-3.5" /></button>
+    {levelControl}
+    <button type="button" disabled={pending} onClick={() => void onDelete()} className="-ml-1 flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground opacity-0 hover:bg-destructive/10 hover:text-destructive group-hover/row:opacity-100 focus:opacity-100" aria-label={`Supprimer la relation avec ${relation.name}`}><Trash2 className="size-3.5" /></button>
   </div>
 }
 
@@ -136,7 +156,17 @@ export function CharacterRelations({ characterId, campaigns }: { characterId: st
   return <section className="min-w-0">
     <div className="flex items-center justify-between gap-3"><div><p className="text-[11px] font-semibold uppercase tracking-[.2em] text-primary/70">Entourage</p><h3 className="font-display text-2xl font-semibold">Relations</h3></div><Button type="button" size="sm" onClick={() => void openCreation()} disabled={!campaigns.length}><Plus />Ajouter une relation</Button></div>
     {error && <p className="mt-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
-    {loading ? <div className="grid min-h-40 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : <div className="mt-4 overflow-hidden rounded-2xl border bg-card/35">{columns.map((column) => { const records = relations.filter((relation) => column.test(relation.level)).sort((left, right) => sorts[column.key] === "name" ? left.name.localeCompare(right.name, "fr") : Math.abs(right.level) - Math.abs(left.level) || left.name.localeCompare(right.name, "fr")); return <section key={column.key} className="border-t border-border/55 first:border-t-0"><div className="flex items-center gap-2 px-3 py-2" style={{ backgroundColor: `${column.color}0d` }}><span className="size-2 rounded-full" style={{ backgroundColor: column.color }} /><h4 className="font-display font-semibold" style={{ color: column.color }}>{column.label}</h4><span className="text-xs text-muted-foreground">{records.length}</span><NativeSelect value={sorts[column.key]} onChange={(event) => setSorts((current) => ({ ...current, [column.key]: event.target.value as "name" | "level" }))} className="ml-auto h-7 w-28 border-0 bg-transparent px-1 text-xs shadow-none" aria-label={`Trier les ${column.label}`}><NativeSelectOption value="level">Par niveau</NativeSelectOption><NativeSelectOption value="name">Par nom</NativeSelectOption></NativeSelect></div><div className="px-3">{records.length ? records.map((relation) => <RelationLine key={relation.id} relation={relation} pending={pending} onUpdate={request} onDelete={() => request({ action: "delete", relationId: relation.id })} />) : <p className="py-3 text-xs text-muted-foreground">Aucune relation</p>}</div></section> })}</div>}
+    {loading ? <div className="grid min-h-40 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div> : <div className="mt-4 grid items-start gap-4 md:grid-cols-3">{columns.map((column) => {
+      const records = relations.filter((relation) => column.test(relation.level)).sort((left, right) => sorts[column.key] === "name" ? left.name.localeCompare(right.name, "fr") : Math.abs(right.level) - Math.abs(left.level) || left.name.localeCompare(right.name, "fr"))
+      return <section key={column.key} className="min-w-0 overflow-hidden rounded-2xl border bg-card/60 shadow-sm" style={{ borderColor: `${column.color}40` }}>
+        <header className="flex items-center gap-2 px-4 py-2.5" style={{ background: `linear-gradient(135deg, ${column.color}22, ${column.color}08)`, borderBottom: `1px solid ${column.color}30` }}>
+          <h4 className="font-display text-lg font-semibold" style={{ color: column.color }}>{column.label}</h4>
+          <span className="rounded-full px-1.5 py-px text-[10px] font-semibold tabular-nums" style={{ backgroundColor: `${column.color}1f`, color: column.color }}>{records.length}</span>
+          <div className="ml-auto"><NativeSelect value={sorts[column.key]} onChange={(event) => setSorts((current) => ({ ...current, [column.key]: event.target.value as "name" | "level" }))} className="h-7 w-24 border-0 bg-transparent px-1 text-[11px] text-muted-foreground shadow-none" aria-label={`Trier les ${column.label}`}><NativeSelectOption value="level">Par niveau</NativeSelectOption><NativeSelectOption value="name">Par nom</NativeSelectOption></NativeSelect></div>
+        </header>
+        <div className="space-y-0.5 p-1.5">{records.length ? records.map((relation) => <RelationLine key={relation.id} relation={relation} color={column.color} pending={pending} onUpdate={request} onDelete={() => request({ action: "delete", relationId: relation.id })} />) : <p className="m-1 rounded-xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">Aucune relation</p>}</div>
+      </section>
+    })}</div>}
 
     <Dialog open={adding} onOpenChange={setAdding}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter une relation</DialogTitle></DialogHeader><div className="space-y-4"><div className="grid grid-cols-3 gap-2"><Button type="button" variant={mode === "npc" ? "default" : "outline"} onClick={() => { setMode("npc"); setSelectedId("") }}><UserRound />PNJ</Button><Button type="button" variant={mode === "character" ? "default" : "outline"} onClick={() => { setMode("character"); setSelectedId("") }}><Users />Joueur·euse</Button><Button type="button" variant={mode === "create-npc" ? "default" : "outline"} onClick={() => { setMode("create-npc"); setSelectedId("") }}><Sparkles />Créer un PNJ</Button></div>
       <Label className="grid gap-1.5 text-sm font-medium">Niveau de relation<NativeSelect value={String(level)} onChange={(event) => setLevel(Number(event.target.value) as RelationLevel)}>{levels.map((candidateLevel) => <NativeSelectOption key={candidateLevel} value={String(candidateLevel)}>{candidateLevel > 0 ? `+${candidateLevel} — Allié·e` : candidateLevel < 0 ? `${candidateLevel} — Ennemi·e` : "0 — Connaissance"}</NativeSelectOption>)}</NativeSelect></Label>

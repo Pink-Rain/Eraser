@@ -73,6 +73,7 @@ import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
+const ItemNotifications = dynamic(() => import("@/components/eraser/item-notifications").then((module) => module.ItemNotifications), { ssr: false })
 
 const PageLabelContext = createContext<(label: string) => void>(() => undefined)
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser } | null>(null)
@@ -729,6 +730,7 @@ export function AppShell({
       </SidebarInset>
     </SidebarProvider>
     <GlobalTableChat user={{ uid: user.uid, role: user.role }} />
+    <ItemNotifications />
     </AppTabsProvider>
     </PageLabelContext.Provider>
   )

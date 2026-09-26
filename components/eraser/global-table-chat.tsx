@@ -43,6 +43,16 @@ function audienceLabel(activity: TabletopActivityRecord) {
 }
 
 const LAST_CAMPAIGN_KEY = "eraser:chat-campaign"
+// Dernier message vu, par salon : au-delà, le bouton du chat porte une pastille.
+const SEEN_KEY = "eraser:chat-seen:"
+
+function readSeen(campaignId: string) {
+  try { return window.localStorage.getItem(SEEN_KEY + campaignId) || "" } catch { return "" }
+}
+
+function latestActivityAt(activities: TabletopActivityRecord[]) {
+  return activities.reduce((latest, activity) => activity.createdAt > latest ? activity.createdAt : latest, "")
+}
 
 function dataRecord(value: unknown) {
   return value && typeof value === "object" && !Array.isArray(value) && !(value instanceof ArrayBuffer) ? value as Record<string, unknown> : null
@@ -83,6 +93,8 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const [connection, setConnection] = useState<ConnectionState>("connecting")
   const [chatText, setChatText] = useState("")
   const [notice, setNotice] = useState("")
+  const [seen, setSeen] = useState<{ campaignId: string; at: string }>({ campaignId: "", at: "" })
+  const openRef = useRef(false)
 
   const presenceRef = useRef<Map<string, Presence>>(new Map())
   const myNameRef = useRef("")
@@ -90,6 +102,14 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const realtimeRef = useRef<{ activity: (payload: TabletopActivityRecord) => void } | null>(null)
   const activityEndRef = useRef<HTMLDivElement>(null)
   const noticeTimerRef = useRef<number | null>(null)
+
+  useEffect(() => { openRef.current = open }, [open])
+
+  const markSeen = useCallback((forCampaign: string, at: string) => {
+    if (!forCampaign || !at) return
+    setSeen((current) => current.campaignId === forCampaign && current.at >= at ? current : { campaignId: forCampaign, at })
+    try { if (readSeen(forCampaign) < at) window.localStorage.setItem(SEEN_KEY + forCampaign, at) } catch { /* navigation privée */ }
+  }, [])
 
   const hideOnThisPage = /\/tabletop(\/|$)/.test(pathname)
   const roomId = campaignId ? `chat:${campaignId}` : ""
@@ -141,6 +161,11 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       .then((response) => responseJson<{ activities: TabletopActivityRecord[]; members: ChatMember[]; accounts?: ChatAccount[]; me?: ChatAccount }>(response))
       .then((payload) => {
         if (cancelled) return
+        // Premier passage dans ce salon : l'historique compte comme déjà lu.
+        const latest = latestActivityAt(payload.activities)
+        const stored = readSeen(campaignId)
+        if (!stored || openRef.current) markSeen(campaignId, latest || new Date().toISOString())
+        else setSeen({ campaignId, at: stored })
         setActivities(payload.activities)
         setMembers(payload.members)
         setAccounts(payload.accounts || [])
@@ -148,7 +173,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       })
       .catch(() => { if (!cancelled) showNotice("Ce salon n’a pas pu être chargé.") })
     return () => { cancelled = true }
-  }, [campaignId, showNotice])
+  }, [campaignId, markSeen, showNotice])
 
   useEffect(() => {
     if (!roomId) return
@@ -167,6 +192,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
         const activity = activityFromPayload(value)
         if (!activity || activity.mapId !== roomId) return
         setActivities((current) => current.some((item) => item.id === activity.id) ? current : [...current, activity].slice(-200))
+        if (openRef.current) markSeen(campaignId, activity.createdAt)
       }
       presenceAction.onMessage = (value, context) => {
         const record = dataRecord(value)
@@ -197,7 +223,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       presence.clear()
       if (room) void room.leave()
     }
-  }, [roomId, campaignId, user.role, user.uid])
+  }, [roomId, campaignId, markSeen, user.role, user.uid])
 
   // Le nom du compte, partout : plus de « MJ » ni de nom de personnage.
   const speakerName = me?.name || "Joueur"
@@ -289,12 +315,15 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     }
   }
 
+  const unread = !open && seen.campaignId === campaignId && activities.some((activity) => activity.authorUid !== user.uid && activity.createdAt > seen.at)
+
   if (hideOnThisPage) return null
 
   return (
     <div className="fixed bottom-4 right-4 z-40">
-      <Button size="icon" className="rounded-full shadow-2xl" onClick={() => setOpen((value) => !value)} aria-label={open ? "Fermer le chat" : "Ouvrir le chat"}>
+      <Button size="icon" className="relative rounded-full shadow-2xl" onClick={() => { if (!open) markSeen(campaignId, latestActivityAt(activities)); setOpen((value) => !value) }} aria-label={open ? "Fermer le chat" : unread ? "Ouvrir le chat (nouveaux messages)" : "Ouvrir le chat"}>
         <MessageCircle />
+        {unread && <span className="absolute right-0.5 top-0.5 size-2.5 rounded-full bg-[#d33b2c] ring-2 ring-primary" aria-hidden="true" />}
       </Button>
       {open && (
         <section className="fixed bottom-16 right-4 flex h-[min(34rem,calc(100svh-5rem))] w-[min(24rem,calc(100vw-2rem))] flex-col overflow-hidden rounded-2xl border bg-card/95 shadow-2xl backdrop-blur">

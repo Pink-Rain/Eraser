@@ -1,15 +1,18 @@
 "use client"
 
-import { useMemo, useState, type DragEvent } from "react"
+import { useMemo, useState, type DragEvent, type MouseEvent } from "react"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, X, Zap } from "lucide-react"
+import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, Trash2, Undo2, X, Zap } from "lucide-react"
 
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
+import { InlineEdit } from "@/components/eraser/inline-edit"
+import { RichTextInlineEditor } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ClassSpell } from "@/lib/class-content"
+import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 
@@ -19,11 +22,32 @@ function spellTone(spell: ClassSpell) {
   return spell.tone.background ? { background: spell.tone.background, foreground: spell.tone.foreground || "#fff" } : categoryTone[spell.category]
 }
 
+/** Ce qu'un joueur a changé sur un sort, pour son personnage seulement. */
+export type CharacterSpellEdit = Partial<Pick<ClassSpell, "name" | "type" | "effect" | "effectHtml" | "description" | "descriptionHtml" | "skillsRaw" | "distance" | "charges">>
+
 export type CharacterClassChoices = {
   choices: Record<string, Record<string, string>>
   charges: Record<string, number>
   extras: string[]
   order: string[]
+  /** Versions personnelles des sorts, par identifiant : l'index des sorts n'est jamais touché. */
+  edits: Record<string, CharacterSpellEdit>
+  /** Sorts retirés de la fiche (acquis par la classe ou ajoutés à la main). */
+  removed: string[]
+}
+
+const editableTextFields = ["name", "type", "effect", "effectHtml", "description", "descriptionHtml", "skillsRaw", "distance"] as const
+
+function parseSpellEdits(value: unknown): CharacterClassChoices["edits"] {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return {}
+  return Object.fromEntries(Object.entries(value as Record<string, unknown>).flatMap(([id, raw]) => {
+    if (!raw || typeof raw !== "object") return []
+    const source = raw as Record<string, unknown>
+    const edit: CharacterSpellEdit = {}
+    for (const key of editableTextFields) if (typeof source[key] === "string") edit[key] = source[key] as string
+    if (source.charges === null || (typeof source.charges === "number" && Number.isFinite(source.charges))) edit.charges = source.charges as number | null
+    return Object.keys(edit).length ? [[id, edit]] : []
+  }))
 }
 
 export function parseClassChoices(value: string): CharacterClassChoices {
@@ -34,10 +58,43 @@ export function parseClassChoices(value: string): CharacterClassChoices {
       charges: parsed && typeof parsed.charges === "object" && parsed.charges ? parsed.charges as CharacterClassChoices["charges"] : {},
       extras: parsed && Array.isArray(parsed.extras) ? parsed.extras.filter((item): item is string => typeof item === "string") : [],
       order: parsed && Array.isArray(parsed.order) ? parsed.order.filter((item): item is string => typeof item === "string") : [],
+      edits: parseSpellEdits(parsed?.edits),
+      removed: parsed && Array.isArray(parsed.removed) ? parsed.removed.filter((item): item is string => typeof item === "string") : [],
     }
   } catch {
-    return { choices: {}, charges: {}, extras: [], order: [] }
+    return { choices: {}, charges: {}, extras: [], order: [], edits: {}, removed: [] }
   }
+}
+
+/** Le sort tel que ce personnage le connaît : la version de l'index, plus ses changements. */
+export function personalizeSpell(spell: ClassSpell, edit: CharacterSpellEdit | undefined): ClassSpell {
+  if (!edit) return spell
+  const next = { ...spell, ...edit }
+  if (edit.skillsRaw !== undefined) next.skills = splitClassSpellSkills(edit.skillsRaw)
+  if (edit.type !== undefined) {
+    next.category = classSpellCategory(edit.type)
+    next.actionKind = classSpellActionKind(edit.type)
+  }
+  if (!next.name.trim()) next.name = spell.name
+  return next
+}
+
+function plainText(html: string) {
+  return html.replace(/<br\s*\/?>/gi, "\n").replace(/<\/p>|<\/div>|<\/li>/gi, "\n").replace(/<[^>]+>/g, "").replace(/&nbsp;/gi, " ").replace(/&amp;/gi, "&").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").trim()
+}
+
+/**
+ * Ajoute un changement à la version personnelle d'un sort. Un champ revenu à la valeur
+ * de l'index n'est plus retenu ; un sort sans différence n'a plus de version personnelle.
+ */
+function mergeSpellEdit(original: ClassSpell, current: CharacterSpellEdit | undefined, patch: CharacterSpellEdit): CharacterSpellEdit | undefined {
+  const next: CharacterSpellEdit = { ...current, ...patch }
+  for (const key of ["name", "type", "skillsRaw", "distance"] as const) if (next[key] !== undefined && next[key] === original[key]) delete next[key]
+  if (next.charges !== undefined && next.charges === original.charges) delete next.charges
+  for (const [html, text] of [["effectHtml", "effect"], ["descriptionHtml", "description"]] as const) {
+    if (next[html] !== undefined && next[html] === (original[html] || original[text])) { delete next[html]; delete next[text] }
+  }
+  return Object.keys(next).length ? next : undefined
 }
 
 export function selectedCharacterClasses(value: string, classes: ClassRecord[]) {
@@ -54,7 +111,10 @@ export function knownSpellsForCharacter(classes: ClassRecord[], spells: ClassSpe
   const state = parseClassChoices(value)
   const classIds = new Set(classes.map((item) => item.id))
   const extras = new Set(state.extras)
-  return spells.filter((spell) => extras.has(spell.id) || Object.entries(spell.classRanks).some(([classId, rank]) => classIds.has(classId) && rank <= level && (rank === 0 || state.choices[classId]?.[String(rank)] === spell.id)))
+  const removed = new Set(state.removed)
+  return spells
+    .filter((spell) => !removed.has(spell.id) && (extras.has(spell.id) || Object.entries(spell.classRanks).some(([classId, rank]) => classIds.has(classId) && rank <= level && (rank === 0 || state.choices[classId]?.[String(rank)] === spell.id))))
+    .map((spell) => personalizeSpell(spell, state.edits[spell.id]))
 }
 
 function SpellGlyph({ category }: { category: ClassSpell["category"] }) {
@@ -63,8 +123,18 @@ function SpellGlyph({ category }: { category: ClassSpell["category"] }) {
   return <Zap />
 }
 
-function KnownSpell({ spell, rank, accent, currentCharges, onCharges, manual, dragOver, onDragStart, onDragEnd, onDragOver, onDrop }: { spell: ClassSpell; rank: number | null; accent: string; currentCharges: number; onCharges: (value: number) => void; manual?: boolean; dragOver?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragOver?: (event: DragEvent) => void; onDrop?: () => void }) {
+/**
+ * Dans l'en-tête repliable, un clic dans le champ du nom en cours de modification (ou sur
+ * ses boutons ✓ / ✕) ne doit pas replier la carte. Tout autre clic l'ouvre ou la ferme.
+ */
+function keepSummaryOpen(event: MouseEvent) {
+  const target = event.target as HTMLElement
+  if (target.closest("input, textarea, button")) event.preventDefault()
+}
+
+function KnownSpell({ spell, original, customized, rank, accent, currentCharges, onCharges, onEdit, onReset, onRemove, manual, dragOver, onDragStart, onDragEnd, onDragOver, onDrop }: { spell: ClassSpell; original: ClassSpell; customized: boolean; rank: number | null; accent: string; currentCharges: number; onCharges: (value: number) => void; onEdit: (patch: CharacterSpellEdit) => Promise<void>; onReset: () => Promise<void>; onRemove: () => Promise<void>; manual?: boolean; dragOver?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragOver?: (event: DragEvent) => void; onDrop?: () => void }) {
   const tone = spellTone(spell)
+  const [confirmRemove, setConfirmRemove] = useState(false)
   return <details
     className={`group rounded-xl border bg-background/45 transition-colors ${dragOver ? "border-dashed" : ""}`}
     style={{ borderColor: dragOver ? accent : `${tone.background}66` }}
@@ -82,13 +152,30 @@ function KnownSpell({ spell, rank, accent, currentCharges, onCharges, manual, dr
         title="Glisser pour réordonner"
       ><GripVertical className="size-3.5" /></span>}
       <span className="flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><span className="flex size-4 items-center justify-center [&>svg]:size-4"><SpellGlyph category={spell.category} /></span></span>
-      <span className="min-w-0 flex-1"><span className="block truncate text-sm font-semibold">{spell.name}</span><span className="block text-[11px] text-muted-foreground">{rank === null ? "Hors classe" : rank === 0 ? "Commun" : `Rang ${rank}`} · {spell.type}</span></span>
+      <span className="min-w-0 flex-1">
+        <span className="block truncate text-sm font-semibold" onClick={keepSummaryOpen}><InlineEdit compact trigger="span" label="Nom du sort" value={spell.name} onCommit={(value) => onEdit({ name: value.trim() || original.name })}><span className="block truncate">{spell.name}</span></InlineEdit></span>
+        <span className="block text-[11px] text-muted-foreground">{rank === null ? "Hors classe" : rank === 0 ? "Commun" : `Rang ${rank}`} · {spell.type}{customized && <span className="ml-1.5 rounded-full bg-primary/10 px-1.5 py-px text-[9px] font-semibold uppercase tracking-wider text-primary" title="Modifié pour ce personnage seulement">Personnalisé</span>}</span>
+      </span>
       {spell.category === "actif" && <SpellChargeStars total={spell.charges} current={currentCharges} interactive onChange={onCharges} accent={accent} />}
       <ChevronDown className="size-4 text-muted-foreground transition group-open:rotate-180" />
     </summary>
     <div className="border-t px-3 py-3 text-sm leading-6" style={{ borderColor: `${accent}28` }}>
-      {(spell.effect || spell.description) && <blockquote className="border-l-2 pl-3" style={{ borderColor: accent }}>{spell.effect && <div className="font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}{spell.description && <div className="mt-1 text-muted-foreground" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}</blockquote>}
-      <div className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">{spell.skills.length > 0 && <span className="font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}{spell.distance && <span className="flex items-center gap-1"><Crosshair className="size-3" />Distance : {spell.distance}</span>}</div>
+      <blockquote className="border-l-2 pl-3" style={{ borderColor: accent }}>
+        <RichTextInlineEditor canEdit html={spell.effectHtml || spell.effect} placeholder="Effet" className="font-medium" onSave={(html) => onEdit({ effectHtml: html, effect: plainText(html) })} />
+        <RichTextInlineEditor canEdit html={spell.descriptionHtml || spell.description} placeholder="Description" className="mt-1 text-muted-foreground" onSave={(html) => onEdit({ descriptionHtml: html, description: plainText(html) })} />
+      </blockquote>
+      <div className="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-muted-foreground">
+        <InlineEdit compact label="Type" value={spell.type} onCommit={(value) => onEdit({ type: value.trim() })}><span>{spell.type || "Type"}</span></InlineEdit>
+        <InlineEdit compact label="Compétences" value={spell.skillsRaw} onCommit={(value) => onEdit({ skillsRaw: value.trim() })}><span className={spell.skills.length ? "font-semibold text-[#b3261e]" : "text-muted-foreground/55"}>{spell.skills.length ? spell.skills.join(" · ") : "Compétences"}</span></InlineEdit>
+        <InlineEdit compact label="Distance" value={spell.distance} onCommit={(value) => onEdit({ distance: value.trim() })}><span className="flex items-center gap-1"><Crosshair className="size-3" />{spell.distance ? `Distance : ${spell.distance}` : <span className="text-muted-foreground/55">Distance</span>}</span></InlineEdit>
+        {spell.category === "actif" && <InlineEdit compact numeric label="Charges" value={spell.charges === null ? "" : String(spell.charges)} onCommit={(value) => onEdit({ charges: value.trim() === "" ? null : Math.max(0, Math.min(5, Math.trunc(Number(value) || 0))) })}><span>Charges : {spell.charges ?? "—"}</span></InlineEdit>}
+      </div>
+      <div className="mt-2 flex flex-wrap items-center justify-end gap-1">
+        {customized && <Button type="button" variant="ghost" size="sm" className="h-7 text-xs text-muted-foreground" onClick={() => void onReset()} title="Revenir au texte de l’index des sorts"><Undo2 />Version de l’index</Button>}
+        {confirmRemove
+          ? <><Button type="button" variant="destructive" size="sm" className="h-7 text-xs" onClick={() => void onRemove()}>Retirer de la fiche</Button><Button type="button" variant="ghost" size="icon-sm" onClick={() => setConfirmRemove(false)} aria-label="Annuler"><X /></Button></>
+          : <Button type="button" variant="ghost" size="icon-sm" className="text-muted-foreground hover:text-destructive" onClick={() => setConfirmRemove(true)} aria-label={`Retirer ${spell.name}`} title="Retirer ce sort de la fiche"><Trash2 /></Button>}
+      </div>
     </div>
   </details>
 }
@@ -124,9 +211,38 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
     return update({ ...state, charges: { ...state.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } })
   }
   function addExtra(spellId: string) {
-    if (state.extras.includes(spellId)) return
-    return update({ ...state, extras: [...state.extras, spellId], order: [...state.order.filter((id) => id !== spellId), spellId] })
+    if (state.extras.includes(spellId) && !state.removed.includes(spellId)) return
+    return update({ ...state, extras: [...state.extras.filter((id) => id !== spellId), spellId], removed: state.removed.filter((id) => id !== spellId), order: [...state.order.filter((id) => id !== spellId), spellId] })
   }
+  const originals = useMemo(() => new Map(spells.map((spell) => [spell.id, spell])), [spells])
+  function editSpell(spell: ClassSpell, patch: CharacterSpellEdit) {
+    const original = originals.get(spell.id) || spell
+    const edits = { ...state.edits }
+    const merged = mergeSpellEdit(original, edits[spell.id], patch)
+    if (merged) edits[spell.id] = merged
+    else delete edits[spell.id]
+    return update({ ...state, edits })
+  }
+  function resetSpell(spell: ClassSpell) {
+    const edits = { ...state.edits }
+    delete edits[spell.id]
+    return update({ ...state, edits })
+  }
+  // Un sort ajouté à la main quitte simplement la liste ; un sort acquis par la classe
+  // est mis de côté, pour pouvoir être rétabli.
+  function removeSpell(spell: ClassSpell) {
+    const classIds = new Set(classes.map((item) => item.id))
+    const fromClass = Object.entries(spell.classRanks).some(([classId, rank]) => classIds.has(classId) && rank <= level && (rank === 0 || state.choices[classId]?.[String(rank)] === spell.id))
+    return update({
+      ...state,
+      extras: state.extras.filter((id) => id !== spell.id),
+      removed: fromClass ? [...state.removed.filter((id) => id !== spell.id), spell.id] : state.removed.filter((id) => id !== spell.id),
+    })
+  }
+  function restoreSpell(spellId: string) {
+    return update({ ...state, removed: state.removed.filter((id) => id !== spellId) })
+  }
+  const removedSpells = state.removed.flatMap((id) => { const spell = originals.get(id); return spell ? [personalizeSpell(spell, state.edits[id])] : [] })
   const [draggedSpellId, setDraggedSpellId] = useState<string | null>(null)
   const [dragOverSpellId, setDragOverSpellId] = useState<string | null>(null)
   function reorderSpell(draggedId: string, targetId: string) {
@@ -161,9 +277,13 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-muted-foreground">Répertoire</p><h2 className="font-display mt-1 text-2xl font-semibold">Capacités acquises</h2></div><div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground">Trier par<NativeSelect value={sort} onChange={(event) => setSort(event.target.value as "rank" | "name" | "type" | "manual")} className="h-10 min-w-40 py-0 pl-3 pr-10 leading-5"><NativeSelectOption value="rank">Rang</NativeSelectOption><NativeSelectOption value="name">Nom</NativeSelectOption><NativeSelectOption value="type">Type</NativeSelectOption><NativeSelectOption value="manual">Manuel</NativeSelectOption></NativeSelect></label><Button type="button" variant={searchOpen ? "secondary" : "outline"} size="icon-sm" aria-label="Ajouter une capacité" title="Ajouter une capacité" onClick={() => setSearchOpen((open) => !open)}>{searchOpen ? <X /> : <Plus />}</Button></div></div>
       {searchOpen && <div className="mt-4 rounded-xl border bg-card/55 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, mot-clé, type ou compétence…" className="pl-9" /></div><NativeSelect value={searchCategory} onChange={(event) => setSearchCategory(event.target.value as typeof searchCategory)} className="h-9 min-w-36"><NativeSelectOption value="all">Tout</NativeSelectOption><NativeSelectOption value="actif">Actifs</NativeSelectOption><NativeSelectOption value="passif">Passifs</NativeSelectOption><NativeSelectOption value="bonus">Bonus</NativeSelectOption></NativeSelect></div><div className="mt-3 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{searchResults.map((spell) => <div key={spell.id} className="flex items-center gap-3 rounded-lg border bg-background/55 p-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&>svg]:size-4" style={{ backgroundColor: spellTone(spell).background, color: spellTone(spell).foreground }}><SpellGlyph category={spell.category} /></span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{spell.name}</b><span className="block truncate text-xs text-muted-foreground">{spell.type}{spell.skills.length ? ` · ${spell.skills.join(" · ")}` : ""}</span></span><Button type="button" size="sm" variant="outline" onClick={() => void addExtra(spell.id)}><Plus />Ajouter</Button></div>)}</div>{matchingSearchResults.length > searchResults.length && <p className="pt-3 text-center text-xs text-muted-foreground">Affichage des 60 premiers résultats — précise ta recherche pour voir les autres.</p>}{!searchResults.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucune capacité correspondante.</p>}</div>}
       {sortedKnown.length ? <div className="mt-4 grid items-start gap-5 lg:grid-cols-2">
-        {(["actif", "passif"] as const).map((category) => { const categorySpells = sortedKnown.filter((spell) => spell.category === category); return <div key={category}><h3 className="mb-2 flex items-center gap-2 font-display text-lg font-semibold">{category === "actif" ? <Zap className="size-4" /> : <CircleDotDashed className="size-4" />}{category === "actif" ? "Actifs" : "Passifs"}</h3><div className="space-y-2">{categorySpells.map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={state.charges[spell.id] ?? spell.charges ?? 0} onCharges={(count) => void setCharges(spell, count)} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}{!categorySpells.length && <p className="rounded-xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">Aucun {category === "actif" ? "actif" : "passif"} acquis.</p>}</div></div> })}
-        {sortedKnown.some((spell) => spell.category === "bonus") && <details className="lg:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-muted-foreground">Afficher les bonus ({sortedKnown.filter((spell) => spell.category === "bonus").length})</summary><div className="mt-3 grid gap-2 lg:grid-cols-2">{sortedKnown.filter((spell) => spell.category === "bonus").map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={0} onCharges={() => undefined} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}</div></details>}
+        {(["actif", "passif"] as const).map((category) => { const categorySpells = sortedKnown.filter((spell) => spell.category === category); return <div key={category}><h3 className="mb-2 flex items-center gap-2 font-display text-lg font-semibold">{category === "actif" ? <Zap className="size-4" /> : <CircleDotDashed className="size-4" />}{category === "actif" ? "Actifs" : "Passifs"}</h3><div className="space-y-2">{categorySpells.map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} original={originals.get(spell.id) || spell} customized={spell.id in state.edits} onEdit={(patch) => editSpell(spell, patch)} onReset={() => resetSpell(spell)} onRemove={() => removeSpell(spell)} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={state.charges[spell.id] ?? spell.charges ?? 0} onCharges={(count) => void setCharges(spell, count)} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}{!categorySpells.length && <p className="rounded-xl border border-dashed px-3 py-5 text-center text-xs text-muted-foreground">Aucun {category === "actif" ? "actif" : "passif"} acquis.</p>}</div></div> })}
+        {sortedKnown.some((spell) => spell.category === "bonus") && <details className="lg:col-span-2"><summary className="cursor-pointer text-sm font-semibold text-muted-foreground">Afficher les bonus ({sortedKnown.filter((spell) => spell.category === "bonus").length})</summary><div className="mt-3 grid gap-2 lg:grid-cols-2">{sortedKnown.filter((spell) => spell.category === "bonus").map((spell) => { const linkedRanks = classes.flatMap((item) => item.id in spell.classRanks ? [spell.classRanks[item.id]] : []); const rank = linkedRanks.length ? Math.min(...linkedRanks) : null; return <KnownSpell key={spell.id} spell={spell} original={originals.get(spell.id) || spell} customized={spell.id in state.edits} onEdit={(patch) => editSpell(spell, patch)} onReset={() => resetSpell(spell)} onRemove={() => removeSpell(spell)} rank={rank} accent={classes.find((item) => item.id in spell.classRanks)?.accentDark || "#927640"} currentCharges={0} onCharges={() => undefined} manual={sort === "manual"} dragOver={dragOverSpellId === spell.id} onDragStart={() => setDraggedSpellId(spell.id)} onDragEnd={() => { setDraggedSpellId(null); setDragOverSpellId(null) }} onDragOver={() => draggedSpellId && draggedSpellId !== spell.id && setDragOverSpellId(spell.id)} onDrop={() => { if (draggedSpellId) void reorderSpell(draggedSpellId, spell.id); setDraggedSpellId(null); setDragOverSpellId(null) }} /> })}</div></details>}
       </div> : <p className="mt-4 rounded-xl border border-dashed px-4 py-7 text-center text-sm text-muted-foreground">Aucune capacité disponible pour ce niveau.</p>}
+      {removedSpells.length > 0 && <div className="mt-4 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+        <span className="mr-1 text-[10px] font-semibold uppercase tracking-wider">Retirés de la fiche</span>
+        {removedSpells.map((spell) => <button key={spell.id} type="button" onClick={() => void restoreSpell(spell.id)} className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 hover:border-primary/50 hover:text-primary" title="Rétablir ce sort sur la fiche"><Undo2 className="size-3" />{spell.name}</button>)}
+      </div>}
     </section>
 
     {classes.map((characterClass) => {

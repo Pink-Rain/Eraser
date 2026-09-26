@@ -6,6 +6,7 @@ import {
   setCharacterInventoryItemQuantity, transferCharacterInventoryItem, updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
 import { isNpcLibraryPage } from "@/lib/npc-pages"
+import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
 /**
@@ -66,7 +67,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string" && authorization.npc.pageLinked !== "bac-a-sable") {
       const targets = await transferTargetsFor(authorization, id)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      inventory = await transferCharacterInventoryItem(id, body.slotId, body.targetId, "npc")
+      const slotId = body.slotId, targetId = body.targetId
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "npc", onMoved))
     }
     else throw new Error("INVALID_INVENTORY_ACTION")
     return NextResponse.json({ inventory: { ...inventory, items: [] } })

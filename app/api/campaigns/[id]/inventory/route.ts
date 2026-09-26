@@ -15,6 +15,7 @@ import {
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
+import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorizedCampaign(id: string) {
@@ -66,7 +67,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
       const targets = await listInventoryTransferTargets(id, ownerId)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      inventory = await transferCharacterInventoryItem(ownerId, body.slotId, body.targetId)
+      const slotId = body.slotId, targetId = body.targetId
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(ownerId, slotId, targetId, "character", onMoved))
     } else throw new Error("INVALID_INVENTORY_ACTION")
     return NextResponse.json({ inventory: { ...inventory, items: [] } })
   } catch (error) {

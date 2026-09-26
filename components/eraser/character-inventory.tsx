@@ -4,6 +4,7 @@ import { useEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type S
 import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Link2, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
+import { useInventoryReceived } from "@/components/eraser/item-notifications"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -236,16 +237,19 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const [targetsLoaded, setTargetsLoaded] = useState(false)
   const [targetsLoading, setTargetsLoading] = useState(false)
   const inventoryEndpoint = endpoint || `/api/characters/${encodeURIComponent(characterId)}/inventory`
+  // Un objet reçu recharge l'inventaire affiché (la fiche, elle, recharge le sien).
+  const [reloads, setReloads] = useState(0)
+  useInventoryReceived(controlled ? [] : [characterId, `CAMPAGNE:${characterId}`], () => setReloads((count) => count + 1))
 
   useEffect(() => {
-    if (initialInventory || controlled) return
+    if ((initialInventory && !reloads) || controlled) return
     let active = true
     fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory(payload.inventory); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
     // Le résumé arrive sans le catalogue : on le complète ensuite en tâche de fond,
     // pour les objets rangés avant que leur mise en forme ne soit conservée.
     fetch(inventoryEndpoint).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } })).then(({ response, payload }) => { if (active && response.ok && payload.inventory) { setOwnInventory(payload.inventory); setCatalogLoaded(true) } }).catch(() => { /* le résumé suffit à travailler */ })
     return () => { active = false }
-  }, [controlled, initialInventory, inventoryEndpoint])
+  }, [controlled, initialInventory, inventoryEndpoint, reloads])
 
   async function mutate(body: MutationBody, key: string) {
     if (readOnly) return false

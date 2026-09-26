@@ -5575,7 +5575,10 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
   return buildCharacterInventory(characterId, workbook)
 }
 
-export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character") {
+/** Ce qui vient de changer de sac : sert à prévenir le destinataire. */
+export type InventoryTransferMoved = { name: string; quantity: number; targetId: string; targetMode: InventoryOwnerMode }
+
+export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character", onMoved?: (moved: InventoryTransferMoved) => void) {
   await inventoryStorageFor(sourceId, true, sourceMode)
   const targetMode: InventoryOwnerMode = await getNpcById(targetId).catch(() => null) ? "npc" : "character"
   const workbook = await inventoryStorageFor(targetId, true, targetMode)
@@ -5644,6 +5647,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
   })))
   workbook.contents = workbook.contents.map((content) => content.id === updatedTarget.id ? updatedTarget : content.id === updatedSource.id ? updatedSource : content)
   cacheInventoryWorkbook(workbook)
+  onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode })
   return buildCharacterInventory(sourceId, workbook)
 }
 

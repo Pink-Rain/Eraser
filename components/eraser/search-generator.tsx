@@ -312,7 +312,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
     if (!draw?.itemId) return false
     setGiving(id); setError("")
     try {
-      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/search-draws`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "give", itemId: draw.itemId, targetId: target.id }) })
+      const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/search-draws`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "give", itemId: draw.itemId, itemName: draw.itemName, targetId: target.id }) })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
       if (!response.ok) throw new Error(payload.error || "Le transfert a échoué.")
       const label = target.kind === "campaign" ? "l’inventaire de campagne" : target.name

@@ -23,6 +23,7 @@ import {
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
+import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorizedCharacter(id: string) {
@@ -99,7 +100,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       inventory = await moveCharacterInventoryItem(id, body.slotId, body.containerId)
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
       if (!(await transferTargets(authorization)).some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      inventory = await transferCharacterInventoryItem(id, body.slotId, body.targetId)
+      const slotId = body.slotId, targetId = body.targetId
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "character", onMoved))
     } else if (body.action === "set-currency" && typeof body.containerId === "string" && typeof body.currency === "string" && typeof body.amount === "number" && Number.isFinite(body.amount)) {
       inventory = await setCharacterInventoryCurrency(id, body.containerId, body.currency, body.amount)
     } else {

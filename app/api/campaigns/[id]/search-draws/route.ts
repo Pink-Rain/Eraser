@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { addCharacterInventoryItem, getCampaignDashboard, listInventoryTransferTargets } from "@/lib/google-sheets"
+import { notifyItemReceived } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 import { readSearchDraws, searchDrawsShared, writeSearchDraws } from "@/lib/search-draws-store"
 
@@ -19,9 +20,10 @@ export async function GET(_request: Request, { params }: { params: Promise<{ id:
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
-  if (!await authorizedCampaign(id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const authorization = await authorizedCampaign(id)
+  if (!authorization) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; draws?: unknown; itemId?: unknown; targetId?: unknown }
+    const body = (await request.json()) as { action?: string; draws?: unknown; itemId?: unknown; targetId?: unknown; itemName?: unknown }
     if (body.action === "save") {
       const count = await writeSearchDraws(id, body.draws)
       return NextResponse.json({ shared: count !== null, count })
@@ -38,6 +40,9 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
         if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || body.itemId.startsWith("DRIVE-")) throw error
         await addCharacterInventoryItem(target.id, `DRIVE-${body.itemId}`, undefined, mode)
       }
+      // Le nom affiché vient du tirage : il ne sert qu'au texte de la notification.
+      const itemName = typeof body.itemName === "string" ? body.itemName.trim().slice(0, 200) : ""
+      if (itemName) await notifyItemReceived(authorization.account, { name: itemName, quantity: 1, targetId: target.id, targetMode: mode })
       return NextResponse.json({ ok: true, target: { id: target.id, name: target.name, kind: target.kind } })
     }
     throw new Error("INVALID_SEARCH_ACTION")

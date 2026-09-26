@@ -160,6 +160,42 @@ function SpellForm({ initial, classes, spells, pending, title, withClasses = tru
 }
 
 const fieldInputClass = "border-transparent bg-transparent px-1.5 shadow-none focus-visible:border-input focus-visible:bg-background"
+// Compétences, distance et charges gardent un cadre léger à leur couleur, pour être
+// repérées d'un coup d'œil dans les cartes.
+const framedInputClass = "px-2 shadow-none focus-visible:bg-background"
+const skillFrameClass = "border-[#b3261e]/30 bg-[#b3261e]/[.05] focus-visible:border-[#b3261e]/60"
+const distanceFrameClass = "border-stone-400/35 bg-stone-500/[.06] focus-visible:border-stone-500/60"
+const chargesFrameClass = "border-violet-400/40 bg-violet-500/[.07] focus-visible:border-violet-500/60"
+
+/**
+ * Rail vertical discret, fixé au bord de l'écran : un clic amène au rang voulu, le rang
+ * visible est mis en avant.
+ */
+function RankRail({ counts, accent }: { counts: number[]; accent: string }) {
+  const [current, setCurrent] = useState(0)
+  useEffect(() => {
+    const sections = counts.map((_, rank) => document.getElementById(`rang-${rank}`)).filter((node): node is HTMLElement => Boolean(node))
+    const visible = new Map<number, number>()
+    const observer = new IntersectionObserver((entries) => {
+      for (const entry of entries) visible.set(Number((entry.target as HTMLElement).dataset.rank), entry.isIntersecting ? entry.intersectionRatio : 0)
+      const best = [...visible.entries()].filter(([, ratio]) => ratio > 0).sort((left, right) => left[0] - right[0])[0]
+      if (best) setCurrent(best[0])
+    }, { rootMargin: "-15% 0px -55% 0px", threshold: [0, 0.01, 0.5, 1] })
+    for (const section of sections) observer.observe(section)
+    return () => observer.disconnect()
+  }, [counts])
+  return <nav aria-label="Aller à un rang" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/70 px-1 py-2 opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
+    {counts.map((count, rank) => <button
+      key={rank}
+      type="button"
+      onClick={() => document.getElementById(`rang-${rank}`)?.scrollIntoView({ behavior: "smooth", block: "start" })}
+      title={`${rankLabel(rank)} — ${count} sort${count > 1 ? "s" : ""}`}
+      aria-current={current === rank ? "true" : undefined}
+      className={`flex size-6 shrink-0 items-center justify-center rounded-full text-[10px] font-semibold tabular-nums transition ${current === rank ? "text-white" : count ? "text-foreground/75 hover:bg-muted" : "text-muted-foreground/45 hover:bg-muted"}`}
+      style={current === rank ? { backgroundColor: accent } : undefined}
+    >{rank === 0 ? "C" : rank}</button>)}
+  </nav>
+}
 
 type SaveStatus = "idle" | "saving" | "saved" | "error"
 
@@ -234,9 +270,9 @@ function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDele
           <RichTextField value={draft.descriptionHtml || draft.description} onCommit={(html) => setDraft((current) => ({ ...current, description: plainText(html), descriptionHtml: html }))} className="mt-1 text-muted-foreground" />
         </blockquote>
         <div className="flex flex-wrap items-center gap-2 text-xs">
-          <Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} placeholder="Compétences" className={`h-7 min-w-32 flex-1 font-semibold text-[#b3261e] ${fieldInputClass}`} />
-          <Input aria-label="Distance" value={draft.distance} onChange={(event) => field("distance", event.target.value)} placeholder="Distance" className={`h-7 w-28 ${fieldInputClass}`} />
-          {classSpellCategory(draft.type) === "actif" && <Input type="number" min={0} max={5} aria-label="Charges" value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} placeholder="Charges" className={`h-7 w-20 ${fieldInputClass}`} />}
+          <Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} placeholder="Compétences" className={`h-7 min-w-32 flex-1 font-semibold text-[#b3261e] ${framedInputClass} ${skillFrameClass}`} />
+          <Input aria-label="Distance" value={draft.distance} onChange={(event) => field("distance", event.target.value)} placeholder="Distance" className={`h-7 w-28 ${framedInputClass} ${distanceFrameClass}`} />
+          {classSpellCategory(draft.type) === "actif" && <Input type="number" min={0} max={5} aria-label="Charges" value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} placeholder="Charges" className={`h-7 w-20 ${framedInputClass} ${chargesFrameClass}`} />}
         </div>
         <ClassLinksEditor compact draft={draft} classes={classes} spells={allSpells} rowNumber={spell.rowNumber} onChange={(classRanks) => field("classRanks", classRanks)} />
       </div>
@@ -298,6 +334,8 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
   const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const filtered = useMemo(() => data.spells.filter((spell) => !normalizedQuery || searchText(spell).includes(normalizedQuery)), [data.spells, normalizedQuery])
   const selectedClass = data.classes.find((item) => item.id === selectedClassId) || data.classes[0]
+  const selectedClassKey = selectedClass?.id || ""
+  const rankCounts = useMemo(() => Array.from({ length: 21 }, (_, rank) => data.spells.filter((spell) => spell.classRanks[selectedClassKey] === rank).length), [data.spells, selectedClassKey])
   // La grille partagée gère largeurs, hauteurs et mise en forme : le composant
   // ne décrit plus que ses colonnes.
   // Distance et charges ne concernent que les actifs : les colonnes disparaissent
@@ -537,7 +575,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Par classe</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger></TabsList>
-      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8">{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} className="rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
+      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => setSearchRank(searchRank === rank ? null : rank)}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
       {/* Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs. */}
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
