@@ -75,6 +75,9 @@ export type CampaignNpcRecord = {
   lore: string
   /** Colonne « PNJ important » de la feuille. */
   important: boolean
+  /** Noms de sorts séparés par des virgules (« Sorts des classes » ou « Sorts des créatures »). */
+  activeSpells?: string
+  passiveSpells?: string
   createdByUid: string
   createdAt: string
   updatedAt: string

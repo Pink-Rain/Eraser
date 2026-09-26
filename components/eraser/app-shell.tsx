@@ -68,13 +68,14 @@ import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
+import { campaignCreatedEvent, characterCreatedEvent } from "@/lib/selection-events"
 import { cn } from "@/lib/utils"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
 
 const PageLabelContext = createContext<(label: string) => void>(() => undefined)
-const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole } | null>(null)
+const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser } | null>(null)
 
 export function PageLabel({ label, children }: { label: string; children: ReactNode }) {
   const setPageLabel = useContext(PageLabelContext)
@@ -255,6 +256,51 @@ export function AppShell({
     }).catch(() => undefined).finally(() => { todosLoadingRef.current = false })
     return () => { active = false }
   }, [accountMenuOpen, todosLoaded, user.role, viewRole])
+
+  // Une campagne ou un personnage tout juste créé rejoint la liste et devient la
+  // sélection : on arrive sur son tableau de bord ou sa fiche déjà choisi.
+  useEffect(() => {
+    function campaignCreated(event: Event) {
+      const campaign = (event as CustomEvent<CampaignRecord>).detail
+      if (!campaign?.id) return
+      setVisibleCampaigns((current) => current.some((item) => item.id === campaign.id) ? current : [campaign, ...current])
+      window.localStorage.setItem(campaignStorageKey, campaign.id)
+      setSelectedCampaignId(campaign.id)
+    }
+    function characterCreated(event: Event) {
+      const character = (event as CustomEvent<CharacterRecord>).detail
+      if (!character?.id) return
+      setVisibleCharacters((current) => current.some((item) => item.id === character.id) ? current : [character, ...current])
+      window.localStorage.setItem(characterStorageKey, character.id)
+      setSelectedCharacterId(character.id)
+    }
+    window.addEventListener(campaignCreatedEvent, campaignCreated)
+    window.addEventListener(characterCreatedEvent, characterCreated)
+    return () => {
+      window.removeEventListener(campaignCreatedEvent, campaignCreated)
+      window.removeEventListener(characterCreatedEvent, characterCreated)
+    }
+  }, [campaignStorageKey, characterStorageKey])
+
+  // Ouvrir la fiche d'un de ses personnages ou le tableau de bord d'une de ses
+  // campagnes (depuis l'accueil, un index, un lien) le sélectionne aussi.
+  useEffect(() => {
+    const characterMatch = pathname.match(/^\/personnage\/([^/]+)/)
+    const campaignMatch = pathname.match(/^\/campagne\/([^/]+)/)
+    const timer = window.setTimeout(() => {
+      const characterId = characterMatch ? decodeURIComponent(characterMatch[1]) : ""
+      if (characterId && visibleCharacters.some((item) => item.id === characterId)) {
+        window.localStorage.setItem(characterStorageKey, characterId)
+        setSelectedCharacterId(characterId)
+      }
+      const campaignId = campaignMatch ? decodeURIComponent(campaignMatch[1]) : ""
+      if (campaignId && visibleCampaigns.some((item) => item.id === campaignId)) {
+        window.localStorage.setItem(campaignStorageKey, campaignId)
+        setSelectedCampaignId(campaignId)
+      }
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [campaignStorageKey, characterStorageKey, pathname, visibleCampaigns, visibleCharacters])
 
   useEffect(() => {
     function updateCampaign(event: Event) {
@@ -674,7 +720,7 @@ export function AppShell({
           </Badge>
         </header>
         <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain">
-          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole }}>
+          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user }}>
             <div data-view-role={viewRole} className="contents">
               {children}
             </div>

@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Backpack, ChevronDown, CircleMinus, Dices, Download, ImagePlus, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Trash2, UserRound, UsersRound } from "lucide-react"
+import { Backpack, ChevronDown, CircleMinus, Dices, Download, ImagePlus, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -21,6 +21,7 @@ import { CharacteristicBadges, CharacteristicInputs } from "@/components/eraser/
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { npcCharacteristicKeys, npcCharacteristics, type CharacteristicName } from "@/lib/characteristics"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
+import { SpellPicker, useSpellOptions } from "@/components/eraser/spell-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { isNpcLibraryPage, npcBelongsToCampaign } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
@@ -163,6 +164,7 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
   const [portraitFile, setPortraitFile] = useState<File>()
   const [portraitPreview, setPortraitPreview] = useState("")
   const inCampaign = npcBelongsToCampaign(draft) && !index
+  const { options: spells, loading: spellsLoading } = useSpellOptions(["classes", "creatures"])
   function update<K extends keyof CampaignNpcRecord>(key: K, value: CampaignNpcRecord[K]) { setDraft((current) => ({ ...current, [key]: value })) }
   function choosePortrait(file?: File) { if (!file) return; setPortraitFile(file); const reader = new FileReader(); reader.onload = () => setPortraitPreview(typeof reader.result === "string" ? reader.result : ""); reader.readAsDataURL(file) }
   const characteristics = Object.fromEntries(Object.entries(npcCharacteristics(draft)).map(([name, value]) => [name, String(value)]))
@@ -204,6 +206,12 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
     <section className="grid gap-2">
       <div className="flex items-center gap-2"><Shield className="size-4 text-primary" /><h3 className="font-display text-lg font-semibold">Caractéristiques</h3></div>
       <CharacteristicInputs values={characteristics} onChange={setCharacteristic} />
+    </section>
+    {/* Comme les créatures, mais un PNJ puise aussi dans les sorts des classes. */}
+    <section className="grid gap-4">
+      <div className="flex items-center gap-2"><WandSparkles className="size-4 text-primary" /><h3 className="font-display text-lg font-semibold">Sorts</h3></div>
+      <SpellPicker label="Actifs" icon={<Zap className="size-3.5" />} value={draft.activeSpells ?? ""} options={spells.filter((spell) => spell.category !== "passif")} known={spells} loading={spellsLoading} onChange={(value) => update("activeSpells", value)} />
+      <SpellPicker label="Passifs" icon={<Sparkles className="size-3.5" />} value={draft.passiveSpells ?? ""} options={spells.filter((spell) => spell.category === "passif")} known={spells} loading={spellsLoading} onChange={(value) => update("passiveSpells", value)} />
     </section>
     {inCampaign && <section className="rounded-2xl border p-4">
       <div className="mb-4"><h3 className="font-display text-lg font-semibold">Sac à dos</h3><p className="text-xs text-muted-foreground">L’unique inventaire du PNJ. Il se modifie aussi sans ouvrir la fiche, depuis la carte du PNJ.</p></div>

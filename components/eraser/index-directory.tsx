@@ -1,7 +1,7 @@
 "use client"
 
 import Link from "next/link"
-import { Church, CircleUserRound, Drama, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Users, type LucideIcon } from "lucide-react"
+import { Church, CircleUserRound, Drama, Flame, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Users, type LucideIcon } from "lucide-react"
 
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexPages, type IndexPage, type IndexPageKey } from "@/lib/index-pages"
@@ -17,6 +17,7 @@ export const indexPageIcons: Record<IndexPageKey, LucideIcon> = {
   personnages: CircleUserRound,
   pnjs: Drama,
   religions: Church,
+  "sorts-creatures": Flame,
 }
 
 function IndexCard({ page, favorite, onToggle }: { page: IndexPage; favorite: boolean; onToggle: () => void }) {

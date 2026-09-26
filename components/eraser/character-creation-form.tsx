@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { characterNarrativeStart, characterValueHeaders } from "@/lib/character-sheet-schema"
+import { announceCreatedCharacter } from "@/lib/selection-events"
 
 export type CreationClassOption = { id: string; name: string; type: string; imageUrl: string | null; accent: string }
 
@@ -90,7 +91,9 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
         setPending(false)
         return setError(payload.error || "Le personnage n’a pas pu être créé.")
       }
-      // La fiche s’ouvre dès l’enregistrement ; le bouton reste en attente jusque-là.
+      // Le personnage devient la sélection du menu, puis sa fiche s’ouvre ; le bouton
+      // reste en attente jusque-là.
+      announceCreatedCharacter({ id: payload.character.id, ownerUid: "", name: values[0], subtitle: values[1], updatedAt: new Date().toISOString(), campaigns: [] })
       router.push(`/personnage/${encodeURIComponent(payload.character.id)}`)
     } catch {
       setPending(false)

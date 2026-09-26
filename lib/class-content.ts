@@ -8,6 +8,7 @@ import {
   appendRows,
   clearSpreadsheetReadCache,
   deleteGoogleSheetRow,
+  ensureJdrSheet,
   googleSheetsJson,
   spreadsheetTabs,
   listClasses,
@@ -276,6 +277,45 @@ export async function listClassPresentations(refresh = false) {
 
 const SPELL_TAB_CANDIDATES = [SPELLS_TAB, "sorts", "Sort", "sort"]
 
+/**
+ * Deux index de sorts partagent tout ce code : « Sorts des classes » (le classeur
+ * « Sorts de classe », avec une colonne par classe) et « Sorts des créatures », un
+ * onglet du classeur « Index des créatures », sans classes ni rangs.
+ */
+export type SpellIndexKind = "classes" | "creatures"
+export const CREATURE_SPELLS_TAB = "Sorts des créatures"
+const CREATURE_SPELL_HEADERS = ["ID", "Nom", "Effet", "Description", "Type", "Compétences", "Distance", "Charges"]
+let creatureSpellFileCache: { expiresAt: number; file: ClassWorkbookFile } | null = null
+
+/**
+ * Le classeur des créatures, relié (jamais recréé s'il existe) ; son onglet de sorts
+ * est ajouté la première fois, avec ses en-têtes, sans toucher aux autres onglets.
+ */
+async function creatureSpellFile(refresh = false): Promise<ClassWorkbookFile> {
+  if (!refresh && creatureSpellFileCache && creatureSpellFileCache.expiresAt > Date.now()) return creatureSpellFileCache.file
+  const sheet = await ensureJdrSheet("creatures")
+  if (!sheet) throw new Error("CREATURE_SPELLS_SHEET_NOT_FOUND")
+  const tabs = await spreadsheetTabs(sheet.spreadsheetId)
+  if (!tabs.some((tab) => tab.title === CREATURE_SPELLS_TAB)) {
+    await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ addSheet: { properties: { title: CREATURE_SPELLS_TAB, gridProperties: { rowCount: 500, columnCount: CREATURE_SPELL_HEADERS.length, frozenRowCount: 1, frozenColumnCount: 2 } } } }] }),
+    })
+    await updateRange(sheet.spreadsheetId, `${quoteTab(CREATURE_SPELLS_TAB)}!A1:${columnName(CREATURE_SPELL_HEADERS.length)}1`, [CREATURE_SPELL_HEADERS])
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+  }
+  const file: ClassWorkbookFile = { id: sheet.spreadsheetId, name: sheet.name, mimeType: SPREADSHEET_MIME_TYPE, webViewLink: sheet.webViewLink }
+  creatureSpellFileCache = { expiresAt: Date.now() + 10 * 60_000, file }
+  return file
+}
+
+async function spellSource(kind: SpellIndexKind, refresh = false) {
+  if (kind === "creatures") return { file: await creatureSpellFile(refresh), candidates: [CREATURE_SPELLS_TAB], classes: [] as ClassRecord[] }
+  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(refresh), listClasses()])
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  return { file, candidates: SPELL_TAB_CANDIDATES, classes }
+}
+
 /** Onglet des sorts déjà reconnu, par classeur : un enregistrement n'a pas à le rechercher. */
 const spellTabs = new Map<string, { sheetId: number; tabName: string }>()
 
@@ -298,10 +338,9 @@ function spellColumnsOf(headers: string[], classes: ClassRecord[]) {
   return { columns, classColumns }
 }
 
-async function spellWorkbook(refresh = false): Promise<SpellWorkbook> {
-  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(refresh), listClasses()])
-  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
-  const sheet = await readFormattedSheet(file.id, SPELL_TAB_CANDIDATES)
+async function spellWorkbook(refresh = false, kind: SpellIndexKind = "classes"): Promise<SpellWorkbook> {
+  const { file, candidates, classes } = await spellSource(kind, refresh)
+  const sheet = await readFormattedSheet(file.id, candidates)
   spellTabs.set(file.id, { sheetId: sheet.sheetId, tabName: sheet.tabName })
   const values = sheet.rows.map((row) => row.map((cell) => cell?.value || ""))
   const headers = values[0] ?? []
@@ -313,13 +352,12 @@ async function spellWorkbook(refresh = false): Promise<SpellWorkbook> {
  * forme (pour les ID et les rangs pleins), et la seule ligne modifiée avec la sienne.
  * Le classeur et son onglet ne sont pas recherchés à nouveau dans Drive.
  */
-async function spellWorkbookForSave(rowNumber: number | null) {
-  const [{ spells: file }, classes] = await Promise.all([classWorkbookFiles(), listClasses()])
-  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+async function spellWorkbookForSave(rowNumber: number | null, kind: SpellIndexKind = "classes") {
+  const { file, candidates, classes } = await spellSource(kind)
   let tab = spellTabs.get(file.id)
   if (!tab) {
     const tabs = await spreadsheetTabs(file.id)
-    const found = SPELL_TAB_CANDIDATES.map((candidate) => tabs.find((item) => item.title === candidate)).find(Boolean)
+    const found = candidates.map((candidate) => tabs.find((item) => item.title === candidate)).find(Boolean)
     if (!found || found.sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
     tab = { sheetId: found.sheetId, tabName: found.title }
     spellTabs.set(file.id, tab)
@@ -376,8 +414,8 @@ function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedShee
   }
 }
 
-export async function listClassSpells(refresh = false) {
-  const workbook = await spellWorkbook(refresh)
+export async function listClassSpells(refresh = false, kind: SpellIndexKind = "classes") {
+  const workbook = await spellWorkbook(refresh, kind)
   return {
     file: workbook.file,
     headers: workbook.headers,
@@ -498,8 +536,8 @@ function spellId(workbook: SpellWorkbook, index: number) {
  * `expectedId` : l'ID que l'interface croit voir sur cette ligne. Si la feuille a
  * bougé entre-temps (ligne supprimée ou insérée dans Sheets), rien n'est écrit.
  */
-export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string>; expectedId?: string } = {}) {
-  const workbook = options.workbook ?? await spellWorkbookForSave(rowNumber)
+export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string>; expectedId?: string; kind?: SpellIndexKind } = {}) {
+  const workbook = options.workbook ?? await spellWorkbookForSave(rowNumber, options.kind)
   const ignoredIndexes = new Set([...(options.ignoredRows ?? [])].map((row) => row - 2))
   const existingIndex = rowNumber === null ? -1 : rowNumber - 2
   if (rowNumber !== null && (existingIndex < 0 || !workbook.rows[existingIndex])) throw new Error("CLASS_SPELL_NOT_FOUND")
@@ -584,8 +622,8 @@ export async function linkClassSpell(rowNumber: number, classId: string, rank: n
   await updateRange(workbook.file.id, `${quoteTab(workbook.tabName)}!${columnName(target.column + 1)}${rowNumber}`, [[value]])
 }
 
-export async function deleteClassSpell(rowNumber: number) {
-  const workbook = await spellWorkbook(true)
+export async function deleteClassSpell(rowNumber: number, kind: SpellIndexKind = "classes") {
+  const workbook = await spellWorkbook(true, kind)
   if (!workbook.rows[rowNumber - 2]) throw new Error("CLASS_SPELL_NOT_FOUND")
   await deleteGoogleSheetRow(workbook.file.id, workbook.tabName, rowNumber)
 }
@@ -611,8 +649,8 @@ async function ignoredSpellPairs(fileId: string) {
   return new Set(rows.filter((row) => row[0] && row[1]).map((row) => pairKey(row[0].trim(), row[1].trim())))
 }
 
-export async function ignoreSpellPairs(pairs: Array<[string, string]>) {
-  const { file } = await spellWorkbook(true)
+export async function ignoreSpellPairs(pairs: Array<[string, string]>, kind: SpellIndexKind = "classes") {
+  const { file } = await spellWorkbook(true, kind)
   const tabs = await spreadsheetTabs(file.id)
   if (!tabs.some((tab) => tab.title === IGNORED_PAIRS_TAB)) {
     await googleSheetsJson(`spreadsheets/${file.id}:batchUpdate`, {
@@ -628,8 +666,8 @@ export async function ignoreSpellPairs(pairs: Array<[string, string]>) {
   clearSpreadsheetReadCache(file.id)
 }
 
-export async function listClassResources(refresh = false) {
-  const data = await listClassSpells(refresh)
+export async function listClassResources(refresh = false, kind: SpellIndexKind = "classes") {
+  const data = await listClassSpells(refresh, kind)
   const ignored = await ignoredSpellPairs(data.file.id).catch(() => new Set<string>())
   return { ...data, similarities: findSpellSimilarities(data.spells).filter((match) => !ignored.has(pairKey(match.leftId, match.rightId))) }
 }
@@ -640,8 +678,8 @@ export async function listClassResources(refresh = false) {
  * Chaque ligne est vérifiée par son ID : si la feuille a bougé entre-temps, rien
  * n'est écrit.
  */
-export async function mergeClassSpells(keep: { rowNumber: number; id: string }, removed: Array<{ rowNumber: number; id: string }>, draft: ClassSpellDraft) {
-  const workbook = await spellWorkbook(true)
+export async function mergeClassSpells(keep: { rowNumber: number; id: string }, removed: Array<{ rowNumber: number; id: string }>, draft: ClassSpellDraft, kind: SpellIndexKind = "classes") {
+  const workbook = await spellWorkbook(true, kind)
   const check = (target: { rowNumber: number; id: string }) => {
     const row = workbook.rows[target.rowNumber - 2]
     const id = row ? cell(row, workbook.columns.id).trim() || `LIGNE-${target.rowNumber}` : ""

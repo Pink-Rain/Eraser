@@ -42,6 +42,9 @@ function npcValue(value: unknown, pageLinked: string): CampaignNpcRecord | null 
     lore: shortText(candidate.lore, 5000),
     inCampaign: Boolean(candidate.inCampaign), inPlayerGroup: Boolean(candidate.inPlayerGroup),
     important: Boolean(candidate.important), createdByUid: shortText(candidate.createdByUid, 200),
+    // Absents d'une ancienne version de l'application : la feuille garde alors ses sorts.
+    activeSpells: typeof candidate.activeSpells === "string" ? shortText(candidate.activeSpells, 4000) : undefined,
+    passiveSpells: typeof candidate.passiveSpells === "string" ? shortText(candidate.passiveSpells, 4000) : undefined,
     createdAt: shortText(candidate.createdAt, 80), updatedAt: shortText(candidate.updatedAt, 80),
   }
 }

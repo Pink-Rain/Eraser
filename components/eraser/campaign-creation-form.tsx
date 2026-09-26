@@ -8,6 +8,8 @@ import { RichTextField } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
+import type { CampaignRecord } from "@/lib/google-sheets"
+import { announceCreatedCampaign } from "@/lib/selection-events"
 
 export function CampaignCreationForm() {
   const router = useRouter()
@@ -28,7 +30,7 @@ export function CampaignCreationForm() {
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ name, description, bannerUrl, accentColor }),
     })
-    const payload = (await response.json()) as { error?: string; campaign?: { id: string } }
+    const payload = (await response.json()) as { error?: string; campaign?: CampaignRecord }
     if (!response.ok || !payload.campaign) { setPending(false); return setError(payload.error || "La campagne n’a pas pu être créée.") }
     if (bannerFile) {
       const form = new FormData()
@@ -36,9 +38,9 @@ export function CampaignCreationForm() {
       const upload = await fetch(`/api/campaigns/${encodeURIComponent(payload.campaign.id)}`, { method: "PATCH", body: form })
       if (!upload.ok) { setPending(false); return setError("La campagne est créée, mais la bannière n’a pas pu être importée.") }
     }
-    setPending(false)
+    // La nouvelle campagne devient la sélection du menu, puis son tableau de bord s’ouvre.
+    announceCreatedCampaign(payload.campaign)
     router.push(`/campagne/${encodeURIComponent(payload.campaign.id)}`)
-    router.refresh()
   }
 
   return (

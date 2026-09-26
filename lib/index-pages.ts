@@ -2,7 +2,7 @@
  * Les pages de la section « Index » (anciennement « Ressources »). Les adresses
  * restent sous /ressources pour que les liens existants continuent de fonctionner.
  */
-export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions"
+export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-creatures"
 
 export type IndexPage = { key: IndexPageKey; href: string; label: string; description: string }
 
@@ -10,7 +10,8 @@ export const indexHomeHref = "/ressources"
 
 export const indexPages: IndexPage[] = ([
   { key: "campagnes", href: "/ressources/index-des-campagnes", label: "Campagnes", description: "Toutes les campagnes, leurs MJ et leurs joueurs." },
-  { key: "classes", href: "/ressources/index-des-classes", label: "Classes", description: "Classes, sorts et progression." },
+  { key: "classes", href: "/ressources/index-des-classes", label: "Sorts des classes", description: "Les sorts de chaque classe, rang par rang." },
+  { key: "sorts-creatures", href: "/ressources/sorts-des-creatures", label: "Sorts des créatures", description: "Les sorts actifs et passifs des créatures." },
   { key: "creatures", href: "/ressources/index-des-creatures", label: "Créatures", description: "Le bestiaire, ses caractéristiques et ses sorts." },
   { key: "langues", href: "/ressources/index-des-langues", label: "Langues", description: "Les langues parlées dans le monde." },
   { key: "lieux", href: "/ressources/index-des-lieux", label: "Lieux", description: "Des continents aux lieux-dits." },
