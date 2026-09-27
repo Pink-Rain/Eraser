@@ -60,6 +60,7 @@ import type {
   TabletopSourcePage,
   TabletopTokenRecord,
 } from "@/lib/tabletop-schema"
+import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { cn } from "@/lib/utils"
 
 type TabletopUser = { uid: string; role: "admin" | "mj" | "joueur" }
@@ -973,7 +974,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
       const url = new URL(window.location.href)
       url.searchParams.set("map", payload.snapshot.map.id)
       if (canManage) url.searchParams.delete("room")
-      window.history.replaceState(null, "", url)
+      replaceAppUrl(url, { record: false })
     } catch (error) {
       showNotice(error instanceof Error ? error.message : "Carte non chargée.", true)
     } finally {

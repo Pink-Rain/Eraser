@@ -9,7 +9,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-async function ClassIndexData({ showErrorDetail }: { showErrorDetail: boolean }) {
+async function ClassIndexData({ showErrorDetail, classId }: { showErrorDetail: boolean; classId: string }) {
   let data: Awaited<ReturnType<typeof listClassResources>> | null = null
   let loadError = ""
   try {
@@ -24,12 +24,13 @@ async function ClassIndexData({ showErrorDetail }: { showErrorDetail: boolean })
       : "Les tableaux « Sorts de classe » n’ont pas pu être chargés."
     loadError = showErrorDetail ? `${base} (${detail})` : base
   }
-  return <ClassIndexManager initialData={data ?? { classes: [], spells: [], similarities: [], headers: [], file: null }} initialError={loadError} />
+  return <ClassIndexManager initialData={data ?? { classes: [], spells: [], similarities: [], headers: [], file: null }} initialError={loadError} initialClassId={classId} />
 }
 
-export default async function ClassCreationPage() {
+export default async function ClassCreationPage({ searchParams }: { searchParams: Promise<{ classe?: string }> }) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
+  const { classe } = await searchParams
   return <AuthenticatedShell pageLabel="Création de classe" roles={["admin", "mj"]}>
     {/* Même disposition que l’Index des objets : la page défile, le tableau se fige. */}
     <div className="w-full px-4 pt-4 sm:px-6">
@@ -37,7 +38,7 @@ export default async function ClassCreationPage() {
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Classes</p>
         <h1 className="font-display text-2xl font-semibold sm:text-3xl">Création de classe</h1>
       </div>
-      <Suspense fallback={<DeferredContentLoading label="Chargement des sorts de classe…" />}><ClassIndexData showErrorDetail={account.role === "admin"} /></Suspense>
+      <Suspense fallback={<DeferredContentLoading label="Chargement des sorts de classe…" />}><ClassIndexData showErrorDetail={account.role === "admin"} classId={typeof classe === "string" ? classe : ""} /></Suspense>
     </div>
   </AuthenticatedShell>
 }

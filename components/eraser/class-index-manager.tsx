@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react"
-import { Check, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
+import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
@@ -22,6 +22,8 @@ import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-du
 import { ClassStateDetail, ClassStateOverview } from "@/components/eraser/class-state-overview"
 import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
 import { ClassStatisticsFor, GlobalClassStatistics, useClassPlayData } from "@/components/eraser/class-statistics"
+import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
+import { PageLabel } from "@/components/eraser/app-shell"
 
 type ResourceData = { classes: ClassRecord[]; spells: ClassSpell[]; similarities: SpellSimilarity[]; headers: string[]; file: { id: string; name: string; webViewLink?: string } | null }
 type MutationResult = { id: string; rowNumber: number; tone: { background: string; foreground: string } } | null
@@ -298,7 +300,53 @@ function SearchExisting({ classId, rank, spells, pending, error, onClose, onLink
  * bonus et les liens vers les classes. `creatures` : « Sorts des créatures », mêmes
  * tableaux sans classes, rangs ni bonus.
  */
-export function ClassIndexManager({ initialData, initialError, kind = "classes" }: { initialData: ResourceData; initialError: string; kind?: SpellIndexKind }) {
+const CLASS_CREATION_PATH = "/creation-de-classe"
+
+function classCreationHref(classId: string) {
+  return classId ? `${CLASS_CREATION_PATH}?classe=${encodeURIComponent(classId)}` : CLASS_CREATION_PATH
+}
+
+/**
+ * Le choix de la classe : une liste de liens, pour qu'un clic droit (ou un clic du
+ * milieu) ouvre la classe dans un autre onglet. Un clic simple l'affiche ici.
+ */
+function ClassPicker({ classes, selected, onSelect }: { classes: ClassRecord[]; selected: ClassRecord | undefined; onSelect: (classId: string) => void }) {
+  const [open, setOpen] = useState(false)
+  const sorted = useMemo(() => [...classes].sort((left, right) => left.name.localeCompare(right.name, "fr")), [classes])
+  const item = (classId: string, name: string, accent?: string) => <a
+    key={classId || "toutes"}
+    href={classCreationHref(classId)}
+    data-tab-label={classId ? `Classe · ${name}` : "Création de classe"}
+    role="option"
+    aria-selected={(selected?.id || "") === classId}
+    onClick={(event) => {
+      if (event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey || event.altKey) return
+      event.preventDefault()
+      setOpen(false)
+      onSelect(classId)
+    }}
+    className={`flex items-center gap-2 rounded-sm px-2 py-1.5 text-sm font-normal hover:bg-accent hover:text-accent-foreground ${(selected?.id || "") === classId ? "bg-accent/60 font-medium" : ""}`}
+  >
+    {accent ? <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: accent }} /> : <span className="size-2 shrink-0" />}
+    <span className="truncate">{name}</span>
+    {(selected?.id || "") === classId && <Check className="ml-auto size-3.5 shrink-0" />}
+  </a>
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" className="flex h-9 w-full items-center gap-2 rounded-md border border-input bg-transparent px-3 text-left text-sm font-normal shadow-xs outline-none focus-visible:border-ring focus-visible:ring-[3px] focus-visible:ring-ring/50 dark:bg-input/30">
+        {selected && <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: selected.accentDark }} />}
+        <span className="min-w-0 flex-1 truncate">{selected?.name ?? "Toutes les classes"}</span>
+        <ChevronDown className="size-4 shrink-0 opacity-50" />
+      </button>
+    </PopoverTrigger>
+    <PopoverContent align="start" className="max-h-80 w-[var(--radix-popover-trigger-width)] overflow-y-auto p-1" role="listbox">
+      {item("", "Toutes les classes")}
+      {sorted.map((characterClass) => item(characterClass.id, characterClass.name, characterClass.accentDark))}
+    </PopoverContent>
+  </Popover>
+}
+
+export function ClassIndexManager({ initialData, initialError, kind = "classes", initialClassId = "" }: { initialData: ResourceData; initialError: string; kind?: SpellIndexKind; initialClassId?: string }) {
   const forClasses = kind === "classes"
   const allowedTabs = forClasses ? ["classes", "actifs", "passifs", "bonus", "duplicates", "rank-bonus"] : ["actifs", "passifs", "duplicates"]
   const [data, setData] = useState(initialData)
@@ -321,7 +369,15 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
   const currentTab = forClasses ? classTab : storedTab
   const tab = allowedTabs.includes(currentTab) ? currentTab : allowedTabs[0]
   // Vide : toutes les classes (état et statistiques d'ensemble).
-  const [selectedClassId, setSelectedClassId] = useState("")
+  // Elle est aussi dans l'adresse (`?classe=`) : chaque classe s'ouvre dans son onglet.
+  const [selectedClassId, setSelectedClassId] = useState(initialClassId)
+  useEffect(() => {
+    if (!forClasses) return
+    const sync = () => setSelectedClassId(new URLSearchParams(window.location.search).get("classe") || "")
+    window.addEventListener(URL_CHANGE_EVENT, sync)
+    window.addEventListener("popstate", sync)
+    return () => { window.removeEventListener(URL_CHANGE_EVENT, sync); window.removeEventListener("popstate", sync) }
+  }, [forClasses])
   const playData = useClassPlayData(forClasses)
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
   // Sort dont on veut voir le groupe de doublons, et sort ouvert dans l'éditeur.
@@ -367,6 +423,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
 
   function selectClass(classId: string) {
     setSelectedClassId(classId)
+    if (forClasses && `${window.location.pathname}${window.location.search}` !== classCreationHref(classId)) replaceAppUrl(classCreationHref(classId))
     setNewDraft(null)
     setSearchRank(null)
     window.scrollTo({ top: 0, behavior: "smooth" })
@@ -590,7 +647,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
     }}
   />
 
-  return <section className="flex flex-col gap-3">
+  const page = <section className="flex flex-col gap-3" {...(forClasses ? { [IN_PLACE_ATTRIBUTE]: CLASS_CREATION_PATH } : {})}>
     <datalist id="class-spell-types">{classSpellTypeSuggestions.filter((type) => forClasses || classSpellCategory(type) !== "bonus").map((type) => <option key={type} value={type} />)}</datalist>
     <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
     {error && <p className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -603,7 +660,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Classes</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
-      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => selectClass(event.target.value)}><NativeSelectOption value="">Toutes les classes</NativeSelectOption>{[...data.classes].sort((left, right) => left.name.localeCompare(right.name, "fr")).map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
+      <TabsContent value="classes" className="mt-3"><div className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<ClassPicker classes={data.classes} selected={selectedClass} onSelect={selectClass} /></div>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} hrefFor={classCreationHref} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
       {/* Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs. */}
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
@@ -612,4 +669,6 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
       {forClasses && <TabsContent value="rank-bonus" className="mt-3"><RankBonusTab /></TabsContent>}
     </Tabs>
   </section>
+  // Le titre de l'onglet suit la classe affichée.
+  return forClasses ? <PageLabel label={selectedClass ? `Classe · ${selectedClass.name}` : "Création de classe"}>{page}</PageLabel> : page
 }

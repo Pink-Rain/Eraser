@@ -1,7 +1,7 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 // The application UI talks only to Eraser's local HTTP server. The
 // exceptions are this narrow set of triggers: checking for an update right
-// away, answering the update announcement, and controlling the frameless window's chrome (the
+// away, answering the update announcement, moving tabs between windows, and controlling the frameless window's chrome (the
 // custom titlebar draws its own minimize/maximize/close/pin buttons, since
 // there's no native titlebar to click).
 const { contextBridge, ipcRenderer } = require("electron")
@@ -26,5 +26,16 @@ contextBridge.exposeInMainWorld("eraserDesktop", {
     const listener = (_event, state) => callback(state)
     ipcRenderer.on("eraser:window-state", listener)
     return () => ipcRenderer.off("eraser:window-state", listener)
+  },
+  // Onglets : ouvrir une fenêtre, glisser un onglet d'une fenêtre à l'autre.
+  openWindow: (href) => ipcRenderer.invoke("eraser:open-window", href),
+  tabDragStart: (tab) => ipcRenderer.invoke("eraser:tab-drag-start", tab),
+  tabDragClaim: () => ipcRenderer.invoke("eraser:tab-drag-claim"),
+  tabDragEnd: (details) => ipcRenderer.invoke("eraser:tab-drag-end", details),
+  tabDragCancel: () => ipcRenderer.invoke("eraser:tab-drag-cancel"),
+  onTabAttach: (callback) => {
+    const listener = (_event, tab) => callback(tab)
+    ipcRenderer.on("eraser:tab-attach", listener)
+    return () => ipcRenderer.off("eraser:tab-attach", listener)
   },
 })

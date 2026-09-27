@@ -202,7 +202,7 @@ function CampaignColumn({ campaigns }: { campaigns: CampaignRecord[] }) {
       ) : layout === "grid" ? (
         <div className="grid gap-3 sm:grid-cols-2 2xl:grid-cols-3">
           {visible.map((campaign) => (
-            <button key={campaign.id} type="button" onClick={() => open(campaign)} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${campaign.accentColor}55` }}>
+            <button key={campaign.id} type="button" data-tab-href={`/campagne/${encodeURIComponent(campaign.id)}`} data-tab-label={campaign.name} onClick={() => open(campaign)} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${campaign.accentColor}55` }}>
               <CampaignBanner campaign={campaign} className="aspect-[16/6] w-full" />
               <div className="h-1 w-full" style={{ backgroundColor: campaign.accentColor }} />
               <div className="flex flex-1 flex-col p-3.5">
@@ -216,7 +216,7 @@ function CampaignColumn({ campaigns }: { campaigns: CampaignRecord[] }) {
       ) : (
         <div className="grid gap-1.5">
           {visible.map((campaign) => (
-            <button key={campaign.id} type="button" onClick={() => open(campaign)} className="group flex items-center gap-3 rounded-xl border border-l-4 bg-background/40 p-2 text-left transition hover:bg-accent" style={{ borderLeftColor: campaign.accentColor }}>
+            <button key={campaign.id} type="button" data-tab-href={`/campagne/${encodeURIComponent(campaign.id)}`} data-tab-label={campaign.name} onClick={() => open(campaign)} className="group flex items-center gap-3 rounded-xl border border-l-4 bg-background/40 p-2 text-left transition hover:bg-accent" style={{ borderLeftColor: campaign.accentColor }}>
               <CampaignBanner campaign={campaign} className="h-11 w-16 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="font-display truncate font-semibold" style={{ color: campaign.accentColor }}>{campaign.name}</p>
@@ -305,7 +305,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
           {visible.map((character) => {
             const accent = character.campaigns[0]?.accentColor || "#927640"
             return (
-              <button key={character.id} type="button" onClick={() => open(character)} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${accent}55` }}>
+              <button key={character.id} type="button" data-tab-href={`/personnage/${encodeURIComponent(character.id)}`} data-tab-label={character.name} onClick={() => open(character)} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 text-left transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${accent}55` }}>
                 <Portrait character={character} className="aspect-[4/5] w-full" />
                 <div className="h-1 w-full" style={{ backgroundColor: accent }} />
                 <div className="p-3">
@@ -323,7 +323,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
       ) : (
         <div className="grid gap-1.5">
           {visible.map((character) => (
-            <button key={character.id} type="button" onClick={() => open(character)} className="flex items-center gap-3 rounded-xl border border-l-4 bg-background/40 p-2 text-left transition hover:bg-accent" style={{ borderLeftColor: character.campaigns[0]?.accentColor || "#927640" }}>
+            <button key={character.id} type="button" data-tab-href={`/personnage/${encodeURIComponent(character.id)}`} data-tab-label={character.name} onClick={() => open(character)} className="flex items-center gap-3 rounded-xl border border-l-4 bg-background/40 p-2 text-left transition hover:bg-accent" style={{ borderLeftColor: character.campaigns[0]?.accentColor || "#927640" }}>
               <Portrait character={character} className="size-11 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="font-display truncate font-semibold">{character.name}</p>

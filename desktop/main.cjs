@@ -1,5 +1,5 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
-const { app, BrowserWindow, dialog, ipcMain, Menu, shell, session } = require("electron")
+const { app, BrowserWindow, dialog, ipcMain, Menu, screen, shell, session } = require("electron")
 const { spawn } = require("node:child_process")
 const { request } = require("node:http")
 const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } = require("node:fs")
@@ -37,7 +37,11 @@ function accountsConfig() {
     return {}
   }
 }
+// La première fenêtre ouverte (ou celle qui a pris sa place) : celle du test
+// d'installation et du « second lancement ». Toutes les fenêtres sont dans `windows`.
 let mainWindow = null
+const windows = new Set()
+let serverUrl = ""
 let serverProcess = null
 let startupLogPath = ""
 let updaterInitialized = false
@@ -50,10 +54,29 @@ let restartingServer = false
 // La mise à jour téléchargée qui attend la réponse de l'utilisateur.
 let pendingUpdate = null
 let fullUpdateInProgress = false
-let isPinned = false
-let isCollapsed = false
-let collapseSavedBounds = null
-let collapseSavedWasMaximized = false
+// Épinglée / réduite : propre à chaque fenêtre.
+const windowStates = new WeakMap()
+// L'onglet en cours de glisser-déposer entre fenêtres (un seul à la fois).
+let tabDrag = null
+let cookieFlushInstalled = false
+
+function stateOf(win) {
+  let state = windowStates.get(win)
+  if (!state) {
+    state = { isPinned: false, isCollapsed: false, savedBounds: null, savedWasMaximized: false }
+    windowStates.set(win, state)
+  }
+  return state
+}
+
+function liveWindows() {
+  return [...windows].filter((win) => !win.isDestroyed())
+}
+
+function senderWindow(event) {
+  const win = BrowserWindow.fromWebContents(event.sender)
+  return win && !win.isDestroyed() ? win : null
+}
 
 function resolveIconPath() {
   return app.isPackaged
@@ -199,7 +222,7 @@ async function startServer() {
   serverProcess.stderr.on("data", (chunk) => logLine(`[service:error] ${String(chunk).trimEnd()}`))
   serverProcess.once("exit", (code) => {
     logLine(`Le service local s’est arrêté avec le code ${code ?? "inconnu"}.`)
-    if (code && mainWindow && !restartingServer) {
+    if (code && windows.size && !restartingServer) {
       void dialog.showErrorBox(
         "Eraser s’est arrêté",
         `Le service local s’est fermé (code ${code}).\n\nJournal : ${startupLogPath}`,
@@ -247,8 +270,9 @@ async function startServerSafely() {
 
 /** Remplace le serveur local par la version téléchargée et recharge la page affichée. */
 async function applyHotUpdate() {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  const current = mainWindow.webContents.getURL()
+  const open = liveWindows()
+  if (!open.length) return
+  const current = new Map(open.map((win) => [win, win.webContents.getURL()]))
   await session.fromPartition(PERSISTENT_PARTITION).cookies.flushStore()
   restartingServer = true
   let url
@@ -258,7 +282,12 @@ async function applyHotUpdate() {
   } finally {
     restartingServer = false
   }
-  await mainWindow.loadURL(current.startsWith(url) ? current : url)
+  serverUrl = url
+  // Chaque fenêtre recharge sa page : ses onglets, gardés par la fenêtre, restent.
+  await Promise.all(liveWindows().map((win) => {
+    const address = current.get(win) || url
+    return win.loadURL(address.startsWith(url) ? address : url).catch(() => undefined)
+  }))
   logLine(`Eraser ${runningVersion} est appliqué sans réinstallation.`)
 }
 
@@ -270,7 +299,7 @@ async function applyHotUpdate() {
  */
 function announceUpdate(update) {
   pendingUpdate = update
-  if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("eraser:update-ready", update)
+  for (const win of liveWindows()) win.webContents.send("eraser:update-ready", update)
 }
 
 function offerHotUpdate(version) {
@@ -295,49 +324,58 @@ async function applyPendingUpdate() {
   }
 }
 
-function broadcastWindowState() {
-  if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.webContents.send("eraser:window-state", {
-    isMaximized: mainWindow.isMaximized(),
-    isPinned,
-    isCollapsed,
-  })
+function windowStateFor(win) {
+  const state = stateOf(win)
+  return { isMaximized: win.isMaximized(), isPinned: state.isPinned, isCollapsed: state.isCollapsed }
+}
+
+function broadcastWindowState(win) {
+  if (!win || win.isDestroyed()) return
+  win.webContents.send("eraser:window-state", windowStateFor(win))
 }
 
 // Shrinks the window to just its titlebar strip, remembering the exact
 // bounds (and maximized state) to restore later. The caller pins the window
 // first if it wasn't already — a floating mini bar only makes sense on top
 // of everything, so collapsing implies pinning rather than requiring it.
-function collapseWindow() {
-  if (!mainWindow || isCollapsed) return
-  collapseSavedWasMaximized = mainWindow.isMaximized()
-  if (collapseSavedWasMaximized) mainWindow.unmaximize()
-  collapseSavedBounds = mainWindow.getBounds()
-  mainWindow.setMinimumSize(COLLAPSED_WIDTH, TITLEBAR_HEIGHT)
-  mainWindow.setResizable(false)
-  mainWindow.setBounds({ x: collapseSavedBounds.x, y: collapseSavedBounds.y, width: COLLAPSED_WIDTH, height: TITLEBAR_HEIGHT })
-  mainWindow.setOpacity(0.88)
-  isCollapsed = true
+function collapseWindow(win) {
+  const state = stateOf(win)
+  if (state.isCollapsed) return
+  state.savedWasMaximized = win.isMaximized()
+  if (state.savedWasMaximized) win.unmaximize()
+  state.savedBounds = win.getBounds()
+  win.setMinimumSize(COLLAPSED_WIDTH, TITLEBAR_HEIGHT)
+  win.setResizable(false)
+  win.setBounds({ x: state.savedBounds.x, y: state.savedBounds.y, width: COLLAPSED_WIDTH, height: TITLEBAR_HEIGHT })
+  win.setOpacity(0.88)
+  state.isCollapsed = true
 }
 
-function restoreFromCollapse() {
-  if (!mainWindow || !isCollapsed) return
-  mainWindow.setOpacity(1)
-  if (collapseSavedBounds) mainWindow.setBounds(collapseSavedBounds)
-  mainWindow.setMinimumSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT)
-  mainWindow.setResizable(true)
-  if (collapseSavedWasMaximized) mainWindow.maximize()
-  collapseSavedBounds = null
-  collapseSavedWasMaximized = false
-  isCollapsed = false
+function restoreFromCollapse(win) {
+  const state = stateOf(win)
+  if (!state.isCollapsed) return
+  win.setOpacity(1)
+  if (state.savedBounds) win.setBounds(state.savedBounds)
+  win.setMinimumSize(NORMAL_MIN_WIDTH, NORMAL_MIN_HEIGHT)
+  win.setResizable(true)
+  if (state.savedWasMaximized) win.maximize()
+  state.savedBounds = null
+  state.savedWasMaximized = false
+  state.isCollapsed = false
 }
 
-async function createWindow(url) {
-  mainWindow = new BrowserWindow({
+/**
+ * Ouvre une fenêtre d'Eraser sur `address` (une page du serveur local). `bounds`
+ * place la fenêtre, par exemple là où un onglet a été lâché.
+ */
+async function createWindow(address, bounds = null) {
+  const url = serverUrl
+  const win = new BrowserWindow({
     title: "Eraser - JDR",
     icon: resolveIconPath(),
-    width: 1440,
-    height: 940,
+    width: bounds?.width || 1440,
+    height: bounds?.height || 940,
+    ...(bounds && Number.isFinite(bounds.x) && Number.isFinite(bounds.y) ? { x: Math.round(bounds.x), y: Math.round(bounds.y) } : {}),
     minWidth: NORMAL_MIN_WIDTH,
     minHeight: NORMAL_MIN_HEIGHT,
     show: false,
@@ -351,12 +389,21 @@ async function createWindow(url) {
       partition: PERSISTENT_PARTITION,
     },
   })
-  mainWindow.on("maximize", broadcastWindowState)
-  mainWindow.on("unmaximize", broadcastWindowState)
-  const persistentSession = session.fromPartition(PERSISTENT_PARTITION)
-  persistentSession.cookies.on("changed", () => {
-    void persistentSession.cookies.flushStore()
+  windows.add(win)
+  if (!mainWindow || mainWindow.isDestroyed()) mainWindow = win
+  win.on("closed", () => {
+    windows.delete(win)
+    if (mainWindow === win) mainWindow = liveWindows()[0] || null
   })
+  win.on("maximize", () => broadcastWindowState(win))
+  win.on("unmaximize", () => broadcastWindowState(win))
+  const persistentSession = session.fromPartition(PERSISTENT_PARTITION)
+  if (!cookieFlushInstalled) {
+    cookieFlushInstalled = true
+    persistentSession.cookies.on("changed", () => {
+      void persistentSession.cookies.flushStore()
+    })
+  }
   // Correcteur orthographique : Electron souligne les fautes mais n'affiche aucun
   // menu contextuel par défaut. On construit donc le nôtre plus bas.
   //
@@ -381,13 +428,13 @@ async function createWindow(url) {
   } catch (error) {
     logLine(`[interface] Correcteur orthographique inchangé : ${error && error.message ? error.message : error}`)
   }
-  mainWindow.webContents.on("context-menu", (_event, params) => {
+  win.webContents.on("context-menu", (_event, params) => {
     // Sur un lien, c'est la page qui propose son menu (« ouvrir dans un nouvel
     // onglet ») : le menu du système ferait double emploi par-dessus.
     if (params.linkURL && !params.isEditable) return
     const items = []
     for (const suggestion of params.dictionarySuggestions || []) {
-      items.push({ label: suggestion, click: () => mainWindow?.webContents.replaceMisspelling(suggestion) })
+      items.push({ label: suggestion, click: () => win.webContents.replaceMisspelling(suggestion) })
     }
     if (items.length) items.push({ type: "separator" })
     if (params.misspelledWord) {
@@ -409,41 +456,46 @@ async function createWindow(url) {
       )
     }
     if (!items.length) return
-    Menu.buildFromTemplate(items).popup({ window: mainWindow })
+    Menu.buildFromTemplate(items).popup({ window: win })
   })
   let closeAfterCookieFlush = false
-  mainWindow.on("close", (event) => {
+  win.on("close", (event) => {
     if (closeAfterCookieFlush) return
     event.preventDefault()
     void persistentSession.cookies.flushStore().finally(() => {
       closeAfterCookieFlush = true
-      mainWindow?.close()
+      win.close()
     })
   })
-  mainWindow.once("ready-to-show", () => mainWindow.show())
-  mainWindow.webContents.setWindowOpenHandler(({ url: target }) => {
-    if (target.startsWith(url)) return { action: "allow" }
+  win.once("ready-to-show", () => win.show())
+  win.webContents.setWindowOpenHandler(({ url: target }) => {
+    // Une page d'Eraser ouverte « ailleurs » devient une vraie fenêtre d'Eraser.
+    if (target.startsWith(url)) {
+      void createWindow(target, nextWindowBounds(win))
+      return { action: "deny" }
+    }
     void shell.openExternal(target)
     return { action: "deny" }
   })
-  mainWindow.webContents.on("will-navigate", (event, target) => {
+  win.webContents.on("will-navigate", (event, target) => {
     if (!target.startsWith(url)) {
       event.preventDefault()
       void shell.openExternal(target)
     }
   })
-  mainWindow.webContents.on("console-message", (_event, ...args) => {
+  win.webContents.on("console-message", (_event, ...args) => {
     const details = args[0]
     const message = details && typeof details === "object" ? details.message : args[1]
     if (message) logLine(`[interface] ${message}`)
   })
-  mainWindow.webContents.on("did-fail-load", (_event, code, description, validatedURL, isMainFrame) => {
+  win.webContents.on("did-fail-load", (_event, code, description, validatedURL, isMainFrame) => {
     if (isMainFrame) logLine(`[interface:error] ${code} ${description} (${validatedURL})`)
   })
-  mainWindow.webContents.on("render-process-gone", (_event, details) => {
+  win.webContents.on("render-process-gone", (_event, details) => {
     logLine(`[interface:error] Le moteur d’affichage s’est arrêté : ${details.reason}.`)
   })
-  await mainWindow.loadURL(url)
+  await win.loadURL(address.startsWith(url) ? address : url)
+  return win
 }
 
 function ensureUpdaterConfigured() {
@@ -615,51 +667,147 @@ ipcMain.handle("eraser:update-apply", () => applyPendingUpdate())
 // « Rester dans le passé » : la mise à jour attend la prochaine ouverture d'Eraser.
 ipcMain.handle("eraser:update-dismiss", () => { pendingUpdate = null })
 
-ipcMain.handle("eraser:window-get-state", () => ({
-  isMaximized: mainWindow ? mainWindow.isMaximized() : false,
-  isPinned,
-  isCollapsed,
-}))
-
-ipcMain.handle("eraser:window-minimize", () => {
-  mainWindow?.minimize()
+ipcMain.handle("eraser:window-get-state", (event) => {
+  const win = senderWindow(event)
+  return win ? windowStateFor(win) : { isMaximized: false, isPinned: false, isCollapsed: false }
 })
 
-ipcMain.handle("eraser:window-toggle-maximize", () => {
-  if (!mainWindow) return
-  if (mainWindow.isMaximized()) mainWindow.unmaximize()
-  else mainWindow.maximize()
+ipcMain.handle("eraser:window-minimize", (event) => {
+  senderWindow(event)?.minimize()
 })
 
-ipcMain.handle("eraser:window-close", () => {
-  mainWindow?.close()
+ipcMain.handle("eraser:window-toggle-maximize", (event) => {
+  const win = senderWindow(event)
+  if (!win) return
+  if (win.isMaximized()) win.unmaximize()
+  else win.maximize()
 })
 
-ipcMain.handle("eraser:window-toggle-pin", () => {
-  if (!mainWindow) return { isPinned }
-  isPinned = !isPinned
-  mainWindow.setAlwaysOnTop(isPinned)
-  if (!isPinned && isCollapsed) restoreFromCollapse()
-  broadcastWindowState()
-  return { isPinned }
+ipcMain.handle("eraser:window-close", (event) => {
+  senderWindow(event)?.close()
 })
 
-ipcMain.handle("eraser:window-toggle-collapse", () => {
-  if (!mainWindow) return { isCollapsed }
-  if (isCollapsed) {
-    restoreFromCollapse()
+ipcMain.handle("eraser:window-toggle-pin", (event) => {
+  const win = senderWindow(event)
+  if (!win) return { isPinned: false }
+  const state = stateOf(win)
+  state.isPinned = !state.isPinned
+  win.setAlwaysOnTop(state.isPinned)
+  if (!state.isPinned && state.isCollapsed) restoreFromCollapse(win)
+  broadcastWindowState(win)
+  return { isPinned: state.isPinned }
+})
+
+ipcMain.handle("eraser:window-toggle-collapse", (event) => {
+  const win = senderWindow(event)
+  if (!win) return { isCollapsed: false }
+  const state = stateOf(win)
+  if (state.isCollapsed) {
+    restoreFromCollapse(win)
   } else {
     // Collapsing without pinning first would leave a tiny window that other
     // apps can immediately cover, defeating the point of the mini bar — so
     // pin automatically instead of refusing the collapse outright.
-    if (!isPinned) {
-      isPinned = true
-      mainWindow.setAlwaysOnTop(true)
+    if (!state.isPinned) {
+      state.isPinned = true
+      win.setAlwaysOnTop(true)
     }
-    collapseWindow()
+    collapseWindow(win)
   }
-  broadcastWindowState()
-  return { isCollapsed }
+  broadcastWindowState(win)
+  return { isCollapsed: state.isCollapsed }
+})
+
+// ——— Fenêtres et onglets ———
+
+/** Une page de l'application seulement (« /… »), jamais une adresse extérieure. */
+function appAddress(href) {
+  if (typeof href !== "string" || !href.startsWith("/") || href.startsWith("//")) return null
+  return `${serverUrl}${href}`
+}
+
+function cleanTab(tab) {
+  if (!tab || typeof tab.href !== "string" || !appAddress(tab.href)) return null
+  return { href: tab.href, label: String(tab.label || "Page").slice(0, 80) }
+}
+
+/** Taille d'une nouvelle fenêtre : celle d'origine, un peu décalée. */
+function nextWindowBounds(from) {
+  if (!from || from.isDestroyed() || stateOf(from).isCollapsed) return null
+  const bounds = from.isMaximized() ? { ...from.getNormalBounds() } : from.getBounds()
+  return { x: bounds.x + 32, y: bounds.y + 32, width: bounds.width, height: bounds.height }
+}
+
+/** Fenêtre d'Eraser sous le pointeur (la plus haute d'abord : celle qui a le focus). */
+function windowAtPoint(point) {
+  const open = liveWindows().filter((win) => win.isVisible() && !win.isMinimized())
+  open.sort((a, b) => Number(b.isFocused()) - Number(a.isFocused()))
+  return open.find((win) => {
+    const box = win.getBounds()
+    return point.x >= box.x && point.x < box.x + box.width && point.y >= box.y && point.y < box.y + box.height
+  }) || null
+}
+
+ipcMain.handle("eraser:open-window", (event, href) => {
+  const address = appAddress(href)
+  if (!address) return
+  void createWindow(address, nextWindowBounds(senderWindow(event)))
+    .catch((error) => logLine(`[interface:error] Nouvelle fenêtre : ${error instanceof Error ? error.message : error}`))
+})
+
+ipcMain.handle("eraser:tab-drag-start", (event, tab) => {
+  const clean = cleanTab(tab)
+  tabDrag = clean ? { tab: clean, sourceId: event.sender.id, claimed: false } : null
+})
+
+// Une autre fenêtre a reçu l'onglet sur sa barre : elle le prend.
+ipcMain.handle("eraser:tab-drag-claim", (event) => {
+  if (!tabDrag || tabDrag.claimed || tabDrag.sourceId === event.sender.id) return null
+  tabDrag.claimed = true
+  return tabDrag.tab
+})
+
+ipcMain.handle("eraser:tab-drag-cancel", () => {
+  tabDrag = null
+})
+
+/**
+ * L'onglet a été lâché hors de sa bande. Déposé sur la barre d'une autre fenêtre,
+ * celle-ci l'a déjà pris ; déposé ailleurs sur une autre fenêtre, il la rejoint ;
+ * lâché hors de toute fenêtre, il ouvre une nouvelle fenêtre à cet endroit (ou,
+ * s'il était seul, sa fenêtre s'y déplace).
+ */
+ipcMain.handle("eraser:tab-drag-end", async (event, details) => {
+  const drag = tabDrag
+  if (!drag || drag.sourceId !== event.sender.id) return { result: "none" }
+  // Le dépôt dans l'autre fenêtre peut arriver juste après la fin du glisser.
+  await new Promise((resolve) => setTimeout(resolve, 200))
+  if (tabDrag === drag) tabDrag = null
+  if (drag.claimed) return { result: "moved" }
+  const source = senderWindow(event)
+  const point = screen.getCursorScreenPoint()
+  const target = windowAtPoint(point)
+  if (target === source) return { result: "none" }
+  if (target) {
+    target.webContents.send("eraser:tab-attach", drag.tab)
+    target.focus()
+    return { result: "moved" }
+  }
+  const tabCount = Number(details?.tabCount) || 1
+  if (source && tabCount <= 1) {
+    if (stateOf(source).isCollapsed) return { result: "none" }
+    if (source.isMaximized()) source.unmaximize()
+    source.setPosition(Math.round(point.x - 120), Math.round(Math.max(0, point.y - 16)))
+    return { result: "none" }
+  }
+  const size = nextWindowBounds(source)
+  void createWindow(appAddress(drag.tab.href), {
+    x: point.x - 120,
+    y: Math.max(0, point.y - 16),
+    width: size?.width,
+    height: size?.height,
+  }).catch((error) => logLine(`[interface:error] Nouvelle fenêtre : ${error instanceof Error ? error.message : error}`))
+  return { result: "moved" }
 })
 
 const hasLock = app.requestSingleInstanceLock()
@@ -676,6 +824,7 @@ app.whenReady().then(async () => {
   try {
     hotUpdate.cleanup()
     const url = await startServerSafely()
+    serverUrl = url
     await createWindow(url)
     await runInstalledUiSmoke(url)
     setTimeout(() => void prepareUpdates(), 10_000)

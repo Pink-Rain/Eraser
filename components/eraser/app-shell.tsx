@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { usePathname, useRouter } from "next/navigation"
@@ -16,7 +16,6 @@ import {
   LibraryBig,
   Map,
   Plus,
-  RefreshCw,
   Search,
   ScrollText,
   Settings2,
@@ -76,13 +75,21 @@ const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu"
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
 const ItemNotifications = dynamic(() => import("@/components/eraser/item-notifications").then((module) => module.ItemNotifications), { ssr: false })
 
-const PageLabelContext = createContext<(label: string) => void>(() => undefined)
+const PageLabelContext = createContext<(label: string | null) => void>(() => undefined)
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser } | null>(null)
 
+/**
+ * Nomme la page (en-tête et onglet). Un PageLabel imbriqué l'emporte sur celui qui
+ * l'entoure : une page peut préciser son titre (« Classe · Samouraï ») à l'intérieur
+ * du titre général posé par AuthenticatedShell.
+ */
 export function PageLabel({ label, children }: { label: string; children: ReactNode }) {
-  const setPageLabel = useContext(PageLabelContext)
-  useEffect(() => setPageLabel(label), [label, setPageLabel])
-  return children
+  const setParentLabel = useContext(PageLabelContext)
+  const [childLabel, setChildLabel] = useState<string | null>(null)
+  const effective = childLabel ?? label
+  useEffect(() => setParentLabel(effective), [effective, setParentLabel])
+  useEffect(() => () => setParentLabel(null), [setParentLabel])
+  return <PageLabelContext.Provider value={setChildLabel}>{children}</PageLabelContext.Provider>
 }
 
 export function useShellData() {
@@ -217,6 +224,8 @@ export function AppShell({
   const [visibleCampaigns, setVisibleCampaigns] = useState(campaigns)
   const [visibleTodos, setVisibleTodos] = useState(todos)
   const [currentPageLabel, setCurrentPageLabel] = useState(pageLabel)
+  // Le titre le plus précis l'emporte ; un titre retiré (page quittée) ne vide pas l'en-tête.
+  const setShellLabel = useCallback((label: string | null) => { if (label) setCurrentPageLabel(label) }, [])
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
   const [todosLoaded, setTodosLoaded] = useState(todos.length > 0 || user.role !== "admin")
   const todosLoadingRef = useRef(false)
@@ -410,7 +419,7 @@ export function AppShell({
   }
 
   return (
-    <PageLabelContext.Provider value={setCurrentPageLabel}>
+    <PageLabelContext.Provider value={setShellLabel}>
     {/* Les onglets enveloppent la barre de titre, qui les affiche, et toute la coque :
         le clic droit sur un lien est capté au niveau du document. */}
     <AppTabsProvider pathname={pathname} label={currentPageLabel}>
@@ -459,6 +468,8 @@ export function AppShell({
                     variant="ghost"
                     size="icon"
                     className="ml-auto size-7 rounded-md"
+                    data-tab-href={viewRole === "mj" ? "/creation-de-campagne" : "/creation-de-personnage"}
+                    data-tab-label={viewRole === "mj" ? "Nouvelle campagne" : "Nouveau personnage"}
                     onClick={(event) => {
                       event.preventDefault()
                       event.stopPropagation()
@@ -474,7 +485,7 @@ export function AppShell({
                 <DropdownMenuSeparator />
                 {viewRole === "mj" && visibleCampaigns.length ? (
                   visibleCampaigns.map((campaign) => (
-                    <div key={campaign.id} onClick={() => selectCampaign(campaign.id)} className="flex cursor-pointer items-center gap-2 rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-accent" style={{ borderColor: selectedCampaignId === campaign.id ? campaign.accentColor : "transparent", backgroundColor: selectedCampaignId === campaign.id ? `${campaign.accentColor}12` : undefined }}>
+                    <div key={campaign.id} data-tab-href={`/campagne/${encodeURIComponent(campaign.id)}`} data-tab-label={campaign.name} onClick={() => selectCampaign(campaign.id)} className="flex cursor-pointer items-center gap-2 rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-accent" style={{ borderColor: selectedCampaignId === campaign.id ? campaign.accentColor : "transparent", backgroundColor: selectedCampaignId === campaign.id ? `${campaign.accentColor}12` : undefined }}>
                       <div className={cn(
                         "relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted text-muted-foreground",
                       )} style={{ borderColor: `${campaign.accentColor}88`, color: campaign.accentColor, boxShadow: selectedCampaignId === campaign.id ? `0 0 0 2px ${campaign.accentColor}33` : undefined }}>
@@ -493,7 +504,7 @@ export function AppShell({
                   </div>
                 ) : visibleCharacters.length ? (
                   visibleCharacters.map((character) => (
-                    <div key={character.id} onClick={() => selectCharacter(character.id)} className="flex cursor-pointer items-center gap-2 rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-accent" style={{ borderColor: selectedCharacterId === character.id ? character.campaigns[0]?.accentColor || "var(--primary)" : "transparent", backgroundColor: selectedCharacterId === character.id ? `${character.campaigns[0]?.accentColor || "#927640"}12` : undefined }}>
+                    <div key={character.id} data-tab-href={`/personnage/${encodeURIComponent(character.id)}`} data-tab-label={character.name} onClick={() => selectCharacter(character.id)} className="flex cursor-pointer items-center gap-2 rounded-md border-l-2 px-2 py-2 transition-colors hover:bg-accent" style={{ borderColor: selectedCharacterId === character.id ? character.campaigns[0]?.accentColor || "var(--primary)" : "transparent", backgroundColor: selectedCharacterId === character.id ? `${character.campaigns[0]?.accentColor || "#927640"}12` : undefined }}>
                       <div className={cn(
                         "relative flex size-9 shrink-0 items-center justify-center overflow-hidden rounded-lg border bg-muted text-muted-foreground",
                       )} style={{ borderColor: `${character.campaigns[0]?.accentColor || "#927640"}88` }}>
@@ -662,11 +673,6 @@ export function AppShell({
         <SidebarGroup className={user.role === "admin" && viewRole === "admin" ? "border-t border-sidebar-border" : "mt-auto border-t border-sidebar-border"}>
           <SidebarGroupContent>
             <SidebarMenu>
-              <SidebarMenuItem>
-                <SidebarMenuButton tooltip="Actualiser" className="h-10" onClick={() => window.location.reload()}>
-                  <RefreshCw /><span>Actualiser</span>
-                </SidebarMenuButton>
-              </SidebarMenuItem>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Chercher les mises à jour" className="h-10" onClick={() => void checkForUpdates()} disabled={checkingUpdate}>
                   <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} /><span>{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span>

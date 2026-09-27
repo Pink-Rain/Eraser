@@ -15,6 +15,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { NpcManager } from "@/components/eraser/npc-manager"
 import { CreateSessionDialog, deleteSession, patchSession, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
+import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 
 export type SessionMember = { id: string; name: string; people: string; classes: string; level: string; honoraryTitle: string }
@@ -82,7 +83,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     // L'adresse garde la session choisie (retour arrière, rechargement) sans recharger la page.
     const url = new URL(window.location.href)
     if (id) url.searchParams.set("session", id); else url.searchParams.delete("session")
-    window.history.replaceState(null, "", url)
+    replaceAppUrl(url, { record: false })
   }
 
   function replace(updated: CampaignSessionRecord) {

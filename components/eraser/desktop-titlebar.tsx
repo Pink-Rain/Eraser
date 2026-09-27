@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type CSSProperties } from "react"
 import { Minus, Pin, Square, X } from "lucide-react"
 
-import { AppTabStrip, useAppTabs } from "@/components/eraser/app-tabs"
+import { AppNavButtons, AppTabStrip } from "@/components/eraser/app-tabs"
 import type { DesktopWindowState } from "@/lib/desktop-bridge"
 
 const APP_TITLE = "Eraser - JDR"
@@ -23,7 +23,6 @@ const noDragStyle: AppRegionStyle = { WebkitAppRegion: "no-drag" }
 // and nothing about the page layout changes.
 export function DesktopTitlebar() {
   const [ready, setReady] = useState(false)
-  const tabs = useAppTabs()
   const [state, setState] = useState<DesktopWindowState>({ isMaximized: false, isPinned: false, isCollapsed: false })
   const lastMouseDownAt = useRef(0)
 
@@ -123,15 +122,15 @@ export function DesktopTitlebar() {
         html::-webkit-scrollbar-thumb, body::-webkit-scrollbar-thumb { background-color: #4c4439; border-radius: 9999px; }
       `}</style>
       <div
-        className={`fixed left-0 top-0 z-[100] flex h-10 shrink-0 select-none items-center gap-2 overflow-hidden border-b border-[#4c4439] bg-[#1c1a17] pl-3 pr-1 text-[#e0bd82] ${state.isCollapsed ? "" : "right-0"}`}
+        className={`fixed left-0 top-0 z-[100] flex h-10 shrink-0 select-none items-center gap-1.5 overflow-hidden border-b border-[#4c4439] bg-[#1c1a17] pl-3 pr-1 text-[#e0bd82] ${state.isCollapsed ? "" : "right-0"}`}
         style={state.isCollapsed ? { ...dragStyle, width: COLLAPSED_WIDTH_PX } : dragStyle}
         onMouseDown={handleBarMouseDown}
       >
         {/* eslint-disable-next-line @next/next/no-img-element */}
         <img src="/favicon.png" alt="" className="size-5 shrink-0 object-contain" style={noDragStyle} />
-        {/* Dès qu'il y a plusieurs onglets, ce sont eux qui nomment la fenêtre. */}
-        {tabs && tabs.tabs.length > 1 && !state.isCollapsed
-          ? <AppTabStrip />
+        {/* Comme un navigateur : précédent, suivant, actualiser, puis les onglets. */}
+        {!state.isCollapsed
+          ? <><AppNavButtons /><AppTabStrip /></>
           : <span className="truncate text-xs font-medium tracking-wide">{APP_TITLE}</span>}
         {!state.isCollapsed && (
           <div className="ml-auto flex items-center gap-0.5" style={noDragStyle} onMouseDown={(event) => event.stopPropagation()}>

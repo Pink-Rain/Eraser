@@ -220,6 +220,8 @@ export function TabletopMapOrganizer({
                       <button
                         type="button"
                         disabled={busy}
+                        data-tab-href={typeof window === "undefined" ? undefined : `${window.location.pathname}?map=${encodeURIComponent(map.id)}`}
+                        data-tab-label={map.name}
                         onClick={async () => {
                           await onSelectMap(map.id)
                           onOpenChange(false)

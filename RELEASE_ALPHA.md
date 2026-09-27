@@ -1,42 +1,50 @@
-# Eraser 0.1.1-alpha.81 — Sorts de classe protégés, portraits retrouvés, « Création de classe »
+# Eraser 0.1.1-alpha.82 — Des onglets comme dans un navigateur
 
-Cette version arrive par la mise à jour sans réinstallation. **Chacun doit relancer
-Eraser (ou accepter la mise à jour) avant de reprendre le travail sur les classes.**
+Cette version change l’enveloppe de l’application (fenêtres multiples) : elle arrive
+par l’**installateur, en silence**, puis Eraser se relance tout seul. Aucune donnée
+n’est touchée.
 
-## Sorts de classe : plus aucune modification perdue en silence
+## La barre du haut devient une barre de navigateur
 
-- Avant l’alpha.75, lier un sort à une classe sans colonne dans « Sorts de classe »
-  (Druide, Rôdeur·euse…) affichait « Enregistré » alors que rien n’était écrit.
-  Depuis l’alpha.75, la colonne est créée. Désormais, en plus, si un lien ne peut
-  pas être écrit, rien n’est marqué enregistré : un message d’erreur s’affiche.
-- « Création de classe » et les pages de classe (pour les MJ) relisent toujours la
-  feuille : elles ne montrent plus une copie gardée en mémoire, qui pouvait faire
-  réécrire une valeur dépassée par-dessus le travail d’une autre personne.
-- Toute écriture refusée est notée dans le journal d’Eraser.
+- **Précédent / Suivant / Actualiser** en haut à gauche. Chaque onglet garde son
+  propre historique. Le bouton « Actualiser » a quitté le menu de gauche.
+- Raccourcis : Alt+← / Alt+→, les boutons latéraux de la souris, F5, Ctrl+T
+  (nouvel onglet), Ctrl+W (fermer), Ctrl+Tab (onglet suivant).
+- **Tous les onglets ont la même largeur**, même avec un seul onglet ouvert, et
+  rétrécissent ensemble quand il y en a beaucoup.
+- **Les onglets ne bougent plus tout seuls.** Cliquer sur un onglet ne le déplace
+  pas ; un nouvel onglet s’ouvre juste à droite de celui où tu es.
+- **Glisser-déposer** : on réordonne les onglets en les faisant glisser.
+- **Sortir un onglet** : lâché hors de la fenêtre, il ouvre une nouvelle fenêtre
+  à cet endroit.
+- **Le remettre** : glisse-le sur la barre d’une autre fenêtre d’Eraser et il la
+  rejoint. Une fenêtre vidée de son dernier onglet se ferme.
+- Clic du milieu sur un onglet : il se ferme.
 
-## « Création de classe » dans le menu
+## « Ouvrir dans un nouvel onglet » partout
 
-- L’ancien index « Sorts des classes » quitte l’Index : il devient **Création de
-  classe**, juste au-dessus d’Index dans le menu. L’ancienne adresse y mène toujours.
-
-## Classes des personnages
-
-- **Index des personnages** : nouvelle colonne « Classe » (et rang).
-- **Accueil** : les cartes de tes personnages affichent leur classe et leur rang.
-
-## Portraits dans le tableau de bord de campagne
-
-- Des portraits envoyés avant le passage au Drive n’existaient que sur l’ordinateur
-  de la personne qui les avait envoyés. Au prochain lancement d’Eraser, chaque
-  installation envoie dans le Drive partagé les images qui n’y sont pas encore :
-  dès que le joueur concerné relance Eraser, son portrait apparaît pour tous.
-- Un portrait donné par lien (image en ligne, fichier Google Drive) s’affiche
-  maintenant aussi dans le tableau de bord, l’accueil et les sessions, comme sur la
-  fiche.
+- Clic droit sur tout ce qui s’ouvre : **Ouvrir dans un nouvel onglet**, **Ouvrir
+  dans une nouvelle fenêtre**, **Ouvrir ici**.
+- Clic du milieu ou Ctrl+clic : nouvel onglet directement.
+- Nouveaux endroits où ça marche :
+  - **Accueil** : cartes des personnages et des campagnes.
+  - **Menu de gauche** : « Mes campagnes » / « Mes personnages » et le bouton « + ».
+  - **Tabletop** : cartes de la fenêtre « Ranger ».
+- **Création de classe** :
+  - Le menu déroulant des classes et la liste « État des classes » s’ouvrent
+    aussi dans un autre onglet.
+  - Chaque classe a sa propre adresse, et l’onglet porte son nom
+    (« Classe · Druide »…).
+- La session choisie (Lieux et rencontres) et la carte choisie (Tabletop) restent
+  dans l’onglet quand on passe d’un onglet à l’autre.
 
 ## Vérifications
 
-- feuille « Sorts de classe » relue dans le Drive pour le diagnostic ;
-- envoi des anciennes images testé sur un stockage simulé : seule l’image absente
-  du Drive est envoyée, une seule fois, sans rien supprimer ;
-- lint sans erreur, 29 tests au vert, build et serveur desktop vérifiés.
+- Onglets testés dans un navigateur :
+  - largeurs égales ;
+  - ordre inchangé au clic ;
+  - glisser-déposer ;
+  - précédent / suivant ;
+  - clic droit, clic du milieu et Ctrl+clic ;
+  - classe ouverte dans son propre onglet sans rechargement.
+- Lint sans erreur, 29 tests au vert, build et serveur desktop vérifiés.

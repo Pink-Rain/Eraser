@@ -74,11 +74,13 @@ function hasClassColumn(headers: string[], characterClass: ClassRecord) {
   return headers.some((header) => header === characterClass.id || normalizeClassLabel(header) === normalizeClassLabel(characterClass.name))
 }
 
-export function ClassStateOverview({ classes, spells, headers, onSelect }: {
+export function ClassStateOverview({ classes, spells, headers, onSelect, hrefFor }: {
   classes: ClassRecord[]
   spells: ClassSpell[]
   headers: string[]
   onSelect: (classId: string) => void
+  /** Adresse de la classe : le clic droit propose alors de l'ouvrir dans un autre onglet. */
+  hrefFor?: (classId: string) => string
 }) {
   const states = useMemo(() => classes.map((characterClass) => ({
     characterClass,
@@ -115,7 +117,7 @@ export function ClassStateOverview({ classes, spells, headers, onSelect }: {
               state.overfullRanks.length ? `${plural(state.overfullRanks.length, "rang")} en trop` : "",
               state.unfinishedSpells.length ? `${plural(state.unfinishedSpells.length, "sort")} à terminer` : "",
             ].filter(Boolean)
-            return <button key={characterClass.id} type="button" onClick={() => onSelect(characterClass.id)} className="grid w-full items-center gap-2 px-4 py-3 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)_5rem_minmax(9rem,14rem)] md:gap-4">
+            return <button key={characterClass.id} type="button" data-tab-href={hrefFor?.(characterClass.id)} data-tab-label={`Classe · ${characterClass.name}`} onClick={() => onSelect(characterClass.id)} className="grid w-full items-center gap-2 px-4 py-3 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)_5rem_minmax(9rem,14rem)] md:gap-4">
               <span className="flex min-w-0 items-center gap-2 font-semibold"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: characterClass.accentDark }} /><span className="truncate">{characterClass.name}</span></span>
               <RankStrip state={state} />
               <span className="font-display text-lg font-semibold md:text-right">{state.completion}%</span>
@@ -127,7 +129,7 @@ export function ClassStateOverview({ classes, spells, headers, onSelect }: {
       </div>
       {notStarted.length > 0 && <div className="rounded-2xl border border-dashed bg-card/50 px-4 py-3">
         <p className="text-sm font-semibold">Pas encore commencées <span className="font-normal text-muted-foreground">({notStarted.length} classes · aucun sort lié)</span></p>
-        <div className="mt-2 flex flex-wrap gap-1.5">{notStarted.map(({ characterClass }) => <button key={characterClass.id} type="button" onClick={() => onSelect(characterClass.id)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium hover:border-primary hover:text-primary"><span className="size-2 rounded-full" style={{ backgroundColor: characterClass.accentDark }} />{characterClass.name}</button>)}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5">{notStarted.map(({ characterClass }) => <button key={characterClass.id} type="button" data-tab-href={hrefFor?.(characterClass.id)} data-tab-label={`Classe · ${characterClass.name}`} onClick={() => onSelect(characterClass.id)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium hover:border-primary hover:text-primary"><span className="size-2 rounded-full" style={{ backgroundColor: characterClass.accentDark }} />{characterClass.name}</button>)}</div>
       </div>}
       <SkillQualityPanel spells={spells} />
     </>

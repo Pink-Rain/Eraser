@@ -34,7 +34,18 @@ export type EraserDesktopBridge = {
   windowTogglePin: () => Promise<{ isPinned: boolean }>
   windowToggleCollapse: () => Promise<{ isCollapsed: boolean }>
   onWindowStateChange: (callback: (state: DesktopWindowState) => void) => () => void
+  /** Fenêtres et onglets (enveloppe 4 et suivantes). */
+  openWindow?: (href: string) => Promise<void>
+  tabDragStart?: (tab: DesktopTab) => Promise<void>
+  /** Une autre fenêtre dépose l'onglet en cours de déplacement : il lui est remis. */
+  tabDragClaim?: () => Promise<DesktopTab | null>
+  /** Fin du glisser : `moved` si l'onglet a rejoint une autre fenêtre ou une nouvelle fenêtre. */
+  tabDragEnd?: (details: { tabCount: number }) => Promise<{ result: "moved" | "none" }>
+  tabDragCancel?: () => Promise<void>
+  onTabAttach?: (callback: (tab: DesktopTab) => void) => () => void
 }
+
+export type DesktopTab = { href: string; label: string }
 
 declare global {
   interface Window {

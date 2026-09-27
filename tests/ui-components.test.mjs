@@ -425,7 +425,8 @@ test("keeps the tab bar out of the way on the website", async () => {
   const source = await readFile(new URL("../components/eraser/app-tabs.tsx", import.meta.url), "utf8");
   // Hors de l'application Windows, le clic droit doit rendre la main au navigateur :
   // sans barre de titre, un onglet ouvert ici n'aurait nulle part où s'afficher.
-  assert.match(source, /dataset\.eraserTitlebar !== "true"/);
+  assert.match(source, /dataset\.eraserTitlebar === "true"/);
+  assert.match(source, /function onContextMenu\(event: MouseEvent\) \{\n\s+if \(!isDesktop\(\)\) return/);
   // Le nouvel onglet s'ouvre en arrière-plan : aucune navigation n'est déclenchée.
   const open = source.slice(source.indexOf("const open = useCallback"), source.indexOf("const close = useCallback"));
   assert.doesNotMatch(open, /router\.push/);
