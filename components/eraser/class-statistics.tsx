@@ -318,29 +318,6 @@ function PlayersOverview({ classes, spells, playData }: { classes: ClassRecord[]
     return { campaign, members: members.length, average: average(members.map((character) => character.level)) }
   }).filter((row) => row.members > 0).sort((left, right) => right.members - left.members)
 
-  // Charges entamées : charges maximales du sort (ou de sa version personnelle) moins charges restantes.
-  const spellById = new Map(spells.map((spell) => [spell.id, spell]))
-  const spent = new Map<string, { spell: ClassSpell; spent: number; characters: number; empty: number }>()
-  let charactersUsing = 0
-  for (const character of parsed) {
-    let used = false
-    for (const [spellId, remaining] of Object.entries(character.state.charges)) {
-      const spell = spellById.get(spellId)
-      const max = character.state.edits[spellId]?.charges ?? spell?.charges ?? null
-      if (!spell || max === null || !Number.isFinite(remaining)) continue
-      const gone = Math.max(0, max - remaining)
-      if (!gone) continue
-      used = true
-      const entry = spent.get(spellId) ?? { spell, spent: 0, characters: 0, empty: 0 }
-      entry.spent += gone
-      entry.characters += 1
-      if (remaining <= 0) entry.empty += 1
-      spent.set(spellId, entry)
-    }
-    if (used) charactersUsing += 1
-  }
-  const spentRows = [...spent.values()].sort((left, right) => right.spent - left.spent)
-
   return <div className="space-y-3">
     <SectionTitle eyebrow="Les joueurs" title="Ce que disent les fiches" />
     <p className="text-xs text-muted-foreground">{parsed.length} personnage{parsed.length > 1 ? "s" : ""} lus dans Google Sheets (hors corbeille).</p>
@@ -353,14 +330,6 @@ function PlayersOverview({ classes, spells, playData }: { classes: ClassRecord[]
         <Columns color={PRIMARY} columns={levels} />
         {campaigns.length > 0 && <table className="w-full text-sm"><thead><tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground"><th className="py-1 font-semibold">Campagne</th><th className="py-1 text-right font-semibold">Personnages</th><th className="py-1 text-right font-semibold">Rang moyen</th></tr></thead>
           <tbody className="divide-y">{campaigns.map((row) => <tr key={row.campaign.id}><td className="py-1.5"><span className="mr-2 inline-block size-2 rounded-full" style={{ backgroundColor: row.campaign.accentColor }} />{row.campaign.name}</td><td className="py-1.5 text-right tabular-nums">{row.members}</td><td className="py-1.5 text-right tabular-nums">{fmt(row.average)}</td></tr>)}</tbody></table>}
-      </Card>
-      <Card title="Charges dépensées en jeu" question="D’après les charges cochées en ce moment sur les fiches (un instantané, pas un historique)." wide>
-        <div className="grid grid-cols-3 gap-2">
-          <Tile value={charactersUsing} label="personnages avec des charges entamées" />
-          <Tile value={spentRows.reduce((total, row) => total + row.spent, 0)} label="charges dépensées au total" />
-          <Tile value={spentRows.reduce((total, row) => total + row.empty, 0)} label="sorts à court de charges" />
-        </div>
-        {spentRows.length ? <BarList color={PRIMARY} rows={spentRows.slice(0, 12).map((row) => ({ label: row.spell.name, value: row.spent, tip: `${row.spell.name} : ${row.spent} charge${row.spent > 1 ? "s" : ""} dépensée${row.spent > 1 ? "s" : ""} par ${row.characters} personnage${row.characters > 1 ? "s" : ""}` }))} /> : <p className="text-sm text-muted-foreground">Aucune charge n’est entamée sur les fiches pour l’instant.</p>}
       </Card>
     </div>
   </div>
