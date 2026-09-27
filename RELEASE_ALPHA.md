@@ -1,42 +1,38 @@
-# Eraser 0.1.1-alpha.75 — Lier les sorts à toutes les classes, doublons un par un
+# Eraser 0.1.1-alpha.76 — Plus de comptes « Test interface installée »
 
-Cette version arrive par la mise à jour sans réinstallation.
+Cette version passe par l’installateur, en mode silencieux : l’enveloppe Windows
+d’Eraser change (`eraserShell` 3). Rien à faire de ton côté.
 
-## Index des classes, onglet « Par classe »
+## Ce qui n’allait pas
 
-- **Les sorts se lient enfin aux nouvelles classes.** La feuille « Sorts de classe »
-  n’avait une colonne que pour 9 des 25 classes. Pour une classe sans colonne
-  (Druide, Rôdeur·euse…), la recherche montrait bien les passifs, mais cliquer
-  dessus échouait sans rien afficher près du clic : le lien n’avait nulle part où
-  s’écrire. La colonne de la classe est maintenant ajoutée automatiquement à droite
-  de la feuille (nom de la classe en en-tête, mise en forme reprise de la colonne
-  de classe voisine) au premier sort lié. Aucune cellule existante n’est modifiée.
-- Même correction pour les cartes de sort, le tableau et le formulaire de création :
-  une classe ajoutée depuis la pastille « + Classe » est bien enregistrée.
-- Une erreur pendant « Chercher un sort » s’affiche maintenant dans le panneau de
-  recherche, et plus seulement en haut de la page.
-- Avant d’écrire le lien, Eraser vérifie que la ligne du sort n’a pas bougé dans
-  Sheets entre-temps.
+À chaque construction de l’application, GitHub installe Eraser sur une machine
+Windows et vérifie qu’on peut créer un compte et ouvrir une session. Ce test
+créait un vrai compte « Test interface installée » dans l’annuaire partagé, et ne
+le supprimait jamais : un compte de plus dans l’administration à chaque version
+publiée.
 
-## Onglet « Doublons »
+## Ce qui change
 
-- **Un sort peut être mis à part.** Dans un groupe de trois sorts ou plus, chaque
-  sort a un bouton « Pas un doublon » : ses ressemblances avec les autres sont
-  ignorées, et le groupe reste ouvert sur les sorts restants, prêts à être comparés
-  ou fusionnés. Le bouton du haut devient « Aucun n’est un doublon » pour écarter
-  tout le groupe d’un coup.
-- **Les doublons ignorés ne glissent plus.** Un sort sans ID était désigné par sa
-  ligne (« LIGNE-315 ») dans l’onglet « Doublons ignorés » : après une fusion ou une
-  suppression plus haut dans la feuille, cette désignation pointait sur un autre
-  sort. Désormais, un sort sans ID marqué « pas un doublon » reçoit un vrai ID
-  (écrit dans sa cellule ID vide), et ses paires déjà ignorées le suivent.
+- Le test d’installation supprime son compte dès la vérification faite.
+- Filet de sécurité : si un test s’interrompt avant, le serveur de comptes efface
+  de lui-même les comptes de test restés plus d’une heure. Seuls sont concernés
+  les comptes `interface-installee-…@eraser.local` encore en attente et sans rôle.
+- Un compte peut se supprimer lui-même seulement tant qu’il est **en attente** et
+  sans rôle. Un compte actif ne se supprime toujours que depuis l’administration.
+
+## Rappel de l’alpha.75
+
+- Les sorts se lient aux classes qui n’avaient pas encore de colonne dans
+  « Sorts de classe » (Druide, Rôdeur·euse…) : la colonne est ajoutée
+  automatiquement.
+- Onglet « Doublons » : bouton « Pas un doublon » par sort dans les groupes de
+  trois ou plus.
 
 ## Vérifications
 
-- dans un vrai navigateur : lien d’un passif, erreur affichée dans le panneau de
-  recherche, groupe de quatre doublons réduit à trois par « Pas un doublon » ;
-- sur une copie simulée de la feuille des sorts : colonne ajoutée une seule fois
-  (grille agrandie si besoin), rang écrit, second lien sans nouvelle colonne,
-  enregistrement et création de sort vers une nouvelle classe, ID attribué aux
-  sorts sans ID et paires ignorées renommées, désignation périmée refusée ;
-- lint sans erreur, tests d’interface au vert, serveur desktop vérifié.
+- purge testée sur une copie SQLite de l’annuaire : seul le compte de test ancien
+  et en attente disparaît (compte de test récent, compte validé et vrai compte
+  en attente conservés) ;
+- serveur desktop : un compte en attente se supprime et ne peut plus se
+  connecter ; un compte administrateur ne peut pas se supprimer lui-même ;
+- lint sans erreur, 29 tests au vert, build et serveur desktop vérifiés.
