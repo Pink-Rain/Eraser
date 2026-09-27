@@ -210,6 +210,20 @@ async function readJson<T>(request: Request): Promise<T> {
 
 // ---------- accounts ----------
 
+/**
+ * Comptes créés par le test d'installation Windows (desktop/main.cjs). Le test
+ * supprime le sien dès la vérification faite ; si un test s'interrompt avant, son
+ * compte (toujours en attente, sans rôle) est effacé ici au bout d'une heure.
+ */
+const INSTALL_TEST_EMAIL_PATTERN = "interface-installee-%@eraser.local"
+
+async function purgeStaleInstallTestAccounts(env: Env) {
+  await env.DB.prepare(
+    `DELETE FROM users WHERE email LIKE ?1 AND status = 'en_attente' AND role IS NULL
+       AND created_at < datetime('now', '-1 hour')`,
+  ).bind(INSTALL_TEST_EMAIL_PATTERN).run()
+}
+
 async function handleRegister(request: Request, env: Env) {
   const body = await readJson<{ email?: string; password?: string; displayName?: string; adminCode?: string }>(request)
   const email = body.email?.trim().toLowerCase() ?? ""
@@ -219,6 +233,8 @@ async function handleRegister(request: Request, env: Env) {
 
   const existing = await env.DB.prepare("SELECT id FROM users WHERE email = ?1").bind(email).first()
   if (existing) throw new HttpError(409, "EMAIL_EXISTS")
+  // Un nettoyage raté ne doit jamais empêcher quelqu'un de créer son compte.
+  await purgeStaleInstallTestAccounts(env).catch(() => undefined)
 
   const adminEmail = env.ADMIN_EMAIL?.trim().toLowerCase()
   const bootstrapAdmin = Boolean(adminEmail) && email === adminEmail && Boolean(env.ADMIN_SETUP_CODE) && body.adminCode === env.ADMIN_SETUP_CODE
@@ -324,6 +340,22 @@ async function handleUpdateAccess(request: Request, env: Env, uid: string) {
   const updated = await env.DB.prepare("SELECT * FROM users WHERE id = ?1").bind(uid).first<UserRow>()
   if (!updated) throw new HttpError(404, "ACCOUNT_NOT_FOUND")
   return json({ account: accountRecord(updated) })
+}
+
+/**
+ * Supprimer son propre compte, seulement tant qu'il n'a jamais été validé (en
+ * attente, sans rôle) : c'est ce que fait le test d'installation Windows après sa
+ * vérification. Un compte actif ne se supprime que par un administrateur.
+ */
+async function handleDeleteOwnPendingAccount(request: Request, env: Env) {
+  const account = await requireAccount(request, env)
+  if (account.status !== "en_attente" || account.role) throw new HttpError(403, "ACCOUNT_NOT_PENDING")
+  try {
+    await env.DB.prepare("DELETE FROM users WHERE id = ?1 AND status = 'en_attente' AND role IS NULL").bind(account.id).run()
+  } catch {
+    throw new HttpError(409, "ACCOUNT_REFERENCED")
+  }
+  return json({ ok: true })
 }
 
 async function handleDeleteAccount(request: Request, env: Env, uid: string) {
@@ -627,6 +659,7 @@ const worker = {
       if (method === "POST" && path === "/logout") return await handleLogout(request, env)
       if (method === "GET" && path === "/accounts") return await handleListAccounts(request, env)
       if (method === "POST" && path === "/account/profile") return await handleUpdateOwnProfile(request, env)
+      if (method === "DELETE" && path === "/account") return await handleDeleteOwnPendingAccount(request, env)
 
       const accessMatch = path.match(/^\/accounts\/([^/]+)\/access$/)
       if (method === "POST" && accessMatch) return await handleUpdateAccess(request, env, decodeURIComponent(accessMatch[1]))

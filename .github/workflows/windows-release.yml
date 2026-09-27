@@ -143,6 +143,7 @@ jobs:
             throw "Le test interactif a échoué : $($uiResult.error)"
           }
           Write-Host "Application installée, interface interactive, compte créé et session ouverte sur $($startup.url)."
+          if ($uiResult.accountDeleted) { Write-Host "Compte de test supprimé de l’annuaire partagé." } else { Write-Host "::warning::Le compte de test n’a pas pu être supprimé ; le Worker l’effacera dans l’heure." }
           Get-Process -Name "Eraser" -ErrorAction SilentlyContinue | Stop-Process -Force
 
       - name: Conserver l’installateur comme artefact

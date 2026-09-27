@@ -112,6 +112,22 @@ try {
     throw new Error(`Le formulaire HTML de création ne redirige pas correctement (${nativeRegistration.status}).`)
   }
 
+  // Le test d'installation supprime le compte qu'il crée : seul un compte encore
+  // en attente peut se supprimer lui-même, jamais un compte actif.
+  const secondCookie = (nativeRegistration.headers.getSetCookie?.() ?? [nativeRegistration.headers.get("set-cookie") || ""])
+    .find((value) => value.startsWith("eraser_session="))?.split(";", 1)[0]
+  if (!secondCookie) throw new Error("Le second profil n’a pas reçu de session.")
+  const activeDelete = await fetch(`${origin}/api/account`, { method: "DELETE", headers: { cookie: loginCookie } })
+  if (activeDelete.ok) throw new Error("Un compte actif a pu se supprimer lui-même.")
+  const pendingDelete = await fetch(`${origin}/api/account`, { method: "DELETE", headers: { cookie: secondCookie } })
+  if (!pendingDelete.ok) throw new Error(`Un compte en attente n’a pas pu se supprimer (${pendingDelete.status}).`)
+  const deletedLogin = await fetch(`${origin}/api/auth/login`, {
+    method: "POST",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ email: "second-profil@eraser.local", password: "mot-de-passe-second-profil" }),
+  })
+  if (deletedLogin.ok) throw new Error("Le compte supprimé peut encore se connecter.")
+
   const oauthStatus = await fetch(`${origin}/api/admin/google-drive/oauth/status`, {
     headers: { cookie: loginCookie },
   })

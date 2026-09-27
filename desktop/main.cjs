@@ -592,6 +592,14 @@ async function runInstalledUiSmoke(url) {
     result.ok = true
     result.url = mainWindow.webContents.getURL()
     result.authenticatedStatus = authenticatedStatus
+    // Le compte de test vit dans l'annuaire partagé : il est supprimé dès la
+    // vérification faite, sinon chaque construction en laissait un de plus dans
+    // l'administration. Un échec ici ne fait pas échouer le test : le Worker
+    // efface de lui-même les comptes de test restés plus d'une heure.
+    result.accountDeleted = await mainWindow.webContents.executeJavaScript(
+      `fetch('/api/account', { method: 'DELETE' }).then((response) => response.ok).catch(() => false)`,
+    )
+    if (!result.accountDeleted) logLine("[interface:test-warning] Le compte de test n’a pas pu être supprimé ; le Worker l’effacera dans l’heure.")
     writeFileSync(resultPath, JSON.stringify(result, null, 2), "utf8")
     logLine("Interface installée vérifiée : création de compte et session administrateur opérationnelles.")
   } catch (error) {

@@ -254,6 +254,26 @@ export async function deleteAccount(uid: string, adminUid: string, sessionToken?
   }
 }
 
+/**
+ * Supprime son propre compte tant qu'il n'a jamais été validé (en attente, sans
+ * rôle). Sert au test d'installation Windows, qui efface ainsi le compte qu'il
+ * vient de créer ; un compte actif ne se supprime que depuis l'administration.
+ */
+export async function deleteOwnPendingAccount(account: AccountRecord, sessionToken: string) {
+  if (account.status !== "en_attente" || account.role) throw new Error("ACCOUNT_NOT_PENDING")
+  forgetCachedSessions()
+  const remote = remoteAccountsConfig(env)
+  if (remote) {
+    await remoteAccountsFetch(remote, "/account", { method: "DELETE", token: sessionToken })
+    return
+  }
+  try {
+    await getDb().delete(users).where(and(eq(users.id, account.uid), eq(users.status, "en_attente")))
+  } catch {
+    throw new Error("ACCOUNT_REFERENCED")
+  }
+}
+
 export type OwnProfileUpdate = { displayName?: string; email?: string; currentPassword?: string; newPassword?: string }
 
 /**
