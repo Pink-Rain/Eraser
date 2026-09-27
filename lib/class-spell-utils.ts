@@ -95,3 +95,66 @@ export function findClassSpellSimilarities(spells: Array<Pick<ClassSpell, "id" |
   }
   return results.sort((left, right) => right.score - left.score || left.kind.localeCompare(right.kind, "fr"))
 }
+
+/** Rangs d'une classe : le rang commun (0) puis les rangs 1 à 20. */
+export const CLASS_RANKS = Array.from({ length: 21 }, (_, rank) => rank)
+
+/** Ce qui manque à un sort pour être considéré comme terminé. */
+export function classSpellGaps(spell: Pick<ClassSpell, "name" | "effect" | "description" | "type">) {
+  const gaps: Array<"nom" | "effet" | "type"> = []
+  if (!spell.name.trim() || spell.name === UNNAMED_CLASS_SPELL) gaps.push("nom")
+  if (!spell.effect.trim() && !spell.description.trim()) gaps.push("effet")
+  if (!spell.type.trim()) gaps.push("type")
+  return gaps
+}
+
+export type ClassRankState = {
+  rank: number
+  spells: ClassSpell[]
+  /** Sorts auxquels il manque un nom, un effet ou un type. */
+  unfinished: ClassSpell[]
+  status: "vide" | "incomplet" | "complet" | "en trop"
+}
+
+export type ClassSpellState = {
+  ranks: ClassRankState[]
+  /** Finition en % : 3 sorts terminés sur chacun des 21 rangs. */
+  completion: number
+  missingSpells: number
+  emptyRanks: number[]
+  partialRanks: number[]
+  overfullRanks: number[]
+  completeRanks: number
+  unfinishedSpells: ClassSpell[]
+}
+
+/**
+ * État d'une classe : chaque rang doit avoir exactement trois sorts. La finition
+ * compte 63 places (21 rangs × 3) ; un sort terminé remplit sa place, un sort sans
+ * nom, sans effet ou sans type n'en remplit que la moitié, et un 4e sort ne compte
+ * pas (il est signalé comme dépassement).
+ */
+export function classSpellState(spells: ClassSpell[], classId: string): ClassSpellState {
+  const ranks = CLASS_RANKS.map((rank): ClassRankState => {
+    const atRank = spells.filter((spell) => spell.classRanks[classId] === rank)
+    const unfinished = atRank.filter((spell) => classSpellGaps(spell).length > 0)
+    const status = atRank.length === 0 ? "vide" : atRank.length < MAX_CLASS_SPELLS_PER_RANK ? "incomplet" : atRank.length > MAX_CLASS_SPELLS_PER_RANK ? "en trop" : "complet"
+    return { rank, spells: atRank, unfinished, status }
+  })
+  const filled = ranks.reduce((total, rank) => {
+    const finished = rank.spells.length - rank.unfinished.length
+    const best = Math.min(MAX_CLASS_SPELLS_PER_RANK, finished) + Math.min(MAX_CLASS_SPELLS_PER_RANK - Math.min(MAX_CLASS_SPELLS_PER_RANK, finished), rank.unfinished.length) / 2
+    return total + best
+  }, 0)
+  const slots = CLASS_RANKS.length * MAX_CLASS_SPELLS_PER_RANK
+  return {
+    ranks,
+    completion: Math.round((filled / slots) * 100),
+    missingSpells: ranks.reduce((total, rank) => total + Math.max(0, MAX_CLASS_SPELLS_PER_RANK - rank.spells.length), 0),
+    emptyRanks: ranks.filter((rank) => rank.status === "vide").map((rank) => rank.rank),
+    partialRanks: ranks.filter((rank) => rank.status === "incomplet").map((rank) => rank.rank),
+    overfullRanks: ranks.filter((rank) => rank.status === "en trop").map((rank) => rank.rank),
+    completeRanks: ranks.filter((rank) => rank.status === "complet" && !rank.unfinished.length).length,
+    unfinishedSpells: ranks.flatMap((rank) => rank.unfinished),
+  }
+}

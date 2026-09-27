@@ -19,6 +19,8 @@ import type { ClassSpell, ClassSpellDraft, SpellIndexKind, SpellSimilarity } fro
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-duplicates"
+import { ClassStateOverview } from "@/components/eraser/class-state-overview"
+import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
 
 type ResourceData = { classes: ClassRecord[]; spells: ClassSpell[]; similarities: SpellSimilarity[]; headers: string[]; file: { id: string; name: string; webViewLink?: string } | null }
 type MutationResult = { id: string; rowNumber: number; tone: { background: string; foreground: string } } | null
@@ -295,7 +297,7 @@ function SearchExisting({ classId, rank, spells, pending, error, onClose, onLink
  */
 export function ClassIndexManager({ initialData, initialError, kind = "classes" }: { initialData: ResourceData; initialError: string; kind?: SpellIndexKind }) {
   const forClasses = kind === "classes"
-  const allowedTabs = forClasses ? ["classes", "actifs", "passifs", "bonus", "duplicates"] : ["actifs", "passifs", "duplicates"]
+  const allowedTabs = forClasses ? ["etat", "classes", "actifs", "passifs", "bonus", "duplicates", "rank-bonus"] : ["actifs", "passifs", "duplicates"]
   const [data, setData] = useState(initialData)
   const [error, setError] = useState(initialError)
   const [pending, setPending] = useState(false)
@@ -306,11 +308,15 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
   // création, suppression) : une frappe enregistrée ne doit rien remonter.
   const [version, setVersion] = useState(0)
   const [query, setQuery] = useState("")
-  const [storedTab, setTab] = usePersistentState(
-    forClasses ? "eraser:class-index:tab" : "eraser:creature-spell-index:tab", forClasses ? "classes" : "actifs",
+  const [storedTab, setStoredTab] = usePersistentState(
+    "eraser:creature-spell-index:tab", "actifs",
     (v): v is string => typeof v === "string",
   )
-  const tab = allowedTabs.includes(storedTab) ? storedTab : allowedTabs[0]
+  // « Sorts des classes » s'ouvre toujours sur « État des classes ».
+  const [classTab, setClassTab] = useState("etat")
+  const setTab = forClasses ? setClassTab : setStoredTab
+  const currentTab = forClasses ? classTab : storedTab
+  const tab = allowedTabs.includes(currentTab) ? currentTab : allowedTabs[0]
   const [selectedClassId, setSelectedClassId] = usePersistentState(
     "eraser:class-index:selected-class", initialData.classes[0]?.id || "",
     (v): v is string => typeof v === "string",
@@ -355,6 +361,15 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
 
   function updateSpells(updater: (spells: ClassSpell[]) => ClassSpell[]) {
     setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells).filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) } })
+  }
+
+  /** Depuis « État des classes » : la classe dans « Par classe », au rang voulu. */
+  function openClassRank(classId: string, rank?: number) {
+    setSelectedClassId(classId)
+    setNewDraft(null)
+    setSearchRank(null)
+    setTab("classes")
+    if (rank !== undefined) window.setTimeout(() => document.getElementById(`rang-${rank}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 120)
   }
 
   function showDuplicates(spell: ClassSpell) {
@@ -583,13 +598,15 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
       </DialogContent>
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
-    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Par classe</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger></TabsList>
+    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="etat">État des classes</TabsTrigger>}{forClasses && <TabsTrigger value="classes">Par classe</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
+      {forClasses && <TabsContent value="etat" className="mt-3"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onOpen={openClassRank} /></TabsContent>}
       <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
       {/* Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs. */}
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
       <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
       <TabsContent value="duplicates" className="mt-3"><SpellDuplicates key={duplicateFocus ?? "tous"} spells={data.spells} classes={data.classes} similarities={data.similarities} focusSpellId={duplicateFocus} pending={pending} onMerge={merge} onIgnore={ignore} onEdit={setEditing} onDelete={remove} /></TabsContent>
+      {forClasses && <TabsContent value="rank-bonus" className="mt-3"><RankBonusTab /></TabsContent>}
     </Tabs>
   </section>
 }

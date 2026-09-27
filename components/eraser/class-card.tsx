@@ -61,7 +61,7 @@ export function ClassCard({ characterClass }: { characterClass: ClassRecord }) {
           </span>
         </div>
 
-        <div className="mt-3">
+        <div className="mt-3" title="Calculée depuis les sorts : 3 sorts terminés sur chaque rang (rang commun et rangs 1 à 20)">
           <div className="mb-1.5 flex items-center justify-between text-xs">
             <span className="flex items-center gap-1.5 text-muted-foreground">
               <BookOpenCheck className="size-3.5" style={{ color: characterClass.accentDark }} />

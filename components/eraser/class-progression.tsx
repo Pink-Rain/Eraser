@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useState, type DragEvent, type MouseEvent } from "react"
+import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, Trash2, Undo2, X, Zap } from "lucide-react"
 
@@ -11,7 +11,8 @@ import { InlineEdit } from "@/components/eraser/inline-edit"
 import { RichTextInlineEditor } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import type { ClassSpell } from "@/lib/class-content"
+import { RankBonusLine } from "@/components/eraser/rank-bonus"
+import type { ClassSpell, RankBonus } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
@@ -192,6 +193,16 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
 export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string }) {
   const state = useMemo(() => parseClassChoices(value), [value])
   const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
+  // Bonus de rang (communs à toutes les classes) : affichés sous le titre de chaque rang.
+  const [rankBonuses, setRankBonuses] = useState<RankBonus[]>([])
+  useEffect(() => {
+    let active = true
+    fetch("/api/classes/rank-bonuses")
+      .then(async (response) => response.ok ? (await response.json()) as { bonuses?: RankBonus[] } : null)
+      .then((payload) => { if (active && payload?.bonuses) setRankBonuses(payload.bonuses) })
+      .catch(() => { /* la progression reste utilisable sans les bonus */ })
+    return () => { active = false }
+  }, [])
   const [sort, setSort] = usePersistentState<"rank" | "name" | "type" | "manual">(
     "eraser:class-progression:sort", "rank",
     (v): v is "rank" | "name" | "type" | "manual" => v === "rank" || v === "name" || v === "type" || v === "manual",
@@ -300,6 +311,7 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
           const choosing = rank > 0 && (!selectedId || reconsidering[key])
           return <section key={rank} className="border-t pt-4" style={{ borderColor: `${characterClass.accentDark}28` }}>
             <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: `${characterClass.accentLight}42`, color: characterClass.accentDark }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display font-semibold">{rank === 0 ? "Rang commun" : `Rang ${rank}`}</h3><p className="text-[11px] text-muted-foreground">{rank === 0 ? "Acquis automatiquement" : choosing ? "Choisis une capacité" : "Choix enregistré"}</p></div></div>{rank > 0 && selectedId && !choosing && <Button type="button" variant="ghost" size="sm" onClick={() => setReconsidering((current) => ({ ...current, [key]: true }))}><RotateCcw />Rechoisir</Button>}{rank > 0 && selectedId && choosing && <Button type="button" variant="ghost" size="sm" onClick={() => setReconsidering((current) => ({ ...current, [key]: false }))}>Annuler</Button>}</div>
+            <RankBonusLine bonus={rankBonuses.find((bonus) => bonus.rank === rank)} accent={characterClass.accentDark} className="-mt-1 mb-3 pl-10" />
             <div className={`grid gap-3 ${choosing || rank === 0 ? "lg:grid-cols-3" : "grid-cols-1"}`}>{(choosing || rank === 0 ? available : available.filter((spell) => spell.id === selectedId)).map((spell) => <ChoiceCard key={spell.id} spell={spell} selected={rank === 0 || spell.id === selectedId} accent={characterClass.accentDark} onChoose={() => { if (rank > 0) void choose(characterClass.id, rank, spell.id) }} />)}</div>
           </section>
         })}</div> : <p className="mt-5 rounded-xl border border-dashed px-4 py-7 text-center text-sm text-muted-foreground">Aucun sort n’est encore lié à cette classe jusqu’au rang {level}.</p>}

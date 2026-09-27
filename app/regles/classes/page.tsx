@@ -7,7 +7,9 @@ import { ClassCard } from "@/components/eraser/class-card"
 import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { Button } from "@/components/ui/button"
+import { listClassSpells } from "@/lib/class-content"
 import { classImageUrl } from "@/lib/class-images"
+import { classSpellState } from "@/lib/class-spell-utils"
 import {
   classTypes,
   listClasses,
@@ -22,7 +24,14 @@ async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSamp
   let loadError = false
   let loadErrorDetail = ""
   try {
-    classes = await listClasses()
+    // La finition se calcule sur les sorts réellement liés (3 par rang, 21 rangs) ;
+    // la colonne « Finition » de la feuille ne sert plus que si les sorts sont
+    // momentanément illisibles.
+    const [loaded, spellData] = await Promise.all([listClasses(), listClassSpells().catch((error) => {
+      console.error("CLASS_COMPLETION_SPELLS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return null
+    })])
+    classes = spellData ? loaded.map((characterClass) => ({ ...characterClass, completion: classSpellState(spellData.spells, characterClass.id).completion })) : loaded
   } catch (error) {
     loadError = true
     loadErrorDetail = error instanceof Error ? error.message : "UNKNOWN_ERROR"

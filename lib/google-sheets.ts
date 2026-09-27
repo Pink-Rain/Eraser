@@ -73,6 +73,7 @@ import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKe
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
+import { listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 export type CharacterRecord = {
   id: string
@@ -2866,6 +2867,8 @@ export async function syncExistingIdentityIndexes() {
       await db.delete(campaignCharacters).where(and(eq(campaignCharacters.campaignId, link.campaignId), eq(campaignCharacters.characterId, link.characterId)))
     }
   }
+  // Les mises à la corbeille faites sur les autres installations.
+  await applySharedTrash().catch((error) => console.error("IDENTITY_SYNC_TRASH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
   return { campaigns: Math.max(0, campaignRows.length - 1), characters: Math.max(0, characterRows.length - 1) }
 }
 
@@ -5856,6 +5859,46 @@ export async function updateAdminTodo(id: string, patch: Partial<Pick<AdminTodoR
   return updated
 }
 
+/**
+ * Corbeille partagée des personnages et campagnes. L'index local ne voyait que les
+ * suppressions faites sur cette installation : un personnage mis à la corbeille
+ * restait visible chez les autres MJ. Chaque mise à la corbeille, restauration ou
+ * suppression définitive est désormais annoncée dans le Worker partagé, et chaque
+ * installation l'applique à son index lors de la synchronisation.
+ */
+const TRASH_SCOPE = "corbeille"
+type TrashKind = "character" | "campaign"
+type TrashState = "deleted" | "restored" | "purged"
+
+async function shareTrashState(kind: TrashKind, id: string, state: TrashState, at = new Date().toISOString()) {
+  if (!sharedStoreAvailable()) return
+  await writeSharedRecord(TRASH_SCOPE, `${kind}:${id}`, JSON.stringify({ state, at }))
+}
+
+async function applySharedTrash() {
+  if (!sharedStoreAvailable()) return
+  const records = await listSharedRecords(TRASH_SCOPE)
+  const db = getDb()
+  for (const record of records) {
+    const separator = record.key.indexOf(":")
+    const kind = record.key.slice(0, separator)
+    const id = record.key.slice(separator + 1)
+    let parsed: { state?: unknown; at?: unknown }
+    try { parsed = JSON.parse(record.value) as typeof parsed } catch { continue }
+    const at = typeof parsed.at === "string" ? parsed.at : record.updatedAt
+    if (!id || (kind !== "character" && kind !== "campaign")) continue
+    if (kind === "character") {
+      if (parsed.state === "deleted") await db.update(characterIndex).set({ deletedAt: at }).where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt)))
+      else if (parsed.state === "restored") await db.update(characterIndex).set({ deletedAt: null }).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
+      else if (parsed.state === "purged") await db.delete(characterIndex).where(eq(characterIndex.id, id))
+    } else {
+      if (parsed.state === "deleted") await db.update(campaignIndex).set({ deletedAt: at }).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt)))
+      else if (parsed.state === "restored") await db.update(campaignIndex).set({ deletedAt: null }).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
+      else if (parsed.state === "purged") await db.delete(campaignIndex).where(eq(campaignIndex.id, id))
+    }
+  }
+}
+
 export async function softDeleteItem(kind: "todo" | "character" | "campaign", id: string) {
   const deletedAt = new Date().toISOString()
   if (kind === "todo") {
@@ -5864,11 +5907,14 @@ export async function softDeleteItem(kind: "todo" | "character" | "campaign", id
     await updateTodoSheetRow({ ...todo, deletedAt, updatedAt: deletedAt })
     return
   }
+  // Annoncé d'abord aux autres installations : un échec du Worker n'est pas masqué.
+  await shareTrashState(kind, id, "deleted", deletedAt)
   if (kind === "character") await getDb().update(characterIndex).set({ deletedAt }).where(eq(characterIndex.id, id))
   else await getDb().update(campaignIndex).set({ deletedAt }).where(eq(campaignIndex.id, id))
 }
 
 export async function listTrash() {
+  await refreshIdentityIndexes()
   const db = getDb()
   const [todos, characters, campaigns] = await Promise.all([
     adminTodosFromGoogleSheet().then((records) => records.filter((todo) => Boolean(todo.deletedAt))),
@@ -5884,8 +5930,13 @@ export async function restoreItem(kind: "todo" | "character" | "campaign", id: s
     if (!todo) throw new Error("TODO_NOT_FOUND")
     const updatedAt = new Date().toISOString()
     await updateTodoSheetRow({ ...todo, deletedAt: null, updatedAt })
-  } else if (kind === "character") await getDb().update(characterIndex).set({ deletedAt: null }).where(eq(characterIndex.id, id))
-  else await getDb().update(campaignIndex).set({ deletedAt: null }).where(eq(campaignIndex.id, id))
+  } else if (kind === "character") {
+    await shareTrashState(kind, id, "restored")
+    await getDb().update(characterIndex).set({ deletedAt: null }).where(eq(characterIndex.id, id))
+  } else {
+    await shareTrashState(kind, id, "restored")
+    await getDb().update(campaignIndex).set({ deletedAt: null }).where(eq(campaignIndex.id, id))
+  }
 }
 
 async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string) {
@@ -5910,10 +5961,12 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
   } else if (kind === "character") {
     const source = await charactersSource()
     if (source) await deleteSheetRow(source.spreadsheetId, source.range.split("!")[0], id)
+    await shareTrashState("character", id, "purged")
     await getDb().delete(characterIndex).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
   } else {
     const source = await campaignsSource()
     if (source) await deleteSheetRow(source.spreadsheetId, source.range.split("!")[0], id)
+    await shareTrashState("campaign", id, "purged")
     await getDb().delete(campaignIndex).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
   }
 }

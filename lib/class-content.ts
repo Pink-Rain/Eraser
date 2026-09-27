@@ -93,6 +93,8 @@ export type ClassContent = {
   supplements: ClassSupplementTable[]
   presentationSheetUrl: string
   spellsSheetUrl: string
+  /** Bonus gagnés à chaque rang, communs à toutes les classes. */
+  rankBonuses: RankBonus[]
 }
 
 export type SpellSimilarity = {
@@ -441,7 +443,7 @@ export async function getClassContent(classId: string): Promise<ClassContent | n
   const classes = await listClasses()
   const characterClass = classes.find((item) => item.id === classId)
   if (!characterClass) return null
-  const [presentationsResult, spellsResult] = await Promise.allSettled([listClassPresentations(), listClassSpells()])
+  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([listClassPresentations(), listClassSpells(), listRankBonuses()])
   const presentations = presentationsResult.status === "fulfilled" ? presentationsResult.value : null
   const spellData = spellsResult.status === "fulfilled" ? spellsResult.value : null
   const presentation = presentations?.presentations.find((item) => item.classId === classId) ?? null
@@ -455,6 +457,7 @@ export async function getClassContent(classId: string): Promise<ClassContent | n
     supplements,
     presentationSheetUrl: presentations?.file.webViewLink || (presentations ? `https://docs.google.com/spreadsheets/d/${presentations.file.id}/edit` : ""),
     spellsSheetUrl: spellData?.file.webViewLink || (spellData ? `https://docs.google.com/spreadsheets/d/${spellData.file.id}/edit` : ""),
+    rankBonuses: bonusResult.status === "fulfilled" ? bonusResult.value.bonuses : [],
   }
 }
 
@@ -793,4 +796,61 @@ export async function mergeClassSpells(keep: { rowNumber: number; id: string }, 
   for (const row of [...removedRows].sort((left, right) => right - left)) await deleteGoogleSheetRow(workbook.file.id, workbook.tabName, row, workbook.sheetId)
   clearSpreadsheetReadCache(workbook.file.id)
   return { ...result, removedNames, keptName: draft.name.trim() }
+}
+
+/**
+ * Bonus gagnés à chaque rang, les mêmes pour toutes les classes (ex. « +5 points de
+ * vie max »). Ils vivent dans l'onglet « Bonus de rang » du classeur des sorts : une
+ * ligne par rang (1 à 20), puis autant de colonnes que de bonus, remplies dans Drive.
+ */
+export const RANK_BONUS_TAB = "Bonus de rang"
+export type RankBonus = { rank: number; entries: Array<{ label: string; value: string }> }
+export type RankBonusTable = { bonuses: RankBonus[]; headers: string[]; sheetUrl: string; exists: boolean }
+
+let rankBonusCache: { expiresAt: number; table: RankBonusTable } | null = null
+let rankBonusCreation: Promise<void> | null = null
+
+/** Crée l'onglet s'il manque : en-têtes et 20 lignes « Rang 1 » à « Rang 20 ». Jamais s'il existe. */
+async function createRankBonusTab(fileId: string) {
+  const tabs = await spreadsheetTabs(fileId)
+  if (tabs.some((tab) => tab.title === RANK_BONUS_TAB)) return
+  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: [{ addSheet: { properties: { title: RANK_BONUS_TAB, gridProperties: { rowCount: 21, columnCount: 6, frozenRowCount: 1, frozenColumnCount: 1 } } } }] }),
+  })
+  await updateRange(fileId, `${quoteTab(RANK_BONUS_TAB)}!A1:B21`, [["Rang", "Bonus"], ...Array.from({ length: 20 }, (_, index) => [`Rang ${index + 1}`, ""])], { valueInputOption: "RAW" })
+  clearSpreadsheetReadCache(fileId)
+}
+
+export async function listRankBonuses(options: { create?: boolean; refresh?: boolean } = {}): Promise<RankBonusTable> {
+  if (!options.refresh && rankBonusCache && rankBonusCache.expiresAt > Date.now() && (rankBonusCache.table.exists || !options.create)) return rankBonusCache.table
+  const { spells: file } = await classWorkbookFiles(options.refresh)
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  let tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)
+  if (!tab && options.create) {
+    rankBonusCreation ??= createRankBonusTab(file.id).finally(() => { rankBonusCreation = null })
+    await rankBonusCreation
+    tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)
+  }
+  const base = file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`
+  if (!tab) {
+    const table = { bonuses: [], headers: [], sheetUrl: base, exists: false }
+    rankBonusCache = { expiresAt: Date.now() + 60_000, table }
+    return table
+  }
+  if (options.refresh) clearSpreadsheetReadCache(file.id)
+  const rows = await readRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!A1:Z60`)
+  const headers = (rows[0] ?? []).map((header) => String(header ?? "").trim())
+  const bonuses = rows.slice(1).flatMap((row): RankBonus[] => {
+    const rank = Number.parseInt(String(row[0] ?? "").match(/\d+/)?.[0] ?? "", 10)
+    if (!Number.isInteger(rank) || rank < 1 || rank > 20) return []
+    const entries = headers.slice(1).flatMap((label, index) => {
+      const value = String(row[index + 1] ?? "").trim()
+      return value ? [{ label, value }] : []
+    })
+    return [{ rank, entries }]
+  })
+  const table = { bonuses, headers, sheetUrl: tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`, exists: true }
+  rankBonusCache = { expiresAt: Date.now() + 60_000, table }
+  return table
 }
