@@ -3,7 +3,6 @@
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { LoaderCircle } from "lucide-react"
 
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { parseClassChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import type { ClassSpell } from "@/lib/class-content"
 import {
@@ -25,8 +24,8 @@ const shorten = (value: string, size: number) => value.length > size ? `${value.
 // ---------- éléments de graphique ----------
 
 function Card({ title, question, wide = false, children }: { title: string; question?: string; wide?: boolean; children: ReactNode }) {
-  return <article className={`flex min-w-0 flex-col gap-3 rounded-2xl border bg-card/80 p-4 ${wide ? "xl:col-span-2" : ""}`}>
-    <div><h4 className="font-display text-lg font-semibold leading-tight">{title}</h4>{question && <p className="mt-0.5 text-xs text-muted-foreground">{question}</p>}</div>
+  return <article className={`flex min-w-0 flex-col gap-2 rounded-xl border bg-card/80 p-3 ${wide ? "lg:col-span-2" : ""}`}>
+    <div><h4 className="font-display text-base font-semibold leading-tight">{title}</h4>{question && <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{question}</p>}</div>
     {children}
   </article>
 }
@@ -43,8 +42,8 @@ function Legend({ items }: { items: Array<{ label: string; color?: string; marke
 }
 
 function Tile({ value, label }: { value: string | number; label: string }) {
-  return <div className="rounded-xl border bg-background/50 px-3 py-2">
-    <p className="font-display text-2xl font-semibold tabular-nums">{value}</p>
+  return <div className="rounded-lg border bg-background/50 px-2.5 py-1.5">
+    <p className="font-display text-xl font-semibold tabular-nums">{value}</p>
     <p className="text-[11px] leading-4 text-muted-foreground">{label}</p>
   </div>
 }
@@ -52,10 +51,10 @@ function Tile({ value, label }: { value: string | number; label: string }) {
 /** Barres horizontales ; `marker` = valeur de comparaison (moyenne des autres). */
 function BarList({ rows, color, labelWidth = 170, unit = "" }: { rows: Array<{ label: string; value: number; marker?: number; color?: string; tip?: string }>; color: string; labelWidth?: number; unit?: string }) {
   if (!rows.length) return <p className="text-sm text-muted-foreground">Aucune donnée.</p>
-  const W = 520, R = 40, rowH = 24, H = rows.length * rowH + 4
+  const W = 520, R = 40, rowH = 21, H = rows.length * rowH + 4
   const max = Math.max(1, ...rows.map((row) => Math.max(row.value, row.marker ?? 0)))
   const x = (value: number) => labelWidth + (value / max) * (W - labelWidth - R)
-  return <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-2xl" role="img">
+  return <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-xl" role="img">
     {rows.map((row, index) => {
       const y = index * rowH + 4
       const end = x(row.value)
@@ -72,11 +71,11 @@ function BarList({ rows, color, labelWidth = 170, unit = "" }: { rows: Array<{ l
 
 /** Colonnes verticales ; `marker` en pointillés = moyenne des autres classes. */
 function Columns({ columns, color }: { columns: Array<{ label: string; value: number; marker?: number }>; color: string }) {
-  const W = 520, B = 150, T = 18, H = 178
+  const W = 520, B = 118, T = 16, H = 144
   const max = Math.max(1, ...columns.map((column) => Math.max(column.value, column.marker ?? 0)))
   const step = (W - 16) / columns.length
   const y = (value: number) => B - (value / max) * (B - T)
-  return <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-2xl" role="img">
+  return <svg viewBox={`0 0 ${W} ${H}`} className="w-full max-w-xl" role="img">
     <line x1={8} x2={W - 8} y1={B} y2={B} stroke={GRID} />
     {columns.map((column, index) => {
       const cx = 8 + step * index + step / 2
@@ -125,40 +124,44 @@ async function fetchPlayData() {
   return payload
 }
 
-/**
- * Onglet « Statistiques » de Sorts des classes : une classe comparée aux autres, le
- * jeu entier, puis ce que les fiches de personnage disent des choix des joueurs.
- */
-export function ClassStatistics({ classes, spells }: { classes: ClassRecord[]; spells: ClassSpell[] }) {
-  const started = useMemo(() => classes.filter((item) => spellsOfClass(spells, item.id).length > 0).sort((left, right) => left.name.localeCompare(right.name, "fr")), [classes, spells])
-  const [classId, setClassId] = useState("")
-  const current = started.find((item) => item.id === classId) ?? started[0]
+/** Les fiches de personnage, lues une seule fois pour tout l'onglet. */
+export function useClassPlayData(enabled = true) {
   const [play, setPlay] = useState<PlayData | null>(null)
-  const [playError, setPlayError] = useState("")
-
+  const [error, setError] = useState("")
   useEffect(() => {
+    if (!enabled) return
     let active = true
-    fetchPlayData().then((data) => { if (active) setPlay(data) }).catch((error) => { if (active) setPlayError(error instanceof Error ? error.message : "Fiches illisibles.") })
+    fetchPlayData().then((data) => { if (active) setPlay(data) }).catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Fiches illisibles.") })
     return () => { active = false }
-  }, [])
+  }, [enabled])
+  return { play, error }
+}
+export type ClassPlayState = ReturnType<typeof useClassPlayData>
 
-  if (!current) return <p className="rounded-2xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Aucune classe n’a encore de sort.</p>
-  const others = started.filter((item) => item.id !== current.id)
-  const accent = current.accentDark || PRIMARY
+function startedClasses(classes: ClassRecord[], spells: ClassSpell[]) {
+  return classes.filter((item) => spellsOfClass(spells, item.id).length > 0).sort((left, right) => left.name.localeCompare(right.name, "fr"))
+}
 
-  return <section className="space-y-8">
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <label className="grid w-full max-w-sm gap-1.5 text-sm font-medium">Classe comparée
-        <NativeSelect value={current.id} onChange={(event) => setClassId(event.target.value)}>
-          {started.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
-        </NativeSelect>
-      </label>
-      <p className="text-xs text-muted-foreground">Comparée à la moyenne des {others.length} autres classes qui ont des sorts. Survole une barre pour le détail.</p>
-    </div>
-
-    <ClassVersusOthers characterClass={current} others={others} spells={spells} accent={accent} />
+/** Toutes les classes : vue d'ensemble, puis ce que disent les fiches, toutes classes confondues. */
+export function GlobalClassStatistics({ classes, spells, playData }: { classes: ClassRecord[]; spells: ClassSpell[]; playData: ClassPlayState }) {
+  const started = useMemo(() => startedClasses(classes, spells), [classes, spells])
+  if (!started.length) return null
+  return <section className="space-y-6">
     <WholeGame classes={started} spells={spells} />
-    <PlayersSection characterClass={current} classes={classes} spells={spells} play={play} error={playError} accent={accent} />
+    <PlayersOverview classes={classes} spells={spells} playData={playData} />
+  </section>
+}
+
+/** Une classe : comparée aux autres, puis les sorts que les joueurs y choisissent. */
+export function ClassStatisticsFor({ characterClass, classes, spells, playData }: { characterClass: ClassRecord; classes: ClassRecord[]; spells: ClassSpell[]; playData: ClassPlayState }) {
+  const started = useMemo(() => startedClasses(classes, spells), [classes, spells])
+  if (!spellsOfClass(spells, characterClass.id).length) return <p className="rounded-2xl border border-dashed px-5 py-6 text-center text-sm text-muted-foreground">Pas encore de statistiques : cette classe n’a aucun sort.</p>
+  const others = started.filter((item) => item.id !== characterClass.id)
+  const accent = characterClass.accentDark || PRIMARY
+  return <section className="space-y-3">
+    <p className="text-xs text-muted-foreground">Comparée à la moyenne des {others.length} autres classes qui ont des sorts. Survole une barre pour le détail.</p>
+    <ClassVersusOthers characterClass={characterClass} others={others} spells={spells} accent={accent} />
+    <ClassPicks characterClass={characterClass} classes={classes} spells={spells} playData={playData} accent={accent} />
   </section>
 }
 
@@ -184,8 +187,7 @@ function ClassVersusOthers({ characterClass, others, spells, accent }: { charact
   const partners = others.map((item) => ({ item, count: sharedSpellCount(spells, characterClass.id, item.id) })).filter((row) => row.count > 0).sort((left, right) => right.count - left.count)
 
   return <div className="space-y-3">
-    <SectionTitle eyebrow="Une classe face aux autres" title={characterClass.name} />
-    <div className="grid gap-3 xl:grid-cols-2">
+    <div className="grid gap-3 lg:grid-cols-2 xl:grid-cols-3">
       <Card title="Compétences utilisées" question="Les compétences que la classe fait lancer, comparées aux autres classes.">
         <Legend items={[{ label: characterClass.name, color: accent }, { label: "Moyenne des autres classes", marker: "dot" }]} />
         <BarList color={accent} rows={skills.map((tally) => ({ label: tally.label, value: tally.count, marker: average(otherSkillCounts.map((counts) => counts.get(tally.key) ?? 0)) }))} />
@@ -263,17 +265,22 @@ function WholeGame({ classes, spells }: { classes: ClassRecord[]; spells: ClassS
   </div>
 }
 
-function PlayersSection({ characterClass, classes, spells, play, error, accent }: { characterClass: ClassRecord; classes: ClassRecord[]; spells: ClassSpell[]; play: PlayData | null; error: string; accent: string }) {
-  const parsed = useMemo(() => (play?.characters ?? []).map((character) => ({
+function useParsedPlay(play: PlayData | null, classes: ClassRecord[]) {
+  return useMemo(() => (play?.characters ?? []).map((character) => ({
     ...character,
     classList: selectedCharacterClasses(character.classes, classes),
     state: parseClassChoices(character.choices),
   })), [classes, play])
+}
 
-  if (error) return <div className="space-y-3"><SectionTitle eyebrow="Les joueurs" title="Ce que disent les fiches" /><p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p></div>
-  if (!play) return <div className="space-y-3"><SectionTitle eyebrow="Les joueurs" title="Ce que disent les fiches" /><p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Lecture des fiches de personnage…</p></div>
+function PlayStatus({ playData }: { playData: ClassPlayState }) {
+  if (playData.error) return <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{playData.error}</p>
+  return <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Lecture des fiches de personnage…</p>
+}
 
-  // Sorts choisis à chaque rang, pour la classe comparée.
+/** Sorts choisis à chaque rang par les personnages de cette classe. */
+function ClassPicks({ characterClass, classes, spells, playData, accent }: { characterClass: ClassRecord; classes: ClassRecord[]; spells: ClassSpell[]; playData: ClassPlayState; accent: string }) {
+  const parsed = useParsedPlay(playData.play, classes)
   const withClass = parsed.filter((character) => character.classList.some((item) => item.id === characterClass.id))
   const ownSpells = spellsOfClass(spells, characterClass.id)
   const rankRows = Array.from({ length: 20 }, (_, index) => index + 1).flatMap((rank) => {
@@ -283,7 +290,25 @@ function PlayersSection({ characterClass, classes, spells, play, error, accent }
     const picks = eligible.map((character) => character.state.choices[characterClass.id]?.[String(rank)] ?? "")
     return [{ rank, eligible: eligible.length, options: options.map((spell) => ({ spell, count: picks.filter((id) => id === spell.id).length })), pending: picks.filter((id) => !id).length }]
   })
+  return <Card title="Sorts choisis à chaque rang" question={`D’après les fiches : ${withClass.length} personnage${withClass.length > 1 ? "s" : ""} de la classe. Un sort jamais choisi est en rouge.`}>
+    {!playData.play ? <PlayStatus playData={playData} /> : rankRows.length ? <div className="grid gap-x-6 lg:grid-cols-2">
+      {rankRows.map((row) => <div key={row.rank} className="grid gap-1.5 border-t py-2 sm:grid-cols-[5.5rem_minmax(0,1fr)]">
+        <div><p className="text-sm font-semibold">Rang {row.rank}</p><p className="text-[10px] text-muted-foreground">{row.eligible} perso.{row.pending ? ` · ${row.pending} sans choix` : ""}</p></div>
+        <div className="grid gap-1">{row.options.map(({ spell, count }) => <div key={spell.id} className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)_2.75rem] items-center gap-2 text-xs" title={`${spell.name} : ${count} sur ${row.eligible}`}>
+          <span className="truncate">{spell.name}</span>
+          <span className="h-2 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${pct(count, row.eligible)}%`, backgroundColor: accent }} /></span>
+          <span className={`text-right tabular-nums ${count === 0 ? "text-destructive" : "text-muted-foreground"}`}>{pct(count, row.eligible)} %</span>
+        </div>)}</div>
+      </div>)}
+    </div> : <p className="text-sm text-muted-foreground">Aucun personnage n’a encore la classe {characterClass.name}.</p>}
+  </Card>
+}
 
+/** Ce que disent les fiches, toutes classes confondues : classes jouées, rangs, charges. */
+function PlayersOverview({ classes, spells, playData }: { classes: ClassRecord[]; spells: ClassSpell[]; playData: ClassPlayState }) {
+  const parsed = useParsedPlay(playData.play, classes)
+  const play = playData.play
+  if (!play) return <div className="space-y-3"><SectionTitle eyebrow="Les joueurs" title="Ce que disent les fiches" /><PlayStatus playData={playData} /></div>
   // Classes et rangs joués.
   const playedCounts = classes.map((item) => ({ item, count: parsed.filter((character) => character.classList.some((entry) => entry.id === item.id)).length })).filter((row) => row.count > 0).sort((left, right) => right.count - left.count)
   const neverPlayed = classes.filter((item) => !playedCounts.some((row) => row.item.id === item.id) && spellsOfClass(spells, item.id).length > 0)
@@ -320,18 +345,6 @@ function PlayersSection({ characterClass, classes, spells, play, error, accent }
     <SectionTitle eyebrow="Les joueurs" title="Ce que disent les fiches" />
     <p className="text-xs text-muted-foreground">{parsed.length} personnage{parsed.length > 1 ? "s" : ""} lus dans Google Sheets (hors corbeille).</p>
     <div className="grid gap-3 xl:grid-cols-2">
-      <Card title={`Sorts choisis à chaque rang · ${characterClass.name}`} question="Quel sort les joueurs prennent-ils ? Lequel n’est jamais choisi ?" wide>
-        {rankRows.length ? <div className="divide-y">
-          {rankRows.map((row) => <div key={row.rank} className="grid gap-2 py-3 md:grid-cols-[7rem_minmax(0,1fr)]">
-            <div><p className="font-semibold">Rang {row.rank}</p><p className="text-[11px] text-muted-foreground">{row.eligible} personnage{row.eligible > 1 ? "s" : ""}{row.pending ? ` · ${row.pending} sans choix` : ""}</p></div>
-            <div className="grid gap-1.5">{row.options.map(({ spell, count }) => <div key={spell.id} className="grid grid-cols-[minmax(0,12rem)_minmax(0,1fr)_3.5rem] items-center gap-2 text-sm" title={`${spell.name} : ${count} sur ${row.eligible}`}>
-              <span className="truncate">{spell.name}</span>
-              <span className="h-2.5 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${pct(count, row.eligible)}%`, backgroundColor: accent }} /></span>
-              <span className={`text-right text-xs tabular-nums ${count === 0 ? "text-destructive" : "text-muted-foreground"}`}>{pct(count, row.eligible)} %</span>
-            </div>)}</div>
-          </div>)}
-        </div> : <p className="text-sm text-muted-foreground">Aucun personnage n’a encore la classe {characterClass.name}.</p>}
-      </Card>
       <Card title="Classes jouées" question="Combien de personnages par classe (un personnage multiclasse compte pour chaque classe).">
         <BarList color={PRIMARY} rows={playedCounts.map(({ item, count }) => ({ label: item.name, value: count, color: item.accentDark }))} />
         {neverPlayed.length > 0 && <p className="text-xs text-muted-foreground">Jamais choisies : {neverPlayed.map((item) => item.name).join(", ")}.</p>}

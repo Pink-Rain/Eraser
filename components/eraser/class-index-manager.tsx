@@ -19,9 +19,9 @@ import type { ClassSpell, ClassSpellDraft, SpellIndexKind, SpellSimilarity } fro
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-duplicates"
-import { ClassStateOverview } from "@/components/eraser/class-state-overview"
+import { ClassStateDetail, ClassStateOverview } from "@/components/eraser/class-state-overview"
 import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
-import { ClassStatistics } from "@/components/eraser/class-statistics"
+import { ClassStatisticsFor, GlobalClassStatistics, useClassPlayData } from "@/components/eraser/class-statistics"
 
 type ResourceData = { classes: ClassRecord[]; spells: ClassSpell[]; similarities: SpellSimilarity[]; headers: string[]; file: { id: string; name: string; webViewLink?: string } | null }
 type MutationResult = { id: string; rowNumber: number; tone: { background: string; foreground: string } } | null
@@ -187,7 +187,9 @@ function RankRail({ counts, accent }: { counts: number[]; accent: string }) {
     for (const section of sections) observer.observe(section)
     return () => observer.disconnect()
   }, [counts])
-  return <nav aria-label="Aller à un rang" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/70 px-1 py-2 opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
+  return <nav aria-label="Aller à une partie de la classe" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/70 px-1 py-2 opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
+    {[["classe-etat", "État", "État de la classe"], ["classe-stats", "Stat", "Statistiques de la classe"]].map(([id, label, title]) => <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} title={title} className="shrink-0 rounded-full px-1 py-1 text-[9px] font-bold uppercase tracking-wide text-foreground/70 hover:bg-muted">{label}</button>)}
+    <span className="my-1 h-px w-4 shrink-0 bg-border" aria-hidden />
     {counts.map((count, rank) => <button
       key={rank}
       type="button"
@@ -298,7 +300,7 @@ function SearchExisting({ classId, rank, spells, pending, error, onClose, onLink
  */
 export function ClassIndexManager({ initialData, initialError, kind = "classes" }: { initialData: ResourceData; initialError: string; kind?: SpellIndexKind }) {
   const forClasses = kind === "classes"
-  const allowedTabs = forClasses ? ["etat", "classes", "actifs", "passifs", "bonus", "duplicates", "stats", "rank-bonus"] : ["actifs", "passifs", "duplicates"]
+  const allowedTabs = forClasses ? ["classes", "actifs", "passifs", "bonus", "duplicates", "rank-bonus"] : ["actifs", "passifs", "duplicates"]
   const [data, setData] = useState(initialData)
   const [error, setError] = useState(initialError)
   const [pending, setPending] = useState(false)
@@ -313,15 +315,14 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
     "eraser:creature-spell-index:tab", "actifs",
     (v): v is string => typeof v === "string",
   )
-  // « Sorts des classes » s'ouvre toujours sur « État des classes ».
-  const [classTab, setClassTab] = useState("etat")
+  // « Sorts des classes » s'ouvre toujours sur l'onglet Classes, toutes classes.
+  const [classTab, setClassTab] = useState("classes")
   const setTab = forClasses ? setClassTab : setStoredTab
   const currentTab = forClasses ? classTab : storedTab
   const tab = allowedTabs.includes(currentTab) ? currentTab : allowedTabs[0]
-  const [selectedClassId, setSelectedClassId] = usePersistentState(
-    "eraser:class-index:selected-class", initialData.classes[0]?.id || "",
-    (v): v is string => typeof v === "string",
-  )
+  // Vide : toutes les classes (état et statistiques d'ensemble).
+  const [selectedClassId, setSelectedClassId] = useState("")
+  const playData = useClassPlayData(forClasses)
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
   // Sort dont on veut voir le groupe de doublons, et sort ouvert dans l'éditeur.
   const [duplicateFocus, setDuplicateFocus] = useState<string | null>(null)
@@ -340,7 +341,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
   const [searchRank, setSearchRank] = useState<number | null>(null)
   const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const filtered = useMemo(() => data.spells.filter((spell) => !normalizedQuery || searchText(spell).includes(normalizedQuery)), [data.spells, normalizedQuery])
-  const selectedClass = data.classes.find((item) => item.id === selectedClassId) || data.classes[0]
+  const selectedClass = data.classes.find((item) => item.id === selectedClassId)
   const selectedClassKey = selectedClass?.id || ""
   const rankCounts = useMemo(() => Array.from({ length: 21 }, (_, rank) => data.spells.filter((spell) => spell.classRanks[selectedClassKey] === rank).length), [data.spells, selectedClassKey])
   // La grille partagée gère largeurs, hauteurs et mise en forme : le composant
@@ -364,13 +365,15 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
     setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells).filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) } })
   }
 
-  /** Depuis « État des classes » : la classe dans « Par classe », au rang voulu. */
-  function openClassRank(classId: string, rank?: number) {
+  function selectClass(classId: string) {
     setSelectedClassId(classId)
     setNewDraft(null)
     setSearchRank(null)
-    setTab("classes")
-    if (rank !== undefined) window.setTimeout(() => document.getElementById(`rang-${rank}`)?.scrollIntoView({ behavior: "smooth", block: "start" }), 120)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
+  function scrollToSection(id: string) {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })
   }
 
   function showDuplicates(spell: ClassSpell) {
@@ -599,15 +602,13 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes" 
       </DialogContent>
     </Dialog>
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
-    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="etat">État des classes</TabsTrigger>}{forClasses && <TabsTrigger value="classes">Par classe</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="stats">Statistiques</TabsTrigger>}{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
-      {forClasses && <TabsContent value="etat" className="mt-3"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onOpen={openClassRank} /></TabsContent>}
-      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => { setSelectedClassId(event.target.value); setNewDraft(null); setSearchRank(null) }}>{data.classes.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{selectedClass ? <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Aucune classe disponible.</p>}</TabsContent>
+    <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Classes</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
+      <TabsContent value="classes" className="mt-3"><label className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<NativeSelect value={selectedClass?.id || ""} onChange={(event) => selectClass(event.target.value)}><NativeSelectOption value="">Toutes les classes</NativeSelectOption>{[...data.classes].sort((left, right) => left.name.localeCompare(right.name, "fr")).map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}</NativeSelect></label>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
       {/* Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs. */}
       <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif"))}</TabsContent>
       <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
       <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
       <TabsContent value="duplicates" className="mt-3"><SpellDuplicates key={duplicateFocus ?? "tous"} spells={data.spells} classes={data.classes} similarities={data.similarities} focusSpellId={duplicateFocus} pending={pending} onMerge={merge} onIgnore={ignore} onEdit={setEditing} onDelete={remove} /></TabsContent>
-      {forClasses && <TabsContent value="stats" className="mt-3"><ClassStatistics classes={data.classes} spells={data.spells} /></TabsContent>}
       {forClasses && <TabsContent value="rank-bonus" className="mt-3"><RankBonusTab /></TabsContent>}
     </Tabs>
   </section>

@@ -1,10 +1,9 @@
 "use client"
 
 import { useMemo, useState } from "react"
-import { AlertTriangle, ArrowRight, CheckCircle2, CircleDashed, PencilLine } from "lucide-react"
+import { AlertTriangle, CheckCircle2, CircleDashed, PencilLine } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ClassSpell } from "@/lib/class-content"
 import { classSpellGaps, classSpellState, MAX_CLASS_SPELLS_PER_RANK, type ClassRankState, type ClassSpellState } from "@/lib/class-spell-utils"
 import { skillQuality } from "@/lib/class-stats"
@@ -71,19 +70,21 @@ function Stat({ label, value, tone = "" }: { label: string; value: string | numb
  * « État des classes » : ce qui manque à chaque classe pour avoir ses 3 sorts sur
  * chacun de ses 21 rangs. Toutes les classes d'un coup d'œil, ou une seule en détail.
  */
-export function ClassStateOverview({ classes, spells, headers, onOpen }: {
+function hasClassColumn(headers: string[], characterClass: ClassRecord) {
+  return headers.some((header) => header === characterClass.id || normalizeClassLabel(header) === normalizeClassLabel(characterClass.name))
+}
+
+export function ClassStateOverview({ classes, spells, headers, onSelect }: {
   classes: ClassRecord[]
   spells: ClassSpell[]
   headers: string[]
-  onOpen: (classId: string, rank?: number) => void
+  onSelect: (classId: string) => void
 }) {
-  const [selectedId, setSelectedId] = useState("")
   const states = useMemo(() => classes.map((characterClass) => ({
     characterClass,
     state: classSpellState(spells, characterClass.id),
-    hasColumn: headers.some((header) => header === characterClass.id || normalizeClassLabel(header) === normalizeClassLabel(characterClass.name)),
+    hasColumn: hasClassColumn(headers, characterClass),
   })).sort((left, right) => right.state.completion - left.state.completion || left.characterClass.name.localeCompare(right.characterClass.name, "fr")), [classes, headers, spells])
-  const selected = states.find((item) => item.characterClass.id === selectedId)
 
   // Une classe sans aucun sort n'est pas « en cours » : elle est regroupée à part
   // pour ne pas noyer le tableau ni le compte des sorts manquants.
@@ -95,17 +96,8 @@ export function ClassStateOverview({ classes, spells, headers, onOpen }: {
   const unfinished = started.reduce((total, item) => total + item.state.unfinishedSpells.length, 0)
 
   return <section className="space-y-4">
-    <div className="flex flex-wrap items-end justify-between gap-3">
-      <label className="grid w-full max-w-sm gap-1.5 text-sm font-medium">Classe
-        <NativeSelect value={selectedId} onChange={(event) => setSelectedId(event.target.value)}>
-          <NativeSelectOption value="">Toutes les classes</NativeSelectOption>
-          {[...classes].sort((left, right) => left.name.localeCompare(right.name, "fr")).map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
-        </NativeSelect>
-      </label>
-      <Legend />
-    </div>
-
-    {!selected ? <>
+    <div className="flex justify-end"><Legend /></div>
+    <>
       <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
         <Stat label="Classes terminées" value={`${finished} / ${states.length}`} tone="text-emerald-700 dark:text-emerald-400" />
         <Stat label="Sorts manquants (classes commencées)" value={missing} />
@@ -123,7 +115,7 @@ export function ClassStateOverview({ classes, spells, headers, onOpen }: {
               state.overfullRanks.length ? `${plural(state.overfullRanks.length, "rang")} en trop` : "",
               state.unfinishedSpells.length ? `${plural(state.unfinishedSpells.length, "sort")} à terminer` : "",
             ].filter(Boolean)
-            return <button key={characterClass.id} type="button" onClick={() => setSelectedId(characterClass.id)} className="grid w-full items-center gap-2 px-4 py-3 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)_5rem_minmax(9rem,14rem)] md:gap-4">
+            return <button key={characterClass.id} type="button" onClick={() => onSelect(characterClass.id)} className="grid w-full items-center gap-2 px-4 py-3 text-left transition hover:bg-muted/40 md:grid-cols-[minmax(10rem,14rem)_minmax(0,1fr)_5rem_minmax(9rem,14rem)] md:gap-4">
               <span className="flex min-w-0 items-center gap-2 font-semibold"><span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: characterClass.accentDark }} /><span className="truncate">{characterClass.name}</span></span>
               <RankStrip state={state} />
               <span className="font-display text-lg font-semibold md:text-right">{state.completion}%</span>
@@ -135,19 +127,25 @@ export function ClassStateOverview({ classes, spells, headers, onOpen }: {
       </div>
       {notStarted.length > 0 && <div className="rounded-2xl border border-dashed bg-card/50 px-4 py-3">
         <p className="text-sm font-semibold">Pas encore commencées <span className="font-normal text-muted-foreground">({notStarted.length} classes · aucun sort lié)</span></p>
-        <div className="mt-2 flex flex-wrap gap-1.5">{notStarted.map(({ characterClass }) => <button key={characterClass.id} type="button" onClick={() => setSelectedId(characterClass.id)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium hover:border-primary hover:text-primary"><span className="size-2 rounded-full" style={{ backgroundColor: characterClass.accentDark }} />{characterClass.name}</button>)}</div>
+        <div className="mt-2 flex flex-wrap gap-1.5">{notStarted.map(({ characterClass }) => <button key={characterClass.id} type="button" onClick={() => onSelect(characterClass.id)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium hover:border-primary hover:text-primary"><span className="size-2 rounded-full" style={{ backgroundColor: characterClass.accentDark }} />{characterClass.name}</button>)}</div>
       </div>}
       <SkillQualityPanel spells={spells} />
-    </> : <ClassState {...selected} onOpen={onOpen} onBack={() => setSelectedId("")} />}
+    </>
   </section>
 }
 
-function ClassState({ characterClass, state, hasColumn, onOpen, onBack }: { characterClass: ClassRecord; state: ClassSpellState; hasColumn: boolean; onOpen: (classId: string, rank?: number) => void; onBack: () => void }) {
+/**
+ * État d'une seule classe : finition, les 21 rangs en couleur, puis ce qui manque.
+ * Un clic sur un rang descend jusqu'à ce rang, affiché plus bas sur la page.
+ */
+export function ClassStateDetail({ characterClass, spells, headers, onRank, onBack }: { characterClass: ClassRecord; spells: ClassSpell[]; headers: string[]; onRank: (rank: number) => void; onBack: () => void }) {
+  const state = useMemo(() => classSpellState(spells, characterClass.id), [characterClass.id, spells])
+  const hasColumn = hasClassColumn(headers, characterClass)
   const accent = characterClass.accentDark || "#7f5a3a"
   const partial = state.ranks.filter((rank) => rank.status === "incomplet")
   const overfull = state.ranks.filter((rank) => rank.status === "en trop")
   const allGood = !state.missingSpells && !overfull.length && !state.unfinishedSpells.length
-  const open = (rank?: number) => onOpen(characterClass.id, rank)
+  const open = (rank: number) => onRank(rank)
   const chip = (rank: ClassRankState, detail?: string) => <button key={rank.rank} type="button" onClick={() => open(rank.rank)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-semibold hover:border-primary hover:text-primary">
     {rankName(rank.rank)}{detail && <span className="font-normal text-muted-foreground">{detail}</span>}
   </button>
@@ -158,7 +156,7 @@ function ClassState({ characterClass, state, hasColumn, onOpen, onBack }: { char
         <span className="size-3 rounded-full" style={{ backgroundColor: accent }} />
         <h3 className="font-display text-2xl font-semibold" style={{ color: accent }}>{characterClass.name}</h3>
         <span className="font-display text-2xl font-semibold">{state.completion}%</span>
-        <div className="ml-auto flex gap-2"><Button type="button" variant="ghost" size="sm" onClick={onBack}>Toutes les classes</Button><Button type="button" size="sm" onClick={() => open()}>Ouvrir dans « Par classe »<ArrowRight /></Button></div>
+        <div className="ml-auto flex items-center gap-3"><Legend /><Button type="button" variant="ghost" size="sm" onClick={onBack}>Toutes les classes</Button></div>
       </div>
       <div className="mt-2 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${characterClass.accentLight || "#ccc"}45` }}><div className="h-full rounded-full" style={{ width: `${state.completion}%`, backgroundColor: accent }} /></div>
       <p className="mt-2 text-sm text-muted-foreground">{state.completeRanks} rang{state.completeRanks > 1 ? "s" : ""} terminé{state.completeRanks > 1 ? "s" : ""} sur 21 · {plural(state.missingSpells, "sort manquant", "sorts manquants")}</p>

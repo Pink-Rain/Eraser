@@ -1,6 +1,6 @@
 {
   "name": "eraser-jdr",
-  "version": "0.1.1-alpha.78",
+  "version": "0.1.1-alpha.79",
   "eraserShell": 3,
   "private": true,
   "main": "desktop/main.cjs",
