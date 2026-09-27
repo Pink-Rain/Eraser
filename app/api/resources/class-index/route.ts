@@ -55,6 +55,8 @@ export async function POST(request: Request) {
     // Une écriture a pu aboutir en partie : rien ne doit rester en mémoire.
     invalidateClassContentCaches()
     const code = error instanceof Error ? error.message : ""
-    return NextResponse.json({ error: code === "CLASS_SPELL_ID_EXISTS" ? "Cet ID de sort existe déjà." : code === "CLASS_SPELL_EMPTY" ? "Donne au moins un nom, un effet ou une description au sort." : code === "CLASS_RANK_INVALID" ? "Le rang doit être compris entre 0 et 20." : code === "CLASS_SPELL_MOVED" ? "La feuille des sorts a changé entre-temps. Actualise puis recommence." : code.startsWith("CLASS_RANK_FULL") ? "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux." : code === "CLASS_COLUMN_NOT_FOUND" ? "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée." : "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
+    // Toujours journalisé : une écriture refusée ne doit jamais passer inaperçue.
+    console.error("CLASS_RESOURCE_WRITE_FAILED", code || "UNKNOWN_ERROR")
+    return NextResponse.json({ error: code === "CLASS_SPELL_ID_EXISTS" ? "Cet ID de sort existe déjà." : code === "CLASS_SPELL_EMPTY" ? "Donne au moins un nom, un effet ou une description au sort." : code === "CLASS_RANK_INVALID" ? "Le rang doit être compris entre 0 et 20." : code === "CLASS_SPELL_MOVED" ? "La feuille des sorts a changé entre-temps. Actualise puis recommence." : code.startsWith("CLASS_RANK_FULL") ? "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux." : code.startsWith("CLASS_COLUMN_NOT_FOUND") ? "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée." : "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
   }
 }

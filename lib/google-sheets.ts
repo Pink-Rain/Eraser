@@ -82,6 +82,10 @@ export type CharacterRecord = {
   subtitle: string
   updatedAt: string
   campaigns: Array<{ id: string; name: string; accentColor: string }>
+  /** Classes lues dans la fiche (« Samouraï · Oracle »), quand elles sont connues. */
+  classes?: string
+  /** Rang du personnage, quand il est connu. */
+  level?: string
 }
 
 export type CharacterSheetRecord = CharacterRecord & { values: string[] }
@@ -3978,6 +3982,49 @@ export async function saveTabletopActivity(activity: TabletopActivityRecord) {
   return activity
 }
 
+/** Une cellule « Classe » de la fiche : texte simple, liste JSON ou { values: [...] }. */
+export function formatCharacterClasses(value: string) {
+  const raw = value.trim()
+  if (!raw) return ""
+  try {
+    const parsed = JSON.parse(raw) as unknown
+    const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray((parsed as { values?: unknown }).values) ? (parsed as { values: unknown[] }).values : null
+    if (list) return list.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).join(" · ")
+  } catch { /* texte simple */ }
+  return raw
+}
+
+/**
+ * Classe, rang et portrait de chaque fiche, en une lecture (mise en cache) de la
+ * feuille des personnages. Le portrait est la cellule « Portrait » : un lien
+ * d'image ou l'adresse d'un portrait envoyé dans Eraser.
+ */
+export async function characterSheetSummaries() {
+  const source = await charactersSource()
+  const summaries = new Map<string, { classes: string; level: string; portrait: string }>()
+  if (!source) return summaries
+  const rows = await readRange(source.spreadsheetId, `${source.tabName}!A2:AM`)
+  for (const row of rows) {
+    if (!row[0]) continue
+    summaries.set(String(row[0]), { classes: formatCharacterClasses(String(row[4] ?? "")), level: String(row[5] ?? "").trim(), portrait: String(row[38] ?? "").trim() })
+  }
+  return summaries
+}
+
+/** Ajoute classes et rang aux personnages ; en cas d'échec de lecture, la liste reste utilisable. */
+export async function withCharacterClasses<T extends CharacterRecord>(characters: T[]): Promise<T[]> {
+  if (!characters.length) return characters
+  const summaries = await characterSheetSummaries().catch((error) => {
+    console.error("CHARACTER_CLASSES_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return null
+  })
+  if (!summaries) return characters
+  return characters.map((character) => {
+    const summary = summaries.get(character.id)
+    return summary ? { ...character, classes: summary.classes, level: summary.level } : character
+  })
+}
+
 export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   const selected = new Set(ids)
   if (!selected.size) return []
@@ -4104,7 +4151,7 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
       .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
     accountLookup(sessionToken),
   ])
-  const decorated = await decorateCharacters(rows.map((row) => row.character))
+  const decorated = await withCharacterClasses(await decorateCharacters(rows.map((row) => row.character)))
   return decorated.map((character) => {
     const owner = owners.get(character.ownerUid)
     return {

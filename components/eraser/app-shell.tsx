@@ -11,6 +11,7 @@ import {
   Crown,
   DownloadCloud,
   FlaskConical,
+  Hammer,
   Home,
   LibraryBig,
   Map,
@@ -597,6 +598,14 @@ export function AppShell({
 
                 {(user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj") && (
                   <>
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild tooltip="Création de classe" isActive={pathname.startsWith("/creation-de-classe")} className="h-10">
+                        <IntentLink href="/creation-de-classe">
+                          <Hammer />
+                          <span>Création de classe</span>
+                        </IntentLink>
+                      </SidebarMenuButton>
+                    </SidebarMenuItem>
                     <NavSection label="Index" icon={LibraryBig} href={indexHomeHref} pageActive={pathname === indexHomeHref} active={pathname.startsWith(indexHomeHref)}>
                       {/* Les index étoilés, par ordre alphabétique ; les autres restent sur la page Index. */}
                       {indexPages.filter((page) => isFavoriteIndex(page.key) || pathname === page.href).map((page) => (

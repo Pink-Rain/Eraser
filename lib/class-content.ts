@@ -466,11 +466,12 @@ async function cartomancerCards(characterClass: ClassRecord, file: ClassWorkbook
   return rows.length ? [{ title: CARDS_TAB, headers: normalizedHeaders, rows }] : []
 }
 
-export async function getClassContent(classId: string): Promise<ClassContent | null> {
+/** `fresh` : la personne peut modifier les sorts, la page relit donc la feuille. */
+export async function getClassContent(classId: string, options: { fresh?: boolean } = {}): Promise<ClassContent | null> {
   const classes = await listClasses()
   const characterClass = classes.find((item) => item.id === classId)
   if (!characterClass) return null
-  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([listClassPresentations(), listClassSpells(), listRankBonuses()])
+  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([options.fresh ? presentationCache.get("presentations", () => loadClassPresentations(), { refresh: true }) : listClassPresentations(), options.fresh ? spellListCache.get("classes", () => loadClassSpells(false, "classes"), { refresh: true }) : listClassSpells(), listRankBonuses()])
   const presentations = presentationsResult.status === "fulfilled" ? presentationsResult.value : null
   const spellData = spellsResult.status === "fulfilled" ? spellsResult.value : null
   const presentation = presentations?.presentations.find((item) => item.classId === classId) ?? null
@@ -622,6 +623,11 @@ function linkedClassIds(draft: ClassSpellDraft) {
  */
 export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string>; expectedId?: string; kind?: SpellIndexKind } = {}) {
   const workbook = await ensureClassColumns(options.workbook ?? await spellWorkbookForSave(rowNumber, options.kind), linkedClassIds(draft))
+  // Garde-fou : un rang demandé pour une classe sans colonne n'est jamais ignoré en
+  // silence (c'est ce qui faisait croire qu'un lien était enregistré alors qu'il ne
+  // l'était pas). Rien n'est écrit et l'erreur remonte à l'écran.
+  const unwritable = linkedClassIds(draft).filter((classId) => !workbook.classColumns.some((item) => item.classId === classId))
+  if ((options.kind ?? "classes") === "classes" && unwritable.length) throw new Error(`CLASS_COLUMN_NOT_FOUND:${unwritable.join(",")}`)
   const ignoredIndexes = new Set([...(options.ignoredRows ?? [])].map((row) => row - 2))
   const existingIndex = rowNumber === null ? -1 : rowNumber - 2
   if (rowNumber !== null && (existingIndex < 0 || !workbook.rows[existingIndex])) throw new Error("CLASS_SPELL_NOT_FOUND")
@@ -796,8 +802,13 @@ export async function ignoreSpellPairs(requested: Array<[string, string]>, kind:
   return { assigned }
 }
 
+/**
+ * Données de l'index des sorts, où l'on modifie : toujours relues dans la feuille,
+ * jamais servies depuis la mémoire. Une copie ancienne ferait réécrire des valeurs
+ * dépassées par-dessus le travail d'une autre personne.
+ */
 export async function listClassResources(refresh = false, kind: SpellIndexKind = "classes") {
-  const data = await listClassSpells(refresh, kind)
+  const data = await spellListCache.get(kind, () => loadClassSpells(refresh, kind), { refresh: true })
   const ignored = await ignoredSpellPairs(data.file.id).catch(() => new Set<string>())
   return { ...data, similarities: findSpellSimilarities(data.spells).filter((match) => !ignored.has(pairKey(match.leftId, match.rightId))) }
 }

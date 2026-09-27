@@ -15,7 +15,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 export const dynamic = "force-dynamic"
 
 async function ClassDetailData({ classId, canEdit }: { classId: string; canEdit: boolean }) {
-  const content = await getClassContent(classId).catch((error) => {
+  const content = await getClassContent(classId, { fresh: canEdit }).catch((error) => {
     console.error("CLASS_CONTENT_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return null
   })

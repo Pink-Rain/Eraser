@@ -10,7 +10,6 @@ export const indexHomeHref = "/ressources"
 
 export const indexPages: IndexPage[] = ([
   { key: "campagnes", href: "/ressources/index-des-campagnes", label: "Campagnes", description: "Toutes les campagnes, leurs MJ et leurs joueurs." },
-  { key: "classes", href: "/ressources/index-des-classes", label: "Sorts des classes", description: "Les sorts de chaque classe, rang par rang." },
   { key: "etats", href: "/ressources/index-des-etats", label: "États", description: "Les états et altérations, leurs effets et leur durée." },
   { key: "runes", href: "/ressources/index-des-runes", label: "Runes", description: "Les runes, leur élément et ce qu’elles apportent." },
   { key: "attributs", href: "/ressources/index-des-attributs", label: "Attributs", description: "Les attributs des armes, armures et objets." },

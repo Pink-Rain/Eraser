@@ -115,6 +115,7 @@ export async function putSharedMedia(key: string, bytes: ArrayBuffer, contentTyp
 }
 
 export async function getSharedMedia(key: string) {
+  void migrateLocalMediaOnce()
   const bucket = localBucket()
   const pointer = await pointerFor(key).catch((error) => {
     console.error("SHARED_MEDIA_LOOKUP_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -188,3 +189,48 @@ export async function sharedMediaVersion(key: string) {
   pointerCache.set(key, { expiresAt: Date.now() + POINTER_TTL_MS, pointer: found })
   return found.modifiedTime || "1"
 }
+
+/**
+ * Les images envoyées avant le passage au Drive (portraits, avatars…) n'existent que
+ * sur l'ordinateur qui les a envoyées : les autres voyaient une case vide. Au premier
+ * accès à un média, chaque installation parcourt son stockage local et envoie dans
+ * le Drive partagé celles qui n'y sont pas encore. Rien n'est supprimé ni remplacé.
+ */
+let legacySweep: Promise<void> | null = null
+
+async function sweepLegacyMedia() {
+  const root = process.env.ERASER_DESKTOP_DATA_DIR
+  const bucket = localBucket()
+  if (!root || !bucket) return
+  const { readdir } = await import("node:fs/promises")
+  const { join, relative, sep } = await import("node:path")
+  const base = join(root, "objects")
+  const keys: string[] = []
+  async function walk(directory: string, depth: number) {
+    if (depth > 5) return
+    const entries = await readdir(directory, { withFileTypes: true }).catch(() => [])
+    for (const entry of entries) {
+      const path = join(directory, entry.name)
+      if (entry.isDirectory()) await walk(path, depth + 1)
+      // Une copie de cache porte « @date » ; l'original n'a pas ce suffixe.
+      else if (!entry.name.includes("@") && !entry.name.endsWith(".metadata.json")) keys.push(relative(base, path).split(sep).join("/"))
+    }
+  }
+  await walk(base, 0)
+  for (const key of keys) {
+    const pointer = await pointerFor(key).catch(() => undefined)
+    if (pointer !== null) continue
+    const legacy = await bucket.get(key).catch(() => null)
+    if (!legacy) continue
+    const bytes = legacy.body instanceof ArrayBuffer ? legacy.body : await new Response(legacy.body as BodyInit).arrayBuffer()
+    await migrateLegacyMedia(key, bytes, legacy.httpMetadata?.contentType || "image/png")
+  }
+}
+
+export function migrateLocalMediaOnce() {
+  legacySweep ??= sweepLegacyMedia().catch((error) => {
+    console.error("SHARED_MEDIA_SWEEP_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+  })
+  return legacySweep
+}
+
