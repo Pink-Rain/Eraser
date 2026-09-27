@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { updateClassPresentationCell } from "@/lib/class-content"
+import { invalidateClassContentCaches, updateClassPresentationCell } from "@/lib/class-content"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export async function POST(request: Request) {
@@ -12,5 +12,8 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true })
   } catch {
     return NextResponse.json({ error: "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
+  } finally {
+    // La présentation modifiée doit apparaître au prochain affichage de la classe.
+    invalidateClassContentCaches()
   }
 }

@@ -7,7 +7,8 @@ import { ClassCard } from "@/components/eraser/class-card"
 import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { Button } from "@/components/ui/button"
-import { listClassSpells } from "@/lib/class-content"
+import { listClassPresentations, listClassSpells, listRankBonuses } from "@/lib/class-content"
+import { runInBackground } from "@/lib/background-work"
 import { classImageUrl } from "@/lib/class-images"
 import { classSpellState } from "@/lib/class-spell-utils"
 import {
@@ -23,6 +24,9 @@ async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSamp
   let classes: Awaited<ReturnType<typeof listClasses>> = []
   let loadError = false
   let loadErrorDetail = ""
+  // Préchargés pendant qu'on choisit : ouvrir une classe est alors immédiat.
+  runInBackground(listClassPresentations(), "CLASS_PRESENTATIONS_WARMUP_FAILED")
+  runInBackground(listRankBonuses(), "RANK_BONUSES_WARMUP_FAILED")
   try {
     // La finition se calcule sur les sorts réellement liés (3 par rang, 21 rangs) ;
     // la colonne « Finition » de la feuille ne sert plus que si les sorts sont

@@ -18,6 +18,9 @@ import {
 // la source de vérité, et une image déjà téléchargée n'est pas retéléchargée.
 const MEDIA_FOLDER = "Eraser - Visuels"
 const POINTER_TTL_MS = 5 * 60_000
+// Un média absent n'est retenu comme absent qu'une minute : un portrait envoyé
+// depuis un autre ordinateur restait sinon invisible jusqu'à cinq minutes.
+const MISSING_TTL_MS = 60_000
 
 type MediaPointer = { fileId: string; modifiedTime: string; contentType: string }
 
@@ -49,7 +52,7 @@ async function folderId() {
 
 // One folder listing serves every image: a page showing twenty tokens would
 // otherwise make twenty separate Drive searches on a cold cache.
-let folderListing: { expiresAt: number; byName: Promise<Map<string, MediaPointer>> } | null = null
+let folderListing: { expiresAt: number; listedAt: number; byName: Promise<Map<string, MediaPointer>> } | null = null
 
 async function listingByName() {
   if (folderListing && folderListing.expiresAt > Date.now()) return folderListing.byName
@@ -63,7 +66,7 @@ async function listingByName() {
       folderListing = null
       throw error
     })
-  folderListing = { expiresAt: Date.now() + POINTER_TTL_MS, byName }
+  folderListing = { expiresAt: Date.now() + POINTER_TTL_MS, listedAt: Date.now(), byName }
   return byName
 }
 
@@ -74,6 +77,11 @@ async function pointerFor(key: string) {
   let pointer: MediaPointer | null = null
   try {
     pointer = (await listingByName()).get(name) ?? null
+    // La liste du dossier a plus d'une minute : le média a pu être ajouté depuis.
+    if (!pointer && folderListing && Date.now() - folderListing.listedAt > MISSING_TTL_MS) {
+      const file = await findDriveFileByName(await folderId(), name).catch(() => null)
+      if (file) pointer = { fileId: file.id, modifiedTime: file.modifiedTime || "", contentType: file.mimeType || "image/*" }
+    }
   } catch {
     // Listing unavailable (folder too large to cache, transient failure):
     // fall back to a direct search for this one file.
@@ -82,7 +90,7 @@ async function pointerFor(key: string) {
       ? { fileId: file.id, modifiedTime: file.modifiedTime || "", contentType: file.mimeType || "image/*" }
       : null
   }
-  pointerCache.set(key, { expiresAt: Date.now() + POINTER_TTL_MS, pointer })
+  pointerCache.set(key, { expiresAt: Date.now() + (pointer ? POINTER_TTL_MS : MISSING_TTL_MS), pointer })
   return pointer
 }
 

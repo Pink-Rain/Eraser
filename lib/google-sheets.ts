@@ -4200,6 +4200,43 @@ export async function updateCampaignForMj(mjUid: string | null, id: string, patc
   return next
 }
 
+/**
+ * Ce que les fiches de personnage disent du jeu, pour les statistiques : classes,
+ * rang, sorts choisis et charges (colonne « Sorts de classe choisis JSON »), et
+ * campagnes. Les personnages à la corbeille sont exclus.
+ */
+export type CharacterPlayRow = { id: string; name: string; classes: string; level: number; choices: string; campaignIds: string[] }
+
+export async function listCharacterPlayRows(): Promise<CharacterPlayRow[]> {
+  await refreshIdentityIndexes()
+  const source = await charactersSource()
+  if (!source) return []
+  const choicesColumn = columnName(characterSheetHeaders.length)
+  const [identityRows, choiceRows] = await readRanges(source.spreadsheetId, [
+    sheetTabRange(source.tabName, "A:F"),
+    sheetTabRange(source.tabName, `${choicesColumn}:${choicesColumn}`),
+  ])
+  const db = getDb()
+  const [active, links] = await Promise.all([
+    db.select({ id: characterIndex.id }).from(characterIndex).where(isNull(characterIndex.deletedAt)),
+    db.select({ campaignId: campaignCharacters.campaignId, characterId: campaignCharacters.characterId }).from(campaignCharacters)
+      .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id)).where(isNull(campaignIndex.deletedAt)),
+  ])
+  const activeIds = new Set(active.map((row) => row.id))
+  return identityRows.slice(1).flatMap((row, index): CharacterPlayRow[] => {
+    const id = String(row[0] ?? "").trim()
+    if (!id || !activeIds.has(id)) return []
+    return [{
+      id,
+      name: String(row[2] ?? "") || "Personnage sans nom",
+      classes: String(row[4] ?? ""),
+      level: Math.max(0, Math.min(20, Math.trunc(Number(row[5]) || 0))),
+      choices: String(choiceRows[index + 1]?.[0] ?? ""),
+      campaignIds: links.filter((link) => link.characterId === id).map((link) => link.campaignId),
+    }]
+  })
+}
+
 export async function listCampaignMembers(campaignId: string) {
   await refreshIdentityIndexes()
   const read = () => getDb().select().from(characterIndex)

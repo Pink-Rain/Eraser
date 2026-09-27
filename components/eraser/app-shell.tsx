@@ -395,29 +395,13 @@ export function AppShell({
     setCheckingUpdate(true); setUpdateNotice("")
     try {
       const result = await window.eraserDesktop.checkForUpdates()
-      switch (result.status) {
-        case "ready":
-          setUpdateNotice(`Eraser ${result.updateVersion || ""} est prêt.`.replace("  ", " "))
-          break
-        case "available":
-          setUpdateNotice(`Mise à jour ${result.updateVersion || ""} trouvée : téléchargement en cours, elle s’installera toute seule, sans assistant.`.replace("  ", " "))
-          break
-        case "not-available":
-          setUpdateNotice("Aucune mise à jour disponible, tu as déjà la dernière version.")
-          break
-        case "timeout":
-          setUpdateNotice("La vérification prend trop de temps, réessaie plus tard.")
-          break
-        case "unavailable":
-          setUpdateNotice("Disponible uniquement dans l’application Windows installée.")
-          break
-        case "error":
-        default:
-          setUpdateNotice(result.message ? `La vérification a échoué : ${result.message}` : "La vérification a échoué.")
-          break
-      }
+      // Un message court : il n'y a rien, ou la version qui arrive.
+      if (result.status === "ready" || result.status === "available") setUpdateNotice(["Eraser", result.updateVersion, "en cours de téléchargement"].filter(Boolean).join(" "))
+      else if (result.status === "not-available") setUpdateNotice("Aucune mise à jour")
+      else if (result.status === "unavailable") setUpdateNotice("Disponible uniquement dans l’application Windows.")
+      else setUpdateNotice("Vérification impossible, réessaie plus tard.")
     } catch {
-      setUpdateNotice("La vérification a échoué.")
+      setUpdateNotice("Vérification impossible, réessaie plus tard.")
     } finally {
       setCheckingUpdate(false)
       window.setTimeout(() => setUpdateNotice(""), 8000)

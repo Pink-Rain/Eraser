@@ -22,6 +22,7 @@ import {
   type FormattedSheetCell,
 } from "@/lib/google-sheets"
 import { normalizeClassLabel } from "@/lib/class-utils"
+import { staleWhileRevalidate } from "@/lib/stale-cache"
 import {
   classSpellActionKind,
   classSpellCategory,
@@ -75,6 +76,8 @@ export type ClassSpell = {
   skillsRaw: string
   distance: string
   charges: number | null
+  /** Texte brut de la cellule Charges (« 3 », « ✦ », vide) : pour les statistiques. */
+  chargesLabel?: string
   classRanks: Record<string, number>
   tone: { background: string; foreground: string }
 }
@@ -267,7 +270,26 @@ function parsePresentationRow(headers: string[], row: string[], cells: Formatted
   }
 }
 
+/**
+ * Les pages de classe relisaient à chaque clic les deux classeurs entiers avec leur
+ * mise en forme : plusieurs secondes d'écran vide. Les lectures sont gardées en
+ * mémoire (servies aussitôt, relues en arrière-plan après une minute) et oubliées
+ * dès qu'Eraser modifie un sort ou une présentation.
+ */
+const presentationCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassPresentations>>>({ freshMs: 60_000, maxStaleMs: 30 * 60_000 })
+const spellListCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassSpells>>>({ freshMs: 60_000, maxStaleMs: 30 * 60_000 })
+
+export function invalidateClassContentCaches() {
+  presentationCache.invalidate()
+  spellListCache.invalidate()
+  rankBonusCache = null
+}
+
 export async function listClassPresentations(refresh = false) {
+  return presentationCache.get("presentations", () => loadClassPresentations(refresh), { refresh })
+}
+
+async function loadClassPresentations(refresh = false) {
   const [table, classes] = await Promise.all([presentationTable(refresh), listClasses()])
   return {
     file: table.file,
@@ -408,6 +430,7 @@ function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedShee
     skills: splitClassSpellSkills(cell(row, workbook.columns.skills)),
     distance: cell(row, workbook.columns.distance),
     charges: Number.isInteger(chargesValue) && chargesValue >= 0 ? Math.min(5, chargesValue) : null,
+    chargesLabel: cell(row, workbook.columns.charges).trim(),
     classRanks,
     tone: {
       background: formattedCell(cells, workbook.columns.type).backgroundColor,
@@ -417,6 +440,10 @@ function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedShee
 }
 
 export async function listClassSpells(refresh = false, kind: SpellIndexKind = "classes") {
+  return spellListCache.get(kind, () => loadClassSpells(refresh, kind), { refresh })
+}
+
+async function loadClassSpells(refresh = false, kind: SpellIndexKind = "classes") {
   const workbook = await spellWorkbook(refresh, kind)
   return {
     file: workbook.file,
@@ -823,7 +850,14 @@ async function createRankBonusTab(fileId: string) {
 }
 
 export async function listRankBonuses(options: { create?: boolean; refresh?: boolean } = {}): Promise<RankBonusTable> {
-  if (!options.refresh && rankBonusCache && rankBonusCache.expiresAt > Date.now() && (rankBonusCache.table.exists || !options.create)) return rankBonusCache.table
+  if (!options.refresh && rankBonusCache && (rankBonusCache.table.exists || !options.create)) {
+    if (rankBonusCache.expiresAt > Date.now()) return rankBonusCache.table
+    // Déjà lus une fois : servis tout de suite, relus en arrière-plan.
+    const stale = rankBonusCache.table
+    rankBonusCache = { ...rankBonusCache, expiresAt: Date.now() + 60_000 }
+    listRankBonuses({ refresh: true }).catch((error) => console.error("RANK_BONUSES_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+    return stale
+  }
   const { spells: file } = await classWorkbookFiles(options.refresh)
   if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
   let tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)

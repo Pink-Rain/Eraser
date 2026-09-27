@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { deleteClassSpell, ignoreSpellPairs, linkClassSpell, listClassResources, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
+import { deleteClassSpell, ignoreSpellPairs, invalidateClassContentCaches, linkClassSpell, listClassResources, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
 import { renameCreatureSpells } from "@/lib/world-indexes"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -48,8 +48,12 @@ export async function POST(request: Request) {
     else if ((body.action === "add" || body.action === "update") && (body.rowNumber === null || typeof body.rowNumber === "number") && body.draft && typeof body.draft === "object") {
       result = await saveClassSpell(body.action === "add" ? null : body.rowNumber as number, body.draft as ClassSpellDraft, { expectedId: typeof body.expectedId === "string" ? body.expectedId : undefined, kind })
     } else throw new Error("INVALID_CLASS_RESOURCE_ACTION")
+    // Les pages de classe et la fiche relisent la feuille modifiée.
+    invalidateClassContentCaches()
     return NextResponse.json({ ok: true, result })
   } catch (error) {
+    // Une écriture a pu aboutir en partie : rien ne doit rester en mémoire.
+    invalidateClassContentCaches()
     const code = error instanceof Error ? error.message : ""
     return NextResponse.json({ error: code === "CLASS_SPELL_ID_EXISTS" ? "Cet ID de sort existe déjà." : code === "CLASS_SPELL_EMPTY" ? "Donne au moins un nom, un effet ou une description au sort." : code === "CLASS_RANK_INVALID" ? "Le rang doit être compris entre 0 et 20." : code === "CLASS_SPELL_MOVED" ? "La feuille des sorts a changé entre-temps. Actualise puis recommence." : code.startsWith("CLASS_RANK_FULL") ? "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux." : code === "CLASS_COLUMN_NOT_FOUND" ? "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée." : "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
   }

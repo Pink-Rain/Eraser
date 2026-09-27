@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ClassSpell } from "@/lib/class-content"
 import { classSpellGaps, classSpellState, MAX_CLASS_SPELLS_PER_RANK, type ClassRankState, type ClassSpellState } from "@/lib/class-spell-utils"
+import { skillQuality } from "@/lib/class-stats"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 
@@ -136,6 +137,7 @@ export function ClassStateOverview({ classes, spells, headers, onOpen }: {
         <p className="text-sm font-semibold">Pas encore commencées <span className="font-normal text-muted-foreground">({notStarted.length} classes · aucun sort lié)</span></p>
         <div className="mt-2 flex flex-wrap gap-1.5">{notStarted.map(({ characterClass }) => <button key={characterClass.id} type="button" onClick={() => setSelectedId(characterClass.id)} className="inline-flex items-center gap-1.5 rounded-full border bg-background/60 px-2.5 py-1 text-xs font-medium hover:border-primary hover:text-primary"><span className="size-2 rounded-full" style={{ backgroundColor: characterClass.accentDark }} />{characterClass.name}</button>)}</div>
       </div>}
+      <SkillQualityPanel spells={spells} />
     </> : <ClassState {...selected} onOpen={onOpen} onBack={() => setSelectedId("")} />}
   </section>
 }
@@ -191,5 +193,41 @@ function ClassState({ characterClass, state, hasColumn, onOpen, onBack }: { char
         })}</ul>
       </div>}
     </div>
+  </div>
+}
+
+/**
+ * Qualité des données : une même compétence écrite de plusieurs façons, ou absente,
+ * fausse les statistiques. Ce panneau liste ce qu'il faut harmoniser dans la feuille.
+ */
+function SkillQualityPanel({ spells }: { spells: ClassSpell[] }) {
+  const quality = useMemo(() => skillQuality(spells), [spells])
+  const [showAll, setShowAll] = useState(false)
+  const placeholderCount = quality.placeholders.active.length + quality.placeholders.other.length
+  const clean = !quality.variants.length && !quality.unknown.length && !placeholderCount && !quality.empty.active.length
+  const spellLabel = (spell: ClassSpell) => `${spell.name} (ligne ${spell.rowNumber})`
+  return <div className="space-y-3 rounded-2xl border bg-card/70 p-4">
+    <div>
+      <p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">Qualité des données</p>
+      <h3 className="font-display text-xl font-semibold">Compétences à harmoniser</h3>
+      <p className="mt-1 text-xs text-muted-foreground">Les statistiques regroupent déjà ces variantes, mais la feuille reste plus lisible si chaque compétence est écrite d’une seule façon.</p>
+    </div>
+    {clean && <p className="flex items-center gap-2 text-sm text-emerald-800"><CheckCircle2 className="size-4" />Toutes les compétences sont écrites de la même façon.</p>}
+    {quality.variants.length > 0 && <div className="space-y-2">
+      <p className="text-sm font-semibold">Écrites de plusieurs façons <span className="font-normal text-muted-foreground">({quality.variants.length})</span></p>
+      <div className="divide-y">{(showAll ? quality.variants : quality.variants.slice(0, 8)).map((tally) => <div key={tally.key} className="flex flex-wrap gap-1.5 py-2">
+        {tally.forms.map(([form, count]) => <span key={form} className="rounded-full border bg-background/60 px-2.5 py-0.5 text-xs">{form} <b className="tabular-nums">{count}</b></span>)}
+      </div>)}</div>
+      {quality.variants.length > 8 && <Button type="button" variant="ghost" size="sm" onClick={() => setShowAll((value) => !value)}>{showAll ? "Afficher moins" : `Afficher les ${quality.variants.length}`}</Button>}
+    </div>}
+    {quality.unknown.length > 0 && <div className="space-y-2">
+      <p className="text-sm font-semibold">Absentes de la liste des compétences de la fiche <span className="font-normal text-muted-foreground">({quality.unknown.length})</span></p>
+      <div className="flex flex-wrap gap-1.5">{quality.unknown.map((tally) => <span key={tally.key} className="rounded-full border border-amber-600/30 bg-amber-500/10 px-2.5 py-0.5 text-xs">{tally.label} <b className="tabular-nums">{tally.count}</b></span>)}</div>
+    </div>}
+    {(placeholderCount > 0 || quality.empty.active.length > 0 || quality.unnamed.length > 0) && <div className="grid gap-2 sm:grid-cols-3">
+      <div className="rounded-xl border bg-background/50 px-3 py-2" title={[...quality.placeholders.active, ...quality.placeholders.other].map(spellLabel).join("\n")}><p className="font-display text-2xl font-semibold tabular-nums">{placeholderCount}</p><p className="text-[11px] text-muted-foreground">sorts avec « / » ou « . » comme compétence ({quality.placeholders.active.length} actifs)</p></div>
+      <div className="rounded-xl border bg-background/50 px-3 py-2" title={quality.empty.active.map(spellLabel).join("\n")}><p className="font-display text-2xl font-semibold tabular-nums">{quality.empty.active.length}</p><p className="text-[11px] text-muted-foreground">actifs sans compétence</p></div>
+      <div className="rounded-xl border bg-background/50 px-3 py-2" title={quality.unnamed.map(spellLabel).join("\n")}><p className="font-display text-2xl font-semibold tabular-nums">{quality.unnamed.length}</p><p className="text-[11px] text-muted-foreground">sorts liés sans nom</p></div>
+    </div>}
   </div>
 }
