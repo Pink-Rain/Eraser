@@ -529,6 +529,60 @@ function spellId(workbook: SpellWorkbook, index: number) {
   return cell(workbook.rows[index] ?? [], workbook.columns.id).trim() || `LIGNE-${index + 2}`
 }
 
+/** Les colonnes ne s'ajoutent qu'une à la fois : deux liens rapides ne créent pas deux colonnes. */
+let classColumnsQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Une classe de la feuille « Classes » n'a pas forcément de colonne dans la feuille des
+ * sorts (Druide, Rôdeur·euse…). Sans colonne, un lien vers elle n'était écrit nulle
+ * part et le sort ne rejoignait jamais la classe. La colonne manquante est ajoutée à
+ * droite, avec le nom de la classe en en-tête et la mise en forme de la colonne de
+ * classe voisine. Aucune cellule existante n'est modifiée.
+ */
+async function ensureClassColumns(workbook: SpellWorkbook, classIds: string[]): Promise<SpellWorkbook> {
+  const wanted = [...new Set(classIds)].filter((classId) => !workbook.classColumns.some((item) => item.classId === classId) && workbook.classes.some((item) => item.id === classId))
+  if (!wanted.length) return workbook
+  const run = classColumnsQueue.then(async () => {
+    // Relu sous le verrou : un appel précédent a pu ajouter la colonne entre-temps.
+    clearSpreadsheetReadCache(workbook.file.id)
+    const values = await readRange(workbook.file.id, quoteTab(workbook.tabName))
+    const headers = values[0] ?? []
+    const known = spellColumnsOf(headers, workbook.classes).classColumns
+    const missing = workbook.classes.filter((item) => wanted.includes(item.id) && !known.some((column) => column.classId === item.id))
+    if (!missing.length) return { headers, rows: values.slice(1) }
+    // Première colonne libre : après l'en-tête et après toute donnée des lignes.
+    const start = values.reduce((width, row) => Math.max(width, row.reduce((last, value, index) => String(value ?? "").trim() ? index + 1 : last, 0)), 0)
+    const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; gridProperties?: { columnCount?: number; rowCount?: number } } }> }>(
+      `spreadsheets/${workbook.file.id}?fields=sheets.properties(sheetId,gridProperties(columnCount,rowCount))`,
+    )
+    const grid = metadata.sheets?.find((sheet) => sheet.properties?.sheetId === workbook.sheetId)?.properties?.gridProperties
+    const columnCount = grid?.columnCount ?? start
+    const template = known.at(-1)?.column
+    const requests: unknown[] = []
+    if (start + missing.length > columnCount) requests.push({ appendDimension: { sheetId: workbook.sheetId, dimension: "COLUMNS", length: start + missing.length - columnCount } })
+    if (template !== undefined) requests.push({
+      copyPaste: {
+        source: { sheetId: workbook.sheetId, startRowIndex: 0, endRowIndex: grid?.rowCount ?? values.length, startColumnIndex: template, endColumnIndex: template + 1 },
+        destination: { sheetId: workbook.sheetId, startRowIndex: 0, endRowIndex: grid?.rowCount ?? values.length, startColumnIndex: start, endColumnIndex: start + missing.length },
+        pasteType: "PASTE_FORMAT",
+      },
+    })
+    if (requests.length) await googleSheetsJson(`spreadsheets/${workbook.file.id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    await updateRange(workbook.file.id, `${quoteTab(workbook.tabName)}!${columnName(start + 1)}1:${columnName(start + missing.length)}1`, [missing.map((item) => item.name)], { valueInputOption: "RAW" })
+    const nextHeaders = [...Array.from({ length: start }, (_, index) => String(headers[index] ?? "")), ...missing.map((item) => item.name)]
+    return { headers: nextHeaders, rows: values.slice(1) }
+  })
+  classColumnsQueue = run.catch(() => undefined)
+  const { headers } = await run
+  // Les lignes lues avant gardent leurs valeurs : les nouvelles colonnes sont vides.
+  return { ...workbook, headers: headers.length >= workbook.headers.length ? headers : workbook.headers, ...spellColumnsOf(headers.length >= workbook.headers.length ? headers : workbook.headers, workbook.classes) }
+}
+
+/** Classes auxquelles un brouillon lie le sort. */
+function linkedClassIds(draft: ClassSpellDraft) {
+  return Object.entries(draft.classRanks).flatMap(([classId, rank]) => rank === null || rank === undefined ? [] : [classId])
+}
+
 /**
  * Enregistre un sort. Seules les cellules qui changent sont écrites, toutes en un seul
  * appel à Google : une cellule que Sheets met en forme autrement, ou une formule dans
@@ -537,7 +591,7 @@ function spellId(workbook: SpellWorkbook, index: number) {
  * bougé entre-temps (ligne supprimée ou insérée dans Sheets), rien n'est écrit.
  */
 export async function saveClassSpell(rowNumber: number | null, draft: ClassSpellDraft, options: { workbook?: SpellWorkbook; ignoredRows?: Set<number>; ignoredIds?: Set<string>; expectedId?: string; kind?: SpellIndexKind } = {}) {
-  const workbook = options.workbook ?? await spellWorkbookForSave(rowNumber, options.kind)
+  const workbook = await ensureClassColumns(options.workbook ?? await spellWorkbookForSave(rowNumber, options.kind), linkedClassIds(draft))
   const ignoredIndexes = new Set([...(options.ignoredRows ?? [])].map((row) => row - 2))
   const existingIndex = rowNumber === null ? -1 : rowNumber - 2
   if (rowNumber !== null && (existingIndex < 0 || !workbook.rows[existingIndex])) throw new Error("CLASS_SPELL_NOT_FOUND")
@@ -609,11 +663,14 @@ export async function saveClassSpell(rowNumber: number | null, draft: ClassSpell
   return { id, rowNumber, tone }
 }
 
-export async function linkClassSpell(rowNumber: number, classId: string, rank: number | null) {
-  const workbook = await spellWorkbook(true)
+export async function linkClassSpell(rowNumber: number, classId: string, rank: number | null, expectedId?: string) {
+  const workbook = await ensureClassColumns(await spellWorkbook(true), rank === null ? [] : [classId])
   const existingIndex = rowNumber - 2
   if (!workbook.rows[existingIndex]) throw new Error("CLASS_SPELL_NOT_FOUND")
+  if (expectedId && spellId(workbook, existingIndex) !== expectedId) throw new Error("CLASS_SPELL_MOVED")
   const target = workbook.classColumns.find((item) => item.classId === classId)
+  // Délier une classe qui n'a pas de colonne : il n'y a rien à effacer.
+  if (!target && rank === null) return
   if (!target) throw new Error("CLASS_COLUMN_NOT_FOUND")
   if (rank !== null && (!Number.isInteger(rank) || rank < 0 || rank > 20)) throw new Error("CLASS_RANK_INVALID")
   const existingRank = Number.parseInt(cell(workbook.rows[existingIndex], target.column), 10)
@@ -649,8 +706,41 @@ async function ignoredSpellPairs(fileId: string) {
   return new Set(rows.filter((row) => row[0] && row[1]).map((row) => pairKey(row[0].trim(), row[1].trim())))
 }
 
-export async function ignoreSpellPairs(pairs: Array<[string, string]>, kind: SpellIndexKind = "classes") {
-  const { file } = await spellWorkbook(true, kind)
+/**
+ * Un sort sans ID est désigné par sa ligne (« LIGNE-315 ») : cette désignation glisse
+ * dès qu'une ligne au-dessus est supprimée (une fusion, par exemple). Avant de retenir
+ * « pas un doublon », ces sorts reçoivent un vrai ID, écrit dans leur cellule ID vide.
+ * Renvoie la correspondance ancienne désignation → ID.
+ */
+async function assignSpellIds(workbook: SpellWorkbook, ids: string[]) {
+  const assigned: Record<string, string> = {}
+  const existing = new Set(workbook.rows.map((row) => cell(row, workbook.columns.id).trim()).filter(Boolean))
+  const writes: Array<{ range: string; values: string[][] }> = []
+  for (const id of new Set(ids)) {
+    const match = /^LIGNE-(\d+)$/.exec(id)
+    if (!match) continue
+    const rowNumber = Number(match[1])
+    const row = workbook.rows[rowNumber - 2]
+    // La ligne a déjà un ID, ou n'existe plus : la désignation n'est plus fiable.
+    if (!row || cell(row, workbook.columns.id).trim()) throw new Error("CLASS_SPELL_MOVED")
+    let fresh = ""
+    do fresh = `SOR-${crypto.randomUUID().slice(0, 8).toUpperCase()}`; while (existing.has(fresh))
+    existing.add(fresh)
+    assigned[id] = fresh
+    writes.push({ range: `${quoteTab(workbook.tabName)}!${columnName(workbook.columns.id + 1)}${rowNumber}`, values: [[fresh]] })
+  }
+  if (writes.length) {
+    await googleSheetsJson(`spreadsheets/${workbook.file.id}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: writes }) })
+    clearSpreadsheetReadCache(workbook.file.id)
+  }
+  return assigned
+}
+
+export async function ignoreSpellPairs(requested: Array<[string, string]>, kind: SpellIndexKind = "classes") {
+  const workbook = await spellWorkbook(true, kind)
+  const { file } = workbook
+  const assigned = await assignSpellIds(workbook, requested.flat())
+  const pairs = requested.map(([left, right]): [string, string] => [assigned[left] ?? left, assigned[right] ?? right])
   const tabs = await spreadsheetTabs(file.id)
   if (!tabs.some((tab) => tab.title === IGNORED_PAIRS_TAB)) {
     await googleSheetsJson(`spreadsheets/${file.id}:batchUpdate`, {
@@ -658,12 +748,22 @@ export async function ignoreSpellPairs(pairs: Array<[string, string]>, kind: Spe
       body: JSON.stringify({ requests: [{ addSheet: { properties: { title: IGNORED_PAIRS_TAB, gridProperties: { rowCount: 500, columnCount: 3, frozenRowCount: 1 } } } }] }),
     })
     await updateRange(file.id, `${quoteTab(IGNORED_PAIRS_TAB)}!A1:C1`, [["Sort 1", "Sort 2", "Ignoré le"]])
+  } else if (Object.keys(assigned).length) {
+    // Les paires déjà ignorées sous l'ancienne désignation suivent le sort.
+    const rows = await readRange(file.id, `${quoteTab(IGNORED_PAIRS_TAB)}!A2:B`)
+    const renamed = rows.flatMap((row, index) => row.slice(0, 2).flatMap((value, column) => {
+      const next = assigned[String(value ?? "").trim()]
+      return next ? [{ range: `${quoteTab(IGNORED_PAIRS_TAB)}!${column === 0 ? "A" : "B"}${index + 2}`, values: [[next]] }] : []
+    }))
+    if (renamed.length) await googleSheetsJson(`spreadsheets/${file.id}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data: renamed }) })
+    clearSpreadsheetReadCache(file.id)
   }
   const known = await ignoredSpellPairs(file.id)
   const now = new Date().toISOString()
   const fresh = pairs.filter(([left, right]) => left && right && left !== right && !known.has(pairKey(left, right)))
   if (fresh.length) await appendRows(file.id, `${quoteTab(IGNORED_PAIRS_TAB)}!A:C`, fresh.map(([left, right]) => [left, right, now]), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(file.id)
+  return { assigned }
 }
 
 export async function listClassResources(refresh = false, kind: SpellIndexKind = "classes") {

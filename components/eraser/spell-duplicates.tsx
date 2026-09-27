@@ -103,7 +103,7 @@ export function SpellDuplicates({ spells, classes, similarities, focusSpellId, p
   focusSpellId?: string | null
   pending: boolean
   onMerge: (keep: ClassSpell, removed: ClassSpell[], draft: ClassSpellDraft) => Promise<boolean>
-  onIgnore: (group: SpellGroup) => Promise<boolean>
+  onIgnore: (pairs: Array<[string, string]>, nextFocus?: string | null, message?: string) => Promise<boolean>
   onEdit: (spell: ClassSpell) => void
   onDelete: (spell: ClassSpell) => Promise<void>
 }) {
@@ -153,7 +153,7 @@ function GroupReview({ group, classes, pending, onMerge, onIgnore, onEdit, onDel
   classes: ClassRecord[]
   pending: boolean
   onMerge: (keep: ClassSpell, removed: ClassSpell[], draft: ClassSpellDraft) => Promise<boolean>
-  onIgnore: (group: SpellGroup) => Promise<boolean>
+  onIgnore: (pairs: Array<[string, string]>, nextFocus?: string | null, message?: string) => Promise<boolean>
   onEdit: (spell: ClassSpell) => void
   onDelete: (spell: ClassSpell) => Promise<void>
   onDone: () => void
@@ -196,6 +196,17 @@ function GroupReview({ group, classes, pending, onMerge, onIgnore, onEdit, onDel
   const differing = fields.filter((field) => differs(spells, field.key))
   const tone = (spell: ClassSpell) => spell.tone.background ? spell.tone : classSpellCategoryTones[spell.category]
 
+  /**
+   * Dans un groupe de trois sorts ou plus, un seul peut être mis à part : ses
+   * ressemblances avec les autres sont ignorées et le groupe reste ouvert sur les
+   * sorts restants, pour les comparer ou les fusionner.
+   */
+  function setApart(spell: ClassSpell) {
+    const own = group.pairs.filter((pair) => pair.leftId === spell.id || pair.rightId === spell.id)
+    const remaining = group.pairs.find((pair) => pair.leftId !== spell.id && pair.rightId !== spell.id)
+    void onIgnore(own.map((pair) => [pair.leftId, pair.rightId]), remaining?.leftId ?? null, `« ${spell.name} » n’est plus proposé comme doublon de ce groupe.`)
+  }
+
   return <section className="min-w-0 space-y-4">
     <header className="flex flex-wrap items-center gap-3 rounded-2xl border bg-card/75 px-4 py-3">
       <AlertTriangle className="size-5 text-amber-600" />
@@ -203,7 +214,7 @@ function GroupReview({ group, classes, pending, onMerge, onIgnore, onEdit, onDel
         <p className="font-display text-lg font-semibold">{spells.length} sorts semblables</p>
         <p className="text-xs text-muted-foreground">{[...new Set(group.pairs.map((pair) => pair.kind))].join(" · ")} — {differing.length ? `${differing.length} champ${differing.length > 1 ? "s" : ""} différent${differing.length > 1 ? "s" : ""}` : "tous les champs sont identiques"}</p>
       </div>
-      <Button type="button" variant="outline" disabled={pending} onClick={() => void onIgnore(group).then((ok) => { if (ok) onDone() })}><EyeOff />Ce ne sont pas des doublons</Button>
+      <Button type="button" variant="outline" disabled={pending} onClick={() => void onIgnore(group.pairs.map((pair) => [pair.leftId, pair.rightId])).then((ok) => { if (ok) onDone() })}><EyeOff />{spells.length > 2 ? "Aucun n’est un doublon" : "Ce ne sont pas des doublons"}</Button>
     </header>
 
     {/* Comparaison : une colonne par sort, les champs qui diffèrent surlignés. */}
@@ -233,6 +244,7 @@ function GroupReview({ group, classes, pending, onMerge, onIgnore, onEdit, onDel
             <div className="mt-auto flex flex-wrap gap-2 border-t pt-3">
               <Button type="button" size="sm" variant={kept ? "default" : "outline"} onClick={() => { setKeepId(spell.id); setSources({}); setRankOverrides({}) }}>{kept ? <Check /> : null}{kept ? "Sort gardé" : "Garder celui-ci"}</Button>
               <Button type="button" size="sm" variant="ghost" onClick={() => onEdit(spell)}><Pencil />Modifier</Button>
+              {spells.length > 2 && <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => setApart(spell)} title="Ce sort n’est pas un doublon des autres : il sort du groupe, les autres restent à comparer"><EyeOff />Pas un doublon</Button>}
               <Button type="button" size="icon-sm" variant="ghost" className="ml-auto text-destructive" onClick={() => setDeleting(spell)} aria-label={`Supprimer ${spell.name}`}><Trash2 /></Button>
             </div>
           </article>
