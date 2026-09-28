@@ -53,11 +53,22 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    regroupés sur quelques secondes, une seule synchronisation pour tous) ;
    toutes les 10 à 15 minutes seulement si l’application est visible et
    qu’aucun signal n’est arrivé. Jamais à la navigation.
-4. **Écritures groupées.** Les modifications partent dans une file locale,
-   envoyées ensemble après une courte pause ou en quittant la page. La
-   réponse à une écriture contient les différences, sans relecture
-   derrière. Si le Worker est injoignable ou le quota atteint, la file attend
-   et l’application reste utilisable en lecture.
+   Deux vitesses : les personnages et campagnes suivent les signaux en
+   quelques secondes ; les données de référence (index, catalogues,
+   vocabulaire, classes) au plus toutes les 5 minutes, ou dès l’ouverture de
+   la page concernée si un signal est en attente.
+4. **Écritures groupées.** L’interface enregistre immédiatement auprès du
+   serveur local (`127.0.0.1`, gratuit), qui garde la file dans sa SQLite :
+   rien n’est perdu si l’application se ferme. La file part vers le Worker
+   après 3 secondes sans nouvelle modification, et au plus tard toutes les
+   10 secondes pendant une saisie continue, soit 6 envois par minute au
+   maximum. Plusieurs modifications de la même ligne fusionnent en une seule
+   ligne écrite. Seules les cellules modifiées sont envoyées : le Worker les
+   fusionne dans la ligne, et il n’y a conflit que si deux personnes ont
+   changé la même cellule. Les gros envois (collage, import) sont découpés en
+   paquets d’environ 200 lignes. La réponse à une écriture contient les
+   différences, sans relecture derrière. Si le Worker est injoignable ou le
+   quota atteint, la file attend et l’application reste utilisable.
 5. **Signaux de changement par Trystero**, dans un salon par campagne protégé
    par une clé secrète stockée dans D1. Le signal ne contient que « le
    domaine X a changé » ; les données viennent toujours de D1.
@@ -73,6 +84,9 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
 
 Estimation pour 8 joueurs un jour de partie (4 h) : environ 200 requêtes
 par personne, soit environ 1 600 par jour, moins de 2 % du quota.
+Un MJ qui modifie 20 cellules par minute pendant 3 heures : au plus
+1 080 envois et environ 7 000 lignes écrites (index compris), et moins de 300
+synchronisations pour les 7 autres joueurs grâce aux deux vitesses.
 
 ## Modèle de données D1
 
