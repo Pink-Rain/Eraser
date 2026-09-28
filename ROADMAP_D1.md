@@ -28,17 +28,51 @@ encore basculé.
    Le Worker annonce une version minimale d’Eraser. En dessous, l’app
    s’installe à jour avant d’écrire. Sans cela, une installation restée
    ancienne continuerait à écrire dans des feuilles devenues simples copies.
-4. **Une requête par écran.** Les routes du Worker renvoient tout ce qu’un
-   écran affiche (par exemple une campagne avec ses personnages, PNJ et
-   magasins), pas une ligne à la fois. Le quota gratuit est de 100 000
-   requêtes par jour et 10 ms de calcul par requête. Les calculs lourds
-   (génération, mise en forme) restent dans l’application locale.
-5. **Pas d’interrogation répétée du serveur.** Les autres joueurs sont
-   prévenus d’un changement par Trystero (« le personnage X a changé ») et ne
-   rechargent que ce qui a changé.
-6. **Les droits sont vérifiés par le Worker.** Un joueur modifie ses
+4. **Copie locale, synchronisation par différences.** Voir « Budget de
+   requêtes » ci-dessous. L’application lit toujours sa SQLite locale ;
+   D1 n’est interrogé que pour récupérer ce qui a changé depuis la dernière
+   synchronisation, et jamais à l’ouverture d’une page.
+5. **Les droits sont vérifiés par le Worker.** Un joueur modifie ses
    personnages, un MJ ses campagnes, un admin tout. Masquer un bouton côté
    application ne suffit pas.
+
+## Budget de requêtes
+
+Limites gratuites (par jour, remise à zéro à 00:00 UTC) : 100 000 requêtes
+Worker (partagées par tous les Workers du compte Cloudflare), 5 millions de
+lignes D1 lues, 100 000 lignes D1 écrites. Une requête Worker peut exécuter
+plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
+
+1. **Lecture locale.** Chaque installation garde une copie des données JDR
+   dans sa SQLite. Ouvrir une page ne fait aucune requête.
+2. **Une seule route de synchronisation** : « tout ce qui a changé depuis le
+   curseur N », tous domaines confondus, en une réponse. Premier lancement :
+   copie complète, une fois.
+3. **Quand synchroniser** : au démarrage ; au retour sur l’application après
+   plus de quelques minutes ; quand un signal de changement arrive (signaux
+   regroupés sur quelques secondes, une seule synchronisation pour tous) ;
+   toutes les 10 à 15 minutes seulement si l’application est visible et
+   qu’aucun signal n’est arrivé. Jamais à la navigation.
+4. **Écritures groupées.** Les modifications partent dans une file locale,
+   envoyées ensemble après une courte pause ou en quittant la page. La
+   réponse à une écriture contient les différences, sans relecture
+   derrière. Si le Worker est injoignable ou le quota atteint, la file attend
+   et l’application reste utilisable en lecture.
+5. **Signaux de changement par Trystero**, dans un salon par campagne protégé
+   par une clé secrète stockée dans D1. Le signal ne contient que « le
+   domaine X a changé » ; les données viennent toujours de D1.
+6. **Pas de requête de session séparée** : chaque appel au Worker valide
+   déjà le jeton, le cache de session local peut donc durer plus longtemps.
+7. **Index sur `updated_at`** dans chaque table : D1 compte les lignes
+   parcourues, pas les lignes renvoyées. Sans cet index, chaque
+   synchronisation relirait toutes les tables.
+8. **Peu d’index** : chaque index ajoute une ligne écrite par modification.
+9. **Garde-fous** : attente croissante après une erreur, plafond de requêtes
+   par minute côté application, compteur de requêtes par installation visible
+   dans l’administration.
+
+Estimation pour 8 joueurs un jour de partie (4 h) : environ 200 requêtes
+par personne, soit environ 1 600 par jour, moins de 2 % du quota.
 
 ## Modèle de données D1
 
@@ -100,19 +134,20 @@ campagne).
 
 ### Phase 5 : PNJ et magasins
 
-### Phase 6 : tabletop
+### Phase 6 : tabletop (reportée)
 
-Cartes, dossiers, jetons, journal (chat et jets). La sauvegarde des jetons
-toutes les 15 s est regroupée en une requête par envoi.
+Le tabletop n’est pas touché pour l’instant : il reste sur Google Sheets
+jusqu’à décision contraire.
 
 ### Phase 7 : fin de transition
 
 - Arrêt de la recopie vers Sheets, domaine par domaine, après quelques
   semaines sans retour en arrière.
-- Suppression des index locaux devenus inutiles (`character_index`,
-  `campaign_index`, `class_index`, `sheet_index_syncs`) par une migration
-  `drizzle/` dédiée.
-- Google ne sert plus qu’aux médias : les droits OAuth sont réduits à Drive.
+- Les index locaux (`character_index`, `campaign_index`, `class_index`,
+  `sheet_index_syncs`) sont remplacés par la copie locale synchronisée depuis
+  D1, par des migrations `drizzle/` ajoutées (jamais supprimées).
+- Une fois le tabletop migré lui aussi, Google ne sert plus qu’aux médias :
+  les droits OAuth sont réduits à Drive.
 - Mise à jour d’`AGENTS.md` et d’`ARCHITECTURE.md`.
 
 ### Phase 8 : Importer
@@ -122,7 +157,7 @@ toutes les 15 s est regroupée en une requête par envoi.
 - Les suppressions ne s’appliquent que si on les coche explicitement.
 - Une sauvegarde est exportée automatiquement avant d’appliquer.
 
-## Pour chaque domaine (phases 2 à 6)
+## Pour chaque domaine (phases 2 à 5)
 
 1. Tables et routes D1 + tests du Worker.
 2. Script d’import depuis Sheets, idempotent, testé sur une D1 de
