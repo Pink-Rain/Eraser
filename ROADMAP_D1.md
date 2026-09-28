@@ -54,9 +54,13 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    toutes les 10 à 15 minutes seulement si l’application est visible et
    qu’aucun signal n’est arrivé. Jamais à la navigation.
    Deux vitesses : les personnages et campagnes suivent les signaux en
-   quelques secondes ; les données de référence (index, catalogues,
-   vocabulaire, classes) au plus toutes les 5 minutes, ou dès l’ouverture de
-   la page concernée si un signal est en attente.
+   quelques secondes, mais seulement si l’élément modifié est affiché dans
+   une fenêtre ouverte ; sinon il est marqué « à rafraîchir » et récupéré à
+   l’ouverture de sa page ou à la synchronisation lente suivante. Les données
+   de référence (index, catalogues, vocabulaire, classes) suivent au plus
+   toutes les 5 minutes, ou dès l’ouverture de la page concernée si un signal
+   est en attente. Le rattrapage après une longue absence est paginé (environ
+   1 000 lignes par réponse).
 4. **Écritures groupées.** L’interface enregistre immédiatement auprès du
    serveur local (`127.0.0.1`, gratuit), qui garde la file dans sa SQLite :
    rien n’est perdu si l’application se ferme. La file part vers le Worker
@@ -78,6 +82,10 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    parcourues, pas les lignes renvoyées. Sans cet index, chaque
    synchronisation relirait toutes les tables.
 8. **Peu d’index** : chaque index ajoute une ligne écrite par modification.
+   Pas de table de journal séparée : le curseur de synchronisation est une
+   colonne de la ligne elle-même, et les suppressions sont douces, ce qui
+   suffit à les transmettre. Un journal doublerait les lignes écrites, qui
+   sont la limite la plus proche.
 9. **Garde-fous** : attente croissante après une erreur, plafond de requêtes
    par minute côté application, compteur de requêtes par installation visible
    dans l’administration.
@@ -87,6 +95,11 @@ par personne, soit environ 1 600 par jour, moins de 2 % du quota.
 Un MJ qui modifie 20 cellules par minute pendant 3 heures : au plus
 1 080 envois et environ 7 000 lignes écrites (index compris), et moins de 300
 synchronisations pour les 7 autres joueurs grâce aux deux vitesses.
+
+Journée complète : 6 h de préparation (MJ à 20 cellules par minute, admin à
+1 modification par minute), puis 5 h de partie à 8. Environ 6 800 appels au
+Worker (7 % du quota), 23 000 lignes écrites (23 %), moins de 150 000 lignes
+lues (3 %). Les lignes écrites sont la limite la plus proche.
 
 ## Modèle de données D1
 
