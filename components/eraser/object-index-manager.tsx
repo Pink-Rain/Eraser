@@ -468,6 +468,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         error={editorError}
         onClose={() => { if (pending !== "schema") setEditor(null) }}
         onApply={(operations) => void applyEditor(operations)}
+        onDeleteIndex={() => undefined}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}

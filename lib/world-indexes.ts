@@ -875,7 +875,10 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
       addColumns: true,
     }
   })
-  return { family: "world", key, title: data.definition.title, tabs, addTabs: true, relationTargets: await worldRelationTargets() }
+  const deleteIndex = isBuiltinWorldIndexKey(key)
+    ? { allowed: false, reason: "Index prévu par Eraser : le code le lit (fiches, colonnes liées, création de personnage, statistiques). On peut en supprimer des onglets et des colonnes, pas l’index entier." }
+    : { allowed: true }
+  return { family: "world", key, title: data.definition.title, tabs, addTabs: true, relationTargets: await worldRelationTargets(), deleteIndex }
 }
 
 /** Les index du monde qu'une relation peut viser, avec leurs onglets et colonnes. */

@@ -538,7 +538,7 @@ test("types every index column from one registry", async () => {
   assert.equal(compactRichText("<strong>Capitaine</strong>"), "<strong>Capitaine</strong>");
   // Types des index du monde, principal et secondaires, formulaire compris.
   assert.equal(worldColumnSpec("creatures", "Créatures", "Nom").kind, "name-form");
-  assert.equal(worldColumnSpec("places", "Villes", "Nom").kind, "name");
+  assert.equal(worldColumnSpec("places", "Villes", "Nom").kind, "name-form");
   assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
   assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
   assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
@@ -548,7 +548,7 @@ test("types every index column from one registry", async () => {
   assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
   // Objets : icône et image sont des fichiers image, « Actif » vide reste actif, le prix est une somme d'argent.
   const headers = ["ID", "Nom", "Icône", "Image", "Actif", "Prix"];
-  assert.deepEqual(headers.map((header) => objectColumnSpec(header, headers).kind), ["id", "name", "file", "file", "checkbox", "number"]);
+  assert.deepEqual(headers.map((header) => objectColumnSpec(header, headers).kind), ["id", "name-form", "file", "file", "checkbox", "number"]);
   assert.equal(objectColumnSpec("ID", headers).hidden, true);
   assert.deepEqual(objectColumnSpec("Icône", headers).file, { accept: "image" });
   assert.equal(objectColumnSpec("Prix", headers).number.unit, "money");
@@ -568,14 +568,15 @@ test("builds grid columns from their type", async () => {
     indexGridColumn("portrait", "Icône", { kind: "file", file: { accept: "image" } }, 120, context),
     indexGridColumn("id", "ID", { kind: "id" }, 120, context),
   ];
-  assert.equal(columns[0].commitDelay, Infinity);
+  // Tous les noms ouvrent la fiche : un ancien « Nom » devient un Nom formulaire.
+  assert.equal(typeof columns[0].control, "function");
   assert.equal(columns[0].plain, true);
   assert.equal(columns[1].typeLabel, "Jauge (icônes, sur 5) · Nombre");
   const html = renderToStaticMarkup(React.createElement(SheetGrid, {
     layoutKey: "test:types", columns, rows: [{ key: "2", rowNumber: 2 }], valueOf: context.valueOf, onCommit: () => {}, empty: "Vide",
   }));
   // Le type se lit au survol de l'en-tête.
-  assert.match(html, /Type : Nom · Style imposé/);
+  assert.match(html, /Type : Nom formulaire · Style imposé/);
   // Jauge en icônes : cinq étincelles, dont trois pleines.
   assert.equal((html.match(/aria-label="Charges : \d"/g) || []).length, 5);
   assert.match(html, /CRE-1234ABCD/);

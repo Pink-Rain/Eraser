@@ -355,7 +355,8 @@ function isHeader(header: string, candidates: string[]) {
 export function worldColumnSpec(index: WorldIndexKey, tab: string, header: string): IndexColumnSpec {
   // L'identifiant est utile à Eraser, rarement à l'écran : il est masqué d'office.
   if (isIdHeader(header)) return { kind: "id", hidden: true }
-  if (isNameColumn(header)) return index === "creatures" ? { kind: "name-form", also: ["fixed"] } : { kind: "name", also: ["fixed"] }
+  // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
+  if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
   if (index === "creatures") {
     const form = !isHeader(header, creatureGridHeaders)

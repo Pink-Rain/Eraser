@@ -55,26 +55,26 @@ export function TrashManager({ initial, indexItems = [] }: { initial: Record<"to
 
       <div className="mt-10 space-y-6">
         <section className="rounded-2xl border bg-card/90 p-5 sm:p-7">
-          <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><Columns3 className="size-5 text-primary" />Colonnes et onglets d’index</h2>
+          <h2 className="flex items-center gap-2 font-display text-2xl font-semibold"><Columns3 className="size-5 text-primary" />Index, onglets et colonnes</h2>
           <p className="mt-1 text-sm text-muted-foreground">Supprimés depuis « Modifier » : cachés dans Eraser, leurs données restent dans Google Sheets tant qu’ils ne sont pas supprimés définitivement.</p>
           {indexError && <p className="mt-3 text-sm text-destructive">{indexError}</p>}
           <div className="mt-4 divide-y">
             {indexTrash.length ? indexTrash.map((item) => (
               <div key={`${item.family}:${item.key}:${item.tab}:${item.column}`} className="flex items-center gap-3 py-3">
                 <div className="min-w-0 flex-1">
-                  <p className="truncate font-medium">{item.column ? `Colonne « ${item.column} »` : `Onglet « ${item.tab} »`}</p>
-                  <p className="text-xs text-muted-foreground">{item.title}{item.column ? ` · onglet ${item.tab}` : ""}{item.deletedAt ? ` · supprimé le ${new Date(item.deletedAt).toLocaleString("fr-FR")}` : ""}</p>
+                  <p className="truncate font-medium">{item.column ? `Colonne « ${item.column} »` : item.tab ? `Onglet « ${item.tab} »` : `Index « ${item.title} »`}</p>
+                  <p className="text-xs text-muted-foreground">{item.tab ? item.title : "Index entier, avec tous ses onglets"}{item.column ? ` · onglet ${item.tab}` : ""}{item.deletedAt ? ` · supprimé le ${new Date(item.deletedAt).toLocaleString("fr-FR")}` : ""}</p>
                 </div>
                 <Button variant="outline" size="sm" onClick={() => void actOnIndex("restore", item)}><RotateCcw />Restaurer</Button>
                 <AlertDialog>
                   <AlertDialogTrigger asChild><Button variant="destructive" size="sm"><Trash2 />Supprimer</Button></AlertDialogTrigger>
                   <AlertDialogContent>
-                    <AlertDialogHeader><AlertDialogTitle>Supprimer définitivement ?</AlertDialogTitle><AlertDialogDescription>{item.column ? `La colonne « ${item.column} » et tout son contenu seront effacés de Google Sheets.` : `L’onglet « ${item.tab} » et toutes ses lignes seront effacés de Google Sheets.`} Cette action est irréversible.</AlertDialogDescription></AlertDialogHeader>
+                    <AlertDialogHeader><AlertDialogTitle>Supprimer définitivement ?</AlertDialogTitle><AlertDialogDescription>{item.column ? `La colonne « ${item.column} » et tout son contenu seront effacés de Google Sheets. Cette action est irréversible.` : item.tab ? `L’onglet « ${item.tab} » et toutes ses lignes seront effacés de Google Sheets. Cette action est irréversible.` : `Le classeur de l’index « ${item.title} » part dans la corbeille de Google Drive (Google le garde encore 30 jours), et l’index disparaît d’Eraser.`}</AlertDialogDescription></AlertDialogHeader>
                     <AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void actOnIndex("delete", item)}>Supprimer définitivement</AlertDialogAction></AlertDialogFooter>
                   </AlertDialogContent>
                 </AlertDialog>
               </div>
-            )) : <p className="py-6 text-center text-sm text-muted-foreground">Aucune colonne ni aucun onglet supprimé.</p>}
+            )) : <p className="py-6 text-center text-sm text-muted-foreground">Aucun index, onglet ni colonne supprimé.</p>}
           </div>
         </section>
         {sections.map((section) => (

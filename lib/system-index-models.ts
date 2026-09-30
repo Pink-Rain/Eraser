@@ -14,6 +14,7 @@ function model(input: { family: IndexEditorModel["family"]; key: string; title: 
     key: input.key,
     title: input.title,
     readOnly: true,
+    deleteIndex: { allowed: false, reason: input.readOnlyReason },
     readOnlyReason: input.readOnlyReason,
     addTabs: false,
     addTabsReason: input.addTabsReason,
@@ -33,7 +34,7 @@ const spellSheet = "La feuille des sorts est lue par Eraser d’après ses en-t�
 
 export function spellEditorModel(kind: "classes" | "creatures"): IndexEditorModel {
   const columns: Column[] = [
-    { header: "Nom", spec: { kind: "name", also: ["fixed"] }, reasons: ["Les fiches de classe, les sorts des créatures et des PNJ et la fusion des doublons retrouvent un sort par son nom.", spellSheet] },
+    { header: "Nom", spec: { kind: "name-form", also: ["fixed"] }, reasons: ["Ouvre la fiche du sort. Les fiches de classe, les sorts des créatures et des PNJ et la fusion des doublons retrouvent un sort par son nom.", spellSheet] },
     { header: "Effet", spec: { kind: "rich" }, reasons: ["Affiché sur les fiches de classe et les cartes de sorts des créatures et des PNJ.", spellSheet] },
     { header: "Description", spec: { kind: "rich", display: "muted" }, reasons: ["Affichée sous l’effet sur les cartes de sorts.", spellSheet] },
     { header: "Type", spec: { kind: "choice", also: ["fixed"], allowCustom: true }, reasons: ["Décide de la catégorie du sort (actif, passif, bonus), de sa couleur et de l’onglet où il apparaît.", spellSheet] },

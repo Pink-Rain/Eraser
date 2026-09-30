@@ -71,6 +71,8 @@ export type IndexEditorModel = {
   tabs: EditorTab[]
   addTabs: boolean
   addTabsReason?: string
+  /** Supprimer tout l'index (à la corbeille) : permis ou non, et pourquoi. */
+  deleteIndex?: { allowed: boolean; reason?: string }
   /** Rien n'est modifiable : l'éditeur ne fait qu'expliquer. */
   readOnly?: boolean
   readOnlyReason?: string
@@ -91,7 +93,7 @@ export type SchemaOperation =
   | { op: "order-tabs"; tabs: string[] }
 
 /** Les types proposés à la création ou au changement de type d'une colonne. */
-export const creatableKinds: IndexColumnKind[] = ["rich", "name", "name-form", "number", "checkbox", "color", "gauge", "choice", "linked-choice", "linked", "lookup", "rollup", "formula", "random", "actions", "file", "spells"]
+export const creatableKinds: IndexColumnKind[] = ["rich", "name-form", "number", "checkbox", "color", "gauge", "choice", "linked-choice", "linked", "lookup", "rollup", "formula", "random", "actions", "file", "spells"]
 
 export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, place, suppression." }
 

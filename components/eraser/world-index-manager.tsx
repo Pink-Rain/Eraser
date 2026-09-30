@@ -634,6 +634,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     setPending("")
   }
 
+  /** Met l'index (créé dans Eraser) à la corbeille, puis revient à la page des index. */
+  async function deleteIndex() {
+    setPending("schema"); setEditorError("")
+    const response = await fetch("/api/resources/custom-indexes", { method: "DELETE", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: indexKey }) })
+    const payload = (await response.json().catch(() => ({}))) as { error?: string }
+    setPending("")
+    if (!response.ok) return setEditorError(payload.error || "L’index n’a pas pu être mis à la corbeille.")
+    setEditor(null)
+    router.push("/ressources")
+  }
+
   async function applyEditor(operations: SchemaOperation[]) {
     setPending("schema"); setEditorError("")
     const seq = ++requestSeq.current
@@ -686,6 +697,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         error={editorError}
         onClose={() => { if (pending !== "schema") setEditor(null) }}
         onApply={(operations) => void applyEditor(operations)}
+        onDeleteIndex={() => void deleteIndex()}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}

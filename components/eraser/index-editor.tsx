@@ -8,6 +8,7 @@ import {
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -465,7 +466,6 @@ function TypeSettings(props: SettingsProps) {
   const relations = siblings.filter((column) => !column.removed && (column.spec.kind === "linked" || column.spec.kind === "linked-choice"))
   switch (spec.kind) {
     case "rich": return <p className="text-xs text-muted-foreground">Chaque case garde sa mise en forme. Pour un style commun à toute la colonne (et sans mise en forme propre à chaque case), règle le « Style imposé » plus bas.</p>
-    case "name": return <p className="text-xs text-muted-foreground">Le nom se modifie directement dans la case. Choisis « Nom formulaire » pour qu’un clic ouvre la fiche de la ligne.</p>
     case "name-form": return <p className="text-xs text-muted-foreground">Un clic sur le nom ouvre la fiche de la ligne, avec tous ses champs (ceux du tableau et ceux « Formulaire seulement »). Le nom se modifie dans la fiche.</p>
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
@@ -654,7 +654,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {} }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {} }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -671,6 +671,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   sampleRows?: Record<string, Array<Record<string, string>>>
   onClose: () => void
   onApply: (operations: SchemaOperation[]) => void
+  /** Supprimer tout l'index (à la corbeille). Absent : pas de bouton. */
+  onDeleteIndex?: () => void
 }) {
   const [tabs, setTabs] = useState<DraftTab[]>(() => [...draftOf(model), ...startTabs.map((name): DraftTab => ({ id: nextId(), name, columns: [], removed: false, remove: true, rename: true, addColumns: true }))])
   const originalTabOrder = useMemo(() => model.tabs.map((tab) => tab.name), [model])
@@ -847,9 +849,26 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </div>
         {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">{operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}</ul>}
       </div>
-      <DialogFooter className="shrink-0">
+      <DialogFooter className="shrink-0 sm:justify-between">
+        <span>
+          {onDeleteIndex && model.deleteIndex && (model.deleteIndex.allowed
+            ? <AlertDialog>
+              <AlertDialogTrigger asChild><Button type="button" variant="ghost" className="text-destructive" disabled={pending}><Trash2 />Supprimer l’index</Button></AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle>Supprimer l’index « {model.title} » ?</AlertDialogTitle>
+                  <AlertDialogDescription>Il part dans la corbeille (Administration › Corbeille) avec tous ses onglets : il disparaît d’Eraser, mais son classeur reste intact dans Google Drive et on peut le restaurer. « Supprimer définitivement », depuis la corbeille, met le classeur dans la corbeille de Google Drive.</AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onDeleteIndex}>Mettre à la corbeille</AlertDialogAction></AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            : <Button type="button" variant="ghost" disabled title={model.deleteIndex.reason} className="text-muted-foreground"><Lock />Supprimer l’index</Button>)}
+          {model.deleteIndex && !model.deleteIndex.allowed && model.deleteIndex.reason && <span className="ml-1 hidden text-[11px] text-muted-foreground lg:inline">{model.deleteIndex.reason}</span>}
+        </span>
+        <span className="flex gap-2">
         <Button type="button" variant="outline" onClick={onClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
         {!readOnly && <Button type="button" disabled={pending || !canSubmit || !operations.length || problems.length > 0} onClick={() => onApply(operations)}>{pending ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
+        </span>
       </DialogFooter>
       {guide && <IndexGuide open section={guide} onClose={() => setGuide(null)} />}
     </DialogContent>
@@ -864,7 +883,7 @@ export function ReadOnlyIndexEditorButton({ model, disabled = false }: { model: 
   const [open, setOpen] = useState<IndexEditorModel | null>(null)
   return <>
     <Button type="button" variant="outline" onClick={() => setOpen(model())} disabled={disabled} title="Voir les colonnes de cet index et ce qui les verrouille"><Settings2 />Modifier</Button>
-    {open && <IndexEditor model={open} open onClose={() => setOpen(null)} onApply={() => setOpen(null)} />}
+    {open && <IndexEditor model={open} open onClose={() => setOpen(null)} onApply={() => setOpen(null)} onDeleteIndex={() => undefined} />}
   </>
 }
 

@@ -55,7 +55,7 @@ type KindInfo = {
 export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "rich": { label: "Texte", group: "Saisie", creatable: true, description: "Du texte libre. Chaque case garde sa mise en forme (gras, couleurs, listes, liens…), sauf si la colonne a un style imposé.", settings: ["Style imposé : toute la colonne prend le même style, et la mise en forme propre à chaque case est retirée."], example: "Description, Histoire, Note." },
   "fixed": { label: "Texte", group: "Saisie", creatable: false, description: "Du texte au style imposé (ancien réglage « Affichage fixe »)." },
-  "name": { label: "Nom", group: "Saisie", creatable: true, description: "Le nom de la ligne : obligatoire, modifiable dans la case, enregistré à la sortie de la case et renommé partout où il est cité.", example: "Le nom d'un lieu, d'une langue." },
+  "name": { label: "Nom formulaire", group: "Saisie", creatable: false, description: "Ancien type « Nom » : tous les noms sont maintenant des Noms formulaires." },
   "name-form": { label: "Nom formulaire", group: "Saisie", creatable: true, description: "Le nom de la ligne, qui ouvre sa fiche (le formulaire complet de la ligne) d'un clic. On le modifie dans la fiche.", example: "Les créatures, les PNJ ; les campagnes et personnages ouvrent leur page." },
   "id": { label: "Identifiant", group: "Système", creatable: false, description: "Identifiant unique, généré par Eraser. Il relie la ligne au reste de l'application ; il ne se modifie pas." },
   "linked": { label: "Colonne liée ↔", group: "Listes et relations", creatable: true, description: "Des noms d'un autre index (ou du même), séparés par des virgules. La colonne d'en face se remplit toute seule, et un nom absent crée sa ligne.", settings: ["Index lié et onglet.", "Colonne qui répond en face (créée si elle n'existe pas)."], example: "Lieux ↔ Peuples : ajouter « Elfes » à une ville ajoute la ville aux Elfes." },
@@ -340,7 +340,9 @@ export function normalizeSpec(input: IndexColumnSpec): IndexColumnSpec {
   const fixed = spec.kind === "fixed" || also.includes("fixed")
   const legacyStyle = spec.display ? displayStyles[spec.display] : undefined
   if (spec.kind === "fixed") spec.kind = "rich"
-  const isName = spec.kind === "name" || spec.kind === "name-form"
+  // Tous les noms ouvrent la fiche de leur ligne : l'ancien « Nom » est un Nom formulaire.
+  if (spec.kind === "name") spec.kind = "name-form"
+  const isName = spec.kind === "name-form"
   if (fixed) spec.style = { ...(isName ? { bold: true } : {}), ...legacyStyle, ...spec.style }
   // « Description » des sorts : grisée, mais chaque case garde sa mise en forme.
   else if (legacyStyle) spec.style = { ...legacyStyle, keepCellFormatting: true, ...spec.style }
@@ -546,7 +548,7 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   if (isIdHeader(header)) return { kind: "id", hidden: true }
   const names = new Set(objectNameHeaders.map(foldName))
   const nameHeader = headers.find((candidate) => names.has(foldName(candidate)))
-  if (nameHeader && foldName(nameHeader) === folded) return { kind: "name", also: ["rich"] }
+  if (nameHeader && foldName(nameHeader) === folded) return { kind: "name-form", also: ["rich"] }
   if (["image", "illustration", "url image", "icone", "icon"].includes(folded)) return { kind: "file", file: { accept: "image" } }
   if (["prix", "valeur", "cout"].includes(folded)) return { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }

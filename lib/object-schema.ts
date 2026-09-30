@@ -50,6 +50,7 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
     title: tables[0].fileName,
     addTabs: true,
     relationTargets: await worldRelationTargets(),
+    deleteIndex: { allowed: false, reason: "Les objets de ce classeur peuvent être dans des inventaires et des boutiques. Mets plutôt ses tableaux à la corbeille un par un : ils restent restaurables." },
     tabs: tables.map((table) => ({
       name: table.tabName,
       columns: table.headers.filter((header) => header.trim() && !trashed(findEntry(schema, table.tabName, header))).map((header) => ({

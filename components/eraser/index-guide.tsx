@@ -39,7 +39,7 @@ function exampleResult(formula: string, random: boolean) {
 }
 
 function TypesSection({ query }: { query: string }) {
-  const kinds = (Object.keys(indexColumnKinds) as IndexColumnKind[]).filter((kind) => !["fixed", "archived"].includes(kind))
+  const kinds = (Object.keys(indexColumnKinds) as IndexColumnKind[]).filter((kind) => !["fixed", "archived", "name"].includes(kind))
   return <>
     <p className={p}>Chaque colonne a un type : il décide de sa case dans le tableau, de son champ dans la fiche, de son tri et de ce qui est écrit dans Google Sheets. On le choisit dans « Modifier ». Survole un en-tête de colonne pour lire son type (par exemple « Jauge (icônes, propre à chaque case) · Nombre »).</p>
     {kindGroups.map((group) => {

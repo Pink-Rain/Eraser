@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { permanentlyDeleteItem, restoreItem } from "@/lib/google-sheets"
 import { purgeObjectIndexTrash, restoreObjectIndexTrash } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
+import { isCustomIndexKey, purgeCustomIndex, restoreCustomIndex } from "@/lib/custom-indexes"
 import { knownWorldIndexKey, purgeWorldIndexTrash, restoreWorldIndexTrash } from "@/lib/world-indexes"
 
 type IndexTrashBody = { kind: "index"; family?: string; key?: string; tab?: string; column?: string }
@@ -11,6 +12,8 @@ type IndexTrashBody = { kind: "index"; family?: string; key?: string; tab?: stri
 async function indexTrash(body: IndexTrashBody, operation: "restore" | "delete") {
   const tab = String(body.tab ?? "")
   const column = String(body.column ?? "")
+  // Sans onglet ni colonne : tout un index créé dans Eraser.
+  if (!tab && !column && body.family === "world" && isCustomIndexKey(body.key)) return operation === "restore" ? restoreCustomIndex(body.key) : purgeCustomIndex(body.key)
   if (!tab) throw new Error("INDEX_TRASH_NOT_FOUND")
   if (body.family === "objects") {
     if (!/^[A-Za-z0-9_-]+$/.test(body.key ?? "")) throw new Error("INDEX_TRASH_NOT_FOUND")

@@ -106,7 +106,8 @@ function ClassLinksEditor({ draft, classes, spells, rowNumber, compact = false, 
 
 /** Les types des colonnes du tableau des sorts. */
 const spellSpecs = {
-  name: { kind: "name", also: ["fixed"] },
+  // Le nom ouvre la fiche du sort (Nom formulaire), comme dans tous les index.
+  name: { kind: "name-form", also: ["fixed"] },
   effect: { kind: "rich" },
   description: { kind: "rich", display: "muted" },
   type: { kind: "choice", also: ["fixed"], options: classSpellTypeSuggestions.map((value) => ({ value })), allowCustom: true },
@@ -359,6 +360,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   }, [forClasses])
   const playData = useClassPlayData(forClasses)
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
+  const [editingSpell, setEditingSpell] = useState<number | null>(null)
   // Sort dont on veut voir le groupe de doublons, et sort ouvert dans l'éditeur.
   const [duplicateFocus, setDuplicateFocus] = useState<string | null>(null)
   const [editing, setEditing] = useState<ClassSpell | null>(null)
@@ -406,6 +408,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
       valueOf,
       commit: (rowKey: string, columnKey: string, value: string) => latestCommit.current(rowKey, columnKey, value),
       idComputed: (rowKey: string) => valueOf(rowKey, "id").startsWith("LIGNE-"),
+      openForm: (rowKey: string) => setEditingSpell(Number(rowKey)),
     }
     const column = (key: keyof typeof spellSpecs, label: string, width: number) => indexGridColumn(key, label, spellSpecs[key], width, context, key === "type" ? { renderValue: (value) => <SpellTypeLabel value={value} /> } : {})
     return [
@@ -651,6 +654,22 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
         {editing && <SpellForm key={`${editing.rowNumber}:${editing.id}`} withClasses={forClasses} initial={toDraft(editing)} classes={data.classes} spells={data.spells} pending={pending} title={`Ligne ${editing.rowNumber}`} onCancel={() => setEditing(null)} onSave={(draft) => void save(editing, draft).then(() => setEditing(null))} />}
       </DialogContent>
     </Dialog>
+    {editingSpell !== null && spellByRow.get(editingSpell) && <Dialog open onOpenChange={(open) => { if (!open) setEditingSpell(null) }}>
+      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-5xl">
+        <DialogHeader><DialogTitle className="sr-only">Fiche du sort</DialogTitle></DialogHeader>
+        <SpellForm
+          key={editingSpell}
+          initial={toDraft(spellByRow.get(editingSpell)!)}
+          classes={data.classes}
+          spells={data.spells}
+          pending={pending}
+          withClasses={forClasses}
+          title={spellByRow.get(editingSpell)!.name}
+          onCancel={() => setEditingSpell(null)}
+          onSave={(draft) => { const spell = spellByRow.get(editingSpell)!; void save(spell, draft).then((saved) => { if (saved) setEditingSpell(null) }) }}
+        />
+      </DialogContent>
+    </Dialog>}
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Classes</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
       <TabsContent value="classes" className="mt-3"><div className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<ClassPicker classes={data.classes} selected={selectedClass} onSelect={selectClass} /></div>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} hrefFor={classCreationHref} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>

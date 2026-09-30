@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Plus, Search, Sparkles, Trash2, X, Zap } from "lucide-react"
 
 import { IndexImage } from "@/components/eraser/index-image"
-import { RichTextField } from "@/components/eraser/rich-text"
+import { RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
 import { SpellPicker, useSpellOptions, type SpellOption } from "@/components/eraser/spell-picker"
 import type { SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
@@ -316,7 +316,10 @@ export function IdCell({ value, computed = false }: { value: string; computed?: 
 export function NameFormCell({ value, onOpen, href, color }: { value: string; onOpen?: () => void; href?: string; color?: string }) {
   const content = <>
     {color && <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
-    <span className="min-w-0 truncate">{value || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</span>
+    {/<[a-z]/i.test(value)
+      // Un nom mis en forme (objets) garde sa mise en forme.
+      ? <span className="min-w-0 truncate" dangerouslySetInnerHTML={{ __html: sanitizeRichText(value) }} />
+      : <span className="min-w-0 truncate">{value || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</span>}
   </>
   const className = "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
   if (href) return <Link href={href} className={className} title="Ouvrir">{content}</Link>
