@@ -8,7 +8,7 @@ import {
   ensureWorldIndexEntry,
   insertWorldIndexRows,
   getWorldIndex,
-  isWorldIndexKey,
+  knownWorldIndexKey,
   moveWorldIndexRows,
   normalizeWorldIndexChoices,
   updateWorldIndexCell,
@@ -29,8 +29,8 @@ function errorMessage(error: unknown) {
 export async function GET(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const parameters = new URL(request.url).searchParams
-  const key = parameters.get("key")
-  if (!isWorldIndexKey(key)) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
+  const key = await knownWorldIndexKey(parameters.get("key"))
+  if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
   try {
     // « Actualiser » relit Google Sheets ; sinon l'index gardé en mémoire suffit.
     return NextResponse.json({ data: await getWorldIndex(key, { refresh: parameters.get("refresh") === "1" }) })
@@ -43,8 +43,8 @@ export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number }
-    if (!isWorldIndexKey(body.key) || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
-    const key = body.key
+    const key = await knownWorldIndexKey(body.key)
+    if (!key || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
     let changed: string[] = []
     if (body.action === "update-cell" && typeof body.rowNumber === "number" && typeof body.column === "number" && typeof body.html === "string") {

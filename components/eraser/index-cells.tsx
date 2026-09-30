@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Check, ChevronDown, ImagePlus, Link2, LoaderCircle, Minus, Plus, Search, Sparkle, Sparkles, Trash2, X, Zap } from "lucide-react"
+import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Minus, Plus, Search, Sparkle, Sparkles, Trash2, X, Zap } from "lucide-react"
 
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -14,9 +14,13 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { SpellIndexKind } from "@/lib/class-content"
+import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import {
   checkboxValue,
   columnTypeLabel,
+  fileAcceptInput,
+  fileAcceptLabels,
+  type FileAccept,
   foldName,
   isCheckedValue,
   isRichSpec,
@@ -26,7 +30,7 @@ import {
   type IndexColumnSpec,
   type SpellSource,
 } from "@/lib/index-columns"
-import { splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
+import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 
 /*
  * Le moteur de cellules de tous les index. Chaque type de colonne (lib/index-columns.ts)
@@ -150,8 +154,26 @@ export const ChoiceCell = memo(function ChoiceCell({ onChange, value, ...props }
   return <ChoicePicker {...props} value={shown} onChange={(next) => { setShown(next); onChange(next) }} />
 })
 
-// Noms d'un index du monde, chargés une fois pour toute la page.
+// Données d'un index du monde, chargées une fois pour toute la page (listes liées,
+// Recherche, Agrégat).
+export type LoadedWorldIndex = {
+  tables: Array<{ tabName: string; headers: string[]; rows: Array<{ values: string[] }> }>
+  columns?: Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
+}
+const dataCache = new Map<string, Promise<LoadedWorldIndex | null>>()
 const namesCache = new Map<string, Promise<string[]>>()
+
+export function loadWorldIndexData(index: WorldIndexKey) {
+  let promise = dataCache.get(index)
+  if (!promise) {
+    promise = fetch(`/api/resources/world-indexes?key=${index}`)
+      .then((response) => response.json())
+      .then((payload: { data?: LoadedWorldIndex }) => payload.data ?? null)
+      .catch(() => { dataCache.delete(index); return null })
+    dataCache.set(index, promise)
+  }
+  return promise
+}
 
 function sourceKey(source: { index: WorldIndexKey; tab: string }) {
   return `${source.index}:${source.tab}`
@@ -161,17 +183,14 @@ export function loadWorldIndexNames(source: { index: WorldIndexKey; tab: string 
   const key = sourceKey(source)
   let promise = namesCache.get(key)
   if (!promise) {
-    promise = fetch(`/api/resources/world-indexes?key=${source.index}`)
-      .then((response) => response.json())
-      .then((payload: { data?: { tables?: Array<{ tabName: string; headers: string[]; rows: Array<{ values: string[] }> }> } }) => {
-        // Une liste liée propose les noms de tous les onglets de l'index : un lieu peut être une ville comme un pays.
-        const names = (payload.data?.tables ?? []).flatMap((table) => {
-          const column = table.headers.findIndex((header) => foldName(header) === "nom")
-          return column >= 0 ? table.rows.map((row) => row.values[column]?.trim() ?? "") : []
-        })
-        return [...new Set(names.filter(Boolean))].sort((left, right) => left.localeCompare(right, "fr"))
+    promise = loadWorldIndexData(source.index).then((data) => {
+      // Une liste liée propose les noms de tous les onglets de l'index : un lieu peut être une ville comme un pays.
+      const names = (data?.tables ?? []).flatMap((table) => {
+        const column = table.headers.findIndex((header) => foldName(header) === "nom")
+        return column >= 0 ? table.rows.map((row) => row.values[column]?.trim() ?? "") : []
       })
-      .catch(() => { namesCache.delete(key); return [] })
+      return [...new Set(names.filter(Boolean))].sort((left, right) => left.localeCompare(right, "fr"))
+    })
     namesCache.set(key, promise)
   }
   return promise
@@ -217,7 +236,7 @@ export function LinkedChoicePicker({ source, value, onChange, compact = true, di
     loading={names === null}
     compact={compact}
     disabled={disabled}
-    createLabel={`l’index ${worldIndexDefinitions[source.index].title}`}
+    createLabel={isBuiltinWorldIndexKey(source.index) ? `l’index ${worldIndexDefinitions[source.index].title}` : "l’index lié"}
     onCreate={(name) => ensureWorldIndexName(source, name)}
     onChange={(next) => { setShown(next); onChange(next) }}
   />
@@ -571,6 +590,251 @@ export const GaugeCell = memo(function GaugeCell({ label, value, style, max, dis
 })
 
 // ---------------------------------------------------------------------------
+// Nombre : unités, monnaie, plage, pourcentage
+// ---------------------------------------------------------------------------
+
+/**
+ * Un nombre dans le tableau. Le texte s'affiche proprement (« 1,5 PO », « 2–5 m ») ;
+ * un clic permet de le récrire tel qu'on le pense (« 10 PC », « 3 à 5 km »). Pour une
+ * unité convertible, la pastille de l'unité change l'unité de cette case, et le survol
+ * donne la valeur dans toutes les unités (`showConversions`).
+ */
+export const NumberCell = memo(function NumberCell({ label, value, format, disabled = false, compact = true, showConversions = true, onChange }: {
+  label: string
+  value: string
+  format: NumberFormat
+  disabled?: boolean
+  compact?: boolean
+  showConversions?: boolean
+  onChange: (value: string) => void
+}) {
+  const [shown, setShown] = useOptimistic(value)
+  const [editing, setEditing] = useState(false)
+  const [draft, setDraft] = useState("")
+  const [unitsOpen, setUnitsOpen] = useState(false)
+  const parsed = parseIndexNumber(shown, format)
+  const family = format.unit ?? "none"
+  const units = unitsOf(family)
+  const text = parsed ? formatIndexNumber(parsed, format) : shown.trim()
+  const conversions = parsed && units.length && showConversions ? conversionsOf(parsed, format).map((item) => item.text).join(" · ") : undefined
+  const change = (next: string) => { setShown(next); onChange(next) }
+
+  function finish(commit: boolean) {
+    setEditing(false)
+    if (!commit) return
+    const typed = draft.trim()
+    if (typed === shown.trim()) return
+    if (!typed) return change("")
+    // Une saisie illisible reste telle quelle (en italique) plutôt que d'être perdue.
+    const next = parseIndexNumber(typed, { ...format, defaultUnit: parsed?.unit ?? format.defaultUnit })
+    change(next && !next.unknown ? formatIndexNumber(next, format, next.unit ?? parsed?.unit) : typed)
+  }
+
+  if (editing) return <Input
+    autoFocus
+    value={draft}
+    aria-label={label}
+    onChange={(event) => setDraft(event.target.value)}
+    onBlur={() => finish(true)}
+    onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); finish(true) } else if (event.key === "Escape") finish(false) }}
+    placeholder={format.range ? "2–5" : units.length ? `12 ${format.defaultUnit ?? units[0].code}` : "0"}
+    className={compact ? "h-8 border-transparent bg-background px-2 text-sm shadow-none" : ""}
+  />
+
+  const amountText = parsed && units.length ? text.replace(new RegExp(`\\s${parsed.unit ?? format.defaultUnit ?? ""}$`), "") : text
+  const unit = parsed?.unit ?? (parsed ? findUnit(family, format.defaultUnit ?? "")?.code : undefined)
+  return <span className={`flex min-h-8 w-full items-center gap-1.5 px-1 ${compact ? "" : "h-9 rounded-md border bg-background/50"}`} title={conversions}>
+    <button
+      type="button"
+      disabled={disabled}
+      onClick={() => { setDraft(shown.trim()); setEditing(true) }}
+      className={`min-w-0 flex-1 truncate rounded-md px-1 py-1 text-right tabular-nums hover:bg-muted ${parsed && !parsed.unknown ? "" : "italic text-muted-foreground"}`}
+      aria-label={`Modifier ${label}`}
+    >{amountText || "—"}</button>
+    {parsed && unit && units.length > 0 && <Popover open={unitsOpen} onOpenChange={setUnitsOpen}>
+      <PopoverTrigger asChild>
+        <button type="button" disabled={disabled} className={`shrink-0 rounded-md border px-1.5 py-0.5 text-[10px] font-bold ${unitTone(family, unit) ?? "bg-muted"}`} title={`${findUnit(family, unit)?.title ?? unit} — changer d’unité`}>{unit}</button>
+      </PopoverTrigger>
+      {unitsOpen && <PopoverContent align="end" className="w-56 p-1">
+        {conversionsOf(parsed, format).map((item) => <button key={item.unit} type="button" onClick={() => { change(item.text); setUnitsOpen(false) }} className="flex w-full items-center justify-between gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
+          <span className="tabular-nums">{item.text}</span>
+          <span className="text-[11px] text-muted-foreground">{item.title}</span>
+        </button>)}
+      </PopoverContent>}
+    </Popover>}
+    {parsed?.corrected && <span className="shrink-0 text-[10px] text-amber-700" title="Pièces d’argent ou de bronze : lues comme des pièces de cuivre">PA→PC</span>}
+  </span>
+})
+
+// ---------------------------------------------------------------------------
+// Couleur
+// ---------------------------------------------------------------------------
+
+const colorPalette = ["#1f1b16", "#7f1d1d", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#285f8f", "#6b4c9a", "#9d174d", "#78716c", "#f5f5f4"]
+
+function isColor(value: string) {
+  return /^#[0-9a-f]{6}$/i.test(value.trim())
+}
+
+export const ColorCell = memo(function ColorCell({ label, value, disabled = false, onChange }: { label: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
+  const [shown, setShown] = useOptimistic(value)
+  const [open, setOpen] = useState(false)
+  const color = shown.trim()
+  const change = (next: string) => { setShown(next); onChange(next) }
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted">
+        <span className="size-4 shrink-0 rounded-full border" style={isColor(color) ? { backgroundColor: color } : undefined} />
+        <span className="truncate font-mono text-muted-foreground">{color || "—"}</span>
+      </button>
+    </PopoverTrigger>
+    {open && <PopoverContent align="start" className="w-56 p-2">
+      <div className="grid grid-cols-6 gap-1.5">
+        {colorPalette.map((swatch) => <button key={swatch} type="button" onClick={() => { change(swatch); setOpen(false) }} className={`size-7 rounded-full border ${swatch === color ? "ring-2 ring-primary ring-offset-1" : ""}`} style={{ backgroundColor: swatch }} aria-label={swatch} />)}
+      </div>
+      <div className="mt-2 flex items-center gap-2">
+        <input type="color" value={isColor(color) ? color : "#927640"} onChange={(event) => change(event.target.value)} className="h-8 w-10 cursor-pointer rounded border bg-transparent" aria-label="Autre couleur" />
+        <Input value={color} onChange={(event) => { if (isColor(event.target.value) || !event.target.value) change(event.target.value) ; else setShown(event.target.value) }} placeholder="#927640" className="h-8 font-mono text-xs" />
+        {color && <Button type="button" variant="ghost" size="icon-sm" onClick={() => change("")} aria-label="Retirer la couleur"><X /></Button>}
+      </div>
+    </PopoverContent>}
+  </Popover>
+})
+
+// ---------------------------------------------------------------------------
+// Fichier : un ou plusieurs, images, sons, PDF…
+// ---------------------------------------------------------------------------
+
+/** Les fichiers d'une cellule : une adresse par ligne. */
+export function splitFiles(value: string) {
+  return value.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+}
+
+type FileInfo = { url: string; name: string; family: "image" | "audio" | "video" | "pdf" | "file" }
+
+function fileInfo(url: string): FileInfo {
+  let name = ""
+  let family = ""
+  try {
+    const parsed = new URL(url, "http://local")
+    name = parsed.searchParams.get("n") ?? decodeURIComponent(parsed.pathname.split("/").pop() ?? "")
+    family = parsed.searchParams.get("t") ?? ""
+  } catch { name = url }
+  const extension = name.split(".").pop()?.toLowerCase() ?? url.split("?")[0].split(".").pop()?.toLowerCase() ?? ""
+  if (!family) family = /^(png|jpe?g|gif|webp|avif|svg)$/.test(extension) || url.startsWith("data:image/") || /\/api\/(resources\/(index-images|creature-portraits)|items\/icons)\//.test(url) ? "image"
+    : /^(mp3|ogg|wav|m4a|flac|opus)$/.test(extension) ? "audio"
+    : /^(mp4|webm|mov)$/.test(extension) ? "video"
+    : extension === "pdf" ? "pdf" : "file"
+  return { url, name: name || url, family: family as FileInfo["family"] }
+}
+
+/** Importe un fichier pour une colonne Fichier, dans le Drive comme les images. */
+export async function uploadIndexFile(file: File, accept: FileAccept) {
+  const form = new FormData()
+  form.set("file", file)
+  form.set("accept", accept)
+  const response = await fetch("/api/resources/index-files", { method: "POST", body: form })
+  const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
+  if (!response.ok || !payload.url) throw new Error(payload.error || "Le fichier n’a pas pu être importé.")
+  return payload.url
+}
+
+function FileGlyph({ info, className = "size-8" }: { info: FileInfo; className?: string }) {
+  // eslint-disable-next-line @next/next/no-img-element
+  if (info.family === "image") return <img src={info.url} alt="" loading="lazy" decoding="async" className={`${className} rounded-md border object-cover`} />
+  const Icon = info.family === "audio" ? Music : info.family === "video" ? Film : info.family === "pdf" ? FileText : FileIcon
+  return <span className={`${className} grid shrink-0 place-items-center rounded-md border bg-muted/50 text-muted-foreground`}><Icon className="size-4" /></span>
+}
+
+/** La liste des fichiers d'une cellule, avec aperçu, import, adresse et retrait. */
+function FilesEditor({ files, accept, multiple, disabled = false, onChange }: { files: string[]; accept: FileAccept; multiple: boolean; disabled?: boolean; onChange: (files: string[]) => void }) {
+  const [uploading, setUploading] = useState(false)
+  const [error, setError] = useState("")
+  const [url, setUrl] = useState("")
+  async function upload(list: FileList) {
+    setUploading(true); setError("")
+    try {
+      const added: string[] = []
+      for (const file of [...list].slice(0, multiple ? 20 : 1)) added.push(await uploadIndexFile(file, accept))
+      onChange(multiple ? [...files, ...added] : added.slice(0, 1))
+    } catch (reason) { setError(reason instanceof Error ? reason.message : "Import impossible.") }
+    setUploading(false)
+  }
+  function addUrl() {
+    const clean = url.trim()
+    if (!clean) return
+    onChange(multiple ? [...files, clean] : [clean])
+    setUrl("")
+  }
+  return <div className="grid gap-2">
+    {files.length > 0 && <ul className="grid max-h-64 gap-1.5 overflow-y-auto">
+      {files.map((item, index) => {
+        const info = fileInfo(item)
+        return <li key={`${item}:${index}`} className="grid gap-1 rounded-lg border bg-background/50 p-1.5">
+          <div className="flex items-center gap-2">
+            <FileGlyph info={info} />
+            <a href={item} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-xs hover:underline">{info.name}</a>
+            <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} onClick={() => onChange(files.filter((_, position) => position !== index))} aria-label={`Retirer ${info.name}`}><X /></Button>
+          </div>
+          {info.family === "audio" && <audio controls preload="none" src={item} className="h-8 w-full" />}
+          {info.family === "video" && <video controls preload="none" src={item} className="max-h-40 w-full rounded" />}
+        </li>
+      })}
+    </ul>}
+    <label className="inline-flex">
+      <input type="file" accept={fileAcceptInput[accept] || undefined} multiple={multiple} className="sr-only" disabled={disabled || uploading} onChange={(event) => { if (event.target.files?.length) void upload(event.target.files); event.target.value = "" }} />
+      <span className="inline-flex w-full cursor-pointer items-center justify-center gap-2 rounded-lg border bg-card px-3 py-2 text-sm font-medium hover:bg-muted">{uploading ? <LoaderCircle className="size-4 animate-spin" /> : <Upload className="size-4" />}{multiple ? "Importer des fichiers" : files.length ? "Remplacer le fichier" : "Importer un fichier"}</span>
+    </label>
+    <div className="relative"><Link2 className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={url} disabled={disabled} onChange={(event) => setUrl(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); addUrl() } }} onBlur={addUrl} placeholder="…ou coller une URL" className="pl-8 text-xs" /></div>
+    <p className="text-[11px] text-muted-foreground">{fileAcceptLabels[accept]} · {multiple ? "plusieurs fichiers" : "un seul fichier"}</p>
+    {error && <p className="text-xs text-destructive">{error}</p>}
+  </div>
+}
+
+/**
+ * La colonne Fichier dans le tableau : des vignettes (une galerie si plusieurs images),
+ * un clic ouvre la liste. Une seule image garde la cellule Image et son import propre.
+ */
+export const FileCell = memo(function FileCell({ label, value, accept, multiple = false, disabled = false, preview, upload, onChange }: {
+  label: string
+  value: string
+  accept: FileAccept
+  multiple?: boolean
+  disabled?: boolean
+  preview?: ReactNode
+  upload?: (file: File, previous: string) => Promise<string>
+  onChange: (value: string) => void
+}) {
+  const [shown, setShown] = useOptimistic(value)
+  const [open, setOpen] = useState(false)
+  if (accept === "image" && !multiple) return <ImageCell label={label} value={value} disabled={disabled} preview={preview} upload={upload} onChange={onChange} />
+  const files = splitFiles(shown)
+  const change = (next: string[]) => { const joined = next.join("\n"); setShown(joined); onChange(joined) }
+  return <Popover open={open} onOpenChange={setOpen}>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 text-left hover:bg-muted">
+        {files.slice(0, 5).map((item, index) => <FileGlyph key={`${item}:${index}`} info={fileInfo(item)} className="size-7" />)}
+        {files.length > 5 && <span className="text-[11px] text-muted-foreground">+{files.length - 5}</span>}
+        {!files.length && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Paperclip className="size-3.5" />—</span>}
+      </button>
+    </PopoverTrigger>
+    {open && <PopoverContent align="start" className="w-80 p-3"><FilesEditor files={files} accept={accept} multiple={multiple} disabled={disabled} onChange={change} /></PopoverContent>}
+  </Popover>
+})
+
+// ---------------------------------------------------------------------------
+// Recherche et Agrégat : calculés à partir des lignes reliées
+// ---------------------------------------------------------------------------
+
+export const ComputedCell = memo(function ComputedCell({ values, pills = false }: { values: string[]; pills?: boolean }) {
+  if (!values.length || values.every((value) => !value.trim())) return <span className="flex min-h-8 items-center px-2 text-xs text-muted-foreground">—</span>
+  if (!pills) return <span className="flex min-h-8 items-center px-2 text-sm tabular-nums" title="Calculé par Eraser">{values.join(" · ")}</span>
+  return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1" title="Calculé par Eraser à partir des lignes reliées">
+    {values.map((value, index) => <span key={`${value}:${index}`} className="max-w-full truncate rounded-full border bg-muted/40 px-2 py-0.5 text-[11px]">{value}</span>)}
+  </span>
+})
+
+// ---------------------------------------------------------------------------
 // Le constructeur de colonnes : un type → une colonne de la grille.
 // ---------------------------------------------------------------------------
 
@@ -589,6 +853,10 @@ export type IndexColumnContext = {
   idComputed?: (rowKey: string) => boolean
   /** Ligne consultable seulement (PNJ d'une campagne qu'on ne mène pas…). */
   lockedRow?: (rowKey: string) => boolean
+  /** Recherche et Agrégat : les valeurs calculées d'une cellule. */
+  computed?: (rowKey: string, columnKey: string, spec: IndexColumnSpec) => string[]
+  /** Nombre : montrer les conversions au survol (le MJ seulement dans une boutique). */
+  showConversions?: boolean
 }
 
 const displayClasses: Record<NonNullable<IndexColumnSpec["display"]>, string> = {
@@ -615,6 +883,8 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
     width,
     typeLabel: columnTypeLabel(spec),
     plain: !rich,
+    hidden: spec.hidden,
+    description: spec.description,
     cellClassName: spec.display ? displayClasses[spec.display] : kinds.includes("name") || kinds.includes("name-form") ? "font-semibold" : undefined,
   }
   const { valueOf, commit } = context
@@ -644,15 +914,29 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
     case "auto-links":
       column.control = (rowKey) => <AutoLinksCell links={context.autoLinks?.(rowKey) ?? []} />
       break
-    case "image":
-      column.control = (rowKey) => <ImageCell
+    case "file":
+      column.control = (rowKey) => <FileCell
         label={label}
         value={valueOf(rowKey, key)}
+        accept={spec.file?.accept ?? "any"}
+        multiple={spec.file?.multiple}
         disabled={off(rowKey)}
         preview={extra.renderValue?.(valueOf(rowKey, key), rowKey)}
         upload={extra.upload ? (file, previous) => extra.upload!(file, previous, rowKey) : undefined}
         onChange={(value) => commit(rowKey, key, value)}
       />
+      break
+    case "number":
+      column.control = (rowKey) => <NumberCell label={label} value={valueOf(rowKey, key)} format={spec.number ?? {}} showConversions={context.showConversions ?? true} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      column.sortKey = (value) => numberSortKey(value, spec.number ?? {})
+      break
+    case "color":
+      column.control = (rowKey) => <ColorCell label={label} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      break
+    case "lookup":
+    case "rollup":
+      column.control = (rowKey) => <ComputedCell values={context.computed?.(rowKey, key, spec) ?? []} pills={spec.kind === "lookup"} />
+      column.computed = true
       break
     case "spells":
       column.control = (rowKey) => <SpellsCell value={valueOf(rowKey, key)} source={spec.spells?.source ?? "all"} category={spec.spells?.category} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
@@ -704,20 +988,28 @@ export function IndexField({ label, spec, value, onChange, long = false, autoFoc
       return spec.source ? <div className={fieldLabel}>{title}<LinkedChoicePicker compact={false} label={label} source={spec.source} value={value} disabled={disabled} onChange={onChange} /></div> : null
     case "checkbox":
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
-    case "image":
-      return <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} aspect="aspect-video" disabled={disabled} /></div>
+    case "file":
+      return spec.file?.accept === "image" && !spec.file.multiple
+        ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} aspect="aspect-video" disabled={disabled} /></div>
+        : <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
+    case "color":
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
     case "gauge":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} disabled={disabled} onChange={onChange} /></span></div>
     case "number":
-      return <label className={fieldLabel}>{title}<Input type="number" min={spec.min} max={spec.max} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} /></label>
+      return spec.number
+        ? <div className={fieldLabel}>{title}<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} /></div>
+        : <label className={fieldLabel}>{title}<Input type="number" min={spec.min} max={spec.max} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} /></label>
     case "id":
       return <label className={fieldLabel}>{title}<Input value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder="Généré si vide" className="font-mono text-xs" /></label>
     case "auto-links":
     case "ranked-links":
     case "tab":
     case "archived":
+    case "lookup":
+    case "rollup":
       return null
     default: {
       const rich = isRichSpec(spec) || kinds.includes("rich")

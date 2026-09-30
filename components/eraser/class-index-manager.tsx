@@ -4,6 +4,8 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
 import { indexGridColumn, RankedLinksCell } from "@/components/eraser/index-cells"
+import { ReadOnlyIndexEditorButton } from "@/components/eraser/index-editor"
+import { spellEditorModel } from "@/lib/system-index-models"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
@@ -112,7 +114,7 @@ const spellSpecs = {
   distance: { kind: "rich" },
   charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } },
   classes: { kind: "ranked-links" },
-  id: { kind: "id" },
+  id: { kind: "id", hidden: true },
 } satisfies Record<string, IndexColumnSpec>
 
 /** Le type d'un sort, dans la couleur de sa catégorie. */
@@ -637,7 +639,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
 
   const page = <section className="flex flex-col gap-3" {...(forClasses ? { [IN_PLACE_ATTRIBUTE]: CLASS_CREATION_PATH } : {})}>
     <datalist id="class-spell-types">{classSpellTypeSuggestions.filter((type) => forClasses || classSpellCategory(type) !== "bonus").map((type) => <option key={type} value={type} />)}</datalist>
-    <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
+    <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><ReadOnlyIndexEditorButton model={() => spellEditorModel(kind)} disabled={pending} /><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
     {error && <p className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     {notice && <p className="flex shrink-0 items-center gap-2 rounded-xl border border-emerald-600/25 bg-emerald-600/5 px-4 py-2.5 text-sm text-emerald-800 dark:text-emerald-300"><Check className="size-4" />{notice}<button type="button" onClick={() => setNotice("")} className="ml-auto text-muted-foreground hover:text-foreground" aria-label="Fermer"><X className="size-4" /></button></p>}
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open) setEditing(null) }}>

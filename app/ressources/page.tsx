@@ -3,6 +3,7 @@ import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { IndexDirectory } from "@/components/eraser/index-directory"
+import { NewIndexButton } from "@/components/eraser/new-index-dialog"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -14,6 +15,7 @@ export default async function IndexHomePage() {
   return (
     <AuthenticatedShell pageLabel="Index" roles={["admin", "mj"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
+        <div className="flex flex-col-reverse gap-4 sm:flex-row sm:items-start sm:justify-between">
         <section className="max-w-3xl">
           <div className="mb-5 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">
             <span className="h-px w-7 bg-primary/50" />
@@ -31,6 +33,8 @@ export default async function IndexHomePage() {
             </div>
           </div>
         </section>
+        <div className="flex justify-end"><NewIndexButton /></div>
+        </div>
         <IndexDirectory />
       </div>
     </AuthenticatedShell>

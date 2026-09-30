@@ -14,6 +14,7 @@ import {
   updateObjectIndexCell,
   updateObjectIndexRow,
 } from "@/lib/google-sheets"
+import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorized() {
@@ -24,7 +25,8 @@ export async function GET(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const refresh = new URL(request.url).searchParams.get("refresh") === "1"
-    return NextResponse.json({ tables: refresh ? await refreshObjectIndexTables() : await listObjectIndexTables() })
+    const tables = refresh ? await refreshObjectIndexTables() : await listObjectIndexTables()
+    return NextResponse.json({ tables, schemas: await objectSchemas(tables) })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     return NextResponse.json({ error: code === "OBJECT_INDEX_FOLDER_NOT_FOUND"

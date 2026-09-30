@@ -5,6 +5,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ObjectIndexManager } from "@/components/eraser/object-index-manager"
 import { listObjectIndexTables } from "@/lib/google-sheets"
+import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -12,14 +13,16 @@ export const dynamic = "force-dynamic"
 async function ObjectIndexesData() {
   let initialTables: Awaited<ReturnType<typeof listObjectIndexTables>> = []
   let initialError = ""
+  let initialSchemas: Awaited<ReturnType<typeof objectSchemas>> = {}
   try {
     initialTables = await listObjectIndexTables()
+    initialSchemas = await objectSchemas(initialTables).catch(() => ({}))
   } catch (error) {
     initialError = error instanceof Error && error.message === "OBJECT_INDEX_FOLDER_NOT_FOUND"
       ? "Le dossier « Objets » est introuvable dans le Drive connecté."
       : "Les tableaux du dossier « Objets » n’ont pas pu être chargés."
   }
-  return <ObjectIndexManager initialTables={initialTables} initialError={initialError} />
+  return <ObjectIndexManager initialTables={initialTables} initialSchemas={initialSchemas} initialError={initialError} />
 }
 
 export default async function ObjectIndexesPage() {

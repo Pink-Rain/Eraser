@@ -13,11 +13,13 @@ import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { ContextMenu, ContextMenuContent, ContextMenuItem, ContextMenuLabel, ContextMenuTrigger } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { patchSession, SessionPicker } from "@/components/eraser/session-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
+import { conversionsOf, findUnit, formatIndexNumber, parseIndexNumber, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, GeneratedShopItem, ReusablePageOption, SavedShopRecord, ShopGeneratorItem, ShopKey, ShopRarity, ShopSize } from "@/lib/shop-schema"
 
 export type { ShopGeneratorItem } from "@/lib/shop-schema"
@@ -123,19 +125,47 @@ function generateShops(cityKey: CityKey, items: ShopGeneratorItem[]) {
   return shopDefinitions.flatMap<GeneratedShop>((definition) => { if (Math.random() * 100 >= city.chances[definition.key]) return []; const size = weightedChoice(city.sizes); return [{ id: crypto.randomUUID(), key: definition.key, name: cityKey === "capital" && definition.key === "market" ? "Grand marché" : definition.name, size, cityKey, cityName: city.name, items: drawItems(items, definition.key, itemCounts[size]) }] })
 }
 
-function PriceTags({ price }: { price: string }) {
-  const matches = [...price.matchAll(/(\d+(?:[.,]\d+)?)\s*(PON|PO|PC)\b/gi)]
-  const entries = matches.length ? matches.map((match) => ({ value: `${match[1]} ${match[2].toUpperCase()}`, currency: match[2].toUpperCase() })) : [{ value: price, currency: /or noir|pon/i.test(price) ? "PON" : /cuivre|pc/i.test(price) ? "PC" : "PO" }]
-  return <span className="flex shrink-0 flex-wrap justify-end gap-1">{entries.map((entry, index) => { const style = entry.currency === "PON" ? "border-zinc-700 bg-zinc-900 text-amber-200" : entry.currency === "PC" ? "border-orange-300 bg-orange-100 text-orange-900" : "border-amber-300 bg-amber-100 text-amber-900"; const title = entry.currency === "PON" ? "Pièce d’or noir" : entry.currency === "PC" ? "Pièce de cuivre" : "Pièce d’or"; return <span key={`${entry.value}:${index}`} title={title} className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${style}`}>{entry.value}</span> })}</span>
+/** Les prix des boutiques : PO, PC ou PN (1 PO = 100 PC, 1 PN = 1,5 PO). PA et PB sont lues comme des PC. */
+const moneyFormat: NumberFormat = { unit: "money", defaultUnit: "PO" }
+
+function priceTone(currency: string) {
+  return unitTone("money", currency) ?? "border-amber-300 bg-amber-100 text-amber-900"
 }
 
+/**
+ * Le prix tel que les joueurs le voient : une seule monnaie, celle écrite dans la case.
+ * `conversions` (le MJ seulement) : le survol montre le prix dans les trois monnaies.
+ */
+function PriceTags({ price, conversions = false }: { price: string; conversions?: boolean }) {
+  const amounts = [...price.matchAll(/(\d+(?:[.,]\d+)?)\s*(PON|PO|PC|PN|PA|PB)\b/gi)]
+  const parsed = parseIndexNumber(price, moneyFormat)
+  const hover = parsed && !parsed.unknown && conversions ? conversionsOf(parsed, moneyFormat).map((entry) => `${entry.text} (${entry.title.toLocaleLowerCase("fr")})`).join(" · ") : ""
+  // Plusieurs montants dans la même case (« 5 PO 20 PC ») : chacun garde son étiquette.
+  if (amounts.length > 1 || !parsed || parsed.unknown) {
+    const entries = amounts.length ? amounts.map((match) => { const currency = findUnit("money", match[2])?.code ?? "PO"; return { value: `${match[1]} ${currency}`, currency } }) : [{ value: price, currency: "PO" }]
+    return <span className="flex shrink-0 flex-wrap justify-end gap-1" title={hover || undefined}>{entries.map((entry, index) => <span key={`${entry.value}:${index}`} title={hover ? undefined : findUnit("money", entry.currency)?.title} className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${priceTone(entry.currency)}`}>{entry.value}</span>)}</span>
+  }
+  const currency = parsed.unit ?? "PO"
+  return <span className="flex shrink-0 flex-wrap justify-end gap-1">
+    <span title={hover || findUnit("money", currency)?.title} className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${priceTone(currency)}`}>{formatIndexNumber(parsed, moneyFormat)}</span>
+  </span>
+}
+
+/**
+ * Le prix d'un objet pour le MJ : un clic ouvre les trois monnaies (choisir celle que
+ * voient les joueurs convertit le prix) ; « Modifier » ou un double-clic permet d'écrire
+ * directement « 10 PC », qui s'affiche alors en PC.
+ */
 function EditablePrice({ item, pending, onCommit }: { item: GeneratedShopItem; pending: boolean; onCommit?: (price: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(item.price)
 
   function commit() {
     setEditing(false)
-    if (draft !== item.price) onCommit?.(draft)
+    const parsed = parseIndexNumber(draft, moneyFormat)
+    // PA et PB n'existent pas : la saisie est réécrite en PC.
+    const next = parsed?.corrected && !parsed.unknown ? formatIndexNumber(parsed, moneyFormat) : draft
+    if (next !== item.price) onCommit?.(next)
   }
 
   if (!onCommit) return item.price ? <PriceTags price={item.price} /> : <span />
@@ -146,6 +176,7 @@ function EditablePrice({ item, pending, onCommit }: { item: GeneratedShopItem; p
       value={draft}
       maxLength={500}
       aria-label={`Prix de ${item.name}`}
+      placeholder="10 PO, 250 PC, 2 PN…"
       className="h-8 min-w-24 text-right text-xs"
       onChange={(event) => setDraft(event.target.value)}
       onBlur={commit}
@@ -155,14 +186,30 @@ function EditablePrice({ item, pending, onCommit }: { item: GeneratedShopItem; p
       }}
     />
   }
-  return <button
-    type="button"
-    className="rounded-md text-right outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
-    title="Double-cliquer pour modifier le prix"
-    aria-label={`Modifier le prix de ${item.name}`}
-    onDoubleClick={() => { setDraft(item.price); setEditing(true) }}
-    onKeyDown={(event) => { if (event.key === "Enter") setEditing(true) }}
-  >{item.price ? <PriceTags price={item.price} /> : <span className="text-xs text-muted-foreground">Prix vide</span>}</button>
+  const parsed = item.price ? parseIndexNumber(item.price, moneyFormat) : null
+  const startEditing = () => { setDraft(item.price); setEditing(true) }
+  return <DropdownMenu>
+    <DropdownMenuTrigger asChild disabled={pending}>
+      <button
+        type="button"
+        className="rounded-md text-right outline-none ring-offset-background focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        aria-label={`Prix de ${item.name} : changer la monnaie ou modifier`}
+        onDoubleClick={startEditing}
+      >{item.price ? <PriceTags price={item.price} conversions /> : <span className="text-xs text-muted-foreground">Prix vide</span>}</button>
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="end" className="w-56">
+      {parsed && !parsed.unknown && <>
+        <DropdownMenuLabel className="text-[11px] text-muted-foreground">Monnaie montrée aux joueurs</DropdownMenuLabel>
+        {conversionsOf(parsed, moneyFormat).map((entry) => <DropdownMenuItem key={entry.unit} onSelect={() => { if (entry.text !== item.price) onCommit(entry.text) }}>
+          <span className={`rounded-md border px-1.5 py-0.5 text-[10px] font-bold tabular-nums ${priceTone(entry.unit)}`}>{entry.text}</span>
+          <span className="text-xs text-muted-foreground">{entry.title}</span>
+          {entry.unit === (parsed.unit ?? "PO") && <Check className="ml-auto size-3.5" />}
+        </DropdownMenuItem>)}
+        <DropdownMenuSeparator />
+      </>}
+      <DropdownMenuItem onSelect={startEditing}><Pencil />Modifier le prix…</DropdownMenuItem>
+    </DropdownMenuContent>
+  </DropdownMenu>
 }
 
 async function persistShops(action: "replace" | "replace-latest" | "save" | "add-to-campaign" | "remove-from-campaign" | "link-npc" | "delete", pageLinked: string, shops: GeneratedShop[], npcId = "") {

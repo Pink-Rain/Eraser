@@ -4,6 +4,8 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
 import { ensureWorldIndexName, indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
+import { ReadOnlyIndexEditorButton } from "@/components/eraser/index-editor"
+import { npcEditorModel } from "@/lib/system-index-models"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { blankNpc, ImportNpcsDialog, importNpcs, NpcForm, npcPeopleSource, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
 import { Button } from "@/components/ui/button"
@@ -42,7 +44,7 @@ const fields: Array<{ key: string; label: string; width: number; spec: IndexColu
   { key: "occupation", label: "Fonction / classe / métier", width: 240, spec: { kind: "rich" } },
   { key: "campaigns", label: "Campagnes", width: 260, spec: { kind: "auto-links" } },
   { key: "important", label: "Important", width: 110, spec: { kind: "checkbox" } },
-  { key: "id", label: "ID", width: 150, spec: { kind: "id" } },
+  { key: "id", label: "ID", width: 150, spec: { kind: "id", hidden: true } },
 ]
 
 type TextField = "name" | "title" | "people" | "occupation"
@@ -258,6 +260,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
       <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher un PNJ…" className="pl-9" /></div>
       <div className="flex flex-wrap gap-2 lg:ml-auto">
         <Button type="button" variant="outline" onClick={() => setImporting(true)} disabled={pending}><Download />Récupérer</Button>
+        <ReadOnlyIndexEditorButton model={npcEditorModel} disabled={pending} />
         <Button type="button" onClick={() => setEditing(blankNpc(tab))} disabled={pending}><Plus />Créer un PNJ</Button>
       </div>
     </div>

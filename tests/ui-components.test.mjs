@@ -542,13 +542,16 @@ test("types every index column from one registry", async () => {
   assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
   assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
   assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Image · Formulaire");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Formulaire");
   assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste déroulante · Formulaire");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Environnement").kind, "archived");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
-  // Objets : icône et image sont des images, « Actif » vide reste actif.
+  // Objets : icône et image sont des fichiers image, « Actif » vide reste actif, le prix est une somme d'argent.
   const headers = ["ID", "Nom", "Icône", "Image", "Actif", "Prix"];
-  assert.deepEqual(headers.map((header) => objectColumnSpec(header, headers).kind), ["id", "name", "image", "image", "checkbox", "rich"]);
+  assert.deepEqual(headers.map((header) => objectColumnSpec(header, headers).kind), ["id", "name", "file", "file", "checkbox", "number"]);
+  assert.equal(objectColumnSpec("ID", headers).hidden, true);
+  assert.deepEqual(objectColumnSpec("Icône", headers).file, { accept: "image" });
+  assert.equal(objectColumnSpec("Prix", headers).number.unit, "money");
   assert.equal(isCheckedValue("", true), true);
   assert.equal(isCheckedValue("Non", true), false);
   assert.equal(checkboxValue(false, "TRUE"), "FALSE");
@@ -562,7 +565,7 @@ test("builds grid columns from their type", async () => {
   const columns = [
     indexGridColumn("nom", "Nom", { kind: "name", also: ["fixed"] }, 200, context),
     indexGridColumn("charges", "Charges", { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } }, 120, context),
-    indexGridColumn("portrait", "Icône", { kind: "image" }, 120, context),
+    indexGridColumn("portrait", "Icône", { kind: "file", file: { accept: "image" } }, 120, context),
     indexGridColumn("id", "ID", { kind: "id" }, 120, context),
   ];
   assert.equal(columns[0].commitDelay, Infinity);
@@ -582,4 +585,95 @@ test("builds grid columns from their type", async () => {
     layoutKey: "test:types", columns: [{ key: "nom", label: "Nom", width: 200 }], rows: [{ key: "2", rowNumber: 2 }], valueOf: () => "Aldor", onCommit: () => {}, empty: "Vide", readOnly: true,
   }));
   assert.doesNotMatch(readOnly, /contenteditable="true"/i);
+});
+
+test("reads, converts and sorts formatted numbers", async () => {
+  const { parseIndexNumber, formatIndexNumber, conversionsOf, numberSortKey, numberCorrection } = await vite.ssrLoadModule("/lib/index-numbers.ts");
+  const money = { unit: "money", defaultUnit: "PO" };
+  // 1 PO = 100 PC, 1 PN = 1,5 PO.
+  assert.equal(parseIndexNumber("1 PO", money).base, 100);
+  assert.equal(parseIndexNumber("1 PN", money).base, 150);
+  assert.equal(parseIndexNumber("12", money).unit, "PO");
+  assert.equal(parseIndexNumber("2 pièces d'or noir", money).unit, "PN");
+  assert.equal(parseIndexNumber("3 PON", money).unit, "PN");
+  // Plusieurs montants dans la même case s'additionnent.
+  assert.equal(parseIndexNumber("5 PO 20 PC", money).base, 520);
+  const texts = Object.fromEntries(conversionsOf(parseIndexNumber("3 PO", money), money).map((entry) => [entry.unit, entry.text]));
+  assert.equal(texts.PC, "300 PC");
+  assert.equal(texts.PN, "2 PN");
+  // PA et PB n'existent pas : ce sont des PC, et « Corriger » les réécrit.
+  const silver = parseIndexNumber("40 PA", money);
+  assert.equal(silver.unit, "PC");
+  assert.equal(silver.corrected, true);
+  assert.equal(numberCorrection("40 PA", money), "40 PC");
+  assert.equal(numberCorrection("40 PC", money), null);
+  // Le tri suit la valeur, pas le texte.
+  assert.ok(numberSortKey("50 PC", money) < numberSortKey("2 PO", money));
+  assert.equal(numberSortKey("", money), Number.POSITIVE_INFINITY);
+  // Distances et plages.
+  const distance = { unit: "distance", defaultUnit: "m" };
+  assert.equal(parseIndexNumber("1,5 km", distance).base, 150000);
+  assert.equal(formatIndexNumber(parseIndexNumber("1500 m", distance), distance, "km"), "1,5 km");
+  const range = parseIndexNumber("2-5 m", { ...distance, range: true });
+  assert.equal(range.base, 200);
+  assert.equal(range.baseMax, 500);
+});
+
+test("computes lookups and rollups from related rows", async () => {
+  const { computeRollup } = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const money = { unit: "money", defaultUnit: "PO" };
+  assert.equal(computeRollup("count", 3, ["a", "", "b"]), "3");
+  assert.equal(computeRollup("filled", 3, ["a", "", "b"]), "2");
+  assert.equal(computeRollup("unique", 3, ["Nord", "Sud", "Nord"]), "Nord, Sud");
+  assert.equal(computeRollup("sum", 2, ["1 PO", "50 PC"], money), "1,5 PO");
+  assert.equal(computeRollup("max", 2, ["1 PO", "150 PC"], money), "1,5 PO");
+});
+
+test("lists the schema changes of the index editor in order", async () => {
+  const { operationsOf } = await vite.ssrLoadModule("/components/eraser/index-editor.tsx");
+  const { headerProblem, tabProblem, objectColumnPolicy, findEntry, isTrashedEntry } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+  const policy = { rename: true, type: true, remove: true, reasons: [], allowed: "" };
+  const tabs = [
+    { id: "t1", original: "Villes", name: "Villes", removed: false, remove: true, addColumns: true, columns: [
+      { id: "c1", original: "Type", header: "Genre", spec: { kind: "rich" }, originalSpec: { kind: "rich" }, policy, removed: false },
+      { id: "c2", original: "Taille", header: "Taille", spec: { kind: "number", number: { unit: "distance" } }, originalSpec: { kind: "rich" }, policy, removed: false },
+      { id: "c3", original: "Notes", header: "Notes", spec: { kind: "rich" }, originalSpec: { kind: "rich" }, policy, removed: true },
+      { id: "c4", header: "Blason", spec: { kind: "file", file: { accept: "image" } }, policy, removed: false },
+    ] },
+    { id: "t2", original: "Ruines", name: "Ruines", removed: true, remove: true, addColumns: true, columns: [] },
+    { id: "t3", name: "Ports", removed: false, remove: true, addColumns: true, columns: [{ id: "c5", header: "Couleur", spec: { kind: "color" }, policy, removed: false }] },
+  ];
+  assert.deepEqual(operationsOf(tabs).map((operation) => operation.op), ["rename", "spec", "remove-column", "add-column", "remove-tab", "add-tab"]);
+  assert.equal(operationsOf(tabs)[1].header, "Taille");
+  assert.match(headerProblem("genre", ["Nom", "Genre"]), /déjà/);
+  assert.equal(headerProblem("Genre", ["Nom", "Genre"], "Genre"), "");
+  assert.match(tabProblem("Eraser · colonnes", []), /réservé/);
+  assert.match(tabProblem("Villes/Ports", []), /ne peut pas/);
+  // Les colonnes lues par l'inventaire et les boutiques sont verrouillées, avec la raison.
+  const price = objectColumnPolicy("Prix");
+  assert.equal(price.rename, false);
+  assert.equal(price.type, true);
+  assert.match(price.reasons[0], /boutiques/);
+  assert.equal(objectColumnPolicy("Notes perso").remove, true);
+  const entries = [{ tab: "Villes", column: "Notes", origin: "", spec: null, state: "corbeille", deletedAt: "2026-09-30" }];
+  assert.equal(isTrashedEntry(findEntry(entries, "villes", "notes")), true);
+});
+
+test("hides masked columns until the toolbar shows them", async () => {
+  const { SheetGrid } = await vite.ssrLoadModule("/components/eraser/sheet-grid.tsx");
+  const html = renderToStaticMarkup(React.createElement(SheetGrid, {
+    layoutKey: "test:hidden",
+    columns: [{ key: "nom", label: "Nom", width: 200 }, { key: "id", label: "Identifiant", width: 120, hidden: true }],
+    rows: [{ key: "2", rowNumber: 2 }], valueOf: () => "Aldor", onCommit: () => {}, empty: "Vide",
+  }));
+  assert.doesNotMatch(html, />Identifiant</);
+  assert.match(html, /Colonnes masquées \(1\)/);
+});
+
+test("renders the read-only editor of a system index with its locks", async () => {
+  const { spellEditorModel, npcEditorModel } = await vite.ssrLoadModule("/lib/system-index-models.ts");
+  const spells = spellEditorModel("classes");
+  assert.equal(spells.readOnly, true);
+  assert.ok(spells.tabs[0].columns.every((column) => column.policy.reasons.length > 0));
+  assert.ok(npcEditorModel().tabs[0].columns.some((column) => column.header === "ID" && column.spec.hidden));
 });

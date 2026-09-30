@@ -1,17 +1,20 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { ImageIcon, LoaderCircle, Plus, RefreshCw, Search } from "lucide-react"
+import { Coins, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { indexGridColumn, IndexEntryForm } from "@/components/eraser/index-cells"
+import { IndexEditor } from "@/components/eraser/index-editor"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
-import { isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { isGridSpec, isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { numberCorrection, numberSortKey } from "@/lib/index-numbers"
+import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 
 function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -37,14 +40,25 @@ function isLongField(header: string) {
 
 /** Colonne virtuelle : l'identifiant que l'inventaire donne à un objet d'une feuille sans colonne ID. */
 const COMPUTED_ID = "__id"
-const idSpec: IndexColumnSpec = { kind: "id" }
+const idSpec: IndexColumnSpec = { kind: "id", hidden: true }
 
 function isIconHeader(header: string) {
   return ["icone", "icon"].includes(normalize(header).trim())
 }
 
-export function ObjectIndexManager({ initialTables, initialError }: { initialTables: ObjectIndexTable[]; initialError: string }) {
+type Schemas = Record<string, SchemaEntry[]>
+
+function compareSortKeys(left: number | string, right: number | string) {
+  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
+  return String(left).localeCompare(String(right), "fr", { numeric: true })
+}
+
+export function ObjectIndexManager({ initialTables, initialSchemas = {}, initialError }: { initialTables: ObjectIndexTable[]; initialSchemas?: Schemas; initialError: string }) {
   const [tables, setTables] = useState(initialTables)
+  // Le schéma de chaque classeur (onglet « Eraser · colonnes ») : types choisis dans « Modifier », colonnes à la corbeille.
+  const [schemas, setSchemas] = useState<Schemas>(initialSchemas)
+  const [editor, setEditor] = useState<IndexEditorModel | null>(null)
+  const [editorError, setEditorError] = useState("")
   const [selectedKey, setSelectedKey] = usePersistentState(
     "eraser:object-index:selected-table", initialTables[0] ? tableKey(initialTables[0]) : "",
     (v): v is string => typeof v === "string",
@@ -67,7 +81,18 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
   const localEdits = useRef<Record<string, string>>({})
 
-  const specs = useMemo(() => (selected?.headers ?? []).map((header, _index, headers) => objectColumnSpec(header, headers)), [selected])
+  // Le type de chaque colonne : celui du schéma du classeur, sinon reconnu par son nom.
+  const specs = useMemo(() => (selected?.headers ?? []).map((header, _index, headers) => {
+    const base = objectColumnSpec(header, headers)
+    const entry = selected ? findEntry(schemas[selected.fileId] ?? [], selected.tabName, header) : undefined
+    return entry?.spec ? { ...base, ...entry.spec } : base
+  }), [schemas, selected])
+  // Les colonnes vides d'en-tête ou à la corbeille ne s'affichent pas (elles restent dans Sheets).
+  const shownColumns = useMemo(() => (selected?.headers ?? []).flatMap((header, index) => {
+    if (!header.trim() || !isGridSpec(specs[index])) return []
+    if (selected && isTrashedEntry(findEntry(schemas[selected.fileId] ?? [], selected.tabName, header))) return []
+    return [index]
+  }), [schemas, selected, specs])
   const hasIdColumn = specs.some((spec) => spec.kind === "id")
 
   /** Case « Icône » : l'icône telle qu'Eraser l'affiche (image du Drive, icône d'Eraser, émoji). */
@@ -105,11 +130,14 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     if (!selected) return []
     const normalizedQuery = query.trim().toLocaleLowerCase("fr")
     const filtered = selected.rows.filter((row) => !normalizedQuery || row.values.some((value) => value.toLocaleLowerCase("fr").includes(normalizedQuery)))
+    // Un prix se trie par sa valeur : 2 PO passe après 50 PC.
+    const spec = sort ? specs[Number(sort.column)] : undefined
+    const keyOf = (value: string): number | string => spec?.kind === "number" ? numberSortKey(value, spec.number ?? {}) : value
     const sorted = sort
-      ? [...filtered].sort((left, right) => (left.values[Number(sort.column)] || "").localeCompare(right.values[Number(sort.column)] || "", "fr", { numeric: true }) * (sort.direction === "asc" ? 1 : -1))
+      ? [...filtered].sort((left, right) => compareSortKeys(keyOf(left.values[Number(sort.column)] || ""), keyOf(right.values[Number(sort.column)] || "")) * (sort.direction === "asc" ? 1 : -1))
       : filtered
     return sorted.map((row) => ({ key: String(row.rowNumber), rowNumber: row.rowNumber }))
-  }, [query, selected, sort])
+  }, [query, selected, sort, specs])
 
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     // La clé vient du tableau réellement affiché, pas de la préférence enregistrée :
@@ -146,24 +174,25 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
     const context = { valueOf, commit: (rowKey: string, columnKey: string, value: string) => void commitCell(rowKey, columnKey, value), idComputed: () => !hasIdColumn }
-    const list = (selected?.headers ?? []).map((header, index) => isIconHeader(header)
+    const list = shownColumns.map((index) => [selected!.headers[index], index] as const).map(([header, index]) => isIconHeader(header)
       // L'icône garde son affichage et son import dans le dossier « icone objet ».
       ? indexGridColumn(String(index), header, specs[index], 96, context, { renderValue: iconPreview, upload: uploadIcon })
       : indexGridColumn(String(index), header, specs[index], columnWidthFor(header), context))
     // Sans colonne ID dans la feuille, l'identifiant calculé par l'inventaire est montré à part.
     if (selected && !hasIdColumn) list.push(indexGridColumn(COMPUTED_ID, "ID", idSpec, 200, context, { sortable: false }))
     return list
-  }, [commitCell, hasIdColumn, iconPreview, selected, specs, uploadIcon, valueOf])
+  }, [commitCell, hasIdColumn, iconPreview, selected, shownColumns, specs, uploadIcon, valueOf])
   /* eslint-enable react-hooks/refs */
 
   async function refresh() {
     setPending("refresh"); setError("")
     const response = await fetch("/api/resources/object-indexes?refresh=1", { cache: "no-store" })
-    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
+    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; schemas?: Schemas; error?: string }
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Actualisation impossible.")
     localEdits.current = {}
     setTables(payload.tables)
+    if (payload.schemas) setSchemas(payload.schemas)
     setVersion((current) => current + 1)
   }
 
@@ -202,6 +231,59 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     setCreating(false)
   }
 
+  /** Les prix en pièces d'argent ou de bronze (PA, PB), qui n'existent pas : ce sont des PC. */
+  const priceCorrections = useMemo(() => {
+    if (!selected) return []
+    return shownColumns.flatMap((column) => {
+      const spec = specs[column]
+      if (spec.kind !== "number" || spec.number?.unit !== "money") return []
+      return selected.rows.flatMap((row) => {
+        const next = numberCorrection(row.values[column] ?? "", spec.number ?? {})
+        return next ? [{ rowKey: String(row.rowNumber), column: String(column), value: next }] : []
+      })
+    })
+  }, [selected, shownColumns, specs])
+
+  async function correctPrices() {
+    setPending("prices"); setError("")
+    for (const correction of priceCorrections) await commitCell(correction.rowKey, correction.column, correction.value)
+    setPending("")
+    await refresh()
+  }
+
+  async function openEditor() {
+    if (!selected) return
+    setPending("editor"); setError("")
+    try {
+      const response = await fetch(`/api/resources/index-schema?family=objects&key=${encodeURIComponent(selected.fileId)}`, { cache: "no-store" })
+      const payload = (await response.json().catch(() => ({}))) as { model?: IndexEditorModel; error?: string }
+      if (!response.ok || !payload.model) throw new Error(payload.error || "Les colonnes de ce classeur n’ont pas pu être lues.")
+      setEditorError("")
+      setEditor(payload.model)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Les colonnes de ce classeur n’ont pas pu être lues.")
+    }
+    setPending("")
+  }
+
+  async function applyEditor(operations: SchemaOperation[]) {
+    if (!editor) return
+    setPending("schema"); setEditorError("")
+    try {
+      const response = await fetch("/api/resources/index-schema", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ family: "objects", key: editor.key, operations }) })
+      const payload = (await response.json().catch(() => ({}))) as { tables?: ObjectIndexTable[]; schemas?: Schemas; error?: string }
+      if (!response.ok || !payload.tables) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
+      localEdits.current = {}
+      setTables(payload.tables)
+      if (payload.schemas) setSchemas((current) => ({ ...current, ...payload.schemas }))
+      setVersion((current) => current + 1)
+      setEditor(null)
+    } catch (reason) {
+      setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")
+    }
+    setPending("")
+  }
+
   const busy = Boolean(pending)
   // Trier ou filtrer détache l’ordre affiché de celui de la feuille : « insérer
   // au-dessus » n’aurait plus de sens, l’entrée disparaît le temps du tri.
@@ -220,17 +302,28 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
         {selected && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+          {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
+          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplit les cases « Icône » vides avec les icônes d’Eraser du dossier « icone objet » ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
         </div>
       </div>
+
+      {editor && <IndexEditor
+        model={editor}
+        open
+        pending={pending === "schema"}
+        error={editorError}
+        onClose={() => { if (pending !== "schema") setEditor(null) }}
+        onApply={(operations) => void applyEditor(operations)}
+      />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
       {notice && <p className="rounded-xl border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">{notice}</p>}
 
       {creating && selected && <IndexEntryForm
         title="Nouvel objet"
-        fields={selected.headers.map((header, index) => ({ key: String(index), label: header, spec: specs[index], long: isLongField(header) }))}
+        fields={shownColumns.map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], long: isLongField(selected.headers[index]) }))}
         pending={pending === "add"}
         onCancel={() => setCreating(false)}
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}

@@ -4,6 +4,8 @@ import { useCallback, useMemo, useState } from "react"
 import { Search } from "lucide-react"
 
 import { indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
+import { ReadOnlyIndexEditorButton } from "@/components/eraser/index-editor"
+import { entityEditorModel } from "@/lib/system-index-models"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { TrashItemButton } from "@/components/eraser/trash-item-button"
@@ -72,7 +74,7 @@ export function EntityIndex({ kind, rows, accounts, isAdmin, nameLabel, linksLab
         control: (rowKey: string) => { const row = byId.get(rowKey); return row ? <OwnerSelector kind={kind} itemId={row.id} ownerUid={row.ownerUid} accounts={accounts} /> : null },
       })] : []),
       indexGridColumn("links", linksLabel, { kind: "auto-links" }, 320, context),
-      indexGridColumn("id", "ID", { kind: "id" }, 200, context),
+      indexGridColumn("id", "ID", { kind: "id", hidden: true }, 200, context),
       // Mise à la corbeille : rien n'est effacé, l'élément se restaure depuis Administration.
       { key: "trash", label: "Corbeille", width: 110, custom: true, sortable: false, typeLabel: "Action" },
     ]
@@ -86,7 +88,10 @@ export function EntityIndex({ kind, rows, accounts, isAdmin, nameLabel, linksLab
   }, [query, rows])
 
   return <section className="mt-8 flex flex-col gap-3">
-    <div className="relative max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" className="pl-9" /></div>
+    <div className="flex flex-wrap items-center gap-2">
+      <div className="relative min-w-0 max-w-sm flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher…" className="pl-9" /></div>
+      <div className="ml-auto"><ReadOnlyIndexEditorButton model={() => entityEditorModel(kind === "campaign" ? "campaigns" : "characters")} /></div>
+    </div>
     <SheetGrid
       layoutKey={`eraser:${kind}-index:grid`}
       columns={columns}

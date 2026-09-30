@@ -1,82 +1,83 @@
-# Eraser 0.1.1-alpha.83 — Un seul moteur pour tous les index
+# Eraser 0.1.1-alpha.84 — Modifier les index, Nouvel index, nouveaux types
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Tous les index partagent le même moteur
+## « Modifier » sur tous les index
 
-Créatures, lieux, religions, peuples, langues, états, runes, attributs, matériaux,
-objets, sorts des classes et des créatures, PNJ, campagnes et personnages passent
-maintenant par le même moteur de colonnes. Chaque
-colonne a un **type**. Survole son en-tête pour le lire (par exemple « Type : Liste
-déroulante · Formulaire »). Un même type se comporte partout de la même façon.
+Un bouton **Modifier** apparaît à côté de « Actualiser » sur chaque index. Il ouvre
+l'éditeur des colonnes et des onglets :
 
-Les types :
+- renommer une colonne, changer son type et ses réglages, la masquer ;
+- créer ou supprimer une colonne ;
+- créer ou supprimer un onglet.
 
-- **Texte enrichi** : c'est la norme. Gras, couleurs, listes et liens sont
-  enregistrés dans Sheets.
-- **Affichage fixe** : l'apparence est imposée par Eraser (nom en gras, compétences
-  en rouge…) et la mise en forme est retirée.
-- **Nom** : obligatoire, enregistré à la sortie de la cellule, renommé partout où
-  il est cité.
-- **Nom formulaire** : le nom ouvre la fiche (créatures, PNJ) ou la page
-  (campagnes, personnages).
-- **Identifiant** : présent dans tous les index, généré par Eraser, non modifiable.
-- **Colonne liée ↔** : du texte enrichi, recopié dans la colonne qui lui répond.
-- **Liste déroulante** : avec recherche. Une valeur hors liste reste en italique.
-- **Liste déroulante liée** : les noms viennent d'un autre index, et un nom absent
-  y est créé. C'est le cas du Peuple des PNJ.
-- **Case à cocher**.
-- **Liens automatiques** : Eraser trouve lui-même où l'élément existe et en fait
-  des liens (campagnes d'un PNJ, personnages d'une campagne, campagnes d'un
-  personnage).
-- **Liens classés** : des pastilles avec un rang (« Classes et rangs » des sorts).
-- **Onglet** : l'onglet d'un lieu dans la vue « Tout ».
-- **Image** : importer une image ou coller une adresse, dans le tableau comme dans
-  les fiches.
-- **Sélecteur de sorts** : « Sorts des classes », « Sorts des créatures » ou les deux.
-  Un sort déjà inscrit qui vient de l'autre index garde sa carte.
-- **Jauge** : un nombre affiché en icônes à cliquer, en barre ou en anneau.
-- **Nombre**.
-- **Formulaire** s'ajoute au type d'une colonne qui ne vit que dans la fiche.
-- **Archivée** : une ancienne colonne gardée dans Sheets, jamais affichée.
+Rien n'est écrit dans Google Sheets avant « Enregistrer ». Le bas de la fenêtre
+liste les changements qui vont être faits.
 
-## Ce qui change dans les index
+Une colonne ou un onglet supprimé part dans la **corbeille** (Administration →
+Corbeille), avec les autres éléments supprimés. On peut l'y restaurer. « Supprimer
+définitivement » l'efface alors de la feuille.
 
-- **Colonnes courtes en texte enrichi** : Type, Sous-type, Peuple, Langues… des
-  index du monde, Distance des sorts, Titre et Fonction des PNJ. Un texte sans mise
-  en forme reste du texte simple dans Sheets.
-- **Fautes des listes des créatures** : un bouton « Corriger N fautes » apparaît
-  quand des cellules sont mal orthographiées (« Aggressif » → « Agressif »,
-  « Forêt noir » → « Forêt noire »). Il ne réécrit que ces cellules. Les valeurs
-  hors liste ne sont pas touchées.
-- **Identifiants** : chaque index du monde reçoit une colonne « ID », ajoutée à
-  droite dans Sheets sans rien déplacer. Les lignes existantes reçoivent leur
-  identifiant au premier affichage (CRE-…, LIE-…, REL-…, DIV-…, PEU-…, LAN-…,
-  ETA-…, RUN-…, ATT-…, MAT-…).
-  Une ligne copiée reçoit le sien. Les objets sans colonne ID montrent
-  l'identifiant calculé, sans rien écrire.
-- **Charges des sorts** : des étincelles à cliquer.
-- **Type des sorts** : une liste avec recherche, dans la couleur de sa catégorie ;
-  un type libre reste possible.
-- **Icône et Image des objets** : des colonnes Image. L'icône garde son affichage
-  (icône d'Eraser, image du Drive, émoji) et son import dans le dossier « icone
-  objet ». On peut aussi y coller une adresse.
-- **Case « Actif » des objets** : une case à cocher. Une vraie case Google Sheets
-  reste une case.
-- **Portraits des créatures et des PNJ** : le même champ Image, avec le bouton
-  Token juste en dessous.
-- **Formulaire d'ajout** : il est construit à partir des types. Les objets ajoutés
-  gardent enfin leur mise en forme au lieu d'écrire leurs balises dans Sheets.
-- **Index des campagnes et des personnages** : même grille que les autres, en
-  lecture seule (tri, filtres, recherche, largeurs), avec liens automatiques, ID,
-  classe et rang des personnages, et la mise à la corbeille.
+Les réglages sont rangés dans un onglet discret, « Eraser · colonnes », de chaque
+classeur. Ils sont donc partagés par toutes les installations. Supprimer cet onglet
+ramène simplement les colonnes à leur type par défaut.
 
-## Vérifications
+### Les cadenas
 
-- dans un vrai navigateur : liste corrigée à l'affichage (« Aggressif » affiché
-  « Agressif »), choix enregistré, case à cocher, liste liée qui crée « Orques »
-  dans l'Index des peuples, jauges en icônes, en barre et en anneau, image par
-  adresse, import propre à la colonne Icône, sélecteur qui ne propose que les sorts
-  des créatures, formulaire d'ajout ;
-- lint sans erreur, 31 tests d'interface au vert (dont le registre des types et la
-  construction des colonnes), build et serveur desktop vérifiés en HTTP 200.
+Un cadenas marque ce qu'il vaut mieux ne pas toucher pour ne rien casser. Son
+survol dit ce qui lit la colonne et ce qu'on peut quand même changer. Par exemple,
+pour « Prix » dans les objets : « L'inventaire des personnages, les boutiques et la
+table lisent le prix dans la colonne « Prix » par son nom : la renommer ou la
+supprimer la rendrait introuvable. » On peut encore changer son type d'affichage.
+
+Les sorts, les PNJ, les campagnes et les personnages ont aussi un « Modifier ».
+Il est en lecture seule pour l'instant : leurs colonnes sont lues une par une par
+Eraser, et chaque cadenas explique pourquoi.
+
+## « Nouvel index »
+
+Le bouton **Nouvel index**, en haut à droite de la page Index, crée un index
+complet : un titre, une description, des onglets et leurs colonnes.
+
+- Le classeur « Index · titre » est créé dans le Drive d'Eraser. S'il existe déjà
+  une feuille de ce nom, elle est reliée et jamais recréée.
+- Chaque onglet reçoit d'office une colonne « Nom » et une colonne « ID ».
+- Les index créés apparaissent dans la section « Index créés ».
+
+## Nouveaux types de colonnes
+
+- **Nombre**, avec ou sans format :
+  - unité et décimales, texte avant/après, pourcentage ;
+  - **plage** (« 2–5 m ») ;
+  - familles convertibles :
+    - distance : cm, m, km ;
+    - poids ;
+    - **monnaie** : PO, PC, PN, avec 1 PO = 100 PC et 1 PN = 1,5 PO.
+- **Prix en PO / PC / PN**, choisis cellule par cellule :
+  - un clic sur l'unité pour convertir, ou écrire directement « 10 PC » ;
+  - le survol montre les trois monnaies ;
+  - les **PA** et **PB** n'existent pas et sont lues comme des PC. Un bouton
+    « Corriger N prix » les réécrit dans l'Index des objets ;
+  - les prix se trient par leur valeur : 50 PC passe avant 2 PO.
+- **Couleur** : une pastille et un sélecteur.
+- **Fichier** remplace Image, avec :
+  - le type accepté par colonne : images, sons, vidéos, PDF ou tous ;
+  - un seul fichier ou plusieurs. Une galerie est un Fichier (images, plusieurs).
+  - Les icônes des objets sont des Fichiers (image, un seul) et gardent leur import
+    dans « icone objet ».
+- **Recherche** : elle montre, en face, une colonne des lignes reliées. Par exemple,
+  la région des peuples d'un lieu.
+- **Agrégat** : il calcule sur les lignes reliées :
+  - nombre, remplies, vides ;
+  - somme, moyenne, minimum, maximum (une somme de prix reste en PO/PC/PN) ;
+  - valeurs uniques ;
+  - pourcentage coché.
+- **Masquée** : la colonne est cachée du tableau. Les identifiants le sont d'office.
+  Le bouton « Colonnes masquées (N) » de la barre du tableau les montre d'un clic.
+
+## Boutiques des campagnes
+
+Pour le MJ, un clic sur un prix ouvre les trois monnaies. Choisir l'une d'elles
+convertit le prix, et c'est celle que voient les joueurs. « Modifier le prix… »
+(ou un double-clic) permet d'écrire le prix directement. Le survol des trois
+conversions est réservé au MJ.

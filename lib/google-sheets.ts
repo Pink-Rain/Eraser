@@ -27,7 +27,7 @@ import {
   type ClassImageScriptAction,
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
-import { worldIndexDefinitions } from "@/lib/world-index-definitions"
+import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
@@ -865,8 +865,16 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
       const sheets = (metadata.sheets ?? []).flatMap((sheet) => {
         const sheetId = sheet.properties?.sheetId
         const tabName = sheet.properties?.title
-        return sheetId === undefined || !tabName ? [] : [{ sheetId, tabName }]
+        // L'onglet « Eraser · colonnes » décrit les colonnes : ce n'est pas un tableau d'objets.
+        return sheetId === undefined || !tabName || tabName.startsWith("Eraser ·") ? [] : [{ sheetId, tabName }]
       })
+      // Un tableau mis à la corbeille depuis « Modifier » n'est plus lu : ni l'index, ni
+      // l'inventaire, ni les boutiques ne le voient, mais ses lignes restent dans Sheets.
+      const hasSchema = (metadata.sheets ?? []).some((sheet) => sheet.properties?.title === "Eraser · colonnes")
+      const trashedTabs = new Set(hasSchema
+        ? (await readRange(file.id, sheetTabRange("Eraser · colonnes", "A2:F")).catch(() => [] as string[][])).filter((row) => row[0]?.trim() && !row[1]?.trim() && (row[5]?.trim() || /supprim/i.test(row[4] ?? ""))).map((row) => row[0].trim())
+        : [])
+      sheets.splice(0, sheets.length, ...sheets.filter((sheet) => !trashedTabs.has(sheet.tabName)))
       // Les cellules sont lues avec leur mise en forme (couleurs, gras, liens) afin que
       // l’Index des objets l’affiche et la conserve, comme l’Index des classes.
       const parameters = new URLSearchParams({
@@ -977,7 +985,7 @@ function lastFilledRow(rows: Array<Array<{ value: string } | undefined> | undefi
   return -1
 }
 
-function clearObjectIndexTableCache() {
+export function clearObjectIndexTableCache() {
   objectIndexTableCache = null
   clearInventoryWorkbookCache()
 }
@@ -2176,8 +2184,8 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
   // Index du monde (Ressources) : colonnes, onglets supplémentaires et liens entre
   // index sont décrits dans lib/world-index-definitions.ts. Seul le premier onglet
   // de chaque classeur est déclaré ici ; les suivants sont ajoutés par lib/world-indexes.ts.
-  ...Object.values(worldIndexDefinitions).map((index): StructuredSheetDefinition => ({
-    key: index.key,
+  ...(Object.keys(worldIndexDefinitions) as BuiltinWorldIndexKey[]).map((key) => worldIndexDefinitions[key]).map((index): StructuredSheetDefinition => ({
+    key: index.key as BuiltinWorldIndexKey,
     name: index.sheetName,
     tabName: index.tabs[0].name,
     frozenColumns: 1,

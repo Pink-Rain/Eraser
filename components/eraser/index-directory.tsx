@@ -1,7 +1,8 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import Link from "next/link"
-import { Activity, Church, CircleUserRound, Drama, Flame, Gem, Hexagon, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Tag, Users, type LucideIcon } from "lucide-react"
+import { LibraryBig, Activity, Church, CircleUserRound, Drama, Flame, Gem, Hexagon, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Tag, Users, type LucideIcon } from "lucide-react"
 
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexPages, type IndexPage, type IndexPageKey } from "@/lib/index-pages"
@@ -70,13 +71,49 @@ function IndexSection({ id, title, hint, pages, isFavorite, setFavorite }: { id:
   )
 }
 
+type CustomIndex = { key: string; title: string; description: string }
+
+/** Un index créé depuis « Nouvel index ». */
+function CustomIndexCard({ index }: { index: CustomIndex }) {
+  return (
+    <Link
+      href={`/ressources/index/${index.key}`}
+      prefetch={false}
+      className="group flex min-h-full flex-col items-center overflow-hidden rounded-[1.35rem] border bg-card/90 px-4 pb-5 pt-6 text-center shadow-[0_12px_35px_rgb(67_50_31/0.07)] transition hover:-translate-y-1 hover:border-primary/35 hover:shadow-[0_18px_45px_rgb(67_50_31/0.13)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+    >
+      <div className="flex size-16 items-center justify-center rounded-2xl border border-primary/20 bg-primary/8 text-primary transition duration-500 group-hover:scale-[1.06]">
+        <LibraryBig className="size-7" />
+      </div>
+      <h3 className="mt-4 font-display text-xl font-semibold leading-tight tracking-[-0.01em]">{index.title}</h3>
+      <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{index.description || "Index créé dans Eraser."}</p>
+    </Link>
+  )
+}
+
 export function IndexDirectory() {
   const { isFavorite, setFavorite } = useIndexFavorites()
+  const [custom, setCustom] = useState<CustomIndex[]>([])
+  useEffect(() => {
+    let cancelled = false
+    void fetch("/api/resources/custom-indexes", { cache: "no-store" })
+      .then((response) => response.json() as Promise<{ indexes?: CustomIndex[] }>)
+      .then((payload) => { if (!cancelled) setCustom(payload.indexes ?? []) })
+      .catch(() => undefined)
+    return () => { cancelled = true }
+  }, [])
   const favorites = indexPages.filter((page) => isFavorite(page.key))
   const secondary = indexPages.filter((page) => !isFavorite(page.key))
   return (
     <div className="mt-12 space-y-14">
       <IndexSection id="index-principal" title="Index" hint="Aucun index étoilé : clique sur l’étoile d’une carte pour la ranger ici." pages={favorites} isFavorite={isFavorite} setFavorite={setFavorite} />
+      {custom.length > 0 && <section aria-labelledby="index-crees">
+        <div className="mb-5 border-b pb-3 text-center">
+          <h2 id="index-crees" className="font-display text-3xl font-semibold sm:text-4xl">Index créés</h2>
+        </div>
+        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5">
+          {custom.map((index) => <CustomIndexCard key={index.key} index={index} />)}
+        </div>
+      </section>}
       <IndexSection id="index-secondaire" title="Index secondaire" hint="Retire l’étoile d’une carte pour la ranger ici." pages={secondary} isFavorite={isFavorite} setFavorite={setFavorite} />
     </div>
   )

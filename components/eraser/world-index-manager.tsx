@@ -1,10 +1,11 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ArrowRightLeft, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, SpellCheck } from "lucide-react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { ArrowRightLeft, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
 import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
-import { indexGridColumn, IndexEntryForm, type IndexFormField } from "@/components/eraser/index-cells"
+import { indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
+import { IndexEditor } from "@/components/eraser/index-editor"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -12,17 +13,21 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { choiceCorrection, columnTypeLabel, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, columnTypeLabel, computeRollup, isGridSpec, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { numberSortKey } from "@/lib/index-numbers"
+import type { IndexEditorModel, SchemaOperation } from "@/lib/index-schema-shared"
 import {
   foldName,
-  gridHeadersOf,
+  isBuiltinWorldIndexKey,
   isLongColumn,
   isNameColumn,
   linkEndCovers,
+  splitNames,
   worldColumnSpec,
   worldIndexDefinitions,
-  worldIndexLinks,
+  type WorldIndexDefinition,
   type WorldIndexKey,
+  type WorldIndexLink,
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world-indexes"
 
@@ -41,12 +46,23 @@ function columnWidthFor(header: string, fallback?: number) {
 const tabSpec: IndexColumnSpec = { kind: "tab" }
 
 /** Les cellules de liste mal orthographiées (« Aggressif »), que « Corriger » réécrit. */
-function countCorrections(indexKey: WorldIndexKey, tables: WorldIndexTable[]) {
+function countCorrections(tables: WorldIndexTable[], specOf: (tab: string, header: string) => IndexColumnSpec) {
   return tables.reduce((total, table) => total + table.headers.reduce((sum, header, column) => {
-    const spec = worldColumnSpec(indexKey, table.tabName, header)
+    const spec = specOf(table.tabName, header)
     if (spec.kind !== "choice" || !spec.options) return sum
     return sum + table.rows.filter((row) => choiceCorrection(row.values[column] ?? "", spec.options!)).length
   }, 0), 0)
+}
+
+function compareSortKeys(left: number | string, right: number | string) {
+  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
+  return String(left).localeCompare(String(right), "fr", { numeric: true, sensitivity: "base" })
+}
+
+/** La colonne « Nom » d'un tableau : c'est par elle que les relations retrouvent une ligne. */
+function nameColumnOf(headers: string[]) {
+  const exact = headers.findIndex((header) => foldName(header) === "nom")
+  return exact >= 0 ? exact : headers.findIndex((header) => isNameColumn(header))
 }
 
 function isValidSort(value: unknown): value is SheetGridSort {
@@ -70,16 +86,25 @@ function columnIndexOf(table: WorldIndexTable, header: string) {
   return table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
 }
 
+function titleOf(index: WorldIndexKey) {
+  return isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].title : "index lié"
+}
+
 /** Les phrases qui expliquent, sous le tableau, quelles colonnes se remplissent seules. */
-function linkHints(index: WorldIndexKey, tab: string) {
-  return worldIndexLinks.flatMap(([left, right]) => {
+function linkHints(links: WorldIndexLink[], index: WorldIndexKey, tab: string) {
+  return links.flatMap(([left, right]) => {
     for (const [end, other] of [[left, right], [right, left]] as const) {
       if (!linkEndCovers(end, index, tab)) continue
-      const where = linkEndCovers(other, index, tab) ? "" : other.index === index ? ` (onglet ${other.tab})` : ` (${worldIndexDefinitions[other.index].title})`
+      const where = linkEndCovers(other, index, tab) ? "" : other.index === index ? ` (onglet ${other.tab})` : ` (${titleOf(other.index)})`
       return [`« ${end.column} » ↔ « ${other.column} »${where}`]
     }
     return []
   })
+}
+
+/** La définition de repli d'un index qui n'a pas pu être chargé. */
+function fallbackDefinition(indexKey: WorldIndexKey): WorldIndexDefinition {
+  return isBuiltinWorldIndexKey(indexKey) ? worldIndexDefinitions[indexKey] : { key: indexKey, sheetName: indexKey, title: indexKey, path: `/ressources/index/${indexKey}`, tabs: [], custom: true }
 }
 
 type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean }
@@ -99,15 +124,17 @@ export function WorldIndexManager(props: WorldIndexManagerProps) {
  * côté serveur ; le tableau se recharge quand un lien a touché l'index affiché.
  */
 function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails = false }: WorldIndexManagerProps) {
-  const definition = worldIndexDefinitions[indexKey]
   const [data, setData] = useState(initialData)
+  const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
   const [tabName, setTabName] = usePersistentState(`eraser:world-index:${indexKey}:view`, ALL_TABS, (value): value is string => typeof value === "string")
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [saving, setSaving] = useState(0)
   const [creating, setCreating] = useState(false)
-  const [creatingTab, setCreatingTab] = useState(definition.tabs[0].name)
+  const [creatingTab, setCreatingTab] = useState(definition.tabs[0]?.name ?? "")
+  const [editor, setEditor] = useState<IndexEditorModel | null>(null)
+  const [editorError, setEditorError] = useState("")
   const [version, setVersion] = useState(0)
   const [query, setQuery] = useState("")
   const [details, setDetails] = useState<string | null>(null)
@@ -118,16 +145,18 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const selectedTable = tables.find((candidate) => candidate.tabName === tabName)
   // « Tout » n'a de sens que si les onglets ont les mêmes colonnes : les lieux, pas les religions.
   const canShowAll = useMemo(() => {
-    const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
-    return definition.tabs.length > 1 && definition.tabs.every((tab) => signature(tab.headers) === signature(definition.tabs[0].headers))
-  }, [definition])
+    const signature = (tab: string) => (data?.columns[tab] ?? []).map((column) => foldName(column.header)).sort().join("|")
+    return tables.length > 1 && tables.every((candidate) => signature(candidate.tabName) === signature(tables[0].tabName))
+  }, [data, tables])
   const showAll = canShowAll && tables.length > 1 && !selectedTable
   const viewTables = useMemo(() => showAll ? tables : selectedTable ? [selectedTable] : tables.slice(0, 1), [selectedTable, showAll, tables])
   // Le premier tableau affiché donne les colonnes : les onglets d'un même index ont les mêmes.
   const table: WorldIndexTable | null = viewTables[0] ?? null
-  const tabDefinition = definition.tabs.find((tab) => tab.name === table?.tabName) ?? definition.tabs[0]
-  // Le type de chaque colonne, par onglet et en-tête : c'est lui qui décide de la cellule.
-  const specOf = useCallback((tab: string, header: string) => worldColumnSpec(indexKey, tab, header), [indexKey])
+  const tabDefinition = useMemo(() => definition.tabs.find((tab) => tab.name === table?.tabName) ?? definition.tabs[0] ?? { name: "", itemLabel: "une ligne", headers: [], widths: [], idPrefix: "IDX" }, [definition, table])
+  // Le type de chaque colonne, par onglet et en-tête : celui du schéma envoyé par le
+  // serveur (colonnes renommées, types choisis dans « Modifier »), sinon le type par défaut.
+  const specOf = useCallback((tab: string, header: string) => data?.columns[tab]?.find((column) => foldName(column.header) === foldName(header))?.spec ?? worldColumnSpec(indexKey, tab, header), [data, indexKey])
+  const links = useMemo(() => data?.links ?? [], [data])
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
 
   const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
@@ -245,23 +274,81 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const busy = Boolean(pending)
 
   // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
-  const visible = useMemo(() => table ? gridHeadersOf(tabDefinition, table.headers) : [], [tabDefinition, table])
+  // Les colonnes masquées restent dans la liste : la grille les cache et les montre d'un clic.
+  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => isGridSpec(column.spec)).map((column) => column.header) : [], [data, table])
+
+  // Recherche et Agrégat lisent un autre index : on le charge une fois pour la page.
+  const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
+  const relationOf = useCallback((tab: string, via: string): { index: WorldIndexKey; tabs: string[] | null } | null => {
+    const spec = specOf(tab, via)
+    if (spec.kind === "linked-choice" && spec.source) return { index: spec.source.index, tabs: null }
+    if (spec.kind !== "linked") return null
+    const pair = links.find(([left, right]) => [left, right].some((end) => linkEndCovers(end, indexKey, tab) && foldName(end.column) === foldName(via)))
+    if (!pair) return null
+    const other = linkEndCovers(pair[0], indexKey, tab) && foldName(pair[0].column) === foldName(via) ? pair[1] : pair[0]
+    return { index: other.index, tabs: other.tab === "*" ? null : [other.tab] }
+  }, [indexKey, links, specOf])
+  const relatedKeys = useMemo(() => {
+    const keys = new Set<WorldIndexKey>()
+    for (const [tab, list] of Object.entries(data?.columns ?? {})) for (const column of list) {
+      const via = column.spec.lookup?.via ?? column.spec.rollup?.via
+      if (!via || (column.spec.kind !== "lookup" && column.spec.kind !== "rollup")) continue
+      const relation = relationOf(tab, via)
+      if (relation && relation.index !== indexKey) keys.add(relation.index)
+    }
+    return [...keys].sort()
+  }, [data, indexKey, relationOf])
+  useEffect(() => {
+    let cancelled = false
+    for (const key of relatedKeys) void loadWorldIndexData(key).then((loaded) => { if (!cancelled) setRelated((current) => ({ ...current, [key]: loaded })) })
+    return () => { cancelled = true }
+  }, [relatedKeys])
+  const computed = useCallback((rowKey: string, _columnKey: string, spec: IndexColumnSpec): string[] => {
+    const found = locate(rowKey)
+    const via = spec.lookup?.via ?? spec.rollup?.via
+    if (!found || !via) return []
+    const relation = relationOf(found.table.tabName, via)
+    const viaColumn = columnIndexOf(found.table, via)
+    if (!relation || viaColumn < 0) return []
+    const names = new Set(splitNames(found.row.values[viaColumn] ?? "").map(foldName))
+    const source = relation.index === indexKey ? { tables: tables as LoadedWorldIndex["tables"], columns: data?.columns } : related[relation.index]
+    if (!source) return []
+    const field = spec.kind === "lookup" ? spec.lookup?.field : spec.rollup?.field
+    const values: string[] = []
+    let count = 0
+    let fieldSpec: IndexColumnSpec | undefined
+    for (const target of source.tables) {
+      if (relation.tabs && !relation.tabs.includes(target.tabName)) continue
+      const nameColumn = nameColumnOf(target.headers)
+      const fieldColumn = field ? target.headers.findIndex((header) => foldName(header) === foldName(field)) : -1
+      if (nameColumn < 0) continue
+      fieldSpec ??= field ? source.columns?.[target.tabName]?.find((column) => foldName(column.header) === foldName(field))?.spec : undefined
+      for (const row of target.rows) {
+        if (!names.has(foldName(row.values[nameColumn] ?? ""))) continue
+        count += 1
+        if (fieldColumn >= 0) values.push(row.values[fieldColumn] ?? "")
+      }
+    }
+    if (spec.kind === "lookup") return values.flatMap((value) => splitNames(value)).filter(Boolean)
+    const result = computeRollup(spec.rollup?.fn ?? "count", count, values, spec.number ?? fieldSpec?.number ?? {})
+    return result ? [result] : []
+  }, [data, indexKey, locate, related, relationOf, tables])
   /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
     if (!table) return []
-    const list: SheetGridColumn[] = visible.map((index) => table.headers[index]).map((header) => indexGridColumn(
+    const list: SheetGridColumn[] = visible.map((header) => indexGridColumn(
       header,
       header,
       specOf(table.tabName, header),
       columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
-      { valueOf, commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value), disabled: busy, openForm: nameOpensDetails ? setDetails : undefined },
+      { valueOf, commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value), disabled: busy, openForm: nameOpensDetails ? setDetails : undefined, computed },
     ))
     if (showAll) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     return list
-  }, [busy, commitCell, nameOpensDetails, showAll, specOf, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, computed, nameOpensDetails, showAll, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
-  const corrections = useMemo(() => countCorrections(indexKey, tables), [indexKey, tables])
+  const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
 
   async function correct() {
     if (!table) return
@@ -281,14 +368,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
       .map((row) => {
         const column = sort ? (sort.column === TAB_COLUMN ? -1 : columnIndexOf(owner, sort.column)) : -1
-        const sortValue = sort?.column === TAB_COLUMN ? owner.tabName : column >= 0 ? row.values[column] ?? "" : ""
+        const text = sort?.column === TAB_COLUMN ? owner.tabName : column >= 0 ? row.values[column] ?? "" : ""
+        // Un nombre se trie par sa valeur : 2 PO passe après 50 PC, 1 km après 800 m.
+        const spec = sort && column >= 0 ? specOf(owner.tabName, sort.column) : null
+        const sortValue: number | string = spec?.kind === "number" ? numberSortKey(text, spec.number ?? {}) : text
         return { key: rowKeyOf(owner.tabName, row.rowNumber), rowNumber: row.rowNumber, sortValue }
       }))
     const sorted = sort
-      ? [...rows].sort((left, right) => left.sortValue.localeCompare(right.sortValue, "fr", { numeric: true, sensitivity: "base" }) * (sort.direction === "asc" ? 1 : -1))
+      ? [...rows].sort((left, right) => compareSortKeys(left.sortValue, right.sortValue) * (sort.direction === "asc" ? 1 : -1))
       : rows
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [query, sort, viewTables])
+  }, [query, sort, specOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
@@ -305,18 +395,44 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [busy, moveTargetsOf])
 
   const detailsFound = details !== null ? locate(details) : null
-  const hints = table ? linkHints(indexKey, table.tabName) : []
+  const hints = table ? linkHints(links, indexKey, table.tabName) : []
   const formTable = showAll ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
   // Le formulaire d'ajout montre les colonnes du tableau, sauf l'identifiant (généré)
   // et, pour les créatures, l'extension qui se règle dans le tableau.
-  const formFields: IndexFormField[] = formTable ? gridHeadersOf(formDefinition, formTable.headers)
-    .map((index) => formTable.headers[index])
-    .flatMap((header) => {
-      const spec = specOf(formTable.tabName, header)
-      if (spec.kind === "id" || (nameOpensDetails && foldName(header) === "extension")) return []
+  const formFields: IndexFormField[] = formTable ? (data?.columns[formTable.tabName] ?? [])
+    .flatMap(({ header, spec }) => {
+      if (!isGridSpec(spec) || spec.kind === "id" || spec.kind === "lookup" || spec.kind === "rollup" || (nameOpensDetails && foldName(header) === "extension")) return []
       return [{ key: header, label: header, spec, long: isLongColumn(header) }]
     }) : []
+
+  async function openEditor() {
+    setPending("editor"); setEditorError("")
+    try {
+      const response = await fetch(`/api/resources/index-schema?key=${encodeURIComponent(indexKey)}`, { cache: "no-store" })
+      const payload = (await response.json().catch(() => ({}))) as { model?: IndexEditorModel; error?: string }
+      if (!response.ok || !payload.model) throw new Error(payload.error || "Les colonnes de cet index n’ont pas pu être lues.")
+      setEditor(payload.model)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Les colonnes de cet index n’ont pas pu être lues.")
+    }
+    setPending("")
+  }
+
+  async function applyEditor(operations: SchemaOperation[]) {
+    setPending("schema"); setEditorError("")
+    const seq = ++requestSeq.current
+    try {
+      const response = await fetch("/api/resources/index-schema", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ family: "world", key: indexKey, operations }) })
+      const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
+      if (!response.ok || !payload.data) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
+      applyData(payload.data, seq)
+      setEditor(null)
+    } catch (reason) {
+      setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")
+    }
+    setPending("")
+  }
 
   return (
     <section className="mt-4 flex flex-col gap-3">
@@ -333,9 +449,19 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={busy} title="Colonnes, types, réglages et onglets de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!table || busy}><Plus />Ajouter {showAll ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
       </div>
+
+      {editor && <IndexEditor
+        model={editor}
+        open
+        pending={pending === "schema"}
+        error={editorError}
+        onClose={() => { if (pending !== "schema") setEditor(null) }}
+        onApply={(operations) => void applyEditor(operations)}
+      />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 

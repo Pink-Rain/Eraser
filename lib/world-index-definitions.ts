@@ -4,10 +4,14 @@
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
 import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
+import type { ColumnPolicy } from "@/lib/index-schema-shared"
 
 export { foldName }
 
-export type WorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials"
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials"
+
+/** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
+export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
 
 export type WorldIndexTabDefinition = {
   name: string
@@ -34,6 +38,9 @@ export type WorldIndexDefinition = {
   /** « un lieu » : ce qu'on ajoute depuis la vue « Tout », quel que soit l'onglet. */
   itemLabel?: string
   tabs: WorldIndexTabDefinition[]
+  /** Index créé depuis « Nouvel index ». */
+  custom?: boolean
+  description?: string
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
@@ -115,7 +122,7 @@ export const placeTabs = [
   ["Environnement", "un environnement"],
 ] as const
 
-export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> = {
+export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefinition> = {
   creatures: {
     key: "creatures",
     sheetName: "Index des créatures",
@@ -264,7 +271,49 @@ export function linkEndCovers(end: WorldIndexLinkEnd, index: WorldIndexKey, tab:
 
 /** Les onglets réellement couverts par un côté de lien. */
 export function linkEndTabs(end: WorldIndexLinkEnd) {
-  return end.tab === "*" ? worldIndexDefinitions[end.index].tabs.map((tab) => tab.name) : [end.tab]
+  return end.tab === "*" && isBuiltinWorldIndexKey(end.index) ? worldIndexDefinitions[end.index].tabs.map((tab) => tab.name) : [end.tab]
+}
+
+export function isBuiltinWorldIndexKey(value: unknown): value is BuiltinWorldIndexKey {
+  return typeof value === "string" && Object.hasOwn(worldIndexDefinitions, value)
+}
+
+/** Deux colonnes qui se répondent. */
+export type WorldIndexLink = [WorldIndexLinkEnd, WorldIndexLinkEnd]
+
+/** Les colonnes d'un onglet que le code d'Eraser lit par leur nom, avec la raison. */
+function builtinReaders(index: WorldIndexKey, header: string): string[] {
+  const folded = foldName(header)
+  const reasons: string[] = []
+  if (index === "creatures") {
+    if (["portrait", "sorts actifs", "sorts passifs", "taille", "poids", "organisation", "langue", foldName(creatureNoteHeader), ...creatureCharacteristics.map(foldName), ...creatureGridHeaders.filter((item) => foldName(item) !== "extension").map(foldName)].includes(folded)) {
+      reasons.push("La fiche des créatures lit cette colonne par son nom et l’affiche avec un champ prévu pour elle.")
+    }
+    if (folded === "sorts actifs" || folded === "sorts passifs") reasons.push("La fusion des sorts (Index des sorts) renomme les sorts cités dans cette colonne.")
+    if (folded === "portrait") reasons.push("Le token d’une créature est fabriqué à partir de ce portrait.")
+    if (Object.keys(creatureChoices).some((choice) => foldName(choice) === folded)) reasons.push("« Corriger les fautes » compare cette colonne à sa liste de choix.")
+  }
+  return reasons
+}
+
+/**
+ * Ce qu'on peut changer sur une colonne d'un index du monde, et pourquoi pas le reste.
+ * `links` : les liens de l'index (prévus par Eraser et créés dans l'éditeur).
+ */
+export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: string, links: WorldIndexLink[]): ColumnPolicy {
+  const all = "Tout : nom, type, réglages, suppression."
+  const only = "Seulement la description et l’option « Masquée »."
+  if (isIdHeader(header)) return { rename: false, type: false, remove: false, reasons: ["Généré par Eraser pour reconnaître chaque ligne (et masqué d’office)."], allowed: only }
+  if (isNameColumn(header)) return { rename: false, type: false, remove: false, reasons: ["Chaque ligne est retrouvée par son nom : colonnes liées, listes liées (le Peuple des PNJ…), Recherche, Agrégat et création de personnage (Peuples) en dépendent."], allowed: only }
+  const pair = links.find(([end]) => linkEndCovers(end, index, tab) && foldName(end.column) === foldName(header))
+  if (pair) {
+    const other = pair[1]
+    const where = isBuiltinWorldIndexKey(other.index) ? worldIndexDefinitions[other.index].title : other.index
+    return { rename: false, type: false, remove: false, reasons: [`Répond à « ${other.column} » (${where}${other.tab === "*" ? "" : `, onglet ${other.tab}`}) : les deux colonnes se recopient par leur nom. Changer son nom, son type ou la supprimer couperait le lien.`], allowed: only }
+  }
+  const readers = builtinReaders(index, header)
+  if (readers.length) return { rename: false, type: false, remove: false, reasons: readers, allowed: only }
+  return { rename: true, type: true, remove: true, reasons: [], allowed: all }
 }
 
 
@@ -304,7 +353,8 @@ function isHeader(header: string, candidates: string[]) {
  * ajoutée à la main dans Sheets est du texte enrichi, la norme.
  */
 export function worldColumnSpec(index: WorldIndexKey, tab: string, header: string): IndexColumnSpec {
-  if (isIdHeader(header)) return { kind: "id" }
+  // L'identifiant est utile à Eraser, rarement à l'écran : il est masqué d'office.
+  if (isIdHeader(header)) return { kind: "id", hidden: true }
   if (isNameColumn(header)) return index === "creatures" ? { kind: "name-form", also: ["fixed"] } : { kind: "name", also: ["fixed"] }
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
   if (index === "creatures") {
@@ -313,7 +363,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     const options = Object.entries(creatureChoices).find(([candidate]) => foldName(candidate) === foldName(header))?.[1]
     if (options) return { kind: "choice", options, form }
     if (foldName(header) === "dressable") return { kind: "checkbox" }
-    if (foldName(header) === "portrait") return { kind: "image", form: true }
+    if (foldName(header) === "portrait") return { kind: "file", file: { accept: "image" }, form: true }
     if (isHeader(header, ["Sorts actifs"])) return { kind: "spells", spells: { source: "creature", category: "actif" }, form: true }
     if (isHeader(header, ["Sorts passifs"])) return { kind: "spells", spells: { source: "creature", category: "passif" }, form: true }
     if (isHeader(header, creatureCharacteristics)) return { kind: "number", min: 0, max: 99999, form: true }

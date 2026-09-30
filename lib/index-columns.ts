@@ -7,6 +7,7 @@
  *
  * Ce fichier ne dépend de rien : le serveur s'en sert aussi (identifiants, corrections).
  */
+import { formatIndexNumber, parseIndexNumber, type NumberFormat } from "@/lib/index-numbers"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
 
 export type IndexColumnKind =
@@ -22,7 +23,10 @@ export type IndexColumnKind =
   | "auto-links"
   | "ranked-links"
   | "tab"
-  | "image"
+  | "file"
+  | "color"
+  | "lookup"
+  | "rollup"
   | "spells"
   | "gauge"
   | "number"
@@ -41,10 +45,13 @@ export const indexColumnKinds: Record<IndexColumnKind, { label: string; descript
   "auto-links": { label: "Liens automatiques", description: "Calculée par Eraser : chaque élément trouvé ailleurs devient un lien. Rien à saisir." },
   "ranked-links": { label: "Liens classés", description: "Pastilles reliées à d'autres éléments, chacune avec son rang." },
   "tab": { label: "Onglet", description: "L'onglet de la ligne ; le changer la déplace." },
-  "image": { label: "Image", description: "Une image importée ou une adresse (URL) collée." },
+  "file": { label: "Fichier", description: "Un ou plusieurs fichiers (images, sons, PDF…) importés dans le Drive, ou des adresses collées." },
+  "color": { label: "Couleur", description: "Une couleur, choisie dans une palette ou par son code." },
+  "lookup": { label: "Recherche", description: "Affiche une colonne des lignes reliées par une relation. Rien à saisir." },
+  "rollup": { label: "Agrégat", description: "Calcule sur les lignes reliées : nombre, somme, moyenne, min, max… Rien à saisir." },
   "spells": { label: "Sélecteur de sorts", description: "Des sorts des classes, des créatures ou des deux, gardés par leur nom." },
   "gauge": { label: "Jauge", description: "Un nombre affiché en barre, en icônes à cliquer ou en anneau." },
-  "number": { label: "Nombre", description: "Un nombre entier." },
+  "number": { label: "Nombre", description: "Un nombre, avec son unité (monnaie, distance, poids…), une plage ou un pourcentage ; trié sur sa vraie valeur." },
   "archived": { label: "Archivée", description: "Ancienne colonne gardée dans Sheets, jamais affichée ni modifiée." },
 }
 
@@ -57,6 +64,28 @@ export type ChoiceOption = {
 }
 
 export type GaugeStyle = "bar" | "icons" | "ring"
+
+/** Les fichiers acceptés par une colonne Fichier. */
+export type FileAccept = "image" | "audio" | "video" | "pdf" | "any"
+
+export const fileAcceptLabels: Record<FileAccept, string> = { image: "Images", audio: "Sons", video: "Vidéos", pdf: "PDF", any: "Tous les fichiers" }
+
+/** Le filtre du sélecteur de fichiers du système pour chaque choix. */
+export const fileAcceptInput: Record<FileAccept, string> = { image: "image/*", audio: "audio/*", video: "video/*", pdf: "application/pdf", any: "" }
+
+export type RollupFunction = "count" | "filled" | "empty" | "sum" | "average" | "min" | "max" | "unique" | "checked"
+
+export const rollupLabels: Record<RollupFunction, string> = {
+  count: "Nombre de lignes reliées",
+  filled: "Nombre de valeurs remplies",
+  empty: "Nombre de valeurs vides",
+  sum: "Somme",
+  average: "Moyenne",
+  min: "Minimum",
+  max: "Maximum",
+  unique: "Valeurs uniques",
+  checked: "% coché",
+}
 
 /**
  * « class » : l'index « Sorts des classes » ; « creature » : l'index « Sorts des
@@ -78,8 +107,25 @@ export type IndexColumnSpec = {
   allowCustom?: boolean
   /** Liste déroulante liée : l'index et l'onglet d'où viennent les noms. */
   source?: { index: WorldIndexKey; tab: string }
+  /**
+   * Colonne liée créée depuis l'éditeur : la colonne qui lui répond dans l'autre index
+   * (`tab: "*"` : n'importe quel onglet). Les liens prévus par Eraser n'en ont pas besoin.
+   */
+  link?: { index: WorldIndexKey; tab: string; column: string }
   gauge?: { style: GaugeStyle; max: number }
   spells?: { source: SpellSource; category?: "actif" | "passif" }
+  /** Nombre : unité, décimales, plage, pourcentage… */
+  number?: NumberFormat
+  /** Fichier : ce qui est accepté, un seul ou plusieurs. */
+  file?: { accept: FileAccept; multiple?: boolean }
+  /** Recherche : la colonne de relation à suivre et la colonne à afficher en face. */
+  lookup?: { via: string; field: string }
+  /** Agrégat : la colonne de relation, la colonne calculée en face et le calcul. */
+  rollup?: { via: string; field?: string; fn: RollupFunction }
+  /** Colonne masquée : cachée du tableau, qu'on peut montrer d'un clic. */
+  hidden?: boolean
+  /** Explication de la colonne, montrée au survol de son en-tête. */
+  description?: string
   /** Case à cocher : une cellule vide compte comme cochée (« Actif » d'un objet). */
   emptyChecked?: boolean
   /** Nombre : bornes. */
@@ -98,6 +144,17 @@ export function columnTypeLabel(spec: IndexColumnSpec) {
   if (spec.form) labels.push("Formulaire")
   if (spec.kind === "gauge" && spec.gauge) labels[0] = `${labels[0]} (${spec.gauge.style === "bar" ? "barre" : spec.gauge.style === "icons" ? "icônes" : "anneau"})`
   if (spec.kind === "spells" && spec.spells) labels[0] = `${labels[0]} (${spec.spells.source === "class" ? "sorts de classe" : spec.spells.source === "creature" ? "sorts de créature" : "tous les sorts"})`
+  if (spec.kind === "file" && spec.file) labels[0] = `${labels[0]} (${fileAcceptLabels[spec.file.accept].toLocaleLowerCase("fr")}, ${spec.file.multiple ? "plusieurs" : "un seul"})`
+  if (spec.kind === "number" && spec.number) {
+    const details = [
+      spec.number.unit && spec.number.unit !== "none" ? { money: "monnaie", distance: "distance", weight: "poids" }[spec.number.unit] : "",
+      spec.number.range ? "plage" : "",
+      spec.number.percent ? "%" : "",
+    ].filter(Boolean)
+    if (details.length) labels[0] = `${labels[0]} (${details.join(", ")})`
+  }
+  if (spec.kind === "rollup" && spec.rollup) labels[0] = `${labels[0]} (${rollupLabels[spec.rollup.fn].toLocaleLowerCase("fr")})`
+  if (spec.hidden) labels.push("Masquée")
   return labels.join(" · ")
 }
 
@@ -110,6 +167,11 @@ export function isRichSpec(spec: IndexColumnSpec) {
 /** La colonne apparaît-elle dans le tableau ? */
 export function isGridSpec(spec: IndexColumnSpec) {
   return !spec.form && spec.kind !== "archived"
+}
+
+/** Colonne calculée par Eraser : rien ne s'y saisit ni ne s'y colle. */
+export function isComputedSpec(spec: IndexColumnSpec) {
+  return spec.kind === "lookup" || spec.kind === "rollup" || spec.kind === "auto-links"
 }
 
 export function foldName(value: string) {
@@ -199,11 +261,32 @@ const objectNameHeaders = ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipemen
  */
 export function objectColumnSpec(header: string, headers: string[]): IndexColumnSpec {
   const folded = foldName(header)
-  if (isIdHeader(header)) return { kind: "id" }
+  if (isIdHeader(header)) return { kind: "id", hidden: true }
   const names = new Set(objectNameHeaders.map(foldName))
   const nameHeader = headers.find((candidate) => names.has(foldName(candidate)))
   if (nameHeader && foldName(nameHeader) === folded) return { kind: "name", also: ["rich"] }
-  if (["image", "illustration", "url image", "icone", "icon"].includes(folded)) return { kind: "image" }
+  if (["image", "illustration", "url image", "icone", "icon"].includes(folded)) return { kind: "file", file: { accept: "image" } }
+  if (["prix", "valeur", "cout"].includes(folded)) return { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
   return { kind: "rich" }
+}
+
+/**
+ * Le résultat d'un Agrégat : `count` lignes reliées, `values` la colonne d'en face.
+ * `format` : le format de nombre de cette colonne (un total de prix reste en PO/PC/PN).
+ */
+export function computeRollup(fn: RollupFunction, count: number, values: string[], format: NumberFormat = {}) {
+  const filled = values.filter((value) => value.trim())
+  if (fn === "count") return String(count)
+  if (fn === "filled") return String(filled.length)
+  if (fn === "empty") return String(values.length - filled.length)
+  if (fn === "unique") return [...new Set(filled.map((value) => value.trim()))].join(", ")
+  if (fn === "checked") return values.length ? `${Math.round((values.filter((value) => isCheckedValue(value)).length / values.length) * 100)} %` : ""
+  const numbers = filled.map((value) => parseIndexNumber(value, format)).filter((parsed): parsed is NonNullable<typeof parsed> => Boolean(parsed))
+  if (!numbers.length) return ""
+  const bases = numbers.map((parsed) => parsed.base)
+  const base = fn === "sum" ? bases.reduce((total, value) => total + value, 0)
+    : fn === "average" ? bases.reduce((total, value) => total + value, 0) / bases.length
+    : fn === "min" ? Math.min(...bases) : Math.max(...bases)
+  return formatIndexNumber({ base, unit: numbers[0].unit }, format)
 }

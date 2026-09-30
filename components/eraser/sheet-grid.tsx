@@ -1,7 +1,7 @@
 "use client"
 
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -65,6 +65,14 @@ export type SheetGridColumn = {
   control?: (rowKey: string) => ReactNode
   /** Le type de la colonne (« Liste déroulante · Formulaire »), montré au survol de l'en-tête. */
   typeLabel?: string
+  /** Explication de la colonne, au survol de l'en-tête. */
+  description?: string
+  /** Colonne masquée : cachée tant qu'on ne demande pas à voir les colonnes masquées. */
+  hidden?: boolean
+  /** Clé de tri propre au type (un prix se trie sur sa valeur, pas sur son texte). */
+  sortKey?: (value: string) => number | string
+  /** Colonne calculée : ni collée, ni vidée, ni recopiée. */
+  computed?: boolean
 }
 
 export type SheetGridRow = { key: string; rowNumber: number }
@@ -88,6 +96,12 @@ export type SheetGridRowCommands = {
 }
 
 type SheetGridLayout = { columnWidths: Record<string, number>; rowHeights: Record<string, number> }
+
+/** Deux clés de tri : les nombres entre eux, sinon en texte. */
+function compareSortKeys(left: number | string, right: number | string) {
+  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
+  return String(left).localeCompare(String(right), "fr", { numeric: true, sensitivity: "base" })
+}
 
 /** Largeur de la poignée de ligne. Fixe : la colonne n'est pas redimensionnable. */
 const HANDLE_WIDTH = 30
@@ -284,7 +298,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
 })
 
 export function SheetGrid({
-  layoutKey, columns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
+  layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0,
 }: {
   layoutKey: string
@@ -311,6 +325,10 @@ export function SheetGrid({
   version?: number
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
+  // Les colonnes masquées (l'identifiant…) restent hors de vue tant qu'on ne les demande pas.
+  const [showHidden, setShowHidden] = usePersistentState<boolean>(`${layoutKey}:hidden`, false, (value): value is boolean => typeof value === "boolean")
+  const hiddenCount = allColumns.filter((column) => column.hidden).length
+  const columns = useMemo(() => showHidden ? allColumns : allColumns.filter((column) => !column.hidden), [allColumns, showHidden])
   const [preview, setPreview] = useState<{ columns: Record<string, number>; rows: Record<string, number> }>({ columns: {}, rows: {} })
   // La cellule active vit dans une référence : la sélectionner ne redessine rien.
   // Seul le passage « aucune cellule » → « une cellule » réveille la barre d'outils.
@@ -344,8 +362,10 @@ export function SheetGrid({
     const filtered = activeFilters.length ? sourceRows.filter((row) => activeFilters.every(([key, filter]) => passesFilter(filter, plainOf(row.key, key)))) : sourceRows
     if (onSort || !internalSort) return filtered
     const direction = internalSort.direction === "asc" ? 1 : -1
+    const sortKey = columns.find((column) => column.key === internalSort.column)?.sortKey
+    if (sortKey) return [...filtered].sort((left, right) => compareSortKeys(sortKey(valueOf(left.key, internalSort.column)), sortKey(valueOf(right.key, internalSort.column))) * direction)
     return [...filtered].sort((left, right) => sortValues(plainOf(left.key, internalSort.column), plainOf(right.key, internalSort.column)) * direction)
-  }, [activeFilters, internalSort, onSort, plainOf, sourceRows])
+  }, [activeFilters, columns, internalSort, onSort, plainOf, sourceRows, valueOf])
   const setFilter = useCallback((key: string, filter: ColumnFilter | null) => {
     const next = { ...filters }
     if (filter) next[key] = filter
@@ -359,7 +379,7 @@ export function SheetGrid({
     setToolbarReady((current) => current || true)
   }, [])
 
-  const textColumns = useMemo(() => columns.filter((column) => !column.custom), [columns])
+  const textColumns = useMemo(() => columns.filter((column) => !column.custom && !column.computed), [columns])
   const rowKeys = useMemo(() => rows.map((row) => row.key), [rows])
   // Une ligne disparue (suppression, filtre, tri) sort de la sélection d'elle-même :
   // elle est recalculée à l'affichage plutôt que corrigée après coup.
@@ -587,6 +607,7 @@ export function SheetGrid({
       leading={toolbarLeading}
       readOnly={readOnly}
       trailing={<>
+        {hiddenCount > 0 && <button type="button" onClick={() => setShowHidden(!showHidden)} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title={showHidden ? "Cacher à nouveau les colonnes masquées" : "Montrer les colonnes masquées (identifiant…)"}>{showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}{showHidden ? "Cacher" : "Colonnes masquées"} ({hiddenCount})</button>}
         {activeFilters.length > 0 && <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Filter className="size-3 fill-current text-primary" />{rows.length} ligne{rows.length > 1 ? "s" : ""} sur {sourceRows.length}<button type="button" className="text-primary underline" onClick={() => setFilters({})}>Retirer les filtres</button></span>}
         {notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}
       </>}
@@ -614,7 +635,7 @@ export function SheetGrid({
                 style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
                 // Clic droit : tri et filtres, comme dans Google Sheets.
                 onContextMenu={(event) => { if (column.custom) return; event.preventDefault(); setMenuColumn(column.key) }}
-                title={[column.typeLabel && `Type : ${column.typeLabel}`, column.custom ? "" : "Clic droit pour trier ou filtrer"].filter(Boolean).join("\n") || undefined}
+                title={[column.description, column.typeLabel && `Type : ${column.typeLabel}`, column.custom ? "" : "Clic droit pour trier ou filtrer"].filter(Boolean).join("\n") || undefined}
               >
                 <div className="flex items-center gap-1">
                   {sortable
