@@ -88,7 +88,9 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    sont la limite la plus proche.
 9. **Garde-fous** : attente croissante après une erreur, plafond de requêtes
    par minute côté application, compteur de requêtes par installation visible
-   dans l’administration.
+   dans l’administration, alerte à 50 % puis 80 % des quotas du jour.
+10. **Sauvegarde automatique** : export vers le Drive à la fin de chaque
+    session de jeu et chaque nuit, réimportable avec le bouton Importer.
 
 Estimation pour 8 joueurs un jour de partie (4 h) : environ 200 requêtes
 par personne, soit environ 1 600 par jour, moins de 2 % du quota.
@@ -100,6 +102,22 @@ Journée complète : 6 h de préparation (MJ à 20 cellules par minute, admin à
 1 modification par minute), puis 5 h de partie à 8. Environ 6 800 appels au
 Worker (7 % du quota), 23 000 lignes écrites (23 %), moins de 150 000 lignes
 lues (3 %). Les lignes écrites sont la limite la plus proche.
+
+### Plan B si les quotas deviennent justes
+
+Décision (septembre 2026) : on reste sur Cloudflare (Worker + D1). Si le
+compteur de l’administration dépasse régulièrement 50 % des lignes écrites
+par jour en conditions réelles, deux sorties existent, sans rien perdre :
+
+- passer au forfait Cloudflare payant (5 $ par mois), sans changer de code ;
+- déplacer les données JDR vers Turso (gratuit : 10 millions de lignes
+  écrites et 500 millions lues par mois). Turso est aussi du SQLite : mêmes
+  tables, mêmes requêtes, et la copie locale et la file d’écriture restent
+  identiques. Seul le module d’accès aux données change, plus un module
+  natif à embarquer dans l’installateur (incrément d’`eraserShell`).
+
+Pour que cette sortie reste simple, les requêtes SQL restent du SQLite
+standard, sans fonction propre à D1.
 
 ## Modèle de données D1
 
