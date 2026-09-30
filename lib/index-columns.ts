@@ -55,12 +55,12 @@ type KindInfo = {
 export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "rich": { label: "Texte", group: "Saisie", creatable: true, description: "Du texte libre. Chaque case garde sa mise en forme (gras, couleurs, listes, liens…), sauf si la colonne a un style imposé.", settings: ["Style imposé : toute la colonne prend le même style, et la mise en forme propre à chaque case est retirée."], example: "Description, Histoire, Note." },
   "fixed": { label: "Texte", group: "Saisie", creatable: false, description: "Du texte au style imposé (ancien réglage « Affichage fixe »)." },
-  "name": { label: "Nom", group: "Saisie", creatable: false, description: "Le nom de la ligne : obligatoire, enregistré à la sortie de la case, renommé partout où il est cité.", settings: ["Ouvre la fiche : un clic sur le nom ouvre la fiche complète de la ligne au lieu de le modifier."], example: "Le nom d'un lieu, d'une créature." },
-  "name-form": { label: "Nom", group: "Saisie", creatable: false, description: "Le nom de la ligne, qui ouvre sa fiche d'un clic." },
+  "name": { label: "Nom", group: "Saisie", creatable: true, description: "Le nom de la ligne : obligatoire, modifiable dans la case, enregistré à la sortie de la case et renommé partout où il est cité.", example: "Le nom d'un lieu, d'une langue." },
+  "name-form": { label: "Nom formulaire", group: "Saisie", creatable: true, description: "Le nom de la ligne, qui ouvre sa fiche (le formulaire complet de la ligne) d'un clic. On le modifie dans la fiche.", example: "Les créatures, les PNJ ; les campagnes et personnages ouvrent leur page." },
   "id": { label: "Identifiant", group: "Système", creatable: false, description: "Identifiant unique, généré par Eraser. Il relie la ligne au reste de l'application ; il ne se modifie pas." },
   "linked": { label: "Colonne liée ↔", group: "Listes et relations", creatable: true, description: "Des noms d'un autre index (ou du même), séparés par des virgules. La colonne d'en face se remplit toute seule, et un nom absent crée sa ligne.", settings: ["Index lié et onglet.", "Colonne qui répond en face (créée si elle n'existe pas)."], example: "Lieux ↔ Peuples : ajouter « Elfes » à une ville ajoute la ville aux Elfes." },
-  "choice": { label: "Liste", group: "Listes et relations", creatable: true, description: "Un ou plusieurs choix dans une liste, chacun avec sa couleur. Les options peuvent être écrites ici ou venir des noms d'un autre index.", settings: ["Options (valeur, couleur, groupe) ou noms d'un autre index.", "Choix multiple.", "Ajout libre : une valeur hors liste est acceptée (ou, pour un index, créée).", "Groupes (statut) : « À faire », « En cours », « Fini »…"], example: "Rareté, Comportement, Statut d'une quête." },
-  "linked-choice": { label: "Liste", group: "Listes et relations", creatable: false, description: "Un ou plusieurs noms d'un autre index ; une valeur absente y crée sa ligne." },
+  "choice": { label: "Liste", group: "Listes et relations", creatable: true, description: "Un ou plusieurs choix dans une liste, chacun avec sa couleur. Remplace les étiquettes et les statuts.", settings: ["Options : valeur, couleur, groupe.", "Choix multiple.", "Ajout libre : une valeur hors liste est acceptée.", "Groupes (statut) : « À faire », « En cours », « Fini »…"], example: "Rareté, Comportement, Statut d'une quête." },
+  "linked-choice": { label: "Liste liée", group: "Listes et relations", creatable: true, description: "Un ou plusieurs noms pris dans un autre index. Un nom absent y crée sa ligne, même collé.", settings: ["Index et onglet d'où viennent les noms.", "Choix multiple."], example: "Le Peuple d'un PNJ." },
   "checkbox": { label: "Case à cocher", group: "Saisie", creatable: true, description: "Oui ou non. Écrit « Oui » ou « Non » dans Sheets.", example: "Dressable, Important, Découvert." },
   "auto-links": { label: "Liens automatiques", group: "Système", creatable: false, description: "Calculée par Eraser : chaque élément trouvé ailleurs devient un lien (campagnes d'un PNJ…). Rien à saisir." },
   "ranked-links": { label: "Liens classés", group: "Système", creatable: false, description: "Des pastilles reliées à d'autres éléments, chacune avec son rang (« Classes et rangs » des sorts)." },
@@ -178,9 +178,9 @@ export type ColumnStyle = {
 export type ColumnPlacement = "both" | "table" | "sheet"
 
 export const placementLabels: Record<ColumnPlacement, string> = {
-  both: "Tableau et fiche",
+  both: "Tableau et formulaire",
   table: "Tableau seulement",
-  sheet: "Fiche seulement",
+  sheet: "Formulaire seulement",
 }
 
 /** Le type du résultat d'une formule. */
@@ -274,8 +274,6 @@ export type IndexColumnSpec = {
   display?: "bold" | "skills" | "muted"
   /** Style imposé à toute la colonne. */
   style?: ColumnStyle
-  /** Nom : un clic ouvre la fiche de la ligne. */
-  opensSheet?: boolean
   /** Liste : les choix. */
   options?: ChoiceOption[]
   /** Liste : une valeur hors liste peut être saisie (ou, pour un index, créée). */
@@ -340,17 +338,17 @@ export function normalizeSpec(input: IndexColumnSpec): IndexColumnSpec {
   const fixed = spec.kind === "fixed" || also.includes("fixed")
   const legacyStyle = spec.display ? displayStyles[spec.display] : undefined
   if (spec.kind === "fixed") spec.kind = "rich"
-  if (spec.kind === "name-form") { spec.kind = "name"; spec.opensSheet = true }
-  if (fixed) spec.style = { ...(spec.kind === "name" ? { bold: true } : {}), ...legacyStyle, ...spec.style }
+  const isName = spec.kind === "name" || spec.kind === "name-form"
+  if (fixed) spec.style = { ...(isName ? { bold: true } : {}), ...legacyStyle, ...spec.style }
   // « Description » des sorts : grisée, mais chaque case garde sa mise en forme.
   else if (legacyStyle) spec.style = { ...legacyStyle, keepCellFormatting: true, ...spec.style }
   // Un nom sans mise en forme propre (« Nom » des index du monde) est en gras.
-  if (spec.kind === "name" && !spec.style && !also.includes("rich")) spec.style = { bold: true }
+  if (isName && !spec.style && !also.includes("rich")) spec.style = { bold: true }
   if (spec.form && !spec.placement) spec.placement = "sheet"
   if (spec.gauge?.mode === "count" && !spec.gauge.scale) spec.gauge = { ...spec.gauge, scale: "cell" }
   delete spec.display
   delete spec.form
-  const rest = also.filter((kind) => kind !== "fixed" && kind !== "rich" && kind !== "name-form" && kind !== spec.kind)
+  const rest = also.filter((kind) => kind !== "fixed" && kind !== "rich" && kind !== spec.kind)
   if (rest.length) spec.also = rest
   else delete spec.also
   return spec
@@ -360,9 +358,15 @@ export function placementOf(spec: IndexColumnSpec): ColumnPlacement {
   return spec.placement ?? (spec.form ? "sheet" : "both")
 }
 
-/** Un clic sur le nom ouvre la fiche de la ligne. */
+/** Un clic sur le nom ouvre la fiche de la ligne (type Nom formulaire). */
 export function opensSheet(spec: IndexColumnSpec) {
-  return spec.kind === "name-form" || (spec.kind === "name" && Boolean(spec.opensSheet))
+  return spec.kind === "name-form"
+}
+
+/** Deux types qui gardent exactement la même donnée : passer de l'un à l'autre ne casse rien. */
+export function isSameDataKind(from: IndexColumnKind, to: IndexColumnKind) {
+  const families: IndexColumnKind[][] = [["name", "name-form"], ["rich", "fixed"]]
+  return from === to || families.some((family) => family.includes(from) && family.includes(to))
 }
 
 /** Les deux sortes de listes (options écrites ici, noms d'un index) sont un seul type « Liste ». */
@@ -387,19 +391,20 @@ export function columnTypeLabel(input: IndexColumnSpec) {
     if (spec.number.percent) details.push("%")
   }
   if (isListSpec(spec)) {
-    if (spec.kind === "linked-choice") details.push("noms d'un index")
     if (spec.multiple) details.push("plusieurs choix")
-    if (spec.allowCustom || spec.kind === "linked-choice") details.push("ajout libre")
+    if (spec.allowCustom && spec.kind === "choice") details.push("ajout libre")
   }
   if (spec.kind === "rollup" && spec.rollup) details.push(rollupLabels[spec.rollup.fn].toLocaleLowerCase("fr"))
   if (spec.kind === "formula" && spec.formula?.result && spec.formula.result !== "auto") details.push(formulaResultLabels[spec.formula.result].toLocaleLowerCase("fr"))
   if (spec.kind === "random" && spec.random) details.push(spec.random.mode === "fixed" ? "figé" : "relançable")
   if (spec.kind === "actions") details.push(`${spec.actions?.length ?? 0} bouton${(spec.actions?.length ?? 0) > 1 ? "s" : ""}`)
-  if (spec.kind === "name" && spec.opensSheet) details.push("ouvre la fiche")
   const labels = [`${indexColumnKinds[spec.kind].label}${details.length ? ` (${details.join(", ")})` : ""}`]
-  if (spec.style && (spec.kind === "rich" || spec.kind === "linked")) labels.push("style imposé")
+  // Types doubles : « Jauge (icônes) · Nombre », « Nom · Style imposé », « Liste · Formulaire ».
+  for (const kind of spec.also ?? []) labels.push(indexColumnKinds[kind].label)
+  if (spec.style && !spec.style.keepCellFormatting) labels.push("Style imposé")
   const placement = placementOf(spec)
-  if (placement !== "both") labels.push(placementLabels[placement])
+  if (placement === "sheet") labels.push("Formulaire")
+  if (placement === "table") labels.push("Tableau seulement")
   if (spec.hidden) labels.push("Masquée")
   return labels.join(" · ")
 }
@@ -408,7 +413,7 @@ export function columnTypeLabel(input: IndexColumnSpec) {
 export function isRichSpec(input: IndexColumnSpec) {
   const spec = normalizeSpec(input)
   if (spec.style && !spec.style.keepCellFormatting) return false
-  return spec.kind === "rich" || spec.kind === "linked" || spec.kind === "name"
+  return spec.kind === "rich" || spec.kind === "linked" || spec.kind === "name" || spec.kind === "name-form"
 }
 
 /** La colonne apparaît-elle dans le tableau ? */

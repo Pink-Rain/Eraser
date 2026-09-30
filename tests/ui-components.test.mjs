@@ -542,8 +542,8 @@ test("types every index column from one registry", async () => {
   assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
   assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
   assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Fiche seulement");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste · Fiche seulement");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Formulaire");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste · Formulaire");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Environnement").kind, "archived");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
   // Objets : icône et image sont des fichiers image, « Actif » vide reste actif, le prix est une somme d'argent.
@@ -570,12 +570,12 @@ test("builds grid columns from their type", async () => {
   ];
   assert.equal(columns[0].commitDelay, Infinity);
   assert.equal(columns[0].plain, true);
-  assert.equal(columns[1].typeLabel, "Jauge (icônes, sur 5)");
+  assert.equal(columns[1].typeLabel, "Jauge (icônes, sur 5) · Nombre");
   const html = renderToStaticMarkup(React.createElement(SheetGrid, {
     layoutKey: "test:types", columns, rows: [{ key: "2", rowNumber: 2 }], valueOf: context.valueOf, onCommit: () => {}, empty: "Vide",
   }));
   // Le type se lit au survol de l'en-tête.
-  assert.match(html, /Type : Nom/);
+  assert.match(html, /Type : Nom · Style imposé/);
   // Jauge en icônes : cinq étincelles, dont trois pleines.
   assert.equal((html.match(/aria-label="Charges : \d"/g) || []).length, 5);
   assert.match(html, /CRE-1234ABCD/);
@@ -689,4 +689,129 @@ test("counts each spell's own charges instead of filling a shared gauge", async 
   // Une jauge à remplir au-delà de cinq icônes répond sur toute sa longueur.
   const ten = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Points", value: "7", style: "icons", max: 10, onChange: () => {} }));
   assert.equal((ten.match(/aria-label="Points : \d+"/g) || []).length, 10);
+});
+
+test("computes every documented formula example exactly as the guide shows it", async () => {
+  const { formulaFunctions, formulaOperators, computeFormulaDisplay, formulaDisplayText, sampleFormulaContext, seededRandom } = await vite.ssrLoadModule("/lib/index-formula.ts");
+  const context = sampleFormulaContext();
+  const normalize = (text) => text.replace(/\s+/g, " ").trim();
+  let checked = 0;
+  for (const definition of formulaFunctions) {
+    assert.ok(definition.examples.length > 0, `${definition.name} n'a pas d'exemple`);
+    for (const example of definition.examples) {
+      const display = computeFormulaDisplay(example.formula, definition.random ? sampleFormulaContext(seededRandom(example.formula)) : context);
+      assert.notEqual(display.kind, "error", `${example.formula} : ${display.message}`);
+      if (definition.random) continue;
+      const text = display.kind === "checkbox" ? (display.value ? "VRAI" : "FAUX") : formulaDisplayText(display);
+      assert.equal(normalize(text), normalize(example.result), example.formula);
+      checked += 1;
+    }
+  }
+  for (const operator of formulaOperators) {
+    const display = computeFormulaDisplay(operator.example, context);
+    const text = display.kind === "checkbox" ? (display.value ? "VRAI" : "FAUX") : formulaDisplayText(display);
+    assert.equal(normalize(text), normalize(operator.result), operator.example);
+  }
+  assert.ok(checked > 60, `${checked} exemples vérifiés`);
+});
+
+test("explains formula mistakes in plain French and keeps random draws stable", async () => {
+  const { formulaProblem, computeFormulaDisplay, sampleFormulaContext, seededRandom, displayFormulaValue, formulaColumns } = await vite.ssrLoadModule("/lib/index-formula.ts");
+  assert.match(formulaProblem("SI({Rang} > 2; \"oui\""), /parenthèse fermante/);
+  assert.match(formulaProblem("SOMME(1; 2) SOMME(3)"), /opérateur/);
+  assert.match(formulaProblem("ARONDI(2,5)"), /Voulais-tu dire ARRONDI/);
+  assert.match(formulaProblem("Rang + 1"), /accolades/);
+  assert.match(formulaProblem("SI(1)"), /SI\(condition; si_vrai; si_faux\)/);
+  assert.equal(formulaProblem("{Prix} * 2"), "");
+  const missing = computeFormulaDisplay("{Inconnue} + 1", sampleFormulaContext());
+  assert.equal(missing.kind, "error");
+  assert.match(missing.message, /n’existe pas/);
+  // 1,5 est une décimale ; « 1; 5 » ou « 1, 5 » sépare deux arguments.
+  assert.equal(computeFormulaDisplay("MAX(1,5; 1)", sampleFormulaContext()).text, "1,5");
+  assert.equal(computeFormulaDisplay("MAX(1, 5)", sampleFormulaContext()).text, "5");
+  // Un prix de colonne est lu dans l'unité par défaut ; le résultat prend le format de la colonne.
+  const doubled = computeFormulaDisplay("{Prix} * 2", sampleFormulaContext(), "number", { unit: "money", defaultUnit: "PO" });
+  assert.equal(doubled.text.replace(/\s+/g, " "), "4 PO");
+  // Le même germe donne le même tirage.
+  const first = computeFormulaDisplay("ALEA.ENTRE(1; 1000)", sampleFormulaContext(seededRandom("ligne 12")));
+  const second = computeFormulaDisplay("ALEA.ENTRE(1; 1000)", sampleFormulaContext(seededRandom("ligne 12")));
+  assert.equal(first.text, second.text);
+  assert.equal(displayFormulaValue(true).kind, "checkbox");
+  assert.deepEqual(formulaColumns("SI({Rang} > 2; {Nom}; {Nom})"), ["Rang", "Nom"]);
+});
+
+test("draws numbers, dice, weighted options and filtered index rows", async () => {
+  const { drawRandom, weightedPick } = await vite.ssrLoadModule("/lib/index-random.ts");
+  const { seededRandom, sampleFormulaContext, columnFormulaValue } = await vite.ssrLoadModule("/lib/index-formula.ts");
+  const context = (seed) => ({ random: seededRandom(seed), row: sampleFormulaContext() });
+  for (let seed = 0; seed < 30; seed += 1) {
+    const number = Number(drawRandom({ source: "number", min: 3, max: 6 }, context(`n${seed}`)).values[0]);
+    assert.ok(number >= 3 && number <= 6 && Number.isInteger(number));
+    const dice = drawRandom({ source: "dice", dice: "2d6+1" }, context(`d${seed}`));
+    assert.ok(Number(dice.values[0]) >= 3 && Number(dice.values[0]) <= 13, dice.values[0]);
+    assert.match(dice.detail, /^2d6 \[\d, \d\]$/);
+  }
+  // Un poids nul n'est jamais tiré ; sans doublon, chaque option sort une fois.
+  for (let seed = 0; seed < 30; seed += 1) {
+    assert.deepEqual(weightedPick([{ value: "a", weight: 0 }, { value: "b", weight: 2 }], seededRandom(`w${seed}`)), ["b"]);
+  }
+  const three = drawRandom({ source: "list", options: [{ value: "Pluie" }, { value: "Soleil" }, { value: "Brume" }], count: 3, unique: true }, context("u"));
+  assert.deepEqual([...three.values].sort(), ["Brume", "Pluie", "Soleil"]);
+  // Une valeur d'une autre colonne de la ligne.
+  assert.ok(["Elfes", "Nains"].includes(drawRandom({ source: "column", column: "Peuples" }, context("c")).values[0]));
+  // Une ligne d'un index, filtrée par une formule et pondérée.
+  const creatures = [
+    { name: "Loup", rang: "1", poids: "5" },
+    { name: "Troll", rang: "4", poids: "1" },
+    { name: "Dragon", rang: "5", poids: "0" },
+  ].map((row) => ({
+    name: row.name,
+    cell: (header) => ({ nom: row.name, rang: row.rang, ponderation: row.poids })[header.toLowerCase().normalize("NFD").replace(/\p{M}/gu, "")] ?? "",
+    formula: { column: (name) => name.toLowerCase() === "rang" ? columnFormulaValue(row.rang, { kind: "number" }) : name.toLowerCase() === "nom" ? row.name : undefined },
+  }));
+  for (let seed = 0; seed < 20; seed += 1) {
+    const draw = drawRandom({ source: "index", index: { index: "creatures", tab: "*", filter: "{Rang} >= 2", weightColumn: "Pondération" } }, { ...context(`i${seed}`), rowsOf: () => creatures });
+    assert.deepEqual(draw.values, ["Troll"]);
+  }
+  assert.match(drawRandom({ source: "index", index: { index: "creatures", tab: "*", filter: "{Rang} > 9" } }, { ...context("x"), rowsOf: () => creatures }).error, /Aucune ligne/);
+  assert.match(drawRandom({ source: "dice", dice: "2x6" }, context("e")).error, /2d6\+1/);
+});
+
+test("runs a button's steps in order, with column templates and formulas", async () => {
+  const { runActionButton, buttonVisible, resolveText, cellTextFor, actionStepCatalog } = await vite.ssrLoadModule("/lib/index-actions.ts");
+  const { columnFormulaValue } = await vite.ssrLoadModule("/lib/index-formula.ts");
+  const specs = { nom: { kind: "name" }, pv: { kind: "number" }, "pv max": { kind: "number" }, charges: { kind: "gauge", gauge: { style: "icons", max: 5 } }, mort: { kind: "checkbox" }, prix: { kind: "number", number: { unit: "money", defaultUnit: "PO" } } };
+  const cells = { nom: "Gobelin", pv: "12", "pv max": "20", charges: "3", mort: "Non", prix: "2 PO" };
+  const key = (header) => header.toLowerCase();
+  const notices = [];
+  const runtime = {
+    row: () => ({ column: (name) => key(name) in cells ? columnFormulaValue(cells[key(name)], specs[key(name)]) : undefined }),
+    cell: (header) => cells[key(header)] ?? "",
+    specOf: (header) => specs[key(header)],
+    setCell: async (header, value) => { cells[key(header)] = value },
+    confirm: async () => true,
+    notify: (message, tone) => notices.push(`${tone ?? "info"}:${message}`),
+    openUrl: () => {}, navigate: () => {}, copy: async () => {},
+  };
+  // −1 charge, bornée à 0 ; soins jusqu'au maximum ; formule et texte.
+  await runActionButton({ id: "a", label: "Charge", steps: [{ type: "increment", column: "Charges", amount: "-1", min: "0" }] }, runtime);
+  assert.equal(cells.charges, "2");
+  await runActionButton({ id: "b", label: "Soin", steps: [{ type: "increment", column: "PV", amount: "=DES(\"1d4\") + 100", max: "{PV max}" }] }, runtime);
+  assert.equal(cells.pv, "20");
+  await runActionButton({ id: "c", label: "Tuer", confirm: "Tuer {Nom} ?", steps: [{ type: "set", column: "PV", value: "0" }, { type: "toggle", column: "Mort" }, { type: "notify", message: "{Nom} est mort (=pas une formule)" }] }, runtime);
+  assert.equal(cells.pv, "0");
+  assert.equal(cells.mort, "Oui");
+  assert.equal(notices.at(-1), "info:Gobelin est mort (=pas une formule)");
+  await runActionButton({ id: "d", label: "Doubler", steps: [{ type: "set", column: "Prix", value: "={Prix} * 2" }] }, runtime);
+  assert.equal(cells.prix.replace(/\s/g, " "), "4 PO");
+  // Une étape impossible arrête le bouton avec un message clair.
+  await runActionButton({ id: "e", label: "Dupliquer", steps: [{ type: "duplicate" }, { type: "clear", column: "Nom" }] }, runtime);
+  assert.match(notices.at(-1), /^error:« Dupliquer » n’est pas possible/);
+  assert.equal(cells.nom, "Gobelin");
+  // Condition d'affichage.
+  assert.equal(buttonVisible({ id: "f", label: "x", steps: [], condition: "{Mort}" }, runtime.row()), true);
+  assert.equal(buttonVisible({ id: "g", label: "x", steps: [], condition: "NON({Mort})" }, runtime.row()), false);
+  assert.equal(resolveText("{Nom} ({Inconnue})", runtime.row()), "Gobelin ({Inconnue})");
+  assert.equal(cellTextFor(true, { kind: "checkbox" }, "TRUE"), "TRUE");
+  assert.ok(actionStepCatalog.length >= 17);
 });
