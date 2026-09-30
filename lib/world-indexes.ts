@@ -15,13 +15,16 @@ import {
   updateRange,
 } from "@/lib/google-sheets"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
+import { choiceCorrection, newIndexId } from "@/lib/index-columns"
 import {
+  ID_HEADER,
   foldName,
   isNameColumn,
   linkEndCovers,
   linkEndTabs,
   splitNames,
   worldIndexDefinitions,
+  worldColumnSpec,
   worldIndexLinks,
   type WorldIndexKey,
   type WorldIndexLinkEnd,
@@ -121,7 +124,63 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
   const tables = await Promise.all(worldIndexDefinitions[key].tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+  if (tables.some(needsIds)) scheduleIdBackfill(key)
   return { key, webViewLink: sheet.webViewLink, tables }
+}
+
+/** Une ligne remplie sans identifiant, ou avec celui d'une autre ligne (copiée dans Sheets). */
+function needsIds(table: WorldIndexTable) {
+  const column = columnOf(table.headers, ID_HEADER)
+  if (column < 0) return false
+  const seen = new Set<string>()
+  return table.rows.some((row) => {
+    if (!row.values.some((value, index) => index !== column && value.trim())) return false
+    const id = (row.values[column] || "").trim()
+    if (!id || seen.has(id)) return true
+    seen.add(id)
+    return false
+  })
+}
+
+const backfilling = new Set<WorldIndexKey>()
+
+/**
+ * Donne un identifiant aux lignes qui n'en ont pas (lignes existantes, lignes
+ * ajoutées dans Sheets) ou qui partagent celui d'une autre. Seules les cellules ID
+ * concernées sont écrites ; rien d'autre n'est touché. Lancé après la lecture, dans
+ * la file des écritures : il ne bloque jamais l'affichage.
+ */
+function scheduleIdBackfill(key: WorldIndexKey) {
+  if (backfilling.has(key)) return
+  backfilling.add(key)
+  void serialized(async () => {
+    const seen = new Set<string>()
+    const data: Array<{ range: string; values: string[][] }> = []
+    const patches: Array<{ tabName: string; rowNumber: number; column: number; id: string }> = []
+    let spreadsheetId = ""
+    for (const tab of worldIndexDefinitions[key].tabs) {
+      const table = await plainTable(key, tab.name)
+      spreadsheetId = table.spreadsheetId
+      const column = columnOf(table.headers, ID_HEADER)
+      if (column < 0) continue
+      table.rows.forEach((row, index) => {
+        if (index === 0 || !row.some((value, position) => position !== column && value?.trim())) return
+        const current = (row[column] || "").trim()
+        if (current && !seen.has(current)) { seen.add(current); return }
+        let id = newIndexId(tab.idPrefix)
+        while (seen.has(id)) id = newIndexId(tab.idPrefix)
+        seen.add(id)
+        const cell = `${columnName(column + 1)}${index + 1}`
+        data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[id]] })
+        patches.push({ tabName: tab.name, rowNumber: index + 1, column, id })
+      })
+    }
+    if (!data.length) return
+    await googleSheetsJson(`spreadsheets/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+    clearSpreadsheetReadCache(spreadsheetId)
+    for (const patch of patches) await patchCachedRow(key, patch.tabName, patch.rowNumber, [{ column: patch.column, html: patch.id }])
+  }).catch((error) => console.error("WORLD_INDEX_ID_BACKFILL_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+    .finally(() => backfilling.delete(key))
 }
 
 /**
@@ -231,7 +290,12 @@ async function writeCell(table: PlainTable, tabName: string, rowIndex: number, c
  * « append » de Google devine lui-même où commence le tableau et pouvait décaler les
  * valeurs d'une ou plusieurs colonnes : on choisit la ligne nous-mêmes.
  */
-async function writeNewRow(table: PlainTable, tabName: string, values: string[]) {
+async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: string, provided: string[]) {
+  // Toute nouvelle ligne reçoit son identifiant (une ligne déplacée garde le sien).
+  const idColumn = columnOf(table.headers, ID_HEADER)
+  const values = idColumn >= 0 && !(provided[idColumn] ?? "").trim()
+    ? table.headers.map((_, index) => index === idColumn ? newIndexId(tabDefinition(key, tabName).idPrefix) : provided[index] ?? "")
+    : provided
   let rowIndex = table.rows.length
   while (rowIndex > 1 && !(table.rows[rowIndex - 1] ?? []).some((value) => value.trim())) rowIndex -= 1
   const range = sheetTabRange(tabName, `A${rowIndex + 1}:${columnName(values.length)}${rowIndex + 1}`)
@@ -273,7 +337,7 @@ async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string
     await writeCell(table, tab, rowIndex, linkColumn, [...current, value].join(", "))
     return true
   }
-  await writeNewRow(table, tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : ""))
+  await writeNewRow(end.index, table, tab, table.headers.map((_, index) => index === nameColumn ? targetName : index === linkColumn ? value : ""))
   return true
 }
 
@@ -394,7 +458,7 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
         await writeCell(current, tabName, existing, column, merged)
       }
     } else {
-      rowNumber = await writeNewRow(current, tabName, plain)
+      rowNumber = await writeNewRow(key, current, tabName, plain)
     }
     for (const [column, value] of html.entries()) {
       if (/<[a-z]/i.test(value)) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html: value })
@@ -445,6 +509,12 @@ export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, row
         } },
       ] }),
     })
+    // La copie reçoit son propre identifiant.
+    const idColumn = columnOf(table.headers, ID_HEADER)
+    if (idColumn >= 0) {
+      const cell = `${columnName(idColumn + 1)}${rowNumber + 1}`
+      await updateRange(sheet.spreadsheetId, sheetTabRange(tabName, `${cell}:${cell}`), [[newIndexId(tabDefinition(key, tabName).idPrefix)]], { valueInputOption: "RAW" })
+    }
   }
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   invalidateWorldIndexes([key])
@@ -552,7 +622,7 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
         const column = columnOf(source.headers, header)
         return column >= 0 ? row[column] ?? "" : ""
       })
-      await writeNewRow(target, toTab, values)
+      await writeNewRow(key, target, toTab, values)
       moved.push(rowNumber)
     }
     const { sheet, table } = await tableFor(key, fromTab)
@@ -590,5 +660,58 @@ export function renameCreatureSpells(oldNames: string[], newName: string) {
       invalidateWorldIndexes(["creatures"])
     }
     return data.length
+  })
+}
+
+/**
+ * Corrige l'orthographe des listes déroulantes : « Aggressif » devient « Agressif ».
+ * Seules les cellules mal écrites d'une colonne à liste sont réécrites, par leur
+ * valeur ; une valeur hors liste n'est jamais touchée. Renvoie le nombre corrigé.
+ */
+export function normalizeWorldIndexChoices(key: WorldIndexKey) {
+  return serialized(async () => {
+    let spreadsheetId = ""
+    const data: Array<{ range: string; values: string[][] }> = []
+    for (const tab of worldIndexDefinitions[key].tabs) {
+      const table = await plainTable(key, tab.name)
+      spreadsheetId = table.spreadsheetId
+      table.headers.forEach((header, column) => {
+        const spec = worldColumnSpec(key, tab.name, header)
+        if (spec.kind !== "choice" || !spec.options) return
+        table.rows.forEach((row, index) => {
+          if (index === 0) return
+          const fixed = choiceCorrection(row[column] || "", spec.options!)
+          if (!fixed) return
+          const cell = `${columnName(column + 1)}${index + 1}`
+          data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[fixed]] })
+        })
+      })
+    }
+    if (data.length) {
+      await googleSheetsJson(`spreadsheets/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+      clearSpreadsheetReadCache(spreadsheetId)
+      invalidateWorldIndexes([key])
+    }
+    return data.length
+  })
+}
+
+/**
+ * Liste déroulante liée : le nom choisi existe-t-il dans l'index source ? Sinon sa
+ * ligne y est créée, comme pour une colonne liée. Renvoie `true` si une ligne a été créée.
+ */
+export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name: string) {
+  return serialized(async () => {
+    const clean = name.replace(/\s+/g, " ").trim()
+    if (!clean) return false
+    for (const tab of worldIndexDefinitions[key].tabs) {
+      if (findRowByName(await plainTable(key, tab.name), clean) > 0) return false
+    }
+    const table = await plainTable(key, tabName)
+    const nameColumn = columnOf(table.headers, "Nom")
+    if (nameColumn < 0) return false
+    await writeNewRow(key, table, tabName, table.headers.map((_, index) => index === nameColumn ? clean : ""))
+    invalidateWorldIndexes([key])
+    return true
   })
 }

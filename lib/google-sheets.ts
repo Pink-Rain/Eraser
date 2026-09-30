@@ -1005,7 +1005,18 @@ export async function updateObjectIndexCell(fileId: string, tabName: string, row
   const table = await validatedObjectIndexTable(fileId, tabName)
   const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column, html })
+  // Une vraie case à cocher de Sheets (TRUE/FALSE) reste une case : la valeur est écrite en booléen.
+  if (/^(true|false)$/i.test((row.values[column] ?? "").trim()) && /^(true|false)$/i.test(html.trim())) {
+    await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: [{ updateCells: {
+        range: { sheetId: table.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: column, endColumnIndex: column + 1 },
+        rows: [{ values: [{ userEnteredValue: { boolValue: /^true$/i.test(html.trim()) } }] }],
+        fields: "userEnteredValue",
+      } }] }),
+    })
+    clearSpreadsheetReadCache(fileId)
+  } else await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column, html })
   const plain = htmlToRichText(html.slice(0, 50_000)).text
   if (objectIndexTableCache) {
     objectIndexTableCache = {
@@ -1070,7 +1081,14 @@ export async function insertObjectIndexRow(fileId: string, tabName: string, afte
 export async function addObjectIndexRowWithValues(fileId: string, tabName: string, provided: string[]) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   const values = table.headers.map((header, index) => normalizedHeader(header) === "id" && !String(provided[index] ?? "").trim() ? crypto.randomUUID() : String(provided[index] ?? ""))
-  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values])
+  // Le formulaire envoie du texte enrichi : la ligne est écrite en texte, puis chaque
+  // cellule mise en forme reçoit sa mise en forme (et non ses balises).
+  const formatted = values.flatMap((value, column) => /<[a-z]/i.test(value) ? [{ column, html: value.slice(0, 50_000) }] : [])
+  const appended = await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values.map((value) => /<[a-z]/i.test(value) ? htmlToRichText(value).text : value)])
+  const rowNumber = Number.parseInt(appended.updatedRange?.match(/![A-Z]+(\d+)/)?.[1] || "", 10)
+  if (Number.isInteger(rowNumber) && rowNumber > 1) {
+    for (const cell of formatted) await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column: cell.column, html: cell.html })
+  }
   clearObjectIndexTableCache()
 }
 

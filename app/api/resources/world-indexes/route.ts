@@ -5,10 +5,12 @@ import {
   addWorldIndexRow,
   deleteWorldIndexRows,
   duplicateWorldIndexRows,
+  ensureWorldIndexEntry,
   insertWorldIndexRows,
   getWorldIndex,
   isWorldIndexKey,
   moveWorldIndexRows,
+  normalizeWorldIndexChoices,
   updateWorldIndexCell,
   updateWorldIndexFields,
 } from "@/lib/world-indexes"
@@ -40,7 +42,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; fields?: Record<string, unknown>; toTab?: string; count?: number }
+    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number }
     if (!isWorldIndexKey(body.key) || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const key = body.key
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
@@ -49,6 +51,15 @@ export async function POST(request: Request) {
       changed = await updateWorldIndexCell(key, body.tabName, body.rowNumber, body.column, body.html)
       // La frappe reste fluide : le classeur n'est renvoyé que si un lien l'a modifié.
       return NextResponse.json({ ok: true, changed, data: changed.includes(key) ? await getWorldIndex(key) : undefined })
+    }
+    if (body.action === "ensure" && typeof body.name === "string") {
+      // Liste déroulante liée : la réponse reste légère, la page n'affiche pas cet index.
+      const created = await ensureWorldIndexEntry(key, body.tabName, body.name)
+      return NextResponse.json({ ok: true, created })
+    }
+    if (body.action === "normalize-choices") {
+      const corrected = await normalizeWorldIndexChoices(key)
+      return NextResponse.json({ ok: true, corrected, data: await getWorldIndex(key) })
     }
     if (body.action === "add" && Array.isArray(body.values)) changed = await addWorldIndexRow(key, body.tabName, body.values.map((value) => String(value ?? "")))
     else if (body.action === "insert" && typeof body.rowNumber === "number") await insertWorldIndexRows(key, body.tabName, body.rowNumber, typeof body.count === "number" ? body.count : 1)

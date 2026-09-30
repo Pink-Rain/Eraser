@@ -1,12 +1,8 @@
-import Link from "next/link"
-import { CircleUserRound, ExternalLink } from "lucide-react"
+import { CircleUserRound } from "lucide-react"
 import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { OwnerSelector } from "@/components/eraser/owner-selector"
-import { TrashItemButton } from "@/components/eraser/trash-item-button"
-import { Button } from "@/components/ui/button"
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table"
+import { EntityIndex } from "@/components/eraser/entity-index"
 import { listAllCharactersForAdmin } from "@/lib/google-sheets"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { listAccounts } from "@/lib/site-auth"
@@ -24,12 +20,26 @@ export default async function CharacterIndexPage() {
     <AuthenticatedShell pageLabel="Personnages" roles={["admin", "mj"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
         <div className="flex items-center gap-4"><div className="flex size-12 items-center justify-center rounded-2xl border bg-card text-primary"><CircleUserRound /></div><div><p className="text-xs font-semibold uppercase tracking-[0.2em] text-primary/75">Index</p><h1 className="font-display text-4xl font-semibold sm:text-5xl">Personnages</h1></div></div>
-        <div className="mt-10 overflow-hidden rounded-2xl border bg-card/90">
-          <Table><TableHeader><TableRow><TableHead>Personnage</TableHead><TableHead>Classe</TableHead><TableHead>Propriétaire</TableHead>{isAdmin && <TableHead>Attribuer à</TableHead>}<TableHead>Campagne(s)</TableHead><TableHead className="text-right">Fiche</TableHead></TableRow></TableHeader>
-            <TableBody>{characters.map((character) => <TableRow key={character.id}><TableCell className="font-medium">{character.name}</TableCell><TableCell>{character.classes ? <><p>{character.classes}</p>{character.level && <p className="text-xs text-muted-foreground">Rang {character.level}</p>}</> : <span className="text-muted-foreground">À choisir</span>}</TableCell><TableCell><p>{character.ownerName}</p>{isAdmin && <p className="text-xs text-muted-foreground">{character.ownerEmail || (character.ownerUid ? character.ownerUid : "Aucun compte")}</p>}</TableCell>{isAdmin && <TableCell><OwnerSelector kind="character" itemId={character.id} ownerUid={character.ownerUid} accounts={accounts} /></TableCell>}<TableCell>{character.campaigns.length ? <div className="flex flex-wrap gap-1">{character.campaigns.map((campaign) => <span key={campaign.id} className="rounded-full border px-2 py-0.5 text-xs" style={{ color: campaign.accentColor, borderColor: `${campaign.accentColor}66` }}>{campaign.name}</span>)}</div> : <span className="text-muted-foreground">Sans campagne</span>}</TableCell><TableCell className="text-right"><div className="flex items-center justify-end gap-1"><Button asChild variant="ghost" size="sm"><Link href={`/personnage/${encodeURIComponent(character.id)}`}>Ouvrir<ExternalLink /></Link></Button>{(isAdmin || character.ownerUid === account.uid) && <TrashItemButton kind="character" id={character.id} name={character.name} />}</div></TableCell></TableRow>)}</TableBody>
-          </Table>
-          {!characters.length && <p className="p-8 text-center text-sm text-muted-foreground">Aucun personnage.</p>}
-        </div>
+        <EntityIndex
+          kind="character"
+          nameLabel="Personnage"
+          linksLabel="Campagne(s)"
+          detailLabel="Classe"
+          empty="Aucun personnage."
+          isAdmin={isAdmin}
+          accounts={accounts}
+          rows={characters.map((character) => ({
+            id: character.id,
+            name: character.name,
+            href: `/personnage/${encodeURIComponent(character.id)}`,
+            ownerUid: character.ownerUid,
+            ownerName: character.ownerName,
+            ownerDetail: character.ownerEmail || character.ownerUid || "Aucun compte",
+            detail: character.classes ? `${character.classes}${character.level ? ` · Rang ${character.level}` : ""}` : "À choisir",
+            canTrash: isAdmin || character.ownerUid === account.uid,
+            links: character.campaigns.map((campaign) => ({ label: campaign.name, href: `/campagne/${encodeURIComponent(campaign.id)}`, color: campaign.accentColor, title: "Ouvrir la campagne" })),
+          }))}
+        />
       </div>
     </AuthenticatedShell>
   )

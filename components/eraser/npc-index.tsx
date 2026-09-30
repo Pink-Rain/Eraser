@@ -1,16 +1,16 @@
 "use client"
 
-import { memo, useCallback, useMemo, useRef, useState } from "react"
-import Link from "next/link"
+import { useCallback, useMemo, useRef, useState } from "react"
 import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
+import { ensureWorldIndexName, indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
-import { blankNpc, ImportNpcsDialog, importNpcs, NpcForm, PeopleSelect, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
+import { blankNpc, ImportNpcsDialog, importNpcs, NpcForm, npcPeopleSource, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { compactRichText, isCheckedValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { foldNpcName, genericNpcIndexPage, isNpcLibraryPage, npcIndexPage, npcIndexTabs } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
 
@@ -31,15 +31,19 @@ function groupByPage(npcs: CampaignNpcRecord[]) {
   return groups
 }
 
-/** Les colonnes du tableau ; le reste de la fiche s'ouvre d'un clic sur le nom. */
-const fields = [
-  { key: "name", label: "Nom", width: 240 },
-  { key: "title", label: "Titre", width: 190 },
-  { key: "people", label: "Peuple", width: 210 },
-  { key: "occupation", label: "Fonction / classe / métier", width: 240 },
-  { key: "campaigns", label: "Campagnes", width: 260 },
-  { key: "important", label: "Important", width: 110 },
-] as const
+/**
+ * Les colonnes du tableau et leur type ; le reste de la fiche (portrait, notes,
+ * caractéristiques) s'ouvre d'un clic sur le nom.
+ */
+const fields: Array<{ key: string; label: string; width: number; spec: IndexColumnSpec }> = [
+  { key: "name", label: "Nom", width: 240, spec: { kind: "name-form", also: ["fixed"] } },
+  { key: "title", label: "Titre", width: 190, spec: { kind: "rich" } },
+  { key: "people", label: "Peuple", width: 210, spec: { kind: "linked-choice", source: npcPeopleSource } },
+  { key: "occupation", label: "Fonction / classe / métier", width: 240, spec: { kind: "rich" } },
+  { key: "campaigns", label: "Campagnes", width: 260, spec: { kind: "auto-links" } },
+  { key: "important", label: "Important", width: 110, spec: { kind: "checkbox" } },
+  { key: "id", label: "ID", width: 150, spec: { kind: "id" } },
+]
 
 type TextField = "name" | "title" | "people" | "occupation"
 
@@ -55,26 +59,6 @@ function isValidSort(value: unknown): value is SheetGridSort {
 function isTab(value: unknown): value is string {
   return typeof value === "string" && npcIndexTabs.some((tab) => tab.id === value)
 }
-
-/** Les campagnes d'un PNJ, chacune cliquable : en mode MJ si on la mène, en mode joueur sinon. */
-const CampaignLinks = memo(function CampaignLinks({ links }: { links: NpcCampaignLink[] }) {
-  if (!links.length) return <span className="flex min-h-8 items-center px-2 text-xs text-muted-foreground">—</span>
-  return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1">
-    {links.map((campaign) => <Link
-      key={campaign.id}
-      href={campaign.id === "bac-a-sable" ? "/bac-a-sable/pnjs" : `/campagne/${encodeURIComponent(campaign.id)}`}
-      title={campaign.manage ? "Ouvrir en mode MJ" : "Ouvrir en mode joueur"}
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground ${campaign.manage ? "border-primary/40 text-primary" : "text-muted-foreground"}`}
-    >{campaign.name}</Link>)}
-  </span>
-})
-
-const ImportantCell = memo(function ImportantCell({ checked, disabled, onChange }: { checked: boolean; disabled: boolean; onChange: (checked: boolean) => void }) {
-  const [shown, setShown] = useState<boolean | null>(null)
-  return <span className="flex min-h-8 items-center justify-center">
-    <Checkbox aria-label="Important" checked={shown ?? checked} disabled={disabled} onCheckedChange={(next) => { setShown(next === true); onChange(next === true) }} />
-  </span>
-})
 
 /**
  * L'Index des PNJs : tous les PNJ, rangés dans la feuille « PNJs ». L'onglet « PNJs »
@@ -134,6 +118,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
     if (!npc) return ""
     if (columnKey === "campaigns") return campaignsOf(npc).map((campaign) => campaign.name).join(", ")
     if (columnKey === "important") return npc.important ? "Oui" : "Non"
+    if (columnKey === "id") return npc.id
     return textFields.has(columnKey) ? npc[columnKey as TextField] : ""
   }, [campaignsOf])
 
@@ -167,27 +152,39 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
       setVersion((current) => current + 1)
       return
     }
-    if (columnKey === "important") return save({ ...npc, important: /^(oui|vrai|true|x|1)$/i.test(value.trim()) }, false)
+    if (columnKey === "important") return save({ ...npc, important: isCheckedValue(value) }, false)
     if (!textFields.has(columnKey)) return
-    const next = { ...npc, [columnKey]: value.trim() }
+    // Titre et fonction sont du texte enrichi ; sans mise en forme, ils restent du texte simple.
+    const next = { ...npc, [columnKey]: columnKey === "title" || columnKey === "occupation" ? compactRichText(value) : value.replace(/<[^>]+>/g, "").trim() }
     if (columnKey === "name" && !next.name) return
+    // Liste liée : un peuple absent de l'Index des peuples y est créé (collage compris).
+    if (columnKey === "people" && next.people) void ensureWorldIndexName(npcPeopleSource, next.people).catch((reason) => setError(reason instanceof Error ? reason.message : "Le peuple n’a pas pu être ajouté à l’index."))
     // Une liste déroulante n'est pas une cellule de texte : sa ligne est redessinée.
     await save(next, columnKey === "people" || columnKey === "name")
   }, [editable, lockedMessage, save])
 
-  const columns = useMemo<SheetGridColumn[]>(() => fields.map((field) => {
-    const column: SheetGridColumn = { key: field.key, label: field.label, width: field.width, plain: true, cellClassName: field.key === "name" ? "font-semibold" : undefined }
-    if (field.key === "name") column.control = (rowKey) => <button
-      type="button"
-      onClick={() => { const npc = latest.current.get(rowKey); if (npc) setEditing(npc) }}
-      className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
-      title="Ouvrir la fiche"
-    >{valueOf(rowKey, "name") || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</button>
-    if (field.key === "people") column.control = (rowKey) => <PeopleSelect compact disabled={!editable(latest.current.get(rowKey))} value={valueOf(rowKey, "people")} onChange={(value) => void commit(rowKey, "people", value)} />
-    if (field.key === "campaigns") column.control = (rowKey) => <CampaignLinks links={campaignsOf(latest.current.get(rowKey))} />
-    if (field.key === "important") column.control = (rowKey) => <ImportantCell checked={latest.current.get(rowKey)?.important ?? false} disabled={pending || !editable(latest.current.get(rowKey))} onChange={(checked) => void commit(rowKey, "important", checked ? "Oui" : "Non")} />
-    return column
-  }), [campaignsOf, commit, editable, pending, valueOf])
+  // Liens automatiques : la campagne d'un PNJ de campagne, ou pour un PNJ de la
+  // bibliothèque les campagnes où figure un PNJ du même nom (mode MJ si on la mène).
+  const autoLinks = useCallback((rowKey: string): AutoLink[] => campaignsOf(latest.current.get(rowKey)).map((campaign) => ({
+    label: campaign.name,
+    href: campaign.id === "bac-a-sable" ? "/bac-a-sable/pnjs" : `/campagne/${encodeURIComponent(campaign.id)}`,
+    emphasis: campaign.manage,
+    title: campaign.manage ? "Ouvrir en mode MJ" : "Ouvrir en mode joueur",
+  })), [campaignsOf])
+
+  /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
+  const columns = useMemo<SheetGridColumn[]>(() => {
+    const context = {
+      valueOf,
+      commit: (rowKey: string, columnKey: string, value: string) => void commit(rowKey, columnKey, value),
+      disabled: pending,
+      lockedRow: (rowKey: string) => !editable(latest.current.get(rowKey)),
+      openForm: (rowKey: string) => { const npc = latest.current.get(rowKey); if (npc) setEditing(npc) },
+      autoLinks,
+    }
+    return fields.map((field) => indexGridColumn(field.key, field.label, field.spec, field.width, context))
+  }, [autoLinks, commit, editable, pending, valueOf])
+  /* eslint-enable react-hooks/refs */
 
   async function run(task: () => Promise<void>) {
     setPending(true); setError("")

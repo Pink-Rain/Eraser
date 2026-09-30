@@ -31,7 +31,8 @@ function npcValue(value: unknown, pageLinked: string): CampaignNpcRecord | null 
   if (!id || !name) return null
   return {
     id, pageLinked, name,
-    title: shortText(candidate.title, 200), occupation: shortText(candidate.occupation, 200), people: shortText(candidate.people, 200),
+    // Titre et fonction sont du texte enrichi : leur mise en forme prend de la place.
+    title: shortText(candidate.title, 2000), occupation: shortText(candidate.occupation, 2000), people: shortText(candidate.people, 200),
     portrait: shortText(candidate.portrait, 1500),
     currentHp: numberValue(candidate.currentHp), totalHp: numberValue(candidate.totalHp), speed: numberValue(candidate.speed),
     constitution: numberValue(candidate.constitution),

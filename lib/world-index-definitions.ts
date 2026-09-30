@@ -3,6 +3,10 @@
  * Ce fichier ne dépend de rien côté serveur : l'interface s'en sert aussi pour savoir
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
+import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
+
+export { foldName }
+
 export type WorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials"
 
 export type WorldIndexTabDefinition = {
@@ -12,6 +16,8 @@ export type WorldIndexTabDefinition = {
   /** Toutes les colonnes de la feuille, dans l'ordre où elles sont créées. */
   headers: string[]
   widths: number[]
+  /** Préfixe des identifiants de l'onglet : « CRE » donne « CRE-3F9A1C2B ». */
+  idPrefix: string
   /**
    * Colonnes affichées dans le tableau de l'application, quand elles ne sont pas
    * toutes utiles : les autres restent dans Sheets et se remplissent par la fiche.
@@ -33,6 +39,12 @@ export type WorldIndexDefinition = {
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
 export const creatureGridHeaders = ["Nom", "Type", "Sous-type", "Rang", "Dressable", "Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire", "Comportement", "Extension"]
 
+/**
+ * La colonne d'identifiant de chaque index. Elle est ajoutée à droite des colonnes
+ * existantes de la feuille, sans rien déplacer, et remplie par Eraser.
+ */
+export const ID_HEADER = "ID"
+
 /** Caractéristiques d'une créature, dans l'ordre de la fiche. */
 export const creatureCharacteristics = ["Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Vitesse", "Vitalité"]
 
@@ -52,15 +64,21 @@ export const creatureSheetOnlyHeaders = [
   "Sorts actifs", "Sorts passifs", "Sagesse", creatureNoteHeader,
 ]
 
-export type CreatureChoice = { value: string; hint?: string }
+/** Un choix d'une liste fermée (conservé sous ce nom pour la fiche des créatures). */
+export type CreatureChoice = ChoiceOption
 
-const choices = (values: string[]): CreatureChoice[] => values.map((value) => ({ value }))
+const choices = (values: string[]): ChoiceOption[] => values.map((value) => ({ value }))
 
-export const creatureLocations = choices(["Marais", "Désert", "Savane", "Jungle", "Forêt", "Forêt noir", "Donjon", "Ville", "Caverne", "Montagne", "Aquatique", "Plaine", "Maison"])
+export const creatureLocations: ChoiceOption[] = [
+  ...choices(["Marais", "Désert", "Savane", "Jungle", "Forêt"]),
+  // Orthographe corrigée : les cellules « Forêt noir » sont reconnues et corrigées.
+  { value: "Forêt noire", aliases: ["Forêt noir"] },
+  ...choices(["Donjon", "Ville", "Caverne", "Montagne", "Aquatique", "Plaine", "Maison"]),
+]
 export const creatureRarities = choices(["Très commun", "Commun", "Rare", "Très rare", "Ultime", "Légendaire"])
 
 /** Les listes fermées de la fiche, par en-tête de colonne. */
-export const creatureChoices: Record<string, CreatureChoice[]> = {
+export const creatureChoices: Record<string, ChoiceOption[]> = {
   "Rang": choices(["1", "2", "3", "4", "5"]),
   "Type": choices(["Animal", "Artificiel", "Extérieur", "Humanoïdes monstrueux", "Mort-vivant", "Spectrale", "Végétale", "Vermine"]),
   "Sous-type": choices(["Destrier", "Amphibien", "Aquatique", "Arachnide", "Bois", "Carnivore", "Cervidé", "Crustacé", "Démoniaque", "Divin", "Familier", "Félin", "Fermier", "Feu", "Fixe", "Golem", "Insecte", "Nim'Or", "Nuée", "Ombre", "Parasite", "Reptile", "Rongeur", "Sable", "Toxique", "Vase", "Volatile"]),
@@ -83,22 +101,8 @@ export const creatureChoices: Record<string, CreatureChoice[]> = {
   ],
 }
 
-/**
- * Forme comparable d'un choix : accents, casse, pluriel et lettres doublées ignorés.
- * La feuille écrit « Aggressif », « défensif » ou « Humanoïde monstrueux » : ce sont
- * bien les choix « Agressif », « Défensif » et « Humanoïdes monstrueux ».
- */
-function choiceKey(value: string) {
-  return foldName(value).replace(/[^a-z0-9' ]+/g, " ").split(" ").filter(Boolean)
-    .map((word) => word.replace(/(.)\1+/g, "$1").replace(/(?<=..)s$/, "")).join(" ")
-}
-
 /** Le choix de la liste qui correspond à une valeur de la feuille, s'il y en a un. */
-export function matchCreatureChoice(value: string, options: CreatureChoice[]) {
-  const key = choiceKey(value)
-  if (!key) return undefined
-  return options.find((option) => choiceKey(option.value) === key)
-}
+export const matchCreatureChoice = matchChoice
 
 /** Les onglets de l'Index des lieux, du plus vaste au plus précis. */
 export const placeTabs = [
@@ -120,9 +124,10 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Créatures",
       itemLabel: "une créature",
-      headers: [...creatureGridHeaders, ...creatureSheetOnlyHeaders],
-      widths: [240, 170, 160, 90, 100, 190, 140, 190, 150, 140, 120, ...creatureSheetOnlyHeaders.map((header) => /portrait|sorts|description|organisation|rencontre/i.test(header) ? 260 : 130)],
-      gridHeaders: creatureGridHeaders,
+      headers: [...creatureGridHeaders, ...creatureSheetOnlyHeaders, ID_HEADER],
+      widths: [240, 170, 160, 90, 100, 190, 140, 190, 150, 140, 120, ...creatureSheetOnlyHeaders.map((header) => /portrait|sorts|description|organisation|rencontre/i.test(header) ? 260 : 130), 130],
+      gridHeaders: [...creatureGridHeaders, ID_HEADER],
+      idPrefix: "CRE",
     }],
   },
   places: {
@@ -134,8 +139,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: placeTabs.map(([name, itemLabel]) => ({
       name,
       itemLabel,
-      headers: ["Nom", "Type", "Sous-type", "Peuple", "Description", "Note", "Langues"],
-      widths: [220, 150, 150, 220, 420, 320, 220],
+      headers: ["Nom", "Type", "Sous-type", "Peuple", "Description", "Note", "Langues", ID_HEADER],
+      widths: [220, 150, 150, 220, 420, 320, 220, 130],
+      idPrefix: "LIE",
     })),
   },
   religions: {
@@ -144,8 +150,8 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     title: "Religions",
     path: "/ressources/index-des-religions",
     tabs: [
-      { name: "Religions", itemLabel: "une religion", headers: ["Nom", "Divinités", "Description", "Note"], widths: [220, 260, 420, 320] },
-      { name: "Divinités", itemLabel: "une divinité", headers: ["Nom", "Religion", "Histoire", "Description", "Autre"], widths: [220, 220, 420, 420, 320] },
+      { name: "Religions", itemLabel: "une religion", headers: ["Nom", "Divinités", "Description", "Note", ID_HEADER], widths: [220, 260, 420, 320, 130], idPrefix: "REL" },
+      { name: "Divinités", itemLabel: "une divinité", headers: ["Nom", "Religion", "Histoire", "Description", "Autre", ID_HEADER], widths: [220, 220, 420, 420, 320, 130], idPrefix: "DIV" },
     ],
   },
   peoples: {
@@ -156,8 +162,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Peuples",
       itemLabel: "un peuple",
-      headers: ["Nom", "Ancêtres", "Descendant", "Lieux", "Description", "Note", "Langues"],
-      widths: [220, 220, 220, 220, 420, 320, 220],
+      headers: ["Nom", "Ancêtres", "Descendant", "Lieux", "Description", "Note", "Langues", ID_HEADER],
+      widths: [220, 220, 220, 220, 420, 320, 220, 130],
+      idPrefix: "PEU",
     }],
   },
   languages: {
@@ -168,8 +175,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Langues",
       itemLabel: "une langue",
-      headers: ["Nom", "Lieu", "Peuple", "Langue-mère", "Langue-fille"],
-      widths: [220, 240, 240, 220, 220],
+      headers: ["Nom", "Lieu", "Peuple", "Langue-mère", "Langue-fille", ID_HEADER],
+      widths: [220, 240, 240, 220, 220, 130],
+      idPrefix: "LAN",
     }],
   },
   // Quatre index préparés, à remplir : chacun a son propre classeur, créé la première
@@ -182,8 +190,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "États",
       itemLabel: "un état",
-      headers: ["Nom", "Type", "Effet", "Durée", "Cumul", "Fin de l'état", "Description", "Note"],
-      widths: [220, 140, 380, 140, 110, 260, 380, 280],
+      headers: ["Nom", "Type", "Effet", "Durée", "Cumul", "Fin de l'état", "Description", "Note", ID_HEADER],
+      widths: [220, 140, 380, 140, 110, 260, 380, 280, 130],
+      idPrefix: "ETA",
     }],
   },
   runes: {
@@ -194,8 +203,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Runes",
       itemLabel: "une rune",
-      headers: ["Nom", "Type", "Élément", "Effet", "Se pose sur", "Rareté", "Description", "Note"],
-      widths: [220, 140, 140, 380, 200, 130, 380, 280],
+      headers: ["Nom", "Type", "Élément", "Effet", "Se pose sur", "Rareté", "Description", "Note", ID_HEADER],
+      widths: [220, 140, 140, 380, 200, 130, 380, 280, 130],
+      idPrefix: "RUN",
     }],
   },
   attributes: {
@@ -206,8 +216,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Attributs",
       itemLabel: "un attribut",
-      headers: ["Nom", "Type", "Effet", "Description", "Note"],
-      widths: [220, 160, 420, 380, 280],
+      headers: ["Nom", "Type", "Effet", "Description", "Note", ID_HEADER],
+      widths: [220, 160, 420, 380, 280, 130],
+      idPrefix: "ATT",
     }],
   },
   materials: {
@@ -218,8 +229,9 @@ export const worldIndexDefinitions: Record<WorldIndexKey, WorldIndexDefinition> 
     tabs: [{
       name: "Matériaux",
       itemLabel: "un matériau",
-      headers: ["Nom", "Type", "Rareté", "Emplacement principal", "Emplacement secondaire", "Propriétés", "Description", "Note"],
-      widths: [220, 150, 130, 200, 200, 320, 380, 280],
+      headers: ["Nom", "Type", "Rareté", "Emplacement principal", "Emplacement secondaire", "Propriétés", "Description", "Note", ID_HEADER],
+      widths: [220, 150, 130, 200, 200, 320, 380, 280, 130],
+      idPrefix: "MAT",
     }],
   },
 }
@@ -255,10 +267,6 @@ export function linkEndTabs(end: WorldIndexLinkEnd) {
   return end.tab === "*" ? worldIndexDefinitions[end.index].tabs.map((tab) => tab.name) : [end.tab]
 }
 
-export function foldName(value: string) {
-  // ’ et ' sont le même caractère pour un nom : le clavier et Sheets n'écrivent pas toujours le même.
-  return value.normalize("NFD").replace(/\p{M}/gu, "").replace(/[’‘ʼ`´]/g, "'").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
-}
 
 /** « Aldor, Vesna ; Tharn » → trois noms. Doublons retirés, casse d'origine conservée. */
 export function splitNames(value: string) {
@@ -280,6 +288,42 @@ export function linkedColumnsOf(index: WorldIndexKey, tab: string) {
   return worldIndexLinks.flatMap((pair) => pair.filter((end) => linkEndCovers(end, index, tab)).map((end) => end.column))
 }
 
+/** Anciennes colonnes des créatures : sorties de la fiche, elles gardent leur contenu dans Sheets. */
+export const creatureArchivedHeaders = ["Environnement", "Climat", "Sous-type secondaire", "Rencontre", "Perception"]
+
+/** Les champs de la fiche d'une créature qui ne sont que du texte enrichi. */
+const creatureFormTexts = ["Taille", "Poids", creatureNoteHeader]
+
+function isHeader(header: string, candidates: string[]) {
+  const folded = foldName(header)
+  return candidates.some((candidate) => foldName(candidate) === folded)
+}
+
+/**
+ * Le type de chaque colonne d'un index du monde, reconnu par son en-tête. Une colonne
+ * ajoutée à la main dans Sheets est du texte enrichi, la norme.
+ */
+export function worldColumnSpec(index: WorldIndexKey, tab: string, header: string): IndexColumnSpec {
+  if (isIdHeader(header)) return { kind: "id" }
+  if (isNameColumn(header)) return index === "creatures" ? { kind: "name-form", also: ["fixed"] } : { kind: "name", also: ["fixed"] }
+  if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
+  if (index === "creatures") {
+    const form = !isHeader(header, creatureGridHeaders)
+    if (isHeader(header, creatureArchivedHeaders)) return { kind: "archived" }
+    const options = Object.entries(creatureChoices).find(([candidate]) => foldName(candidate) === foldName(header))?.[1]
+    if (options) return { kind: "choice", options, form }
+    if (foldName(header) === "dressable") return { kind: "checkbox" }
+    if (foldName(header) === "portrait") return { kind: "image", form: true }
+    if (isHeader(header, ["Sorts actifs"])) return { kind: "spells", spells: { source: "creature", category: "actif" }, form: true }
+    if (isHeader(header, ["Sorts passifs"])) return { kind: "spells", spells: { source: "creature", category: "passif" }, form: true }
+    if (isHeader(header, creatureCharacteristics)) return { kind: "number", min: 0, max: 99999, form: true }
+    if (isHeader(header, creatureFormTexts)) return { kind: "rich", form: true }
+    return { kind: "rich", form }
+  }
+  return { kind: "rich" }
+}
+
+/** Les colonnes longues (récits) prennent plus de place dans le tableau et le formulaire. */
 export function isLongColumn(header: string) {
   return /description|note|histoire|autre|organisation|rencontre/.test(foldName(header))
 }

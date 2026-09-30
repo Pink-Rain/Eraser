@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { Backpack, ChevronDown, CircleMinus, Dices, Download, ImagePlus, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
+import { Backpack, ChevronDown, CircleMinus, Dices, Download, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
   AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger,
 } from "@/components/ui/alert-dialog"
-import { RichTextField, RichTextView } from "@/components/eraser/rich-text"
+import { ImageField, LinkedChoicePicker } from "@/components/eraser/index-cells"
+import { RichTextField, RichTextView, richTextPlainText } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
@@ -18,11 +19,11 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Progress } from "@/components/ui/progress"
 import { CharacterInventory } from "@/components/eraser/character-inventory"
 import { CharacteristicBadges, CharacteristicInputs } from "@/components/eraser/characteristic-fields"
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { npcCharacteristicKeys, npcCharacteristics, type CharacteristicName } from "@/lib/characteristics"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
 import { SpellPicker, useSpellOptions } from "@/components/eraser/spell-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
+import { compactRichText } from "@/lib/index-columns"
 import { isNpcLibraryPage, npcBelongsToCampaign } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
 
@@ -95,47 +96,16 @@ export function ImportNpcsDialog({ open, sourcePages, pending, onClose, onImport
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Récupérer des PNJ</DialogTitle></DialogHeader><div className="space-y-4"><div className="grid gap-3 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Source<NativeSelect value={sourcePageLinked} onChange={(event) => { setLoading(true); setError(""); setSelected(new Set()); setSourcePageLinked(event.target.value) }}>{sourcePages.map((source) => <NativeSelectOption key={source.id} value={source.id}>{source.name}</NativeSelectOption>)}</NativeSelect></Label><Label className="grid gap-1.5 text-sm font-medium">Action<NativeSelect value={transferMode} onChange={(event) => setTransferMode(event.target.value as "copy" | "move")}><NativeSelectOption value="copy">Copier — garder l’original</NativeSelectOption><NativeSelectOption value="move">Déplacer — retirer de la source</NativeSelectOption></NativeSelect></Label></div><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ…" /></div>{error && <p className="text-sm text-destructive">{error}</p>}<div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{loading ? <div className="grid min-h-28 place-items-center"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : filtered.length ? filtered.map((npc) => <button key={npc.id} type="button" onClick={() => toggle(npc.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent ${selected.has(npc.id) ? "bg-primary/10" : ""}`}><Checkbox checked={selected.has(npc.id)} aria-label={`Sélectionner ${npc.name}`} /><UserRound className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{npc.name}</span></button>) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">Aucun PNJ dans cette source.</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={onClose}>Annuler</Button><Button type="button" disabled={pending || !selected.size} onClick={() => onImport(sourcePageLinked, [...selected], transferMode)}>{pending ? <LoaderCircle className="animate-spin" /> : <Download />}{transferMode === "move" ? "Déplacer" : "Copier"} {selected.size || ""}</Button></div></div></DialogContent></Dialog>
 }
 
-/** Les noms de l'Index des peuples, chargés une fois pour toutes les fiches ouvertes. */
-let peopleNames: Promise<string[]> | null = null
-
-function loadPeopleNames() {
-  peopleNames ||= fetch("/api/resources/world-indexes?key=peoples")
-    .then((response) => response.json())
-    .then((payload: { data?: { tables?: Array<{ headers: string[]; rows: Array<{ values: string[] }> }> } }) => {
-      const table = payload.data?.tables?.[0]
-      const column = table?.headers.findIndex((header) => header.trim().toLowerCase() === "nom") ?? -1
-      return table && column >= 0 ? [...new Set(table.rows.map((row) => row.values[column].trim()).filter(Boolean))].sort((left, right) => left.localeCompare(right, "fr")) : []
-    })
-    .catch(() => { peopleNames = null; return [] })
-  return peopleNames
-}
-
-const NO_PEOPLE = "__aucun__"
+/** Le peuple d'un PNJ : une liste déroulante liée à l'Index des peuples. */
+export const npcPeopleSource = { index: "peoples", tab: "Peuples" } as const
 
 /**
  * Le peuple d'un PNJ, choisi dans l'Index des peuples. Une valeur déjà écrite qui n'y
- * figure pas (« Haut-homme ») reste proposée : rien n'est effacé en ouvrant la fiche.
+ * figure pas (« Haut-homme ») reste proposée : rien n'est effacé en ouvrant la fiche,
+ * et un peuple saisi qui n'existe pas encore est créé dans l'index.
  */
 export function PeopleSelect({ value, onChange, compact = false, disabled = false }: { value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean }) {
-  const [names, setNames] = useState<string[] | null>(null)
-  useEffect(() => {
-    let alive = true
-    void loadPeopleNames().then((loaded) => { if (alive) setNames(loaded) })
-    return () => { alive = false }
-  }, [])
-  const current = value.trim()
-  const options = names ?? []
-  const legacy = current && !options.some((name) => name.toLocaleLowerCase("fr") === current.toLocaleLowerCase("fr")) ? current : ""
-  const selected = options.find((name) => name.toLocaleLowerCase("fr") === current.toLocaleLowerCase("fr")) ?? current
-  return <Select value={selected || NO_PEOPLE} onValueChange={(next) => onChange(next === NO_PEOPLE ? "" : next)} disabled={disabled}>
-    <SelectTrigger size="sm" aria-label="Peuple" className={compact ? "h-8 w-full border-transparent bg-transparent px-2 shadow-none hover:border-input dark:bg-transparent" : "h-10 w-full bg-background/75"}><SelectValue placeholder="—" /></SelectTrigger>
-    <SelectContent position="popper" className="max-h-72">
-      <SelectItem value={NO_PEOPLE} className="text-muted-foreground">—</SelectItem>
-      {legacy && <SelectItem value={legacy} className="italic text-muted-foreground" title="Absent de l’index Peuples">{legacy}</SelectItem>}
-      {names === null && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Peuples…</p>}
-      {options.map((name) => <SelectItem key={name} value={name}>{name}</SelectItem>)}
-    </SelectContent>
-  </Select>
+  return <LinkedChoicePicker label="Peuple" source={npcPeopleSource} value={value} compact={compact} disabled={disabled} onChange={onChange} />
 }
 
 const textLabel = "grid gap-1.5 text-xs font-semibold text-muted-foreground"
@@ -181,21 +151,23 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
   return <div className="space-y-6">
     <section className="grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)]">
       <div className="space-y-3">
-        <label className="group relative block aspect-[4/5] cursor-pointer overflow-hidden rounded-2xl border bg-muted/40">
-          {portraitPreview || draft.portrait
-            // eslint-disable-next-line @next/next/no-img-element
-            ? <img src={portraitPreview || draft.portrait} alt={`Portrait de ${draft.name || "ce PNJ"}`} className="size-full object-cover" />
-            : <div className="grid size-full place-items-center"><UserRound className="size-16 text-primary/25" /></div>}
-          <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />Importer</span>
-          <input type="file" accept="image/*" className="sr-only" onChange={(event) => choosePortrait(event.target.files?.[0])} />
-        </label>
-        <TokenButton kind="npc" ownerId={draft.id} name={draft.name} source={portraitPreview || draft.portrait} style={{ kind: "npc" }} disabledReason={portraitPreview || draft.portrait ? "" : "Ajoute d’abord un avatar"} />
-        <Label className={textLabel}>Avatar (URL)<Input type="url" value={draft.portrait} onChange={(event) => update("portrait", event.target.value)} placeholder="https://…" /></Label>
+        {/* Colonne Image (formulaire) : l'image importée est envoyée à l'enregistrement du PNJ. */}
+        <ImageField
+          label={`Portrait de ${draft.name || "ce PNJ"}`}
+          value={draft.portrait}
+          preview={portraitPreview}
+          aspect="aspect-[4/5]"
+          placeholder={<UserRound className="size-16 text-primary/25" />}
+          onFile={choosePortrait}
+          onChange={(value) => { setPortraitFile(undefined); setPortraitPreview(""); update("portrait", value) }}
+        >
+          <TokenButton kind="npc" ownerId={draft.id} name={draft.name} source={portraitPreview || draft.portrait} style={{ kind: "npc" }} disabledReason={portraitPreview || draft.portrait ? "" : "Ajoute d’abord un avatar"} />
+        </ImageField>
       </div>
       <div className="grid content-start gap-4 sm:grid-cols-2">
         <Label className={textLabel}>Nom du PNJ<Input required value={draft.name} onChange={(event) => update("name", event.target.value)} /></Label>
-        <Label className={textLabel}>Titre<Input value={draft.title} onChange={(event) => update("title", event.target.value)} placeholder="Capitaine, comtesse…" /></Label>
-        <Label className={textLabel}>Fonction / classe / métier<Input value={draft.occupation} onChange={(event) => update("occupation", event.target.value)} /></Label>
+        <div className={textLabel}><span>Titre</span><RichTextField ariaLabel="Titre" value={draft.title} minHeight="min-h-10" placeholder="Capitaine, comtesse…" onCommit={(html) => update("title", compactRichText(html))} /></div>
+        <div className={textLabel}><span>Fonction / classe / métier</span><RichTextField ariaLabel="Fonction / classe / métier" value={draft.occupation} minHeight="min-h-10" onCommit={(html) => update("occupation", compactRichText(html))} /></div>
         <div className={textLabel}><span>Peuple</span><PeopleSelect value={draft.people} onChange={(value) => update("people", value)} /></div>
         {inCampaign && <NumberField label="Vie actuelle" value={draft.currentHp} onChange={(value) => update("currentHp", value)} />}
         <div className={`${textLabel} sm:col-span-2 leading-none`}>Notes <span className="font-normal">Visible pour les joueurs</span><RichTextField ariaLabel="Notes" value={draft.playerNotes} onCommit={(html) => update("playerNotes", html)} minHeight="min-h-28" /></div>
@@ -234,7 +206,7 @@ function NpcCard({ npc, pending, mode, action, onEdit, onAction, onToggleGroup, 
       <div className="aspect-[4/5] overflow-hidden rounded-xl border bg-muted/40">{npc.portrait ? <img src={npc.portrait} alt={`Portrait de ${npc.name}`} className="size-full object-cover" /> : <div className="grid size-full place-items-center"><UserRound className="size-10 text-primary/25" /></div>}</div>
       <div className="min-w-0 space-y-3">
         <div className="flex items-start justify-between gap-3">
-          <div><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[npc.title, npc.occupation, npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p>{campaignNpc && npc.inPlayerGroup && <p className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"><UsersRound className="size-3" />Groupe</p>}</div>
+          <div><h3 className="font-display text-xl font-semibold">{npc.name}</h3><p className="text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")}{campaignNpc && <>{(npc.title || npc.occupation || npc.people) ? " · " : ""}PV {npc.currentHp} / {npc.totalHp}</>}</p>{campaignNpc && npc.inPlayerGroup && <p className="mt-1 inline-flex items-center gap-1 rounded-full border border-primary/35 px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider text-primary"><UsersRound className="size-3" />Groupe</p>}</div>
           <div className="flex gap-1">
             <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} title="Modifier" aria-label={`Modifier ${npc.name}`}><Pencil /></Button>
             {campaignNpc && <Button type="button" variant={npc.inPlayerGroup ? "secondary" : "ghost"} size="icon-sm" onClick={onToggleGroup} disabled={pending} title={npc.inPlayerGroup ? "Retirer des PNJs du groupe" : "Ajouter aux PNJs du groupe"} aria-label={npc.inPlayerGroup ? `Retirer ${npc.name} des PNJs du groupe` : `Ajouter ${npc.name} aux PNJs du groupe`} aria-pressed={npc.inPlayerGroup}><UsersRound className={npc.inPlayerGroup ? "text-primary" : ""} /></Button>}
@@ -270,7 +242,7 @@ function AddNpcToSessionDialog({ open, candidates, pending, onClose, onAdd, onCr
   const filtered = candidates.filter((npc) => !normalizedQuery || `${npc.name} ${npc.title} ${npc.occupation}`.toLocaleLowerCase("fr").includes(normalizedQuery))
   function toggle(id: string) { setSelected((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next }) }
   function close() { setSelected(new Set()); setQuery(""); onClose() }
-  return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) close() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter un PNJ</DialogTitle></DialogHeader><div className="space-y-4"><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ de la campagne…" /></div><Button type="button" variant="outline" onClick={() => { setSelected(new Set()); setQuery(""); onCreate() }}><Plus />Créer un PNJ</Button></div><div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((npc) => <button key={npc.id} type="button" onClick={() => toggle(npc.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent ${selected.has(npc.id) ? "bg-primary/10" : ""}`}><Checkbox checked={selected.has(npc.id)} aria-label={`Sélectionner ${npc.name}`} /><UserRound className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{npc.name}</span><span className="truncate text-xs text-muted-foreground">{[npc.title, npc.occupation].filter(Boolean).join(" · ")}</span></button>) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{candidates.length ? "Aucun PNJ ne correspond." : "Tous les PNJs de la campagne sont déjà dans la session."}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Annuler</Button><Button type="button" disabled={pending || !selected.size} onClick={() => { onAdd([...selected]); setSelected(new Set()); setQuery("") }}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}Ajouter {selected.size || ""}</Button></div></div></DialogContent></Dialog>
+  return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) close() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter un PNJ</DialogTitle></DialogHeader><div className="space-y-4"><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ de la campagne…" /></div><Button type="button" variant="outline" onClick={() => { setSelected(new Set()); setQuery(""); onCreate() }}><Plus />Créer un PNJ</Button></div><div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((npc) => <button key={npc.id} type="button" onClick={() => toggle(npc.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent ${selected.has(npc.id) ? "bg-primary/10" : ""}`}><Checkbox checked={selected.has(npc.id)} aria-label={`Sélectionner ${npc.name}`} /><UserRound className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{npc.name}</span><span className="truncate text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation)].filter(Boolean).join(" · ")}</span></button>) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{candidates.length ? "Aucun PNJ ne correspond." : "Tous les PNJs de la campagne sont déjà dans la session."}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Annuler</Button><Button type="button" disabled={pending || !selected.size} onClick={() => { onAdd([...selected]); setSelected(new Set()); setQuery("") }}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}Ajouter {selected.size || ""}</Button></div></div></DialogContent></Dialog>
 }
 
 export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "manage", session }: { initialNpcs: CampaignNpcRecord[]; pageLinked: string; sourcePages?: ReusablePageOption[]; mode?: "manage" | "session"; session?: NpcSessionBinding }) {

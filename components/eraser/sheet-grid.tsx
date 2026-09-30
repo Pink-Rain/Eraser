@@ -63,6 +63,8 @@ export type SheetGridColumn = {
    * copier, coller, vider et trier continuent de passer par sa valeur.
    */
   control?: (rowKey: string) => ReactNode
+  /** Le type de la colonne (« Liste déroulante · Formulaire »), montré au survol de l'en-tête. */
+  typeLabel?: string
 }
 
 export type SheetGridRow = { key: string; rowNumber: number }
@@ -118,10 +120,10 @@ function parseTsv(text: string) {
 }
 
 /** Habillage de la barre d'outils commune : mêmes boutons partout, plus la mise en page du tableau. */
-function SheetGridToolbar({ targetRef, ready, leading, trailing, onReset }: { targetRef: MutableRefObject<RichTextTarget | null>; ready: boolean; leading?: ReactNode; trailing?: ReactNode; onReset: () => void }) {
+function SheetGridToolbar({ targetRef, ready, leading, trailing, readOnly, onReset }: { targetRef: MutableRefObject<RichTextTarget | null>; ready: boolean; leading?: ReactNode; trailing?: ReactNode; readOnly: boolean; onReset: () => void }) {
   return <div className="flex flex-wrap items-center gap-1 border-b bg-card/95 px-2 py-1.5 backdrop-blur">
-    <RichTextToolbar targetRef={targetRef} ready={ready} leading={leading} />
-    {!ready && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans une cellule pour mettre en forme.</span>}
+    {readOnly ? leading : <RichTextToolbar targetRef={targetRef} ready={ready} leading={leading} />}
+    {!ready && !readOnly && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans une cellule pour mettre en forme.</span>}
     <span className="ml-auto flex items-center gap-1">
       {trailing}
       <Button type="button" size="sm" variant="ghost" onClick={onReset} title="Réinitialiser largeurs et hauteurs"><RotateCcw />Mise en page</Button>
@@ -143,6 +145,7 @@ type SheetGridMenu = {
   askInsertRows: (key: string) => void
   rowCommands?: SheetGridRowCommands
   rowMenuExtras?: (rowKey: string) => ReactNode
+  readOnly: boolean
 }
 
 const SheetGridMenuContext = createContext<SheetGridMenu | null>(null)
@@ -156,6 +159,7 @@ function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: nu
   return <>
     <ContextMenuLabel>{count > 1 ? `${count} lignes sélectionnées` : `Ligne ${rowNumber}`}</ContextMenuLabel>
     <ContextMenuItem onSelect={() => void menu.copyRows(targets())}><Copy />Copier<ContextMenuShortcut>Ctrl+C</ContextMenuShortcut></ContextMenuItem>
+    {!menu.readOnly && <>
     <ContextMenuItem onSelect={() => void menu.copyRows(targets(), true)}><Scissors />Couper<ContextMenuShortcut>Ctrl+X</ContextMenuShortcut></ContextMenuItem>
     <ContextMenuItem onSelect={() => void menu.pasteRows(rowKey)}><ClipboardPaste />Coller ici<ContextMenuShortcut>Ctrl+V</ContextMenuShortcut></ContextMenuItem>
     <ContextMenuItem onSelect={() => menu.clearRows(targets())}><Eraser />Vider le contenu<ContextMenuShortcut>Suppr</ContextMenuShortcut></ContextMenuItem>
@@ -169,6 +173,7 @@ function SheetGridRowMenu({ rowKey, rowNumber }: { rowKey: string; rowNumber: nu
     {rowCommands?.remove && <>
       <ContextMenuSeparator />
       <ContextMenuItem variant="destructive" onSelect={() => menu.askRemoval(targets())}><Trash2 />Supprimer<ContextMenuShortcut>Ctrl+Suppr</ContextMenuShortcut></ContextMenuItem>
+    </>}
     </>}
     {menu.rowMenuExtras?.(rowKey)}
   </>
@@ -192,7 +197,7 @@ type SheetGridRowActions = {
  */
 const SheetGridRowView = memo(function SheetGridRowView({
   rowKey, rowNumber, rowIndex, columns, firstKey, manualHeight, selected, activeColumn, fillColumn,
-  version, writeTick, disabled, valueOf, renderCustomCell, actions, striped,
+  version, writeTick, disabled, readOnly, valueOf, renderCustomCell, actions, striped,
 }: {
   rowKey: string
   rowNumber: number
@@ -206,6 +211,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
   version: number
   writeTick: number
   disabled: boolean
+  readOnly: boolean
   valueOf: (rowKey: string, columnKey: string) => string
   renderCustomCell?: (rowKey: string, columnKey: string) => ReactNode
   actions: SheetGridRowActions
@@ -258,14 +264,14 @@ const SheetGridRowView = memo(function SheetGridRowView({
                 key={`${version}:${writeTick}:${column.key}`}
                 initialHtml={column.plain ? escapeRichText(valueOf(rowKey, column.key)) : sanitizeRichText(valueOf(rowKey, column.key))}
                 plain={Boolean(column.plain)}
-                disabled={disabled}
+                disabled={disabled || readOnly}
                 placeholder=""
                 delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
                 onCommit={(value) => actions.commit(rowKey, column.key, value)}
                 onActivate={(editor) => actions.activate(editor, rowKey, column.key)}
                 className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
               />}
-        {isActive && !column.custom && !column.control && <span
+        {isActive && !readOnly && !column.custom && !column.control && <span
           role="separator"
           aria-label="Recopier le contenu vers les lignes suivantes"
           title="Tirer pour recopier le contenu"
@@ -279,7 +285,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
 
 export function SheetGrid({
   layoutKey, columns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
-  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, version = 0,
+  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -298,6 +304,8 @@ export function SheetGrid({
   toolbarTrailing?: ReactNode
   empty: ReactNode
   disabled?: boolean
+  /** Tableau consultable seulement : ni frappe, ni collage, ni recopie ; la copie reste possible. */
+  readOnly?: boolean
   /** À incrémenter quand les valeurs viennent réellement du serveur : les cellules
    *  sont alors remontées avec le nouveau contenu. Une frappe ne doit jamais le changer. */
   version?: number
@@ -440,6 +448,7 @@ export function SheetGrid({
       const modifier = event.ctrlKey || event.metaKey
       const key = event.key.toLowerCase()
       if (modifier && key === "c") { event.preventDefault(); void copyRows(ordered) }
+      else if (readOnly) { if (key === "escape") setSelection([]) }
       else if (modifier && key === "x") { event.preventDefault(); void copyRows(ordered, true) }
       else if (modifier && key === "v") { event.preventDefault(); void pasteRows(ordered[0]) }
       else if (modifier && key === "d") { event.preventDefault(); rowCommands?.duplicate?.(ordered) }
@@ -450,7 +459,7 @@ export function SheetGrid({
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [clearRows, copyRows, ordered, pasteRows, rowCommands, selection])
+  }, [clearRows, copyRows, ordered, pasteRows, readOnly, rowCommands, selection])
 
   useEffect(() => {
     if (!notice) return
@@ -558,8 +567,9 @@ export function SheetGrid({
     clearRows,
     askRemoval: setPendingRemoval,
     askInsertRows: (key) => { setInsertFor(key); setInsertCount("5") },
-    rowCommands,
+    rowCommands: readOnly ? undefined : rowCommands,
     rowMenuExtras,
+    readOnly,
   }
 
   const headerCell = "sticky top-0 border-b border-r bg-muted px-2 py-2 text-left align-bottom font-semibold"
@@ -575,6 +585,7 @@ export function SheetGrid({
       targetRef={activeRef}
       ready={toolbarReady}
       leading={toolbarLeading}
+      readOnly={readOnly}
       trailing={<>
         {activeFilters.length > 0 && <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Filter className="size-3 fill-current text-primary" />{rows.length} ligne{rows.length > 1 ? "s" : ""} sur {sourceRows.length}<button type="button" className="text-primary underline" onClick={() => setFilters({})}>Retirer les filtres</button></span>}
         {notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}
@@ -603,7 +614,7 @@ export function SheetGrid({
                 style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
                 // Clic droit : tri et filtres, comme dans Google Sheets.
                 onContextMenu={(event) => { if (column.custom) return; event.preventDefault(); setMenuColumn(column.key) }}
-                title={column.custom ? undefined : "Clic droit pour trier ou filtrer"}
+                title={[column.typeLabel && `Type : ${column.typeLabel}`, column.custom ? "" : "Clic droit pour trier ou filtrer"].filter(Boolean).join("\n") || undefined}
               >
                 <div className="flex items-center gap-1">
                   {sortable
@@ -648,12 +659,13 @@ export function SheetGrid({
             version={version}
             writeTick={writeTick}
             disabled={disabled}
+            readOnly={readOnly}
             valueOf={valueOf}
             renderCustomCell={renderCustomCell}
             actions={rowActions}
             striped={rowIndex % 2 === 1}
           />)}
-          {rowCommands?.append && Boolean(rows.length) && <tr>
+          {rowCommands?.append && !readOnly && Boolean(rows.length) && <tr>
             <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
             <td colSpan={columns.length} className="border-b p-0">
               <button type="button" onClick={() => rowCommands.append?.()} disabled={disabled} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50">

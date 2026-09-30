@@ -75,6 +75,7 @@ export type ClassSpell = {
   skills: string[]
   skillsRaw: string
   distance: string
+  distanceHtml: string
   charges: number | null
   /** Texte brut de la cellule Charges (« 3 », « ✦ », vide) : pour les statistiques. */
   chargesLabel?: string
@@ -429,6 +430,7 @@ function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedShee
     skillsRaw: cell(row, workbook.columns.skills),
     skills: splitClassSpellSkills(cell(row, workbook.columns.skills)),
     distance: cell(row, workbook.columns.distance),
+    distanceHtml: formattedCell(cells, workbook.columns.distance).html,
     charges: Number.isInteger(chargesValue) && chargesValue >= 0 ? Math.min(5, chargesValue) : null,
     chargesLabel: cell(row, workbook.columns.charges).trim(),
     classRanks,
@@ -505,6 +507,7 @@ export async function updateClassPresentationCell(input: { classId: string; rowN
 export type ClassSpellDraft = Pick<ClassSpell, "id" | "name" | "effect" | "description" | "type" | "skillsRaw" | "distance"> & {
   effectHtml?: string
   descriptionHtml?: string
+  distanceHtml?: string
   charges: number | null
   classRanks: Record<string, number | null>
 }
@@ -650,7 +653,6 @@ export async function saveClassSpell(rowNumber: number | null, draft: ClassSpell
     [workbook.columns.name, name],
     [workbook.columns.type, draft.type],
     [workbook.columns.skills, draft.skillsRaw],
-    [workbook.columns.distance, draft.distance],
     [workbook.columns.charges, chargesCell(draft.charges, current ? cell(current, workbook.columns.charges) : "")],
     ...workbook.classColumns.map(({ classId, column }): [number, string] => {
       const rank = draft.classRanks[classId]
@@ -662,6 +664,7 @@ export async function saveClassSpell(rowNumber: number | null, draft: ClassSpell
   const texts: Array<[number, string, string | undefined]> = [
     [workbook.columns.effect, draft.effect, rich(draft.effect, draft.effectHtml)],
     [workbook.columns.description, draft.description, rich(draft.description, draft.descriptionHtml)],
+    [workbook.columns.distance, draft.distance, rich(draft.distance, draft.distanceHtml)],
   ]
 
   const typeCell = formattedCell(currentCells, workbook.columns.type)

@@ -1,15 +1,15 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
+import { indexGridColumn, RankedLinksCell } from "@/components/eraser/index-cells"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -18,6 +18,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { ClassSpell, ClassSpellDraft, SpellIndexKind, SpellSimilarity } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
+import type { IndexColumnSpec } from "@/lib/index-columns"
 import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-duplicates"
 import { ClassStateDetail, ClassStateOverview } from "@/components/eraser/class-state-overview"
 import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
@@ -39,11 +40,11 @@ function ignoredPairsOf(data: ResourceData) {
 }
 
 function emptyDraft(): ClassSpellDraft {
-  return { id: "", name: "", effect: "", effectHtml: "", description: "", descriptionHtml: "", type: "Passif", skillsRaw: "", distance: "", charges: null, classRanks: {} }
+  return { id: "", name: "", effect: "", effectHtml: "", description: "", descriptionHtml: "", type: "Passif", skillsRaw: "", distance: "", distanceHtml: "", charges: null, classRanks: {} }
 }
 
 function toDraft(spell: ClassSpell): ClassSpellDraft {
-  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, charges: spell.charges, classRanks: { ...spell.classRanks } }
+  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, distanceHtml: spell.distanceHtml, charges: spell.charges, classRanks: { ...spell.classRanks } }
 }
 
 /** Un sort peut ne pas avoir de titre, mais pas être entièrement vide. */
@@ -62,7 +63,7 @@ function searchText(spell: Pick<ClassSpell, "name" | "type" | "skillsRaw" | "eff
 function materialize(draft: ClassSpellDraft, rowNumber: number, id: string, tone?: { background: string; foreground: string }): ClassSpell {
   const category = classSpellCategory(draft.type)
   const classRanks = Object.fromEntries(Object.entries(draft.classRanks).flatMap(([classId, rank]) => Number.isInteger(rank) && rank !== null && rank >= 0 && rank <= 20 ? [[classId, rank]] : [])) as Record<string, number>
-  return { rowNumber, id, name: draft.name.trim() || UNNAMED_CLASS_SPELL, effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, charges: draft.charges, classRanks, tone: tone || classSpellCategoryTones[category] }
+  return { rowNumber, id, name: draft.name.trim() || UNNAMED_CLASS_SPELL, effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, distanceHtml: draft.distanceHtml || draft.distance, charges: draft.charges, classRanks, tone: tone || classSpellCategoryTones[category] }
 }
 
 function TypeGlyph({ category }: { category: ClassSpell["category"] }) {
@@ -77,71 +78,47 @@ function rankCount(spells: ClassSpell[], classId: string, rank: number, exceptRo
   return spells.filter((spell) => spell.rowNumber !== exceptRow && spell.classRanks[classId] === rank).length
 }
 
-function fold(value: string) {
-  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
-}
+
+const classRanks = Array.from({ length: 21 }, (_, rank) => rank)
 
 /**
- * « Classes et rangs » tient désormais dans une cellule : chaque lien est une pastille
- * aux couleurs de la classe, avec son rang modifiable sur place, et un seul bouton
- * ouvre une liste de classes cherchable pour en ajouter une.
+ * « Classes et rangs » est une colonne de type Liens classés : chaque lien est une
+ * pastille aux couleurs de la classe, avec son rang (C, R1…R20) modifiable sur place.
+ * Un rang ne peut pas contenir plus de trois sorts.
  */
 function ClassLinksEditor({ draft, classes, spells, rowNumber, compact = false, onChange }: { draft: ClassSpellDraft; classes: ClassRecord[]; spells: ClassSpell[]; rowNumber?: number; compact?: boolean; onChange: (value: Record<string, number | null>) => void }) {
-  const [open, setOpen] = useState(false)
-  const [query, setQuery] = useState("")
-  const [rank, setRank] = useState(0)
-  const linked = Object.entries(draft.classRanks).flatMap(([classId, linkedRank]) => linkedRank === null ? [] : [[classId, linkedRank] as const])
-  const available = classes.filter((item) => draft.classRanks[item.id] === undefined || draft.classRanks[item.id] === null)
-  const matches = available.filter((item) => !fold(query) || fold(item.name).includes(fold(query)))
-  const full = (classId: string, candidate: number) => rankCount(spells, classId, candidate, rowNumber) >= MAX_CLASS_SPELLS_PER_RANK
+  const options = useMemo(() => classes.map((item) => ({ id: item.id, name: item.name, color: item.accentDark })), [classes])
+  return <RankedLinksCell
+    links={draft.classRanks}
+    options={options}
+    ranks={classRanks}
+    rankLabel={(rank) => rank === 0 ? "Commun" : `Rang ${rank}`}
+    rankShort={(rank) => rank === 0 ? "C" : `R${rank}`}
+    isFull={(classId, rank) => rankCount(spells, classId, rank, rowNumber) >= MAX_CLASS_SPELLS_PER_RANK}
+    addLabel="Classe"
+    fullLabel="rang plein (3 sorts)"
+    compact={compact}
+    onChange={onChange}
+  />
+}
 
-  function add(classId: string) {
-    onChange({ ...draft.classRanks, [classId]: rank })
-    setOpen(false); setQuery("")
-  }
+/** Les types des colonnes du tableau des sorts. */
+const spellSpecs = {
+  name: { kind: "name", also: ["fixed"] },
+  effect: { kind: "rich" },
+  description: { kind: "rich", display: "muted" },
+  type: { kind: "choice", also: ["fixed"], options: classSpellTypeSuggestions.map((value) => ({ value })), allowCustom: true },
+  skills: { kind: "fixed", display: "skills" },
+  distance: { kind: "rich" },
+  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } },
+  classes: { kind: "ranked-links" },
+  id: { kind: "id" },
+} satisfies Record<string, IndexColumnSpec>
 
-  return <div className={`flex flex-wrap items-center gap-1 ${compact ? "" : "py-0.5"}`}>
-    {linked.map(([classId, linkedRank]) => {
-      const characterClass = classes.find((item) => item.id === classId)
-      const accent = characterClass?.accentDark || "#7f5a3a"
-      return <span key={classId} className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold" style={{ borderColor: `${accent}55`, backgroundColor: `${accent}14`, color: accent }}>
-        <span className="max-w-28 truncate">{characterClass?.name || classId}</span>
-        <select
-          aria-label={`Rang de ${characterClass?.name || classId}`}
-          value={linkedRank}
-          onChange={(event) => onChange({ ...draft.classRanks, [classId]: Number(event.target.value) })}
-          className="cursor-pointer rounded bg-transparent text-[11px] font-bold outline-none"
-          style={{ color: accent }}
-        >
-          <option value="0" disabled={linkedRank !== 0 && full(classId, 0)}>C</option>
-          {Array.from({ length: 20 }, (_, index) => <option key={index + 1} value={index + 1} disabled={linkedRank !== index + 1 && full(classId, index + 1)}>R{index + 1}</option>)}
-        </select>
-        <button type="button" onClick={() => onChange({ ...draft.classRanks, [classId]: null })} className="rounded-full p-0.5 hover:bg-destructive/15 hover:text-destructive" aria-label={`Délier ${characterClass?.name || classId}`}><X className="size-3" /></button>
-      </span>
-    })}
-    <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) { setQuery(""); setRank(0) } }}>
-      <PopoverTrigger asChild>
-        <button type="button" disabled={!available.length} className="inline-flex items-center gap-1 rounded-full border border-dashed px-2 py-0.5 text-[11px] font-semibold text-muted-foreground hover:border-primary hover:text-primary disabled:opacity-40" title="Lier une classe"><Plus className="size-3" />Classe</button>
-      </PopoverTrigger>
-      <PopoverContent align="start" className="w-72 p-0">
-        <div className="flex items-center gap-2 border-b p-2">
-          <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Classe…" className="h-8 border-0 bg-muted/45 pl-8 text-sm shadow-none" /></div>
-          <NativeSelect aria-label="Rang du lien" value={rank} onChange={(event) => setRank(Number(event.target.value))} className="h-8 w-20 text-xs"><NativeSelectOption value="0">Commun</NativeSelectOption>{Array.from({ length: 20 }, (_, index) => <NativeSelectOption key={index + 1} value={index + 1}>Rang {index + 1}</NativeSelectOption>)}</NativeSelect>
-        </div>
-        <div className="max-h-60 overflow-y-auto p-1">
-          {matches.map((item) => {
-            const blocked = full(item.id, rank)
-            return <button key={item.id} type="button" disabled={blocked} onClick={() => add(item.id)} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent disabled:opacity-45" title={blocked ? "Ce rang contient déjà trois sorts" : undefined}>
-              <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: item.accentDark }} />
-              <span className="min-w-0 flex-1 truncate">{item.name}</span>
-              {blocked && <span className="text-[10px] text-destructive">rang plein</span>}
-            </button>
-          })}
-          {!matches.length && <p className="px-3 py-5 text-center text-xs text-muted-foreground">Aucune classe disponible.</p>}
-        </div>
-      </PopoverContent>
-    </Popover>
-  </div>
+/** Le type d'un sort, dans la couleur de sa catégorie. */
+function SpellTypeLabel({ value }: { value: string }) {
+  const tone = classSpellCategoryTones[classSpellCategory(value)]
+  return <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: tone.background, color: tone.foreground }}>{value}</span>
 }
 
 function SpellForm({ initial, classes, spells, pending, title, withClasses = true, onCancel, onSave }: { initial: ClassSpellDraft; classes: ClassRecord[]; spells: ClassSpell[]; pending: boolean; title: string; withClasses?: boolean; onCancel: () => void; onSave: (draft: ClassSpellDraft) => void }) {
@@ -154,7 +131,7 @@ function SpellForm({ initial, classes, spells, pending, title, withClasses = tru
       <label className="grid gap-1 text-xs font-semibold md:col-span-1 xl:col-span-2">Nom<Input value={draft.name} onChange={(event) => field("name", event.target.value)} placeholder="Sans titre" /></label>
       <label className="grid gap-1 text-xs font-semibold">Type exact<Input list="class-spell-types" value={draft.type} onChange={(event) => field("type", event.target.value)} /></label>
       <label className="grid gap-1 text-xs font-semibold">Compétences<Input value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} className="text-[#b3261e]" /></label>
-      <label className="grid gap-1 text-xs font-semibold">Distance<Input value={draft.distance} onChange={(event) => field("distance", event.target.value)} /></label>
+      <div className="grid gap-1 text-xs font-semibold">Distance<RichTextField ariaLabel="Distance" value={draft.distanceHtml || draft.distance} minHeight="min-h-9" onCommit={(html) => setDraft((current) => ({ ...current, distance: plainText(html), distanceHtml: html }))} /></div>
       <label className="grid gap-1 text-xs font-semibold">Charges{classSpellCategory(draft.type) === "actif" ? <Input type="number" min={0} max={5} value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} /> : <span className="flex min-h-9 items-center text-muted-foreground">—</span>}</label>
       {withClasses && <div className="md:col-span-2 xl:col-span-1"><p className="mb-1 text-xs font-semibold">Classes et rangs</p><ClassLinksEditor draft={draft} classes={classes} spells={spells} onChange={(classRanks) => field("classRanks", classRanks)} /></div>}
       <div className="grid gap-1 text-xs font-semibold md:col-span-2">Effet<RichTextField ariaLabel="Effet" value={draft.effectHtml || draft.effect} onCommit={(html) => setDraft((current) => ({ ...current, effect: plainText(html), effectHtml: html }))} /></div>
@@ -278,7 +255,7 @@ function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDele
         </blockquote>
         <div className="flex flex-wrap items-center gap-2 text-xs">
           <Input aria-label="Compétences" value={draft.skillsRaw} onChange={(event) => field("skillsRaw", event.target.value)} placeholder="Compétences" className={`h-7 min-w-32 flex-1 font-semibold text-[#b3261e] ${framedInputClass} ${skillFrameClass}`} />
-          <Input aria-label="Distance" value={draft.distance} onChange={(event) => field("distance", event.target.value)} placeholder="Distance" className={`h-7 w-28 ${framedInputClass} ${distanceFrameClass}`} />
+          <Input aria-label="Distance" value={draft.distance} onChange={(event) => setDraft((current) => ({ ...current, distance: event.target.value, distanceHtml: undefined }))} placeholder="Distance" className={`h-7 w-28 ${framedInputClass} ${distanceFrameClass}`} />
           {classSpellCategory(draft.type) === "actif" && <Input type="number" min={0} max={5} aria-label="Charges" value={draft.charges ?? ""} onChange={(event) => field("charges", event.target.value === "" ? null : Math.max(0, Math.min(5, Number(event.target.value))))} placeholder="Charges" className={`h-7 w-20 ${framedInputClass} ${chargesFrameClass}`} />}
         </div>
         <ClassLinksEditor compact draft={draft} classes={classes} spells={allSpells} rowNumber={spell.rowNumber} onChange={(classRanks) => field("classRanks", classRanks)} />
@@ -404,18 +381,42 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   // ne décrit plus que ses colonnes.
   // Distance et charges ne concernent que les actifs : les colonnes disparaissent
   // ailleurs plutôt que d'occuper la largeur pour rien.
-  const spellColumns = useMemo<SheetGridColumn[]>(() => [
-    { key: "name", label: "Nom", width: 220, plain: true, cellClassName: "text-sm font-semibold" },
-    { key: "effect", label: "Effet", width: 380 },
-    { key: "description", label: "Description", width: 380, cellClassName: "text-muted-foreground" },
-    { key: "type", label: "Type", width: 150, plain: true },
-    { key: "skills", label: "Compétences", width: 200, plain: true, cellClassName: "font-semibold text-[#b3261e]" },
-    ...(tab === "actifs" ? [
-      { key: "distance", label: "Distance", width: 130, plain: true },
-      { key: "charges", label: "Charges", width: 110, plain: true },
-    ] as SheetGridColumn[] : []),
-    ...(forClasses ? [{ key: "classes", label: "Classes et rangs", width: 280, custom: true, sortable: false }] as SheetGridColumn[] : []),
-  ], [forClasses, tab])
+  // L'enregistrement passe par une référence : les colonnes ne se reconstruisent pas à chaque rendu.
+  const latestCommit = useRef<(rowKey: string, columnKey: string, value: string) => void>(() => undefined)
+  const spellByRow = useMemo(() => new Map(data.spells.map((spell) => [spell.rowNumber, spell])), [data.spells])
+  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+    const spell = spellByRow.get(Number(rowKey))
+    if (!spell) return ""
+    if (columnKey === "name") return spell.name
+    if (columnKey === "effect") return spell.effectHtml || spell.effect
+    if (columnKey === "description") return spell.descriptionHtml || spell.description
+    if (columnKey === "type") return spell.type
+    if (columnKey === "skills") return spell.skillsRaw
+    if (columnKey === "distance") return spell.distanceHtml || spell.distance
+    if (columnKey === "charges") return spell.charges === null ? "" : String(spell.charges)
+    if (columnKey === "id") return spell.id
+    return ""
+  }, [spellByRow])
+  /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
+  const spellColumns = useMemo<SheetGridColumn[]>(() => {
+    const context = {
+      valueOf,
+      commit: (rowKey: string, columnKey: string, value: string) => latestCommit.current(rowKey, columnKey, value),
+      idComputed: (rowKey: string) => valueOf(rowKey, "id").startsWith("LIGNE-"),
+    }
+    const column = (key: keyof typeof spellSpecs, label: string, width: number) => indexGridColumn(key, label, spellSpecs[key], width, context, key === "type" ? { renderValue: (value) => <SpellTypeLabel value={value} /> } : {})
+    return [
+      column("name", "Nom", 220),
+      column("effect", "Effet", 380),
+      column("description", "Description", 380),
+      column("type", "Type", 190),
+      column("skills", "Compétences", 200),
+      ...(tab === "actifs" ? [column("distance", "Distance", 130), column("charges", "Charges", 130)] : []),
+      ...(forClasses ? [column("classes", "Classes et rangs", 280)] : []),
+      column("id", "ID", 150),
+    ]
+  }, [forClasses, tab, valueOf])
+  /* eslint-enable react-hooks/refs */
 
   function updateSpells(updater: (spells: ClassSpell[]) => ClassSpell[]) {
     setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells).filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) } })
@@ -549,21 +550,6 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
 
   const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, onSave: (spell: ClassSpell, draft: ClassSpellDraft) => save(spell, draft, true), onDelete: remove, onShowDuplicates: showDuplicates }
   const duplicateGroups = useMemo(() => groupSimilarities(data.spells, data.similarities).length, [data.similarities, data.spells])
-  const spellByRow = useMemo(() => new Map(data.spells.map((spell) => [spell.rowNumber, spell])), [data.spells])
-
-  const valueOf = useCallback((rowKey: string, columnKey: string) => {
-    const spell = spellByRow.get(Number(rowKey))
-    if (!spell) return ""
-    if (columnKey === "name") return spell.name
-    if (columnKey === "effect") return spell.effectHtml || spell.effect
-    if (columnKey === "description") return spell.descriptionHtml || spell.description
-    if (columnKey === "type") return spell.type
-    if (columnKey === "skills") return spell.skillsRaw
-    if (columnKey === "distance") return spell.distance
-    if (columnKey === "charges") return spell.charges === null ? "" : String(spell.charges)
-    return ""
-  }, [spellByRow])
-
   /**
    * Un sort s'enregistre en bloc : chaque colonne modifiée est accumulée dans le même
    * brouillon, puis la ligne part une seule fois. Sans cela, coller une ligne entière
@@ -576,7 +562,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     if (columnKey === "description") return { ...draft, descriptionHtml: value, description: plainText(value) }
     if (columnKey === "type") return { ...draft, type: value }
     if (columnKey === "skills") return { ...draft, skillsRaw: value }
-    if (columnKey === "distance") return { ...draft, distance: value }
+    if (columnKey === "distance") return { ...draft, distanceHtml: value, distance: plainText(value) }
     if (columnKey === "charges") {
       const parsed = Number.parseInt(value.replace(/[^0-9]/g, ""), 10)
       return { ...draft, charges: Number.isFinite(parsed) ? Math.max(0, Math.min(5, parsed)) : null }
@@ -607,6 +593,8 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
       void save(spell, draftWithEdits(spell, finalEdits), true)
     }, 400))
   }
+
+  useLayoutEffect(() => { latestCommit.current = commitCell })
 
   // Même grille que l'Index des objets : en-têtes figés en haut, barre horizontale
   // en bas de l'écran, cellules toujours modifiables.

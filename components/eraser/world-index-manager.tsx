@@ -1,26 +1,25 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ArrowRightLeft, Check, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
+import { ArrowRightLeft, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, SpellCheck } from "lucide-react"
 
-import { CreatureCheckCell, CreatureChoiceCell, CreatureChoiceSelect, CreatureSheetDialog, isChecked } from "@/components/eraser/creature-sheet"
-import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
+import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
+import { indexGridColumn, IndexEntryForm, type IndexFormField } from "@/components/eraser/index-cells"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
-import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
+import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { choiceCorrection, columnTypeLabel, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import {
-  creatureChoices,
   foldName,
   gridHeadersOf,
   isLongColumn,
-  linkEndCovers,
   isNameColumn,
-  linkedColumnsOf,
+  linkEndCovers,
+  worldColumnSpec,
   worldIndexDefinitions,
   worldIndexLinks,
   type WorldIndexKey,
@@ -36,6 +35,18 @@ function columnWidthFor(header: string, fallback?: number) {
   if (fallback) return fallback
   if (isLongColumn(header)) return 380
   return isNameColumn(header) ? 220 : 170
+}
+
+/** L'onglet de la vue « Tout » est une colonne comme une autre, de type Onglet. */
+const tabSpec: IndexColumnSpec = { kind: "tab" }
+
+/** Les cellules de liste mal orthographiées (« Aggressif »), que « Corriger » réécrit. */
+function countCorrections(indexKey: WorldIndexKey, tables: WorldIndexTable[]) {
+  return tables.reduce((total, table) => total + table.headers.reduce((sum, header, column) => {
+    const spec = worldColumnSpec(indexKey, table.tabName, header)
+    if (spec.kind !== "choice" || !spec.options) return sum
+    return sum + table.rows.filter((row) => choiceCorrection(row.values[column] ?? "", spec.options!)).length
+  }, 0), 0)
 }
 
 function isValidSort(value: unknown): value is SheetGridSort {
@@ -69,57 +80,6 @@ function linkHints(index: WorldIndexKey, tab: string) {
     }
     return []
   })
-}
-
-function EntryForm({ headers, visible, linked, itemLabel, pending, controls, tabs, tabName, onTabChange, onCancel, onSave }: {
-  headers: string[]
-  visible: number[]
-  linked: string[]
-  itemLabel: string
-  pending: boolean
-  /** Listes déroulantes et case à cocher des créatures. */
-  controls: boolean
-  /** Vue « Tout » : l'onglet où ranger la nouvelle ligne. */
-  tabs?: string[]
-  tabName?: string
-  onTabChange?: (tabName: string) => void
-  onCancel: () => void
-  onSave: (values: string[]) => void
-}) {
-  const [values, setValues] = useState<string[]>(() => headers.map(() => ""))
-  const set = (index: number, value: string) => setValues((current) => current.map((item, position) => position === index ? value : item))
-  const nameIndex = headers.findIndex(isNameColumn)
-  const named = nameIndex < 0 || values[nameIndex].trim().length > 0
-  const isLinked = (header: string) => linked.some((column) => foldName(column) === foldName(header))
-
-  return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm">
-    <div className="flex items-center justify-between gap-3">
-      <h3 className="font-display text-xl font-semibold">Ajouter {itemLabel}</h3>
-      <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
-    </div>
-    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {tabs && tabName && <label className="grid gap-1 text-xs font-semibold">
-        Onglet
-        <NativeSelect value={tabName} onChange={(event) => onTabChange?.(event.target.value)} className="w-full">
-          {tabs.map((tab) => <NativeSelectOption key={tab} value={tab}>{tab}</NativeSelectOption>)}
-        </NativeSelect>
-      </label>}
-      {visible.map((index) => [headers[index], index] as const).map(([header, index]) => {
-        if (controls && creatureChoices[header]) return <div key={header + index} className="grid gap-1 text-xs font-semibold"><span>{header}</span><CreatureChoiceSelect header={header} value={values[index]} onChange={(value) => set(index, value)} /></div>
-        if (controls && foldName(header) === "dressable") return <label key={header + index} className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isChecked(values[index])} onCheckedChange={(checked) => set(index, checked === true ? "Oui" : "Non")} />{header}</label>
-        return isLongColumn(header)
-          ? <div key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField ariaLabel={header} value={values[index]} onCommit={(html) => set(index, html)} /></div>
-          : <label key={header + index} className="grid gap-1 text-xs font-semibold">
-              <span className="flex items-center gap-1">{header}{isLinked(header) && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}</span>
-              <Input autoFocus={index === nameIndex} value={values[index]} onChange={(event) => set(index, event.target.value)} placeholder={isLinked(header) ? "Noms séparés par des virgules" : undefined} />
-            </label>
-      })}
-    </div>
-    <div className="mt-4 flex justify-end gap-2">
-      <Button type="button" variant="outline" onClick={onCancel}>Annuler</Button>
-      <Button type="button" onClick={() => onSave(values)} disabled={pending || !named}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
-    </div>
-  </section>
 }
 
 type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean }
@@ -166,7 +126,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Le premier tableau affiché donne les colonnes : les onglets d'un même index ont les mêmes.
   const table: WorldIndexTable | null = viewTables[0] ?? null
   const tabDefinition = definition.tabs.find((tab) => tab.name === table?.tabName) ?? definition.tabs[0]
-  const linked = useMemo(() => table ? linkedColumnsOf(indexKey, table.tabName) : [], [indexKey, table])
+  // Le type de chaque colonne, par onglet et en-tête : c'est lui qui décide de la cellule.
+  const specOf = useCallback((tab: string, header: string) => worldColumnSpec(indexKey, tab, header), [indexKey])
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
 
   const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
@@ -201,8 +162,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     if (columnKey === TAB_COLUMN) return found.table.tabName
     const index = columnIndexOf(found.table, columnKey)
     if (index < 0) return ""
-    return isLongColumn(columnKey) ? found.row.html[index] ?? "" : found.row.values[index] ?? ""
-  }, [locate])
+    return isRichSpec(specOf(found.table.tabName, columnKey)) ? found.row.html[index] ?? "" : found.row.values[index] ?? ""
+  }, [locate, specOf])
 
   const post = useCallback(async (body: Record<string, unknown> & { tabName: string }) => {
     const seq = ++requestSeq.current
@@ -285,35 +246,34 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
   const visible = useMemo(() => table ? gridHeadersOf(tabDefinition, table.headers) : [], [tabDefinition, table])
+  /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
     if (!table) return []
-    const isLinked = (header: string) => linked.some((column) => foldName(column) === foldName(header))
-    const list: SheetGridColumn[] = visible.map((index) => table.headers[index]).map((header) => {
-      const column: SheetGridColumn = {
-        key: header,
-        label: isLinked(header) ? `${header} ↔` : header,
-        width: columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
-        plain: !isLongColumn(header),
-        cellClassName: isNameColumn(header) ? "font-semibold" : undefined,
-        // Les noms et les colonnes liées déclenchent des liens : on attend la sortie de la
-        // cellule, sinon un nom à moitié tapé (« Yfl ») créerait une entité.
-        commitDelay: isNameColumn(header) || isLinked(header) ? Infinity : undefined,
-      }
-      if (!nameOpensDetails) return column
-      // Créatures : le nom ouvre la fiche, les listes fermées sont des menus déroulants.
-      if (isNameColumn(header)) column.control = (rowKey) => <button
-        type="button"
-        onClick={() => setDetails(rowKey)}
-        className="flex min-h-8 w-full items-center rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
-        title="Ouvrir la fiche"
-      >{richTextPlainText(valueOf(rowKey, header)) || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</button>
-      else if (creatureChoices[header]) column.control = (rowKey) => <CreatureChoiceCell header={header} value={valueOf(rowKey, header)} disabled={busy} onChange={(value) => void commitCell(rowKey, header, value)} />
-      else if (foldName(header) === "dressable") column.control = (rowKey) => <CreatureCheckCell label={header} value={valueOf(rowKey, header)} disabled={busy} onChange={(value) => void commitCell(rowKey, header, value)} />
-      return column
-    })
-    if (showAll) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true })
+    const list: SheetGridColumn[] = visible.map((index) => table.headers[index]).map((header) => indexGridColumn(
+      header,
+      header,
+      specOf(table.tabName, header),
+      columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
+      { valueOf, commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value), disabled: busy, openForm: nameOpensDetails ? setDetails : undefined },
+    ))
+    if (showAll) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     return list
-  }, [busy, commitCell, linked, nameOpensDetails, showAll, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, nameOpensDetails, showAll, specOf, tabDefinition, table, valueOf, visible])
+  /* eslint-enable react-hooks/refs */
+
+  const corrections = useMemo(() => countCorrections(indexKey, tables), [indexKey, tables])
+
+  async function correct() {
+    if (!table) return
+    setPending("correct"); setError("")
+    try {
+      const payload = await post({ action: "normalize-choices", tabName: table.tabName })
+      if (payload.data) applyData(payload.data, payload.seq)
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "Correction impossible.")
+    }
+    setPending("")
+  }
 
   const displayedRows = useMemo(() => {
     const folded = foldName(query)
@@ -348,6 +308,15 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const hints = table ? linkHints(indexKey, table.tabName) : []
   const formTable = showAll ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
+  // Le formulaire d'ajout montre les colonnes du tableau, sauf l'identifiant (généré)
+  // et, pour les créatures, l'extension qui se règle dans le tableau.
+  const formFields: IndexFormField[] = formTable ? gridHeadersOf(formDefinition, formTable.headers)
+    .map((index) => formTable.headers[index])
+    .flatMap((header) => {
+      const spec = specOf(formTable.tabName, header)
+      if (spec.kind === "id" || (nameOpensDetails && foldName(header) === "extension")) return []
+      return [{ key: header, label: header, spec, long: isLongColumn(header) }]
+    }) : []
 
   return (
     <section className="mt-4 flex flex-col gap-3">
@@ -362,6 +331,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         {table && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans le tableau…" className="pl-9" /></div>}
         <div className="flex flex-wrap gap-2 lg:ml-auto">
           {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
+          {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!table || busy}><Plus />Ajouter {showAll ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
@@ -374,20 +344,19 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         Colonnes liées, qui se complètent d’elles-mêmes (noms séparés par des virgules) : {hints.join(" · ")}
       </p>}
 
-      {creating && formTable && <EntryForm
+      {creating && formTable && <IndexEntryForm
         key={formTable.tabName}
-        headers={formTable.headers}
-        // L'extension se règle dans le tableau : elle n'a pas sa place dans le formulaire des créatures.
-        visible={gridHeadersOf(formDefinition, formTable.headers).filter((index) => !nameOpensDetails || foldName(formTable.headers[index]) !== "extension")}
-        linked={linkedColumnsOf(indexKey, formTable.tabName)}
-        itemLabel={formDefinition.itemLabel}
+        title={`Ajouter ${formDefinition.itemLabel}`}
+        fields={formFields}
         pending={pending === "add"}
-        controls={nameOpensDetails}
-        tabs={showAll ? tables.map((candidate) => candidate.tabName) : undefined}
-        tabName={showAll ? formTable.tabName : undefined}
-        onTabChange={setCreatingTab}
+        leading={showAll ? <label className="grid gap-1 text-xs font-semibold">
+          Onglet
+          <NativeSelect value={formTable.tabName} onChange={(event) => setCreatingTab(event.target.value)} className="w-full">
+            {tables.map((candidate) => <NativeSelectOption key={candidate.tabName} value={candidate.tabName}>{candidate.tabName}</NativeSelectOption>)}
+          </NativeSelect>
+        </label> : undefined}
         onCancel={() => setCreating(false)}
-        onSave={(values) => void addRow(formTable.tabName, values.map((value, index) => isLongColumn(formTable.headers[index]) ? value : richTextPlainText(value)))}
+        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] ?? ""))}
       />}
 
       {table ? (

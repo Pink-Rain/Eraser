@@ -524,3 +524,62 @@ test("names rich text fields and resets their weight", async () => {
   assert.match(html, /aria-label="Notes MJ"/);
   assert.match(html, /font-normal/);
 });
+
+test("types every index column from one registry", async () => {
+  const { choiceCorrection, columnTypeLabel, compactRichText, isCheckedValue, checkboxValue, objectColumnSpec } = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const { worldColumnSpec, creatureChoices } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  // Les fautes de liste sont reconnues et corrigées ; une valeur juste ou hors liste ne bouge pas.
+  assert.equal(choiceCorrection("Aggressif", creatureChoices["Comportement"]), "Agressif");
+  assert.equal(choiceCorrection("Forêt noir", creatureChoices["Emplacement principal"]), "Forêt noire");
+  assert.equal(choiceCorrection("Agressif", creatureChoices["Comportement"]), null);
+  assert.equal(choiceCorrection("Donjon-Ruine", creatureChoices["Emplacement principal"]), null);
+  // Un texte enrichi sans mise en forme redevient du texte simple.
+  assert.equal(compactRichText("Capitaine &amp; comte<br>"), "Capitaine & comte");
+  assert.equal(compactRichText("<strong>Capitaine</strong>"), "<strong>Capitaine</strong>");
+  // Types des index du monde, principal et secondaires, formulaire compris.
+  assert.equal(worldColumnSpec("creatures", "Créatures", "Nom").kind, "name-form");
+  assert.equal(worldColumnSpec("places", "Villes", "Nom").kind, "name");
+  assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
+  assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
+  assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Image · Formulaire");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste déroulante · Formulaire");
+  assert.equal(worldColumnSpec("creatures", "Créatures", "Environnement").kind, "archived");
+  assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
+  // Objets : icône et image sont des images, « Actif » vide reste actif.
+  const headers = ["ID", "Nom", "Icône", "Image", "Actif", "Prix"];
+  assert.deepEqual(headers.map((header) => objectColumnSpec(header, headers).kind), ["id", "name", "image", "image", "checkbox", "rich"]);
+  assert.equal(isCheckedValue("", true), true);
+  assert.equal(isCheckedValue("Non", true), false);
+  assert.equal(checkboxValue(false, "TRUE"), "FALSE");
+  assert.equal(checkboxValue(true, ""), "Oui");
+});
+
+test("builds grid columns from their type", async () => {
+  const { indexGridColumn } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
+  const { SheetGrid } = await vite.ssrLoadModule("/components/eraser/sheet-grid.tsx");
+  const context = { valueOf: (_row, column) => ({ nom: "Aldor", charges: "3", portrait: "🗡️", id: "CRE-1234ABCD" })[column] ?? "", commit: () => {} };
+  const columns = [
+    indexGridColumn("nom", "Nom", { kind: "name", also: ["fixed"] }, 200, context),
+    indexGridColumn("charges", "Charges", { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } }, 120, context),
+    indexGridColumn("portrait", "Icône", { kind: "image" }, 120, context),
+    indexGridColumn("id", "ID", { kind: "id" }, 120, context),
+  ];
+  assert.equal(columns[0].commitDelay, Infinity);
+  assert.equal(columns[0].plain, true);
+  assert.equal(columns[1].typeLabel, "Jauge (icônes) · Nombre");
+  const html = renderToStaticMarkup(React.createElement(SheetGrid, {
+    layoutKey: "test:types", columns, rows: [{ key: "2", rowNumber: 2 }], valueOf: context.valueOf, onCommit: () => {}, empty: "Vide",
+  }));
+  // Le type se lit au survol de l'en-tête.
+  assert.match(html, /Type : Nom · Affichage fixe/);
+  // Jauge en icônes : cinq étincelles, dont trois pleines.
+  assert.equal((html.match(/aria-label="Charges : \d"/g) || []).length, 5);
+  assert.match(html, /CRE-1234ABCD/);
+  assert.match(html, /🗡️/);
+  // En lecture seule, plus aucune cellule modifiable.
+  const readOnly = renderToStaticMarkup(React.createElement(SheetGrid, {
+    layoutKey: "test:types", columns: [{ key: "nom", label: "Nom", width: 200 }], rows: [{ key: "2", rowNumber: 2 }], valueOf: () => "Aldor", onCommit: () => {}, empty: "Vide", readOnly: true,
+  }));
+  assert.doesNotMatch(readOnly, /contenteditable="true"/i);
+});

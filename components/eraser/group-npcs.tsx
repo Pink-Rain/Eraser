@@ -4,7 +4,7 @@ import { useState } from "react"
 import { ChevronDown, LoaderCircle, Pencil, Plus, Search, UserRound, UserRoundMinus, X } from "lucide-react"
 
 import { NpcBackpack, NpcForm, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
-import { RichTextView } from "@/components/eraser/rich-text"
+import { RichTextView, richTextPlainText } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,7 +16,7 @@ import type { CampaignNpcRecord } from "@/lib/shop-schema"
 function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: CampaignNpcRecord; canManage: boolean; pending: boolean; onEdit: () => void; onRemove: () => void }) {
   const [open, setOpen] = useState(false)
   const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
-  const details = [npc.title, npc.occupation, npc.people].filter(Boolean).join(" · ")
+  const details = [richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")
   return <Collapsible open={open} onOpenChange={setOpen} asChild>
     <article className="min-w-0 self-start overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
       <div className="relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)]">
@@ -115,7 +115,7 @@ export function GroupNpcs({ campaignId, initialNpcs, canManage }: { campaignId: 
               // eslint-disable-next-line @next/next/no-img-element
               ? <img src={npc.portrait} alt="" className="size-full object-cover" />
               : <UserRound className="size-4" />}</span>
-            <span className="min-w-0 flex-1"><span className="block truncate font-medium">{npc.name}</span><span className="block truncate text-xs text-muted-foreground">{[npc.title, npc.occupation, `PV ${npc.currentHp} / ${npc.totalHp}`].filter(Boolean).join(" · ")}</span></span>
+            <span className="min-w-0 flex-1"><span className="block truncate font-medium">{npc.name}</span><span className="block truncate text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation), `PV ${npc.currentHp} / ${npc.totalHp}`].filter(Boolean).join(" · ")}</span></span>
             <Plus className="size-4 text-muted-foreground" />
           </button>)
             : <p className="px-3 py-6 text-center text-xs text-muted-foreground">{candidates.length ? "Aucun autre PNJ à ajouter." : "Cette campagne n’a encore aucun PNJ. Crée-les depuis la page PNJs."}</p>}

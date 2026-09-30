@@ -1,16 +1,17 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
-import { Check, ImageIcon, ImageUp, LoaderCircle, Plus, RefreshCw, Search, X } from "lucide-react"
+import { ImageIcon, LoaderCircle, Plus, RefreshCw, Search } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { indexGridColumn, IndexEntryForm } from "@/components/eraser/index-cells"
 import { ObjectIcon } from "@/components/eraser/object-icon"
-import { RichTextField, richTextPlainText } from "@/components/eraser/rich-text"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
+import { isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 
 function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -34,37 +35,12 @@ function isLongField(header: string) {
   return /description|effet|note|prerequis|attribut/.test(normalize(header))
 }
 
-function isGeneratedField(header: string) {
-  return normalize(header) === "id"
-}
+/** Colonne virtuelle : l'identifiant que l'inventaire donne à un objet d'une feuille sans colonne ID. */
+const COMPUTED_ID = "__id"
+const idSpec: IndexColumnSpec = { kind: "id" }
 
-/**
- * Le formulaire d’ajout, construit à partir des colonnes du tableau choisi : chaque
- * index d’objets a les siennes, il n’y a donc pas de formulaire figé à écrire.
- */
-function ObjectForm({ headers, pending, onCancel, onSave }: { headers: string[]; pending: boolean; onCancel: () => void; onSave: (values: string[]) => void }) {
-  const [values, setValues] = useState<string[]>(() => headers.map(() => ""))
-  const set = (index: number, value: string) => setValues((current) => current.map((item, position) => position === index ? value : item))
-  const nameIndex = headers.findIndex((header) => /^nom|titre/.test(normalize(header)))
-  const named = nameIndex < 0 || values[nameIndex].trim().length > 0
-
-  return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm">
-    <div className="flex items-center justify-between gap-3">
-      <h3 className="font-display text-xl font-semibold">Nouvel objet</h3>
-      <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
-    </div>
-    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {headers.map((header, index) => isGeneratedField(header)
-        ? <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} placeholder="Généré si vide" /></label>
-        : isLongField(header)
-          ? <div key={header + index} className="grid gap-1 text-xs font-semibold md:col-span-2">{header}<RichTextField ariaLabel={header} value={values[index]} onCommit={(html) => set(index, html)} /></div>
-          : <label key={header + index} className="grid gap-1 text-xs font-semibold">{header}<Input value={values[index]} onChange={(event) => set(index, event.target.value)} /></label>)}
-    </div>
-    <div className="mt-4 flex justify-end gap-2">
-      <Button type="button" variant="outline" onClick={onCancel}>Annuler</Button>
-      <Button type="button" onClick={() => onSave(values)} disabled={pending || !named}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
-    </div>
-  </section>
+function isIconHeader(header: string) {
+  return ["icone", "icon"].includes(normalize(header).trim())
 }
 
 export function ObjectIndexManager({ initialTables, initialError }: { initialTables: ObjectIndexTable[]; initialError: string }) {
@@ -91,34 +67,39 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
   const localEdits = useRef<Record<string, string>>({})
 
-  const iconInput = useRef<HTMLInputElement>(null)
-  const iconTarget = useRef<number | null>(null)
+  const specs = useMemo(() => (selected?.headers ?? []).map((header, _index, headers) => objectColumnSpec(header, headers)), [selected])
+  const hasIdColumn = specs.some((spec) => spec.kind === "id")
 
-  /** Case « Icône » : l'image telle qu'elle est dans la feuille, et un bouton pour en importer une. */
-  const iconControl = useCallback((rowKey: string) => {
+  /** Case « Icône » : l'icône telle qu'Eraser l'affiche (image du Drive, icône d'Eraser, émoji). */
+  const iconPreview = useCallback((value: string, rowKey?: string) => {
     if (!selected) return null
     const row = selected.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
     const cell = (aliases: string[]) => {
       const index = selected.headers.findIndex((header) => aliases.includes(normalize(header).replace(/[^a-z]+/g, " ").trim()))
       return index >= 0 ? row?.values[index] ?? "" : ""
     }
-    const iconIndex = selected.headers.findIndex((header) => ["icone", "icon"].includes(normalize(header).trim()))
     const name = cell(["nom", "nom de l objet", "objet", "arme", "equipement", "ressource", "livre", "titre"])
-    const uploading = pending === `icon:${rowKey}`
-    return <div className="flex items-center gap-1.5 p-0.5">
-      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-md bg-muted/60">{name.trim()
-        ? <ObjectIcon icon={row?.values[iconIndex] ?? ""} name={name} type={cell(["type", "categorie"])} subtype={cell(["sous type", "subtype"])} className="size-full p-0.5" emojiClassName="text-lg" />
-        : null}</span>
-      <Button type="button" variant="ghost" size="icon-xs" disabled={Boolean(pending)} title="Importer une image pour cet objet" aria-label="Importer une icône" onClick={() => { iconTarget.current = Number(rowKey); iconInput.current?.click() }}>{uploading ? <LoaderCircle className="animate-spin" /> : <ImageUp />}</Button>
-    </div>
-  }, [pending, selected])
+    return name.trim() ? <ObjectIcon icon={value} name={name} type={cell(["type", "categorie"])} subtype={cell(["sous type", "subtype"])} className="size-full p-0.5" emojiClassName="text-lg" /> : null
+  }, [selected])
 
-  const columns = useMemo<SheetGridColumn[]>(() => (selected?.headers ?? []).map((header, index) => ({
-    key: String(index),
-    label: header,
-    width: ["icone", "icon"].includes(normalize(header).trim()) ? 96 : columnWidthFor(header),
-    ...(["icone", "icon"].includes(normalize(header).trim()) ? { control: iconControl } : {}),
-  })), [iconControl, selected])
+  /** Import d'une icône : l'image va dans le dossier « icone objet » du Drive et le serveur la pose dans la case. */
+  const uploadIcon = useCallback(async (file: File, _previous: string, rowKey: string) => {
+    if (!selected) throw new Error("Aucun tableau choisi.")
+    const form = new FormData()
+    form.set("fileId", selected.fileId)
+    form.set("tabName", selected.tabName)
+    form.set("rowNumber", rowKey)
+    form.set("file", file)
+    const response = await fetch("/api/resources/object-indexes/icon", { method: "POST", body: form })
+    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
+    if (!response.ok || !payload.tables) throw new Error(payload.error || "L’icône n’a pas pu être importée.")
+    localEdits.current = {}
+    setTables(payload.tables)
+    setVersion((current) => current + 1)
+    const table = payload.tables.find((candidate) => tableKey(candidate) === tableKey(selected))
+    const iconIndex = table?.headers.findIndex(isIconHeader) ?? -1
+    return table?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)?.values[iconIndex] ?? ""
+  }, [selected])
 
   const displayedRows = useMemo(() => {
     if (!selected) return []
@@ -135,9 +116,11 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     // au premier affichage la préférence est encore vide alors qu'un tableau est choisi.
     const local = selected ? localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] : undefined
     if (local !== undefined) return local
+    if (columnKey === COMPUTED_ID) return selected ? `DRIVE-${selected.fileId}-${selected.sheetId}-${rowKey}` : ""
     const row = selected?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
-    return row?.html[Number(columnKey)] ?? ""
-  }, [selected])
+    const spec = specs[Number(columnKey)]
+    return (spec && !isRichSpec(spec) ? row?.values[Number(columnKey)] : row?.html[Number(columnKey)]) ?? ""
+  }, [selected, specs])
 
   const commitCell = useCallback(async (rowKey: string, columnKey: string, html: string) => {
     if (!selected) return
@@ -159,31 +142,26 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
     setSaving((current) => current - 1)
   }, [selected])
 
+  // Chaque colonne passe par le moteur des index : son type décide de sa cellule.
+  /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
+  const columns = useMemo<SheetGridColumn[]>(() => {
+    const context = { valueOf, commit: (rowKey: string, columnKey: string, value: string) => void commitCell(rowKey, columnKey, value), idComputed: () => !hasIdColumn }
+    const list = (selected?.headers ?? []).map((header, index) => isIconHeader(header)
+      // L'icône garde son affichage et son import dans le dossier « icone objet ».
+      ? indexGridColumn(String(index), header, specs[index], 96, context, { renderValue: iconPreview, upload: uploadIcon })
+      : indexGridColumn(String(index), header, specs[index], columnWidthFor(header), context))
+    // Sans colonne ID dans la feuille, l'identifiant calculé par l'inventaire est montré à part.
+    if (selected && !hasIdColumn) list.push(indexGridColumn(COMPUTED_ID, "ID", idSpec, 200, context, { sortable: false }))
+    return list
+  }, [commitCell, hasIdColumn, iconPreview, selected, specs, uploadIcon, valueOf])
+  /* eslint-enable react-hooks/refs */
+
   async function refresh() {
     setPending("refresh"); setError("")
     const response = await fetch("/api/resources/object-indexes?refresh=1", { cache: "no-store" })
     const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Actualisation impossible.")
-    localEdits.current = {}
-    setTables(payload.tables)
-    setVersion((current) => current + 1)
-  }
-
-  /** Envoie l'image choisie dans le dossier « icone objet » du Drive et la pose dans la case. */
-  async function importIcon(file: File) {
-    const rowNumber = iconTarget.current
-    if (!selected || !rowNumber) return
-    setPending(`icon:${rowNumber}`); setError(""); setNotice("")
-    const form = new FormData()
-    form.set("fileId", selected.fileId)
-    form.set("tabName", selected.tabName)
-    form.set("rowNumber", String(rowNumber))
-    form.set("file", file)
-    const response = await fetch("/api/resources/object-indexes/icon", { method: "POST", body: form })
-    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
-    setPending("")
-    if (!response.ok || !payload.tables) return setError(payload.error || "L’icône n’a pas pu être importée.")
     localEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
@@ -249,13 +227,13 @@ export function ObjectIndexManager({ initialTables, initialError }: { initialTab
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
       {notice && <p className="rounded-xl border bg-muted/40 px-4 py-2.5 text-sm text-muted-foreground">{notice}</p>}
-      <input ref={iconInput} type="file" accept="image/png,image/jpeg,image/webp,image/gif,image/svg+xml,image/avif" className="hidden" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; if (file) void importIcon(file) }} />
 
-      {creating && selected && <ObjectForm
-        headers={selected.headers}
+      {creating && selected && <IndexEntryForm
+        title="Nouvel objet"
+        fields={selected.headers.map((header, index) => ({ key: String(index), label: header, spec: specs[index], long: isLongField(header) }))}
         pending={pending === "add"}
         onCancel={() => setCreating(false)}
-        onSave={(values) => void mutate({ action: "add", values: values.map((value, index) => isLongField(selected.headers[index]) ? value : richTextPlainText(value)) }, "add")}
+        onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}
       />}
 
       {selected ? (
