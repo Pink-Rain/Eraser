@@ -15,6 +15,10 @@
   contient aussi le chat de campagne (`/api/campaign-chat`).
 - Plan B si les quotas deviennent justes : forfait Cloudflare payant, ou
   Turso (voir « Plan B »).
+- **Porte de secours Drive** : si le serveur est plein ou injoignable,
+  l’application bascule seule sur Google Sheets, puis revient sur D1 quand
+  il répond de nouveau (voir « Mode secours Drive »). La recopie vers Sheets
+  est donc permanente et l’accès Sheets est conservé.
 
 Tant que la phase 8 n’est pas terminée, les règles d’`AGENTS.md` restent
 valables : Sheets reste la source prioritaire pour chaque domaine qui n’a pas
@@ -60,8 +64,8 @@ Chaque panne possible et ce qui se passe :
 
 | Panne | Conséquence | Prévu |
 |---|---|---|
-| Worker injoignable (réseau, panne Cloudflare) | Lecture normale, écritures en attente | Copie locale, file d’écriture, session hors ligne |
-| Quota D1 du jour atteint (les requêtes échouent jusqu’à 00:00 UTC, appliqué depuis le 1ᵉʳ septembre 2026) | Idem | Idem, plus alertes à 50 % et 80 %, forfait payant activable en quelques minutes |
+| Worker injoignable (réseau, panne Cloudflare) | Lecture normale, écritures en attente | Copie locale, file d’écriture, session hors ligne ; mode secours Drive si la panne dure |
+| Quota D1 du jour atteint (les requêtes échouent jusqu’à 00:00 UTC, appliqué depuis le 1ᵉʳ septembre 2026) | Plus de partage par le serveur | Mode secours Drive, alertes à 50 % et 80 %, forfait payant activable en quelques minutes |
 | Trystero sans connexion (4G, réseau filtré, relais en panne) | Les changements des autres arrivent moins vite | Synchronisation lente toutes les 5 minutes, indicateur « direct indisponible » |
 | Google Drive injoignable ou autorisation expirée | Images non chargées | Cache local des médias, préchargement avant la partie |
 | Bug dans une préversion | Données mal lues ou mal écrites | Interrupteurs par domaine, coupe-circuits, Time Travel D1, sauvegardes Drive |
@@ -78,13 +82,56 @@ Mesures correspondantes :
 2. **Coupe-circuits dans le Worker**, modifiables par un admin sans
    nouvelle version : couper les signaux Trystero, forcer la synchronisation
    lente, suspendre la recopie vers Sheets, rebasculer un domaine sur
-   `sheets`.
+   `sheets`. Ces réglages sont gardés en cache sur chaque PC, pour rester
+   connus quand D1 ne répond plus.
 3. **Préchargement des médias** : à l’ouverture d’une campagne, les images
    de la campagne sont mises dans le cache local, pour qu’une panne Google
    pendant la partie ne vide pas l’écran.
 4. **Recopie vers Sheets jamais bloquante** : si Google refuse ou ralentit,
    la recopie attend dans sa propre file ; D1 et la partie continuent.
 5. **Procédure d’urgence** (voir plus bas), connue de l’admin.
+
+## Mode secours Drive
+
+Pendant une panne ou un quota atteint, la copie locale permet déjà de lire
+et d’écrire, mais les joueurs ne voient plus les modifications des autres.
+Le mode secours rétablit ce partage en passant par Google Sheets, qui a ses
+propres limites (par minute, pas par jour : un pic ralentit sans bloquer la
+journée).
+
+1. **Sheets toujours à jour.** Chaque écriture confirmée dans D1 est recopiée
+   dans Sheets par une file séparée, qui ne bloque jamais le reste. Les
+   feuilles gardent pour chaque ligne sa révision et sa version D1. Toute
+   nouvelle colonne ajoutée dans D1 l’est aussi dans les feuilles.
+2. **Entrée automatique.** Quand le Worker répond « quota D1 atteint » ou
+   « quota Worker atteint », ou reste injoignable plus de quelques minutes,
+   l’application passe en mode secours. Tous les PC reçoivent la même erreur
+   et basculent ensemble. Pas besoin de lire un réglage dans D1 : il serait
+   lui aussi inaccessible. Un admin peut aussi forcer le mode secours sur
+   son PC ; les derniers réglages connus sont gardés en local.
+3. **Pendant le mode secours.**
+   - Les écritures partent dans Sheets, comme avant la migration, **et**
+     restent dans la file d’écriture D1 de chaque PC, marquées « secours ».
+   - Les autres PC lisent les changements dans Sheets (ancienne méthode, plus
+     lente) et mettent à jour leur copie locale.
+   - Les signaux Trystero continuent de prévenir les autres.
+   - Bandeau visible : « Mode secours : synchronisation par Google Drive ».
+   - Les droits ne sont plus vérifiés par le Worker, comme aujourd’hui.
+4. **Sortie automatique.** Une requête de test toutes les 15 minutes ; dès
+   que D1 répond (au plus tard après 00:00 UTC pour un quota), chaque PC vide
+   sa file vers D1, avec la gestion habituelle des conflits.
+5. **Rattrapage.** Un PC éteint avant la fin de la panne vide sa file au
+   prochain démarrage. Pour ne rien perdre si un PC ne revient jamais, le
+   premier PC d’un admin ou d’un MJ qui revient sur D1 compare les lignes
+   modifiées dans Sheets pendant le mode secours avec D1, et propose un
+   import avec aperçu (même écran que le bouton Importer) pour ce qui
+   manque.
+6. **Le tabletop** n’est pas concerné : il reste sur Sheets en permanence.
+
+Coût : la recopie vers Sheets consomme le quota Google (une écriture groupée
+par envoi, largement sous les 60 écritures par minute et par utilisateur),
+et l’implémentation Sheets de `lib/data/` est conservée et testée au lieu
+d’être supprimée.
 
 ## Budget de requêtes
 
@@ -263,6 +310,9 @@ standard (`json_patch` et `json_each` en font partie), sans fonction propre
   limites de taille et de nombre de requêtes.
 - Tests de la file d’écriture : fermeture de l’application pendant un envoi,
   Worker injoignable, quota atteint, reprise.
+- Tests du mode secours : entrée et sortie automatiques, deux PC qui
+  modifient la même cellule pendant le secours, PC éteint avant le retour,
+  rattrapage depuis Sheets.
 - Simulation de la journée complète sur la préproduction (voir
   « Estimations »), avec relevé des lignes écrites et lues.
 - Pour chaque domaine : comparaison automatique D1 / Sheets pendant quelques
@@ -342,19 +392,23 @@ Vérifier le pont Roll20 (il lit et enregistre des PNJ) avant la bascule.
 - Aperçu : ajouts, modifications et suppressions, domaine par domaine.
 - Les suppressions ne s’appliquent que si on les coche explicitement.
 - Une sauvegarde est exportée automatiquement avant d’appliquer.
-- Doit exister avant la phase 8 : une fois la recopie vers Sheets arrêtée,
-  c’est le seul chemin d’une feuille modifiée à la main vers Eraser.
+- Doit exister avant la phase 8 : c’est le seul chemin d’une feuille
+  modifiée à la main vers Eraser, et le rattrapage du mode secours s’appuie
+  sur lui.
 
-### Phase 8 : fin de transition
+### Phase 8 : mode secours Drive et fin de transition
 
-- Arrêt de la recopie vers Sheets, domaine par domaine, après quelques
-  semaines sans retour en arrière.
+- Mode secours Drive (voir la section dédiée), testé sur la préproduction en
+  simulant un quota atteint, puis une panne longue avec un PC éteint.
+- La recopie vers Sheets n’est pas arrêtée : elle devient permanente et
+  sert le mode secours. Les feuilles ne sont plus la source, mais restent
+  complètes et à jour.
 - Les index locaux (`character_index`, `campaign_index`, `class_index`,
   `sheet_index_syncs`) sont remplacés par la copie locale synchronisée, par
   des migrations `drizzle/` ajoutées (jamais supprimées).
 - Mise à jour d’`AGENTS.md` et d’`ARCHITECTURE.md`.
-- Tant que le tabletop reste sur Sheets, l’accès Google garde ses droits
-  Sheets.
+- L’accès Google garde ses droits Sheets, pour le mode secours et pour le
+  tabletop.
 
 ## Pour chaque domaine (phases 3 à 6)
 
@@ -372,8 +426,9 @@ Vérifier le pont Roll20 (il lit et enregistre des PNJ) avant la bascule.
 
 1. Regarder l’indicateur de synchronisation. « En attente d’envoi » : on
    peut continuer à jouer, rien n’est perdu.
-2. Quota atteint : continuer à jouer ; si l’attente gêne, activer le forfait
-   Cloudflare payant (quelques minutes, sans nouvelle version).
+2. Quota atteint ou serveur en panne : le mode secours Drive s’active seul,
+   on continue à jouer. Si la lenteur gêne, activer le forfait Cloudflare
+   payant (quelques minutes, sans nouvelle version).
 3. Comportement anormal après une bascule : l’admin rebascule le domaine
    sur `sheets` et coupe les signaux depuis l’administration.
 4. Données abîmées : Time Travel D1 ou dernière sauvegarde Drive, après la
