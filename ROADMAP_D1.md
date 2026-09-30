@@ -1,18 +1,33 @@
-# Feuille de route : données JDR de Google Sheets vers D1
+# Feuille de route : personnages et campagnes de Google Sheets vers D1
 
 ## Décisions (septembre 2026)
 
-- Toutes les données JDR passent dans la base D1 du Worker partagé
-  `worker-accounts/` (Cloudflare).
+- **Seules les données qui doivent être réactives en partie passent dans la
+  base D1** du Worker partagé `worker-accounts/` (Cloudflare) :
+  - campagnes et appartenance des personnages aux campagnes ;
+  - feuilles de personnage et relations ;
+  - contenants et contenus d’inventaire (personnages et campagnes).
+- **Tout le reste reste sur Google Sheets pour l’instant** : index du monde,
+  classes et sorts, catalogue d’objets et types de contenants, vocabulaire,
+  PNJ, magasins, to-do d’administration, tabletop. Ils pourront suivre plus
+  tard, domaine par domaine, avec la même méthode.
 - Les médias (images, cartes, portraits) restent sur Google Drive.
 - Une seule application pour joueurs et MJ, qui s’adapte au rôle.
 - Google Sheets devient une copie. Bouton **Exporter** : mettre à jour les
   feuilles du Drive, ou télécharger un `.xlsx` / `.csv`. Bouton
   **Importer** : depuis les feuilles du Drive ou un fichier, avec aperçu des
   différences avant d’appliquer.
-- Le tabletop est hors de ce plan : il reste sur Google Sheets et n’est pas
-  modifié jusqu’à décision contraire. Cela inclut son onglet Journal, qui
-  contient aussi le chat de campagne (`/api/campaign-chat`).
+- **Le tabletop est éteint** (`TABLETOP_ENABLED` dans
+  `lib/tabletop-status.ts`) : ses pages affichent « Tabletop éteint — Non
+  prioritaire, utilisation de Roll20 ». Son code et ses données restent en
+  place. Il lit et modifie les personnages et les campagnes
+  (`lib/tabletop-access.ts`, par exemple `updateTabletopEntityHp`) : avant de
+  le rallumer après la migration, ces accès doivent passer par `lib/data/`.
+  Son onglet Journal, qui contient aussi le chat de campagne
+  (`/api/campaign-chat`), reste sur Sheets.
+- **Roll20 devient l’outil de jeu** : le pont Roll20 (`lib/roll20-bridge.ts`)
+  lit les campagnes et les personnages, et doit être vérifié à chaque
+  bascule.
 - Plan B si les quotas deviennent justes : forfait Cloudflare payant, ou
   Turso (voir « Plan B »).
 - **Porte de secours Drive** : si le serveur est plein ou injoignable,
@@ -20,9 +35,8 @@
   il répond de nouveau (voir « Mode secours Drive »). La recopie vers Sheets
   est donc permanente et l’accès Sheets est conservé.
 
-Tant que la phase 8 n’est pas terminée, les règles d’`AGENTS.md` restent
-valables : Sheets reste la source prioritaire pour chaque domaine qui n’a pas
-encore basculé.
+Les règles d’`AGENTS.md` restent valables : Sheets reste la source
+prioritaire pour chaque domaine qui n’a pas basculé.
 
 ## Principes
 
@@ -126,7 +140,8 @@ journée).
    modifiées dans Sheets pendant le mode secours avec D1, et propose un
    import avec aperçu (même écran que le bouton Importer) pour ce qui
    manque.
-6. **Le tabletop** n’est pas concerné : il reste sur Sheets en permanence.
+6. **Les autres domaines** (index, PNJ, tabletop…) ne sont pas concernés :
+   ils restent sur Sheets.
 
 Coût : la recopie vers Sheets consomme le quota Google (une écriture groupée
 par envoi, largement sous les 60 écritures par minute et par utilisateur),
@@ -153,8 +168,8 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    secondes après un signal, seulement si l’élément modifié est affiché dans
    une fenêtre ouverte ; sinon marqués « à rafraîchir » et récupérés à
    l’ouverture de leur page ou à la synchronisation lente suivante. Données
-   de référence (index, catalogues, vocabulaire, classes) : au plus toutes
-   les 5 minutes, ou dès l’ouverture de la page concernée si un signal est en
+   de référence, si elles rejoignent un jour D1 : au plus toutes les
+   5 minutes, ou dès l’ouverture de la page concernée si un signal est en
    attente. Les signaux reçus en quelques secondes sont regroupés en une
    seule synchronisation.
 5. **Écritures groupées.** L’interface enregistre immédiatement auprès du
@@ -168,8 +183,8 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    changé la même cellule. La réponse à une écriture contient les
    différences, sans relecture derrière. Si le Worker est injoignable ou le
    quota atteint, la file attend et l’application reste utilisable.
-6. **Signaux de changement par Trystero** : un salon global pour les données
-   de référence et un salon par campagne, protégés par des clés secrètes
+6. **Signaux de changement par Trystero** : un salon par campagne (et un
+   salon global si des données de référence rejoignent D1), protégés par des clés secrètes
    stockées dans D1 (pas l’identifiant de campagne, qui n’est pas secret).
    Une seule connexion par application, partagée entre ses fenêtres par
    `BroadcastChannel`. Un signal part seulement après la confirmation de
@@ -239,10 +254,11 @@ renverrait sans fin et resterait bloquée. D’où :
 ### Estimations
 
 - 8 joueurs, 4 h de partie : environ 1 600 appels au Worker (moins de 2 %).
-- Journée complète : 6 h de préparation (MJ à 20 cellules par minute, admin
-  à 1 modification par minute), puis 5 h de partie à 8. Environ 6 800 appels
-  au Worker (7 %), 23 000 lignes écrites (23 %), moins de 150 000 lignes lues
-  (3 %). Les lignes écrites sont la limite la plus proche.
+- Journée complète : 6 h de préparation, puis 5 h de partie à 8. La
+  préparation des index par le MJ et l’admin reste sur Sheets et ne touche
+  pas D1. Environ 4 000 appels au Worker (4 %) et 8 000 lignes écrites (8 %).
+  (Avec tout le contenu dans D1, cette journée aurait coûté 6 800 appels et
+  23 000 lignes écrites.)
 - Ces chiffres sont vérifiés en phase 1 par une simulation de cette journée
   sur la base de préproduction, avant tout domaine réel.
 
@@ -318,7 +334,7 @@ standard (`json_patch` et `json_each` en font partie), sans fonction propre
 - Pour chaque domaine : comparaison automatique D1 / Sheets pendant quelques
   jours avant la bascule.
 - Parcours manuel avant chaque bascule : connexion, campagne, personnages,
-  PNJ, pont Roll20, Exporter, fonctionnement hors ligne.
+  pont Roll20, Exporter, fonctionnement hors ligne.
 
 ## Phases
 
@@ -365,52 +381,49 @@ Chaque phase se termine par une préversion alpha installée et vérifiée.
 - Construit sur `lib/data/` : fonctionne avant et après chaque bascule. C’est
   le filet de sécurité avant de migrer quoi que ce soit.
 
-### Phase 3 : données de référence
+### Phase 3 : campagnes
 
-Vocabulaire, index du monde (créatures, lieux, religions, peuples, langues),
-catalogue des classes et leur contenu (présentation, sorts), catalogue
-d’objets (onglet Objets et dossier « Objets »), types de contenants.
-Peu d’écritures, risque faible : c’est le premier vrai domaine basculé.
+Campagnes, appartenance des personnages aux campagnes. Vérifier le pont
+Roll20 avant la bascule.
 
-### Phase 4 : campagnes
+### Phase 4 : personnages
 
-Campagnes, appartenance des personnages aux campagnes.
+Feuilles de personnage, relations, contenants et contenus d’inventaire
+(personnages et campagnes). Les onglets « Contenants personnages » et
+« Contenu inventaire » passent dans D1 ; le catalogue (« Objets », « Types de
+contenants ») reste dans Sheets et est lu comme aujourd’hui. Vérifier le pont
+Roll20 avant la bascule.
 
-### Phase 5 : personnages
-
-Feuilles de personnage, relations, contenants et inventaires (personnage et
-campagne). Vérifier le pont Roll20 avant la bascule.
-
-### Phase 6 : PNJ et magasins
-
-Vérifier le pont Roll20 (il lit et enregistre des PNJ) avant la bascule.
-
-### Phase 7 : Importer
+### Phase 5 : Importer
 
 - Depuis les feuilles du Drive ou depuis un `.xlsx` / `.csv`.
 - Réservé aux admins et aux MJ (pour leurs campagnes).
 - Aperçu : ajouts, modifications et suppressions, domaine par domaine.
 - Les suppressions ne s’appliquent que si on les coche explicitement.
 - Une sauvegarde est exportée automatiquement avant d’appliquer.
-- Doit exister avant la phase 8 : c’est le seul chemin d’une feuille
+- Doit exister avant la phase 6 : c’est le seul chemin d’une feuille
   modifiée à la main vers Eraser, et le rattrapage du mode secours s’appuie
   sur lui.
 
-### Phase 8 : mode secours Drive et fin de transition
+### Phase 6 : mode secours Drive
 
 - Mode secours Drive (voir la section dédiée), testé sur la préproduction en
   simulant un quota atteint, puis une panne longue avec un PC éteint.
-- La recopie vers Sheets n’est pas arrêtée : elle devient permanente et
-  sert le mode secours. Les feuilles ne sont plus la source, mais restent
-  complètes et à jour.
-- Les index locaux (`character_index`, `campaign_index`, `class_index`,
-  `sheet_index_syncs`) sont remplacés par la copie locale synchronisée, par
+- La recopie vers Sheets devient permanente et sert le mode secours. Les
+  feuilles ne sont plus la source pour les campagnes et les personnages,
+  mais restent complètes et à jour.
+- `character_index`, `campaign_index` et la partie correspondante de
+  `sheet_index_syncs` sont remplacés par la copie locale synchronisée, par
   des migrations `drizzle/` ajoutées (jamais supprimées).
 - Mise à jour d’`AGENTS.md` et d’`ARCHITECTURE.md`.
-- L’accès Google garde ses droits Sheets, pour le mode secours et pour le
-  tabletop.
 
-## Pour chaque domaine (phases 3 à 6)
+### Plus tard (hors périmètre actuel)
+
+Données de référence, PNJ et magasins, tabletop : même méthode, domaine par
+domaine, seulement si le besoin s’en fait sentir. Pour le tabletop, ses
+accès aux personnages et campagnes passent d’abord par `lib/data/`.
+
+## Pour chaque domaine (phases 3 et 4)
 
 1. Inventaire des champs réservés au MJ et des règles de visibilité.
 2. Tables et routes D1 + tests du Worker.
@@ -420,7 +433,7 @@ Vérifier le pont Roll20 (il lit et enregistre des PNJ) avant la bascule.
    jours pour repérer les écarts.
 5. Bascule de l’interrupteur sur `d1`, hors jour de partie, avec recopie des
    écritures vers Sheets.
-6. Vérification en partie réelle, puis domaine suivant.
+6. Vérification en partie réelle sur Roll20, puis domaine suivant.
 
 ## Critères avant chaque bascule
 
