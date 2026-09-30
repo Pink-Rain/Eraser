@@ -680,14 +680,23 @@ test("renders the read-only editor of a system index with its locks", async () =
 
 test("counts each spell's own charges instead of filling a shared gauge", async () => {
   const { GaugeCell } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
-  const render = (value) => renderToStaticMarkup(React.createElement(GaugeCell, { label: "Charges", value, style: "icons", max: 5, mode: "count", onChange: () => {} }));
+  const render = (value) => renderToStaticMarkup(React.createElement(GaugeCell, { label: "Charges", value, settings: { style: "icons", max: 5, mode: "count", unlimited: "✦" }, onChange: () => {} }));
   // « 3 » : trois étincelles, pas trois sur cinq.
   assert.equal((render("3").match(/<svg/g) || []).length, 3);
   assert.equal((render("1").match(/<svg/g) || []).length, 1);
   // « ✦ » (charges sans nombre) reste tel quel.
   assert.match(render("✦"), />✦</);
   // Une jauge à remplir au-delà de cinq icônes répond sur toute sa longueur.
-  const ten = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Points", value: "7", style: "icons", max: 10, onChange: () => {} }));
+  const ten = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Points", value: "7", settings: { style: "icons", max: 10 }, onChange: () => {} }));
+  // Maximum lu dans une autre colonne : 12 PV sur 20.
+  const bar = renderToStaticMarkup(React.createElement(GaugeCell, { label: "PV", value: "12", settings: { style: "bar", max: 10, scale: "from-column", maxColumn: "PV max" }, maxValue: 20, onChange: () => {} }));
+  assert.match(bar, /max="20"/);
+  assert.match(bar, />12\/20</);
+  // Une icône choisie (tête de mort) ou un émoji.
+  const skulls = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Danger", value: "2", settings: { style: "icons", max: 3, icon: "skull" }, onChange: () => {} }));
+  assert.match(skulls, /lucide-skull/);
+  const drops = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Eau", value: "2", settings: { style: "icons", max: 3, emoji: "💧" }, onChange: () => {} }));
+  assert.equal((drops.match(/💧/g) || []).length, 3);
   assert.equal((ten.match(/aria-label="Points : \d+"/g) || []).length, 10);
 });
 

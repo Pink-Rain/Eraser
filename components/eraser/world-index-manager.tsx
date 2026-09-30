@@ -1,11 +1,15 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { ArrowRightLeft, ExternalLink, Link2, LoaderCircle, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ArrowRightLeft, ExternalLink, FileText, Link2, LoaderCircle, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
 import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
-import { indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
+import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
+import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { IndexEditor } from "@/components/eraser/index-editor"
+import { createRowEngine } from "@/components/eraser/index-row-engine"
+import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -13,7 +17,10 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { choiceCorrection, columnTypeLabel, computeRollup, isGridSpec, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
+import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
+import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { numberSortKey } from "@/lib/index-numbers"
 import type { IndexEditorModel, SchemaOperation } from "@/lib/index-schema-shared"
 import {
@@ -140,6 +147,21 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [details, setDetails] = useState<string | null>(null)
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
+  const engineRef = useRef<ReturnType<typeof createRowEngine> | null>(null)
+  const router = useRouter()
+  const { notify, view: noticesView } = useIndexNotices()
+  const { ask, view: choiceView } = useChoiceDialog()
+  // Le hasard des formules reste le même jusqu'à « Actualiser ».
+  const [seed, setSeed] = useState(() => `${indexKey}:${Date.now()}`)
+  const [sheetPending, setSheetPending] = useState(false)
+  const [sheetError, setSheetError] = useState("")
+  // Un lien « ?q=… » (bouton « Ouvrir la ligne liée ») ouvre l'index filtré sur ce nom.
+  useEffect(() => {
+    const initial = new URLSearchParams(window.location.search).get("q")
+    // L'adresse n'est connue qu'une fois la page affichée : la lire au rendu ferait différer le serveur et le navigateur.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    if (initial) setQuery(initial)
+  }, [])
 
   const tables = useMemo(() => data?.tables ?? [], [data])
   const selectedTable = tables.find((candidate) => candidate.tabName === tabName)
@@ -183,7 +205,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     else remount()
   }, [])
 
-  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+  /** Le texte d'une case tel qu'il est dans Sheets (ou tel qu'il vient d'être tapé). */
+  const rawOf = useCallback((rowKey: string, columnKey: string) => {
     const local = localEdits.current[`${rowKey}:${columnKey}`]
     if (local !== undefined) return local
     const found = locate(rowKey)
@@ -211,6 +234,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const column = found ? columnIndexOf(found.table, columnKey) : -1
     if (!found || column < 0) return
     localEdits.current[`${rowKey}:${columnKey}`] = value
+    engineRef.current?.invalidate()
     setSaving((current) => current + 1)
     try {
       const payload = await post({ action: "update-cell", tabName: found.table.tabName, rowNumber: found.row.rowNumber, column, html: value })
@@ -260,6 +284,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
     setPending("")
     if (!response.ok || !payload.data) return setError(payload.error || "Actualisation impossible.")
+    // Les formules au hasard (ALEA, DES…) sont retirées à chaque actualisation.
+    setSeed(`${indexKey}:${Date.now()}`)
     applyData(payload.data, seq)
   }
 
@@ -277,7 +303,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Les colonnes masquées restent dans la liste : la grille les cache et les montre d'un clic.
   const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => isGridSpec(column.spec)).map((column) => column.header) : [], [data, table])
 
-  // Recherche et Agrégat lisent un autre index : on le charge une fois pour la page.
+  // Recherche, Agrégat, formules et tirages lisent d'autres index : chargés une fois pour la page.
   const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
   const relationOf = useCallback((tab: string, via: string): { index: WorldIndexKey; tabs: string[] | null } | null => {
     const spec = specOf(tab, via)
@@ -291,10 +317,16 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const relatedKeys = useMemo(() => {
     const keys = new Set<WorldIndexKey>()
     for (const [tab, list] of Object.entries(data?.columns ?? {})) for (const column of list) {
-      const via = column.spec.lookup?.via ?? column.spec.rollup?.via
-      if (!via || (column.spec.kind !== "lookup" && column.spec.kind !== "rollup")) continue
-      const relation = relationOf(tab, via)
-      if (relation && relation.index !== indexKey) keys.add(relation.index)
+      const spec = normalizeSpec(column.spec)
+      const vias = [spec.lookup?.via, spec.rollup?.via]
+      // Une formule peut suivre n'importe quelle relation (RECHERCHE, NB.RELIES).
+      if (spec.kind === "formula") vias.push(...(data?.columns[tab] ?? []).filter((other) => other.spec.kind === "linked" || other.spec.kind === "linked-choice").map((other) => other.header))
+      for (const via of vias) {
+        if (!via) continue
+        const relation = relationOf(tab, via)
+        if (relation && relation.index !== indexKey) keys.add(relation.index)
+      }
+      if (spec.kind === "random" && spec.random?.source === "index" && spec.random.index && spec.random.index.index !== "self" && spec.random.index.index !== indexKey) keys.add(spec.random.index.index)
     }
     return [...keys].sort()
   }, [data, indexKey, relationOf])
@@ -303,36 +335,169 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     for (const key of relatedKeys) void loadWorldIndexData(key).then((loaded) => { if (!cancelled) setRelated((current) => ({ ...current, [key]: loaded })) })
     return () => { cancelled = true }
   }, [relatedKeys])
-  const computed = useCallback((rowKey: string, _columnKey: string, spec: IndexColumnSpec): string[] => {
+
+  /** Les lignes reliées à une ligne par une relation (colonne liée ↔ ou liste liée). */
+  const relatedRows = useCallback((rowKey: string, via: string) => {
     const found = locate(rowKey)
-    const via = spec.lookup?.via ?? spec.rollup?.via
-    if (!found || !via) return []
+    if (!found) return undefined
     const relation = relationOf(found.table.tabName, via)
     const viaColumn = columnIndexOf(found.table, via)
-    if (!relation || viaColumn < 0) return []
-    const names = new Set(splitNames(found.row.values[viaColumn] ?? "").map(foldName))
+    if (!relation || viaColumn < 0) return undefined
+    const names = new Set(splitNames(rawOf(rowKey, via).replace(/<[^>]+>/g, " ")).map(foldName))
     const source = relation.index === indexKey ? { tables: tables as LoadedWorldIndex["tables"], columns: data?.columns } : related[relation.index]
-    if (!source) return []
-    const field = spec.kind === "lookup" ? spec.lookup?.field : spec.rollup?.field
-    const values: string[] = []
-    let count = 0
-    let fieldSpec: IndexColumnSpec | undefined
+    if (!source) return { rows: [] as Array<{ tabName: string; headers: string[]; values: string[] }>, columns: undefined }
+    const rows: Array<{ tabName: string; headers: string[]; values: string[] }> = []
     for (const target of source.tables) {
       if (relation.tabs && !relation.tabs.includes(target.tabName)) continue
       const nameColumn = nameColumnOf(target.headers)
-      const fieldColumn = field ? target.headers.findIndex((header) => foldName(header) === foldName(field)) : -1
       if (nameColumn < 0) continue
-      fieldSpec ??= field ? source.columns?.[target.tabName]?.find((column) => foldName(column.header) === foldName(field))?.spec : undefined
-      for (const row of target.rows) {
-        if (!names.has(foldName(row.values[nameColumn] ?? ""))) continue
-        count += 1
-        if (fieldColumn >= 0) values.push(row.values[fieldColumn] ?? "")
-      }
+      for (const row of target.rows) if (names.has(foldName(row.values[nameColumn] ?? ""))) rows.push({ tabName: target.tabName, headers: target.headers, values: row.values })
+    }
+    return { rows, columns: source.columns }
+  }, [data, indexKey, locate, rawOf, related, relationOf, tables])
+
+  const computed = useCallback((rowKey: string, _columnKey: string, spec: IndexColumnSpec): string[] => {
+    const via = spec.lookup?.via ?? spec.rollup?.via
+    if (!via) return []
+    const found = relatedRows(rowKey, via)
+    if (!found) return []
+    const field = spec.kind === "lookup" ? spec.lookup?.field : spec.rollup?.field
+    const values: string[] = []
+    let fieldSpec: IndexColumnSpec | undefined
+    for (const row of found.rows) {
+      const fieldColumn = field ? row.headers.findIndex((header) => foldName(header) === foldName(field)) : -1
+      fieldSpec ??= field ? found.columns?.[row.tabName]?.find((column) => foldName(column.header) === foldName(field))?.spec : undefined
+      if (fieldColumn >= 0) values.push(row.values[fieldColumn] ?? "")
     }
     if (spec.kind === "lookup") return values.flatMap((value) => splitNames(value)).filter(Boolean)
-    const result = computeRollup(spec.rollup?.fn ?? "count", count, values, spec.number ?? fieldSpec?.number ?? {})
+    const result = computeRollup(spec.rollup?.fn ?? "count", found.rows.length, values, spec.number ?? fieldSpec?.number ?? {})
     return result ? [result] : []
-  }, [data, indexKey, locate, related, relationOf, tables])
+  }, [relatedRows])
+
+  // Le moteur de la ligne : ce que voit une formule, les jauges, les conditions des boutons.
+  // Comme les cellules, il ne lit les modifications en cours (une référence) qu'une fois appelé.
+  /* eslint-disable react-hooks/refs -- les fonctions du moteur ne lisent la référence qu'à l'appel, jamais pendant sa création */
+  const engine = useMemo(() => createRowEngine({
+    specOf: (rowKey, header) => {
+      const found = locate(rowKey)
+      if (!found || !(data?.columns[found.table.tabName] ?? []).some((column) => foldName(column.header) === foldName(header))) return undefined
+      return specOf(found.table.tabName, header)
+    },
+    raw: rawOf,
+    rowInfo: (rowKey) => { const found = locate(rowKey); return found ? { tabName: found.table.tabName, rowNumber: found.row.rowNumber } : null },
+    related: (rowKey, via, field) => {
+      const found = relatedRows(rowKey, via)
+      if (!found) return undefined
+      return found.rows.map((row) => { const column = row.headers.findIndex((header) => foldName(header) === foldName(field)); return column >= 0 ? row.values[column] ?? "" : "" })
+    },
+    relatedCount: (rowKey, via) => relatedRows(rowKey, via)?.rows.length,
+    computed: (rowKey, spec) => computed(rowKey, "", spec),
+    seed,
+  }), [computed, data, locate, rawOf, relatedRows, seed, specOf])
+  /* eslint-enable react-hooks/refs */
+  useLayoutEffect(() => { engineRef.current = engine })
+
+  /** Ce qu'affiche une case : la valeur de Sheets, ou le résultat d'une colonne calculée (tri, recherche, copie). */
+  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+    const found = locate(rowKey)
+    if (found && columnKey !== TAB_COLUMN) {
+      const spec = specOf(found.table.tabName, columnKey)
+      if (isComputedSpec(spec) && spec.kind !== "auto-links" && spec.kind !== "actions") return engine.computedText(rowKey, columnKey, spec) ?? ""
+    }
+    return rawOf(rowKey, columnKey)
+  }, [engine, locate, rawOf, specOf])
+
+  /** Les lignes d'un index, pour un tirage « ligne d'un index ». */
+  const rowsOf = useCallback((index: string, tab: string): RandomCandidateRow[] | undefined => {
+    const self = index === "self" || index === indexKey
+    const source = self ? { tables: tables as LoadedWorldIndex["tables"], columns: data?.columns } : related[index]
+    if (!source) {
+      if (!self) void loadWorldIndexData(index as WorldIndexKey).then((loaded) => setRelated((current) => ({ ...current, [index]: loaded })))
+      return undefined
+    }
+    return source.tables.filter((target) => tab === "*" || !tab || target.tabName === tab).flatMap((target) => {
+      const nameColumn = nameColumnOf(target.headers)
+      const columnOf = (header: string) => target.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
+      const specFor = (header: string) => source.columns?.[target.tabName]?.find((column) => foldName(column.header) === foldName(header))?.spec
+      return target.rows.map((row): RandomCandidateRow => ({
+        name: nameColumn >= 0 ? row.values[nameColumn] ?? "" : "",
+        cell: (header) => { const column = columnOf(header); return column >= 0 ? row.values[column] ?? "" : "" },
+        formula: { column: (name) => { const column = columnOf(name); return column < 0 ? undefined : columnFormulaValue(row.values[column] ?? "", specFor(name)) } },
+      }))
+    })
+  }, [data, indexKey, related, tables])
+
+  /** Un tirage d'une colonne Aléatoire, écrit dans la case. `force` : même si elle est figée. */
+  const drawCell = useCallback(async (rowKey: string, header: string, spec: IndexColumnSpec, force = false) => {
+    const settings = normalizeSpec(spec).random
+    if (!settings) return null
+    if (!force && settings.mode === "fixed" && rawOf(rowKey, header).trim()) return null
+    const draw = drawRandom(settings, { random: cryptoRandom, row: engine.context(rowKey), rowsOf })
+    if (draw.error) { notify(`${header} : ${draw.error}`, "error"); return null }
+    const text = drawText(draw)
+    await commitCell(rowKey, header, text)
+    if (draw.detail) notify(`${header} : ${text} (${draw.detail})`)
+    return text
+  }, [commitCell, engine, notify, rawOf, rowsOf])
+
+  // Les boutons d'une ligne : ce qu'ils peuvent toucher dans un index du monde.
+  const mutateRef = useRef<(action: string, rowKeys: string[], label: string, extra?: Record<string, unknown>) => Promise<void>>(async () => undefined)
+  const pathOf = useCallback((index: string) => isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].path : `/ressources/index/${index}`, [])
+  const runtimeFor = useCallback((rowKey: string): ActionRuntime => {
+    const found = locate(rowKey)
+    const tab = found?.table.tabName ?? ""
+    const sheetFields = (data?.columns[tab] ?? []).filter((column) => isSheetSpec(column.spec) && !["id", "actions"].includes(column.spec.kind))
+    return {
+      row: () => engine.context(rowKey),
+      cell: (header) => rawOf(rowKey, header),
+      specOf: (header) => (data?.columns[tab] ?? []).some((column) => foldName(column.header) === foldName(header)) ? specOf(tab, header) : undefined,
+      setCell: async (header, value) => {
+        if (!found || columnIndexOf(found.table, header) < 0) throw new Error(`La colonne « ${header} » n’existe pas dans cet onglet.`)
+        await commitCell(rowKey, header, value)
+      },
+      confirm: async (message) => window.confirm(message),
+      notify,
+      openUrl: (url) => { window.open(url, "_blank", "noopener,noreferrer") },
+      navigate: (href) => router.push(href),
+      openSheet: () => setDetails(rowKey),
+      linkedHref: (header) => {
+        const relation = found ? relationOf(tab, header) : null
+        const [first] = splitNames(rawOf(rowKey, header).replace(/<[^>]+>/g, " "))
+        return relation && first ? `${pathOf(relation.index)}?q=${encodeURIComponent(first)}` : undefined
+      },
+      indexHref: (index) => index ? pathOf(index) : undefined,
+      roll: async (header) => drawCell(rowKey, header, specOf(tab, header), true),
+      duplicate: () => mutateRef.current("duplicate", [rowKey], "duplicate"),
+      remove: () => mutateRef.current("delete", [rowKey], "delete"),
+      move: (target) => mutateRef.current("move", [rowKey], "move", { toTab: target }),
+      create: async (index, targetTab, values) => {
+        const target = index === indexKey ? { tables: tables as LoadedWorldIndex["tables"] } : await loadWorldIndexData(index as WorldIndexKey)
+        const table = target?.tables.find((candidate) => !targetTab || candidate.tabName === targetTab) ?? target?.tables[0]
+        if (!table) throw new Error("Cet index ou cet onglet est introuvable.")
+        const row = table.headers.map((header) => Object.entries(values).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")
+        const response = await fetch("/api/resources/world-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: index, action: "add", tabName: table.tabName, values: row }) })
+        const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
+        if (!response.ok) throw new Error(payload.error || "La ligne n’a pas pu être créée.")
+        forgetWorldIndexData(index as WorldIndexKey)
+        if (index === indexKey && payload.data) applyData(payload.data, ++requestSeq.current)
+        const name = row[nameColumnOf(table.headers)] ?? ""
+        return { href: `${pathOf(index)}${name ? `?q=${encodeURIComponent(name)}` : ""}` }
+      },
+      copy: copyToClipboard,
+      card: () => rowCard(rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "") || "Sans nom", sheetFields.filter((column) => !isComputedSpec(column.spec) || column.spec.kind === "formula").map((column) => {
+        const text = valueOf(rowKey, column.header).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+        return { label: column.header, text }
+      }).filter((field) => foldName(field.label) !== "nom")),
+      chat: async (message, audience) => {
+        const campaign = await chooseCampaign(ask, "chat")
+        if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
+        await sendToCampaignChat(campaign, message, audience)
+      },
+    }
+  }, [applyData, ask, commitCell, data, drawCell, engine, indexKey, locate, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
+
+  const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
+
   /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
     if (!table) return []
@@ -341,11 +506,22 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       header,
       specOf(table.tabName, header),
       columnWidthFor(header, tabDefinition.widths[tabDefinition.headers.findIndex((candidate) => foldName(candidate) === foldName(header))]),
-      { valueOf, commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value), disabled: busy, openForm: nameOpensDetails ? setDetails : undefined, computed },
+      {
+        valueOf,
+        commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value),
+        disabled: busy,
+        openForm: setDetails,
+        computed,
+        formula: (rowKey, columnKey, spec) => engine.formula(rowKey, columnKey, spec),
+        gaugeMax: (rowKey, spec) => engine.gaugeMax(rowKey, spec),
+        draw: async (rowKey, columnKey, spec) => { await drawCell(rowKey, columnKey, spec) },
+        buttonVisible: (rowKey, button) => engine.buttonVisible(rowKey, button),
+        runButton,
+      },
     ))
     if (showAll) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     return list
-  }, [busy, commitCell, computed, nameOpensDetails, showAll, specOf, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, computed, drawCell, engine, runButton, showAll, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -382,7 +558,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
-  useLayoutEffect(() => { moveRow.current = mutate })
+  useLayoutEffect(() => { moveRow.current = mutate; mutateRef.current = mutate })
   const renderTabCell = useCallback((rowKey: string) => {
     const { tabName: rowTab } = parseRowKey(rowKey)
     return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void moveRow.current("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
@@ -398,13 +574,50 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const hints = table ? linkHints(links, indexKey, table.tabName) : []
   const formTable = showAll ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
-  // Le formulaire d'ajout montre les colonnes du tableau, sauf l'identifiant (généré)
-  // et, pour les créatures, l'extension qui se règle dans le tableau.
+  // Le formulaire d'ajout montre les colonnes du formulaire (« Tableau et formulaire »,
+  // « Formulaire seulement »), sauf l'identifiant (généré), les colonnes calculées et,
+  // pour les créatures, ce qui se remplit dans leur fiche.
   const formFields: IndexFormField[] = formTable ? (data?.columns[formTable.tabName] ?? [])
     .flatMap(({ header, spec }) => {
-      if (!isGridSpec(spec) || spec.kind === "id" || spec.kind === "lookup" || spec.kind === "rollup" || (nameOpensDetails && foldName(header) === "extension")) return []
+      if (!isSheetSpec(spec) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
+      if (nameOpensDetails && (!isGridSpec(spec) || foldName(header) === "extension")) return []
       return [{ key: header, label: header, spec, long: isLongColumn(header) }]
     }) : []
+
+  /** Le texte enregistré d'une case (la fiche relit la ligne telle que Sheets l'a renvoyée). */
+  const savedCell = (found: { table: WorldIndexTable; row: WorldIndexRow }, header: string) => {
+    const column = columnIndexOf(found.table, header)
+    if (column < 0) return ""
+    return isRichSpec(specOf(found.table.tabName, header)) ? found.row.html[column] ?? "" : found.row.values[column] ?? ""
+  }
+
+  // La fiche d'une ligne (index sans fiche dédiée) : tous ses champs du formulaire.
+  const sheetFields = detailsFound && !nameOpensDetails ? (data?.columns[detailsFound.table.tabName] ?? [])
+    .filter((column) => isSheetSpec(column.spec) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
+    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: savedCell(detailsFound, column.header), long: isLongColumn(column.header) })) : []
+  const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
+    formula: (spec) => engine.formula(details, header, spec),
+    computed: (spec) => computed(details, header, spec),
+    gaugeMax: (spec) => engine.gaugeMax(details, spec),
+    draw: async (spec) => { await drawCell(details, header, spec) },
+    buttonVisible: (button) => engine.buttonVisible(details, button),
+    runButton: (button) => runButton(details, button),
+  }
+
+  async function saveSheet(changes: Record<string, string>) {
+    if (details === null) return
+    setSheetPending(true); setSheetError("")
+    try {
+      // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs effets.
+      for (const [header, value] of Object.entries(changes)) await commitCell(details, header, value)
+    } catch (reason) {
+      setSheetError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")
+    }
+    setSheetPending(false)
+  }
+
+  // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
+  const weightColumns = table ? (data?.columns[table.tabName] ?? []).filter((column) => ["number", "gauge", "formula", "rollup"].includes(column.spec.kind)).map((column) => column.header) : []
 
   async function openEditor() {
     setPending("editor"); setEditorError("")
@@ -449,6 +662,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+          {table && <DrawRowButton
+            rows={displayedRows}
+            weightColumns={weightColumns}
+            weightOf={(rowKey, header) => { const found = locate(rowKey); return found ? numericCellValue(valueOf(rowKey, header), specOf(found.table.tabName, header)) : null }}
+            nameOf={(rowKey) => rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "")}
+            onOpen={setDetails}
+            disabled={busy}
+          />}
           <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={busy} title="Colonnes, types, réglages et onglets de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!table || busy}><Plus />Ajouter {showAll ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
@@ -506,11 +727,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           }}
           rowMenuExtras={(rowKey) => {
             const targets = moveTargetsOf(parseRowKey(rowKey).tabName)
-            if (!targets.length) return null
             return <>
               <ContextMenuSeparator />
-              <ContextMenuLabel className="flex items-center gap-1.5"><ArrowRightLeft className="size-3.5" />Déplacer vers</ContextMenuLabel>
-              {targets.map((target) => <ContextMenuItem key={target} onSelect={() => void mutate("move", [rowKey], "move", { toTab: target })}>{target}</ContextMenuItem>)}
+              <ContextMenuItem onSelect={() => setDetails(rowKey)}><FileText className="size-3.5" />Ouvrir la fiche</ContextMenuItem>
+              {targets.length > 0 && <>
+                <ContextMenuSeparator />
+                <ContextMenuLabel className="flex items-center gap-1.5"><ArrowRightLeft className="size-3.5" />Déplacer vers</ContextMenuLabel>
+                {targets.map((target) => <ContextMenuItem key={target} onSelect={() => void mutate("move", [rowKey], "move", { toTab: target })}>{target}</ContextMenuItem>)}
+              </>}
             </>
           }}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
@@ -531,6 +755,21 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           if (payload.data) applyData(payload.data, payload.seq)
         }}
       />}
+
+      {!nameOpensDetails && detailsFound && <IndexRowSheet
+        key={`${details}`}
+        open
+        title={savedCell(detailsFound, "Nom").replace(/<[^>]+>/g, "")}
+        subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
+        fields={sheetFields}
+        rowFor={sheetRow}
+        pending={sheetPending}
+        error={sheetError}
+        onSave={saveSheet}
+        onClose={() => { setDetails(null); setSheetError("") }}
+      />}
+      {noticesView}
+      {choiceView}
     </section>
   )
 }

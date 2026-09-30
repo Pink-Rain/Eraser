@@ -2,7 +2,7 @@
 
 import { memo, useEffect, useMemo, useState, type ReactNode } from "react"
 import Link from "next/link"
-import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Minus, Plus, Search, Sparkle, Sparkles, Trash2, X, Zap } from "lucide-react"
+import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Plus, Search, Sparkles, Trash2, X, Zap } from "lucide-react"
 
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -14,6 +14,9 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
+import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
+import { GaugeCell } from "@/components/eraser/index-gauge"
+import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import {
   checkboxValue,
   columnTypeLabel,
@@ -21,14 +24,19 @@ import {
   fileAcceptLabels,
   type FileAccept,
   foldName,
+  gaugeScaleOf,
   isCheckedValue,
   isRichSpec,
-  kindsOf,
+  joinListValue,
   matchChoice,
+  normalizeSpec,
+  splitListValue,
+  type ActionButton,
   type ChoiceOption,
   type IndexColumnSpec,
   type SpellSource,
 } from "@/lib/index-columns"
+import type { FormulaDisplay } from "@/lib/index-formula"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 
 /*
@@ -37,7 +45,7 @@ import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIn
  * que leurs colonnes et la façon d'enregistrer une valeur.
  */
 
-export { isCheckedValue as isChecked, IndexImage }
+export { isCheckedValue as isChecked, IndexImage, GaugeCell }
 
 /**
  * Valeur affichée tout de suite après un choix, sans attendre que le tableau entier se
@@ -65,6 +73,10 @@ type PickerProps = {
   loading?: boolean
   /** Une valeur hors liste peut être choisie telle quelle. */
   allowCustom?: boolean
+  /** Plusieurs choix par case, séparés par des virgules dans la feuille. */
+  multiple?: boolean
+  /** Les groupes d'options (statut), dans l'ordre. */
+  groups?: Array<{ name: string; color?: string }>
   /** Liste liée : une valeur absente est créée dans l'index source. */
   onCreate?: (value: string) => Promise<void>
   createLabel?: string
@@ -73,28 +85,55 @@ type PickerProps = {
   renderValue?: (value: string) => ReactNode
 }
 
+/** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
+function ChoicePill({ value, option, group, outside, renderValue }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode }) {
+  const color = option?.color ?? group?.color
+  if (renderValue) return <span className="min-w-0 truncate">{renderValue(value)}</span>
+  if (!color) return <span className={`min-w-0 truncate ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
+  return <span className={`inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 text-xs font-medium ${outside ? "italic" : ""}`} style={pillStyle(color)}>{value}</span>
+}
+
 /**
  * Le sélecteur d'une liste. Fermé, ce n'est qu'un bouton : le menu n'est monté qu'au
  * clic (des centaines de menus montés d'avance rendaient le tableau interminable).
  * Une valeur écrite autrement dans la feuille (« Aggressif ») est reconnue ; une valeur
  * hors liste reste affichée en italique, pour ne jamais être effacée par mégarde.
+ * À choix multiple, un clic coche ou décoche une option et le menu reste ouvert.
  */
-export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, onCreate, createLabel, compact = true, renderValue }: PickerProps) {
+export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue }: PickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const trimmed = value.trim()
-  const matched = matchChoice(trimmed, options)
-  const current = matched?.value ?? trimmed
-  const outside = Boolean(trimmed) && !matched
+  const values = multiple ? splitListValue(trimmed, options) : trimmed ? [trimmed] : []
+  const current = values.map((item) => ({ raw: item, option: matchChoice(item, options) }))
+  const selected = new Set(current.map((item) => item.option?.value ?? item.raw).map(foldName))
+  const outsideValues = current.filter((item) => !item.option).map((item) => item.raw)
   const folded = foldName(query)
-  const shown = options.filter((option) => !folded || foldName(`${option.value} ${option.hint ?? ""}`).includes(folded)).slice(0, 200)
+  const shown = options.filter((option) => !folded || foldName(`${option.value} ${option.hint ?? ""} ${option.group ?? ""}`).includes(folded)).slice(0, 300)
   const exact = query.trim() && options.some((option) => foldName(option.value) === folded)
   const canCreate = Boolean(query.trim()) && !exact && (allowCustom || onCreate)
+  const groupOf = (option?: ChoiceOption) => groups.find((group) => option?.group && foldName(group.name) === foldName(option.group))
+  // Les options rangées par groupe, dans l'ordre des groupes ; les autres à la fin.
+  const sections = groups.length
+    ? [...groups.map((group) => ({ group: group as { name: string; color?: string } | null, items: shown.filter((option) => option.group && foldName(option.group) === foldName(group.name)) })), { group: null, items: shown.filter((option) => !groupOf(option)) }].filter((section) => section.items.length)
+    : [{ group: null, items: shown }]
+
+  function commit(next: string[]) {
+    onChange(multiple ? joinListValue(next) : next[0] ?? "")
+  }
 
   function choose(next: string) {
-    onChange(next)
-    setOpen(false)
+    if (!multiple) {
+      commit(next ? [next] : [])
+      setOpen(false)
+      setQuery("")
+      return
+    }
+    if (!next) { commit([]); return }
+    const key = foldName(next)
+    const kept = current.map((item) => item.option?.value ?? item.raw)
+    commit(kept.some((item) => foldName(item) === key) ? kept.filter((item) => foldName(item) !== key) : [...kept, next])
     setQuery("")
   }
 
@@ -104,10 +143,14 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
     try { await onCreate(name); choose(name) } finally { setCreating(false) }
   }
 
+  const closed = values.length
+    ? <span className={`flex min-w-0 ${multiple ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item) => <ChoicePill key={item.raw} value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} />)}</span>
+    : <span className="text-muted-foreground">—</span>
+
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
     <PopoverTrigger asChild>
-      <button type="button" aria-label={label} disabled={disabled} title={matched?.hint ?? (outside ? "Valeur hors de la liste" : undefined)} className={compact ? cellButton : `${cellButton} h-9 border-input bg-background/50`}>
-        <span className={`min-w-0 truncate ${outside ? "italic text-muted-foreground" : ""}`}>{current ? renderValue?.(current) ?? current : "—"}</span>
+      <button type="button" aria-label={label} disabled={disabled} title={current[0]?.option?.hint ?? (outsideValues.length ? "Valeur hors de la liste" : undefined)} className={compact ? `${cellButton} ${multiple ? "h-auto" : ""}` : `${cellButton} min-h-9 border-input bg-background/50`}>
+        {closed}
         <ChevronDown className="size-4 shrink-0 opacity-50" />
       </button>
     </PopoverTrigger>
@@ -125,18 +168,21 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
         }}
         placeholder={onCreate || allowCustom ? "Chercher ou saisir…" : "Chercher…"}
         className="h-8 border-0 bg-muted/45 pl-8 text-sm shadow-none"
-      /></div></div>
-      <div className="max-h-64 overflow-y-auto p-1">
-        <button type="button" onClick={() => choose("")} className="flex w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent">—</button>
-        {outside && !folded && <div className="flex items-center gap-1">
-          <button type="button" onClick={() => choose(trimmed)} className="min-w-0 flex-1 truncate rounded-md px-2 py-1.5 text-left text-sm italic text-muted-foreground hover:bg-accent" title="Valeur actuelle de la feuille, hors de la liste">{trimmed}</button>
-          {onCreate && <button type="button" disabled={creating} onClick={() => void create(trimmed)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10">Créer</button>}
-        </div>}
+      /></div>{multiple && <p className="mt-1.5 px-1 text-[10px] text-muted-foreground">Plusieurs choix : clique pour cocher ou décocher.</p>}</div>
+      <div className="max-h-72 overflow-y-auto p-1">
+        <button type="button" onClick={() => { commit([]); if (!multiple) setOpen(false) }} className="flex w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent">{multiple ? "Tout décocher" : "—"}</button>
+        {!folded && outsideValues.map((outside) => <div key={outside} className="flex items-center gap-1">
+          <button type="button" onClick={() => choose(outside)} className="flex min-w-0 flex-1 items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-left text-sm italic text-muted-foreground hover:bg-accent" title="Valeur de la feuille, hors de la liste"><span className="truncate">{outside}</span>{multiple && <Check className="size-3.5 shrink-0" />}</button>
+          {onCreate && <button type="button" disabled={creating} onClick={() => void create(outside)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10">Créer</button>}
+        </div>)}
         {loading && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Chargement…</p>}
-        {shown.map((option) => <button key={option.value} type="button" onClick={() => choose(option.value)} className="group flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
-          <span className="flex w-full items-center justify-between gap-2"><span className="truncate">{renderValue?.(option.value) ?? option.value}</span>{option.value === current && <Check className="size-3.5 shrink-0" />}</span>
-          {option.hint && <span className="hidden text-xs text-muted-foreground group-hover:block">{option.hint}</span>}
-        </button>)}
+        {sections.map((section) => <div key={section.group?.name ?? "*"}>
+          {section.group && <p className="flex items-center gap-1.5 px-2 pb-0.5 pt-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{section.group.color && <span className="size-2 rounded-full" style={{ backgroundColor: section.group.color }} />}{section.group.name}</p>}
+          {section.items.map((option) => <button key={option.value} type="button" onClick={() => choose(option.value)} className="group flex w-full flex-col items-start rounded-md px-2 py-1.5 text-left text-sm hover:bg-accent">
+            <span className="flex w-full items-center justify-between gap-2"><ChoicePill value={option.value} option={option} group={groupOf(option)} renderValue={renderValue} />{selected.has(foldName(option.value)) && <Check className="size-3.5 shrink-0" />}</span>
+            {option.hint && <span className="hidden text-xs text-muted-foreground group-hover:block">{option.hint}</span>}
+          </button>)}
+        </div>)}
         {canCreate && <button type="button" disabled={creating} onClick={() => void create(query.trim())} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm font-medium text-primary hover:bg-primary/10">
           {creating ? <LoaderCircle className="size-3.5 animate-spin" /> : <Plus className="size-3.5" />}
           <span className="truncate">{onCreate ? `Créer « ${query.trim()} »${createLabel ? ` dans ${createLabel}` : ""}` : `Utiliser « ${query.trim()} »`}</span>
@@ -161,6 +207,12 @@ export type LoadedWorldIndex = {
 }
 const dataCache = new Map<string, Promise<LoadedWorldIndex | null>>()
 const namesCache = new Map<string, Promise<string[]>>()
+
+/** Oublie les données gardées d'un index (après y avoir créé une ligne). */
+export function forgetWorldIndexData(index: WorldIndexKey) {
+  dataCache.delete(index)
+  for (const key of [...namesCache.keys()]) if (key.startsWith(`${index}:`)) namesCache.delete(key)
+}
 
 export function loadWorldIndexData(index: WorldIndexKey) {
   let promise = dataCache.get(index)
@@ -224,7 +276,7 @@ function useWorldIndexNames(source: { index: WorldIndexKey; tab: string }) {
  * Liste déroulante liée : les noms viennent d'un autre index (les peuples d'un PNJ…).
  * Choisir ou saisir un nom absent le crée dans cet index, comme une colonne liée.
  */
-export function LinkedChoicePicker({ source, value, onChange, compact = true, disabled = false, label }: { source: { index: WorldIndexKey; tab: string }; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; label: string }) {
+export function LinkedChoicePicker({ source, value, onChange, compact = true, disabled = false, multiple = false, label }: { source: { index: WorldIndexKey; tab: string }; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; multiple?: boolean; label: string }) {
   const names = useWorldIndexNames(source)
   const [shown, setShown] = useOptimistic(value)
   const options = useMemo(() => (names ?? []).map((name) => ({ value: name })), [names])
@@ -235,6 +287,7 @@ export function LinkedChoicePicker({ source, value, onChange, compact = true, di
     loading={names === null}
     compact={compact}
     disabled={disabled}
+    multiple={multiple}
     createLabel={isBuiltinWorldIndexKey(source.index) ? `l’index ${worldIndexDefinitions[source.index].title}` : "l’index lié"}
     onCreate={(name) => ensureWorldIndexName(source, name)}
     onChange={(next) => { setShown(next); onChange(next) }}
@@ -523,105 +576,6 @@ export const SpellsCell = memo(function SpellsCell({ value, source, category, di
 })
 
 // ---------------------------------------------------------------------------
-// Jauge : barre, icônes ou anneau
-// ---------------------------------------------------------------------------
-
-function parseGauge(value: string, max: number) {
-  const parsed = Number.parseInt(value.replace(/[^0-9-]/g, ""), 10)
-  return Number.isFinite(parsed) ? Math.max(0, Math.min(max, parsed)) : null
-}
-
-/**
- * Les icônes se remplissent comme une barre : cliquer une icône pleine vide jusqu'à
- * elle comprise, cliquer une icône vide remplit jusqu'à elle comprise.
- */
-function nextGaugeValue(current: number, clickedIndex: number) {
-  return clickedIndex < current ? clickedIndex : clickedIndex + 1
-}
-
-/**
- * Un nombre affiché en jauge, propre à chaque ligne. « icons » : des icônes à cliquer ;
- * « bar » : une barre qu'on fait glisser ; « ring » : un anneau avec − et +.
- * `mode: "count"` : la case compte des icônes (les charges d'un sort : « 3 » affiche
- * trois étincelles), sans maximum commun ; un texte non numérique (« ✦ ») reste tel quel.
- */
-export const GaugeCell = memo(function GaugeCell({ label, value, style, max, mode = "fill", unlimited, disabled = false, accent, onChange }: { label: string; value: string; style: "bar" | "icons" | "ring"; max: number; mode?: "fill" | "count"; unlimited?: string; disabled?: boolean; accent?: string; onChange: (value: string) => void }) {
-  const [shown, setShown] = useOptimistic(value)
-  const current = parseGauge(shown, max)
-  const [dragging, setDragging] = useState<number | null>(null)
-  const [picking, setPicking] = useState(false)
-  const set = (next: number | null) => { const text = next === null ? "" : String(next); setShown(text); onChange(text) }
-  const clear = current !== null && !disabled && <button type="button" onClick={() => set(null)} className="ml-auto hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover/gauge:inline-flex" aria-label={`Vider ${label}`} title="Vider"><X className="size-3" /></button>
-
-  if (mode === "count") {
-    const text = shown.trim()
-    const count = /^\d+$/.test(text) ? current : null
-    return <Popover open={picking} onOpenChange={setPicking}>
-      <PopoverTrigger asChild>
-        <button type="button" disabled={disabled} className="flex min-h-8 w-full items-center gap-0.5 rounded-md px-1.5 text-left hover:bg-muted/60 disabled:opacity-60" style={{ color: accent || "var(--primary)" }} aria-label={`${label} : ${text || "vide"}`} title={text ? `${label} : ${text} — cliquer pour changer` : `${label} : cliquer pour choisir`}>
-          {count !== null
-            ? count > 0 ? Array.from({ length: count }, (_, index) => <Sparkle key={index} className="size-4" fill="currentColor" strokeWidth={1.5} />) : <span className="text-xs text-muted-foreground">0</span>
-            : text ? <span className="text-sm font-semibold">{text}</span> : <span className="text-xs text-muted-foreground">—</span>}
-        </button>
-      </PopoverTrigger>
-      {picking && <PopoverContent align="start" className="w-auto p-2">
-        <p className="mb-1.5 px-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
-        <div className="flex flex-wrap gap-1">
-          {Array.from({ length: max + 1 }, (_, index) => <Button key={index} type="button" size="sm" variant={index === count ? "default" : "outline"} className="min-w-8 tabular-nums" onClick={() => { set(index); setPicking(false) }}>{index}</Button>)}
-          {unlimited && <Button type="button" size="sm" variant={text === unlimited ? "default" : "outline"} title="Illimité" onClick={() => { setShown(unlimited); onChange(unlimited); setPicking(false) }}>{unlimited}</Button>}
-          <Button type="button" size="sm" variant="ghost" onClick={() => { set(null); setPicking(false) }}>Vider</Button>
-        </div>
-      </PopoverContent>}
-    </Popover>
-  }
-
-  if (style === "icons") return <span className="group/gauge flex min-h-8 items-center gap-0.5 px-1.5" style={{ color: accent || "var(--primary)" }} role="group" aria-label={`${label} : ${current ?? "vide"} sur ${max}`}>
-    {Array.from({ length: max }, (_, index) => {
-      const filled = current !== null && index < current
-      return <button key={index} type="button" disabled={disabled} onClick={() => set(nextGaugeValue(current ?? 0, index))} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>
-        <Sparkle className="size-4" fill={filled ? "currentColor" : "none"} strokeWidth={filled ? 1.5 : 1.8} />
-      </button>
-    })}
-    {clear}
-  </span>
-
-  if (style === "ring") {
-    const ratio = current === null ? 0 : current / Math.max(1, max)
-    const radius = 11
-    const length = 2 * Math.PI * radius
-    return <span className="group/gauge flex min-h-8 items-center gap-1 px-1.5">
-      <button type="button" disabled={disabled || !current} onClick={() => set(Math.max(0, (current ?? 0) - 1))} className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Diminuer ${label}`}><Minus className="size-3" /></button>
-      <span className="relative grid size-7 place-items-center" aria-label={`${label} : ${current ?? "vide"} sur ${max}`}>
-        <svg viewBox="0 0 28 28" className="absolute inset-0 -rotate-90"><circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" /><circle cx="14" cy="14" r={radius} fill="none" stroke={accent || "var(--primary)"} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${length * ratio} ${length}`} /></svg>
-        <span className="relative text-[10px] font-semibold tabular-nums">{current ?? "—"}</span>
-      </span>
-      <button type="button" disabled={disabled || current === max} onClick={() => set(Math.min(max, (current ?? 0) + 1))} className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Augmenter ${label}`}><Plus className="size-3" /></button>
-      {clear}
-    </span>
-  }
-
-  const displayed = dragging ?? current ?? 0
-  return <span className="group/gauge flex min-h-8 items-center gap-2 px-2">
-    <input
-      type="range"
-      min={0}
-      max={max}
-      step={1}
-      value={displayed}
-      disabled={disabled}
-      aria-label={label}
-      onChange={(event) => setDragging(Number(event.target.value))}
-      onPointerUp={() => { if (dragging !== null) { set(dragging); setDragging(null) } }}
-      onKeyUp={() => { if (dragging !== null) { set(dragging); setDragging(null) } }}
-      className="h-1.5 min-w-0 flex-1 cursor-pointer"
-      style={{ accentColor: accent || "var(--primary)" }}
-    />
-    <span className="w-9 shrink-0 text-right text-xs tabular-nums text-muted-foreground">{current === null && dragging === null ? "—" : `${displayed}/${max}`}</span>
-    {clear}
-  </span>
-})
-
-// ---------------------------------------------------------------------------
 // Nombre : unités, monnaie, plage, pourcentage
 // ---------------------------------------------------------------------------
 
@@ -887,37 +841,42 @@ export type IndexColumnContext = {
   lockedRow?: (rowKey: string) => boolean
   /** Recherche et Agrégat : les valeurs calculées d'une cellule. */
   computed?: (rowKey: string, columnKey: string, spec: IndexColumnSpec) => string[]
+  /** Formule : le résultat d'une cellule. */
+  formula?: (rowKey: string, columnKey: string, spec: IndexColumnSpec) => FormulaDisplay
+  /** Jauge « maximum lu dans une autre colonne » : le maximum de la ligne. */
+  gaugeMax?: (rowKey: string, spec: IndexColumnSpec) => number | null
+  /** Aléatoire : tire et enregistre. */
+  draw?: (rowKey: string, columnKey: string, spec: IndexColumnSpec) => Promise<void>
+  /** Boutons : visibles sur la ligne, et leur exécution. */
+  buttonVisible?: (rowKey: string, button: ActionButton) => boolean
+  runButton?: (rowKey: string, button: ActionButton) => Promise<void>
   /** Nombre : montrer les conversions au survol (le MJ seulement dans une boutique). */
   showConversions?: boolean
-}
-
-const displayClasses: Record<NonNullable<IndexColumnSpec["display"]>, string> = {
-  bold: "font-semibold",
-  skills: "font-semibold text-[#b3261e]",
-  muted: "text-muted-foreground",
 }
 
 /**
  * La colonne de grille d'un type. Tous les index passent par ici : un même type se
  * comporte partout de la même façon (enregistrement, copier-coller, tri, apparence).
  */
-export function indexGridColumn(key: string, label: string, spec: IndexColumnSpec, width: number, context: IndexColumnContext, extra: Partial<SheetGridColumn> & {
+export function indexGridColumn(key: string, label: string, input: IndexColumnSpec, width: number, context: IndexColumnContext, extra: Partial<SheetGridColumn> & {
   /** Rendu propre d'une valeur : pastille d'une liste, vignette d'une image. */
   renderValue?: (value: string, rowKey?: string) => ReactNode
   /** Colonne Image : import propre à la colonne. */
   upload?: (file: File, previous: string, rowKey: string) => Promise<string>
 } = {}): SheetGridColumn {
-  const kinds = kindsOf(spec)
-  const rich = isRichSpec(spec) || (spec.kind === "name" && kinds.includes("rich"))
+  const spec = normalizeSpec(input)
+  const rich = isRichSpec(spec)
+  const look = columnStyleCss(spec.style)
   const column: SheetGridColumn = {
     key,
     label: spec.kind === "linked" ? `${label} ↔` : label,
     width,
-    typeLabel: columnTypeLabel(spec),
+    typeLabel: columnTypeLabel(input),
     plain: !rich,
     hidden: spec.hidden,
     description: spec.description,
-    cellClassName: spec.display ? displayClasses[spec.display] : kinds.includes("name") || kinds.includes("name-form") ? "font-semibold" : undefined,
+    cellClassName: look.className || undefined,
+    cellStyle: Object.keys(look.style).length ? look.style : undefined,
   }
   const { valueOf, commit } = context
   const off = (rowKey: string) => Boolean(context.disabled || context.lockedRow?.(rowKey))
@@ -935,10 +894,10 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
       column.control = (rowKey) => <IdCell value={valueOf(rowKey, key)} computed={context.idComputed?.(rowKey)} />
       break
     case "choice":
-      column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={spec.options ?? []} allowCustom={spec.allowCustom} disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
+      column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "linked-choice":
-      if (spec.source) { const source = spec.source; column.control = (rowKey) => <LinkedChoicePicker label={label} source={source} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} /> }
+      if (spec.source) { const source = spec.source; column.control = (rowKey) => <LinkedChoicePicker label={label} source={source} multiple={spec.multiple} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} /> }
       break
     case "checkbox":
       column.control = (rowKey) => <CheckCell label={label} value={valueOf(rowKey, key)} emptyChecked={spec.emptyChecked} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
@@ -970,12 +929,28 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
       column.control = (rowKey) => <ComputedCell values={context.computed?.(rowKey, key, spec) ?? []} pills={spec.kind === "lookup"} />
       column.computed = true
       break
+    case "formula":
+      column.control = (rowKey) => <FormulaCell display={context.formula?.(rowKey, key, spec) ?? { kind: "text", text: "" }} />
+      column.computed = true
+      column.sortKey = (value) => { const number = Number.parseFloat(value.replace(/\s/g, "").replace(",", ".")); return Number.isFinite(number) && /^-?[\d\s.,]+/.test(value) ? number : value }
+      break
+    case "random":
+      column.control = (rowKey) => <RandomCell label={label} value={valueOf(rowKey, key)} settings={spec.random ?? { source: "number" }} disabled={off(rowKey) || !context.draw} onDraw={() => context.draw ? context.draw(rowKey, key, spec) : Promise.resolve()} />
+      break
+    case "actions":
+      column.control = (rowKey) => <ActionsCell buttons={spec.actions ?? []} disabled={off(rowKey) || !context.runButton} visible={(button) => context.buttonVisible ? context.buttonVisible(rowKey, button) : true} onRun={(button) => context.runButton ? context.runButton(rowKey, button) : Promise.resolve()} />
+      column.computed = true
+      column.sortable = false
+      break
     case "spells":
       column.control = (rowKey) => <SpellsCell value={valueOf(rowKey, key)} source={spec.spells?.source ?? "all"} category={spec.spells?.category} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
-    case "gauge":
-      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} unlimited={spec.gauge?.unlimited} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+    case "gauge": {
+      const settings = spec.gauge ?? { style: "bar", max: 10 }
+      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} settings={settings} maxValue={gaugeScaleOf(settings) === "from-column" ? context.gaugeMax?.(rowKey, spec) ?? null : undefined} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      column.sortKey = (value) => { const number = Number.parseFloat(value.replace(",", ".")); return Number.isFinite(number) ? number : Number.POSITIVE_INFINITY }
       break
+    }
     case "ranked-links":
     case "tab":
       // Contrôles propres à la page : la grille les dessine par `renderCustomCell`.
@@ -1006,46 +981,65 @@ export type IndexFieldProps = {
   disabled?: boolean
   /** Colonne liée : les noms séparés par des virgules. */
   linkedHint?: boolean
+  /** Dans une fiche : les colonnes calculées, les tirages et les boutons de la ligne. */
+  row?: {
+    formula?: (spec: IndexColumnSpec) => FormulaDisplay
+    computed?: (spec: IndexColumnSpec) => string[]
+    gaugeMax?: (spec: IndexColumnSpec) => number | null
+    draw?: (spec: IndexColumnSpec) => Promise<void>
+    buttonVisible?: (button: ActionButton) => boolean
+    runButton?: (button: ActionButton) => Promise<void>
+  }
 }
 
 const fieldLabel = "grid content-start gap-1 text-xs font-semibold"
 
-export function IndexField({ label, spec, value, onChange, long = false, autoFocus = false, placeholder, disabled = false }: IndexFieldProps) {
-  const kinds = kindsOf(spec)
-  const title = <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}</span>
+export function IndexField({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row }: IndexFieldProps) {
+  const spec = normalizeSpec(input)
+  const look = columnStyleCss(spec.style)
+  const title = <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   switch (spec.kind) {
     case "choice":
-      return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} disabled={disabled} onChange={onChange} /></div>
+      return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} /></div>
     case "linked-choice":
-      return spec.source ? <div className={fieldLabel}>{title}<LinkedChoicePicker compact={false} label={label} source={spec.source} value={value} disabled={disabled} onChange={onChange} /></div> : null
+      return spec.source ? <div className={fieldLabel}>{title}<LinkedChoicePicker compact={false} label={label} source={spec.source} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} /></div> : null
     case "checkbox":
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
     case "file":
       return spec.file?.accept === "image" && !spec.file.multiple
         ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} aspect="aspect-video" disabled={disabled} /></div>
-        : <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
+        : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
-    case "gauge":
-      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} unlimited={spec.gauge?.unlimited} disabled={disabled} onChange={onChange} /></span></div>
+    case "gauge": {
+      const settings = spec.gauge ?? { style: "bar" as const, max: 10 }
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} settings={settings} maxValue={gaugeScaleOf(settings) === "from-column" ? row?.gaugeMax?.(spec) ?? null : undefined} disabled={disabled} onChange={onChange} /></span></div>
+    }
     case "number":
       return spec.number
         ? <div className={fieldLabel}>{title}<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} /></div>
         : <label className={fieldLabel}>{title}<Input type="number" min={spec.min} max={spec.max} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} /></label>
     case "id":
       return <label className={fieldLabel}>{title}<Input value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder="Généré si vide" className="font-mono text-xs" /></label>
+    case "formula":
+      return row?.formula ? <div className={fieldLabel}>{title}<span className="rounded-lg border border-dashed bg-muted/20"><FormulaCell display={row.formula(spec)} /></span></div> : null
+    case "lookup":
+    case "rollup":
+      return row?.computed ? <div className={fieldLabel}>{title}<span className="rounded-lg border border-dashed bg-muted/20"><ComputedCell values={row.computed(spec)} pills={spec.kind === "lookup"} /></span></div> : null
+    case "random":
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><RandomCell label={label} value={value} settings={spec.random ?? { source: "number" }} disabled={disabled || !row?.draw} onDraw={() => row?.draw ? row.draw(spec) : Promise.resolve()} /></span></div>
+    case "actions":
+      return row?.runButton ? <div className={`${fieldLabel} md:col-span-2`}>{title}<ActionsCell buttons={spec.actions ?? []} disabled={disabled} visible={(button) => row.buttonVisible ? row.buttonVisible(button) : true} onRun={(button) => row.runButton!(button)} /></div> : null
     case "auto-links":
     case "ranked-links":
     case "tab":
     case "archived":
-    case "lookup":
-    case "rollup":
       return null
     default: {
-      const rich = isRichSpec(spec) || kinds.includes("rich")
-      if (!rich) return <label className={fieldLabel}>{title}<Input autoFocus={autoFocus} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} /></label>
+      const rich = isRichSpec(spec)
+      if (!rich) return <label className={fieldLabel}>{title}<Input autoFocus={autoFocus} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} className={look.className} style={look.style} /></label>
       return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}<RichTextField ariaLabel={label} value={value} onCommit={onChange} disabled={disabled} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} minHeight={long ? "min-h-24" : "min-h-9"} /></div>
     }
   }
@@ -1080,7 +1074,7 @@ export function IndexEntryForm({ title, fields, pending, leading, onCancel, onSa
         key={field.key}
         label={field.label}
         // Dans le formulaire, le nom se saisit toujours : il n'ouvre pas de fiche.
-        spec={field.spec.kind === "name-form" ? { kind: "name", also: field.spec.also } : field.spec}
+        spec={field.spec.kind === "name-form" ? { ...field.spec, kind: "name" } : field.spec}
         value={values[field.key] ?? ""}
         long={field.long}
         autoFocus={field === nameField}

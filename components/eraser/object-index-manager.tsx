@@ -1,18 +1,27 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
-import { Coins, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useRouter } from "next/navigation"
+import { Coins, FileText, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { indexGridColumn, IndexEntryForm } from "@/components/eraser/index-cells"
+import { addToCampaignInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
+import { indexGridColumn, IndexEntryForm, type IndexFieldProps } from "@/components/eraser/index-cells"
 import { IndexEditor } from "@/components/eraser/index-editor"
+import { createRowEngine } from "@/components/eraser/index-row-engine"
+import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
-import { isGridSpec, isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
+import { foldName, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
+import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
+import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
 import { numberCorrection, numberSortKey } from "@/lib/index-numbers"
 import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 
@@ -88,11 +97,18 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return entry?.spec ? { ...base, ...entry.spec } : base
   }), [schemas, selected])
   // Les colonnes vides d'en-tête ou à la corbeille ne s'affichent pas (elles restent dans Sheets).
-  const shownColumns = useMemo(() => (selected?.headers ?? []).flatMap((header, index) => {
-    if (!header.trim() || !isGridSpec(specs[index])) return []
+  const liveColumns = useMemo(() => (selected?.headers ?? []).flatMap((header, index) => {
+    if (!header.trim() || specs[index]?.kind === "archived") return []
     if (selected && isTrashedEntry(findEntry(schemas[selected.fileId] ?? [], selected.tabName, header))) return []
     return [index]
   }), [schemas, selected, specs])
+  // Le tableau : « Tableau et formulaire » et « Tableau seulement » ; la fiche : « … formulaire ».
+  const shownColumns = useMemo(() => liveColumns.filter((index) => isGridSpec(specs[index])), [liveColumns, specs])
+  const sheetColumns = useMemo(() => liveColumns.filter((index) => isSheetSpec(specs[index])), [liveColumns, specs])
+  const columnOfHeader = useCallback((header: string) => {
+    const index = (selected?.headers ?? []).findIndex((candidate) => foldName(candidate) === foldName(header))
+    return index >= 0 && liveColumns.includes(index) ? index : -1
+  }, [liveColumns, selected])
   const hasIdColumn = specs.some((spec) => spec.kind === "id")
 
   /** Case « Icône » : l'icône telle qu'Eraser l'affiche (image du Drive, icône d'Eraser, émoji). */
@@ -139,7 +155,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return sorted.map((row) => ({ key: String(row.rowNumber), rowNumber: row.rowNumber }))
   }, [query, selected, sort, specs])
 
-  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+  const rawOf = useCallback((rowKey: string, columnKey: string) => {
     // La clé vient du tableau réellement affiché, pas de la préférence enregistrée :
     // au premier affichage la préférence est encore vide alors qu'un tableau est choisi.
     const local = selected ? localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] : undefined
@@ -170,10 +186,113 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setSaving((current) => current - 1)
   }, [selected])
 
+  const router = useRouter()
+  const { notify, view: noticesView } = useIndexNotices()
+  const { ask, view: choiceView } = useChoiceDialog()
+  const [details, setDetails] = useState<string | null>(null)
+  const [sheetPending, setSheetPending] = useState(false)
+  const [sheetError, setSheetError] = useState("")
+  const [seed, setSeed] = useState(() => `objets:${Date.now()}`)
+
+  // Le moteur de la ligne : formules, jauges « autre colonne », conditions des boutons.
+  /* eslint-disable react-hooks/refs -- les fonctions du moteur ne lisent les modifications en cours (une référence) qu'à l'appel */
+  const engine = useMemo(() => createRowEngine({
+    specOf: (_rowKey, header) => { const index = columnOfHeader(header); return index >= 0 ? specs[index] : undefined },
+    raw: (rowKey, header) => { const index = columnOfHeader(header); return index >= 0 ? rawOf(rowKey, String(index)) : "" },
+    rowInfo: (rowKey) => selected ? { tabName: selected.tabName, rowNumber: Number(rowKey) } : null,
+    seed,
+  }), [columnOfHeader, rawOf, seed, selected, specs])
+  /* eslint-enable react-hooks/refs */
+  const engineRef = useRef(engine)
+  useLayoutEffect(() => { engineRef.current = engine })
+
+  /** Ce qu'affiche une case : la valeur de Sheets, ou le résultat d'une formule (tri, recherche, copie). */
+  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+    const spec = specs[Number(columnKey)]
+    if (spec && spec.kind === "formula" && selected) return engine.computedText(rowKey, selected.headers[Number(columnKey)], spec) ?? ""
+    return rawOf(rowKey, columnKey)
+  }, [engine, rawOf, selected, specs])
+
+  /** Les lignes du tableau affiché, pour un tirage « ligne de cet index ». */
+  const rowsOf = useCallback((): RandomCandidateRow[] | undefined => {
+    if (!selected) return undefined
+    const nameIndex = selected.headers.findIndex((header) => specs[selected.headers.indexOf(header)]?.kind === "name" || specs[selected.headers.indexOf(header)]?.kind === "name-form")
+    return selected.rows.map((row) => ({
+      name: nameIndex >= 0 ? row.values[nameIndex] ?? "" : "",
+      cell: (header) => { const index = columnOfHeader(header); return index >= 0 ? row.values[index] ?? "" : "" },
+      formula: { column: (name) => { const index = columnOfHeader(name); return index < 0 ? undefined : columnFormulaValue(row.values[index] ?? "", specs[index]) } },
+    }))
+  }, [columnOfHeader, selected, specs])
+
+  const drawCell = useCallback(async (rowKey: string, header: string, spec: IndexColumnSpec, force = false) => {
+    const settings = normalizeSpec(spec).random
+    const index = columnOfHeader(header)
+    if (!settings || index < 0) return null
+    if (!force && settings.mode === "fixed" && rawOf(rowKey, String(index)).trim()) return null
+    const draw = drawRandom(settings, { random: cryptoRandom, row: engine.context(rowKey), rowsOf: () => rowsOf() })
+    if (draw.error) { notify(`${header} : ${draw.error}`, "error"); return null }
+    const text = drawText(draw)
+    await commitCell(rowKey, String(index), text)
+    engineRef.current.invalidate()
+    if (draw.detail) notify(`${header} : ${text} (${draw.detail})`)
+    return text
+  }, [columnOfHeader, commitCell, engine, notify, rawOf, rowsOf])
+
+  const mutateRef = useRef<(body: Record<string, unknown>, label: string) => Promise<void>>(async () => undefined)
+  const runtimeFor = useCallback((rowKey: string): ActionRuntime => ({
+    row: () => engine.context(rowKey),
+    cell: (header) => { const index = columnOfHeader(header); return index >= 0 ? rawOf(rowKey, String(index)) : "" },
+    specOf: (header) => { const index = columnOfHeader(header); return index >= 0 ? specs[index] : undefined },
+    setCell: async (header, value) => {
+      const index = columnOfHeader(header)
+      if (index < 0) throw new Error(`La colonne « ${header} » n’existe pas dans ce tableau.`)
+      await commitCell(rowKey, String(index), value)
+      engineRef.current.invalidate()
+    },
+    confirm: async (message) => window.confirm(message),
+    notify,
+    openUrl: (url) => { window.open(url, "_blank", "noopener,noreferrer") },
+    navigate: (href) => router.push(href),
+    openSheet: () => setDetails(rowKey),
+    indexHref: (index) => !index ? undefined : isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].path : `/ressources/index/${index}`,
+    roll: async (header) => { const index = columnOfHeader(header); return index >= 0 ? drawCell(rowKey, header, specs[index], true) : null },
+    duplicate: () => mutateRef.current({ action: "duplicate", rowNumbers: [Number(rowKey)] }, "duplicate"),
+    remove: () => mutateRef.current({ action: "delete", rowNumbers: [Number(rowKey)] }, "delete"),
+    copy: copyToClipboard,
+    card: () => {
+      const nameIndex = selected?.headers.findIndex((_, index) => specs[index]?.kind === "name" || specs[index]?.kind === "name-form") ?? -1
+      return rowCard(nameIndex >= 0 ? rawOf(rowKey, String(nameIndex)).replace(/<[^>]+>/g, "") : "Objet", sheetColumns.filter((index) => index !== nameIndex && !["id", "actions"].includes(specs[index].kind)).map((index) => ({ label: selected!.headers[index], text: valueOf(rowKey, String(index)).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() })))
+    },
+    chat: async (message, audience) => {
+      const campaign = await chooseCampaign(ask, "chat")
+      if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
+      await sendToCampaignChat(campaign, message, audience)
+    },
+    campaignInventory: async () => {
+      const campaign = await chooseCampaign(ask, "inventory")
+      if (!campaign) throw new Error("Aucune campagne choisie.")
+      const idIndex = specs.findIndex((spec) => spec.kind === "id")
+      const itemId = (idIndex >= 0 ? rawOf(rowKey, String(idIndex)).trim() : "") || (selected ? `DRIVE-${selected.fileId}-${selected.sheetId}-${rowKey}` : "")
+      await addToCampaignInventory(campaign, itemId)
+      notify("Objet ajouté à l’inventaire de la campagne.")
+    },
+  }), [ask, columnOfHeader, commitCell, drawCell, engine, notify, rawOf, router, selected, sheetColumns, specs, valueOf])
+  const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
+
   // Chaque colonne passe par le moteur des index : son type décide de sa cellule.
   /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
   const columns = useMemo<SheetGridColumn[]>(() => {
-    const context = { valueOf, commit: (rowKey: string, columnKey: string, value: string) => void commitCell(rowKey, columnKey, value), idComputed: () => !hasIdColumn }
+    const context = {
+      valueOf,
+      commit: (rowKey: string, columnKey: string, value: string) => void commitCell(rowKey, columnKey, value),
+      idComputed: () => !hasIdColumn,
+      openForm: setDetails,
+      formula: (rowKey: string, _columnKey: string, spec: IndexColumnSpec) => engine.formula(rowKey, selected?.headers[Number(_columnKey)] ?? _columnKey, spec),
+      gaugeMax: (rowKey: string, spec: IndexColumnSpec) => engine.gaugeMax(rowKey, spec),
+      draw: async (rowKey: string, columnKey: string, spec: IndexColumnSpec) => { await drawCell(rowKey, selected?.headers[Number(columnKey)] ?? columnKey, spec) },
+      buttonVisible: (rowKey: string, button: ActionButton) => engine.buttonVisible(rowKey, button),
+      runButton,
+    }
     const list = shownColumns.map((index) => [selected!.headers[index], index] as const).map(([header, index]) => isIconHeader(header)
       // L'icône garde son affichage et son import dans le dossier « icone objet ».
       ? indexGridColumn(String(index), header, specs[index], 96, context, { renderValue: iconPreview, upload: uploadIcon })
@@ -181,11 +300,13 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     // Sans colonne ID dans la feuille, l'identifiant calculé par l'inventaire est montré à part.
     if (selected && !hasIdColumn) list.push(indexGridColumn(COMPUTED_ID, "ID", idSpec, 200, context, { sortable: false }))
     return list
-  }, [commitCell, hasIdColumn, iconPreview, selected, shownColumns, specs, uploadIcon, valueOf])
+  }, [commitCell, drawCell, engine, hasIdColumn, iconPreview, runButton, selected, shownColumns, specs, uploadIcon, valueOf])
   /* eslint-enable react-hooks/refs */
 
-  async function refresh() {
+  async function refresh(keepSeed = false) {
     setPending("refresh"); setError("")
+    // Les formules au hasard sont retirées à chaque actualisation (pas après une fiche enregistrée).
+    if (!keepSeed) setSeed(`objets:${Date.now()}`)
     const response = await fetch("/api/resources/object-indexes?refresh=1", { cache: "no-store" })
     const payload = (await response.json()) as { tables?: ObjectIndexTable[]; schemas?: Schemas; error?: string }
     setPending("")
@@ -284,6 +405,27 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setPending("")
   }
 
+  useLayoutEffect(() => { mutateRef.current = mutate })
+
+  const detailsRow = details !== null ? selected?.rows.find((row) => String(row.rowNumber) === details) : undefined
+  const savedCell = (index: number) => (specs[index] && !isRichSpec(specs[index]) ? detailsRow?.values[index] : detailsRow?.html[index]) ?? ""
+  const nameColumn = specs.findIndex((spec) => spec.kind === "name" || spec.kind === "name-form")
+  const sheetRow = (key: string): IndexFieldProps["row"] => details === null ? undefined : {
+    formula: (spec) => engine.formula(details, selected?.headers[Number(key)] ?? key, spec),
+    gaugeMax: (spec) => engine.gaugeMax(details, spec),
+    draw: async (spec) => { await drawCell(details, selected?.headers[Number(key)] ?? key, spec) },
+    buttonVisible: (button) => engine.buttonVisible(details, button),
+    runButton: (button) => runButton(details, button),
+  }
+  async function saveSheet(changes: Record<string, string>) {
+    if (details === null) return
+    setSheetPending(true); setSheetError("")
+    for (const [key, value] of Object.entries(changes)) await commitCell(details, key, value)
+    setSheetPending(false)
+    await refresh(true)
+  }
+  const weightColumns = shownColumns.filter((index) => ["number", "gauge", "formula"].includes(specs[index].kind)).map((index) => selected!.headers[index])
+
   const busy = Boolean(pending)
   // Trier ou filtrer détache l’ordre affiché de celui de la feuille : « insérer
   // au-dessus » n’aurait plus de sens, l’entrée disparaît le temps du tri.
@@ -303,6 +445,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
+          {selected && <DrawRowButton
+            rows={displayedRows}
+            weightColumns={weightColumns}
+            weightOf={(rowKey, header) => { const index = columnOfHeader(header); return index >= 0 ? numericCellValue(valueOf(rowKey, String(index)), specs[index]) : null }}
+            nameOf={(rowKey) => nameColumn >= 0 ? rawOf(rowKey, String(nameColumn)).replace(/<[^>]+>/g, "") : `Ligne ${rowKey}`}
+            onOpen={setDetails}
+            disabled={busy}
+          />}
           <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplit les cases « Icône » vides avec les icônes d’Eraser du dossier « icone objet » ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
@@ -323,7 +473,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
 
       {creating && selected && <IndexEntryForm
         title="Nouvel objet"
-        fields={shownColumns.map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], long: isLongField(selected.headers[index]) }))}
+        fields={sheetColumns.filter((index) => !isComputedSpec(specs[index]) && !["random", "id"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], long: isLongField(selected.headers[index]) }))}
         pending={pending === "add"}
         onCancel={() => setCreating(false)}
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}
@@ -349,10 +499,26 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
             duplicate: (rowKeys) => void mutate({ action: "duplicate", rowNumbers: rowKeys.map(Number) }, "duplicate"),
             remove: (rowKeys) => void mutate({ action: "delete", rowNumbers: rowKeys.map(Number) }, "delete"),
           }}
+          rowMenuExtras={(rowKey) => <><ContextMenuSeparator /><ContextMenuItem onSelect={() => setDetails(rowKey)}><FileText className="size-3.5" />Ouvrir la fiche</ContextMenuItem></>}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
           empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute sa première ligne."}
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun Google Sheets n’a été trouvé dans le dossier « Objets ».</div> : null}
+
+      {selected && detailsRow && <IndexRowSheet
+        key={`${tableKey(selected)}:${details}`}
+        open
+        title={nameColumn >= 0 ? savedCell(nameColumn).replace(/<[^>]+>/g, "") : `Ligne ${details}`}
+        subtitle={`${selected.fileName} · ${selected.tabName}`}
+        fields={sheetColumns.filter((index) => !["auto-links", "ranked-links", "tab"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], value: savedCell(index), long: isLongField(selected.headers[index]) }))}
+        rowFor={sheetRow}
+        pending={sheetPending}
+        error={sheetError}
+        onSave={saveSheet}
+        onClose={() => { setDetails(null); setSheetError("") }}
+      />}
+      {noticesView}
+      {choiceView}
     </section>
   )
 }

@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
@@ -50,6 +50,8 @@ export type SheetGridColumn = {
   plain?: boolean
   /** Classes appliquées au contenu de la cellule (couleur, graisse…). */
   cellClassName?: string
+  /** Style imposé de la colonne (couleur, fond) : appliqué à toute la case. */
+  cellStyle?: CSSProperties
   sortable?: boolean
   /**
    * Délai avant l'enregistrement pendant la frappe. `Infinity` n'enregistre qu'à la
@@ -267,7 +269,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
       return <td
         key={column.key}
         className={`${cellBase} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${column.key === firstKey ? "z-10" : ""}`}
-        style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH } : undefined}
+        style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, ...column.cellStyle } : column.cellStyle}
       >
         {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
         {column.custom
