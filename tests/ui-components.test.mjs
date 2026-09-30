@@ -643,8 +643,19 @@ test("lists the schema changes of the index editor in order", async () => {
     { id: "t2", original: "Ruines", name: "Ruines", removed: true, remove: true, addColumns: true, columns: [] },
     { id: "t3", name: "Ports", removed: false, remove: true, addColumns: true, columns: [{ id: "c5", header: "Couleur", spec: { kind: "color" }, policy, removed: false }] },
   ];
-  assert.deepEqual(operationsOf(tabs).map((operation) => operation.op), ["rename", "spec", "remove-column", "add-column", "remove-tab", "add-tab"]);
-  assert.equal(operationsOf(tabs)[1].header, "Taille");
+  const order = ["Villes", "Ruines"];
+  assert.deepEqual(operationsOf(tabs, order).map((operation) => operation.op), ["rename", "spec", "remove-column", "add-column", "remove-tab", "add-tab"]);
+  assert.equal(operationsOf(tabs, order)[1].header, "Taille");
+  // Une colonne déplacée, un onglet renommé et réordonné.
+  const indexed = (columns) => columns.map((column, index) => column.original ? { ...column, originalIndex: index } : column);
+  const villes = { ...tabs[0], columns: indexed(tabs[0].columns) };
+  const moved = [{ ...tabs[1], removed: false }, { ...villes, name: "Cités", columns: [villes.columns[1], villes.columns[0], villes.columns[3]] }];
+  const operations = operationsOf(moved, order);
+  assert.deepEqual(operations.filter((operation) => ["order-columns", "rename-tab", "order-tabs"].includes(operation.op)), [
+    { op: "order-columns", tab: "Villes", headers: ["Taille", "Genre", "Blason"] },
+    { op: "rename-tab", tab: "Villes", to: "Cités" },
+    { op: "order-tabs", tabs: ["Ruines", "Cités"] },
+  ]);
   assert.match(headerProblem("genre", ["Nom", "Genre"]), /déjà/);
   assert.equal(headerProblem("Genre", ["Nom", "Genre"], "Genre"), "");
   assert.match(tabProblem("Eraser · colonnes", []), /réservé/);
@@ -823,4 +834,21 @@ test("runs a button's steps in order, with column templates and formulas", async
   assert.equal(resolveText("{Nom} ({Inconnue})", runtime.row()), "Gobelin ({Inconnue})");
   assert.equal(cellTextFor(true, { kind: "checkbox" }, "TRUE"), "TRUE");
   assert.ok(actionStepCatalog.length >= 17);
+});
+
+test("reorders sheet columns with the fewest moves and tells display changes apart", async () => {
+  const { columnMoves, isDisplayOnlyChange } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+  const apply = (headers, moves) => { const working = [...headers]; for (const move of moves) { const [item] = working.splice(move.from, 1); working.splice(move.to, 0, item) } return working };
+  const headers = ["Nom", "Type", "Ancienne", "Région", "Note", "ID"];
+  // « Ancienne » (à la corbeille) ne fait pas partie de l'ordre voulu : elle garde sa place.
+  const desired = ["Nom", "Région", "Type", "Note", "ID"];
+  const moved = apply(headers, columnMoves(headers, desired));
+  assert.deepEqual(moved, ["Nom", "Région", "Ancienne", "Type", "Note", "ID"]);
+  assert.deepEqual(columnMoves(headers, headers), []);
+  assert.deepEqual(apply(headers, columnMoves(headers, ["ID", "Note", "Région", "Ancienne", "Type", "Nom"])), ["ID", "Note", "Région", "Ancienne", "Type", "Nom"]);
+  // Style, emplacement, masquée, Nom ↔ Nom formulaire : l'affichage seulement.
+  assert.equal(isDisplayOnlyChange({ kind: "name", also: ["fixed"] }, { kind: "name-form", style: { bold: true }, placement: "both" }), true);
+  assert.equal(isDisplayOnlyChange({ kind: "rich" }, { kind: "rich", style: { color: "#b3261e" }, hidden: true }), true);
+  assert.equal(isDisplayOnlyChange({ kind: "rich" }, { kind: "number" }), false);
+  assert.equal(isDisplayOnlyChange({ kind: "choice", options: [{ value: "A" }] }, { kind: "choice", options: [{ value: "B" }] }), false);
 });

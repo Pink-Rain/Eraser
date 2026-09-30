@@ -92,9 +92,23 @@ export async function sendToCampaignChat(campaignId: string, message: string, au
   if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || "Le message n’a pas pu être envoyé.")
 }
 
-export async function addToCampaignInventory(campaignId: string, itemId: string) {
-  const response = await fetch(`/api/campaigns/${encodeURIComponent(campaignId)}/inventory`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add-item", itemId }) })
-  if (!response.ok) throw new Error(((await response.json().catch(() => ({}))) as { error?: string }).error || "L’objet n’a pas pu être ajouté.")
+/**
+ * Ajoute un objet à un inventaire d'une campagne : celui de la campagne, d'un de ses
+ * personnages ou d'un de ses PNJ (choisis au clic). Renvoie le nom de l'inventaire.
+ */
+export async function addToInventory(ask: ReturnType<typeof useChoiceDialog>["ask"], itemId: string) {
+  const campaign = await chooseCampaign(ask, "inventory")
+  if (!campaign) return null
+  const response = await fetch(`/api/campaigns/${encodeURIComponent(campaign)}/inventory?targets=1`, { cache: "no-store" })
+  const payload = (await response.json().catch(() => ({}))) as { transferTargets?: Array<{ id: string; name: string; kind: "character" | "npc" | "campaign" }> }
+  const targets = [{ id: "campaign", name: "Inventaire de la campagne", kind: "campaign" as const }, ...(payload.transferTargets ?? []).filter((target) => target.kind !== "campaign")]
+  const chosen = await ask("Dans quel inventaire ?", targets.map((target) => ({ value: `${target.kind}:${target.id}`, label: target.kind === "npc" ? `${target.name} (PNJ)` : target.name })))
+  if (!chosen) return null
+  const [kind, id] = [chosen.slice(0, chosen.indexOf(":")), chosen.slice(chosen.indexOf(":") + 1)]
+  const url = kind === "character" ? `/api/characters/${encodeURIComponent(id)}/inventory` : kind === "npc" ? `/api/npcs/${encodeURIComponent(id)}/inventory` : `/api/campaigns/${encodeURIComponent(campaign)}/inventory`
+  const added = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add-item", itemId }) })
+  if (!added.ok) throw new Error(((await added.json().catch(() => ({}))) as { error?: string }).error || "L’objet n’a pas pu être ajouté.")
+  return targets.find((target) => `${target.kind}:${target.id}` === chosen)?.name ?? "l’inventaire"
 }
 
 function escapeHtml(value: string) {

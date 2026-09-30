@@ -3,7 +3,7 @@
  * colonnes sont verrouillées. Partagé par l'éditeur (interface) et le serveur, qui
  * refuse une opération verrouillée même si l'interface la laissait passer.
  */
-import { foldName, isIdHeader, type IndexColumnKind, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isIdHeader, isSameDataKind, normalizeSpec, type IndexColumnKind, type IndexColumnSpec } from "@/lib/index-columns"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
 
 /** L'onglet discret de chaque classeur qui décrit ses colonnes. */
@@ -53,6 +53,9 @@ export type EditorTab = {
   columns: EditorColumn[]
   remove: boolean
   removeReason?: string
+  /** L'onglet peut-il être renommé ? (un onglet prévu par Eraser est lu par son nom) */
+  rename?: boolean
+  renameReason?: string
   addColumns: boolean
   addColumnsReason?: string
 }
@@ -81,14 +84,74 @@ export type SchemaOperation =
   | { op: "remove-column"; tab: string; header: string }
   | { op: "add-tab"; name: string; columns: Array<{ header: string; spec: IndexColumnSpec }> }
   | { op: "remove-tab"; tab: string }
+  /** Nouvel ordre des colonnes d'un onglet (déplacées dans Sheets). */
+  | { op: "order-columns"; tab: string; headers: string[] }
+  | { op: "rename-tab"; tab: string; to: string }
+  /** Nouvel ordre des onglets. */
+  | { op: "order-tabs"; tabs: string[] }
 
 /** Les types proposés à la création ou au changement de type d'une colonne. */
-export const creatableKinds: IndexColumnKind[] = ["rich", "fixed", "number", "choice", "checkbox", "linked-choice", "linked", "file", "color", "gauge", "lookup", "rollup", "spells"]
+export const creatableKinds: IndexColumnKind[] = ["rich", "name", "name-form", "number", "checkbox", "color", "gauge", "choice", "linked-choice", "linked", "lookup", "rollup", "formula", "random", "actions", "file", "spells"]
 
-export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, suppression." }
+export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, place, suppression." }
 
-export function lockedPolicy(reasons: string[], allowed = "Seulement la description et l’option « Masquée ».", partial: Partial<Pick<ColumnPolicy, "rename" | "type" | "remove">> = {}): ColumnPolicy {
+/** Ce qu'on peut toujours changer, même sur une colonne verrouillée : son affichage. */
+export const displayOnlyAllowed = "L’affichage seulement : description, « Masquée », style imposé, emplacement (tableau / formulaire), place dans le tableau."
+
+export function lockedPolicy(reasons: string[], allowed = displayOnlyAllowed, partial: Partial<Pick<ColumnPolicy, "rename" | "type" | "remove">> = {}): ColumnPolicy {
   return { rename: false, type: false, remove: false, ...partial, reasons, allowed }
+}
+
+function stable(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(stable)
+  if (value && typeof value === "object") return Object.fromEntries(Object.entries(value as Record<string, unknown>).filter(([, item]) => item !== undefined).sort(([left], [right]) => left.localeCompare(right)).map(([key, item]) => [key, stable(item)]))
+  return value
+}
+
+/** Deux réglages identiques, quel que soit l'ordre de leurs champs. */
+export function sameSpec(left: IndexColumnSpec, right: IndexColumnSpec) {
+  return JSON.stringify(stable(normalizeSpec(left))) === JSON.stringify(stable(normalizeSpec(right)))
+}
+
+/**
+ * Un changement qui ne touche que l'affichage (description, masquée, style imposé,
+ * emplacement tableau / formulaire, Nom ↔ Nom formulaire) : permis même quand la
+ * colonne est verrouillée, puisque la donnée écrite dans Sheets ne change pas.
+ */
+export function isDisplayOnlyChange(current: IndexColumnSpec, next: IndexColumnSpec) {
+  const a = normalizeSpec(current)
+  const b = normalizeSpec(next)
+  if (!isSameDataKind(a.kind, b.kind)) return false
+  const strip = (spec: IndexColumnSpec) => {
+    const copy: Record<string, unknown> = { ...spec, kind: spec.kind === "name-form" ? "name" : spec.kind }
+    for (const key of ["hidden", "description", "style", "placement", "form", "display"]) delete copy[key]
+    return JSON.stringify(stable(copy))
+  }
+  return strip(a) === strip(b)
+}
+
+/**
+ * Les déplacements qui mettent `desired` dans cet ordre, sans bouger les autres colonnes :
+ * les colonnes voulues gardent les mêmes places, permutées. Chaque déplacement est un
+ * `moveDimension` de Sheets (source → destination), à appliquer dans l'ordre.
+ */
+export function columnMoves(current: string[], desired: string[]) {
+  const keys = current.map(foldName)
+  const wanted = desired.map(foldName).filter((key, index, all) => keys.includes(key) && all.indexOf(key) === index)
+  const slots = keys.flatMap((key, index) => wanted.includes(key) ? [index] : [])
+  const target = [...keys]
+  slots.forEach((slot, position) => { target[slot] = wanted[position] })
+  const working = [...keys]
+  const moves: Array<{ from: number; to: number }> = []
+  for (let index = 0; index < working.length; index += 1) {
+    if (working[index] === target[index]) continue
+    const from = working.indexOf(target[index], index + 1)
+    if (from < 0) continue
+    moves.push({ from, to: index })
+    const [moved] = working.splice(from, 1)
+    working.splice(index, 0, moved)
+  }
+  return moves
 }
 
 /** Un nom de colonne acceptable : non vide, pas trop long, pas déjà pris dans l'onglet. */

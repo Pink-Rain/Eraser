@@ -19,7 +19,7 @@ import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
 import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
-import { headerProblem, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { columnMoves, headerProblem, isDisplayOnlyChange, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import {
   ID_HEADER,
   foldName,
@@ -98,7 +98,10 @@ function effectiveTabs(base: WorldIndexTabDefinition[], schema: SchemaEntry[]) {
     const columns = schema.filter((column) => column.tab === entry.tab && column.column && !trashed(column)).map((column) => column.column)
     return { name: entry.tab, itemLabel: "une ligne", headers: ["Nom", ...columns.filter((header) => !["nom", "id"].includes(foldName(header))), ID_HEADER], widths: [], idPrefix: idPrefixOf(entry.tab) }
   })
-  return [...kept, ...added]
+  // L'ordre choisi dans « Modifier » (place gardée sur la ligne de l'onglet) ; les autres gardent le leur, à la suite.
+  const all = [...kept, ...added]
+  const placeOf = (name: string, index: number) => { const spec = findEntry(schema, name, "")?.spec; return spec?.kind === "tab" && typeof spec.position === "number" ? spec.position : 1000 + index }
+  return all.map((tab, index) => ({ tab, place: placeOf(tab.name, index) })).sort((left, right) => left.place - right.place).map((item) => item.tab)
 }
 
 async function loadEffectiveIndex(key: WorldIndexKey): Promise<EffectiveIndex> {
@@ -859,11 +862,16 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
     const locked = table.tabName === firstTab
       ? "Premier onglet : une ligne créée par un lien (un nom saisi ailleurs) arrive ici."
       : linkedTabs.has(table.tabName) ? "Une colonne liée d’un autre onglet ou d’un autre index vise cet onglet." : ""
+    // Un onglet prévu par Eraser est lu par son nom ; un onglet visé par une colonne liée aussi.
+    const planned = isBuiltinWorldIndexKey(key) && worldIndexDefinitions[key].tabs.some((tab) => foldName(tab.name) === foldName(table.tabName))
+    const renameReason = planned ? "Onglet prévu par Eraser : il est retrouvé par son nom (créations, liens, statistiques)." : linkedTabs.has(table.tabName) ? "Une colonne liée vise cet onglet par son nom." : ""
     return {
       name: table.tabName,
       columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links) })),
       remove: !locked,
       removeReason: locked || undefined,
+      rename: !renameReason,
+      renameReason: renameReason || undefined,
       addColumns: true,
     }
   })
@@ -946,8 +954,45 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
         }
         continue
       }
+      if (operation.op === "order-tabs") {
+        const existing = await spreadsheetTabs(sheet.spreadsheetId)
+        const requests: unknown[] = []
+        operation.tabs.forEach((name, position) => {
+          upsertEntry(schema, name, "", { spec: { kind: "tab", position } })
+          const sheetId = existing.find((candidate) => candidate.title === name)?.sheetId
+          if (sheetId !== undefined) requests.push({ updateSheetProperties: { properties: { sheetId, index: position }, fields: "index" } })
+        })
+        if (requests.length) await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+        continue
+      }
       const tab = sheet.definition.tabs.find((candidate) => candidate.name === operation.tab)
       if (!tab) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+      if (operation.op === "rename-tab") {
+        const model = await worldEditorModel(key)
+        const target = model.tabs.find((candidate) => candidate.name === tab.name)
+        assertPolicy(Boolean(target?.rename), [target?.renameReason ?? ""])
+        const existing = await spreadsheetTabs(sheet.spreadsheetId)
+        const problem = tabProblem(operation.to, existing.map((candidate) => candidate.title).filter((title) => title !== tab.name))
+        if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+        const to = operation.to.replace(/\s+/g, " ").trim()
+        const sheetId = existing.find((candidate) => candidate.title === tab.name)?.sheetId
+        if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+        await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId, title: to }, fields: "title" } }] }) })
+        for (const entry of schema) if (entry.tab === tab.name) entry.tab = to
+        clearSpreadsheetReadCache(sheet.spreadsheetId)
+        continue
+      }
+      if (operation.op === "order-columns") {
+        clearSpreadsheetReadCache(sheet.spreadsheetId)
+        const [firstRow = []] = await readRange(sheet.spreadsheetId, sheetTabRange(tab.name, "A1:AZ1"))
+        const moves = columnMoves(firstRow, operation.headers)
+        const sheetId = (await spreadsheetTabs(sheet.spreadsheetId)).find((candidate) => candidate.title === tab.name)?.sheetId
+        if (moves.length && sheetId !== undefined) {
+          await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
+          clearSpreadsheetReadCache(sheet.spreadsheetId)
+        }
+        continue
+      }
       if (operation.op === "remove-tab") {
         const model = await worldEditorModel(key)
         const target = model.tabs.find((candidate) => candidate.name === tab.name)
@@ -989,8 +1034,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
       }
       if (operation.op === "spec") {
         const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
-        const onlyDisplay = current.kind === operation.spec.kind && JSON.stringify({ ...current, hidden: undefined, description: undefined }) === JSON.stringify({ ...operation.spec, hidden: undefined, description: undefined })
-        if (!onlyDisplay) assertPolicy(policy.type, policy.reasons)
+        if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type, policy.reasons)
         upsertEntry(schema, tab.name, operation.header, { spec: operation.spec })
         if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await ensureReciprocal(key, tab.name, operation.header, operation.spec.link)
         continue

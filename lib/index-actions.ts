@@ -49,7 +49,7 @@ export const actionStepCatalog: ActionStepInfo[] = [
   { type: "delete", group: "Gérer la ligne", label: "Supprimer la ligne", description: "Supprime la ligne de la feuille. Pense à demander une confirmation.", fields: [] },
   { type: "move", group: "Gérer la ligne", label: "Déplacer vers un onglet", description: "Déplace la ligne dans un autre onglet aux mêmes colonnes.", fields: [{ key: "tab", label: "Onglet", kind: "tab" }], only: "world" },
   { type: "create", group: "Créer ailleurs", label: "Créer une ligne dans un index", description: "Ajoute une ligne pré-remplie dans un index (celui-ci ou un autre) : chaque colonne reçoit un texte, une {Colonne} de cette ligne ou une =formule. Sert aussi à copier une ligne vers un autre index.", fields: [{ key: "index", label: "Index", kind: "index" }, { key: "tab", label: "Onglet", kind: "tab" }, { key: "values", label: "Valeurs", kind: "mapping" }, { key: "open", label: "Ouvrir l’index ensuite", kind: "boolean" }], only: "world" },
-  { type: "campaign-inventory", group: "Créer ailleurs", label: "Ajouter à l’inventaire d’une campagne", description: "Ajoute l’objet à l’inventaire commun d’une campagne (choisie au clic).", fields: [], only: "objects" },
+  { type: "campaign-inventory", group: "Créer ailleurs", label: "Ajouter à un inventaire", description: "Ajoute l’objet à un inventaire d’une campagne : celui de la campagne, d’un personnage ou d’un PNJ (choisis au clic).", fields: [], only: "objects" },
   { type: "chat", group: "Jeu", label: "Envoyer dans le chat d’une campagne", description: "Envoie un message dans le chat d’une campagne (choisie au clic, la dernière est retenue), pour tous ou pour le MJ seulement.", fields: [{ key: "message", label: "Message", kind: "text", hint: "{Nom} attaque ! — ou =formule" }, { key: "audience", label: "Pour", kind: "audience" }] },
   { type: "copy", group: "Copier", label: "Copier une valeur", description: "Copie un texte dans le presse-papiers.", fields: [{ key: "value", label: "Texte", kind: "text", hint: "{Nom} — {Effet}, ou =formule" }] },
   { type: "copy-card", group: "Copier", label: "Copier la carte", description: "Copie toute la ligne mise en forme (nom en titre, puis chaque champ), à coller dans un document ou un message.", fields: [] },
@@ -100,7 +100,7 @@ export function describeStep(step: ActionStep): string {
     case "copy-card": return "Copier la carte"
     case "notify": return `Message : ${step.message || "…"}`
     case "chat": return `Chat${step.audience === "gm" ? " (MJ)" : ""} : ${step.message || "…"}`
-    case "campaign-inventory": return "Ajouter à l’inventaire d’une campagne"
+    case "campaign-inventory": return "Ajouter à un inventaire (campagne, personnage, PNJ)"
   }
 }
 

@@ -2,12 +2,13 @@
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { Coins, FileText, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
+import { CircleHelp, Coins, FileText, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { addToCampaignInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
+import { addToInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { indexGridColumn, IndexEntryForm, type IndexFieldProps } from "@/components/eraser/index-cells"
 import { IndexEditor } from "@/components/eraser/index-editor"
+import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
@@ -192,6 +193,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [details, setDetails] = useState<string | null>(null)
   const [sheetPending, setSheetPending] = useState(false)
   const [sheetError, setSheetError] = useState("")
+  const [guideOpen, setGuideOpen] = useState(false)
   const [seed, setSeed] = useState(() => `objets:${Date.now()}`)
 
   // Le moteur de la ligne : formules, jauges « autre colonne », conditions des boutons.
@@ -269,12 +271,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       await sendToCampaignChat(campaign, message, audience)
     },
     campaignInventory: async () => {
-      const campaign = await chooseCampaign(ask, "inventory")
-      if (!campaign) throw new Error("Aucune campagne choisie.")
       const idIndex = specs.findIndex((spec) => spec.kind === "id")
       const itemId = (idIndex >= 0 ? rawOf(rowKey, String(idIndex)).trim() : "") || (selected ? `DRIVE-${selected.fileId}-${selected.sheetId}-${rowKey}` : "")
-      await addToCampaignInventory(campaign, itemId)
-      notify("Objet ajouté à l’inventaire de la campagne.")
+      const target = await addToInventory(ask, itemId)
+      if (target) notify(`Objet ajouté : ${target}.`)
     },
   }), [ask, columnOfHeader, commitCell, drawCell, engine, notify, rawOf, router, selected, sheetColumns, specs, valueOf])
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
@@ -454,6 +454,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
             disabled={busy}
           />}
           <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplit les cases « Icône » vides avec les icônes d’Eraser du dossier « icone objet » ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
         </div>
@@ -461,6 +462,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
 
       {editor && <IndexEditor
         model={editor}
+        sampleRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 3).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
         open
         pending={pending === "schema"}
         error={editorError}
@@ -517,6 +519,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError("") }}
       />}
+      {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}
       {choiceView}
     </section>

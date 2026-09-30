@@ -18,7 +18,7 @@ import {
 } from "@/lib/google-sheets"
 import { foldName, isIdHeader, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
-import { headerProblem, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { columnMoves, headerProblem, isDisplayOnlyChange, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import type { IndexTrashItem } from "@/lib/world-indexes"
 import { worldRelationTargets } from "@/lib/world-indexes"
 
@@ -59,6 +59,8 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
       })),
       remove: tables.length > 1,
       removeReason: tables.length > 1 ? undefined : "C’est le seul tableau de ce classeur : il doit en garder au moins un.",
+      // Les objets sont retrouvés par leur identifiant, pas par le nom de leur tableau.
+      rename: true,
       addColumns: true,
     })),
   }
@@ -75,6 +77,11 @@ async function appendHeader(fileId: string, tabName: string, header: string) {
   await updateRange(fileId, sheetTabRange(tabName, `${cell}:${cell}`), [[header]], { valueInputOption: "RAW" })
 }
 
+const relationKinds = ["linked", "lookup", "rollup", "linked-choice"]
+function assertNoRelation(spec: IndexColumnSpec) {
+  if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les objets : les cases d’objets sont lues comme du texte par l’inventaire et les boutiques.")
+}
+
 function locked(allowed: boolean, reasons: string[]) {
   if (!allowed) throw new Error(`INDEX_SCHEMA_LOCKED:${reasons.join(" ")}`)
 }
@@ -86,6 +93,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
   const now = new Date().toISOString()
   for (const operation of operations) {
     if (operation.op === "add-tab") {
+      operation.columns.forEach((column) => assertNoRelation(column.spec))
       const problem = tabProblem(operation.name, (await spreadsheetTabs(fileId)).map((tab) => tab.title))
       if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
       const name = operation.name.replace(/\s+/g, " ").trim()
@@ -96,14 +104,44 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       for (const column of operation.columns) if (!["nom", "id"].includes(foldName(column.header))) upsertEntry(schema, name, column.header.trim(), { spec: column.spec, state: "ajouté", deletedAt: "" })
       continue
     }
+    if (operation.op === "order-tabs") {
+      const existing = await spreadsheetTabs(fileId)
+      const requests = operation.tabs.flatMap((name, position) => {
+        const sheetId = existing.find((candidate) => candidate.title === name)?.sheetId
+        return sheetId === undefined ? [] : [{ updateSheetProperties: { properties: { sheetId, index: position }, fields: "index" } }]
+      })
+      if (requests.length) await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+      continue
+    }
     const table = tables.find((candidate) => candidate.tabName === operation.tab)
     if (!table) throw new Error("OBJECT_INDEX_NOT_FOUND")
+    if (operation.op === "rename-tab") {
+      const existing = await spreadsheetTabs(fileId)
+      const problem = tabProblem(operation.to, existing.map((candidate) => candidate.title).filter((title) => title !== table.tabName))
+      if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+      const to = operation.to.replace(/\s+/g, " ").trim()
+      await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: table.sheetId, title: to }, fields: "title" } }] }) })
+      for (const entry of schema) if (entry.tab === table.tabName) entry.tab = to
+      clearSpreadsheetReadCache(fileId)
+      continue
+    }
+    if (operation.op === "order-columns") {
+      clearSpreadsheetReadCache(fileId)
+      const [firstRow = []] = await readRange(fileId, sheetTabRange(table.tabName, "A1:AZ1"))
+      const moves = columnMoves(firstRow, operation.headers)
+      if (moves.length) {
+        await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId: table.sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
+        clearSpreadsheetReadCache(fileId)
+      }
+      continue
+    }
     if (operation.op === "remove-tab") {
       locked(tables.length > 1, ["C’est le seul tableau de ce classeur : il doit en garder au moins un."])
       upsertEntry(schema, table.tabName, "", { deletedAt: now })
       continue
     }
     if (operation.op === "add-column") {
+      assertNoRelation(operation.spec)
       const problem = headerProblem(operation.header, table.headers)
       if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
       const header = operation.header.replace(/\s+/g, " ").trim()
@@ -127,10 +165,9 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     }
     if (operation.op === "spec") {
       const current = effectiveObjectSpec(operation.header, table.headers, schema, table.tabName)
-      const onlyDisplay = current.kind === operation.spec.kind && JSON.stringify({ ...current, hidden: undefined, description: undefined }) === JSON.stringify({ ...operation.spec, hidden: undefined, description: undefined })
-      if (!onlyDisplay) locked(policy.type, policy.reasons)
+      if (!isDisplayOnlyChange(current, operation.spec)) locked(policy.type, policy.reasons)
       // Une colonne d'objets reste du texte dans Sheets : les relations entre index n'y sont pas proposées.
-      if (["linked", "lookup", "rollup"].includes(operation.spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les objets.")
+      assertNoRelation(operation.spec)
       upsertEntry(schema, table.tabName, operation.header, { spec: operation.spec })
       continue
     }

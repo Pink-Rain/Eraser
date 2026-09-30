@@ -314,6 +314,8 @@ export type IndexColumnSpec = {
   /** Nombre : bornes. */
   min?: number
   max?: number
+  /** Ligne d'onglet du schéma (`kind: "tab"`) : la place de l'onglet dans l'index. */
+  position?: number
 }
 
 /** Tous les types d'une colonne, principal d'abord. */

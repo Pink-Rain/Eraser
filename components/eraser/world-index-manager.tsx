@@ -2,12 +2,13 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { ArrowRightLeft, ExternalLink, FileText, Link2, LoaderCircle, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
+import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Link2, LoaderCircle, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
 import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { IndexEditor } from "@/components/eraser/index-editor"
+import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -155,6 +156,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [seed, setSeed] = useState(() => `${indexKey}:${Date.now()}`)
   const [sheetPending, setSheetPending] = useState(false)
   const [sheetError, setSheetError] = useState("")
+  const [guideOpen, setGuideOpen] = useState(false)
   // Un lien « ?q=… » (bouton « Ouvrir la ligne liée ») ouvre l'index filtré sur ce nom.
   useEffect(() => {
     const initial = new URLSearchParams(window.location.search).get("q")
@@ -671,12 +673,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             disabled={busy}
           />}
           <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={busy} title="Colonnes, types, réglages et onglets de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!table || busy}><Plus />Ajouter {showAll ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
       </div>
 
       {editor && <IndexEditor
         model={editor}
+        sampleRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 3).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
         open
         pending={pending === "schema"}
         error={editorError}
@@ -768,6 +772,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError("") }}
       />}
+      {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}
       {choiceView}
     </section>
