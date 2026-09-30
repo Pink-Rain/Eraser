@@ -84,6 +84,13 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
    stockées dans D1. Le signal ne contient que « tel élément a changé » ; les
    données viennent toujours de D1. Une seule connexion par application,
    partagée entre ses fenêtres par `BroadcastChannel`.
+   Un signal part seulement après la confirmation de l’écriture par le
+   Worker, pour que les autres ne rechargent pas avant que la donnée y soit.
+   Il contient le type et l’identifiant de l’élément, jamais son contenu ; le
+   nom affiché dans les notifications est lu dans la copie locale.
+   Si Trystero ne se connecte pas (réseau qui bloque les connexions
+   directes, relais indisponibles), la synchronisation lente passe à toutes
+   les 5 minutes tant que l’application est visible.
 7. **Pas de requête de session séparée** : chaque appel au Worker valide
    déjà le jeton, le cache de session local peut donc durer plus longtemps.
 8. **Index SQL sur `updated_at`** dans chaque table : D1 compte les lignes
@@ -99,6 +106,24 @@ plusieurs requêtes D1 : c’est le nombre d’appels au Worker qui compte.
     l’administration, alerte à 50 % puis 80 % des quotas du jour.
 11. **Sauvegarde automatique** : export vers le Drive à la fin de chaque
     session de jeu et chaque nuit, réimportable avec le bouton Importer.
+
+### Ce que voit l’utilisateur
+
+- **Page affichée modifiée par quelqu’un d’autre, sans saisie en cours** :
+  elle se met à jour seule, sans bandeau.
+- **Page affichée modifiée par quelqu’un d’autre pendant une saisie non
+  enregistrée** : bandeau « [Nom de la page] a reçu des modifications »
+  avec un bouton Actualiser ; rien n’est écrasé tant qu’on n’a pas choisi.
+- **Conflit** (la même cellule changée par deux personnes) : message « [Nom]
+  a modifié cette valeur entre-temps », avec le choix de garder la sienne ou
+  la vôtre.
+- **Indicateur de synchronisation** discret : à jour, envoi en cours,
+  « N modifications en attente d’envoi » (hors ligne ou quota atteint),
+  synchronisation en direct indisponible (Trystero non connecté).
+- **Autres fenêtres d’Eraser sur le même PC** : mises à jour immédiatement
+  par `BroadcastChannel`, sans requête.
+- **Administration** : compteur de requêtes et de lignes écrites, alerte à
+  50 % puis 80 % des quotas du jour.
 
 ### Estimations
 
@@ -164,7 +189,9 @@ Chaque phase se termine par une préversion alpha installée et vérifiée.
 - Copie locale dans la SQLite, route de synchronisation par différences,
   file d’écriture locale et envois groupés.
 - Signaux Trystero, connexion partagée entre fenêtres.
-- Garde-fous et compteur de requêtes dans l’administration.
+- Bandeau « a reçu des modifications », message de conflit et indicateur
+  de synchronisation (voir « Ce que voit l’utilisateur »).
+- Garde-fous, compteur de requêtes et alertes dans l’administration.
 - Testé de bout en bout sur un domaine factice avant tout domaine réel.
 
 ### Phase 2 : Exporter et sauvegarde automatique
