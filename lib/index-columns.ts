@@ -112,7 +112,11 @@ export type IndexColumnSpec = {
    * (`tab: "*"` : n'importe quel onglet). Les liens prévus par Eraser n'en ont pas besoin.
    */
   link?: { index: WorldIndexKey; tab: string; column: string }
-  gauge?: { style: GaugeStyle; max: number }
+  /**
+   * `mode: "count"` : chaque case compte ses propres icônes (les charges d'un sort),
+   * au lieu de remplir une jauge sur un maximum commun.
+   */
+  gauge?: { style: GaugeStyle; max: number; mode?: "fill" | "count" }
   spells?: { source: SpellSource; category?: "actif" | "passif" }
   /** Nombre : unité, décimales, plage, pourcentage… */
   number?: NumberFormat
@@ -142,7 +146,7 @@ export function kindsOf(spec: IndexColumnSpec): IndexColumnKind[] {
 export function columnTypeLabel(spec: IndexColumnSpec) {
   const labels = kindsOf(spec).map((kind) => indexColumnKinds[kind].label)
   if (spec.form) labels.push("Formulaire")
-  if (spec.kind === "gauge" && spec.gauge) labels[0] = `${labels[0]} (${spec.gauge.style === "bar" ? "barre" : spec.gauge.style === "icons" ? "icônes" : "anneau"})`
+  if (spec.kind === "gauge" && spec.gauge) labels[0] = `${labels[0]} (${spec.gauge.mode === "count" ? "compteur d’icônes, propre à chaque ligne" : spec.gauge.style === "bar" ? "barre" : spec.gauge.style === "icons" ? "icônes" : "anneau"})`
   if (spec.kind === "spells" && spec.spells) labels[0] = `${labels[0]} (${spec.spells.source === "class" ? "sorts de classe" : spec.spells.source === "creature" ? "sorts de créature" : "tous les sorts"})`
   if (spec.kind === "file" && spec.file) labels[0] = `${labels[0]} (${fileAcceptLabels[spec.file.accept].toLocaleLowerCase("fr")}, ${spec.file.multiple ? "plusieurs" : "un seul"})`
   if (spec.kind === "number" && spec.number) {

@@ -112,7 +112,7 @@ const spellSpecs = {
   type: { kind: "choice", also: ["fixed"], options: classSpellTypeSuggestions.map((value) => ({ value })), allowCustom: true },
   skills: { kind: "fixed", display: "skills" },
   distance: { kind: "rich" },
-  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } },
+  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count" } },
   classes: { kind: "ranked-links" },
   id: { kind: "id", hidden: true },
 } satisfies Record<string, IndexColumnSpec>
@@ -395,7 +395,8 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     if (columnKey === "type") return spell.type
     if (columnKey === "skills") return spell.skillsRaw
     if (columnKey === "distance") return spell.distanceHtml || spell.distance
-    if (columnKey === "charges") return spell.charges === null ? "" : String(spell.charges)
+    // « ✦ » (charges sans nombre) reste affiché tel quel.
+    if (columnKey === "charges") return spell.charges === null ? spell.chargesLabel ?? "" : String(spell.charges)
     if (columnKey === "id") return spell.id
     return ""
   }, [spellByRow])

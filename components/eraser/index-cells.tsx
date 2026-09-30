@@ -6,7 +6,6 @@ import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music,
 
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { nextSpellChargeValue } from "@/components/eraser/spell-charges"
 import { SpellPicker, useSpellOptions, type SpellOption } from "@/components/eraser/spell-picker"
 import type { SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
@@ -533,20 +532,52 @@ function parseGauge(value: string, max: number) {
 }
 
 /**
- * Un nombre affiché en jauge. « icons » : des icônes à cliquer, comme les charges ;
- * « bar » : une barre qu'on fait glisser ; « ring » : un anneau avec − et +.
+ * Les icônes se remplissent comme une barre : cliquer une icône pleine vide jusqu'à
+ * elle comprise, cliquer une icône vide remplit jusqu'à elle comprise.
  */
-export const GaugeCell = memo(function GaugeCell({ label, value, style, max, disabled = false, accent, onChange }: { label: string; value: string; style: "bar" | "icons" | "ring"; max: number; disabled?: boolean; accent?: string; onChange: (value: string) => void }) {
+function nextGaugeValue(current: number, clickedIndex: number) {
+  return clickedIndex < current ? clickedIndex : clickedIndex + 1
+}
+
+/**
+ * Un nombre affiché en jauge, propre à chaque ligne. « icons » : des icônes à cliquer ;
+ * « bar » : une barre qu'on fait glisser ; « ring » : un anneau avec − et +.
+ * `mode: "count"` : la case compte des icônes (les charges d'un sort : « 3 » affiche
+ * trois étincelles), sans maximum commun ; un texte non numérique (« ✦ ») reste tel quel.
+ */
+export const GaugeCell = memo(function GaugeCell({ label, value, style, max, mode = "fill", disabled = false, accent, onChange }: { label: string; value: string; style: "bar" | "icons" | "ring"; max: number; mode?: "fill" | "count"; disabled?: boolean; accent?: string; onChange: (value: string) => void }) {
   const [shown, setShown] = useOptimistic(value)
   const current = parseGauge(shown, max)
   const [dragging, setDragging] = useState<number | null>(null)
+  const [picking, setPicking] = useState(false)
   const set = (next: number | null) => { const text = next === null ? "" : String(next); setShown(text); onChange(text) }
   const clear = current !== null && !disabled && <button type="button" onClick={() => set(null)} className="ml-auto hidden rounded p-0.5 text-muted-foreground hover:text-destructive group-hover/gauge:inline-flex" aria-label={`Vider ${label}`} title="Vider"><X className="size-3" /></button>
+
+  if (mode === "count") {
+    const text = shown.trim()
+    const count = /^\d+$/.test(text) ? current : null
+    return <Popover open={picking} onOpenChange={setPicking}>
+      <PopoverTrigger asChild>
+        <button type="button" disabled={disabled} className="flex min-h-8 w-full items-center gap-0.5 rounded-md px-1.5 text-left hover:bg-muted/60 disabled:opacity-60" style={{ color: accent || "var(--primary)" }} aria-label={`${label} : ${text || "vide"}`} title={text ? `${label} : ${text} — cliquer pour changer` : `${label} : cliquer pour choisir`}>
+          {count !== null
+            ? count > 0 ? Array.from({ length: count }, (_, index) => <Sparkle key={index} className="size-4" fill="currentColor" strokeWidth={1.5} />) : <span className="text-xs text-muted-foreground">0</span>
+            : text ? <span className="text-sm font-semibold">{text}</span> : <span className="text-xs text-muted-foreground">—</span>}
+        </button>
+      </PopoverTrigger>
+      {picking && <PopoverContent align="start" className="w-auto p-2">
+        <p className="mb-1.5 px-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
+        <div className="flex flex-wrap gap-1">
+          {Array.from({ length: max + 1 }, (_, index) => <Button key={index} type="button" size="sm" variant={index === count ? "default" : "outline"} className="min-w-8 tabular-nums" onClick={() => { set(index); setPicking(false) }}>{index}</Button>)}
+          <Button type="button" size="sm" variant="ghost" onClick={() => { set(null); setPicking(false) }}>Vider</Button>
+        </div>
+      </PopoverContent>}
+    </Popover>
+  }
 
   if (style === "icons") return <span className="group/gauge flex min-h-8 items-center gap-0.5 px-1.5" style={{ color: accent || "var(--primary)" }} role="group" aria-label={`${label} : ${current ?? "vide"} sur ${max}`}>
     {Array.from({ length: max }, (_, index) => {
       const filled = current !== null && index < current
-      return <button key={index} type="button" disabled={disabled} onClick={() => set(nextSpellChargeValue(max, current ?? 0, index))} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>
+      return <button key={index} type="button" disabled={disabled} onClick={() => set(nextGaugeValue(current ?? 0, index))} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>
         <Sparkle className="size-4" fill={filled ? "currentColor" : "none"} strokeWidth={filled ? 1.5 : 1.8} />
       </button>
     })}
@@ -942,7 +973,7 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
       column.control = (rowKey) => <SpellsCell value={valueOf(rowKey, key)} source={spec.spells?.source ?? "all"} category={spec.spells?.category} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "gauge":
-      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "ranked-links":
     case "tab":
@@ -997,7 +1028,7 @@ export function IndexField({ label, spec, value, onChange, long = false, autoFoc
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
     case "gauge":
-      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} disabled={disabled} onChange={onChange} /></span></div>
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} disabled={disabled} onChange={onChange} /></span></div>
     case "number":
       return spec.number
         ? <div className={fieldLabel}>{title}<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} /></div>

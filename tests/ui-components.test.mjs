@@ -677,3 +677,16 @@ test("renders the read-only editor of a system index with its locks", async () =
   assert.ok(spells.tabs[0].columns.every((column) => column.policy.reasons.length > 0));
   assert.ok(npcEditorModel().tabs[0].columns.some((column) => column.header === "ID" && column.spec.hidden));
 });
+
+test("counts each spell's own charges instead of filling a shared gauge", async () => {
+  const { GaugeCell } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
+  const render = (value) => renderToStaticMarkup(React.createElement(GaugeCell, { label: "Charges", value, style: "icons", max: 5, mode: "count", onChange: () => {} }));
+  // « 3 » : trois étincelles, pas trois sur cinq.
+  assert.equal((render("3").match(/<svg/g) || []).length, 3);
+  assert.equal((render("1").match(/<svg/g) || []).length, 1);
+  // « ✦ » (charges sans nombre) reste tel quel.
+  assert.match(render("✦"), />✦</);
+  // Une jauge à remplir au-delà de cinq icônes répond sur toute sa longueur.
+  const ten = renderToStaticMarkup(React.createElement(GaugeCell, { label: "Points", value: "7", style: "icons", max: 10, onChange: () => {} }));
+  assert.equal((ten.match(/aria-label="Points : \d+"/g) || []).length, 10);
+});

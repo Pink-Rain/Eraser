@@ -39,7 +39,7 @@ export function spellEditorModel(kind: "classes" | "creatures"): IndexEditorMode
     { header: "Type", spec: { kind: "choice", also: ["fixed"], allowCustom: true }, reasons: ["Décide de la catégorie du sort (actif, passif, bonus), de sa couleur et de l’onglet où il apparaît.", spellSheet] },
     { header: "Compétences", spec: { kind: "fixed", display: "skills" }, reasons: ["Affichées en rouge sur les cartes de sorts.", spellSheet] },
     { header: "Distance", spec: { kind: "rich" }, reasons: ["Affichée sur les cartes des sorts actifs.", spellSheet] },
-    { header: "Charges", spec: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5 } }, reasons: ["Les étincelles des cartes de sorts ; elles se dépensent en jeu sur les fiches.", spellSheet] },
+    { header: "Charges", spec: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count" } }, reasons: ["Les étincelles des cartes de sorts ; elles se dépensent en jeu sur les fiches.", spellSheet] },
     ...(kind === "classes" ? [{ header: "Classes et rangs", spec: { kind: "ranked-links" }, reasons: ["Une colonne par classe dans la feuille, avec le rang du sort (trois sorts au plus par rang) : la page de chaque classe et les rangs des personnages s’en servent."] } satisfies Column] : []),
     { header: "ID", spec: { kind: "id", hidden: true }, reasons: ["Relie le sort aux personnages qui l’ont appris et aux doublons marqués « ignorés ».", spellSheet] },
   ]
