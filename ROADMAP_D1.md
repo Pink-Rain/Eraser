@@ -422,6 +422,30 @@ Vérifier le pont Roll20 (il lit et enregistre des PNJ) avant la bascule.
    écritures vers Sheets.
 6. Vérification en partie réelle, puis domaine suivant.
 
+## Critères avant chaque bascule
+
+Un domaine ne bascule que si tout est vrai :
+
+1. La comparaison automatique D1 / Sheets ne montre aucun écart depuis au
+   moins 7 jours.
+2. Le rapport d’import a été validé par un responsable.
+3. Un export complet vient d’être fait (Drive et `.xlsx`).
+4. Le retour arrière (interrupteur sur `sheets`) a été essayé sur la
+   préproduction pour ce domaine.
+5. L’exercice de secours (ci-dessous) a réussi depuis moins d’un mois.
+6. Aucune partie n’est prévue dans les 48 heures.
+
+Sinon, on attend. Rien n’oblige à basculer : chaque phase terminée apporte
+déjà quelque chose, et on peut s’arrêter à n’importe laquelle.
+
+## Exercice de secours
+
+Le mode secours ne sert presque jamais : c’est donc le chemin le moins
+éprouvé. Avant la première bascule, puis une fois par mois, sur la
+préproduction : simuler un quota atteint, écrire depuis deux PC, en éteindre
+un, rétablir le serveur, vérifier que rien n’est perdu et que le rattrapage
+propose bien ce qui manque.
+
 ## Procédure d’urgence un soir de partie
 
 1. Regarder l’indicateur de synchronisation. « En attente d’envoi » : on
