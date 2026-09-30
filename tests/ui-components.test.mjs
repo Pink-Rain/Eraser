@@ -542,8 +542,8 @@ test("types every index column from one registry", async () => {
   assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
   assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
   assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Formulaire");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste déroulante · Formulaire");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Fiche seulement");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste · Fiche seulement");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Environnement").kind, "archived");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
   // Objets : icône et image sont des fichiers image, « Actif » vide reste actif, le prix est une somme d'argent.
@@ -570,12 +570,12 @@ test("builds grid columns from their type", async () => {
   ];
   assert.equal(columns[0].commitDelay, Infinity);
   assert.equal(columns[0].plain, true);
-  assert.equal(columns[1].typeLabel, "Jauge (icônes) · Nombre");
+  assert.equal(columns[1].typeLabel, "Jauge (icônes, sur 5)");
   const html = renderToStaticMarkup(React.createElement(SheetGrid, {
     layoutKey: "test:types", columns, rows: [{ key: "2", rowNumber: 2 }], valueOf: context.valueOf, onCommit: () => {}, empty: "Vide",
   }));
   // Le type se lit au survol de l'en-tête.
-  assert.match(html, /Type : Nom · Affichage fixe/);
+  assert.match(html, /Type : Nom/);
   // Jauge en icônes : cinq étincelles, dont trois pleines.
   assert.equal((html.match(/aria-label="Charges : \d"/g) || []).length, 5);
   assert.match(html, /CRE-1234ABCD/);

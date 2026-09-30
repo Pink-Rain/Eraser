@@ -46,7 +46,7 @@ function emptyDraft(): ClassSpellDraft {
 }
 
 function toDraft(spell: ClassSpell): ClassSpellDraft {
-  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, distanceHtml: spell.distanceHtml, charges: spell.charges, classRanks: { ...spell.classRanks } }
+  return { id: spell.id.startsWith("LIGNE-") ? "" : spell.id, name: spell.name === UNNAMED_CLASS_SPELL ? "" : spell.name, effect: spell.effect, effectHtml: spell.effectHtml, description: spell.description, descriptionHtml: spell.descriptionHtml, type: spell.type, skillsRaw: spell.skillsRaw, distance: spell.distance, distanceHtml: spell.distanceHtml, charges: spell.charges, chargesLabel: spell.chargesLabel, classRanks: { ...spell.classRanks } }
 }
 
 /** Un sort peut ne pas avoir de titre, mais pas être entièrement vide. */
@@ -65,7 +65,7 @@ function searchText(spell: Pick<ClassSpell, "name" | "type" | "skillsRaw" | "eff
 function materialize(draft: ClassSpellDraft, rowNumber: number, id: string, tone?: { background: string; foreground: string }): ClassSpell {
   const category = classSpellCategory(draft.type)
   const classRanks = Object.fromEntries(Object.entries(draft.classRanks).flatMap(([classId, rank]) => Number.isInteger(rank) && rank !== null && rank >= 0 && rank <= 20 ? [[classId, rank]] : [])) as Record<string, number>
-  return { rowNumber, id, name: draft.name.trim() || UNNAMED_CLASS_SPELL, effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, distanceHtml: draft.distanceHtml || draft.distance, charges: draft.charges, classRanks, tone: tone || classSpellCategoryTones[category] }
+  return { rowNumber, id, name: draft.name.trim() || UNNAMED_CLASS_SPELL, effect: draft.effect, effectHtml: draft.effectHtml || draft.effect, description: draft.description, descriptionHtml: draft.descriptionHtml || draft.description, type: draft.type, category, actionKind: classSpellActionKind(draft.type), skillsRaw: draft.skillsRaw, skills: splitClassSpellSkills(draft.skillsRaw), distance: draft.distance, distanceHtml: draft.distanceHtml || draft.distance, charges: draft.charges, chargesLabel: draft.charges !== null ? String(draft.charges) : draft.chargesLabel ?? "", classRanks, tone: tone || classSpellCategoryTones[category] }
 }
 
 function TypeGlyph({ category }: { category: ClassSpell["category"] }) {
@@ -112,7 +112,7 @@ const spellSpecs = {
   type: { kind: "choice", also: ["fixed"], options: classSpellTypeSuggestions.map((value) => ({ value })), allowCustom: true },
   skills: { kind: "fixed", display: "skills" },
   distance: { kind: "rich" },
-  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count" } },
+  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count", unlimited: "✦" } },
   classes: { kind: "ranked-links" },
   id: { kind: "id", hidden: true },
 } satisfies Record<string, IndexColumnSpec>
@@ -567,8 +567,10 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     if (columnKey === "skills") return { ...draft, skillsRaw: value }
     if (columnKey === "distance") return { ...draft, distanceHtml: value, distance: plainText(value) }
     if (columnKey === "charges") {
+      // « ✦ » : charges illimitées ; un nombre : le nombre de charges du sort (0 à 5).
+      if (value.trim() === "✦") return { ...draft, charges: null, chargesLabel: "✦" }
       const parsed = Number.parseInt(value.replace(/[^0-9]/g, ""), 10)
-      return { ...draft, charges: Number.isFinite(parsed) ? Math.max(0, Math.min(5, parsed)) : null }
+      return Number.isFinite(parsed) ? { ...draft, charges: Math.max(0, Math.min(5, parsed)), chargesLabel: undefined } : { ...draft, charges: null, chargesLabel: "" }
     }
     return null
   }

@@ -545,7 +545,7 @@ function nextGaugeValue(current: number, clickedIndex: number) {
  * `mode: "count"` : la case compte des icônes (les charges d'un sort : « 3 » affiche
  * trois étincelles), sans maximum commun ; un texte non numérique (« ✦ ») reste tel quel.
  */
-export const GaugeCell = memo(function GaugeCell({ label, value, style, max, mode = "fill", disabled = false, accent, onChange }: { label: string; value: string; style: "bar" | "icons" | "ring"; max: number; mode?: "fill" | "count"; disabled?: boolean; accent?: string; onChange: (value: string) => void }) {
+export const GaugeCell = memo(function GaugeCell({ label, value, style, max, mode = "fill", unlimited, disabled = false, accent, onChange }: { label: string; value: string; style: "bar" | "icons" | "ring"; max: number; mode?: "fill" | "count"; unlimited?: string; disabled?: boolean; accent?: string; onChange: (value: string) => void }) {
   const [shown, setShown] = useOptimistic(value)
   const current = parseGauge(shown, max)
   const [dragging, setDragging] = useState<number | null>(null)
@@ -568,6 +568,7 @@ export const GaugeCell = memo(function GaugeCell({ label, value, style, max, mod
         <p className="mb-1.5 px-1 text-[11px] font-semibold text-muted-foreground">{label}</p>
         <div className="flex flex-wrap gap-1">
           {Array.from({ length: max + 1 }, (_, index) => <Button key={index} type="button" size="sm" variant={index === count ? "default" : "outline"} className="min-w-8 tabular-nums" onClick={() => { set(index); setPicking(false) }}>{index}</Button>)}
+          {unlimited && <Button type="button" size="sm" variant={text === unlimited ? "default" : "outline"} title="Illimité" onClick={() => { setShown(unlimited); onChange(unlimited); setPicking(false) }}>{unlimited}</Button>}
           <Button type="button" size="sm" variant="ghost" onClick={() => { set(null); setPicking(false) }}>Vider</Button>
         </div>
       </PopoverContent>}
@@ -973,7 +974,7 @@ export function indexGridColumn(key: string, label: string, spec: IndexColumnSpe
       column.control = (rowKey) => <SpellsCell value={valueOf(rowKey, key)} source={spec.spells?.source ?? "all"} category={spec.spells?.category} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "gauge":
-      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      column.control = (rowKey) => <GaugeCell label={label} value={valueOf(rowKey, key)} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} unlimited={spec.gauge?.unlimited} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "ranked-links":
     case "tab":
@@ -1028,7 +1029,7 @@ export function IndexField({ label, spec, value, onChange, long = false, autoFoc
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
     case "gauge":
-      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} disabled={disabled} onChange={onChange} /></span></div>
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GaugeCell label={label} value={value} style={spec.gauge?.style ?? "bar"} max={spec.gauge?.max ?? 10} mode={spec.gauge?.mode} unlimited={spec.gauge?.unlimited} disabled={disabled} onChange={onChange} /></span></div>
     case "number":
       return spec.number
         ? <div className={fieldLabel}>{title}<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} /></div>

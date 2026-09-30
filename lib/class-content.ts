@@ -509,6 +509,11 @@ export type ClassSpellDraft = Pick<ClassSpell, "id" | "name" | "effect" | "descr
   descriptionHtml?: string
   distanceHtml?: string
   charges: number | null
+  /**
+   * Texte de la case Charges quand il n'y a pas de nombre : « ✦ » (charges illimitées)
+   * ou vide. Absent : une case « ✦ » existante est gardée telle quelle.
+   */
+  chargesLabel?: string
   classRanks: Record<string, number | null>
 }
 
@@ -551,11 +556,12 @@ async function toneForType(workbook: SpellWorkbook, type: string) {
 }
 
 /**
- * Les charges sans nombre (« ✦ ») ne sont pas modifiables dans Eraser : un sort
- * enregistré sans charges les garde telles quelles au lieu de les effacer.
+ * La case Charges : un nombre de 0 à 5, ou « ✦ » (charges illimitées). Un sort
+ * enregistré sans nombre et sans choix explicite garde son « ✦ » au lieu de le perdre.
  */
-function chargesCell(charges: number | null, current: string) {
+function chargesCell(charges: number | null, current: string, label?: string) {
   if (charges !== null) return String(Math.max(0, Math.min(5, Math.trunc(charges))))
+  if (label !== undefined) return label.trim() === "✦" ? "✦" : ""
   return current.trim() && !Number.isFinite(Number.parseInt(current, 10)) ? current : ""
 }
 
@@ -653,7 +659,7 @@ export async function saveClassSpell(rowNumber: number | null, draft: ClassSpell
     [workbook.columns.name, name],
     [workbook.columns.type, draft.type],
     [workbook.columns.skills, draft.skillsRaw],
-    [workbook.columns.charges, chargesCell(draft.charges, current ? cell(current, workbook.columns.charges) : "")],
+    [workbook.columns.charges, chargesCell(draft.charges, current ? cell(current, workbook.columns.charges) : "", draft.chargesLabel)],
     ...workbook.classColumns.map(({ classId, column }): [number, string] => {
       const rank = draft.classRanks[classId]
       return [column, rank === null || rank === undefined || !Number.isInteger(rank) || rank < 0 || rank > 20 ? "" : String(rank)]
