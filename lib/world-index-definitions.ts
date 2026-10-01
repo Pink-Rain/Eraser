@@ -52,11 +52,6 @@ export type WorldIndexDefinition = {
   /** Index créé depuis « Nouvel index ». */
   custom?: boolean
   description?: string
-  /**
-   * Lignes écrites une seule fois, quand le classeur vient d'être créé et que tous ses
-   * onglets sont vides : par onglet, une ligne par objet « en-tête → valeur ».
-   */
-  seed?: () => Record<string, Array<Record<string, string>>>
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
@@ -150,7 +145,6 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       { name: CHARACTERISTICS_TAB, itemLabel: "une caractéristique", headers: ["Nom", CATALOG_TYPE_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [260, 150, 160, 220, 130], idPrefix: "CAR" },
       { name: SKILLS_TAB, itemLabel: "une compétence", headers: ["Nom", CATALOG_CHARACTERISTIC_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [300, 220, 160, 220, 130], idPrefix: "COM" },
     ],
-    seed: catalogSeedRows,
   },
   creatures: {
     key: "creatures",
@@ -270,6 +264,16 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       idPrefix: "MAT",
     }],
   },
+}
+
+/**
+ * Lignes de départ d'un index prévu par Eraser, écrites une seule fois, quand son
+ * classeur vient d'être créé et que tous ses onglets sont vides : par onglet, une
+ * ligne par objet « en-tête → valeur ». Gardées hors de la définition, qui est envoyée
+ * telle quelle à la page (une fonction ne peut pas y voyager).
+ */
+export const worldIndexSeeds: Partial<Record<BuiltinWorldIndexKey, () => Record<string, Array<Record<string, string>>>>> = {
+  skills: catalogSeedRows,
 }
 
 /**

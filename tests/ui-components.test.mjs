@@ -964,3 +964,15 @@ test("shows a skill added to the index on the character sheet and lets items tar
   const saved = serializeItemModifiers([{ value: "+3", target: "comp:COM-5E6F7A8B" }, { value: "1", target: "crit-reussite:comp:COM-5E6F7A8B" }]);
   assert.equal(parseItemModifiers(saved).length, 2);
 });
+
+test("sends builtin index definitions to the page without functions", async () => {
+  const { worldIndexDefinitions, worldIndexSeeds } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  // Une définition passe du serveur à la page : elle doit rester sérialisable.
+  for (const definition of Object.values(worldIndexDefinitions)) {
+    assert.deepEqual(JSON.parse(JSON.stringify(definition)), definition, `définition ${definition.key}`);
+  }
+  const seeds = worldIndexSeeds.skills();
+  assert.equal(seeds["Compétences"].length, 78);
+
+  assert.equal(seeds["Caractéristiques"].length, 24);
+});

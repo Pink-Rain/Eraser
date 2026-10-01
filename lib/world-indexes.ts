@@ -33,6 +33,7 @@ import {
   splitNames,
   worldColumnPolicy,
   worldIndexDefinitions,
+  worldIndexSeeds,
   worldColumnSpec,
   worldIndexLinks,
   type WorldIndexKey,
@@ -255,7 +256,7 @@ function linksOf(key: WorldIndexKey): WorldIndexLink[] {
  * cette installation. Une feuille qui a déjà des lignes n'est jamais touchée.
  */
 async function seedEmptyIndex(key: WorldIndexKey, sheet: Awaited<ReturnType<typeof workbook>>, tables: WorldIndexTable[]) {
-  const seed = sheet.definition.seed?.()
+  const seed = isBuiltinWorldIndexKey(key) ? worldIndexSeeds[key]?.() : undefined
   if (!seed || tables.some((table) => table.rows.some((row) => row.values.some((value) => value.trim())))) return false
   const flag = `world-index-seed:${key}:${sheet.spreadsheetId}`
   const [done] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, flag)).limit(1)
