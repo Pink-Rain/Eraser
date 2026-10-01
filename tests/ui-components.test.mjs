@@ -975,4 +975,18 @@ test("sends builtin index definitions to the page without functions", async () =
   assert.equal(seeds["Compétences"].length, 78);
 
   assert.equal(seeds["Caractéristiques"].length, 24);
+  assert.equal(seeds["Caractéristiques"].find((row) => row["Clé de fiche"] === "Folie")["Couleur"], "#8f79b5");
+
+  // La Caractéristique d'une compétence ne propose que les principales de l'onglet Caractéristiques.
+  const { worldColumnSpec } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const spec = worldColumnSpec("skills", "Compétences", "Caractéristique");
+  assert.deepEqual(spec.source, { index: "skills", tab: "Caractéristiques", onlyTab: true, exclude: { column: "Type", value: "Secondaire" } });
+  assert.equal(worldColumnSpec("skills", "Caractéristiques", "Couleur").kind, "color");
+  assert.ok(worldIndexDefinitions.skills.tabs[0].headers.includes("Couleur"));
+
+  // Une couleur choisie dans l'index est lue par la fiche ; une case vide garde la couleur d'origine.
+  const { catalogFromTables } = await vite.ssrLoadModule("/lib/character-catalog.ts");
+  const parsed = catalogFromTables({ headers: ["Nom", "Type", "Valeur par défaut", "Clé de fiche", "ID", "Couleur"], rows: [["Force", "Principale", "0", "Force", "CAR-1", "#123456"], ["Arcane", "Principale", "", "", "CAR-2", ""]] }, null);
+  assert.equal(parsed.characteristics[0].color, "#123456");
+  assert.equal(parsed.characteristics[1].color, undefined);
 });

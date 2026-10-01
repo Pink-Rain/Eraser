@@ -29,6 +29,7 @@ import {
 } from "@/lib/character-sheet-schema"
 import {
   builtinCharacterCatalog,
+  builtinPrincipalColors,
   catalogGroups,
   characterLayout,
   CRITICAL_FAILURE_METRIC,
@@ -106,17 +107,15 @@ function skillGroupTitle(characteristic: string) {
 type GroupColor = { accent: string; soft: string; border: string }
 const tone = (accent: string): GroupColor => ({ accent, soft: `${accent}18`, border: `${accent}55` })
 
-/** Les couleurs d'origine des cartes ; une caractéristique ajoutée à l'index prend la suivante du cycle. */
-const characteristicColors: Record<string, string> = {
-  "Capacité de combat": "#b9504e", "Capacité de tir": "#b9504e", "Capacité magique": "#b9504e",
-  "Constitution": "#648f4e", "Force mentale": "#648f4e",
-  "Force": "#397f88", "Dextérité": "#397f88", "Intelligence": "#397f88", "Sagesse": "#397f88", "Charisme": "#397f88",
-}
+/**
+ * La couleur d'une carte : celle choisie dans l'Index des caractéristiques et compétences,
+ * sinon celle d'origine ; une caractéristique ajoutée sans couleur prend la suivante du cycle.
+ */
 const extraColors = ["#8a6fb0", "#b48745", "#4f7fb0", "#a76f9d", "#6d8f6a"]
 
 function groupColor(characteristic: CatalogCharacteristic | null, position: number) {
   if (!characteristic) return tone("#7d7f86")
-  return tone(characteristicColors[characteristic.key] ?? extraColors[position % extraColors.length])
+  return tone(characteristic.color || builtinPrincipalColors[characteristic.key] || extraColors[position % extraColors.length])
 }
 
 
@@ -360,7 +359,7 @@ function CombinedCalculatedCard({ label, groupColor, fields, values, commit, mod
   </div>
 }
 
-function LifePool({ label = "Points de vie", current, total, commit, modifier = 0 }: { label?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number }) {
+function LifePool({ label = "Points de vie", color = "#6e9ee8", current, total, commit, modifier = 0 }: { label?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number }) {
   const [editing, setEditing] = useState(false)
   const [expression, setExpression] = useState(current || "0")
   const [editingTotal, setEditingTotal] = useState(false)
@@ -373,7 +372,7 @@ function LifePool({ label = "Points de vie", current, total, commit, modifier = 
   const leaveTotal = useCommitOnLeave(editingTotal, totalExpression, total || "0", (next) => commit(10, String(calculateExpression(next, Number(total) || 0))))
   async function save() { if (await leaveCurrent.save()) setEditing(false) }
   async function saveTotal() { if (await leaveTotal.save()) setEditingTotal(false) }
-  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl bg-[#6e9ee816] px-4 py-3 text-center shadow-sm" style={{ borderTop: "2px solid #6e9ee8" }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums text-[#6798e2]" title="Valeur, +10, -10%, *2 ou /3">{current || "0"}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums text-[#86ace6]" title="Valeur, +10%, *2 ou /3">{total || "0"}</button>}<ModifierBadge amount={modifier} /></div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full bg-[#6e9ee826]"><div className="h-full rounded-full bg-[#6e9ee8] transition-[width]" style={{ width: `${healthRatio}%` }} /></div></div></div>
+  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title="Valeur, +10, -10%, *2 ou /3">{current || "0"}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title="Valeur, +10%, *2 ou /3">{total || "0"}</button>}<ModifierBadge amount={modifier} /></div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
 }
 
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
@@ -589,6 +588,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
    */
   const secondaryKeys = new Set(secondaries.map((item) => item.key))
   const secondaryName = (key: string, fallback: string) => secondaries.find((item) => item.key === key)?.name ?? fallback
+  const secondaryColor = (key: string, fallback: string) => secondaries.find((item) => item.key === key)?.color || fallback
   const combinedCards: Array<{ label: string; color: string; span: string; members: Array<{ key: string; index: number; label: string; short: string; color: string }> }> = [
     { label: "Dégâts", color: "#b96485", span: "sm:col-span-2 xl:col-span-4", members: [{ key: "Bonus de dégâts physiques", index: 17, label: "Dégâts physiques", short: "Physiques", color: "#c85f78" }, { key: "Bonus de dégâts magiques", index: 18, label: "Dégâts magiques", short: "Magiques", color: "#a96991" }] },
     { label: "Armure", color: "#6da184", span: "sm:col-span-2 xl:col-span-4", members: [{ key: "Armure physique", index: 19, label: "Armure physique", short: "Physique", color: "#74a968" }, { key: "Armure magique", index: 20, label: "Armure magique", short: "Magique", color: "#6599a0" }] },
@@ -606,10 +606,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") return [<div key={item.key} className="xl:col-span-3 xl:row-span-2"><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title={item.name} color="#6e9ee8" total={totalWithModifier(values[10], modifierForValue(10))}><LifePool label={item.name} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>]
-    if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, "#75a9c8")]
-    if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, "#c37998")]
-    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color="#e8aa62" values={values} commit={commit} modifier={modifierForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
+    if (item.key === "Vie totale") return [<div key={item.key} className="xl:col-span-3 xl:row-span-2"><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title={item.name} color={item.color || "#6e9ee8"} total={totalWithModifier(values[10], modifierForValue(10))}><LifePool label={item.name} color={item.color || "#6e9ee8"} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>]
+    if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
+    if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
+    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
     const combined = combinedCards.find((card) => card.members.some((member) => member.key === item.key))
     if (combined) {
       if (renderedCombined.has(combined.label)) return []
@@ -617,11 +617,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       const fields = combined.members.filter((member) => secondaryKeys.has(member.key)).map((member) => {
         // Renommée dans l'index, la case prend son nouveau nom ; sinon elle garde son libellé d'origine.
         const name = secondaryName(member.key, member.key)
-        return { index: member.index, label: name === member.key ? member.label : name, shortLabel: name === member.key ? member.short : name, color: member.color }
+        return { index: member.index, label: name === member.key ? member.label : name, shortLabel: name === member.key ? member.short : name, color: secondaryColor(member.key, member.color) }
       })
       return [<div key={combined.label} className={combined.span}><CombinedCalculatedCard label={combined.label} groupColor={combined.color} fields={fields} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>]
     }
-    return [counterTile(item.key, item.name, index, counterStyles[item.key] ?? { color: "#8a9bb0", span: "xl:col-span-2" })]
+    const style = counterStyles[item.key] ?? { color: "#8a9bb0", span: "xl:col-span-2" }
+    return [counterTile(item.key, item.name, index, { ...style, color: item.color || style.color })]
   })
   const secondaryCharacteristics = secondaryTiles.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(18,minmax(0,1fr))]">{secondaryTiles}</div> : null
 

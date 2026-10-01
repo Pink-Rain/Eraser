@@ -33,6 +33,7 @@ import {
   splitNames,
   worldColumnPolicy,
   worldIndexDefinitions,
+  worldIndexColumnFills,
   worldIndexSeeds,
   worldColumnSpec,
   worldIndexLinks,
@@ -277,10 +278,42 @@ async function seedEmptyIndex(key: WorldIndexKey, sheet: Awaited<ReturnType<type
   return true
 }
 
+/**
+ * Remplit une fois les cases d'une colonne ajoutée après coup (worldIndexColumnFills),
+ * seulement si la colonne est encore entièrement vide : rien de ce qu'on y a écrit n'est
+ * jamais remplacé.
+ */
+async function fillNewColumns(key: WorldIndexKey, sheet: Awaited<ReturnType<typeof workbook>>, tables: WorldIndexTable[]) {
+  const fills = isBuiltinWorldIndexKey(key) ? worldIndexColumnFills[key] ?? [] : []
+  let wrote = false
+  for (const fill of fills) {
+    const table = tables.find((candidate) => candidate.tabName === fill.tab)
+    const column = table ? columnOf(table.headers, fill.column) : -1
+    if (!table || column < 0 || table.rows.some((row) => row.values[column]?.trim())) continue
+    const flag = `world-index-fill:${key}:${fill.tab}:${fill.column}:${sheet.spreadsheetId}`
+    const [done] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, flag)).limit(1)
+    if (done) continue
+    const data = table.rows.flatMap((row) => {
+      const named = Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""]))
+      const value = fill.valueFor(named)
+      const cell = `${columnName(column + 1)}${row.rowNumber}`
+      return value ? [{ range: sheetTabRange(fill.tab, `${cell}:${cell}`), values: [[value]] }] : []
+    })
+    if (data.length) {
+      await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+      clearSpreadsheetReadCache(sheet.spreadsheetId)
+      wrote = true
+    }
+    await getDb().insert(sheetIndexSyncs).values({ key: flag }).onConflictDoNothing()
+  }
+  return wrote
+}
+
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
   let tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   if (await seedEmptyIndex(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+  else if (await fillNewColumns(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   if (tables.some(needsIds)) scheduleIdBackfill(key)
   return {
     key,

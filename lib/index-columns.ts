@@ -78,6 +78,14 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "archived": { label: "Archivée", group: "Système", creatable: false, description: "Ancienne colonne gardée dans Sheets, jamais affichée ni modifiée." },
 }
 
+/**
+ * D'où une liste liée tire ses noms. Par défaut, tous les onglets de l'index (un lieu
+ * peut être une ville comme un pays) ; `onlyTab` les limite à l'onglet nommé, et
+ * `exclude` écarte les lignes dont une colonne vaut une valeur (les caractéristiques
+ * secondaires, pour la Caractéristique d'une compétence).
+ */
+export type ChoiceSource = { index: WorldIndexKey; tab: string; onlyTab?: boolean; exclude?: { column: string; value: string } }
+
 export type ChoiceOption = {
   value: string
   /** Information affichée au survol de l'option. */
@@ -283,7 +291,7 @@ export type IndexColumnSpec = {
   /** Liste : les groupes d'options, dans l'ordre (statut). */
   groups?: Array<{ name: string; color?: string }>
   /** Liste venant d'un index : l'index et l'onglet d'où viennent les noms. */
-  source?: { index: WorldIndexKey; tab: string }
+  source?: ChoiceSource
   /**
    * Colonne liée créée depuis l'éditeur : la colonne qui lui répond dans l'autre index
    * (`tab: "*"` : n'importe quel onglet). Les liens prévus par Eraser n'en ont pas besoin.

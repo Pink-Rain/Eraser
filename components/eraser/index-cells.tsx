@@ -33,6 +33,7 @@ import {
   splitListValue,
   type ActionButton,
   type ChoiceOption,
+  type ChoiceSource,
   type IndexColumnSpec,
   type SpellSource,
 } from "@/lib/index-columns"
@@ -226,19 +227,24 @@ export function loadWorldIndexData(index: WorldIndexKey) {
   return promise
 }
 
-function sourceKey(source: { index: WorldIndexKey; tab: string }) {
-  return `${source.index}:${source.tab}`
+function sourceKey(source: ChoiceSource) {
+  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}`
 }
 
-export function loadWorldIndexNames(source: { index: WorldIndexKey; tab: string }) {
+export function loadWorldIndexNames(source: ChoiceSource) {
   const key = sourceKey(source)
   let promise = namesCache.get(key)
   if (!promise) {
     promise = loadWorldIndexData(source.index).then((data) => {
-      // Une liste liée propose les noms de tous les onglets de l'index : un lieu peut être une ville comme un pays.
-      const names = (data?.tables ?? []).flatMap((table) => {
+      // Une liste liée propose les noms de tous les onglets de l'index (un lieu peut être une
+      // ville comme un pays), sauf si elle se limite à son onglet ou écarte certaines lignes.
+      const tables = (data?.tables ?? []).filter((table) => !source.onlyTab || table.tabName === source.tab)
+      const names = tables.flatMap((table) => {
         const column = table.headers.findIndex((header) => foldName(header) === "nom")
-        return column >= 0 ? table.rows.map((row) => row.values[column]?.trim() ?? "") : []
+        const excluded = source.exclude ? table.headers.findIndex((header) => foldName(header) === foldName(source.exclude!.column)) : -1
+        return column >= 0 ? table.rows
+          .filter((row) => excluded < 0 || foldName(row.values[excluded] ?? "") !== foldName(source.exclude!.value))
+          .map((row) => row.values[column]?.trim() ?? "") : []
       })
       return [...new Set(names.filter(Boolean))].sort((left, right) => left.localeCompare(right, "fr"))
     })
@@ -248,7 +254,7 @@ export function loadWorldIndexNames(source: { index: WorldIndexKey; tab: string 
 }
 
 /** Crée le nom dans l'index source s'il n'y est pas encore. */
-export async function ensureWorldIndexName(source: { index: WorldIndexKey; tab: string }, name: string) {
+export async function ensureWorldIndexName(source: ChoiceSource, name: string) {
   const clean = name.replace(/\s+/g, " ").trim()
   if (!clean) return
   const known = await loadWorldIndexNames(source)
@@ -262,7 +268,7 @@ export async function ensureWorldIndexName(source: { index: WorldIndexKey; tab: 
   namesCache.set(sourceKey(source), Promise.resolve([...known, clean].sort((left, right) => left.localeCompare(right, "fr"))))
 }
 
-function useWorldIndexNames(source: { index: WorldIndexKey; tab: string }) {
+function useWorldIndexNames(source: ChoiceSource) {
   const [names, setNames] = useState<string[] | null>(null)
   useEffect(() => {
     let alive = true
@@ -276,7 +282,7 @@ function useWorldIndexNames(source: { index: WorldIndexKey; tab: string }) {
  * Liste déroulante liée : les noms viennent d'un autre index (les peuples d'un PNJ…).
  * Choisir ou saisir un nom absent le crée dans cet index, comme une colonne liée.
  */
-export function LinkedChoicePicker({ source, value, onChange, compact = true, disabled = false, multiple = false, label }: { source: { index: WorldIndexKey; tab: string }; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; multiple?: boolean; label: string }) {
+export function LinkedChoicePicker({ source, value, onChange, compact = true, disabled = false, multiple = false, label }: { source: ChoiceSource; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; multiple?: boolean; label: string }) {
   const names = useWorldIndexNames(source)
   const [shown, setShown] = useOptimistic(value)
   const options = useMemo(() => (names ?? []).map((name) => ({ value: name })), [names])

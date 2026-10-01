@@ -7,6 +7,7 @@ import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnS
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
 import {
   CATALOG_CHARACTERISTIC_HEADER,
+  CATALOG_COLOR_HEADER,
   CATALOG_DEFAULT_HEADER,
   CATALOG_KEY_HEADER,
   CATALOG_TYPE_HEADER,
@@ -14,6 +15,7 @@ import {
   PRINCIPAL_LABEL,
   SECONDARY_LABEL,
   SKILLS_TAB,
+  builtinCharacteristicColor,
   catalogSeedRows,
 } from "@/lib/character-catalog"
 
@@ -142,7 +144,8 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
     title: "Caractéristiques et compétences",
     path: "/ressources/index-des-caracteristiques",
     tabs: [
-      { name: CHARACTERISTICS_TAB, itemLabel: "une caractéristique", headers: ["Nom", CATALOG_TYPE_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [260, 150, 160, 220, 130], idPrefix: "CAR" },
+      // « Couleur » est venue après : dans un classeur existant, elle s'ajoute à droite.
+      { name: CHARACTERISTICS_TAB, itemLabel: "une caractéristique", headers: ["Nom", CATALOG_TYPE_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER, CATALOG_COLOR_HEADER], widths: [260, 150, 160, 220, 130, 150], idPrefix: "CAR" },
       { name: SKILLS_TAB, itemLabel: "une compétence", headers: ["Nom", CATALOG_CHARACTERISTIC_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [300, 220, 160, 220, 130], idPrefix: "COM" },
     ],
   },
@@ -277,6 +280,15 @@ export const worldIndexSeeds: Partial<Record<BuiltinWorldIndexKey, () => Record<
 }
 
 /**
+ * Une colonne ajoutée après coup à un index déjà rempli, et ce qu'elle reçoit une seule
+ * fois dans ses cases vides (la Couleur des caractéristiques d'origine). Comme les lignes
+ * de départ, gardé hors de la définition envoyée à la page.
+ */
+export const worldIndexColumnFills: Partial<Record<BuiltinWorldIndexKey, Array<{ tab: string; column: string; valueFor: (row: Record<string, string>) => string }>>> = {
+  skills: [{ tab: CHARACTERISTICS_TAB, column: CATALOG_COLOR_HEADER, valueFor: (row) => builtinCharacteristicColor(row[CATALOG_KEY_HEADER] ?? "") }],
+}
+
+/**
  * Un côté d'un lien. `tab: "*"` désigne n'importe quel onglet de l'index : un lieu
  * cité peut être une ville comme un pays. Une entité absente est alors créée dans
  * le premier onglet, d'où elle peut être déplacée.
@@ -330,6 +342,7 @@ function builtinReaders(index: WorldIndexKey, header: string): string[] {
     if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
     if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
     if (folded === foldName(CATALOG_DEFAULT_HEADER)) reasons.push("La fiche de personnage écrit cette valeur à la création d’un personnage, et dans les fiches existantes quand la ligne est ajoutée.")
+    if (folded === foldName(CATALOG_COLOR_HEADER)) reasons.push("La fiche de personnage colore la carte (principale) ou la case (secondaire) de la caractéristique avec cette couleur.")
     if (folded === foldName(CATALOG_KEY_HEADER)) reasons.push("Relie les lignes d’origine aux colonnes déjà remplies de la feuille de personnage. Vide pour une ligne ajoutée : son ID fait ce lien.")
   }
   return reasons
@@ -399,7 +412,9 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
   if (index === "skills") {
     if (isHeader(header, [CATALOG_TYPE_HEADER])) return { kind: "choice", options: [{ value: PRINCIPAL_LABEL, color: "#397f88" }, { value: SECONDARY_LABEL, color: "#b48745" }] }
-    if (isHeader(header, [CATALOG_CHARACTERISTIC_HEADER])) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB } }
+    // Une compétence dépend d'une caractéristique principale : les secondaires ne sont pas proposées.
+    if (isHeader(header, [CATALOG_CHARACTERISTIC_HEADER])) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB, onlyTab: true, exclude: { column: CATALOG_TYPE_HEADER, value: SECONDARY_LABEL } } }
+    if (isHeader(header, [CATALOG_COLOR_HEADER])) return { kind: "color" }
     if (isHeader(header, [CATALOG_DEFAULT_HEADER])) return tab === SKILLS_TAB ? { kind: "number" } : { kind: "rich" }
     if (isHeader(header, [CATALOG_KEY_HEADER])) return { kind: "rich", hidden: true, placement: "table" }
     return { kind: "rich" }

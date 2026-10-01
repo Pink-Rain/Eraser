@@ -1,22 +1,21 @@
-# Eraser 0.1.1-alpha.89 — La page Caractéristiques et compétences s'ouvre
+# Eraser 0.1.1-alpha.90 — Couleurs des caractéristiques, compétences rangées sous les principales
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Correction
+## Index › Caractéristiques et compétences
 
-- **Index › Caractéristiques et compétences** affichait « Impossible d’afficher cette
-  page ». La définition de l'index contenait la fonction qui le remplit la première
-  fois, et une fonction ne peut pas être envoyée du serveur à la page. Elle est
-  maintenant rangée à part : la page s'ouvre normalement. Aucune donnée n'était en
-  cause.
-- Un test vérifie désormais que la définition de chaque index prévu par Eraser peut
-  être envoyée à la page.
+- **Couleur** : nouvelle colonne de l'onglet Caractéristiques, avec la palette et le
+  code couleur. Dans un classeur existant, elle s'ajoute à droite et reçoit une seule
+  fois les couleurs actuelles de la fiche (seulement si la colonne est vide).
+- La fiche de personnage prend cette couleur : la carte d'une caractéristique
+  principale (bandeau, bordure, survols), et la case d'une secondaire (points de vie,
+  notoriété, dégâts, armure, critiques…). Une case vide garde la couleur d'origine.
+- **Caractéristique d'une compétence** : la liste ne propose plus que les
+  caractéristiques **principales**. Les secondaires et les compétences n'y figurent
+  plus.
 
-## Rappel : ce que contient l'index (alpha.88)
+## Pour les autres index
 
-- **Caractéristiques** : Nom, Type (Principale ou Secondaire), Valeur par défaut.
-  24 lignes au départ : 10 principales et 14 secondaires.
-- **Compétences** : Nom, Caractéristique, Valeur par défaut. 78 lignes au départ.
-- La fiche de personnage lit cet index : une compétence ou une caractéristique
-  ajoutée apparaît sur toutes les fiches, avec sa valeur de départ. Les colonnes
-  d'origine de la feuille « Personnages » ne bougent jamais.
+- Une liste liée peut maintenant se limiter à un onglet et écarter certaines lignes.
+  Seule la Caractéristique des compétences s'en sert pour l'instant ; les autres
+  listes liées proposent toujours les noms de tous les onglets de leur index.

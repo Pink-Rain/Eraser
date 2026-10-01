@@ -29,6 +29,8 @@ export type CatalogCharacteristic = {
   kind: CharacteristicKind
   /** Écrite dans la fiche à sa création (et dans les fiches existantes quand la caractéristique est ajoutée). */
   defaultValue: string
+  /** Couleur de sa carte (principale) ou de sa case (secondaire) sur la fiche ; vide : celle d'origine. */
+  color?: string
 }
 
 export type CatalogSkill = {
@@ -54,6 +56,7 @@ export const CATALOG_CHARACTERISTIC_HEADER = "Caractéristique"
 export const CATALOG_DEFAULT_HEADER = "Valeur par défaut"
 /** Colonne masquée : relie une ligne d'origine à ses colonnes de la feuille de personnage. */
 export const CATALOG_KEY_HEADER = "Clé de fiche"
+export const CATALOG_COLOR_HEADER = "Couleur"
 export const PRINCIPAL_LABEL = "Principale"
 export const SECONDARY_LABEL = "Secondaire"
 
@@ -62,28 +65,40 @@ export const SECONDARY_LABEL = "Secondaire"
  * l'en-tête de leur colonne ; la fiche leur garde leur affichage propre (points de vie,
  * listes, cartes calculées), une secondaire ajoutée s'affiche en compteur.
  */
-export const builtinSecondaryCharacteristics: Array<{ key: string; name: string; defaultValue: string }> = [
-  { key: "Vie totale", name: "Points de vie", defaultValue: "" },
-  { key: "Classe sociale", name: "Classe sociale", defaultValue: "" },
-  { key: "Notoriété", name: "Notoriété", defaultValue: "0" },
-  { key: "Alignement", name: "Alignement", defaultValue: "" },
-  { key: "Moralité", name: "Moralité", defaultValue: "0" },
-  { key: "Folie", name: "Folie", defaultValue: "0" },
-  { key: "Destin", name: "Destin", defaultValue: "0" },
-  { key: "Bonus de dégâts physiques", name: "Bonus de dégâts physiques", defaultValue: "0" },
-  { key: "Bonus de dégâts magiques", name: "Bonus de dégâts magiques", defaultValue: "0" },
-  { key: "Armure physique", name: "Armure physique", defaultValue: "0" },
-  { key: "Armure magique", name: "Armure magique", defaultValue: "0" },
-  { key: "Rapidité", name: "Rapidité", defaultValue: "0" },
-  { key: "Échec critique", name: "Échec critique", defaultValue: "96" },
-  { key: "Réussite critique", name: "Réussite critique", defaultValue: "5" },
+export const builtinSecondaryCharacteristics: Array<{ key: string; name: string; defaultValue: string; color: string }> = [
+  { key: "Vie totale", name: "Points de vie", defaultValue: "", color: "#6e9ee8" },
+  { key: "Classe sociale", name: "Classe sociale", defaultValue: "", color: "#75a9c8" },
+  { key: "Notoriété", name: "Notoriété", defaultValue: "0", color: "#70a8c5" },
+  { key: "Alignement", name: "Alignement", defaultValue: "", color: "#c37998" },
+  { key: "Moralité", name: "Moralité", defaultValue: "0", color: "#bd7b99" },
+  { key: "Folie", name: "Folie", defaultValue: "0", color: "#8f79b5" },
+  { key: "Destin", name: "Destin", defaultValue: "0", color: "#e7ae69" },
+  { key: "Bonus de dégâts physiques", name: "Bonus de dégâts physiques", defaultValue: "0", color: "#c85f78" },
+  { key: "Bonus de dégâts magiques", name: "Bonus de dégâts magiques", defaultValue: "0", color: "#a96991" },
+  { key: "Armure physique", name: "Armure physique", defaultValue: "0", color: "#74a968" },
+  { key: "Armure magique", name: "Armure magique", defaultValue: "0", color: "#6599a0" },
+  { key: "Rapidité", name: "Rapidité", defaultValue: "0", color: "#e8aa62" },
+  { key: "Échec critique", name: "Échec critique", defaultValue: "96", color: "#c86f6f" },
+  { key: "Réussite critique", name: "Réussite critique", defaultValue: "5", color: "#d9b85c" },
 ]
+
+/** Les couleurs d'origine des cartes de caractéristiques principales. */
+export const builtinPrincipalColors: Record<string, string> = {
+  "Capacité de combat": "#b9504e", "Capacité de tir": "#b9504e", "Capacité magique": "#b9504e",
+  "Constitution": "#648f4e", "Force mentale": "#648f4e",
+  "Force": "#397f88", "Dextérité": "#397f88", "Intelligence": "#397f88", "Sagesse": "#397f88", "Charisme": "#397f88",
+}
+
+/** La couleur d'origine d'une caractéristique, d'après sa clé de fiche. */
+export function builtinCharacteristicColor(key: string) {
+  return builtinPrincipalColors[key] ?? builtinSecondaryCharacteristics.find((item) => item.key === key)?.color ?? ""
+}
 
 /** La liste telle qu'elle était écrite dans le code : graines de l'index et repli sans lui. */
 export const builtinCharacterCatalog: CharacterCatalog = {
   source: "code",
   characteristics: [
-    ...characterSkillGroups.map((group) => ({ key: group.characteristic, name: group.characteristic, kind: "principale" as const, defaultValue: "0" })),
+    ...characterSkillGroups.map((group) => ({ key: group.characteristic, name: group.characteristic, kind: "principale" as const, defaultValue: "0", color: builtinPrincipalColors[group.characteristic] })),
     ...builtinSecondaryCharacteristics.map((item) => ({ ...item, kind: "secondaire" as const })),
   ],
   skills: characterSkillGroups.flatMap((group) => group.skills.map((skill) => ({
@@ -102,6 +117,7 @@ export function catalogSeedRows(): Record<string, Array<Record<string, string>>>
       [CATALOG_TYPE_HEADER]: item.kind === "principale" ? PRINCIPAL_LABEL : SECONDARY_LABEL,
       [CATALOG_DEFAULT_HEADER]: item.defaultValue,
       [CATALOG_KEY_HEADER]: item.key,
+      [CATALOG_COLOR_HEADER]: item.color ?? "",
     })),
     [SKILLS_TAB]: builtinCharacterCatalog.skills.map((skill) => ({
       Nom: skill.name,
@@ -143,7 +159,8 @@ export function catalogFromTables(characteristics: CatalogTable | null, skills: 
     const key = keyOf(characteristics!, row)
     if (!key) continue
     const kind = foldCatalogName(cellOf(characteristics!, row, CATALOG_TYPE_HEADER)).startsWith("second") ? "secondaire" : "principale"
-    characteristicList.push({ key, name, kind, defaultValue: cellOf(characteristics!, row, CATALOG_DEFAULT_HEADER) })
+    const color = cellOf(characteristics!, row, CATALOG_COLOR_HEADER)
+    characteristicList.push({ key, name, kind, defaultValue: cellOf(characteristics!, row, CATALOG_DEFAULT_HEADER), ...(/^#[0-9a-f]{3,8}$/i.test(color) ? { color } : {}) })
   }
   const principalByName = new Map<string, string>()
   for (const item of characteristicList) {
