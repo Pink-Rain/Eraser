@@ -7,12 +7,13 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import {
+  buildItemModifierTargets,
   formatModifierAmount,
   hasModifierAmount,
   itemModifierAspectLabels,
-  itemModifierTargets,
-  itemModifierTargetById,
+  itemModifierTargetLabel,
   joinModifierTarget,
   parseModifierAmount,
   serializeItemModifiers,
@@ -25,10 +26,19 @@ function normalized(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").trim()
 }
 
-// La liste ne propose que les cibles de base : les seuils critiques d’une caractéristique
-// ou d’une compétence se choisissent ensuite, avec les boutons sous la cible.
-const baseTargets = itemModifierTargets.filter((target) => target.kind !== "critique")
-const targetGroups = [...new Set(baseTargets.map((target) => target.group))]
+/**
+ * Les cibles possibles, d'après l'Index des caractéristiques et compétences. La liste
+ * ne propose que les cibles de base : les seuils critiques d’une caractéristique ou
+ * d’une compétence se choisissent ensuite, avec les boutons sous la cible.
+ */
+function useModifierTargets() {
+  const catalog = useCharacterCatalog()
+  return useMemo(() => {
+    const all = buildItemModifierTargets(catalog)
+    const base = all.filter((target) => target.kind !== "critique")
+    return { byId: new Map(all.map((target) => [target.id, target])), base, groups: [...new Set(base.map((target) => target.group))] }
+  }, [catalog])
+}
 const aspects: ItemModifierAspect[] = ["stat", "reussite", "echec"]
 const aspectTones: Record<ItemModifierAspect, string> = {
   stat: "border-primary/40 bg-primary/10 text-primary",
@@ -53,15 +63,16 @@ function TargetPicker({ value, onChange }: { value: string; onChange: (target: s
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const search = normalized(query)
+  const { byId, base: baseTargets, groups: targetGroups } = useModifierTargets()
   const matches = useMemo(
     () => baseTargets.filter((target) => !search || normalized(`${target.label} ${target.group}`).includes(search)),
-    [search],
+    [baseTargets, search],
   )
-  const selected = itemModifierTargetById.get(value)
+  const selected = byId.get(value)
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (next) setQuery("") }}>
     <PopoverTrigger asChild>
       <button type="button" className="flex h-9 w-full min-w-0 items-center gap-2 rounded-md border bg-background/55 px-3 text-left text-sm shadow-sm hover:bg-accent/45">
-        <span className={`min-w-0 flex-1 truncate ${selected ? "" : "text-muted-foreground"}`}>{selected?.label || "Choisir…"}</span>
+        <span className={`min-w-0 flex-1 truncate ${value ? "" : "text-muted-foreground"}`}>{selected?.label || (value ? itemModifierTargetLabel(value) : "Choisir…")}</span>
         <ChevronsUpDown className="size-3.5 shrink-0 text-muted-foreground" />
       </button>
     </PopoverTrigger>
@@ -98,6 +109,7 @@ function TargetPicker({ value, onChange }: { value: string; onChange: (target: s
 /** Monté seulement à l’ouverture : le brouillon repart des liens enregistrés à chaque fois. */
 function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: ItemModifier[]; pending: boolean; onSave: (serialized: string) => Promise<boolean>; onClose: () => void }) {
   const [draft, setDraft] = useState<ItemModifier[]>(() => modifiers.length ? modifiers : [{ value: "", target: "" }])
+  const { byId } = useModifierTargets()
 
   function update(index: number, changes: Partial<ItemModifier>) {
     setDraft((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry))
@@ -115,8 +127,8 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
       <div className="grid gap-2">
         {draft.map((entry, index) => {
           const { baseId, aspect } = splitModifierTarget(entry.target)
-          const base = itemModifierTargetById.get(baseId)
-          const hasCritical = base?.kind === "caracteristique" || base?.kind === "competence"
+          const base = byId.get(baseId)
+          const hasCritical = base ? base.kind === "caracteristique" || base.kind === "competence" : /^(?:carac|comp):/.test(baseId)
           return <div key={index} className="grid grid-cols-[5rem_minmax(0,1fr)_2rem] items-start gap-x-2 gap-y-1.5">
           <Input
             value={entry.value}
@@ -166,6 +178,7 @@ export function ItemModifierDialog({ open, onOpenChange, itemName, modifiers, pe
 }
 
 export function ItemModifierSummary({ modifiers, className = "" }: { modifiers: ItemModifier[]; className?: string }) {
+  const { byId } = useModifierTargets()
   if (!modifiers.length) return null
   return <div className={`flex flex-wrap items-center gap-1 ${className}`}>
     <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>
@@ -176,7 +189,7 @@ export function ItemModifierSummary({ modifiers, className = "" }: { modifiers: 
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${amount < 0 ? "bg-rose-500/12 text-rose-400" : "bg-emerald-500/12 text-emerald-400"}`}
       >
         <span className="tabular-nums">{formatModifierAmount(amount)}</span>
-        <span className="font-medium text-foreground/70">{itemModifierTargetById.get(modifier.target)?.label || modifier.target}</span>
+        <span className="font-medium text-foreground/70">{itemModifierTargetLabel(modifier.target, byId)}</span>
       </span>
     })}
   </div>

@@ -1,7 +1,6 @@
 import { NextResponse } from "next/server"
 
 import { saveCharacterPortrait } from "@/lib/character-portraits"
-import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import { getCharacterForMj, updateCharacterSheet } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -25,7 +24,9 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       return NextResponse.json({ character })
     }
     const body = (await request.json()) as { values?: unknown }
-    if (!Array.isArray(body.values) || body.values.length > characterValueHeaders.length || !body.values.every((value) => typeof value === "string")) throw new Error("INVALID_VALUES")
+    // La largeur réelle de la fiche dépend de l'Index des caractéristiques et compétences ;
+    // le serveur ignore ce qui dépasse ses colonnes.
+    if (!Array.isArray(body.values) || body.values.length > 20_000 || !body.values.every((value) => typeof value === "string")) throw new Error("INVALID_VALUES")
     const character = await updateCharacterSheet(accountUid, id, body.values)
     return NextResponse.json({ character })
   } catch (error) {

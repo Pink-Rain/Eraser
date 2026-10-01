@@ -4,6 +4,8 @@ import { notFound, redirect } from "next/navigation"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CharacterSheet } from "@/components/eraser/character-sheet"
 import { DeferredPageLoading } from "@/components/eraser/deferred-content-loading"
+import { getCharacterCatalog } from "@/lib/character-catalog-server"
+import { builtinCharacterCatalog } from "@/lib/character-catalog"
 import { getCharacterById, getCharacterForMj, getCharacterForUser, getCharacterSheet } from "@/lib/google-sheets"
 import type { SiteRole } from "@/lib/auth-types"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -13,8 +15,10 @@ export const dynamic = "force-dynamic"
 async function CharacterData({ id, accountUid, role }: { id: string; accountUid: string; role: SiteRole }) {
   let character: Awaited<ReturnType<typeof getCharacterSheet>> = null
   let loadError = false
+  let catalog = builtinCharacterCatalog
   try {
     character = await getCharacterSheet(role === "admin" || role === "mj" ? null : accountUid, id)
+    catalog = await getCharacterCatalog()
   } catch (error) {
     loadError = true
     console.error("CHARACTER_SHEET_LOAD_FAILED", id, error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -26,7 +30,7 @@ async function CharacterData({ id, accountUid, role }: { id: string; accountUid:
       <a href={`/personnage/${encodeURIComponent(id)}`} className="mt-5 inline-flex rounded-lg bg-primary px-4 py-2 text-sm font-semibold text-primary-foreground">Réessayer</a>
     </div>
   }
-  return <CharacterSheet initialCharacter={character} classes={[]} classSpells={[]} loadClassCatalog />
+  return <CharacterSheet initialCharacter={character} catalog={catalog} classes={[]} classSpells={[]} loadClassCatalog />
 }
 
 export default async function CharacterPage({ params }: { params: Promise<{ id: string }> }) {

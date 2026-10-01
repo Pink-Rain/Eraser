@@ -5,6 +5,7 @@ import { redirect } from "next/navigation"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { GoogleDriveManager } from "@/components/eraser/google-drive-manager"
+import { SheetDiagnosticsGrid } from "@/components/eraser/sheet-diagnostics-grid"
 import { listDriveFiles } from "@/lib/google-drive"
 import {
   diagnoseJdrSheets,
@@ -74,34 +75,7 @@ async function SheetDiagnostics({ writeTest }: { writeTest: boolean }) {
         </a>
         <span className="ml-2 text-muted-foreground">Le test d’écriture ajoute une ligne témoin dans chaque feuille puis l’efface.</span>
       </p>
-      <div className="mt-4 overflow-x-auto">
-        <table className="w-full min-w-[42rem] text-sm">
-          <thead className="text-left text-xs uppercase tracking-wider text-muted-foreground">
-            <tr><th className="py-2 pr-3 font-semibold">Feuille</th><th className="py-2 pr-3 font-semibold">Onglet attendu</th><th className="py-2 pr-3 font-semibold">Lignes</th><th className="py-2 font-semibold">État</th></tr>
-          </thead>
-          <tbody className="divide-y">
-            {diagnostics.map((item) => (
-              <tr key={item.key} className="align-top">
-                <td className="py-2 pr-3 font-medium">
-                  {item.webViewLink
-                    ? <a href={item.webViewLink} target="_blank" rel="noreferrer" className="underline underline-offset-2">{item.name}</a>
-                    : item.name}
-                </td>
-                <td className="py-2 pr-3 text-muted-foreground">{item.expectedTab}</td>
-                <td className="py-2 pr-3 tabular-nums text-muted-foreground">{item.rows === null ? "—" : item.rows}</td>
-                <td className="py-2">
-                  {item.status === "ok"
-                    ? <span className="text-emerald-700">OK</span>
-                    : <span className="text-destructive">
-                        {item.detail}
-                        {item.actualTabs.length ? <span className="block text-xs text-muted-foreground">Onglets présents : {item.actualTabs.join(", ")}</span> : null}
-                      </span>}
-                </td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+      <div className="mt-4"><SheetDiagnosticsGrid diagnostics={diagnostics} /></div>
     </section>
   )
 }

@@ -1,9 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useState, type ReactNode } from "react"
 import { LoaderCircle } from "lucide-react"
 
 import { parseClassChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
+import { indexGridColumn } from "@/components/eraser/index-cells"
+import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
 import type { ClassSpell } from "@/lib/class-content"
 import {
   ACTIVE_KIND_COLORS, ACTIVE_KIND_LABELS, ACTIVE_KINDS, activeKind, average, CHARGE_BUCKETS, CHARGE_LABELS, chargeBucket,
@@ -305,6 +307,28 @@ function ClassPicks({ characterClass, classes, spells, playData, accent }: { cha
 }
 
 /** Ce que disent les fiches, toutes classes confondues : classes jouées, rangs, charges. */
+/**
+ * Les campagnes et le rang moyen de leurs personnages, dans le tableau des index (lecture
+ * seule) : la campagne se présente comme dans l'Index des campagnes et ouvre sa page.
+ */
+function CampaignLevels({ rows }: { rows: Array<{ id: string; name: string; color: string; members: number; average: string }> }) {
+  const byId = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows])
+  const valueOf = useCallback((rowKey: string, columnKey: string) => {
+    const row = byId.get(rowKey)
+    if (!row) return ""
+    return columnKey === "name" ? row.name : columnKey === "members" ? String(row.members) : columnKey === "average" ? row.average : ""
+  }, [byId])
+  const columns = useMemo<SheetGridColumn[]>(() => {
+    const context = { valueOf, commit: () => undefined, hrefOf: (rowKey: string) => `/campagne/${encodeURIComponent(rowKey)}`, colorOf: (rowKey: string) => byId.get(rowKey)?.color }
+    return [
+      indexGridColumn("name", "Campagne", { kind: "name-form", also: ["fixed"] }, 220, context),
+      { ...indexGridColumn("members", "Personnages", { kind: "number" }, 120, context), description: "Personnages de la campagne (hors corbeille)." },
+      { ...indexGridColumn("average", "Rang moyen", { kind: "number" }, 120, context), description: "Moyenne des rangs (Level) de ses personnages, calculée par Eraser à partir des fiches." },
+    ]
+  }, [byId, valueOf])
+  return <SheetGrid layoutKey="eraser:class-stats:campaigns" columns={columns} rows={rows.map((row, index) => ({ key: row.id, rowNumber: index + 1 }))} valueOf={valueOf} onCommit={() => undefined} readOnly fit empty="Aucune campagne." />
+}
+
 function PlayersOverview({ classes, spells, playData }: { classes: ClassRecord[]; spells: ClassSpell[]; playData: ClassPlayState }) {
   const parsed = useParsedPlay(playData.play, classes)
   const play = playData.play
@@ -328,8 +352,7 @@ function PlayersOverview({ classes, spells, playData }: { classes: ClassRecord[]
       </Card>
       <Card title="Rangs des personnages" question="À quel rang en sont les personnages, et par campagne.">
         <Columns color={PRIMARY} columns={levels} />
-        {campaigns.length > 0 && <table className="w-full text-sm"><thead><tr className="text-left text-[10px] uppercase tracking-wider text-muted-foreground"><th className="py-1 font-semibold">Campagne</th><th className="py-1 text-right font-semibold">Personnages</th><th className="py-1 text-right font-semibold">Rang moyen</th></tr></thead>
-          <tbody className="divide-y">{campaigns.map((row) => <tr key={row.campaign.id}><td className="py-1.5"><span className="mr-2 inline-block size-2 rounded-full" style={{ backgroundColor: row.campaign.accentColor }} />{row.campaign.name}</td><td className="py-1.5 text-right tabular-nums">{row.members}</td><td className="py-1.5 text-right tabular-nums">{fmt(row.average)}</td></tr>)}</tbody></table>}
+        {campaigns.length > 0 && <CampaignLevels rows={campaigns.map((row) => ({ id: row.campaign.id, name: row.campaign.name, color: row.campaign.accentColor, members: row.members, average: fmt(row.average) }))} />}
       </Card>
     </div>
   </div>

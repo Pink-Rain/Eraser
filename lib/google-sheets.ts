@@ -44,16 +44,13 @@ import {
 import { copyNpcPortrait } from "@/lib/npc-portraits"
 import { copyToken } from "@/lib/tokens"
 import {
-  characterCriticalValueIndex,
-  characterCharacteristics,
   characterSheetHeaders,
   characterSecondaryCalculatedFields,
   characterSecondaryCalculationValueIndex,
-  characterSkills,
-  characterSkillValueIndex,
   characterValueHeaders,
-  innateCharacterSkills,
 } from "@/lib/character-sheet-schema"
+import { builtinCharacterCatalog, characterLayout, planCatalogColumns, type CharacterCatalog, type CharacterLayout } from "@/lib/character-catalog"
+import { applyCharacteristicDefaults, applySkillCells, characterValueCell } from "@/lib/character-sheet-cells"
 import {
   baseInventoryContainerTypes,
   baseInventoryTypeIds,
@@ -88,7 +85,12 @@ export type CharacterRecord = {
   level?: string
 }
 
-export type CharacterSheetRecord = CharacterRecord & { values: string[] }
+/**
+ * Une fiche : ses valeurs (colonne C et suivantes) et l'en-tête de chacune. Les
+ * colonnes d'origine gardent leur place ; celles des caractéristiques et compétences
+ * ajoutées à leur index viennent à la suite.
+ */
+export type CharacterSheetRecord = CharacterRecord & { values: string[]; headers: string[] }
 
 export type CampaignMemberRecord = CharacterRecord & {
   people: string
@@ -4406,13 +4408,14 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     const sheet = await ensureJdrSheet("characters")
     if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
     await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-    const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`)
+    const width = (await characterColumns(sheet.spreadsheetId, sheet.tabName)).layout.headers.length + 2
+    const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width)}`)
     const sourceRow = rows.slice(1).find((row) => row[0] === characterId)
     if (!sourceRow) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
     const copiedRow = [...sourceRow]
     copiedRow[0] = targetId
-    while (copiedRow.length < characterSheetHeaders.length) copiedRow.push("")
-    await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`, [copiedRow])
+    while (copiedRow.length < width) copiedRow.push("")
+    await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width)}`, [copiedRow])
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
   // On tente d'abord la feuille partagée, mais son échec ne doit plus bloquer
@@ -4486,26 +4489,24 @@ export async function removeCharacterFromCampaign(mjUid: string | null, campaign
   return { id: characterId, sharedError }
 }
 
-/** Seuils critiques d'un nouveau personnage : le joueur peut ensuite les modifier. */
-export const defaultCharacterCriticalFailure = "96"
-export const defaultCharacterCriticalSuccess = "5"
-
 export async function createCharacterForUser(uid: string, input: string[], id: string = crypto.randomUUID()) {
-  const values = Array.from({ length: Math.max(input.length, 24) }, (_, index) => input[index] ?? "")
-  const name = values[0]?.trim()
+  const name = String(input[0] ?? "").trim()
   if (!name || name.length > 120) throw new Error("INVALID_CHARACTER_NAME")
-  if (!values[22]?.trim()) values[22] = defaultCharacterCriticalFailure
-  if (!values[23]?.trim()) values[23] = defaultCharacterCriticalSuccess
   const sheet = await ensureJdrSheet("characters")
   if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-  const cells = [id, uid, ...values.slice(0, characterValueHeaders.length)]
-  while (cells.length < characterSheetHeaders.length) cells.push("")
-  await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(characterSheetHeaders.length)}`, [cells])
+  const { layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
+  const width = layout.headers.length
+  const values = Array.from({ length: width }, (_, index) => String(input[index] ?? ""))
+  // Les valeurs de départ viennent de l'Index des caractéristiques et compétences
+  // (seuils critiques 96 et 5, compteurs à 0… dans la liste d'origine).
+  applyCharacteristicDefaults(values, layout, catalog)
+  const cells = [id, uid, ...values]
+  await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width + 2)}`, [cells])
   const rowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, id)
   if (rowNumber) {
-    const prepared = applyCharacterDefaultsAndFormulas(cells.slice(2), rowNumber)
-    await updateRange(sheet.spreadsheetId, `${sheet.tabName}!C${rowNumber}:${columnName(characterSheetHeaders.length)}${rowNumber}`, [prepared])
+    const prepared = applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog)
+    await updateRange(sheet.spreadsheetId, `${sheet.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`, [prepared])
   }
   await getDb().insert(characterIndex).values({
     id, ownerUid: uid, name, subtitle: values[1] || "", updatedAt: new Date().toISOString(),
@@ -4560,7 +4561,7 @@ async function ensureCharacterSheetSchema(spreadsheetId: string, tabName: string
       const aliasIndex = oldHeaderIndex.get(aliasedHeader)
       return aliasIndex === undefined ? "" : row[aliasIndex] || ""
     })
-    const prepared = applyCharacterDefaultsAndFormulas(migrated.slice(2), rowOffset + 2)
+    const prepared = applyCharacterDefaultsAndFormulas(migrated.slice(2), rowOffset + 2, characterLayout(characterValueHeaders), builtinCharacterCatalog)
     return [migrated[0], migrated[1], ...prepared]
   })
   await updateRange(spreadsheetId, `${tabName}!A1:${columnName(characterSheetHeaders.length)}${Math.max(1, migratedRows.length + 1)}`, [characterSheetHeaders, ...migratedRows])
@@ -4568,21 +4569,17 @@ async function ensureCharacterSheetSchema(spreadsheetId: string, tabName: string
 }
 
 function characterCell(valueIndex: number, rowNumber: number) {
-  return `${columnName(valueIndex + 3)}${rowNumber}`
-}
-
-function cappedStatFormula(expression: string) {
-  const minimum = `((${expression})+10+ABS((${expression})-10))/2`
-  return `=(${minimum}+90-ABS(${minimum}-90))/2`
+  return characterValueCell(valueIndex, rowNumber)
 }
 
 function isGoogleSheetsCalculationError(value: GoogleSheetCellValue) {
   return /^#(?:REF|VALUE|N\/A|NAME|DIV\/0|NUM|ERROR|NULL)/i.test(String(value ?? "").trim())
 }
 
-function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number) {
-  const values = input.slice(0, characterValueHeaders.length)
-  while (values.length < characterValueHeaders.length) values.push("")
+function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number, layout: CharacterLayout, catalog: CharacterCatalog) {
+  const width = Math.max(layout.headers.length, characterValueHeaders.length)
+  const values = input.slice(0, width)
+  while (values.length < width) values.push("")
   characterSecondaryCalculatedFields.forEach((field, fieldIndex) => {
     const bonusIndex = characterSecondaryCalculationValueIndex(fieldIndex, "bonus")
     const modifierIndex = characterSecondaryCalculationValueIndex(fieldIndex, "modifier")
@@ -4590,29 +4587,76 @@ function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number) {
     values[modifierIndex] = "=0"
     values[field.valueIndex] = `=${characterCell(bonusIndex, rowNumber)}+${characterCell(modifierIndex, rowNumber)}`
   })
-  characterSkills.forEach((skill, skillIndex) => {
-    const characteristicPosition = characterCharacteristics.findIndex((item) => item.characteristic === skill.characteristic)
-    const bonusStat = characterSkillValueIndex(skillIndex, 0)
-    const modifierStat = characterSkillValueIndex(skillIndex, 1)
-    const totalStat = characterSkillValueIndex(skillIndex, 2)
-    const bonusSuccess = characterSkillValueIndex(skillIndex, 3)
-    const modifierSuccess = characterSkillValueIndex(skillIndex, 4)
-    const totalSuccess = characterSkillValueIndex(skillIndex, 5)
-    const bonusFailure = characterSkillValueIndex(skillIndex, 6)
-    const modifierFailure = characterSkillValueIndex(skillIndex, 7)
-    const totalFailure = characterSkillValueIndex(skillIndex, 8)
-    if (values[bonusStat] === "") values[bonusStat] = innateCharacterSkills.has(skill.name) ? "0" : "-20"
-    if (values[bonusSuccess] === "") values[bonusSuccess] = "0"
-    if (values[bonusFailure] === "") values[bonusFailure] = "0"
-    values[modifierStat] = "=0"
-    values[modifierSuccess] = "=0"
-    values[modifierFailure] = "=0"
-    const statExpression = `${characterCell(skill.characteristicIndex, rowNumber)}+${characterCell(bonusStat, rowNumber)}+${characterCell(modifierStat, rowNumber)}`
-    values[totalStat] = cappedStatFormula(statExpression)
-    values[totalSuccess] = `=${characterCell(23, rowNumber)}+${characterCell(characterCriticalValueIndex(characteristicPosition, "success"), rowNumber)}+${characterCell(bonusSuccess, rowNumber)}+${characterCell(modifierSuccess, rowNumber)}`
-    values[totalFailure] = `=${characterCell(22, rowNumber)}+${characterCell(characterCriticalValueIndex(characteristicPosition, "failure"), rowNumber)}+${characterCell(bonusFailure, rowNumber)}+${characterCell(modifierFailure, rowNumber)}`
-  })
-  return values
+  return applySkillCells(values, rowNumber, layout, catalog)
+}
+
+/**
+ * Les colonnes de la feuille de personnage pour le catalogue actuel. Une caractéristique
+ * ou une compétence ajoutée à son index reçoit ses colonnes à la suite des autres (jamais
+ * au milieu : aucune colonne existante ne bouge), puis chaque fiche existante y reçoit
+ * sa valeur de départ et ses formules. Une ligne d'index renommée renomme seulement
+ * l'en-tête de ses colonnes.
+ */
+const CHARACTER_COLUMNS_CACHE_MS = 5 * 60_000
+let characterColumnsCache: { signature: string; expiresAt: number; headers: string[] } | null = null
+let characterColumnsTask: Promise<{ layout: CharacterLayout; catalog: CharacterCatalog }> | null = null
+
+async function loadCharacterCatalog(): Promise<CharacterCatalog> {
+  const { getCharacterCatalog } = await import("@/lib/character-catalog-server")
+  return getCharacterCatalog()
+}
+
+async function characterColumns(spreadsheetId: string, tabName: string): Promise<{ layout: CharacterLayout; catalog: CharacterCatalog }> {
+  const catalog = await loadCharacterCatalog()
+  const signature = `${spreadsheetId}:${tabName}:${JSON.stringify([catalog.characteristics.map((item) => [item.key, item.name, item.kind]), catalog.skills.map((skill) => [skill.key, skill.name, skill.characteristicKey])])}`
+  if (characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now()) return { layout: characterLayout(characterColumnsCache.headers), catalog }
+  // Une seule mise à jour à la fois : deux fiches ouvertes ensemble n'ajoutent pas deux fois les mêmes colonnes.
+  while (characterColumnsTask) await characterColumnsTask.catch(() => undefined)
+  if (characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now()) return { layout: characterLayout(characterColumnsCache.headers), catalog }
+  const task = syncCharacterColumns(spreadsheetId, tabName, catalog, signature)
+  characterColumnsTask = task
+  try {
+    return await task
+  } finally {
+    characterColumnsTask = null
+  }
+}
+
+async function syncCharacterColumns(spreadsheetId: string, tabName: string, catalog: CharacterCatalog, signature: string) {
+  clearSpreadsheetReadCache(spreadsheetId)
+  const [headerRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+  let used = headerRow.length
+  while (used > 0 && !String(headerRow[used - 1] ?? "").trim()) used -= 1
+  const headers = Array.from({ length: Math.max(used, characterSheetHeaders.length) }, (_, index) => String(headerRow[index] ?? "").trim() || characterSheetHeaders[index] || "")
+  const valueHeaders = headers.slice(2)
+  const plan = planCatalogColumns(valueHeaders, catalog)
+  if (plan.rename.length) {
+    await updateRanges(spreadsheetId, plan.rename.map((item) => ({ range: sheetTabRange(tabName, `${columnName(item.index + 3)}1`), values: [[item.header]] })), { valueInputOption: "RAW" })
+    for (const item of plan.rename) valueHeaders[item.index] = item.header
+  }
+  if (plan.append.length) {
+    const start = valueHeaders.length
+    const width = start + plan.append.length
+    await ensureSheetColumnCount(spreadsheetId, tabName, width + 2)
+    await updateRange(spreadsheetId, sheetTabRange(tabName, `${columnName(start + 3)}1:${columnName(width + 2)}1`), [plan.append.map((column) => column.header)], { valueInputOption: "RAW" })
+    valueHeaders.push(...plan.append.map((column) => column.header))
+    const layout = characterLayout(valueHeaders)
+    const added = new Set(plan.append.map((column) => column.key))
+    // Les fiches existantes : valeur de départ et formules dans les nouvelles colonnes seulement.
+    const ids = await readRange(spreadsheetId, sheetTabRange(tabName, "A:A"))
+    const data = ids.flatMap((row, offset) => {
+      if (offset === 0 || !String(row[0] ?? "").trim()) return []
+      const rowNumber = offset + 1
+      const values = Array<string>(width).fill("")
+      applyCharacteristicDefaults(values, layout, catalog, added)
+      applySkillCells(values, rowNumber, layout, catalog, added)
+      return [{ range: sheetTabRange(tabName, `${columnName(start + 3)}${rowNumber}:${columnName(width + 2)}${rowNumber}`), values: [values.slice(start)] }]
+    })
+    for (let index = 0; index < data.length; index += 200) await updateRanges(spreadsheetId, data.slice(index, index + 200))
+    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", data.length)
+  }
+  characterColumnsCache = { signature, expiresAt: Date.now() + CHARACTER_COLUMNS_CACHE_MS, headers: valueHeaders }
+  return { layout: characterLayout(valueHeaders), catalog }
 }
 
 export async function getCharacterSheet(accountUid: string | null, id: string) {
@@ -4625,20 +4669,23 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   const cached = characterSheetCache.get(id)
   if (cached && cached.expiresAt > Date.now()) return { ...cached.character, ...indexed, name: cached.character.name, subtitle: cached.character.subtitle }
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
+  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
+  const width = layout.headers.length
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) return null
-  const range = `${source.tabName}!C${rowNumber}:${columnName(characterSheetHeaders.length)}${rowNumber}`
+  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
   let [row = []] = await readRange(source.spreadsheetId, range)
-  let values = row.slice(0, characterValueHeaders.length)
-  while (values.length < characterValueHeaders.length) values.push("")
+  let values = row.slice(0, width)
+  while (values.length < width) values.push("")
   if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
-    await updateRange(source.spreadsheetId, range, [applyCharacterDefaultsAndFormulas(values, rowNumber)])
+    const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
+    await updateRange(source.spreadsheetId, `${source.tabName}!C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`, [applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog).slice(0, writeWidth)])
     const [repairedRow = []] = await readRange(source.spreadsheetId, range)
     row = repairedRow
-    values = row.slice(0, characterValueHeaders.length)
-    while (values.length < characterValueHeaders.length) values.push("")
+    values = row.slice(0, width)
+    while (values.length < width) values.push("")
   }
-  const character = { ...indexed, name: values[0] || indexed.name, subtitle: values[1] || indexed.subtitle, values } satisfies CharacterSheetRecord
+  const character = { ...indexed, name: values[0] || indexed.name, subtitle: values[1] || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }
@@ -4651,19 +4698,30 @@ export async function updateCharacterSheet(accountUid: string | null, id: string
   const source = await charactersSource()
   if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
+  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
+  const width = layout.headers.length
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-  const nextValues = values.slice(0, characterValueHeaders.length)
-  while (nextValues.length < characterValueHeaders.length) nextValues.push("")
-  const preparedValues = applyCharacterDefaultsAndFormulas(nextValues, rowNumber)
-  const range = `${source.tabName}!C${rowNumber}:${columnName(characterSheetHeaders.length)}${rowNumber}`
-  let [calculatedValues = []] = await updateRangeAndReturnValues(source.spreadsheetId, range, [preparedValues])
-  if (!calculatedValues.length) [calculatedValues = []] = await readRange(source.spreadsheetId, range)
-  calculatedValues = calculatedValues.slice(0, characterValueHeaders.length)
-  while (calculatedValues.length < characterValueHeaders.length) calculatedValues.push("")
+  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
+  const nextValues = values.slice(0, width)
+  // Une fiche ouverte avant l'ajout d'une compétence ne connaît pas ses colonnes : elles
+  // gardent ce que la feuille contient (les colonnes s'ajoutent toujours à la fin).
+  if (nextValues.length < width) {
+    const [current = []] = await readRange(source.spreadsheetId, range)
+    for (let index = nextValues.length; index < width; index += 1) nextValues.push(String(current[index] ?? ""))
+  }
+  const preparedValues = applyCharacterDefaultsAndFormulas(nextValues, rowNumber, layout, catalog)
+  // Index des caractéristiques injoignable : les colonnes ajoutées par l'index ne sont pas
+  // réécrites (leurs formules ne sont pas connues sans lui), seules celles d'origine le sont.
+  const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
+  const writeRange = `${source.tabName}!C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`
+  let [calculatedValues = []] = await updateRangeAndReturnValues(source.spreadsheetId, writeRange, [preparedValues.slice(0, writeWidth)])
+  if (!calculatedValues.length || writeWidth < width) [calculatedValues = []] = await readRange(source.spreadsheetId, range)
+  calculatedValues = calculatedValues.slice(0, width)
+  while (calculatedValues.length < width) calculatedValues.push("")
   const updatedAt = new Date().toISOString()
   await getDb().update(characterIndex).set({ name, subtitle: nextValues[1] || "", updatedAt }).where(eq(characterIndex.id, id))
-  const character = { ...existing, name, subtitle: nextValues[1] || "", updatedAt, values: calculatedValues } satisfies CharacterSheetRecord
+  const character = { ...existing, name, subtitle: nextValues[1] || "", updatedAt, values: calculatedValues, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }

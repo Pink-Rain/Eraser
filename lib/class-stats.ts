@@ -92,10 +92,20 @@ export function tallySkills(spells: ClassSpell[]): SkillTally[] {
   }).sort((left, right) => right.count - left.count || left.label.localeCompare(right.label, "fr"))
 }
 
-/** Compétences et caractéristiques de la fiche de personnage : la liste de référence. */
-const officialSkillKeys = new Set([...characterSkills.map((skill) => skill.name), ...characterCharacteristics.map((item) => item.characteristic)].map(skillKey))
+/**
+ * Compétences et caractéristiques de la fiche de personnage : la liste de référence.
+ * Celle d'origine, remplacée par celle de l'Index des caractéristiques et compétences
+ * dès qu'elle est chargée (setOfficialSkillNames).
+ */
+let officialSkillKeys = new Set([...characterSkills.map((skill) => skill.name), ...characterCharacteristics.map((item) => item.characteristic)].map(skillKey))
 
-const officialCompactKeys = new Set([...officialSkillKeys].map((key) => key.replace(/ /g, "")))
+let officialCompactKeys = new Set([...officialSkillKeys].map((key) => key.replace(/ /g, "")))
+
+export function setOfficialSkillNames(names: string[]) {
+  if (!names.length) return
+  officialSkillKeys = new Set(names.map(skillKey))
+  officialCompactKeys = new Set([...officialSkillKeys].map((key) => key.replace(/ /g, "")))
+}
 
 /** « Forgemagie » et « Forge magie » sont la même compétence de la fiche. */
 export function isOfficialSkill(key: string) {

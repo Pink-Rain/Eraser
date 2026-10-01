@@ -14,6 +14,10 @@ import {
   updateFormattedCell,
   updateRange,
 } from "@/lib/google-sheets"
+import { eq } from "drizzle-orm"
+
+import { getDb } from "@/db"
+import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
@@ -245,9 +249,37 @@ function linksOf(key: WorldIndexKey): WorldIndexLink[] {
   return [...worldIndexLinks.filter(([left, right]) => left.index === key || right.index === key), ...fromSchema]
 }
 
+/**
+ * Remplit un index prévu par Eraser avec ses lignes de départ, une seule fois : quand
+ * tous ses onglets sont vides et que ce classeur n'a encore jamais été rempli depuis
+ * cette installation. Une feuille qui a déjà des lignes n'est jamais touchée.
+ */
+async function seedEmptyIndex(key: WorldIndexKey, sheet: Awaited<ReturnType<typeof workbook>>, tables: WorldIndexTable[]) {
+  const seed = sheet.definition.seed?.()
+  if (!seed || tables.some((table) => table.rows.some((row) => row.values.some((value) => value.trim())))) return false
+  const flag = `world-index-seed:${key}:${sheet.spreadsheetId}`
+  const [done] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, flag)).limit(1)
+  if (done) return false
+  for (const table of tables) {
+    const rows = seed[table.tabName] ?? []
+    if (!rows.length) continue
+    const prefix = tabDefinition(key, table.tabName).idPrefix
+    const values = rows.map((row) => table.headers.map((header) => {
+      if (foldName(header) === foldName(ID_HEADER)) return newIndexId(prefix)
+      const entry = Object.entries(row).find(([candidate]) => foldName(candidate) === foldName(header))
+      return entry?.[1] ?? ""
+    }))
+    await updateRange(sheet.spreadsheetId, sheetTabRange(table.tabName, `A2:${columnName(table.headers.length)}${values.length + 1}`), values)
+  }
+  await getDb().insert(sheetIndexSyncs).values({ key: flag }).onConflictDoNothing()
+  clearSpreadsheetReadCache(sheet.spreadsheetId)
+  return true
+}
+
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
-  const tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+  let tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+  if (await seedEmptyIndex(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   if (tables.some(needsIds)) scheduleIdBackfill(key)
   return {
     key,
@@ -324,14 +356,33 @@ function scheduleIdBackfill(key: WorldIndexKey) {
 const WORLD_INDEX_CACHE_MS = 5 * 60_000
 const worldIndexCache = new Map<WorldIndexKey, { expiresAt: number; promise: Promise<WorldIndexData> }>()
 
+const lastLoaded = new Map<WorldIndexKey, WorldIndexData>()
+
 export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
   const cached = worldIndexCache.get(key)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
   const promise = loadWorldIndex(key)
   worldIndexCache.set(key, { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise })
+  promise.then((data) => { if (worldIndexCache.get(key)?.promise === promise) lastLoaded.set(key, data) }, () => undefined)
   // Une lecture ratée ne doit pas rester en mémoire : la suivante réessaie.
   promise.catch(() => { if (worldIndexCache.get(key)?.promise === promise) worldIndexCache.delete(key) })
   return promise
+}
+
+/**
+ * Pour ceux qui lisent un index sans l'afficher (la fiche de personnage) : la dernière
+ * version chargée tout de suite, relue en arrière-plan quand elle a vieilli. Seule la
+ * toute première lecture attend Google Sheets.
+ */
+export function getWorldIndexQuick(key: WorldIndexKey): Promise<WorldIndexData> {
+  const cached = worldIndexCache.get(key)
+  if (cached && cached.expiresAt > Date.now()) return cached.promise
+  // Sans entrée en mémoire, l'index vient de changer (ligne ajoutée, structure) : on attend sa relecture.
+  const previous = cached ? lastLoaded.get(key) : undefined
+  const loading = getWorldIndex(key)
+  if (!previous) return loading
+  loading.catch(() => undefined)
+  return Promise.resolve(previous)
 }
 
 function invalidateWorldIndexes(keys: Iterable<WorldIndexKey>) {
@@ -527,6 +578,40 @@ async function tableFor(key: WorldIndexKey, tabName: string) {
  * ajoutés inscrits (et créés au besoin), noms effacés retirés, entité renommée
  * renommée partout où elle est citée. Renvoie les index modifiés par les liens.
  */
+/**
+ * Une ligne renommée : les listes liées du même index qui la citaient prennent le nouveau
+ * nom (la Caractéristique des compétences quand on renomme une caractéristique…). Seules
+ * les cellules qui citaient l'ancien nom sont réécrites.
+ */
+async function renameLinkedChoices(key: WorldIndexKey, tabName: string, oldName: string, newName: string) {
+  const { schema } = await workbook(key)
+  const pointsHere = (tab: string, header: string) => { const spec = effectiveColumnSpec(key, tab, header, schema); return spec.kind === "linked-choice" && spec.source?.index === key && spec.source.tab === tabName }
+  let touched = false
+  for (const tab of await tabsOf(key)) {
+    // Sans liste liée vers cet onglet (d'après la définition et le schéma), rien à relire.
+    const known = [...tab.headers, ...schema.filter((entry) => entry.tab === tab.name && entry.column).map((entry) => entry.column)]
+    if (!known.some((header) => pointsHere(tab.name, header))) continue
+    const table = await plainTable(key, tab.name)
+    const data: Array<{ range: string; values: string[][] }> = []
+    table.headers.forEach((header, column) => {
+      if (!pointsHere(tab.name, header)) return
+      table.rows.forEach((row, rowIndex) => {
+        if (rowIndex === 0) return
+        const names = splitNames(row[column] ?? "")
+        if (!names.some((name) => foldName(name) === foldName(oldName))) return
+        const next = names.map((name) => foldName(name) === foldName(oldName) ? newName : name).join(", ")
+        const cell = `${columnName(column + 1)}${rowIndex + 1}`
+        data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[next]] })
+      })
+    })
+    if (!data.length) continue
+    await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+    clearSpreadsheetReadCache(table.spreadsheetId)
+    touched = true
+  }
+  if (touched) invalidateWorldIndexes([key])
+}
+
 export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNumber: number, column: number, html: string) {
   return serialized(async () => {
     const { sheet, table } = await tableFor(key, tabName)
@@ -535,9 +620,12 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNum
     const ends = linkEndsOf(key, tabName)
     const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(header))
     const touchesLinks = Boolean(linkedEnd) || (isNameColumn(header) && ends.length > 0)
+    const previousName = isNameColumn(header) ? (table.rows.find((row) => row.rowNumber === rowNumber)?.values[column] ?? "").replace(/\s+/g, " ").trim() : ""
     const before = touchesLinks ? await plainTable(key, tabName) : null
     await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html })
     await patchCachedRow(key, tabName, rowNumber, [{ column, html }])
+    const renamedTo = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
+    if (previousName && renamedTo && foldName(previousName) !== foldName(renamedTo)) await renameLinkedChoices(key, tabName, previousName, renamedTo)
     const changed = new Set<WorldIndexKey>()
     if (!before) return []
     const oldName = rowName(before, rowNumber - 1)
@@ -696,6 +784,7 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
     const rowIndex = rowNumber - 1
     if (rowIndex < 1 || !table.rows[rowIndex]?.some((value) => value.trim())) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
     const nameColumn = columnOf(table.headers, "Nom")
+    const oldName = nameColumn >= 0 ? String(table.rows[rowIndex]?.[nameColumn] ?? "").trim() : ""
     const data: Array<{ range: string; values: string[][] }> = []
     const formatted: Array<{ column: number; html: string }> = []
     const written = new Map<string, number>()
@@ -729,6 +818,9 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
       ...data.map((entry) => ({ column: written.get(entry.range) ?? -1, html: entry.values[0][0] })),
       ...formatted,
     ].filter((cell) => cell.column >= 0))
+    const nameField = Object.entries(fields).find(([header]) => columnOf(table.headers, header) === nameColumn)?.[1]
+    const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()
+    if (oldName && newName && foldName(oldName) !== foldName(newName)) await renameLinkedChoices(key, tabName, oldName, newName)
     return data.length + formatted.length
   })
 }

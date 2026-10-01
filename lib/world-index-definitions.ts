@@ -5,10 +5,21 @@
  */
 import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
+import {
+  CATALOG_CHARACTERISTIC_HEADER,
+  CATALOG_DEFAULT_HEADER,
+  CATALOG_KEY_HEADER,
+  CATALOG_TYPE_HEADER,
+  CHARACTERISTICS_TAB,
+  PRINCIPAL_LABEL,
+  SECONDARY_LABEL,
+  SKILLS_TAB,
+  catalogSeedRows,
+} from "@/lib/character-catalog"
 
 export { foldName }
 
-export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials"
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills"
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
 export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
@@ -41,6 +52,11 @@ export type WorldIndexDefinition = {
   /** Index créé depuis « Nouvel index ». */
   custom?: boolean
   description?: string
+  /**
+   * Lignes écrites une seule fois, quand le classeur vient d'être créé et que tous ses
+   * onglets sont vides : par onglet, une ligne par objet « en-tête → valeur ».
+   */
+  seed?: () => Record<string, Array<Record<string, string>>>
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
@@ -123,6 +139,19 @@ export const placeTabs = [
 ] as const
 
 export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefinition> = {
+  // Lu par la fiche de personnage : ses caractéristiques, ses compétences et leurs
+  // valeurs de départ. Rempli à sa création avec la liste d'origine de la fiche.
+  skills: {
+    key: "skills",
+    sheetName: "Index des caractéristiques et compétences",
+    title: "Caractéristiques et compétences",
+    path: "/ressources/index-des-caracteristiques",
+    tabs: [
+      { name: CHARACTERISTICS_TAB, itemLabel: "une caractéristique", headers: ["Nom", CATALOG_TYPE_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [260, 150, 160, 220, 130], idPrefix: "CAR" },
+      { name: SKILLS_TAB, itemLabel: "une compétence", headers: ["Nom", CATALOG_CHARACTERISTIC_HEADER, CATALOG_DEFAULT_HEADER, CATALOG_KEY_HEADER, ID_HEADER], widths: [300, 220, 160, 220, 130], idPrefix: "COM" },
+    ],
+    seed: catalogSeedRows,
+  },
   creatures: {
     key: "creatures",
     sheetName: "Index des créatures",
@@ -293,6 +322,12 @@ function builtinReaders(index: WorldIndexKey, header: string): string[] {
     if (folded === "portrait") reasons.push("Le token d’une créature est fabriqué à partir de ce portrait.")
     if (Object.keys(creatureChoices).some((choice) => foldName(choice) === folded)) reasons.push("« Corriger les fautes » compare cette colonne à sa liste de choix.")
   }
+  if (index === "skills") {
+    if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
+    if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
+    if (folded === foldName(CATALOG_DEFAULT_HEADER)) reasons.push("La fiche de personnage écrit cette valeur à la création d’un personnage, et dans les fiches existantes quand la ligne est ajoutée.")
+    if (folded === foldName(CATALOG_KEY_HEADER)) reasons.push("Relie les lignes d’origine aux colonnes déjà remplies de la feuille de personnage. Vide pour une ligne ajoutée : son ID fait ce lien.")
+  }
   return reasons
 }
 
@@ -358,6 +393,13 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
   if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
+  if (index === "skills") {
+    if (isHeader(header, [CATALOG_TYPE_HEADER])) return { kind: "choice", options: [{ value: PRINCIPAL_LABEL, color: "#397f88" }, { value: SECONDARY_LABEL, color: "#b48745" }] }
+    if (isHeader(header, [CATALOG_CHARACTERISTIC_HEADER])) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB } }
+    if (isHeader(header, [CATALOG_DEFAULT_HEADER])) return tab === SKILLS_TAB ? { kind: "number" } : { kind: "rich" }
+    if (isHeader(header, [CATALOG_KEY_HEADER])) return { kind: "rich", hidden: true, placement: "table" }
+    return { kind: "rich" }
+  }
   if (index === "creatures") {
     const form = !isHeader(header, creatureGridHeaders)
     if (isHeader(header, creatureArchivedHeaders)) return { kind: "archived" }

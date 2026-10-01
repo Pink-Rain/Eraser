@@ -853,3 +853,114 @@ test("reorders sheet columns with the fewest moves and tells display changes apa
   assert.equal(isDisplayOnlyChange({ kind: "rich" }, { kind: "number" }), false);
   assert.equal(isDisplayOnlyChange({ kind: "choice", options: [{ value: "A" }] }, { kind: "choice", options: [{ value: "B" }] }), false);
 });
+
+test("reads the character sheet from the characteristics and skills index without moving a column", async () => {
+  const catalogModule = await vite.ssrLoadModule("/lib/character-catalog.ts");
+  const cellsModule = await vite.ssrLoadModule("/lib/character-sheet-cells.ts");
+  const schema = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
+  const { builtinCharacterCatalog, catalogFromTables, catalogSeedRows, characterLayout, planCatalogColumns, catalogGroups, CHARACTERISTICS_TAB, SKILLS_TAB } = catalogModule;
+
+  // Une feuille existante et la liste d'origine : rien à ajouter, rien à renommer.
+  const base = [...schema.characterValueHeaders];
+  assert.deepEqual(planCatalogColumns(base, builtinCharacterCatalog), { append: [], rename: [] });
+
+  // Les lignes de départ de l'index redonnent exactement la liste d'origine.
+  const seed = catalogSeedRows();
+  const table = (rows) => {
+    const headers = [...new Set(rows.flatMap((row) => Object.keys(row))), "ID"];
+    return { headers, rows: rows.map((row, index) => headers.map((header) => header === "ID" ? `ID-${index}` : row[header] ?? "")) };
+  };
+  const fromSeed = catalogFromTables(table(seed[CHARACTERISTICS_TAB]), table(seed[SKILLS_TAB]));
+  assert.deepEqual(fromSeed.characteristics, builtinCharacterCatalog.characteristics);
+  assert.deepEqual(fromSeed.skills, builtinCharacterCatalog.skills);
+  assert.equal(fromSeed.skills.find((skill) => skill.key === "Parade").defaultValue, "0");
+  assert.equal(fromSeed.skills.find((skill) => skill.key === "Escalade").defaultValue, "-20");
+
+  // Les formules d'une compétence d'origine sont celles d'avant l'index.
+  const layout = characterLayout(base);
+  const parade = schema.characterSkills.findIndex((skill) => skill.name === "Parade");
+  const values = base.map(() => "");
+  cellsModule.applySkillCells(values, 7, layout, builtinCharacterCatalog);
+  const cell = (index) => cellsModule.characterValueCell(index, 7);
+  const bonus = schema.characterSkillValueIndex(parade, 0);
+  const modifier = schema.characterSkillValueIndex(parade, 1);
+  assert.equal(values[bonus], "0");
+  assert.equal(values[schema.characterSkillValueIndex(parade, 2)], cellsModule.cappedStatFormula(`${cell(30)}+${cell(bonus)}+${cell(modifier)}`));
+  assert.equal(values[schema.characterSkillValueIndex(parade, 5)], `=${cell(23)}+${cell(schema.characterCriticalValueIndex(5, "success"))}+${cell(schema.characterSkillValueIndex(parade, 3))}+${cell(schema.characterSkillValueIndex(parade, 4))}`);
+
+  // Une compétence et une caractéristique ajoutées : leurs colonnes vont à la fin, nommées d'après la ligne et reliées par leur ID.
+  const added = {
+    ...builtinCharacterCatalog,
+    source: "index",
+    characteristics: [...builtinCharacterCatalog.characteristics, { key: "CAR-1A2B3C4D", name: "Arcane", kind: "principale", defaultValue: "25" }],
+    skills: [...builtinCharacterCatalog.skills, { key: "COM-5E6F7A8B", name: "Pêche à la mouche", characteristicKey: "CAR-1A2B3C4D", defaultValue: "-10" }],
+  };
+  const plan = planCatalogColumns(base, added);
+  assert.equal(plan.append.length, 3 + 9);
+  assert.equal(plan.append[0].header, "Arcane [CAR-1A2B3C4D]");
+  assert.equal(plan.append[1].header, "Arcane — Réussite critique [CAR-1A2B3C4D]");
+  assert.equal(plan.append[3].header, "Pêche à la mouche — Bonus/Malus de stats [COM-5E6F7A8B]");
+  const extended = [...base, ...plan.append.map((column) => column.header)];
+  const wide = characterLayout(extended);
+  assert.equal(wide.index("CAR-1A2B3C4D"), base.length);
+  assert.equal(wide.index("COM-5E6F7A8B", "Total de stats"), base.length + 5);
+  assert.equal(wide.index("Parade", "Total de stats"), schema.characterSkillValueIndex(parade, 2));
+  assert.deepEqual(planCatalogColumns(extended, added), { append: [], rename: [] });
+
+  // Renommer la ligne renomme l'en-tête de ses colonnes, sans en ajouter.
+  const renamed = { ...added, skills: added.skills.map((skill) => skill.key === "COM-5E6F7A8B" ? { ...skill, name: "Pêche" } : skill) };
+  const renamePlan = planCatalogColumns(extended, renamed);
+  assert.equal(renamePlan.append.length, 0);
+  assert.equal(renamePlan.rename.length, 9);
+  assert.equal(renamePlan.rename[0].header, "Pêche — Bonus/Malus de stats [COM-5E6F7A8B]");
+
+  // Valeurs de départ et formules d'une fiche existante dans les nouvelles colonnes seulement.
+  const row = extended.map(() => "");
+  const only = new Set(plan.append.map((column) => column.key));
+  cellsModule.applyCharacteristicDefaults(row, wide, added, only);
+  cellsModule.applySkillCells(row, 4, wide, added, only);
+  assert.equal(row[base.length], "25");
+  assert.equal(row[wide.index("COM-5E6F7A8B", "Bonus/Malus de stats")], "-10");
+  assert.match(row[wide.index("COM-5E6F7A8B", "Total de stats")], new RegExp(cellsModule.characterValueCell(base.length, 4)));
+  assert.equal(row[bonus], "", "les colonnes d'origine ne sont pas touchées");
+
+  // La fiche range la compétence sous sa caractéristique.
+  const groups = catalogGroups(added);
+  assert.equal(groups.at(-1).characteristic.name, "Arcane");
+  assert.deepEqual(groups.at(-1).skills.map((skill) => skill.name), ["Pêche à la mouche"]);
+});
+
+test("shows a skill added to the index on the character sheet and lets items target it", async () => {
+  const { CharacterSheet } = await vite.ssrLoadModule("/components/eraser/character-sheet.tsx");
+  const { builtinCharacterCatalog, planCatalogColumns } = await vite.ssrLoadModule("/lib/character-catalog.ts");
+  const { characterValueHeaders, characterCustomTabsIndex } = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
+  const { parseItemModifiers, serializeItemModifiers, buildItemModifierTargets, characterLayout } = {
+    ...(await vite.ssrLoadModule("/lib/item-modifiers.ts")),
+    ...(await vite.ssrLoadModule("/lib/character-catalog.ts")),
+  };
+  const catalog = {
+    ...builtinCharacterCatalog,
+    source: "index",
+    characteristics: [...builtinCharacterCatalog.characteristics, { key: "CAR-1A2B3C4D", name: "Arcane", kind: "principale", defaultValue: "25" }, { key: "CAR-9C9C9C9C", name: "Fatigue", kind: "secondaire", defaultValue: "0" }],
+    skills: [...builtinCharacterCatalog.skills, { key: "COM-5E6F7A8B", name: "Pêche à la mouche", characteristicKey: "CAR-1A2B3C4D", defaultValue: "-10" }],
+  };
+  const headers = [...characterValueHeaders, ...planCatalogColumns([...characterValueHeaders], catalog).append.map((column) => column.header)];
+  const values = headers.map(() => "");
+  values[0] = "Personnage test";
+  values[characterCustomTabsIndex] = "[]";
+  const html = renderToStaticMarkup(React.createElement(CharacterSheet, {
+    initialCharacter: { id: "PER-TEST", ownerUid: "USR-TEST", name: "Personnage test", subtitle: "", updatedAt: "2026-09-05T00:00:00.000Z", campaigns: [], values, headers },
+    catalog,
+    classes: [],
+    classSpells: [],
+  }));
+  assert.match(html, /Arcane/);
+  assert.match(html, /Pêche à la mouche/);
+  assert.match(html, /Fatigue/);
+
+  const targets = buildItemModifierTargets(catalog, characterLayout(headers));
+  assert.ok(targets.some((target) => target.id === "comp:COM-5E6F7A8B" && target.label === "Pêche à la mouche" && target.valueIndex > characterValueHeaders.length));
+  assert.ok(targets.some((target) => target.id === "carac:CAR-9C9C9C9C" && target.group === "Général"));
+  const saved = serializeItemModifiers([{ value: "+3", target: "comp:COM-5E6F7A8B" }, { value: "1", target: "crit-reussite:comp:COM-5E6F7A8B" }]);
+  assert.equal(parseItemModifiers(saved).length, 2);
+});

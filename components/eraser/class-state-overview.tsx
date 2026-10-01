@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button"
 import type { ClassSpell } from "@/lib/class-content"
 import { classSpellGaps, classSpellState, MAX_CLASS_SPELLS_PER_RANK, type ClassRankState, type ClassSpellState } from "@/lib/class-spell-utils"
 import { skillQuality } from "@/lib/class-stats"
+import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 
@@ -201,7 +202,10 @@ export function ClassStateDetail({ characterClass, spells, headers, onRank, onBa
  * fausse les statistiques. Ce panneau liste ce qu'il faut harmoniser dans la feuille.
  */
 function SkillQualityPanel({ spells }: { spells: ClassSpell[] }) {
-  const quality = useMemo(() => skillQuality(spells), [spells])
+  // Les compétences reconnues sont celles de l'Index des caractéristiques et compétences.
+  const catalog = useCharacterCatalog()
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- le catalogue chargé change la liste de référence lue par skillQuality
+  const quality = useMemo(() => skillQuality(spells), [spells, catalog])
   const [showAll, setShowAll] = useState(false)
   const placeholderCount = quality.placeholders.active.length + quality.placeholders.other.length
   const clean = !quality.variants.length && !quality.unknown.length && !placeholderCount && !quality.empty.active.length

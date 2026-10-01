@@ -9,6 +9,7 @@ import {
   clearSpreadsheetReadCache,
   deleteGoogleSheetRow,
   ensureJdrSheet,
+  ensureSheetColumnCount,
   googleSheetsJson,
   spreadsheetTabs,
   listClasses,
@@ -907,4 +908,32 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
   const table = { bonuses, headers, sheetUrl: tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`, exists: true }
   rankBonusCache = { expiresAt: Date.now() + 60_000, table }
   return table
+}
+
+/**
+ * Écrit un bonus de rang : la case du rang (lignes « Rang 1 » à « Rang 20 ») dans la
+ * colonne de ce nom. Une colonne absente est ajoutée à droite des autres.
+ */
+export async function saveRankBonus(rank: number, header: string, value: string) {
+  if (!Number.isInteger(rank) || rank < 1 || rank > 20) throw new Error("RANK_BONUS_INVALID_RANK")
+  const label = header.replace(/\s+/g, " ").trim()
+  if (!label || label.length > 80) throw new Error("RANK_BONUS_INVALID_COLUMN")
+  const { spells: file } = await classWorkbookFiles()
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  clearSpreadsheetReadCache(file.id)
+  const rows = await readRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!A1:Z60`)
+  const headers = (rows[0] ?? []).map((cell) => String(cell ?? "").trim())
+  let column = headers.findIndex((candidate, index) => index > 0 && candidate.toLocaleLowerCase("fr") === label.toLocaleLowerCase("fr"))
+  if (column < 0) {
+    column = Math.max(1, headers.length)
+    await ensureSheetColumnCount(file.id, RANK_BONUS_TAB, column + 1)
+    await updateRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}1`, [[label]], { valueInputOption: "RAW" })
+  }
+  const rowIndex = rows.findIndex((row, index) => index > 0 && Number.parseInt(String(row[0] ?? "").match(/\d+/)?.[0] ?? "", 10) === rank)
+  if (rowIndex < 0) throw new Error("RANK_BONUS_ROW_NOT_FOUND")
+  if (value !== "" || column < headers.length) {
+    await updateRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}${rowIndex + 1}`, [[value.slice(0, 2000)]], { valueInputOption: "RAW" })
+  }
+  rankBonusCache = null
+  return listRankBonuses({ refresh: true })
 }

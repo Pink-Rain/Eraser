@@ -1,29 +1,44 @@
-# Eraser 0.1.1-alpha.87 — Supprimer un index, tous les noms ouvrent la fiche
+# Eraser 0.1.1-alpha.88 — Index des caractéristiques et compétences
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Supprimer un index
+## Nouvel index : Caractéristiques et compétences
 
-Dans « Modifier », un bouton **Supprimer l'index** apparaît en bas à gauche.
+Dans Index, une nouvelle page **Caractéristiques et compétences**, avec deux onglets.
 
-- Un index créé avec « Nouvel index » part dans la **corbeille** (Administration ›
-  Corbeille), avec tous ses onglets. Il disparaît d'Eraser, mais son classeur reste
-  intact dans Google Drive.
-- Depuis la corbeille, on peut le **restaurer**, ou le **supprimer définitivement**.
-  Dans ce cas, le classeur part dans la corbeille de Google Drive, qui le garde encore
-  30 jours.
-- Les index prévus par Eraser (créatures, lieux, peuples…) et les classeurs d'objets
-  ne peuvent pas être supprimés entiers. Le bouton est grisé avec un cadenas, et son
-  survol dit pourquoi. On peut toujours supprimer leurs onglets et leurs colonnes.
+- **Caractéristiques** : Nom, Type (Principale ou Secondaire), Valeur par défaut.
+- **Compétences** : Nom, Caractéristique (liste des caractéristiques), Valeur par défaut.
 
-## Tous les noms sont des Noms formulaires
+À sa première ouverture, l'index se remplit avec ce que contient déjà la fiche de
+personnage : 10 caractéristiques principales, 14 secondaires (points de vie, classe
+sociale, notoriété… seuils critiques 96 et 5) et 88 compétences (0 ou −20).
+Il n'est rempli qu'une fois, et seulement si son classeur est vide.
 
-Dans tous les index, cliquer sur un nom ouvre la **fiche** de la ligne, où l'on
-modifie tous ses champs, nom compris.
+## La fiche de personnage lit cet index
 
-- Lieux, religions, peuples, langues, états, runes, attributs, matériaux et index
-  créés : la fiche commune.
-- Objets : la fiche commune. Un nom mis en forme garde sa mise en forme.
-- Sorts des classes et des créatures : la fiche du sort (nom, type, compétences,
-  distance, charges, classes et rangs, effet, description).
-- Créatures, PNJ, campagnes et personnages : comme avant (leur fiche ou leur page).
+- Une **compétence ajoutée** apparaît sur toutes les fiches, sous sa caractéristique,
+  avec sa valeur de départ et son calcul (stat, réussite et échec critiques).
+- Une **caractéristique principale ajoutée** devient une nouvelle carte de l'onglet
+  Compétences ; une **secondaire ajoutée**, une case en haut de la fiche.
+- Les **valeurs par défaut** s'écrivent à la création d'un personnage, et dans les
+  fiches existantes quand la ligne est ajoutée à l'index.
+- **Renommer** une ligne renomme la case sur la fiche, sans rien perdre. Renommer une
+  caractéristique met à jour la colonne Caractéristique de ses compétences.
+- Les objets peuvent viser une compétence ou une caractéristique ajoutée
+  (« +5 en Pêche »).
+- Les compétences reconnues par « Création de classe » (compétences des sorts) sont
+  celles de l'index.
+
+Rien n'est déplacé dans la feuille « Personnages » : les colonnes d'origine restent à
+leur place. Celles d'une ligne ajoutée viennent à la fin, nommées d'après elle.
+Une ligne retirée de l'index disparaît de la fiche, mais ses valeurs restent dans
+Google Sheets.
+
+## Trois tableaux passent sur le moteur des index
+
+- **Bonus de rang** (Création de classe) : tri, filtres, et modification des cases
+  directement dans Eraser. « Colonne » ajoute une sorte de bonus.
+- **Diagnostic des feuilles** (Administration › Google Drive) : en lecture seule ;
+  le nom ouvre la feuille dans le navigateur.
+- **Campagnes et rang moyen** (statistiques de Création de classe) : la campagne se
+  présente comme dans l'Index des campagnes et ouvre sa page.

@@ -301,7 +301,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
 
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
-  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0,
+  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, fit = false,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -325,6 +325,8 @@ export function SheetGrid({
   /** À incrémenter quand les valeurs viennent réellement du serveur : les cellules
    *  sont alors remontées avec le nouveau contenu. Une frappe ne doit jamais le changer. */
   version?: number
+  /** Petit tableau posé dans une page (statistiques, diagnostic) : à la hauteur de ses lignes, sans se figer sous l'en-tête. */
+  fit?: boolean
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
   // Les colonnes masquées (l'identifiant…) restent hors de vue tant qu'on ne les demande pas.
@@ -602,7 +604,7 @@ export function SheetGrid({
   // titre, la recherche et les onglets s'effacent vers le haut, la barre d'outils et
   // les noms de colonnes restent. La hauteur retire l'en-tête (3.5rem) et, sur
   // l'application Windows, la barre de titre.
-  return <SheetGridMenuContext.Provider value={menu}><div className="sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))] flex-col overflow-hidden rounded-xl border bg-background/60">
+  return <SheetGridMenuContext.Provider value={menu}><div className={`${fit ? "relative flex max-h-[70svh]" : "sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))]"} flex-col overflow-hidden rounded-xl border bg-background/60`}>
     <SheetGridToolbar
       targetRef={activeRef}
       ready={toolbarReady}
