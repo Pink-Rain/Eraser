@@ -178,23 +178,20 @@ function Oozing({ style, variant }: { style: CSSProperties; variant: FxVariant }
 // ---------------------------------------------------------------------------
 
 /**
- * L'aura : un contour lumineux qui suit le bord du cadre (portrait, case ou écran), une
- * lueur qui respire le long de ce bord, deux reflets qui en font le tour et des
- * étincelles qui scintillent sur la ligne. Le centre reste libre.
+ * L'aura : un anneau lumineux aux coins très arrondis (pilule, ovale) qui suit la forme du cadre, un peu en
+ * retrait du bord pour que son halo pulse des deux côtés, un reflet qui en fait le tour
+ * et des étincelles qui scintillent sur son pourtour.
  */
 function Aura({ style, variant }: { style: CSSProperties; variant: FxVariant }) {
   const random = seeded(variant === "page" ? 71 : 29)
-  const count = variant === "page" ? 22 : 8
-  const sparkles = Array.from({ length: count }, (_, index) => {
-    // Réparties sur les quatre côtés, loin des coins arrondis.
-    const side = index % 4
-    const along = 12 + ((Math.floor(index / 4) + 0.2 + random() * 0.6) / Math.ceil(count / 4)) * 76
-    const position = side === 0 ? { left: `${along}%`, top: "var(--aura-line)" } : side === 1 ? { left: "calc(100% - var(--aura-line))", top: `${along}%` } : side === 2 ? { left: `${100 - along}%`, top: "calc(100% - var(--aura-line))" } : { left: "var(--aura-line)", top: `${100 - along}%` }
-    return { ...position, delay: random() * 3, size: variant === "page" ? 11 + random() * 9 : 7 + random() * 5 }
-  })
-  return <span aria-hidden="true" className={`eraser-fx-aura ${variant === "page" ? "eraser-fx-aura-page" : ""} pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit]`} style={style}>
-    <s /><u /><i><em /></i>
-    {sparkles.map((sparkle, index) => <b key={index} style={{ left: sparkle.left, top: sparkle.top, width: sparkle.size, height: sparkle.size, animationDelay: `${sparkle.delay}s` }} />)}
+  const count = variant === "page" ? 16 : 10
+  // Posées sur la courbe de l'anneau (offset-path), réparties tout autour.
+  const sparkles = Array.from({ length: count }, (_, index) => ({ at: ((index + 0.2 + random() * 0.6) / count) * 100, delay: random() * 2.8, size: variant === "page" ? 10 + random() * 8 : 7 + random() * 6 }))
+  return <span aria-hidden="true" className={`eraser-fx-aura ${variant === "page" ? "eraser-fx-aura-page" : ""} pointer-events-none absolute inset-0 overflow-hidden`} style={style}>
+    <span className="eraser-fx-aura-ring">
+      <s /><u /><i><em /></i>
+      {sparkles.map((sparkle, index) => <b key={index} style={{ offsetDistance: `${sparkle.at}%`, width: sparkle.size, height: sparkle.size, animationDelay: `${sparkle.delay}s` }} />)}
+    </span>
   </span>
 }
 

@@ -1,19 +1,20 @@
-# Eraser 0.1.1-alpha.105 — Aura : un contour lumineux
+# Eraser 0.1.1-alpha.106 — Aura : l'anneau, en forme de pilule
 
 Cette version arrive par la mise à jour sans réinstallation.
 
 ## FX des états
 
-- **Aura, en contour** : le cercle au milieu cachait le visage du portrait, serrait les
-  nombres des petites cases et traversait toute la fiche. L'aura suit maintenant le bord
-  de ce qu'elle entoure : une fine ligne lumineuse qui épouse ses coins arrondis, une
-  lueur douce qui respire le long de ce bord, deux reflets qui en font le tour et des
-  étincelles qui scintillent sur la ligne. Le centre reste entièrement libre. Elle prend
-  la couleur de l'effet.
-  - Dans le portrait : le cadre du portrait s'illumine, le visage reste dégagé.
-  - Sur une case visée (Réussite, une compétence…) : le contour de la case, le nombre
-    reste lisible.
-  - Sur la page entière : le contour de l'écran, qui reste en place pendant qu'on fait
+- **Aura** : on retrouve l'anneau lumineux de l'alpha.104, avec la même ligne claire, le
+  même halo qui pulse, le même reflet qui fait le tour et les mêmes étincelles. Il n'est
+  plus centré en cercle : il suit maintenant la forme du cadre, avec des coins très
+  arrondis.
+  - Dans le portrait : un ovale allongé, en retrait du bord. Le halo, plus large qu'avant,
+    se voit des deux côtés de la ligne.
+  - Sur une case visée (Réussite, une compétence…) : une pilule autour du nombre, à la
+    taille de la case. Dans une ligne fine, l'anneau longe le bord sans passer sur le
+    texte.
+  - Sur la page entière : une grande forme arrondie qui suit l'écran pendant qu'on fait
     défiler la fiche.
-- **Page entière** : les FX couvrent maintenant exactement la zone visible sous
-  l'en-tête ; le bas de l'écran n'est plus coupé (utile aussi pour Flammes).
+  - Les étincelles s'allument directement sur la courbe de l'anneau.
+- La correction de l'alpha.105 est conservée : les FX de la page entière couvrent toute
+  la zone visible, et le bas de l'écran n'est plus coupé.
