@@ -1,6 +1,7 @@
 "use client"
 
 import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { rememberScroll } from "@/lib/scroll-memory"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
@@ -334,6 +335,13 @@ export function SheetGrid({
   fit?: boolean
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
+  // Revenir sur ce tableau (autre onglet d'Eraser, autre page) le remet là où on était.
+  const scrollerRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const scroller = scrollerRef.current
+    if (!scroller || fit) return
+    return rememberScroll(`${layoutKey}:scroll`, scroller)
+  }, [fit, layoutKey])
   // Les colonnes masquées (l'identifiant…) restent hors de vue tant qu'on ne les demande pas.
   const [showHidden, setShowHidden] = usePersistentState<boolean>(`${layoutKey}:hidden`, false, (value): value is boolean => typeof value === "boolean")
   const hiddenCount = allColumns.filter((column) => column.hidden).length
@@ -627,7 +635,7 @@ export function SheetGrid({
     />
     {/* Un seul conteneur défile, dans les deux sens : les en-têtes restent collés en haut
         de l’écran et la barre horizontale reste collée en bas, comme dans Google Sheets. */}
-    <div className="min-h-0 flex-1 overflow-auto">
+    <div ref={scrollerRef} className="min-h-0 flex-1 overflow-auto">
       {/* Changer de tableau remonte les cellules : aucune ne garde le contenu du précédent. */}
       <table key={layoutKey} className="border-separate border-spacing-0 text-sm" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
         <colgroup>

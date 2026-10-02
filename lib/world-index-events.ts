@@ -6,6 +6,8 @@
  *
  * `origin` désigne la vue qui a écrit : elle a déjà ses données et s'ignore elle-même.
  */
+import { forgetVisitedPages } from "@/lib/navigation-cache"
+
 const EVENT = "eraser:world-index-changed"
 const CHANNEL = "eraser-world-index"
 
@@ -18,6 +20,8 @@ let started = false
 
 function deliver(change: Change) {
   if (!change || !Array.isArray(change.keys) || !change.keys.length) return
+  // Les copies des pages gardées par le routeur montreraient l'index d'avant.
+  forgetVisitedPages()
   for (const listener of [...listeners]) listener(change.keys, change.origin ?? "")
 }
 

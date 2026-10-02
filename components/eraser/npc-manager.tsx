@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { Backpack, ChevronDown, CircleMinus, Dices, Download, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
 
 import {
@@ -248,7 +249,7 @@ function AddNpcToSessionDialog({ open, candidates, pending, onClose, onAdd, onCr
 }
 
 export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "manage", session }: { initialNpcs: CampaignNpcRecord[]; pageLinked: string; sourcePages?: ReusablePageOption[]; mode?: "manage" | "session"; session?: NpcSessionBinding }) {
-  const [npcs, setNpcs] = useState(initialNpcs); const [editing, setEditing] = useState<CampaignNpcRecord | null>(null); const [importing, setImporting] = useState(false); const [pending, setPending] = useState(false); const [query, setQuery] = useState(""); const [error, setError] = useState("")
+  const [npcs, setNpcs] = useState(initialNpcs); const [editing, setEditing] = useState<CampaignNpcRecord | null>(null); const [importing, setImporting] = useState(false); const [pending, setPending] = useState(false); const [query, setQuery] = useRememberedSearch(mode); const [error, setError] = useState("")
   const [sessionTarget, setSessionTarget] = useState<CampaignNpcRecord | null>(null); const [picking, setPicking] = useState(false); const [notice, setNotice] = useState("")
   const inSession = mode === "session" && session ? new Set(session.ids) : null
   const shown = inSession ? npcs.filter((npc) => inSession.has(npc.id)) : npcs

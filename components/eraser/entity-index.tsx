@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useMemo, useState } from "react"
+import { useCallback, useMemo } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { Search } from "lucide-react"
 
 import { indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
@@ -44,7 +45,7 @@ export function EntityIndex({ kind, rows, accounts, isAdmin, nameLabel, linksLab
   detailLabel?: string
   empty: string
 }) {
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useRememberedSearch()
   const byId = useMemo(() => new Map(rows.map((row) => [row.id, row])), [rows])
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     const row = byId.get(rowKey)

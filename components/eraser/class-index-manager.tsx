@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
 
 import { indexGridColumn, RankedLinksCell } from "@/components/eraser/index-cells"
@@ -338,7 +339,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   // Remonte les cellules seulement quand les lignes changent réellement (actualisation,
   // création, suppression) : une frappe enregistrée ne doit rien remonter.
   const [version, setVersion] = useState(0)
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useRememberedSearch(kind)
   const [storedTab, setStoredTab] = usePersistentState(
     "eraser:creature-spell-index:tab", "actifs",
     (v): v is string => typeof v === "string",

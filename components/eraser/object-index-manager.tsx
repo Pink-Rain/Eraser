@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
@@ -88,7 +89,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Incrémenté seulement quand les valeurs viennent du serveur : les cellules sont
   // alors remontées. La frappe, elle, ne doit jamais les remonter.
   const [version, setVersion] = useState(0)
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useRememberedSearch()
   const [sort, setSort] = usePersistentState<SheetGridSort>(
     "eraser:object-index:sort", null,
     (v): v is SheetGridSort => v === null || (typeof v === "object" && v !== null && typeof (v as { column?: unknown }).column === "string" && ((v as { direction?: unknown }).direction === "asc" || (v as { direction?: unknown }).direction === "desc")),

@@ -1,6 +1,8 @@
 "use client"
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
+import { installNavigationCacheGuard } from "@/lib/navigation-cache"
+import { rememberScroll } from "@/lib/scroll-memory"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { usePathname, useRouter } from "next/navigation"
@@ -241,6 +243,19 @@ export function AppShell({
   const todosLoadingRef = useRef(false)
   const [checkingUpdate, setCheckingUpdate] = useState(false)
   const [updateNotice, setUpdateNotice] = useState("")
+
+  // Une modification enregistrée rend périmées les pages gardées par le routeur : elles
+  // sont oubliées, et revenir sur un index le relit au lieu d'en montrer l'ancienne copie.
+  useEffect(() => installNavigationCacheGuard(), [])
+
+  // Revenir sur une page (autre onglet d'Eraser, lien) la remet là où on l'avait laissée.
+  const pageScrollerRef = useRef<HTMLDivElement>(null)
+  const pageArriving = Boolean(pendingPage)
+  useEffect(() => {
+    const scroller = pageScrollerRef.current
+    if (!scroller || pageArriving) return
+    return rememberScroll(`eraser:page-scroll:${pathname}`, scroller, 60)
+  }, [pageArriving, pathname])
 
   // Un lien vers une page d'Eraser écrit dans un texte enrichi est un simple <a> :
   // on l'ouvre sur place, comme un lien du menu, au lieu de recharger toute l'appli.
@@ -736,7 +751,7 @@ export function AppShell({
         </header>
         {/* `--eraser-viewport` : la hauteur visible de ce bloc (l’écran moins l’en-tête), pour
             les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
-        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
+        <div ref={pageScrollerRef} className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
           <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user, avatarVersion, openAccount }}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}

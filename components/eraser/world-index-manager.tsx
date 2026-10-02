@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
@@ -154,7 +155,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)
   const [editorError, setEditorError] = useState("")
   const [version, setVersion] = useState(0)
-  const [query, setQuery] = useState("")
+  // Gardée pour cette page : changer d'onglet d'Eraser puis revenir la retrouve.
+  const [query, setQuery] = useRememberedSearch()
   const [details, setDetails] = useState<string | null>(null)
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
@@ -171,9 +173,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   useEffect(() => {
     const initial = new URLSearchParams(window.location.search).get("q")
     // L'adresse n'est connue qu'une fois la page affichée : la lire au rendu ferait différer le serveur et le navigateur.
-    // eslint-disable-next-line react-hooks/set-state-in-effect
     if (initial) setQuery(initial)
-  }, [])
+  }, [setQuery])
 
   const tables = useMemo(() => data?.tables ?? [], [data])
   // Les onglets-fenêtres : des onglets sans données propres, qui réaffichent des lignes existantes.

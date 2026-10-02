@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useMemo, useRef, useState } from "react"
+import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
 import { ensureWorldIndexName, indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
@@ -85,7 +86,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
   const [pending, setPending] = useState(false)
   const [saving, setSaving] = useState(0)
   const [error, setError] = useState("")
-  const [query, setQuery] = useState("")
+  const [query, setQuery] = useRememberedSearch()
   const [version, setVersion] = useState(0)
   const [sort, setSort] = usePersistentState<SheetGridSort>("eraser:npc-index:sort", null, isValidSort)
   // Dernière version connue de chaque PNJ : deux cellules enregistrées coup sur coup
