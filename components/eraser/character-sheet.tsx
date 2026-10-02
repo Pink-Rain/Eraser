@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
-import { FxOverlay, PortraitFx, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
+import { FxOverlay, PageFxOverlay, PortraitFx, pageImageFxClass, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
 import { applyRule, hasRule, ruleLabel, type ModifierRule } from "@/lib/state-change"
 import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
@@ -1022,13 +1022,13 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Coma et Mort donnent leur propre apparence quand ils existent avec un effet.
   const lifeState = autoLife.styledByState ? "alive" : autoLife.state
 
-  return <div data-life={lifeState} className={`character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10 ${portraitImageFxClass(portrait.sheetFx)}`} style={{ "--character-accent": campaignAccent } as CSSProperties} title={autoLife.state === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : autoLife.state === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
+  return <div data-life={lifeState} className={`character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10 ${pageImageFxClass(portrait.sheetFx)}`} style={{ "--character-accent": campaignAccent } as CSSProperties} title={autoLife.state === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : autoLife.state === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
     {/* Bichromie rouge sang de la fiche « morte » : la luminosité de chaque point devient
         un rouge, du plus sombre au rose pâle, comme le gris le fait pour une fiche à terre. */}
     {/* Un effet « appliqué à la page » teinte toute la fiche de sa couleur, comme à 0 PV. */}
     {portrait.sheetColors.length > 0 && <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] mix-blend-color" style={{ background: portrait.sheetColors.length > 1 ? `linear-gradient(160deg, ${portrait.sheetColors.join(", ")})` : portrait.sheetColors[0], opacity: 0.35 }} />}
     {/* Les FX « appliqués à la page entière » se dessinent sur toute la fiche. */}
-    <FxOverlay fx={portrait.sheetFx} className="z-[5]" />
+    <PageFxOverlay fx={portrait.sheetFx} />
     <svg aria-hidden="true" width="0" height="0" className="pointer-events-none absolute"><filter id="eraser-life-dead" colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values="0.1318 0.4434 0.0448 0 0.35 0.1446 0.4863 0.0491 0 0.02 0.1382 0.4649 0.0469 0 0.03 0 0 0 1 0" /></filter></svg>
     <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: `${campaignAccent}55` }}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${campaignAccent}, ${campaignAccent}66 58%, transparent)` }} />

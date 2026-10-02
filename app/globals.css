@@ -485,7 +485,6 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 @keyframes eraser-fx-spin { to { transform: rotate(360deg); } }
 @keyframes eraser-fx-mist { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
 .eraser-fx-pulse { animation: eraser-fx-pulse 1.6s ease-in-out infinite; }
-.eraser-fx-aura { box-shadow: inset 0 0 34px 8px color-mix(in srgb, var(--fx) 70%, transparent); }
 /*
  * Flammes : un dégradé de feu découpé par un bruit qui monte (deux couches à deux
  * vitesses), une lueur au pied et des braises qui s'envolent.
@@ -550,6 +549,102 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 /* Coma et Mort : les apparences de la fiche à 0 PV et morte, posées par leur état. */
 .eraser-fx-coma { filter: grayscale(1); transition: filter 0.6s ease; }
 .eraser-fx-mort { filter: url(#eraser-life-dead); transition: filter 0.6s ease; }
-.eraser-fx-spiral { background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--fx) 35%, transparent) 0 18deg, transparent 18deg 36deg); border-radius: 50%; inset: -40%; animation: eraser-fx-spin 9s linear infinite; mix-blend-mode: soft-light; }
-.eraser-fx-mist { background: radial-gradient(40% 30% at 30% 60%, color-mix(in srgb, var(--fx) 40%, #e7e5e4) 0%, transparent 70%), radial-gradient(35% 25% at 70% 40%, color-mix(in srgb, var(--fx) 35%, #e7e5e4) 0%, transparent 70%); filter: blur(6px); inset: 0 -30%; animation: eraser-fx-mist 7s ease-in-out infinite alternate; }
+/* Rayons : des rayons qui tournent ; sur la page, centrés sur l'écran et plus nets. */
+.eraser-fx-rays { background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--fx) 35%, transparent) 0 18deg, transparent 18deg 36deg); border-radius: 50%; inset: -40%; animation: eraser-fx-spin 9s linear infinite; mix-blend-mode: soft-light; }
+.eraser-fx-rays-page { inset: auto; left: 50%; top: 50%; width: 170vmax; height: 170vmax; margin: -85vmax 0 0 -85vmax; mix-blend-mode: normal; opacity: 0.3; background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--fx) 70%, transparent) 0 9deg, transparent 9deg 22deg); animation-duration: 28s; -webkit-mask: radial-gradient(circle, transparent 12%, #000 55%); mask: radial-gradient(circle, transparent 12%, #000 55%); }
+
+/* Pulsation sur la page : la même lueur qui bat, depuis les bords de l'écran. */
+.eraser-fx-pulse-page { animation-name: eraser-fx-pulse-page; animation-duration: 2s; }
+@keyframes eraser-fx-pulse-page { 0%, 100% { box-shadow: inset 0 0 40px 6px color-mix(in srgb, var(--fx) 45%, transparent); } 50% { box-shadow: inset 0 0 120px 30px color-mix(in srgb, var(--fx) 80%, transparent); } }
+
+/*
+ * Aura : un halo d'énergie qui tourne et ondule autour des bords (deux couches qui
+ * tournent en sens contraire), là où la pulsation bat sur place.
+ */
+.eraser-fx-aura {
+  mix-blend-mode: screen;
+  -webkit-mask: radial-gradient(ellipse 70% 66% at 50% 50%, transparent 38%, #000 88%);
+  mask: radial-gradient(ellipse 70% 66% at 50% 50%, transparent 38%, #000 88%);
+}
+.eraser-fx-aura > i {
+  position: absolute; left: 50%; top: 50%; width: 220%; aspect-ratio: 1; translate: -50% -50%;
+  background: conic-gradient(from 0deg, transparent 0 8%, var(--fx) 16%, transparent 27% 42%, color-mix(in srgb, var(--fx) 60%, #fff) 52%, transparent 63% 76%, var(--fx) 86%, transparent 96%);
+  filter: blur(10px) saturate(1.4);
+  animation: eraser-fx-spin 5.5s linear infinite;
+}
+.eraser-fx-aura > i + i { width: 200%; opacity: 0.7; filter: blur(22px); animation: eraser-fx-spin-back 8s linear infinite; background: conic-gradient(from 90deg, transparent 0 20%, color-mix(in srgb, var(--fx) 70%, #fff) 30%, transparent 45% 70%, var(--fx) 82%, transparent 95%); }
+.eraser-fx-aura-page { -webkit-mask: radial-gradient(ellipse 65% 60% at 50% 50%, transparent 62%, #000 100%); mask: radial-gradient(ellipse 65% 60% at 50% 50%, transparent 62%, #000 100%); }
+.eraser-fx-aura-page > i { width: 160vmax; filter: blur(28px); }
+.eraser-fx-aura-page > i + i { width: 150vmax; filter: blur(36px); }
+@keyframes eraser-fx-spin-back { to { transform: rotate(-360deg); } }
+
+/* Spirale : une vraie spirale à trois bras qui s'enroule et tourne lentement. */
+.eraser-fx-spiral { mix-blend-mode: screen; opacity: 0.75; }
+.eraser-fx-spiral-turn { transform-box: view-box; transform-origin: 50% 50%; animation: eraser-fx-spin 14s linear infinite; }
+.eraser-fx-spiral-page { opacity: 0.2; mix-blend-mode: normal; }
+.eraser-fx-spiral-page > svg { width: 150vmax; }
+
+/*
+ * Brume : trois nappes de brouillard (un bruit doux) qui dérivent à des vitesses
+ * différentes, plus épaisses en bas et sur les bords.
+ */
+.eraser-fx-mist > i {
+  position: absolute; inset: 0 -50% 0 0;
+  background: color-mix(in srgb, var(--fx) 55%, #f5f5f4);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.008 0.016' numOctaves='4' seed='5' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2 -0.7'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 400px 300px repeat, linear-gradient(to top, #000 0%, rgba(0,0,0,.55) 45%, rgba(0,0,0,.15) 100%) 0 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='400' height='300'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.008 0.016' numOctaves='4' seed='5' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 2 -0.7'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 400px 300px repeat, linear-gradient(to top, #000 0%, rgba(0,0,0,.55) 45%, rgba(0,0,0,.15) 100%) 0 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+  opacity: 0.75;
+  animation: eraser-fx-drift 16s linear infinite;
+}
+.eraser-fx-mist > i:nth-child(2) { opacity: 0.55; -webkit-mask-size: 560px 380px, 100% 100%; mask-size: 560px 380px, 100% 100%; animation: eraser-fx-drift-slow 26s linear infinite reverse; }
+.eraser-fx-mist > i:nth-child(3) { opacity: 0.35; filter: blur(4px); -webkit-mask-size: 300px 220px, 100% 100%; mask-size: 300px 220px, 100% 100%; animation-duration: 11s; }
+.eraser-fx-mist-page > i { opacity: 0.7; background: color-mix(in srgb, var(--fx) 45%, #8c8680); }
+.eraser-fx-mist-page { -webkit-mask: radial-gradient(ellipse 70% 60% at 50% 45%, rgba(0,0,0,.25) 40%, #000 100%); mask: radial-gradient(ellipse 70% 60% at 50% 45%, rgba(0,0,0,.25) 40%, #000 100%); }
+@keyframes eraser-fx-drift { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 400px 0, 0 0; mask-position: 400px 0, 0 0; } }
+@keyframes eraser-fx-drift-slow { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 560px 0, 0 0; mask-position: 560px 0, 0 0; } }
+
+/* Flammes sur la page : un mur de feu au bas de l'écran, plus de braises qui montent haut. */
+.eraser-fx-flames-page > i { -webkit-mask-size: 260px 300px, 100% 100%; mask-size: 260px 300px, 100% 100%; background: linear-gradient(to top, color-mix(in srgb, var(--fx) 10%, #fff8dc) 0%, color-mix(in srgb, var(--fx) 55%, #ffb000) 4%, color-mix(in srgb, var(--fx) 85%, #ff5a00) 10%, color-mix(in srgb, var(--fx) 70%, transparent) 17%, transparent 26%); opacity: 0.9; }
+.eraser-fx-flames-page > i + i { -webkit-mask-size: 180px 220px, 100% 100%; mask-size: 180px 220px, 100% 100%; }
+.eraser-fx-flames-page > s { background: radial-gradient(90% 18% at 50% 100%, color-mix(in srgb, var(--fx) 65%, #ffb347) 0%, transparent 80%); }
+.eraser-fx-flames-page > b { animation-name: eraser-fx-ember-page; animation-duration: 4s; }
+@keyframes eraser-fx-ember-page { 0% { opacity: 0; transform: translate(0, 0) scale(1); } 10% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--sway, 10px), -60vh) scale(0.3); } }
+
+/* Givre sur la page : une bande plus fine sur les bords, beaucoup plus d'éclats. */
+.eraser-fx-frost-page::before { -webkit-mask: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 68%, #000 100%); mask: radial-gradient(ellipse 75% 70% at 50% 50%, transparent 68%, #000 100%); }
+.eraser-fx-frost-page > i { -webkit-mask-size: 150px 150px, 100% 100%; mask-size: 150px 150px, 100% 100%; }
+.eraser-fx-frost-page > b { animation-duration: 2.6s; background: radial-gradient(circle, #fff 0 1.4px, transparent 2.8px), linear-gradient(color-mix(in srgb, var(--fx) 70%, #2b6cb0), color-mix(in srgb, var(--fx) 70%, #2b6cb0)) center / 1.5px 100% no-repeat, linear-gradient(color-mix(in srgb, var(--fx) 70%, #2b6cb0), color-mix(in srgb, var(--fx) 70%, #2b6cb0)) center / 100% 1.5px no-repeat; filter: drop-shadow(0 0 4px color-mix(in srgb, var(--fx) 60%, #60a5fa)); }
+
+/*
+ * Suintement (maladie) : des pustules qui gonflent, se collent et crèvent, des bulles qui
+ * montent, une pourriture qui ronge les bords.
+ */
+.eraser-fx-ooze > i {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--fx) 55%, #2a1f05);
+  opacity: 0.6;
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.045' numOctaves='3' seed='19' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 5 -2.3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 180px repeat, radial-gradient(ellipse 75% 70% at 50% 50%, transparent 55%, #000 100%) 0 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='180' height='180'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.045' numOctaves='3' seed='19' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 5 -2.3'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 180px repeat, radial-gradient(ellipse 75% 70% at 50% 50%, transparent 55%, #000 100%) 0 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+  animation: eraser-fx-rot 9s ease-in-out infinite alternate;
+}
+.eraser-fx-ooze-page > i { -webkit-mask-size: 220px 220px, 100% 100%; mask-size: 220px 220px, 100% 100%; opacity: 0.45; }
+.eraser-fx-ooze > svg { opacity: 0.92; }
+.eraser-fx-ooze-page > svg { opacity: 0.75; }
+.eraser-fx-ooze-mass { fill: color-mix(in srgb, var(--fx) 62%, #26300a); filter: drop-shadow(0 0 1px #000); }
+.eraser-fx-pustule { transform-box: fill-box; transform-origin: 50% 50%; animation: eraser-fx-pustule 4.5s ease-in-out infinite; }
+.eraser-fx-pus-head { fill: color-mix(in srgb, var(--fx) 25%, #f2e889); transform-box: fill-box; transform-origin: 50% 50%; animation: eraser-fx-pus-head 4.5s ease-in-out infinite; }
+@keyframes eraser-fx-rot { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 30px 18px, 0 0; mask-position: 30px 18px, 0 0; } }
+@keyframes eraser-fx-pustule { 0% { transform: scale(0.55); } 50% { transform: scale(1.12); } 66% { transform: scale(1.22, 1.05); } 74% { transform: scale(0.6); } 100% { transform: scale(0.55); } }
+@keyframes eraser-fx-pus-head { 0% { transform: scale(0.3); opacity: 0.6; } 60% { transform: scale(1.15); opacity: 1; } 68% { transform: scale(1.35); opacity: 1; } 72% { transform: scale(0.1); opacity: 0; } 100% { transform: scale(0.3); opacity: 0.6; } }
+
+/* Sur la page entière, les FX qui changent ce qu'ils recouvrent restent doux. */
+.eraser-fx-shake-soft { animation: eraser-fx-shake-soft 0.5s linear infinite; }
+@keyframes eraser-fx-shake-soft { 0%, 100% { transform: translate(0, 0); } 25% { transform: translate(-0.6px, 0.4px); } 50% { transform: translate(0.6px, -0.4px); } 75% { transform: translate(-0.4px, -0.4px); } }
+.eraser-fx-blur-soft { filter: blur(0.45px); }
+.eraser-fx-ghost-soft { animation: eraser-fx-ghost-soft 3s ease-in-out infinite; }
+@keyframes eraser-fx-ghost-soft { 0%, 100% { opacity: 0.82; } 50% { opacity: 0.95; } }
 @media (prefers-reduced-motion: reduce) { [class*="eraser-fx-"] { animation: none !important; } }
