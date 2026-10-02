@@ -734,7 +734,9 @@ export function AppShell({
             {roleViewLabels[viewRole]}
           </Badge>
         </header>
-        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain">
+        {/* `--eraser-viewport` : la hauteur visible de ce bloc (l’écran moins l’en-tête), pour
+            les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
+        <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
           <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user, avatarVersion, openAccount }}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
