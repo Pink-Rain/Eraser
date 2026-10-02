@@ -1,7 +1,9 @@
 import { BookText, ExternalLink } from "lucide-react"
+import { Suspense } from "react"
 import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { VocabularyGlossary } from "@/components/eraser/vocabulary-glossary"
 import { Button } from "@/components/ui/button"
 import { getJdrSheet } from "@/lib/jdr-sheets"
@@ -10,11 +12,8 @@ import { listVocabulary, type VocabularyEntry } from "@/lib/vocabulary"
 
 export const dynamic = "force-dynamic"
 
-export default async function VocabularyPage() {
-  const account = await authorizedAccount(["admin", "mj", "joueur"])
-  if (!account) redirect("/connexion")
-  const canEdit = account.role === "admin" || account.role === "mj"
-
+// La page s'affiche aussitôt ; les mots arrivent ensuite.
+async function VocabularyData({ canEdit }: { canEdit: boolean }) {
   let entries: VocabularyEntry[] = []
   let loadError = ""
   try {
@@ -23,6 +22,14 @@ export default async function VocabularyPage() {
     console.error("VOCABULARY_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     loadError = "Le vocabulaire est momentanément indisponible."
   }
+  return <VocabularyGlossary initialEntries={entries} canEdit={canEdit} loadError={loadError} />
+}
+
+export default async function VocabularyPage() {
+  const account = await authorizedAccount(["admin", "mj", "joueur"])
+  if (!account) redirect("/connexion")
+  const canEdit = account.role === "admin" || account.role === "mj"
+
   const sheet = account.role === "admin" ? await getJdrSheet("vocabulary").catch(() => null) : null
 
   return (
@@ -56,7 +63,9 @@ export default async function VocabularyPage() {
           </div>
         </section>
 
-        <VocabularyGlossary initialEntries={entries} canEdit={canEdit} loadError={loadError} />
+        <Suspense fallback={<DeferredContentLoading label="Chargement du vocabulaire…" />}>
+          <VocabularyData canEdit={canEdit} />
+        </Suspense>
       </div>
     </AuthenticatedShell>
   )

@@ -9,6 +9,7 @@ import {
   UsersRound, type LucideIcon,
 } from "lucide-react"
 
+import { HomeAchievements } from "@/components/eraser/achievements"
 import { PageLabel, useShellData } from "@/components/eraser/app-shell"
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexPageIcons } from "@/components/eraser/index-directory"
@@ -142,7 +143,7 @@ function SideColumn({ withIndex, withTools }: { withIndex: boolean; withTools: b
  * Une image qui n'apparaît qu'une fois chargée : absente (404 arrivé avant que la page
  * soit interactive) ou cassée, elle laisse simplement voir l'icône en dessous.
  */
-function QuietImage({ src }: { src: string }) {
+export function QuietImage({ src }: { src: string }) {
   const [loaded, setLoaded] = useState("")
   const [failed, setFailed] = useState("")
   if (!src || failed === src) return null
@@ -265,6 +266,8 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
   const open = (character: CharacterRecord) => router.push(`/personnage/${encodeURIComponent(character.id)}`)
   // Classe et rang, lus dans les fiches après l'affichage : l'accueil n'attend pas Sheets.
   const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string }>>({})
+  // Tant que les fiches n'ont pas répondu, la classe reste en attente (pas « à choisir »).
+  const [summariesLoaded, setSummariesLoaded] = useState(false)
   useEffect(() => {
     if (!characters.length) return
     let active = true
@@ -272,6 +275,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
       .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string }> } : null)
       .then((payload) => { if (active && payload?.summaries) setSummaries(payload.summaries) })
       .catch(() => { /* les cartes restent lisibles sans la classe */ })
+      .finally(() => { if (active) setSummariesLoaded(true) })
     return () => { active = false }
   }, [characters.length])
   const classLine = (character: CharacterRecord) => {
@@ -310,7 +314,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
                 <div className="h-1 w-full" style={{ backgroundColor: accent }} />
                 <div className="p-3">
                   <h3 className="font-display truncate text-base font-semibold">{character.name}</h3>
-                  <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine(character) || "Classe à choisir"}</p>
+                  <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine(character) || (summariesLoaded ? "Classe à choisir" : "…")}</p>
                   <p className="truncate text-xs text-muted-foreground">{character.subtitle || "Peuple à choisir"}</p>
                   <div className="mt-1.5 flex min-h-4 flex-wrap gap-x-2 gap-y-0.5">
                     {character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="truncate text-[10px] font-medium" style={{ color: campaign.accentColor }}>{campaign.name}</span>) : <span className="text-[10px] text-muted-foreground/80">Sans campagne</span>}
@@ -521,6 +525,7 @@ export function HomeShell() {
           {viewRole === "mj" ? <CampaignColumn campaigns={campaigns} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} />}
           <SideColumn withIndex={viewRole !== "joueur"} withTools={viewRole === "admin"} />
         </div>
+        <HomeAchievements viewRole={viewRole} />
       </div>
     </PageLabel>
   )

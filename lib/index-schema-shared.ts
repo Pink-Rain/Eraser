@@ -80,10 +80,14 @@ export type IndexEditorModel = {
 }
 
 export type SchemaOperation =
-  | { op: "rename"; tab: string; header: string; to: string }
-  | { op: "spec"; tab: string; header: string; spec: IndexColumnSpec }
+  /**
+   * `force` : la colonne a été déverrouillée dans « Modifier », après l'avertissement qui
+   * explique ce qui la lit. Le serveur accepte alors le changement malgré le cadenas.
+   */
+  | { op: "rename"; tab: string; header: string; to: string; force?: boolean }
+  | { op: "spec"; tab: string; header: string; spec: IndexColumnSpec; force?: boolean }
   | { op: "add-column"; tab: string; header: string; spec: IndexColumnSpec }
-  | { op: "remove-column"; tab: string; header: string }
+  | { op: "remove-column"; tab: string; header: string; force?: boolean }
   | { op: "add-tab"; name: string; columns: Array<{ header: string; spec: IndexColumnSpec }> }
   | { op: "remove-tab"; tab: string }
   /** Nouvel ordre des colonnes d'un onglet (déplacées dans Sheets). */

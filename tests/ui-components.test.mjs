@@ -990,3 +990,94 @@ test("sends builtin index definitions to the page without functions", async () =
   assert.equal(parsed.characteristics[0].color, "#123456");
   assert.equal(parsed.characteristics[1].color, undefined);
 });
+
+test("marks unlocked builtin columns as forced changes", async () => {
+  const { operationsOf } = await vite.ssrLoadModule("/components/eraser/index-editor.tsx");
+  const locked = { rename: false, type: false, remove: false, reasons: ["La fiche lit cette colonne."], allowed: "" };
+  const free = { rename: true, type: true, remove: true, reasons: locked.reasons, allowed: "Tout (déverrouillée)." };
+  const tabs = [{ id: "t1", original: "Succès", name: "Succès", removed: false, remove: false, addColumns: true, columns: [
+    { id: "c1", original: "Couleur", header: "Teinte", spec: { kind: "color" }, originalSpec: { kind: "color" }, policy: free, lockedPolicy: locked, removed: false },
+    { id: "c2", original: "Note", header: "Remarque", spec: { kind: "rich" }, originalSpec: { kind: "rich" }, policy: free, removed: false },
+  ] }];
+  const operations = operationsOf(tabs, ["Succès"]);
+  assert.deepEqual(operations.map((operation) => [operation.header, Boolean(operation.force)]), [["Couleur", true], ["Note", false]]);
+});
+
+test("offers a rank's spell choice again once its chosen spell is removed", async () => {
+  const { pendingSpellChoices } = await vite.ssrLoadModule("/components/eraser/class-progression.tsx");
+  const spell = (id, rank) => ({ id, rowNumber: 1, name: id, effect: "", effectHtml: "", description: "", descriptionHtml: "", type: "Sort actif", category: "actif", actionKind: "action", skillsRaw: "", skills: [], distance: "", distanceHtml: "", charges: 1, chargesLabel: "1", classRanks: { samourai: rank }, tone: { background: "#000", foreground: "#fff" } });
+  const classes = [{ id: "samourai", name: "Samouraï", accentDark: "#7f3430", accentLight: "#e9c4b0" }];
+  const spells = [spell("A", 1), spell("B", 1), spell("C", 1), spell("D", 2), spell("Commun", 0)];
+  // Rang 2 atteint, rien choisi : les rangs 1 et 2 attendent (le rang commun n'est pas un choix).
+  assert.deepEqual(pendingSpellChoices(classes, spells, 2, "").map((choice) => choice.rank), [1, 2]);
+  // Le rang 1 choisi : il ne reste que le rang 2.
+  const chosen = JSON.stringify({ choices: { samourai: { "1": "B", "2": "D" } } });
+  assert.deepEqual(pendingSpellChoices(classes, spells, 2, chosen), []);
+  // Le sort choisi au rang 1 retiré de la fiche (ancienne façon) : le choix revient.
+  const removed = JSON.stringify({ choices: { samourai: { "1": "B", "2": "D" } }, removed: ["B"] });
+  const again = pendingSpellChoices(classes, spells, 2, removed);
+  assert.deepEqual(again.map((choice) => [choice.rank, choice.options.map((option) => option.id)]), [[1, ["A", "B", "C"]]]);
+});
+
+test("spots items that just arrived in an inventory", async () => {
+  const { receivedSlots } = await vite.ssrLoadModule("/components/eraser/new-inventory-items.ts");
+  const item = (name) => ({ id: name, name });
+  const inventory = (slots) => ({ containers: [{ id: "sac", slots }] });
+  const before = inventory([{ id: "s1", itemId: "pomme", item: item("Pomme"), quantity: 2 }, { id: "s2", itemId: "", item: null, quantity: 0 }, { id: "s3", itemId: "corde", item: item("Corde"), quantity: 1 }]);
+  const after = inventory([{ id: "s1", itemId: "pomme", item: item("Pomme"), quantity: 3 }, { id: "s2", itemId: "epee", item: item("Épée"), quantity: 1 }, { id: "s3", itemId: "corde", item: item("Corde"), quantity: 1 }]);
+  assert.deepEqual(receivedSlots(before, after), ["s1", "s2"]);
+  // Sans inventaire précédent (premier chargement), rien n'est « nouveau ».
+  assert.deepEqual(receivedSlots(null, after), []);
+});
+
+test("keeps computed character cells out of a partial save", async () => {
+  const { builtinCharacterCatalog, characterLayout } = await vite.ssrLoadModule("/lib/character-catalog.ts");
+  const { computedCellIndexes } = await vite.ssrLoadModule("/lib/character-sheet-cells.ts");
+  const schema = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
+  const layout = characterLayout([...schema.characterValueHeaders]);
+  const computed = computedCellIndexes(layout, builtinCharacterCatalog, [], () => -1);
+  const skill = builtinCharacterCatalog.skills[0].key;
+  const metrics = (await vite.ssrLoadModule("/lib/character-catalog.ts")).skillMetrics;
+  // Le bonus se saisit ; le modificateur et le total restent des formules.
+  assert.equal(computed.has(layout.index(skill, metrics[0])), false);
+  assert.equal(computed.has(layout.index(skill, metrics[1])), true);
+  assert.equal(computed.has(layout.index(skill, metrics[2])), true);
+});
+
+test("reads achievements, their grants and their icons from the index", async () => {
+  const shared = await vite.ssrLoadModule("/lib/achievements-shared.ts");
+  const { parseIconValue, iconValueOf } = await vite.ssrLoadModule("/components/eraser/index-gauge.tsx");
+  const { worldColumnSpec, worldColumnPolicy, worldIndexDefinitions } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const { indexColumnKinds } = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const row = (rowNumber, values) => ({ rowNumber, values, html: values });
+  const achievements = shared.achievementsFromTable({ headers: ["Nom", "Type", "Sous-type", "Description", "Icône", "Couleur", "ID"], rows: [
+    row(2, ["Premier sang", "Joueur", "Combat", "Toucher le premier", "sword", "#aa3355", "SUC-1"]),
+    row(3, ["Conteur", "Maître du jeu", "", "", "", "pas une couleur", "SUC-2"]),
+    row(4, ["", "Joueur", "", "", "", "", "SUC-3"]),
+  ] });
+  assert.deepEqual(achievements.map((item) => [item.name, item.type, item.color]), [["Premier sang", "Joueur", "#aa3355"], ["Conteur", "MJ", "#9a4f2c"]]);
+  const obtained = shared.obtainedFromTable({ headers: ["Succès", "Joueur", "Attribué par", "Date", "Note", "Compte", "ID"], rows: [
+    row(2, ["Premier sang", "Ayla", "Mira", "2026-10-02", "", "uid-ayla", "OBT-1"]),
+    row(3, ["Conteur", "Ayla", "Mira", "2026-10-01", "", "", "OBT-2"]),
+    row(4, ["Premier sang", "Bram", "Mira", "2026-10-01", "", "uid-bram", "OBT-3"]),
+  ] });
+  // Par identifiant de compte, ou par pseudo pour une ligne écrite à la main.
+  const mine = shared.obtainedBy(obtained, { uid: "uid-ayla", displayName: "ayla" });
+  assert.deepEqual(mine.map((entry) => entry.id), ["OBT-1", "OBT-2"]);
+  assert.equal(shared.achievementOf(achievements, mine[1]).name, "Conteur");
+  // Icône : nom de la liste, nom français tapé dans Sheets, ou émoji.
+  assert.deepEqual(parseIconValue("trophy"), { icon: "trophy" });
+  assert.deepEqual(parseIconValue("Trophée"), { icon: "trophy" });
+  assert.deepEqual(parseIconValue("🏆"), { emoji: "🏆" });
+  assert.equal(iconValueOf({ icon: "crown", emoji: "" }), "crown");
+  assert.equal(iconValueOf({ icon: "crown", emoji: "⭐" }), "⭐");
+  assert.equal(indexColumnKinds.icon.creatable, true);
+  // L'index des succès : ses types de colonnes, et les colonnes lues par Eraser verrouillées.
+  assert.equal(worldColumnSpec("achievements", "Succès", "Icône").kind, "icon");
+  assert.equal(worldColumnSpec("achievements", "Succès", "Sous-type").allowCustom, true);
+  assert.deepEqual(worldColumnSpec("achievements", "Obtenus", "Succès").source, { index: "achievements", tab: "Succès", onlyTab: true });
+  assert.equal(worldColumnSpec("achievements", "Obtenus", "Compte").hidden, true);
+  assert.equal(worldColumnPolicy("achievements", "Succès", "Type", []).type, false);
+  assert.equal(worldColumnPolicy("achievements", "Succès", "Sous-type", []).type, true);
+  assert.deepEqual(worldIndexDefinitions.achievements.tabs.map((tab) => tab.name), ["Succès", "Obtenus"]);
+});

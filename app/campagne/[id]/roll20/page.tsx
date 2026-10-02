@@ -16,5 +16,5 @@ export default async function Roll20BridgePage({ params }: { params: Promise<{ i
     const campaign = await import("@/lib/roll20-bridge").then(({ campaignForRoll20Manager }) => campaignForRoll20Manager(account, id))
     if (!campaign) notFound()
   }
-  return <AuthenticatedShell pageLabel="Roll20" roles={["admin", "mj"]}><Roll20BridgePanel campaignId={id} initialLink={link} /></AuthenticatedShell>
+  return <AuthenticatedShell pageLabel="Roll20" roles={["admin", "mj"]}><Roll20BridgePanel key={id} campaignId={id} initialLink={link} /></AuthenticatedShell>
 }

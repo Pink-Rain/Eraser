@@ -17,5 +17,5 @@ export default async function CampaignTabletopPage({ params, searchParams }: { p
   const campaign = await (account.role === "joueur" ? getCampaignForPlayer(account.uid, id) : getCampaignDashboard(account.role === "admin" ? null : account.uid, id)).catch(() => null)
   if (!campaign) notFound()
   const canManage = account.role === "admin" || account.role === "mj"
-  return <AuthenticatedShell pageLabel={`${campaign.name} / Tabletop`}><TabletopWorkspace canManage={canManage} pageLinked={id} pageName={campaign.name} roomKey={query.room || ""} requestedMapId={query.map || ""} user={{ uid: account.uid, role: account.role }} /></AuthenticatedShell>
+  return <AuthenticatedShell pageLabel={`${campaign.name} / Tabletop`}><TabletopWorkspace key={id} canManage={canManage} pageLinked={id} pageName={campaign.name} roomKey={query.room || ""} requestedMapId={query.map || ""} user={{ uid: account.uid, role: account.role }} /></AuthenticatedShell>
 }

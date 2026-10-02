@@ -90,22 +90,32 @@ export function CreateSessionDialog({ open, campaignId, onClose, onCreated }: { 
  * Liste des sessions d'une campagne, de la plus récente à la plus ancienne, avec
  * recherche par nom. La plus récente est choisie d'office.
  */
+// Les sessions déjà lues, par campagne : rouvrir la fenêtre les montre tout de suite,
+// pendant qu'elles sont relues.
+const knownSessions = new Map<string, CampaignSessionRecord[]>()
+
 export function SessionPicker({ campaignId, value, onChange }: { campaignId: string; value: string; onChange: (sessionId: string) => void }) {
-  const [sessions, setSessions] = useState<CampaignSessionRecord[] | null>(null)
+  const [sessions, setShownSessions] = useState<CampaignSessionRecord[] | null>(() => knownSessions.get(campaignId) ?? null)
+  const setSessions = (next: CampaignSessionRecord[]) => { knownSessions.set(campaignId, next); setShownSessions(next) }
+  const [refreshing, setRefreshing] = useState(true)
   const [error, setError] = useState("")
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
 
   useEffect(() => {
     let alive = true
+    const cached = knownSessions.get(campaignId)
+    if (cached?.[0]) onChange(cached[0].id)
     fetchSessions(campaignId)
       .then((loaded) => {
-        if (!alive) return
         const ordered = newestFirst(loaded)
-        setSessions(ordered)
-        if (ordered[0]) onChange(ordered[0].id)
+        knownSessions.set(campaignId, ordered)
+        if (!alive) return
+        setShownSessions(ordered)
+        if (ordered[0] && ordered[0].id !== cached?.[0]?.id) onChange(ordered[0].id)
       })
-      .catch((caught) => { if (alive) { setSessions([]); setError(caught instanceof Error ? caught.message : "Chargement impossible.") } })
+      .catch((caught) => { if (alive) { if (!cached) setShownSessions([]); setError(caught instanceof Error ? caught.message : "Chargement impossible.") } })
+      .finally(() => { if (alive) setRefreshing(false) })
     return () => { alive = false }
     // onChange ne doit pas relancer le chargement : seule la campagne compte.
     // eslint-disable-next-line react-hooks/exhaustive-deps
@@ -120,7 +130,8 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
       <Button type="button" variant="outline" onClick={() => setCreating(true)}><CalendarPlus />Créer une session</Button>
     </div>
     {error && <p className="text-sm text-destructive">{error}</p>}
-    <div className="max-h-60 space-y-1 overflow-y-auto rounded-xl border p-1.5">
+    <div className="relative max-h-60 space-y-1 overflow-y-auto rounded-xl border p-1.5" aria-busy={refreshing}>
+      {refreshing && sessions !== null && <LoaderCircle className="absolute right-2 top-2 size-3.5 animate-spin text-muted-foreground" aria-label="Actualisation" />}
       {sessions === null
         ? <div className="grid min-h-24 place-items-center"><LoaderCircle className="animate-spin text-muted-foreground" /></div>
         : filtered.length
@@ -134,7 +145,7 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
     <CreateSessionDialog open={creating} campaignId={campaignId} onClose={() => setCreating(false)} onCreated={(session) => {
       setCreating(false)
       setQuery("")
-      setSessions((current) => newestFirst([session, ...(current || [])]))
+      setSessions(newestFirst([session, ...(sessions || [])]))
       onChange(session.id)
     }} />
   </div>

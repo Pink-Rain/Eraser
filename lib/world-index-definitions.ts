@@ -18,10 +18,27 @@ import {
   builtinCharacteristicColor,
   catalogSeedRows,
 } from "@/lib/character-catalog"
+import {
+  ACHIEVEMENT_COLOR_HEADER,
+  ACHIEVEMENT_DESCRIPTION_HEADER,
+  ACHIEVEMENT_ICON_HEADER,
+  ACHIEVEMENT_SUBTYPE_HEADER,
+  ACHIEVEMENT_TYPE_HEADER,
+  ACHIEVEMENTS_TAB,
+  OBTAINED_ACCOUNT_HEADER,
+  OBTAINED_ACHIEVEMENT_HEADER,
+  OBTAINED_BY_HEADER,
+  OBTAINED_DATE_HEADER,
+  OBTAINED_NOTE_HEADER,
+  OBTAINED_PLAYER_HEADER,
+  OBTAINED_TAB,
+  achievementSubtypes,
+  achievementTypeColors,
+} from "@/lib/achievements-shared"
 
 export { foldName }
 
-export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills"
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills" | "achievements"
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
 export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
@@ -254,6 +271,18 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       idPrefix: "ATT",
     }],
   },
+  // Les succès des joueurs et des MJ, et qui les a obtenus : l'accueil et le profil les
+  // affichent en cartes. Rien n'y est écrit d'office : le classeur part vide.
+  achievements: {
+    key: "achievements",
+    sheetName: "Index des succès",
+    title: "Succès",
+    path: "/ressources/index-des-succes",
+    tabs: [
+      { name: ACHIEVEMENTS_TAB, itemLabel: "un succès", headers: ["Nom", ACHIEVEMENT_TYPE_HEADER, ACHIEVEMENT_SUBTYPE_HEADER, ACHIEVEMENT_DESCRIPTION_HEADER, ACHIEVEMENT_ICON_HEADER, ACHIEVEMENT_COLOR_HEADER, ID_HEADER], widths: [240, 120, 170, 420, 150, 140, 130], idPrefix: "SUC" },
+      { name: OBTAINED_TAB, itemLabel: "une attribution", headers: [OBTAINED_ACHIEVEMENT_HEADER, OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER, OBTAINED_NOTE_HEADER, OBTAINED_ACCOUNT_HEADER, ID_HEADER], widths: [240, 200, 200, 130, 320, 220, 130], idPrefix: "OBT" },
+    ],
+  },
   materials: {
     key: "materials",
     sheetName: "Index des matériaux",
@@ -327,7 +356,7 @@ export function isBuiltinWorldIndexKey(value: unknown): value is BuiltinWorldInd
 export type WorldIndexLink = [WorldIndexLinkEnd, WorldIndexLinkEnd]
 
 /** Les colonnes d'un onglet que le code d'Eraser lit par leur nom, avec la raison. */
-function builtinReaders(index: WorldIndexKey, header: string): string[] {
+function builtinReaders(index: WorldIndexKey, tab: string, header: string): string[] {
   const folded = foldName(header)
   const reasons: string[] = []
   if (index === "creatures") {
@@ -337,6 +366,14 @@ function builtinReaders(index: WorldIndexKey, header: string): string[] {
     if (folded === "sorts actifs" || folded === "sorts passifs") reasons.push("La fusion des sorts (Index des sorts) renomme les sorts cités dans cette colonne.")
     if (folded === "portrait") reasons.push("Le token d’une créature est fabriqué à partir de ce portrait.")
     if (Object.keys(creatureChoices).some((choice) => foldName(choice) === folded)) reasons.push("« Corriger les fautes » compare cette colonne à sa liste de choix.")
+  }
+  if (index === "achievements") {
+    const cards = "L’accueil et le profil affichent les succès en cartes à partir de cette colonne."
+    if (tab === ACHIEVEMENTS_TAB && folded === foldName(ACHIEVEMENT_TYPE_HEADER)) reasons.push("L’accueil montre les succès Joueur en vue joueur et les succès MJ en vue MJ ; le profil les range par type.")
+    if (tab === ACHIEVEMENTS_TAB && [ACHIEVEMENT_ICON_HEADER, ACHIEVEMENT_COLOR_HEADER, ACHIEVEMENT_DESCRIPTION_HEADER].some((header) => foldName(header) === folded)) reasons.push(cards)
+    if (tab === OBTAINED_TAB && folded === foldName(OBTAINED_ACHIEVEMENT_HEADER)) reasons.push("Relie chaque attribution à son succès, par son nom (renommer un succès renomme aussi ses attributions).")
+    if (tab === OBTAINED_TAB && folded === foldName(OBTAINED_ACCOUNT_HEADER)) reasons.push("L’identifiant du compte qui a obtenu le succès : écrit par « Attribuer un succès », il retrouve le joueur même s’il change de pseudo.")
+    if (tab === OBTAINED_TAB && [OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER].some((header) => foldName(header) === folded)) reasons.push("Écrite par « Attribuer un succès » et affichée sur la carte du succès obtenu.")
   }
   if (index === "skills") {
     if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
@@ -363,7 +400,7 @@ export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: str
     const where = isBuiltinWorldIndexKey(other.index) ? worldIndexDefinitions[other.index].title : other.index
     return { rename: false, type: false, remove: false, reasons: [`Répond à « ${other.column} » (${where}${other.tab === "*" ? "" : `, onglet ${other.tab}`}) : les deux colonnes se recopient par leur nom. Changer son nom, son type ou la supprimer couperait le lien.`], allowed: only }
   }
-  const readers = builtinReaders(index, header)
+  const readers = builtinReaders(index, tab, header)
   if (readers.length) return { rename: false, type: false, remove: false, reasons: readers, allowed: only }
   return { rename: true, type: true, remove: true, reasons: [], allowed: all }
 }
@@ -410,6 +447,18 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
   if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
+  if (index === "achievements") {
+    if (tab === OBTAINED_TAB) {
+      if (isHeader(header, [OBTAINED_ACHIEVEMENT_HEADER])) return { kind: "linked-choice", source: { index: "achievements", tab: ACHIEVEMENTS_TAB, onlyTab: true } }
+      if (isHeader(header, [OBTAINED_ACCOUNT_HEADER])) return { kind: "rich", hidden: true }
+      return { kind: "rich" }
+    }
+    if (isHeader(header, [ACHIEVEMENT_TYPE_HEADER])) return { kind: "choice", options: [{ value: "Joueur", color: achievementTypeColors.Joueur }, { value: "MJ", color: achievementTypeColors.MJ }] }
+    if (isHeader(header, [ACHIEVEMENT_SUBTYPE_HEADER])) return { kind: "choice", allowCustom: true, options: achievementSubtypes.map((value) => ({ value })) }
+    if (isHeader(header, [ACHIEVEMENT_ICON_HEADER])) return { kind: "icon" }
+    if (isHeader(header, [ACHIEVEMENT_COLOR_HEADER])) return { kind: "color" }
+    return { kind: "rich" }
+  }
   if (index === "skills") {
     if (isHeader(header, [CATALOG_TYPE_HEADER])) return { kind: "choice", options: [{ value: PRINCIPAL_LABEL, color: "#397f88" }, { value: SECONDARY_LABEL, color: "#b48745" }] }
     // Une compétence dépend d'une caractéristique principale : les secondaires ne sont pas proposées.

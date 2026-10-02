@@ -12,6 +12,7 @@ import { RichTextInlineEditor } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { RankBonusLine } from "@/components/eraser/rank-bonus"
+import { NewSpellSlot, SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
 import type { ClassSpell, RankBonus } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
@@ -118,6 +119,24 @@ export function knownSpellsForCharacter(classes: ClassRecord[], spells: ClassSpe
     .map((spell) => personalizeSpell(spell, state.edits[spell.id]))
 }
 
+/** Un rang de classe dont le sort reste à choisir, avec ses (au plus) trois propositions. */
+export type PendingSpellChoice = { classId: string; className: string; accent: string; accentLight: string; rank: number; options: ClassSpell[] }
+
+/**
+ * Les choix de sorts en attente : chaque rang atteint (hors rang commun) qui propose des
+ * sorts et dont le choix manque, ou dont le sort choisi a été retiré de la fiche.
+ */
+export function pendingSpellChoices(classes: ClassRecord[], spells: ClassSpell[], level: number, value: string): PendingSpellChoice[] {
+  const state = parseClassChoices(value)
+  const removed = new Set(state.removed)
+  return classes.flatMap((characterClass) => Array.from({ length: Math.max(0, level) }, (_, index) => index + 1).flatMap((rank) => {
+    const options = spells.filter((spell) => spell.classRanks[characterClass.id] === rank).slice(0, 3)
+    const chosen = state.choices[characterClass.id]?.[String(rank)]
+    if (!options.length || (chosen && !removed.has(chosen))) return []
+    return [{ classId: characterClass.id, className: characterClass.name, accent: characterClass.accentDark || "#927640", accentLight: characterClass.accentLight || "#d8c39a", rank, options: options.map((spell) => personalizeSpell(spell, state.edits[spell.id])) }]
+  }))
+}
+
 function SpellGlyph({ category }: { category: ClassSpell["category"] }) {
   if (category === "bonus") return <Gauge />
   if (category === "passif") return <CircleDotDashed />
@@ -190,16 +209,19 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
   </button>
 }
 
+let knownRankBonuses: RankBonus[] = []
+
 export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string }) {
   const state = useMemo(() => parseClassChoices(value), [value])
   const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
   // Bonus de rang (communs à toutes les classes) : affichés sous le titre de chaque rang.
-  const [rankBonuses, setRankBonuses] = useState<RankBonus[]>([])
+  // Gardés d'un affichage à l'autre : revenir sur l'onglet Sorts ne les fait pas disparaître.
+  const [rankBonuses, setRankBonuses] = useState<RankBonus[]>(() => knownRankBonuses)
   useEffect(() => {
     let active = true
     fetch("/api/classes/rank-bonuses")
       .then(async (response) => response.ok ? (await response.json()) as { bonuses?: RankBonus[] } : null)
-      .then((payload) => { if (active && payload?.bonuses) setRankBonuses(payload.bonuses) })
+      .then((payload) => { if (payload?.bonuses) knownRankBonuses = payload.bonuses; if (active && payload?.bonuses) setRankBonuses(payload.bonuses) })
       .catch(() => { /* la progression reste utilisable sans les bonus */ })
     return () => { active = false }
   }, [])
@@ -211,12 +233,17 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
   const [query, setQuery] = useState("")
   const [searchCategory, setSearchCategory] = useState<"all" | ClassSpell["category"]>("all")
   const known = knownSpellsForCharacter(classes, spells, level, value)
+  const pending = useMemo(() => pendingSpellChoices(classes, spells, level, value), [classes, spells, level, value])
+  const [choiceOpen, setChoiceOpen] = useState(false)
+  const currentChoice = pending[0]
 
   async function update(next: CharacterClassChoices) { await onCommit(JSON.stringify(next)) }
   function choose(classId: string, rank: number, spellId: string) {
+    const previous = state.choices[classId]?.[String(rank)]
     const choices = { ...state.choices, [classId]: { ...(state.choices[classId] || {}), [String(rank)]: spellId } }
     setReconsidering((current) => ({ ...current, [`${classId}:${rank}`]: false }))
-    return update({ ...state, choices })
+    // Le sort choisi n'est plus « retiré » ; l'ancien choix retiré n'a plus lieu d'être rétabli.
+    return update({ ...state, choices, removed: state.removed.filter((id) => id !== spellId && id !== previous) })
   }
   function setCharges(spell: ClassSpell, count: number) {
     return update({ ...state, charges: { ...state.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } })
@@ -239,21 +266,42 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
     delete edits[spell.id]
     return update({ ...state, edits })
   }
-  // Un sort ajouté à la main quitte simplement la liste ; un sort acquis par la classe
-  // est mis de côté, pour pouvoir être rétabli.
+  /**
+   * Retirer un sort de la fiche :
+   * - choisi à un rang de classe : le choix de ce rang est annulé, et le rang repropose ses
+   *   trois sorts (« Nouveau sort ») ;
+   * - acquis d'office au rang commun : mis de côté, pour pouvoir être rétabli ;
+   * - ajouté à la main (hors classe) : il quitte simplement la liste.
+   */
   function removeSpell(spell: ClassSpell) {
     const classIds = new Set(classes.map((item) => item.id))
-    const fromClass = Object.entries(spell.classRanks).some(([classId, rank]) => classIds.has(classId) && rank <= level && (rank === 0 || state.choices[classId]?.[String(rank)] === spell.id))
+    const chosenAt = Object.entries(spell.classRanks).filter(([classId, rank]) => classIds.has(classId) && rank > 0 && rank <= level && state.choices[classId]?.[String(rank)] === spell.id)
+    const common = Object.entries(spell.classRanks).some(([classId, rank]) => classIds.has(classId) && rank === 0)
+    const choices = { ...state.choices }
+    for (const [classId, rank] of chosenAt) {
+      const ranks = { ...(choices[classId] || {}) }
+      delete ranks[String(rank)]
+      choices[classId] = ranks
+    }
     return update({
       ...state,
+      choices,
       extras: state.extras.filter((id) => id !== spell.id),
-      removed: fromClass ? [...state.removed.filter((id) => id !== spell.id), spell.id] : state.removed.filter((id) => id !== spell.id),
+      removed: common && !chosenAt.length ? [...state.removed.filter((id) => id !== spell.id), spell.id] : state.removed.filter((id) => id !== spell.id),
     })
   }
   function restoreSpell(spellId: string) {
     return update({ ...state, removed: state.removed.filter((id) => id !== spellId) })
   }
-  const removedSpells = state.removed.flatMap((id) => { const spell = originals.get(id); return spell ? [personalizeSpell(spell, state.edits[id])] : [] })
+  // « Retirés de la fiche » : seulement ceux qu'un clic ferait revenir (acquis d'office au
+  // rang commun, ou encore choisis à leur rang dans une ancienne fiche).
+  const classIdSet = new Set(classes.map((item) => item.id))
+  const removedSpells = state.removed.flatMap((id) => {
+    const spell = originals.get(id)
+    if (!spell) return []
+    const comesBack = state.extras.includes(id) || Object.entries(spell.classRanks).some(([classId, rank]) => classIdSet.has(classId) && rank <= level && (rank === 0 || state.choices[classId]?.[String(rank)] === id))
+    return comesBack ? [personalizeSpell(spell, state.edits[id])] : []
+  })
   const [draggedSpellId, setDraggedSpellId] = useState<string | null>(null)
   const [dragOverSpellId, setDragOverSpellId] = useState<string | null>(null)
   function reorderSpell(draggedId: string, targetId: string) {
@@ -284,6 +332,26 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
   if (!classes.length) return <div className="grid min-h-52 place-items-center rounded-2xl border border-dashed border-border/55 bg-card/20 p-8 text-center text-sm text-muted-foreground">Choisis une classe dans l’identité du personnage pour afficher sa progression.</div>
 
   return <div className="space-y-9">
+    {currentChoice && <>
+      <NewSpellSlot
+        count={pending.length}
+        accent={currentChoice.accent}
+        detail={`${currentChoice.className} · rang ${currentChoice.rank}`}
+        onOpen={() => setChoiceOpen(true)}
+      />
+      <SpellChoiceDialog
+        open={choiceOpen}
+        onOpenChange={setChoiceOpen}
+        title="Nouveau sort"
+        subtitle={`${currentChoice.className} · rang ${currentChoice.rank}`}
+        options={currentChoice.options}
+        accent={currentChoice.accent}
+        accentLight={currentChoice.accentLight}
+        choiceKey={`${currentChoice.classId}:${currentChoice.rank}`}
+        remaining={pending.length}
+        onChoose={(spell) => choose(currentChoice.classId, currentChoice.rank, spell.id)}
+      />
+    </>}
     <section>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-muted-foreground">Répertoire</p><h2 className="font-display mt-1 text-2xl font-semibold">Capacités acquises</h2></div><div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground">Trier par<NativeSelect value={sort} onChange={(event) => setSort(event.target.value as "rank" | "name" | "type" | "manual")} className="h-10 min-w-40 py-0 pl-3 pr-10 leading-5"><NativeSelectOption value="rank">Rang</NativeSelectOption><NativeSelectOption value="name">Nom</NativeSelectOption><NativeSelectOption value="type">Type</NativeSelectOption><NativeSelectOption value="manual">Manuel</NativeSelectOption></NativeSelect></label><Button type="button" variant={searchOpen ? "secondary" : "outline"} size="icon-sm" aria-label="Ajouter une capacité" title="Ajouter une capacité" onClick={() => setSearchOpen((open) => !open)}>{searchOpen ? <X /> : <Plus />}</Button></div></div>
       {searchOpen && <div className="mt-4 rounded-xl border bg-card/55 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, mot-clé, type ou compétence…" className="pl-9" /></div><NativeSelect value={searchCategory} onChange={(event) => setSearchCategory(event.target.value as typeof searchCategory)} className="h-9 min-w-36"><NativeSelectOption value="all">Tout</NativeSelectOption><NativeSelectOption value="actif">Actifs</NativeSelectOption><NativeSelectOption value="passif">Passifs</NativeSelectOption><NativeSelectOption value="bonus">Bonus</NativeSelectOption></NativeSelect></div><div className="mt-3 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{searchResults.map((spell) => <div key={spell.id} className="flex items-center gap-3 rounded-lg border bg-background/55 p-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&>svg]:size-4" style={{ backgroundColor: spellTone(spell).background, color: spellTone(spell).foreground }}><SpellGlyph category={spell.category} /></span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{spell.name}</b><span className="block truncate text-xs text-muted-foreground">{spell.type}{spell.skills.length ? ` · ${spell.skills.join(" · ")}` : ""}</span></span><Button type="button" size="sm" variant="outline" onClick={() => void addExtra(spell.id)}><Plus />Ajouter</Button></div>)}</div>{matchingSearchResults.length > searchResults.length && <p className="pt-3 text-center text-xs text-muted-foreground">Affichage des 60 premiers résultats — précise ta recherche pour voir les autres.</p>}{!searchResults.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucune capacité correspondante.</p>}</div>}
@@ -300,13 +368,15 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
     {classes.map((characterClass) => {
       const classSpells = spells.filter((spell) => characterClass.id in spell.classRanks && spell.classRanks[characterClass.id] <= level)
       const ranks = Array.from({ length: level + 1 }, (_, rank) => rank)
-      const hasChoicePending = ranks.some((rank) => rank > 0 && classSpells.some((spell) => spell.classRanks[characterClass.id] === rank) && !state.choices[characterClass.id]?.[String(rank)])
+      const hasChoicePending = pending.some((choice) => choice.classId === characterClass.id)
       return <details key={characterClass.id} className="group rounded-2xl border bg-card/40" style={{ borderColor: `${characterClass.accentDark}45` }}>
         <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 sm:p-5 [&::-webkit-details-marker]:hidden"><div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em]" style={{ color: characterClass.accentDark }}>Progression de classe{hasChoicePending && <span className="flex size-5 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground" title="Un rang est à choisir">!</span>}</p><h2 className="font-display mt-1 text-2xl font-semibold">{characterClass.name}</h2></div><div className="flex items-center gap-2"><Badge variant="outline" style={{ borderColor: `${characterClass.accentDark}55`, color: characterClass.accentDark }}>Rang actuel : {level}</Badge><ChevronDown className="size-5 text-muted-foreground transition group-open:rotate-180" /></div></summary>
         <div className="border-t px-4 pb-4 sm:px-5 sm:pb-5" style={{ borderColor: `${characterClass.accentDark}28` }}>
         {ranks.length ? <div className="mt-5 space-y-6">{ranks.map((rank) => {
           const available = classSpells.filter((spell) => spell.classRanks[characterClass.id] === rank).slice(0, 3)
-          const selectedId = rank === 0 ? "" : state.choices[characterClass.id]?.[String(rank)] || ""
+          const chosenId = rank === 0 ? "" : state.choices[characterClass.id]?.[String(rank)] || ""
+          // Un sort choisi puis retiré de la fiche rend le choix de son rang à nouveau ouvert.
+          const selectedId = chosenId && !state.removed.includes(chosenId) ? chosenId : ""
           const key = `${characterClass.id}:${rank}`
           const choosing = rank > 0 && (!selectedId || reconsidering[key])
           return <section key={rank} className="border-t pt-4" style={{ borderColor: `${characterClass.accentDark}28` }}>

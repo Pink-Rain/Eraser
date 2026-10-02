@@ -1,4 +1,7 @@
+import { Suspense } from "react"
+
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { DeferredPageLoading } from "@/components/eraser/deferred-content-loading"
 import { CharacterCreationForm, type CreationClassOption } from "@/components/eraser/character-creation-form"
 import { classImageUrl } from "@/lib/class-images"
 import { listClasses, listClassOptions } from "@/lib/google-sheets"
@@ -29,11 +32,17 @@ async function creationPeoples() {
   }
 }
 
-export default async function CharacterCreationPage() {
+async function CreationData() {
   const [classes, peoples] = await Promise.all([creationClasses(), creationPeoples()])
+  return <CharacterCreationForm classes={classes} peoples={peoples} />
+}
+
+export default async function CharacterCreationPage() {
   return (
     <AuthenticatedShell pageLabel="Création de personnage">
-      <CharacterCreationForm classes={classes} peoples={peoples} />
+      <Suspense fallback={<DeferredPageLoading label="Préparation du formulaire…" />}>
+        <CreationData />
+      </Suspense>
     </AuthenticatedShell>
   )
 }

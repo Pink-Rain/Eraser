@@ -2,6 +2,13 @@
 @import "tw-animate-css";
 @import "../vendor/shadcn-tailwind-4.13.0.css";
 
+/*
+ * Eraser n'a qu'un thème, clair (parchemin). Sans cette ligne, les couleurs « dark: »
+ * suivent le mode sombre de Windows et écrivent du jaune ou du vert pâle sur le fond
+ * crème : illisible. Elles ne s'appliquent plus qu'à un élément marqué « .dark ».
+ */
+@custom-variant dark (&:where(.dark, .dark *));
+
 @utility scrollbar-thin {
   scrollbar-width: thin;
 }

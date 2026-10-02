@@ -1,10 +1,11 @@
 "use client"
 
-import { useEffect, useMemo, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react"
+import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react"
 import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Link2, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
+import { markNewSlots, NewSlotsContext, receivedSlots, useNewSlot, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -98,6 +99,10 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   </div>
 }
 
+// Les destinations de transfert déjà lues, par inventaire : rouvrir la fenêtre (ou revenir
+// sur l'onglet) les montre aussitôt, relues derrière.
+const knownTransferTargets = new Map<string, InventoryTransferTarget[]>()
+
 function InventoryTransferPicker({ itemName, slotId, internalTargets, transferTargets, loading, pending, mutate, onDone }: { itemName: string; slotId: string; internalTargets: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; loading: boolean; pending: boolean; mutate: Mutate; onDone: () => void }) {
   const [kind, setKind] = useState<"character" | "npc" | null>(null)
   const [search, setSearch] = useState("")
@@ -109,21 +114,23 @@ function InventoryTransferPicker({ itemName, slotId, internalTargets, transferTa
       : await mutate({ action: "transfer-item", slotId, targetId }, `slot:${slotId}`)
     if (saved) onDone()
   }
-  if (loading) return <div className="grid min-h-24 place-items-center"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div>
+  // Les contenants de cet inventaire sont connus d'emblée : seules les destinations
+  // lointaines (campagne, joueur·euses, PNJs) attendent leur chargement.
   return <div className="space-y-3">
-    <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><MoveRight className="size-3.5" />Transférer {itemName}</div>
+    <div className="flex items-center gap-2 text-xs font-medium text-muted-foreground"><MoveRight className="size-3.5" />Transférer {itemName}{loading && <LoaderCircle className="ml-auto size-3.5 animate-spin" aria-label="Chargement des destinations" />}</div>
     {!kind ? <>
       {(internalTargets.length > 0 || campaignTargets.length > 0) && <div className="space-y-1">{internalTargets.map((target) => <button key={target.id} type="button" disabled={pending} onClick={() => void moveTo(target.id, true)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent"><Backpack className="size-4 text-muted-foreground" /><span className="min-w-0 flex-1 truncate">Dans cet inventaire · {target.name}</span></button>)}{campaignTargets.map((target) => <button key={target.id} type="button" disabled={pending} onClick={() => void moveTo(target.id)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent"><Backpack className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate">Inventaire de campagne{target.campaignName ? ` · ${target.campaignName}` : ""}</span></button>)}</div>}
       <div className="grid grid-cols-2 gap-2"><Button type="button" variant="outline" className="h-auto justify-start px-3 py-3" onClick={() => { setKind("character"); setSearch("") }}><Users /><span className="text-left">Joueur·euses</span></Button><Button type="button" variant="outline" className="h-auto justify-start px-3 py-3" onClick={() => { setKind("npc"); setSearch("") }}><UserRound /><span>PNJs</span></Button></div>
     </> : <>
       <div className="flex items-center gap-2"><Button type="button" size="icon-sm" variant="ghost" onClick={() => { setKind(null); setSearch("") }} aria-label="Revenir aux destinations"><ArrowLeft /></Button><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={search} onChange={(event) => setSearch(event.target.value)} className="h-9 pl-9" placeholder={kind === "npc" ? "Rechercher un PNJ…" : "Rechercher un·e joueur·euse…"} /></div></div>
-      <div className="max-h-56 space-y-1 overflow-y-auto">{peopleTargets.length ? peopleTargets.map((target) => <button key={`${target.campaignId}:${target.id}`} type="button" disabled={pending} onClick={() => void moveTo(target.id)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent"><span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">{kind === "npc" ? <UserRound className="size-3.5" /> : <Users className="size-3.5" />}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{target.name}</span>{target.campaignName && <span className="block truncate text-[11px] text-muted-foreground">{target.campaignName}</span>}</span></button>) : <p className="px-3 py-6 text-center text-xs text-muted-foreground">Aucun résultat.</p>}</div>
+      <div className="max-h-56 space-y-1 overflow-y-auto">{peopleTargets.length ? peopleTargets.map((target) => <button key={`${target.campaignId}:${target.id}`} type="button" disabled={pending} onClick={() => void moveTo(target.id)} className="flex w-full items-center gap-2 rounded-lg px-3 py-2 text-left text-sm hover:bg-accent"><span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">{kind === "npc" ? <UserRound className="size-3.5" /> : <Users className="size-3.5" />}</span><span className="min-w-0 flex-1"><span className="block truncate font-medium">{target.name}</span>{target.campaignName && <span className="block truncate text-[11px] text-muted-foreground">{target.campaignName}</span>}</span></button>) : loading ? <div className="grid min-h-16 place-items-center"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div> : <p className="px-3 py-6 text-center text-xs text-muted-foreground">Aucun résultat.</p>}</div>
     </>}
   </div>
 }
 
 function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, flat, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; flat: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
   const item = slot.item
+  const fresh = useNewSlot(slot.id)
   const [moving, setMoving] = useState(false)
   const [linking, setLinking] = useState(false)
   const modifiers = parseItemModifiers(slot.modifiers)
@@ -145,7 +152,8 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
     effectHtml: changes.effectHtml,
   }, `slot:${slot.id}`)
   const internalTargets = compatibleContainers.filter((candidate) => candidate.id !== container.id)
-  return <article className="rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm">
+  return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onMouseEnter={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
+    {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Objet reçu — disparaît au survol" aria-label="Nouvel objet reçu" />}
     <div className="flex items-start gap-3">
       {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
       <div className="flex size-14 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={item.image} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />}</div>
@@ -233,13 +241,27 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const [searches, setSearches] = useState<Record<string, string>>({})
   const [catalogLoaded, setCatalogLoaded] = useState(Boolean((controlledInventory || initialInventory)?.items.length))
   const [catalogLoading, setCatalogLoading] = useState(false)
-  const [transferTargets, setTransferTargets] = useState<InventoryTransferTarget[]>([])
+  const [transferTargets, setTransferTargets] = useState<InventoryTransferTarget[]>(() => knownTransferTargets.get(endpoint || `/api/characters/${encodeURIComponent(characterId)}/inventory`) ?? [])
   const [targetsLoaded, setTargetsLoaded] = useState(false)
   const [targetsLoading, setTargetsLoading] = useState(false)
   const inventoryEndpoint = endpoint || `/api/characters/${encodeURIComponent(characterId)}/inventory`
   // Un objet reçu recharge l'inventaire affiché (la fiche, elle, recharge le sien).
   const [reloads, setReloads] = useState(0)
-  useInventoryReceived(controlled ? [] : [characterId, `CAMPAGNE:${characterId}`], () => setReloads((count) => count + 1))
+  // Un objet annoncé : le prochain inventaire reçu est comparé au précédent pour poser la pastille.
+  const expectingReceived = useRef(0)
+  useInventoryReceived([characterId, `CAMPAGNE:${characterId}`], () => {
+    expectingReceived.current = Date.now()
+    if (!controlled) setReloads((count) => count + 1)
+  })
+  const previousInventory = useRef<CharacterInventoryRecord | null>(null)
+  useEffect(() => {
+    if (expectingReceived.current && Date.now() - expectingReceived.current < 60_000) {
+      const slots = receivedSlots(previousInventory.current, inventory)
+      if (slots.length) { markNewSlots(characterId, slots); expectingReceived.current = 0 }
+    }
+    previousInventory.current = inventory
+  }, [characterId, inventory])
+  const newSlots = useNewSlots(characterId)
 
   useEffect(() => {
     if ((initialInventory && !reloads) || controlled) return
@@ -273,7 +295,7 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   async function ensureTargets() {
     if (targetsLoaded || targetsLoading || readOnly) return
     setTargetsLoading(true)
-    try { const response = await fetch(`${inventoryEndpoint}?targets=1`); const payload = (await response.json()) as { transferTargets?: InventoryTransferTarget[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Chargement impossible."); setTransferTargets(payload.transferTargets || []); setTargetsLoaded(true) }
+    try { const response = await fetch(`${inventoryEndpoint}?targets=1`); const payload = (await response.json()) as { transferTargets?: InventoryTransferTarget[]; error?: string }; if (!response.ok) throw new Error(payload.error || "Chargement impossible."); knownTransferTargets.set(inventoryEndpoint, payload.transferTargets || []); setTransferTargets(payload.transferTargets || []); setTargetsLoaded(true) }
     catch (caught) { setError(caught instanceof Error ? caught.message : "Les destinations n’ont pas pu être chargées.") }
     finally { setTargetsLoading(false) }
   }
@@ -284,12 +306,12 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   const effectiveFlat = flat || mode === "npc"
   const sectionProps = { inventory, pendingKey, openSearch, catalogLoading, searches, flat: effectiveFlat, readOnly, transferTargets, targetsLoading, setSearches, openItemSearch: (containerId: string) => void openItemSearch(containerId), closeItemSearch: () => setOpenSearch(null), openContainerCreation, openContainerEdition, openItemCreation, ensureTargets, mutate }
   if (initialLoading) return <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
-  return <section>
+  return <NewSlotsContext.Provider value={newSlots}><section>
     {pendingKey && <div className="mb-3 flex justify-end"><LoaderCircle className="size-4 animate-spin text-muted-foreground" /></div>}
     {error && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-3 text-sm text-destructive">{error}</p>}
     {effectiveFlat ? <CategorySection category="Inventaire" {...sectionProps} /> : <div className="grid items-start gap-4 xl:grid-cols-2"><div className="space-y-4"><CategorySection category="Armes" {...sectionProps} /><CategorySection category="Équipement" {...sectionProps} /><CategorySection category="Esthétique" {...sectionProps} /></div><div className="space-y-4"><CategorySection category="Bourse" {...sectionProps} /><CategorySection category="Inventaire" {...sectionProps} /></div></div>}
     <Dialog open={addingCategory !== null} onOpenChange={(open) => { if (!open) setAddingCategory(null) }}><DialogContent><DialogHeader><DialogTitle>Ajouter {addingCategory ? categoryPresentation[addingCategory].singular : "un contenant"}</DialogTitle></DialogHeader><div className="mt-2 grid gap-4">{addingCategory && inventory.containerTypes.some((type) => type.category === addingCategory) && <Label className="grid gap-1.5 text-sm font-medium">Modèle<NativeSelect value="" onChange={(event) => { const preset = inventory.containerTypes.find((type) => type.id === event.target.value); if (preset) setNewContainer({ name: preset.name, capacity: String(preset.capacity) }) }}><NativeSelectOption value="">Choisir…</NativeSelectOption>{inventory.containerTypes.filter((type) => type.category === addingCategory).map((type) => <NativeSelectOption key={type.id} value={type.id}>{type.name} · {type.capacity}</NativeSelectOption>)}</NativeSelect></Label>}<Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newContainer.name} onChange={(event) => setNewContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{addingCategory === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={newContainer.capacity} onChange={(event) => setNewContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!addingCategory || !newContainer.name.trim() || !Number(newContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!addingCategory) return; const saved = await mutate({ action: "create-container", name: newContainer.name, category: addingCategory, capacity: Number(newContainer.capacity) }, `create:${addingCategory}`); if (saved) setAddingCategory(null) }}><Plus />Ajouter</Button></div></DialogContent></Dialog>
     <Dialog open={editingContainer !== null} onOpenChange={(open) => { if (!open) setEditingContainer(null) }}><DialogContent><DialogHeader><DialogTitle>Modifier le contenant</DialogTitle></DialogHeader><div className="mt-2 grid gap-4"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={editedContainer.name} onChange={(event) => setEditedContainer((current) => ({ ...current, name: event.target.value }))} maxLength={120} /></Label><Label className="grid gap-1.5 text-sm font-medium">{editingContainer?.category === "Bourse" ? "Capacité" : "Emplacements"}<Input type="number" min={1} max={10000} value={editedContainer.capacity} onChange={(event) => setEditedContainer((current) => ({ ...current, capacity: event.target.value }))} /></Label><Button type="button" disabled={!editingContainer || !editedContainer.name.trim() || !Number(editedContainer.capacity) || Boolean(pendingKey)} onClick={async () => { if (!editingContainer) return; const saved = await mutate({ action: "update-container", containerId: editingContainer.id, name: editedContainer.name, capacity: Number(editedContainer.capacity) }, `container:${editingContainer.id}:edit`); if (saved) setEditingContainer(null) }}><Check />Enregistrer</Button></div></DialogContent></Dialog>
     <Dialog open={creatingItemFor !== null} onOpenChange={(open) => { if (!open) setCreatingItemFor(null) }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Créer un objet</DialogTitle></DialogHeader><div className="grid gap-4 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Nom<Input value={newItem.name} onChange={(event) => setNewItem((current) => ({ ...current, name: event.target.value }))} maxLength={160} autoFocus /></Label><Label className="grid gap-1.5 text-sm font-medium">Type<Input value={newItem.type} onChange={(event) => setNewItem((current) => ({ ...current, type: event.target.value }))} placeholder="Arme, équipement, ressource…" /></Label><Label className="grid gap-1.5 text-sm font-medium sm:col-span-2">Sous-type<Input value={newItem.subtype} onChange={(event) => setNewItem((current) => ({ ...current, subtype: event.target.value }))} /></Label><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Description<RichTextField ariaLabel="Description" value={newItem.description} onCommit={(html) => setNewItem((current) => ({ ...current, description: html }))} minHeight="min-h-24" /></div><div className="grid gap-1.5 text-sm font-medium sm:col-span-2 leading-none">Effet<RichTextField ariaLabel="Effet" value={newItem.effect} onCommit={(html) => setNewItem((current) => ({ ...current, effect: html }))} minHeight="min-h-24" /></div><div className="flex justify-end gap-2 sm:col-span-2"><Button type="button" variant="ghost" onClick={() => setCreatingItemFor(null)}>Annuler</Button><Button type="button" disabled={!creatingItemFor || !newItem.name.trim() || Boolean(pendingKey)} onClick={async () => { if (!creatingItemFor) return; const saved = await mutate({ action: "create-item", containerId: creatingItemFor.id, ...newItem }, `container:${creatingItemFor.id}:item`); if (saved) { setCreatingItemFor(null); setOpenSearch(null) } }}><Plus />Créer et ajouter</Button></div></div></DialogContent></Dialog>
-  </section>
+  </section></NewSlotsContext.Provider>
 }

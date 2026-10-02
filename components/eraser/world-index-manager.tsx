@@ -758,8 +758,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Le classeur « {definition.sheetName} » n’a pas pu être préparé.</div> : null}
 
+      {/* Clé sur la ligne seulement : un rechargement de l'index pendant que la fiche est
+          ouverte ne la remonte pas (champs en cours gardés, sorts non relus). */}
       {nameOpensDetails && detailsFound && <CreatureSheetDialog
-        key={`${version}:${details}`}
+        key={details}
         open
         headers={detailsFound.table.headers}
         values={detailsFound.row.values}

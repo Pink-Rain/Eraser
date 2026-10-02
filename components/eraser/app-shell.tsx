@@ -76,7 +76,7 @@ const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-c
 const ItemNotifications = dynamic(() => import("@/components/eraser/item-notifications").then((module) => module.ItemNotifications), { ssr: false })
 
 const PageLabelContext = createContext<(label: string | null) => void>(() => undefined)
-const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser } | null>(null)
+const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void } | null>(null)
 
 /**
  * Nomme la page (en-tête et onglet). Un PageLabel imbriqué l'emporte sur celui qui
@@ -214,6 +214,7 @@ export function AppShell({
   const router = useRouter()
   const { isFavorite: isFavoriteIndex } = useIndexFavorites()
   const [accountOpen, setAccountOpen] = useState(false)
+  const openAccount = useCallback(() => setAccountOpen(true), [])
   const [avatarVersion, setAvatarVersion] = useState(0)
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
@@ -686,17 +687,22 @@ export function AppShell({
         <SidebarFooter className="border-t border-sidebar-border p-3">
           <SidebarMenu>
             <SidebarMenuItem>
-              {/* Le compte s’ouvre d’un clic : avatar, pseudo, e-mail, mot de passe, déconnexion. */}
-              <SidebarMenuButton size="lg" tooltip="Mon compte" onClick={() => setAccountOpen(true)} aria-haspopup="dialog">
-                <AccountAvatar user={user} version={avatarVersion} className="size-8 shrink-0" />
-                <div className="min-w-0 flex-1 text-left">
-                  <span className="block truncate font-medium">{user.displayName || user.email}</span>
-                  <span className="block truncate text-xs text-sidebar-foreground/55">
-                    {roleLabels[user.role]}
-                  </span>
-                </div>
-                <Settings2 className="ml-auto size-4 text-sidebar-foreground/45 group-data-[collapsible=icon]:hidden" />
+              {/* Un clic ouvre le profil (personnages, campagnes, succès) ; la roue, les
+                  réglages du compte : avatar, pseudo, e-mail, mot de passe, déconnexion. */}
+              <SidebarMenuButton asChild size="lg" tooltip="Mon profil" isActive={pathname === "/profil"} className="pr-9">
+                <IntentLink href="/profil" data-tab-href="/profil" data-tab-label="Mon profil">
+                  <AccountAvatar user={user} version={avatarVersion} className="size-8 shrink-0" />
+                  <div className="min-w-0 flex-1 text-left">
+                    <span className="block truncate font-medium">{user.displayName || user.email}</span>
+                    <span className="block truncate text-xs text-sidebar-foreground/55">
+                      {roleLabels[user.role]}
+                    </span>
+                  </div>
+                </IntentLink>
               </SidebarMenuButton>
+              <SidebarMenuAction onClick={() => setAccountOpen(true)} aria-haspopup="dialog" aria-label="Réglages du compte" title="Réglages du compte" className="text-sidebar-foreground/55">
+                <Settings2 />
+              </SidebarMenuAction>
             </SidebarMenuItem>
           </SidebarMenu>
           {accountOpen && <AccountDialog open onOpenChange={setAccountOpen} user={user} roleLabel={roleLabels[user.role]} avatarVersion={avatarVersion} onAvatarChange={() => setAvatarVersion(Date.now())} onSignOut={() => void signOut()} />}
@@ -720,7 +726,7 @@ export function AppShell({
           </Badge>
         </header>
         <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain">
-          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user }}>
+          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user, avatarVersion, openAccount }}>
             <div data-view-role={viewRole} className="contents">
               {children}
             </div>

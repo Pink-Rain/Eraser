@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react"
+import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, Plus, RotateCw, X } from "lucide-react"
 
@@ -31,6 +31,8 @@ type AppTabsValue = {
   back: () => void
   forward: () => void
   reload: () => void
+  /** Une actualisation est en cours : l'icône tourne, la page reste affichée. */
+  refreshing: boolean
 }
 
 const AppTabsContext = createContext<AppTabsValue | null>(null)
@@ -59,6 +61,30 @@ export const IN_PLACE_ATTRIBUTE = "data-in-place-path"
 export function replaceAppUrl(href: string | URL, { record = true }: { record?: boolean } = {}) {
   window.history.replaceState(window.history.state, "", href)
   window.dispatchEvent(new CustomEvent(URL_CHANGE_EVENT, { detail: { record } }))
+}
+
+type VinextWindow = Window & {
+  __VINEXT_RSC_NAVIGATE__?: (href: string, redirectDepth?: number, kind?: string, historyUpdateMode?: unknown, previousNextUrl?: unknown, programmaticTransition?: boolean) => Promise<unknown>
+  __VINEXT_CLEAR_NAV_CACHES__?: () => void
+}
+
+/**
+ * Actualise la page sans la vider : les données sont relues et remplacées en place
+ * (comme `router.refresh()`, dont on attend ici la fin pour arrêter l'icône). Si le
+ * routeur ne le permet pas, ou si l'actualisation échoue, on recharge la fenêtre.
+ */
+async function softRefresh() {
+  const vinext = window as VinextWindow
+  const navigateRsc = vinext.__VINEXT_RSC_NAVIGATE__
+  if (typeof navigateRsc !== "function") { window.location.reload(); return }
+  try {
+    vinext.__VINEXT_CLEAR_NAV_CACHES__?.()
+    await new Promise<void>((resolve, reject) => {
+      startTransition(() => { navigateRsc(window.location.href, 0, "refresh", undefined, undefined, true).then(() => resolve(), reject) })
+    })
+  } catch {
+    window.location.reload()
+  }
 }
 
 function navigate(router: ReturnType<typeof useRouter>, href: string) {
@@ -285,7 +311,12 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
     go(next)
   }, [go])
 
-  const reload = useCallback(() => window.location.reload(), [])
+  const [refreshing, setRefreshing] = useState(false)
+  const reload = useCallback(() => {
+    setRefreshing(true)
+    // Garde-fou : l'icône ne tourne jamais indéfiniment, même si la réponse se perd.
+    void Promise.race([softRefresh(), new Promise((resolve) => window.setTimeout(resolve, 30_000))]).finally(() => setRefreshing(false))
+  }, [])
 
   // Un onglet déposé depuis une autre fenêtre ailleurs que sur la barre : il s'ajoute à la fin.
   useEffect(() => {
@@ -330,6 +361,8 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
       if (!isDesktop()) return
       if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); back() }
       else if (event.altKey && event.key === "ArrowRight") { event.preventDefault(); forward() }
+      // Ctrl+F5 recharge toute la fenêtre (en cas de souci) ; F5 actualise sans rien vider.
+      else if (event.key === "F5" && event.ctrlKey) { event.preventDefault(); window.location.reload() }
       else if (event.key === "F5") { event.preventDefault(); reload() }
       else if (event.ctrlKey && (event.key === "w" || event.key === "W")) { event.preventDefault(); close(stateRef.current.activeId) }
       else if (event.ctrlKey && (event.key === "t" || event.key === "T")) { event.preventDefault(); open("/", "Accueil", { focus: true }) }
@@ -369,8 +402,8 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
     activeId: active?.id ?? "",
     canGoBack: Boolean(active?.back.length),
     canGoForward: Boolean(active?.forward.length),
-    open, openWindow, close, select, move, insert, remove, back, forward, reload,
-  }), [active, back, close, forward, insert, move, open, openWindow, reload, remove, select, state.tabs])
+    open, openWindow, close, select, move, insert, remove, back, forward, reload, refreshing,
+  }), [active, back, close, forward, insert, move, open, openWindow, refreshing, reload, remove, select, state.tabs])
 
   const itemClass = "flex w-full items-center gap-2 rounded-sm px-2 py-1.5 text-left text-sm hover:bg-accent hover:text-accent-foreground"
   return <AppTabsContext.Provider value={value}>
@@ -402,7 +435,7 @@ export function AppNavButtons() {
   return <div className="flex shrink-0 items-center gap-0.5" style={noDragStyle} onMouseDown={(event) => event.stopPropagation()}>
     <button type="button" className={navButton} disabled={!value.canGoBack} onClick={value.back} aria-label="Page précédente" title="Page précédente (Alt+←)"><ArrowLeft className="size-4" /></button>
     <button type="button" className={navButton} disabled={!value.canGoForward} onClick={value.forward} aria-label="Page suivante" title="Page suivante (Alt+→)"><ArrowRight className="size-4" /></button>
-    <button type="button" className={navButton} onClick={value.reload} aria-label="Actualiser" title="Actualiser (F5)"><RotateCw className="size-3.5" /></button>
+    <button type="button" className={navButton} onClick={value.reload} disabled={value.refreshing} aria-busy={value.refreshing} aria-label="Actualiser" title="Actualiser (F5) — Ctrl+F5 recharge toute la fenêtre"><RotateCw className={`size-3.5 ${value.refreshing ? "animate-spin" : ""}`} /></button>
   </div>
 }
 

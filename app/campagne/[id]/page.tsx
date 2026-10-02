@@ -50,7 +50,7 @@ export default async function CampaignDashboardPage({ params }: { params: Promis
 
   return (
     <AuthenticatedShell pageLabel={`Campagne - ${campaign.name}`}>
-      <Suspense fallback={<DeferredPageLoading label="Chargement de la campagne…" />}>
+      <Suspense key={id} fallback={<DeferredPageLoading label="Chargement de la campagne…" />}>
         <CampaignDashboardData campaign={campaign} canManage={canManage} accountUid={account.uid} userEmail={account.email} />
       </Suspense>
     </AuthenticatedShell>

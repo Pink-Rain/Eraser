@@ -1,6 +1,7 @@
 "use client"
 
 import { useEffect, useState, type FormEvent } from "react"
+import { useRouter } from "next/navigation"
 import {
   Check,
   ExternalLink,
@@ -70,6 +71,8 @@ export function GoogleDriveManager({
   loadError: string | null
   oauthStatus?: string
 }) {
+  // Actualiser garde la page affichée (au lieu de tout recharger) : seules les données changent.
+  const router = useRouter()
   const [email, setEmail] = useState(authorization?.googleEmail ?? defaultEmail)
   const [authorizationNotice, setAuthorizationNotice] = useState<string | null>(null)
   const [authorizing, setAuthorizing] = useState(false)
@@ -144,7 +147,9 @@ export function GoogleDriveManager({
       if (!statusResponse.ok) continue
       const status = (await statusResponse.json()) as { authorization?: AuthorizationSummary | null }
       if (status.authorization?.googleEmail === normalizedEmail) {
-        window.location.reload()
+        setAuthorizing(false)
+        setAuthorizationNotice(null)
+        router.refresh()
         return
       }
     }
@@ -167,7 +172,8 @@ export function GoogleDriveManager({
       setSettingsMessage(payload.error ?? "Impossible d’enregistrer la configuration Google.")
       return
     }
-    window.location.reload()
+    setClientSecret("")
+    router.refresh()
   }
 
   async function createSheet(event: FormEvent) {

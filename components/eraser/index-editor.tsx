@@ -2,7 +2,7 @@
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
 import {
-  ArrowDown, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Eye, EyeOff, GripVertical, Italic, ListChecks, LoaderCircle, Lock, Pencil, Plus, Save, Settings2, Strikethrough, Trash2, Underline, Undo2,
+  ArrowDown, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Eye, EyeOff, GripVertical, Italic, ListChecks, LoaderCircle, Lock, LockOpen, Pencil, Plus, Save, Settings2, Strikethrough, Trash2, TriangleAlert, Underline, Undo2,
 } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -56,7 +56,11 @@ import {
   type SchemaOperation,
 } from "@/lib/index-schema-shared"
 
-type DraftColumn = { id: string; original?: string; originalIndex?: number; header: string; spec: IndexColumnSpec; originalSpec?: IndexColumnSpec; policy: ColumnPolicy; removed: boolean }
+/**
+ * `lockedPolicy` : le cadenas d'origine, gardé quand on déverrouille la colonne (le
+ * changement part alors avec `force`, et l'avertissement reste affiché).
+ */
+type DraftColumn = { id: string; original?: string; originalIndex?: number; header: string; spec: IndexColumnSpec; originalSpec?: IndexColumnSpec; policy: ColumnPolicy; lockedPolicy?: ColumnPolicy; removed: boolean }
 type DraftTab = { id: string; original?: string; name: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
 
 let draftCounter = 0
@@ -93,10 +97,11 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
         if (!column.removed) operations.push({ op: "add-column", tab: tab.original, header: column.header.trim(), spec: column.spec })
         continue
       }
-      if (column.removed) { operations.push({ op: "remove-column", tab: tab.original, header: column.original }); continue }
+      const force = column.lockedPolicy ? { force: true } : {}
+      if (column.removed) { operations.push({ op: "remove-column", tab: tab.original, header: column.original, ...force }); continue }
       const header = column.header.trim()
-      if (header !== column.original) operations.push({ op: "rename", tab: tab.original, header: column.original, to: header })
-      if (column.originalSpec && !sameSpec(column.spec, column.originalSpec)) operations.push({ op: "spec", tab: tab.original, header, spec: column.spec })
+      if (header !== column.original) operations.push({ op: "rename", tab: tab.original, header: column.original, to: header, ...force })
+      if (column.originalSpec && !sameSpec(column.spec, column.originalSpec)) operations.push({ op: "spec", tab: tab.original, header, spec: column.spec, ...force })
     }
     // L'ordre : les colonnes gardées puis les nouvelles, telles que le serveur les aurait sans déplacement.
     const live = tab.columns.filter((column) => !column.removed)
@@ -111,6 +116,11 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
 }
 
 function describe(operation: SchemaOperation) {
+  const text = describeOperation(operation)
+  return "force" in operation && operation.force ? `${text} · colonne déverrouillée` : text
+}
+
+function describeOperation(operation: SchemaOperation) {
   switch (operation.op) {
     case "add-tab": return `Nouvel onglet « ${operation.name} » (${operation.columns.length} colonne${operation.columns.length > 1 ? "s" : ""} en plus de Nom et ID)`
     case "remove-tab": return `Onglet « ${operation.tab} » mis à la corbeille`
@@ -153,12 +163,44 @@ const sectionTitle = "text-[11px] font-semibold uppercase tracking-[.14em] text-
 const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
 const box = "grid gap-3 rounded-xl border bg-card/60 p-3"
 
-function LockNote({ policy }: { policy: ColumnPolicy }) {
+/**
+ * Le cadenas d'une colonne : ce qui la lit, et le bouton pour la modifier quand même.
+ * Déverrouiller demande une confirmation qui redit ce qui risque de casser ; ensuite
+ * l'avertissement reste affiché tant que les changements ne sont pas enregistrés.
+ */
+function LockNote({ policy, unlocked, readOnly, onUnlock, onRelock }: { policy: ColumnPolicy; unlocked: boolean; readOnly: boolean; onUnlock: () => void; onRelock: () => void }) {
+  const [confirming, setConfirming] = useState(false)
   if (!policy.reasons.length) return null
-  return <div className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs leading-5 text-amber-900 dark:text-amber-200">
+  const reasons = policy.reasons.filter(Boolean)
+  if (unlocked) return <div className="rounded-lg border border-destructive/35 bg-destructive/[.06] px-3 py-2 text-xs leading-5 text-foreground">
+    <p className="flex items-center gap-1.5 font-semibold text-destructive"><TriangleAlert className="size-3.5" />Déverrouillée : attention</p>
+    <p className="mt-1">Eraser lit cette colonne ailleurs. Si tu changes son nom, son type ou la supprimes, voici ce qui risque de ne plus marcher :</p>
+    <ul className="mt-1 list-disc pl-4">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+    <Button type="button" variant="link" size="sm" className="h-auto px-0 text-xs" onClick={onRelock}>Annuler et reverrouiller</Button>
+  </div>
+  return <div className="rounded-lg border border-amber-700/30 bg-amber-100/60 px-3 py-2 text-xs leading-5 text-amber-950">
     <p className="flex items-center gap-1.5 font-semibold"><Lock className="size-3.5" />Verrouillée</p>
-    <ul className="mt-1 list-disc pl-4">{policy.reasons.filter(Boolean).map((reason) => <li key={reason}>{reason}</li>)}</ul>
-    <p className="mt-1"><span className="font-semibold">Modifiable quand même :</span> {policy.allowed}</p>
+    <ul className="mt-1 list-disc pl-4">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+    <p className="mt-1"><span className="font-semibold">Modifiable sans risque :</span> {policy.allowed}</p>
+    {!readOnly && <Button type="button" variant="outline" size="sm" className="mt-2 h-7 border-amber-800/40 bg-transparent text-xs text-amber-950 hover:bg-amber-200/60" onClick={() => setConfirming(true)}><LockOpen />Modifier quand même</Button>}
+    <AlertDialog open={confirming} onOpenChange={setConfirming}>
+      <AlertDialogContent>
+        <AlertDialogHeader>
+          <AlertDialogTitle className="flex items-center gap-2"><TriangleAlert className="size-5 text-destructive" />Déverrouiller cette colonne ?</AlertDialogTitle>
+          <AlertDialogDescription asChild>
+            <div className="grid gap-2 text-sm">
+              <p>Cette colonne est verrouillée parce qu’Eraser s’en sert ailleurs :</p>
+              <ul className="list-disc pl-5">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
+              <p>Tu pourras changer son nom, son type et ses réglages, ou la supprimer. Si ça casse quelque chose, remets-la comme avant (son nom et son type d’origine) : les données de la feuille ne sont pas effacées.</p>
+            </div>
+          </AlertDialogDescription>
+        </AlertDialogHeader>
+        <AlertDialogFooter>
+          <AlertDialogCancel>Laisser verrouillée</AlertDialogCancel>
+          <AlertDialogAction onClick={() => { setConfirming(false); onUnlock() }}>Je comprends, déverrouiller</AlertDialogAction>
+        </AlertDialogFooter>
+      </AlertDialogContent>
+    </AlertDialog>
   </div>
 }
 
@@ -470,6 +512,7 @@ function TypeSettings(props: SettingsProps) {
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
     case "color": return <p className="text-xs text-muted-foreground">Une pastille et un sélecteur de couleur ; la feuille garde le code (#aa3355).</p>
+    case "icon": return <p className="text-xs text-muted-foreground">Une icône de la liste (avec recherche) ou un émoji. La feuille garde le nom de l’icône (trophy) ou l’émoji ; un nom français tapé dans Sheets (« Trophée ») est reconnu.</p>
     case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "linked-choice": {
       const source = spec.source ?? { index: targets[0]?.index ?? "peoples", tab: "" }
@@ -735,7 +778,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   // Une colonne verrouillée garde son affichage modifiable (style, emplacement, description…).
   const typeDisabled = columnDisabled || !policy.type
   const displayDisabled = columnDisabled
-  const lockedTitle = (item: DraftColumn) => item.policy.reasons.length ? `${item.policy.reasons.join("\n")}\n\nModifiable quand même : ${item.policy.allowed}` : undefined
+  const lockedTitle = (item: DraftColumn) => item.policy.reasons.length ? `${item.policy.reasons.join("\n")}\n\nModifiable sans risque : ${item.policy.allowed}\nPour le reste : « Modifier quand même », dans ses réglages.` : undefined
 
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose() }}>
     <DialogContent className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
@@ -785,7 +828,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                   {place === "table" && <span className="rounded bg-muted px-1">Tableau seul</span>}
                   {spec.hidden && <span className="rounded bg-muted px-1">Masquée</span>}
                   {spec.style && !spec.style.keepCellFormatting && <span className="rounded bg-muted px-1">Style</span>}
-                  {item.policy.reasons.length > 0 && <Lock className="size-3 text-amber-600" aria-label={lockedTitle(item)} />}
+                  {item.lockedPolicy ? <LockOpen className="size-3 text-destructive" aria-label="Déverrouillée : voir l’avertissement" /> : item.policy.reasons.length > 0 && <Lock className="size-3 text-amber-700" aria-label={lockedTitle(item)} />}
                 </span>
               </button>
               {!readOnly && !tab.removed && <span className="flex opacity-0 group-hover:opacity-100">
@@ -813,7 +856,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 {column.spec.hidden ? <EyeOff className="mb-2 size-4 text-muted-foreground" aria-label="Masquée" /> : <Eye className="mb-2 size-4 text-muted-foreground" aria-label="Visible" />}
               </div>
               <p className="text-[11px] text-muted-foreground">Au survol de l’en-tête : {columnTypeLabel(column.spec)}</p>
-              <LockNote policy={policy} />
+              <LockNote
+                policy={column.lockedPolicy ?? policy}
+                unlocked={Boolean(column.lockedPolicy)}
+                readOnly={columnDisabled}
+                onUnlock={() => updateColumn({ ...column, lockedPolicy: column.policy, policy: { ...freePolicy, reasons: column.policy.reasons, allowed: "Tout (déverrouillée)." } })}
+                onRelock={() => updateColumn({ ...column, policy: column.lockedPolicy ?? column.policy, lockedPolicy: undefined, header: column.original ?? column.header, spec: column.originalSpec ?? column.spec, removed: false })}
+              />
             </div>
             <TypePicker spec={column.spec} policy={policy} disabled={columnDisabled} family={model.family} onPick={pickKind} />
             <div className={box}>

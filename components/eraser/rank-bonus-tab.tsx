@@ -23,8 +23,12 @@ async function fetchRankBonuses(refresh: boolean) {
  * classeur des sorts (créé à la première ouverture) ; une case s'écrit d'ici ou de
  * Google Sheets, et « Colonne » ajoute une sorte de bonus.
  */
+// Le dernier tableau lu : changer d'onglet puis revenir le montre aussitôt, relu derrière.
+let knownTable: LoadedRankBonuses | null = null
+
 export function RankBonusTab() {
-  const [table, setTable] = useState<LoadedRankBonuses | null>(null)
+  const [table, setShownTable] = useState<LoadedRankBonuses | null>(() => knownTable)
+  const setTable = useCallback((next: LoadedRankBonuses) => { knownTable = next; setShownTable(next) }, [])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
 
@@ -43,7 +47,7 @@ export function RankBonusTab() {
   useEffect(() => {
     let active = true
     fetchRankBonuses(false)
-      .then((payload) => { if (active) setTable(payload) })
+      .then((payload) => { knownTable = payload; if (active) setShownTable(payload) })
       .catch((reason) => { if (active) setError(reason instanceof Error ? reason.message : "Chargement impossible.") })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }

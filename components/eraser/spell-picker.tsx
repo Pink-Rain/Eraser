@@ -18,9 +18,16 @@ const sourceLabels: Record<SpellIndexKind, string> = { classes: "Classe", creatu
  * Les sorts de un ou plusieurs index (« Sorts des classes », « Sorts des créatures »),
  * chargés une fois pour la fiche ouverte, triés par nom.
  */
+// Les sorts déjà lus, par liste d'index : une fiche rouverte affiche aussitôt ses sorts
+// choisis, relus derrière.
+const knownSpellOptions = new Map<string, SpellOption[]>()
+
 export function useSpellOptions(sources: SpellIndexKind[]) {
   const key = sources.join(",")
-  const [state, setState] = useState<{ key: string; options: SpellOption[] } | null>(null)
+  const [state, setState] = useState<{ key: string; options: SpellOption[]; fresh: boolean } | null>(() => {
+    const known = knownSpellOptions.get(key)
+    return known ? { key, options: known, fresh: false } : null
+  })
   useEffect(() => {
     let alive = true
     const kinds = key.split(",").filter(Boolean) as SpellIndexKind[]
@@ -28,14 +35,19 @@ export function useSpellOptions(sources: SpellIndexKind[]) {
       .then((response) => response.json() as Promise<{ data?: { spells?: Omit<SpellOption, "source">[] } }>)
       .then((payload) => (payload.data?.spells ?? []).filter((spell) => spell.name).map((spell) => ({ ...spell, source: kind })))
       .catch(() => [] as SpellOption[])))
-      .then((lists) => { if (alive) setState({ key, options: lists.flat().sort((left, right) => left.name.localeCompare(right.name, "fr")) }) })
+      .then((lists) => {
+        const options = lists.flat().sort((left, right) => left.name.localeCompare(right.name, "fr"))
+        if (options.length) knownSpellOptions.set(key, options)
+        if (alive) setState({ key, options, fresh: true })
+      })
     return () => { alive = false }
   }, [key])
-  return { options: state?.key === key ? state.options : [], loading: state?.key !== key }
+  const shown = state?.key === key ? state.options : knownSpellOptions.get(key) ?? []
+  return { options: shown, loading: !(state?.key === key && state.fresh) }
 }
 
 /** La fiche d'un sort choisi : tout ce que dit son index, sauf les classes. */
-function SpellCard({ name, spell, showSource, onRemove }: { name: string; spell?: SpellOption; showSource: boolean; onRemove: () => void }) {
+function SpellCard({ name, spell, showSource, loading, onRemove }: { name: string; spell?: SpellOption; showSource: boolean; loading: boolean; onRemove: () => void }) {
   const accent = spell?.tone.background || "var(--primary)"
   return <article className="relative rounded-xl border bg-card/80 p-3 pl-4 text-sm shadow-xs" style={{ borderLeft: `3px solid ${accent}` }}>
     <button type="button" onClick={onRemove} className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-destructive" aria-label={`Retirer ${name}`}><X className="size-3.5" /></button>
@@ -45,7 +57,9 @@ function SpellCard({ name, spell, showSource, onRemove }: { name: string; spell?
       {spell && showSource && <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{sourceLabels[spell.source]}</span>}
       {spell?.category === "actif" && <SpellChargeStars total={spell.charges} accent={accent} />}
     </header>
-    {!spell && <p className="mt-1 text-xs text-muted-foreground">Ce sort n’est pas (ou plus) dans les index de sorts.</p>}
+    {!spell && (loading
+      ? <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Lecture de l’index des sorts…</p>
+      : <p className="mt-1 text-xs text-muted-foreground">Ce sort n’est pas (ou plus) dans les index de sorts.</p>)}
     {spell && (spell.effect || spell.description) && <div className="mt-2 grid gap-1 leading-6">
       {spell.effect && <div className="font-medium [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
       {spell.description && <div className="text-muted-foreground [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}
@@ -96,7 +110,7 @@ export function SpellPicker({ label, icon, value, options, known = options, load
     </div>
     {selected.length
       ? <div className="grid gap-2 md:grid-cols-2">
-          {selected.map((name) => <SpellCard key={name} name={name} spell={byName.get(foldName(name))} showSource={mixed} onRemove={() => onChange(selected.filter((item) => foldName(item) !== foldName(name)).join(", "))} />)}
+          {selected.map((name) => <SpellCard key={name} name={name} spell={byName.get(foldName(name))} showSource={mixed} loading={loading && !byName.has(foldName(name))} onRemove={() => onChange(selected.filter((item) => foldName(item) !== foldName(name)).join(", "))} />)}
         </div>
       : <p className="rounded-xl border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">Aucun sort pour l’instant.</p>}
   </section>

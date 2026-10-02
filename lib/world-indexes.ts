@@ -1144,7 +1144,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
       const policy = worldColumnPolicy(key, tab.name, operation.header, links)
       const entry = findEntry(schema, tab.name, operation.header)
       if (operation.op === "rename") {
-        assertPolicy(policy.rename, policy.reasons)
+        assertPolicy(policy.rename || Boolean(operation.force), policy.reasons)
         const problem = headerProblem(operation.to, table.headers, operation.header)
         if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
         const to = operation.to.replace(/\s+/g, " ").trim()
@@ -1163,13 +1163,13 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
       }
       if (operation.op === "spec") {
         const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
-        if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type, policy.reasons)
+        if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type || Boolean(operation.force), policy.reasons)
         upsertEntry(schema, tab.name, operation.header, { spec: operation.spec })
         if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await ensureReciprocal(key, tab.name, operation.header, operation.spec.link)
         continue
       }
       if (operation.op === "remove-column") {
-        assertPolicy(policy.remove, policy.reasons)
+        assertPolicy(policy.remove || Boolean(operation.force), policy.reasons)
         upsertEntry(schema, tab.name, operation.header, { deletedAt: now })
       }
     }

@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react"
 import { Gift, X } from "lucide-react"
 
 import type { ItemNotification } from "@/lib/item-notifications"
+import { playItemReceived } from "@/lib/sounds"
 
 /** Annoncé quand un objet vient d'arriver : l'inventaire concerné, s'il est ouvert, se recharge. */
 export const inventoryReceivedEvent = "eraser:inventory-received"
@@ -50,6 +51,7 @@ export function ItemNotifications() {
         const payload = (await response.json().catch(() => ({}))) as { notifications?: ItemNotification[] }
         const fresh = response.ok ? payload.notifications ?? [] : []
         if (alive && fresh.length) {
+          playItemReceived()
           setShown((current) => [...current, ...fresh.filter((item) => !current.some((known) => known.id === item.id))].slice(-4))
           for (const notification of fresh) if (notification.targetId) announceInventoryReceived(notification.targetId)
         }

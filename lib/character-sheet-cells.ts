@@ -96,3 +96,19 @@ export function applyCharacteristicDefaults(values: string[], layout: CharacterL
   }
   return values
 }
+
+/**
+ * Les colonnes calculées par la feuille (totaux, modificateurs) : une modification
+ * envoyée par la fiche ne les écrase jamais, elles gardent leurs formules.
+ */
+export function computedCellIndexes(layout: CharacterLayout, catalog: CharacterCatalog, calculatedFields: Array<{ valueIndex: number }>, modifierIndex: (fieldIndex: number) => number) {
+  const computed = new Set<number>()
+  calculatedFields.forEach((field, fieldIndex) => { computed.add(field.valueIndex); computed.add(modifierIndex(fieldIndex)) })
+  for (const skill of skillsWithColumns(catalog, layout)) {
+    for (const metric of [1, 2, 4, 5, 7, 8]) {
+      const cell = layout.index(skill.key, skillMetrics[metric])
+      if (cell >= 0) computed.add(cell)
+    }
+  }
+  return computed
+}

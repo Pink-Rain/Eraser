@@ -6,6 +6,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { GoogleDriveManager } from "@/components/eraser/google-drive-manager"
 import { SheetDiagnosticsGrid } from "@/components/eraser/sheet-diagnostics-grid"
+import { WriteTestLink } from "@/components/eraser/write-test-link"
 import { listDriveFiles } from "@/lib/google-drive"
 import {
   diagnoseJdrSheets,
@@ -70,9 +71,7 @@ async function SheetDiagnostics({ writeTest }: { writeTest: boolean }) {
             : "Toutes les feuilles se lisent correctement."}
       </p>
       <p className="mt-3 text-sm">
-        <a href={writeTest ? "/administration/google-drive" : "/administration/google-drive?test=ecriture"} className="font-medium underline underline-offset-2">
-          {writeTest ? "Revenir au test de lecture seule" : "Tester aussi l’écriture"}
-        </a>
+        <WriteTestLink writeTest={writeTest} />
         <span className="ml-2 text-muted-foreground">Le test d’écriture ajoute une ligne témoin dans chaque feuille puis l’efface.</span>
       </p>
       <div className="mt-4"><SheetDiagnosticsGrid diagnostics={diagnostics} /></div>
@@ -111,7 +110,8 @@ export default async function GoogleDriveAdministrationPage({
         <Suspense fallback={<DeferredContentLoading label="Chargement du Drive…" />}>
           <GoogleDriveData origin={origin} oauthStatus={oauthStatus} />
         </Suspense>
-        <Suspense key={writeTest ? "write" : "read"} fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
+        {/* Sans clé : changer de test garde le tableau affiché jusqu'au nouveau résultat. */}
+        <Suspense fallback={<DeferredContentLoading label="Diagnostic des feuilles…" />}>
           <SheetDiagnostics writeTest={writeTest} />
         </Suspense>
       </div>

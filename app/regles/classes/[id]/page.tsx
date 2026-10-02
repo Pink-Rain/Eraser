@@ -53,7 +53,7 @@ export default async function ClassDetailPage({ params }: { params: Promise<{ id
           </Link>
         </Button>
       </div>
-      <Suspense fallback={<div className="w-full px-5 sm:px-8">
+      <Suspense key={classId} fallback={<div className="w-full px-5 sm:px-8">
         {characterClass && <h1 className="font-display text-4xl font-semibold sm:text-5xl" style={{ color: characterClass.accentDark }}>{characterClass.name}</h1>}
         <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Chargement de la présentation et des sorts…</p>
         <DeferredContentLoading label="Chargement de la classe…" className="mt-4" />

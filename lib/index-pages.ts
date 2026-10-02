@@ -2,7 +2,7 @@
  * Les pages de la section « Index » (anciennement « Ressources »). Les adresses
  * restent sous /ressources pour que les liens existants continuent de fonctionner.
  */
-export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-creatures" | "etats" | "runes" | "attributs" | "materiaux" | "caracteristiques"
+export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-creatures" | "etats" | "runes" | "attributs" | "materiaux" | "caracteristiques" | "succes"
 
 export type IndexPage = { key: IndexPageKey; href: string; label: string; description: string }
 
@@ -14,6 +14,7 @@ export const indexPages: IndexPage[] = ([
   { key: "runes", href: "/ressources/index-des-runes", label: "Runes", description: "Les runes, leur élément et ce qu’elles apportent." },
   { key: "attributs", href: "/ressources/index-des-attributs", label: "Attributs", description: "Les attributs des armes, armures et objets." },
   { key: "materiaux", href: "/ressources/index-des-materiaux", label: "Matériaux", description: "Les matériaux, où les trouver et leurs propriétés." },
+  { key: "succes", href: "/ressources/index-des-succes", label: "Succès", description: "Les succès des joueurs et des MJ, et qui les a obtenus." },
   { key: "caracteristiques", href: "/ressources/index-des-caracteristiques", label: "Caractéristiques et compétences", description: "Ce que la fiche de personnage contient, et ses valeurs de départ." },
   { key: "sorts-creatures", href: "/ressources/sorts-des-creatures", label: "Sorts des créatures", description: "Les sorts actifs et passifs des créatures." },
   { key: "creatures", href: "/ressources/index-des-creatures", label: "Créatures", description: "Le bestiaire, ses caractéristiques et ses sorts." },

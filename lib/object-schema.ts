@@ -154,7 +154,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     if (column < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
     const policy = objectColumnPolicy(operation.header)
     if (operation.op === "rename") {
-      locked(policy.rename, policy.reasons)
+      locked(policy.rename || Boolean(operation.force), policy.reasons)
       const problem = headerProblem(operation.to, table.headers, operation.header)
       if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
       const to = operation.to.replace(/\s+/g, " ").trim()
@@ -166,14 +166,14 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     }
     if (operation.op === "spec") {
       const current = effectiveObjectSpec(operation.header, table.headers, schema, table.tabName)
-      if (!isDisplayOnlyChange(current, operation.spec)) locked(policy.type, policy.reasons)
+      if (!isDisplayOnlyChange(current, operation.spec)) locked(policy.type || Boolean(operation.force), policy.reasons)
       // Une colonne d'objets reste du texte dans Sheets : les relations entre index n'y sont pas proposées.
       assertNoRelation(operation.spec)
       upsertEntry(schema, table.tabName, operation.header, { spec: operation.spec })
       continue
     }
     if (operation.op === "remove-column") {
-      locked(policy.remove && !isIdHeader(operation.header), policy.reasons)
+      locked((policy.remove || Boolean(operation.force)) && !isIdHeader(operation.header), policy.reasons)
       upsertEntry(schema, table.tabName, operation.header, { deletedAt: now })
     }
   }

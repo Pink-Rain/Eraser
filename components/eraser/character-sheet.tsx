@@ -7,12 +7,13 @@ import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, Gra
 import { Checkbox } from "@/components/ui/checkbox"
 import { InlineEdit } from "@/components/eraser/inline-edit"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
+import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
-import { ClassProgression, knownSpellsForCharacter, parseClassChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
+import { ClassProgression, knownSpellsForCharacter, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -400,15 +401,19 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // L’inventaire vit ici : l’onglet Compétences a besoin des objets équipés et de leurs liens.
   const [inventory, setInventory] = useState<CharacterInventoryRecord | null>(initialInventory ?? null)
   const [inventoryLoading, setInventoryLoading] = useState(!initialInventory)
+  const inventoryRef = useRef(inventory)
+  useEffect(() => { inventoryRef.current = inventory }, [inventory])
   const [equipPending, setEquipPending] = useState("")
 
-  // Joueurs qui cliquent vite sur +/- : chaque commit part en écriture Google Sheets
-  // en remplaçant toute la fiche. Sans file d’attente, deux requêtes en vol peuvent
-  // répondre dans le désordre et faire "reculer" une valeur qui vient d’être augmentée.
-  // On sérialise les envois et on n’applique que la réponse du dernier commit lancé.
-  const persistSeq = useRef(0)
+  /**
+   * Enregistrement : seules les cases changées partent, dans une file (un envoi à la
+   * fois). Une case reste « en attente » tant que le serveur ne l'a pas confirmée : un
+   * échec (Google lent ou injoignable) est réessayé, signalé, et la case repart avec le
+   * prochain enregistrement. Le joueur et le MJ sur la même fiche ne s'écrasent plus.
+   */
+  const pendingChanges = useRef(new Map<number, string>())
   const persistQueue = useRef(Promise.resolve())
-
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
   const modifierIndex = useMemo(() => indexInventoryModifiers(inventory?.containers || []), [inventory])
   const modifiersByValueIndex = useMemo(() => {
@@ -433,38 +438,79 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   }
   const slotToggle: SlotToggle = { pendingSlot: equipPending, onToggle: (slotId, equipped) => void setSlotEquipped(slotId, equipped) }
 
-  async function persist(nextValues: string[], portrait?: File) {
-    const seq = (persistSeq.current += 1)
+  // Toujours la dernière version de la fiche : deux champs quittés coup sur coup
+  // (clic ailleurs, survol refermé) partent chacun de la précédente, sans l'effacer.
+  const latestValues = useRef(values)
+  useEffect(() => { latestValues.current = values }, [values])
+
+  /** La fiche du serveur, avec par-dessus les cases pas encore confirmées. */
+  function applyServer(next: CharacterSheetRecord) {
+    const merged = next.values.map((cell, index) => pendingChanges.current.has(index) ? pendingChanges.current.get(index)! : cell)
+    latestValues.current = merged
+    setCharacter(next)
+    setValues(merged)
+  }
+
+  function flush(portrait?: File) {
     const run = persistQueue.current.then(async () => {
-      let response: Response
-      if (portrait) {
-        const form = new FormData(); form.append("portrait", portrait); form.append("values", JSON.stringify(nextValues))
-        response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", body: form })
-      } else {
-        response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ values: nextValues }) })
+      if (!pendingChanges.current.size && !portrait) return
+      const batch = new Map(pendingChanges.current)
+      const delays = [800, 2500, 6000]
+      for (let attempt = 0; ; attempt += 1) {
+        try {
+          const changes = JSON.stringify(Object.fromEntries(batch))
+          let response: Response
+          if (portrait) {
+            const form = new FormData(); form.append("portrait", portrait); form.append("changes", changes)
+            response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", body: form })
+          } else {
+            response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes: Object.fromEntries(batch) }) })
+          }
+          const payload = (await response.json().catch(() => ({}))) as { character?: CharacterSheetRecord; error?: string }
+          if (!response.ok || !payload.character) throw new Error(payload.error || "SAVE_FAILED")
+          for (const [index, value] of batch) if (pendingChanges.current.get(index) === value) pendingChanges.current.delete(index)
+          applyServer(payload.character)
+          setSaveState(pendingChanges.current.size ? "saving" : "saved")
+          return
+        } catch {
+          if (attempt >= delays.length) { setSaveState("error"); return }
+          await new Promise((resolve) => window.setTimeout(resolve, delays[attempt]))
+        }
       }
-      const payload = (await response.json()) as { character?: CharacterSheetRecord }
-      if (payload.character && seq === persistSeq.current) { setCharacter(payload.character); setValues(payload.character.values) }
     })
     persistQueue.current = run.catch(() => {})
     return run
   }
 
-  // Toujours la dernière version de la fiche : deux champs quittés coup sur coup
-  // (clic ailleurs, survol refermé) partent chacun de la précédente, sans l'effacer.
-  const latestValues = useRef(values)
-  useEffect(() => { latestValues.current = values }, [values])
   async function commit(index: number, value: string) {
     const next = latestValues.current.map((cell, cellIndex) => cellIndex === index ? value : cell)
     latestValues.current = next
     setValues(next)
-    await persist(next)
+    pendingChanges.current.set(index, value)
+    setSaveState("saving")
+    await flush()
   }
 
   async function changePortrait(file?: File) {
     if (!file) return
-    setPortraitPending(true); await persist(values, file); setPortraitPending(false)
+    setPortraitPending(true); await flush(file); setPortraitPending(false)
   }
+
+  // Quitter la page avec des cases pas encore enregistrées : le navigateur prévient.
+  useEffect(() => {
+    function warn(event: BeforeUnloadEvent) {
+      if (!pendingChanges.current.size) return
+      event.preventDefault()
+      event.returnValue = ""
+    }
+    window.addEventListener("beforeunload", warn)
+    return () => window.removeEventListener("beforeunload", warn)
+  }, [])
+  useEffect(() => {
+    if (saveState !== "saved") return
+    const timer = window.setTimeout(() => setSaveState((current) => current === "saved" ? "idle" : current), 1800)
+    return () => window.clearTimeout(timer)
+  }, [saveState])
 
   const classOptions = availableClasses.map((item) => ({ value: item.name, label: item.name }))
   const socialClasses = ["Errant·e", "Serf·ve", "Vilain·e", "Tenancier·ère", "Membre du clergé", "Noble"]
@@ -485,6 +531,15 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     [assignedClasses, availableClassSpells, currentLevel, classChoicesValue],
   )
 
+  // Un rang atteint dont le sort n'est pas encore choisi : pastille sur l'onglet Sorts.
+  // Des objets reçus pas encore survolés : la même pastille discrète sur l'onglet Inventaire.
+  const newSlots = useNewSlots(character.id)
+  const hasNewItems = Boolean(inventory?.containers.some((container) => container.slots.some((slot) => slot.item && newSlots.isNew(slot.id))))
+  const pendingChoiceCount = useMemo(
+    () => pendingSpellChoices(assignedClasses, availableClassSpells, currentLevel, classChoicesValue).length,
+    [assignedClasses, availableClassSpells, currentLevel, classChoicesValue],
+  )
+
   function linkedAbilities(skillName: string) {
     const normalized = skillName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
     return knownClassSpells.filter((spell) => spell.category !== "bonus" && spell.skills.some((skill) => {
@@ -501,7 +556,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   useInventoryReceived([character.id], () => {
     fetch(`${inventoryEndpoint}?summary=1`)
       .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
-      .then(({ ok, payload }) => { if (ok && payload.inventory) setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] })) })
+      .then(({ ok, payload }) => {
+        if (!ok || !payload.inventory) return
+        // La pastille de l'objet reçu, même si l'onglet Inventaire n'est pas ouvert.
+        markNewSlots(character.id, receivedSlots(inventoryRef.current, payload.inventory))
+        setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] }))
+      })
       .catch(() => { /* la notification a suffi */ })
   })
 
@@ -761,12 +821,18 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     <Tabs value={activeCharacterTab.id} onValueChange={setActiveTab} className="mt-9 rounded-2xl border border-[#74664f3d] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.018))] p-2 shadow-sm">
       <div className="overflow-hidden">
         <TabsList variant="line" className="h-auto w-full min-w-0 flex-wrap justify-start bg-transparent">
-          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span>{tab.label}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); void removeCharacterTab(tab.id) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); void removeCharacterTab(tab.id) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
+          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span className="relative">{tab.label}{tab.type === "classe" && pendingChoiceCount > 0 && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title={pendingChoiceCount > 1 ? `${pendingChoiceCount} nouveaux sorts à choisir` : "Un nouveau sort à choisir"} />}{tab.type === "inventaire" && hasNewItems && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title="Nouvel objet reçu" />}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); void removeCharacterTab(tab.id) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); void removeCharacterTab(tab.id) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAddingTab(true)} aria-label="Ajouter un onglet" title="Ajouter un onglet"><Plus /></Button>
         </TabsList>
       </div>
       <TabsContent value={activeCharacterTab.id} forceMount className="mt-2 rounded-xl p-2 sm:p-3">{renderTabContent(activeCharacterTab)}</TabsContent>
     </Tabs>
+
+    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
+      {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
+      {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
+      {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
+    </div>}
 
     <Dialog open={addingTab} onOpenChange={setAddingTab}>
       <DialogContent>

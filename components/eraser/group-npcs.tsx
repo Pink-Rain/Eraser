@@ -15,9 +15,11 @@ import type { CampaignNpcRecord } from "@/lib/shop-schema"
 
 function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: CampaignNpcRecord; canManage: boolean; pending: boolean; onEdit: () => void; onRemove: () => void }) {
   const [open, setOpen] = useState(false)
+  // Déplié une fois, le contenu (et le sac à dos) reste monté : le rouvrir ne recharge rien.
+  const [opened, setOpened] = useState(false)
   const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
   const details = [richTextPlainText(npc.title), richTextPlainText(npc.occupation), npc.people].filter(Boolean).join(" · ")
-  return <Collapsible open={open} onOpenChange={setOpen} asChild>
+  return <Collapsible open={open} onOpenChange={(next) => { setOpen(next); if (next) setOpened(true) }} asChild>
     <article className="min-w-0 self-start overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
       <div className="relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)]">
         <div className="relative min-h-28 bg-muted">{npc.portrait
@@ -47,12 +49,12 @@ function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: Camp
           <ChevronDown className={`size-4 transition-transform ${open ? "rotate-180" : ""}`} />
         </button>
       </CollapsibleTrigger>
-      <CollapsibleContent className="border-t">
+      <CollapsibleContent forceMount className="border-t data-[state=closed]:hidden">
         <div className="space-y-4 p-4">
           <section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes</h4>{npc.playerNotes ? <RichTextView html={npc.playerNotes} className="text-sm leading-6" /> : <p className="text-sm text-muted-foreground">Aucune note.</p>}</section>
           {canManage && npc.gmNotes && <section><h4 className="mb-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notes MJ</h4><RichTextView html={npc.gmNotes} className="text-sm leading-6" /></section>}
         </div>
-        {open && <NpcBackpack npc={npc} defaultOpen className="border-t" />}
+        {opened && <NpcBackpack npc={npc} defaultOpen className="border-t" />}
       </CollapsibleContent>
     </article>
   </Collapsible>

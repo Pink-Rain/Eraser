@@ -50,7 +50,7 @@ import {
   characterValueHeaders,
 } from "@/lib/character-sheet-schema"
 import { builtinCharacterCatalog, characterLayout, planCatalogColumns, type CharacterCatalog, type CharacterLayout } from "@/lib/character-catalog"
-import { applyCharacteristicDefaults, applySkillCells, characterValueCell } from "@/lib/character-sheet-cells"
+import { applyCharacteristicDefaults, applySkillCells, characterValueCell, computedCellIndexes } from "@/lib/character-sheet-cells"
 import {
   baseInventoryContainerTypes,
   baseInventoryTypeIds,
@@ -4722,6 +4722,52 @@ export async function updateCharacterSheet(accountUid: string | null, id: string
   const updatedAt = new Date().toISOString()
   await getDb().update(characterIndex).set({ name, subtitle: nextValues[1] || "", updatedAt }).where(eq(characterIndex.id, id))
   const character = { ...existing, name, subtitle: nextValues[1] || "", updatedAt, values: calculatedValues, headers: layout.headers } satisfies CharacterSheetRecord
+  characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
+  return character
+}
+
+/**
+ * Enregistre seulement les cases changées d'une fiche, chacune à sa place. Deux
+ * personnes sur la même fiche (le joueur et le MJ) ne s'écrasent plus : chacune n'écrit
+ * que ce qu'elle a modifié. Les colonnes calculées par la feuille ne sont jamais
+ * remplacées ; la fiche relue après l'écriture porte les totaux recalculés.
+ */
+export async function patchCharacterSheet(accountUid: string | null, id: string, changes: Record<string, string>) {
+  const existing = accountUid ? await getCharacterForUser(accountUid, id) : await getCharacterById(id)
+  if (!existing) throw new Error("CHARACTER_NOT_FOUND")
+  const source = await charactersSource()
+  if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
+  await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
+  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
+  const width = layout.headers.length
+  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
+  if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  const computed = computedCellIndexes(layout, catalog, [...characterSecondaryCalculatedFields], (fieldIndex) => characterSecondaryCalculationValueIndex(fieldIndex, "modifier"))
+  const entries = Object.entries(changes).flatMap(([key, raw]) => {
+    const index = Number(key)
+    if (!Number.isInteger(index) || index < 0 || index >= width || computed.has(index)) return []
+    return [[index, String(raw ?? "").slice(0, 50_000)] as const]
+  })
+  const name = entries.find(([index]) => index === 0)?.[1]
+  if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
+  // Une saisie qui commence par « = » reste du texte : seule Eraser écrit des formules.
+  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(index + 3)}${rowNumber}`), values: [[value.startsWith("=") ? `'${value}` : value]] }))
+  for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
+  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
+  let [row = []] = await readRange(source.spreadsheetId, range)
+  let values = row.slice(0, width)
+  while (values.length < width) values.push("")
+  // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
+  if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
+    await updateRange(source.spreadsheetId, range, [applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog)])
+    ;[row = []] = await readRange(source.spreadsheetId, range)
+    values = row.slice(0, width)
+    while (values.length < width) values.push("")
+  }
+  const updatedAt = new Date().toISOString()
+  const nextName = values[0]?.trim() || existing.name
+  await getDb().update(characterIndex).set({ name: nextName, subtitle: values[1] || "", updatedAt }).where(eq(characterIndex.id, id))
+  const character = { ...existing, name: nextName, subtitle: values[1] || "", updatedAt, values, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }

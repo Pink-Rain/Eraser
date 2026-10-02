@@ -25,6 +25,7 @@ export type IndexColumnKind =
   | "tab"
   | "file"
   | "color"
+  | "icon"
   | "lookup"
   | "rollup"
   | "formula"
@@ -67,6 +68,7 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "tab": { label: "Onglet", group: "Système", creatable: false, description: "L'onglet de la ligne dans la vue « Tout » ; le changer la déplace." },
   "file": { label: "Fichier", group: "Médias", creatable: true, description: "Un ou plusieurs fichiers importés dans le Drive, ou des adresses collées. Une galerie, c'est un Fichier « images, plusieurs ».", settings: ["Fichiers acceptés : images, sons, vidéos, PDF ou tous.", "Un seul ou plusieurs (galerie)."], example: "Portrait, Carte du lieu, Thème musical." },
   "color": { label: "Couleur", group: "Saisie", creatable: true, description: "Une couleur, choisie dans une palette ou par son code (#aa3355).", example: "Couleur d'une faction sur la carte." },
+  "icon": { label: "Icône", group: "Médias", creatable: true, description: "Une icône choisie dans la liste (une centaine, avec recherche) ou un émoji. La feuille garde le nom de l'icône (trophy) ou l'émoji ; un nom français tapé dans Sheets (« Trophée ») est reconnu.", example: "L'icône d'un succès, d'un état ou d'une faction." },
   "lookup": { label: "Recherche", group: "Calculs", creatable: true, description: "Affiche, en face, une colonne des lignes reliées par une relation (colonne liée ou liste d'un index). Rien à saisir.", settings: ["Relation à suivre.", "Colonne à afficher en face."], example: "La région de chaque peuple d'un lieu." },
   "rollup": { label: "Agrégat", group: "Calculs", creatable: true, description: "Calcule sur les lignes reliées : nombre, somme, moyenne, minimum, maximum, valeurs uniques, % coché… Rien à saisir.", settings: ["Relation à suivre.", "Colonne d'en face (facultative pour compter).", "Calcul."], example: "Le nombre de villes d'un peuple, la somme des prix d'un équipement." },
   "formula": { label: "Formule", group: "Calculs", creatable: true, description: "Une valeur calculée à partir des autres colonnes de la ligne : {Prix} * 2, SI({Rang} >= 3; \"Élite\"; \"Commun\")… Rien à saisir. Le bouton « ? » détaille toutes les fonctions.", settings: ["La formule.", "Le type du résultat : texte, nombre (avec son format), case à cocher, liste, couleur."], example: "Prix de revente = {Prix} / 2 ; Danger = SI({Rang} >= 4; \"Mortel\"; \"\")." },

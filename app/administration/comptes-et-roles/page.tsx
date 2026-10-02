@@ -1,16 +1,23 @@
+import { Suspense } from "react"
 import { redirect } from "next/navigation"
 
 import { AccountAccessTable } from "@/components/eraser/account-access-table"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { listAccounts } from "@/lib/site-auth"
 
 export const dynamic = "force-dynamic"
 
+// La page s'affiche aussitôt ; la liste des comptes arrive ensuite.
+async function AccountsData({ currentUid }: { currentUid: string }) {
+  const accounts = await listAccounts(await currentAuthToken())
+  return <AccountAccessTable accounts={accounts} currentUid={currentUid} />
+}
+
 export default async function AccountsAndRolesPage() {
   const admin = await authorizedAccount(["admin"])
   if (!admin) redirect("/")
-  const accounts = await listAccounts(await currentAuthToken())
 
   return (
     <AuthenticatedShell pageLabel="Comptes et rôles" roles={["admin"]}>
@@ -25,7 +32,9 @@ export default async function AccountsAndRolesPage() {
           Aucun compte ne peut consulter le contenu avant d’avoir reçu un rôle
           et le statut actif.
         </p>
-        <AccountAccessTable accounts={accounts} currentUid={admin.uid} />
+        <Suspense fallback={<DeferredContentLoading label="Chargement des comptes…" />}>
+          <AccountsData currentUid={admin.uid} />
+        </Suspense>
       </div>
     </AuthenticatedShell>
   )

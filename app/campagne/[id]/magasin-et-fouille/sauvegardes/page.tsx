@@ -37,7 +37,7 @@ export default async function SavedCampaignShopsPage({ params, searchParams }: {
         <p className="mt-5 text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">{campaign.name}</p>
         <h1 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">Magasins sauvegardés</h1>
         <div className="mt-7">
-          <Suspense fallback={<DeferredContentLoading className="mt-0" label="Chargement des magasins sauvegardés…" />}>
+          <Suspense key={id} fallback={<DeferredContentLoading className="mt-0" label="Chargement des magasins sauvegardés…" />}>
           <SavedCampaignShopsData campaignId={campaign.id} shopId={query.shop || ""} canManage={canManage} />
           </Suspense>
         </div>
