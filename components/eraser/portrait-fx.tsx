@@ -178,20 +178,22 @@ function Oozing({ style, variant }: { style: CSSProperties; variant: FxVariant }
 // ---------------------------------------------------------------------------
 
 /**
- * L'aura : une enveloppe de lumière collée aux bords, un liseré presque blanc, des langues
- * d'énergie qui montent en ondulant tout autour et des particules qui s'élèvent. (La
- * pulsation, elle, est une simple lueur qui bat ; les flammes brûlent par le bas.)
+ * L'aura : un cercle lumineux, une lueur qui pulse autour de lui, un reflet qui en fait
+ * le tour et des étincelles qui scintillent sur son pourtour.
  */
 function Aura({ style, variant }: { style: CSSProperties; variant: FxVariant }) {
   const random = seeded(variant === "page" ? 71 : 29)
-  const motes = Array.from({ length: variant === "page" ? 18 : 9 }, () => {
-    // Le long des côtés, surtout : l'énergie monte autour du personnage.
-    const left = random() < 0.5
-    return { x: left ? random() * 14 : 86 + random() * 14, y: 30 + random() * 70, delay: random() * 3.5, size: 2 + random() * 2.5 }
+  const count = variant === "page" ? 16 : 10
+  const sparkles = Array.from({ length: count }, (_, index) => {
+    const angle = ((index + random() * 0.6) / count) * Math.PI * 2
+    const radius = 50 + (random() - 0.5) * 16
+    return { x: 50 + Math.cos(angle) * radius, y: 50 + Math.sin(angle) * radius, delay: random() * 2.8, size: variant === "page" ? 10 + random() * 8 : 7 + random() * 6 }
   })
   return <span aria-hidden="true" className={`eraser-fx-aura ${variant === "page" ? "eraser-fx-aura-page" : ""} pointer-events-none absolute inset-0 overflow-hidden`} style={style}>
-    <u /><i /><i /><s />
-    {motes.map((mote, index) => <b key={index} style={{ left: `${mote.x}%`, top: `${mote.y}%`, width: mote.size, height: mote.size, animationDelay: `${mote.delay}s` }} />)}
+    <span className="eraser-fx-aura-ring">
+      <s /><u /><i />
+      {sparkles.map((sparkle, index) => <b key={index} style={{ left: `${sparkle.x}%`, top: `${sparkle.y}%`, width: sparkle.size, height: sparkle.size, animationDelay: `${sparkle.delay}s` }} />)}
+    </span>
   </span>
 }
 
