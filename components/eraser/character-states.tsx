@@ -134,7 +134,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
     setQuery("")
   }
 
-  return <div className="mt-2 grid gap-1.5">
+  return <div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5">
     <div className="flex items-center gap-2">
       <p className="flex flex-1 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[.2em] text-muted-foreground"><Activity className="size-3.5" />États</p>
       <Popover open={open} onOpenChange={setOpen}>
@@ -167,10 +167,13 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
       const level = Math.min(state.level, levels) as 1 | 2
       const rolled = onRoll ? activeEffectsOf(catalog, state).filter(isRolledEffect) : []
       const last = outcomes[state.name]
-      return <div key={state.name} className="grid gap-1"><HoverCard openDelay={180} closeDelay={80}>
+      return <div key={state.name} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1"><HoverCard openDelay={180} closeDelay={80}>
         <HoverCardTrigger asChild>
-          <div className="group flex items-center gap-2 rounded-xl border border-l-4 bg-background/50 px-2 py-1.5" style={{ borderLeftColor: color }}>
-            <span className="min-w-0 flex-1 truncate text-xs font-semibold" style={{ color }}>{state.name}</span>
+          {/* Un nom long passe à la ligne ; s'il manque encore de place, les boutons descendent
+              sous le nom : la ligne grandit en hauteur, jamais en largeur. */}
+          <div className="group flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-l-4 bg-background/50 px-2 py-1.5" style={{ borderLeftColor: color }}>
+            <span className="min-w-[min(min-content,100%)] flex-1 basis-16 break-words text-xs font-semibold leading-tight" style={{ color }}>{state.name}</span>
+            <span className="ml-auto flex shrink-0 items-center gap-2">
             {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title="Posé tout seul d’après les points de vie">Auto</span>}
             {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
             {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
@@ -180,6 +183,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
               </button>)}
             </span>}
             {!automatic && <button type="button" disabled={disabled} onClick={() => onChange(states.filter((candidate) => candidate !== state))} className="rounded-full p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100" aria-label={`Retirer ${state.name}`} title="Retirer cet état"><X className="size-3" /></button>}
+            </span>
           </div>
         </HoverCardTrigger>
         <HoverCardContent side="right" align="start" className="w-80 rounded-2xl p-3.5" style={{ borderColor: `${color}55` }}>
@@ -190,7 +194,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
       </HoverCard>
       {last && <div className={cn("ml-2 rounded-lg border-l-2 bg-background/40 px-2 py-1 text-[11px] leading-4", last.undone && "opacity-50")} style={{ borderLeftColor: last.outcome.hit ? color : "#a8a29e" }}>
         <p className="flex items-center gap-1 font-semibold" style={{ color: last.outcome.hit ? color : undefined }}><Dices className="size-3" />{last.effect}{last.undone && <span className="font-normal text-muted-foreground"> · annulé</span>}</p>
-        {last.outcome.lines.map((line, index) => <p key={index} className="tabular-nums text-muted-foreground">{line}</p>)}
+        {last.outcome.lines.map((line, index) => <p key={index} className="tabular-nums text-muted-foreground [overflow-wrap:anywhere]">{line}</p>)}
         {last.outcome.undo && !last.undone && <button type="button" onClick={() => { last.outcome.undo?.(); setOutcomes((current) => ({ ...current, [state.name]: { ...last, undone: true } })) }} className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"><Undo2 className="size-3" />Annuler</button>}
       </div>}
       </div>

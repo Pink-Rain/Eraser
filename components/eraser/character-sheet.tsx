@@ -751,6 +751,13 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           void commit(index, String(Math.round(after * 100) / 100))
         }
       }
+      // Rien n'a été écrit : on dit pourquoi plutôt que de laisser croire que ça a marché.
+      if (hit && !operation && effect.roll && !effect.roll.range) {
+        const damage = `-${effect.roll.dice.replace(/^[+-]/, "").replace(/[+-]/g, (sign) => sign === "+" ? "-" : "+")}`
+        lines.push(`Rien n’est appliqué : « Jet » est la condition et « Changement de valeur » est vide. Pour des dégâts, écrire ${damage} dans « Changement de valeur » et vider « Jet ».`)
+      } else if (hit && operation && !changes.length) {
+        lines.push(effect.targets.length ? `Rien n’est appliqué : « ${effect.targets.join(", ")} » n’est pas une valeur que la fiche peut écrire.` : "Rien n’est appliqué : l’effet n’a pas de cible.")
+      }
       return { hit, lines: [...lines, ...changes.map((change) => change.label)], undo: changes.length ? () => { for (const change of changes) void commit(change.index, change.before) } : undefined }
     } catch {
       return { hit: false, lines: ["Ces dés n’ont pas pu être lancés : vérifier l’écriture dans l’Index des états."] }

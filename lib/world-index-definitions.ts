@@ -48,6 +48,10 @@ export const EFFECT_COLOR_HEADER = "Couleur"
 export const EFFECT_CHANGE_HEADER = "Changement de valeur"
 /** Le jet de dés qui déclenche l'effet depuis la fiche (« 1d20 16-20 »). */
 export const EFFECT_ROLL_HEADER = "Jet"
+
+/** Comment écrire ces deux colonnes : la description proposée d'office (modifiable dans « Modifier »). */
+export const EFFECT_CHANGE_DESCRIPTION = "Tant que l’état est posé : +10 ou 10 ajoute, -30 retire, =100 remplace, ≥1 (ou >=1) plancher, ≤50 (ou <=50) plafond ; tout revient quand l’état part. Des dés se lancent depuis la fiche et s’écrivent dans la fiche (dégâts, soins) : -1d20-20 retire, +2d6 ajoute."
+export const EFFECT_ROLL_DESCRIPTION = "La condition, lancée depuis la fiche avant le changement de valeur : les dés puis la plage qui réussit. 1d20 16-20, 1d20 : 16 & 20, 1d10 ≤3 (ou 3 ou moins), 1d10 ≥8 (ou 8 ou plus), 1d6 6. Réussi : le changement de valeur s’applique ; raté : rien. Sans plage, il réussit toujours. Les dégâts eux-mêmes (-1d20-20) vont dans « Changement de valeur »."
 /** Une cible de la fiche qui n'est pas dans l'Index des caractéristiques : la vie actuelle. */
 export const CURRENT_LIFE_TARGET = "Points de vie actuels"
 export const EFFECT_IMAGE_HEADER = "Image"
@@ -519,8 +523,8 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       if (isHeader(header, [EFFECT_TARGET_HEADER])) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: CHARACTERISTICS_TAB, extra: [CURRENT_LIFE_TARGET] } }
       if (isHeader(header, [EFFECT_COLOR_HEADER])) return { kind: "color" }
       // « +10 », « =100 », « ≥1 », « -1d20-20 » : du texte, lu par lib/state-change.
-      if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich" }
-      if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich" }
+      if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich", description: EFFECT_CHANGE_DESCRIPTION }
+      if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich", description: EFFECT_ROLL_DESCRIPTION }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
       if (isHeader(header, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }
