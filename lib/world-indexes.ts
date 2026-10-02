@@ -176,6 +176,15 @@ async function ensureTab(spreadsheetId: string, key: WorldIndexKey, tab: WorldIn
   const [firstRow = []] = await readRange(spreadsheetId, sheetTabRange(tab.name, "A1:AZ1"))
   let used = firstRow.length
   while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
+  // Une colonne renommée par Eraser : seul son en-tête est réécrit, ses valeurs restent.
+  for (const [legacy, renamed] of tab.renamedHeaders ?? []) {
+    if (firstRow.slice(0, used).some((header) => foldName(header) === foldName(renamed))) continue
+    const position = firstRow.slice(0, used).findIndex((header) => foldName(header) === foldName(legacy))
+    if (position < 0) continue
+    const cell = `${columnName(position + 1)}1`
+    await updateRange(spreadsheetId, sheetTabRange(tab.name, `${cell}:${cell}`), [[renamed]], { valueInputOption: "RAW" })
+    firstRow[position] = renamed
+  }
   const present = new Set(firstRow.slice(0, used).map(foldName))
   const missing = tab.headers.filter((header) => !present.has(foldName(header)))
   if (!missing.length) return
@@ -388,16 +397,39 @@ function scheduleIdBackfill(key: WorldIndexKey) {
  * depuis l'application est recopiée ici au lieu de tout relire.
  */
 const WORLD_INDEX_CACHE_MS = 5 * 60_000
-const worldIndexCache = new Map<WorldIndexKey, { expiresAt: number; promise: Promise<WorldIndexData> }>()
+/** Au-delà, la version gardée est trop vieille pour être rendue sans attendre. */
+const WORLD_INDEX_STALE_MS = 30 * 60_000
+type WorldIndexCacheEntry = { expiresAt: number; promise: Promise<WorldIndexData>; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean; patchedAt?: number }
+const worldIndexCache = new Map<WorldIndexKey, WorldIndexCacheEntry>()
 
 const lastLoaded = new Map<WorldIndexKey, WorldIndexData>()
 
 export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
   const cached = worldIndexCache.get(key)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
+  // Passé quelques minutes, l'index gardé est rendu tout de suite et relu en arrière-plan
+  // (pour voir ce qui a été changé directement dans Sheets) : la page n'attend plus.
+  if (!options.refresh && cached?.loadedAt && !cached.refreshFailed && Date.now() - cached.loadedAt < WORLD_INDEX_STALE_MS) {
+    if (!cached.refreshing) {
+      cached.refreshing = true
+      const startedAt = Date.now()
+      const fresh = loadWorldIndex(key)
+      fresh.then((data) => {
+        // Changé entre-temps (écriture, « Actualiser ») : la nouvelle entrée l'emporte.
+        if (worldIndexCache.get(key) !== cached) return
+        // Une cellule enregistrée pendant la relecture : la relecture a pu la manquer, on
+        // garde la version corrigée et on relira plus tard.
+        if ((cached.patchedAt ?? 0) >= startedAt) { cached.refreshing = false; return }
+        lastLoaded.set(key, data)
+        worldIndexCache.set(key, { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise: Promise.resolve(data), loadedAt: Date.now() })
+      }, () => { cached.refreshing = false; cached.refreshFailed = true })
+    }
+    return cached.promise
+  }
   const promise = loadWorldIndex(key)
-  worldIndexCache.set(key, { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise })
-  promise.then((data) => { if (worldIndexCache.get(key)?.promise === promise) lastLoaded.set(key, data) }, () => undefined)
+  const entry: WorldIndexCacheEntry = { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise }
+  worldIndexCache.set(key, entry)
+  promise.then((data) => { if (worldIndexCache.get(key) === entry) { lastLoaded.set(key, data); entry.loadedAt = Date.now() } }, () => undefined)
   // Une lecture ratée ne doit pas rester en mémoire : la suivante réessaie.
   promise.catch(() => { if (worldIndexCache.get(key)?.promise === promise) worldIndexCache.delete(key) })
   return promise
@@ -441,6 +473,7 @@ function escapeCellHtml(value: string) {
 async function patchCachedRow(key: WorldIndexKey, tabName: string, rowNumber: number, cells: Array<{ column: number; html: string }>) {
   const entry = worldIndexCache.get(key)
   if (!entry) return
+  entry.patchedAt = Date.now()
   const data = await entry.promise.catch(() => null)
   const row = data?.tables.find((table) => table.tabName === tabName)?.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row) return invalidateWorldIndexes([key])

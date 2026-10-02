@@ -1,21 +1,37 @@
-# Eraser 0.1.1-alpha.97 — États et Effets synchronisés, couleurs enregistrées
+# Eraser 0.1.1-alpha.98 — États sur la fiche, pages plus rapides
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Index
+## Fiche de personnage et états
 
-- **Les onglets se tiennent à jour entre eux** : un effet ajouté ou renommé dans « Effets »
-  apparaît aussitôt dans les listes « Niveau 1 » / « Niveau 2 » de « États », même ouvert
-  dans un autre onglet ou une autre fenêtre. Plus besoin d'« Actualiser » ni de recharger.
-  Valable pour tous les index et leurs listes liées.
-- **La fiche de personnage suit aussi** : un état ou un effet modifié dans l'Index des états
-  est relu par les fiches ouvertes.
+- **Les totaux s'affichent** : un état à +100 sur Folie affiche maintenant 100, au lieu de
+  « 0 » avec un « +100 » à côté. La case vide valait « rien » au lieu de 0, c'était le bug.
+  Même chose pour Destin, Notoriété, Moralité, les compteurs ajoutés, les
+  caractéristiques (Force…) et les points de vie.
+- **Survol de Folie, Destin, Notoriété, Moralité** : comme les autres cartes, le survol
+  montre le calcul (valeur de base modifiable, modificateur, total) et les états et
+  objets qui la changent. − et + changent la valeur de base.
+- **Colonne « Appliqué à la page » (onglet Effets)** : c'est maintenant une liste à
+  choix multiples : Page entière, Compétence liée, Portrait. La couleur de l'effet ne
+  s'applique qu'à ce qui est choisi : toute la fiche, les caractéristiques et compétences
+  visées (Folie en rouge si l'effet est rouge), le portrait. Rien de choisi : la couleur
+  ne s'applique nulle part. L'ancienne colonne « Non lié aux caractéristiques » est
+  renommée sur place ; une case qui était cochée vaut « Page entière ». Le changement de
+  valeur s'applique toujours aux cibles.
 
-## Icônes et couleurs dans les cellules
+## Icônes
 
-- **Plus d'erreur « Cette modification n'a pas pu être enregistrée »** en changeant une
-  couleur : le sélecteur envoyait une écriture à Google Sheets à chaque mouvement, et
-  Google refusait. L'aperçu suit maintenant en direct, et une seule écriture part quand la
-  fenêtre se ferme. Cela vaut pour la palette de la jauge par ligne (icône et couleur) et
-  pour la colonne Couleur.
-- Si Google Sheets refuse encore une modification, le message dit maintenant pourquoi.
+- **Les icônes pleines sont vraiment pleines** : le cerveau (et la main) se remplissait
+  par morceaux. La silhouette est maintenant calculée pour chaque icône, intérieur
+  compris.
+
+## Vitesse
+
+- **Les pages n'attendent plus Google Sheets quand le cache a vieilli** : jusqu'ici,
+  toutes les 3 minutes (et toutes les minutes pour le schéma des colonnes), la page
+  suivante attendait une nouvelle lecture de Google, ce qui coûtait plusieurs secondes.
+  Maintenant, la dernière version lue s'affiche tout de suite et Google est relu en
+  arrière-plan. Ce qui est modifié depuis Eraser reste visible immédiatement.
+- Le schéma des colonnes ne vide plus tout le cache de son classeur à chaque relecture.
+- Une feuille Eraser absente du Drive n'est plus recherchée chaque minute (toutes les dix
+  minutes ; « Relier mes feuilles existantes » la retrouve aussitôt).

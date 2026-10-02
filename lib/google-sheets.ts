@@ -273,7 +273,10 @@ export type FormattedSheet = {
 // never recreate a sheet that already exists in the connected Drive).
 const missingJdrSheetRetryAt = new Map<JdrSheetKey, number>()
 const pendingJdrSheetResolutions = new Map<JdrSheetKey, Promise<JdrSheetRecord | null>>()
-const MISSING_JDR_SHEET_RETRY_MS = 60_000
+// Une feuille absente du Drive n'y est recherchée qu'une fois toutes les dix minutes : la
+// chercher à chaque page coûtait une recherche Drive par minute. « Relier mes feuilles
+// existantes » la retrouve aussitôt.
+const MISSING_JDR_SHEET_RETRY_MS = 10 * 60_000
 
 export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null> {
   const stored = await getJdrSheet(key)
@@ -416,7 +419,32 @@ export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
 // edits made outside Eraser (directly in Google Sheets) — an accepted tradeoff
 // for cutting down repeated round-trips while navigating within a session.
 const RANGE_CACHE_MS = 180_000
-const rangeReadCache = new Map<string, { expiresAt: number; promise: Promise<string[][]> }>()
+/**
+ * Passé RANGE_CACHE_MS, une plage déjà lue est rendue aussitôt (la page n'attend plus
+ * Google) et relue en arrière-plan ; la lecture suivante a la version fraîche. Au-delà de
+ * RANGE_STALE_MS, ou si la relecture a échoué, on attend Google comme avant. Une écriture
+ * d'Eraser vide le cache de son classeur : ses propres changements ne sont jamais servis
+ * en retard.
+ */
+const RANGE_STALE_MS = 30 * 60_000
+type RangeCacheEntry = { expiresAt: number; promise: Promise<string[][]>; value?: string[][]; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean }
+const rangeReadCache = new Map<string, RangeCacheEntry>()
+
+/** La valeur à rendre sans attendre (et la relecture lancée), ou null s'il faut lire Google. */
+function staleRange(cacheKey: string, refresh: () => Promise<string[][]>) {
+  const cached = rangeReadCache.get(cacheKey)
+  if (!cached || cached.expiresAt > Date.now()) return null
+  if (!cached.value || cached.refreshFailed || Date.now() - (cached.loadedAt ?? 0) > RANGE_STALE_MS) return null
+  if (!cached.refreshing) {
+    cached.refreshing = true
+    refresh().then((rows) => {
+      // Un classeur vidé entre-temps (écriture) : on ne remet pas l'ancienne entrée.
+      if (rangeReadCache.get(cacheKey) !== cached) return
+      rangeReadCache.set(cacheKey, { expiresAt: Date.now() + RANGE_CACHE_MS, promise: Promise.resolve(rows), value: rows, loadedAt: Date.now() })
+    }, () => { cached.refreshing = false; cached.refreshFailed = true })
+  }
+  return Promise.resolve(cached.value)
+}
 
 function rangeCacheKey(
   spreadsheetId: string,
@@ -431,8 +459,9 @@ function cacheRangePromise(cacheKey: string, promise: Promise<string[][]>) {
     const oldestKey = rangeReadCache.keys().next().value
     if (oldestKey) rangeReadCache.delete(oldestKey)
   }
-  rangeReadCache.set(cacheKey, { expiresAt: Date.now() + RANGE_CACHE_MS, promise })
-  promise.catch(() => rangeReadCache.delete(cacheKey))
+  const entry: RangeCacheEntry = { expiresAt: Date.now() + RANGE_CACHE_MS, promise }
+  rangeReadCache.set(cacheKey, entry)
+  promise.then((rows) => { entry.value = rows; entry.loadedAt = Date.now() }, () => { if (rangeReadCache.get(cacheKey) === entry) rangeReadCache.delete(cacheKey) })
   return promise
 }
 
@@ -443,6 +472,13 @@ export function clearSpreadsheetReadCache(spreadsheetId: string) {
   }
 }
 
+/** Une plage lue dans Google Sheets, sans passer par le cache. */
+function fetchRange(spreadsheetId: string, range: string, valueRenderOption?: "FORMATTED_VALUE" | "UNFORMATTED_VALUE" | "FORMULA") {
+  const parameters = valueRenderOption ? `?valueRenderOption=${encodeURIComponent(valueRenderOption)}` : ""
+  return googleSheetsFetch(`spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}${parameters}`)
+    .then(async (response) => normalizeGoogleSheetRows(((await response.json()) as ValuesResponse).values))
+}
+
 export async function readRange(
   spreadsheetId: string,
   range: string,
@@ -451,13 +487,8 @@ export async function readRange(
   const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
   const cached = rangeReadCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.promise
-  const parameters = valueRenderOption
-    ? `?valueRenderOption=${encodeURIComponent(valueRenderOption)}`
-    : ""
-  const promise = googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}${parameters}`,
-  ).then(async (response) => normalizeGoogleSheetRows(((await response.json()) as ValuesResponse).values))
-  return cacheRangePromise(cacheKey, promise)
+  const load = () => fetchRange(spreadsheetId, range, valueRenderOption)
+  return staleRange(cacheKey, load) ?? cacheRangePromise(cacheKey, load())
 }
 
 /**
@@ -515,7 +546,9 @@ async function readRanges(
   ranges.forEach((range, index) => {
     const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
     const cached = rangeReadCache.get(cacheKey)
+    const stale = cached && cached.expiresAt > Date.now() ? null : staleRange(cacheKey, () => fetchRange(spreadsheetId, range, valueRenderOption))
     if (cached && cached.expiresAt > Date.now()) results[index] = cached.promise
+    else if (stale) results[index] = stale
     else missing.push({ range, index, cacheKey })
   })
   if (missing.length) {

@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useState, type ComponentType, type ReactNode } from "react"
+import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react"
 import {
   Anchor, Apple, Atom, Award, Axe, Baby, Banana, Bandage, Banknote, Battery, BatteryFull, Bean, Beef, Beer, Bell, Biohazard, Bird, Bomb, Bone, BookOpen, Brain, Bug, Candy, Carrot, Castle, Cat, Cherry, Church, Circle, Clock, Cloud, CloudLightning, Clover, Coins, Compass, Cookie, Cross, Crosshair, Crown, Diamond, Dices, Dna, Dog, Droplet, Droplets, Drumstick, Egg, Eye, EyeOff, Feather, Fingerprint, Fish, Flag, FlaskConical, Flame, Flower, Flower2, Footprints, Frown, Gavel, Gem, Ghost, Gift, Glasses, Grape, Hammer, Hand, HandHeart, Heart, HeartCrack, HeartPulse, Hexagon, Hourglass, Key, Landmark, Laugh, Leaf, Lock, Map as MapIcon, Medal, Minus, Moon, Mountain, MountainSnow, Music, Octagon, Orbit, PawPrint, Pentagon, Pickaxe, PiggyBank, Pill, Plus, Rabbit, Radiation, Rainbow, Rat, Rocket, Scale, Scroll, Shell, Shield, ShieldHalf, Ship, Shovel, Skull, Smile, Snail, Snowflake, Sparkle, Sparkles, Sprout, Square, Squirrel, Star, StarHalf, Sun, Sunrise, Sunset, Sword, Swords, Syringe, Target, Tent, Tornado, TreePine, Trees, Triangle, Trophy, Turtle, Umbrella, User, Users, WandSparkles, Waves, Wheat, Wind, Wine, Worm, Wrench, X, Zap,
   Palette,
@@ -175,19 +175,93 @@ export function indexIcon(name: string | undefined) {
 export const DEFAULT_GLYPH_STROKE = "#fffaf0"
 
 /**
+ * La silhouette pleine d'une icône, en masque (adresse d'image). Certaines icônes (le
+ * cerveau) sont faites d'arcs ouverts : remplis un à un, ils laissent un grand vide au
+ * milieu. On dessine l'icône, on remplit depuis les bords tout ce qui est dehors, et tout
+ * ce que ce remplissage n'atteint pas est l'intérieur. Calculée une fois par icône.
+ */
+const silhouettes = new Map<string, Promise<string>>()
+const SILHOUETTE_SIZE = 96
+
+function silhouetteOf(name: string, svg: SVGSVGElement) {
+  let promise = silhouettes.get(name)
+  if (promise) return promise
+  promise = new Promise<string>((resolve) => {
+    const copy = svg.cloneNode(true) as SVGSVGElement
+    copy.setAttribute("width", String(SILHOUETTE_SIZE))
+    copy.setAttribute("height", String(SILHOUETTE_SIZE))
+    copy.setAttribute("stroke", "#000")
+    copy.setAttribute("stroke-width", "2")
+    copy.setAttribute("fill", "none")
+    copy.removeAttribute("class")
+    const image = new Image()
+    image.onload = () => {
+      const canvas = document.createElement("canvas")
+      canvas.width = canvas.height = SILHOUETTE_SIZE
+      const context = canvas.getContext("2d")
+      if (!context) return resolve("")
+      context.drawImage(image, 0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
+      const pixels = context.getImageData(0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
+      const size = SILHOUETTE_SIZE
+      const outside = new Uint8Array(size * size)
+      const stack: number[] = []
+      for (let i = 0; i < size; i += 1) stack.push(i, (size - 1) * size + i, i * size, i * size + size - 1)
+      while (stack.length) {
+        const at = stack.pop() as number
+        if (outside[at] || pixels.data[at * 4 + 3] > 40) continue
+        outside[at] = 1
+        const x = at % size
+        if (x > 0) stack.push(at - 1)
+        if (x < size - 1) stack.push(at + 1)
+        if (at >= size) stack.push(at - size)
+        if (at < size * (size - 1)) stack.push(at + size)
+      }
+      for (let at = 0; at < size * size; at += 1) {
+        pixels.data[at * 4] = pixels.data[at * 4 + 1] = pixels.data[at * 4 + 2] = 0
+        pixels.data[at * 4 + 3] = outside[at] ? 0 : 255
+      }
+      context.putImageData(pixels, 0, 0)
+      resolve(canvas.toDataURL())
+    }
+    image.onerror = () => resolve("")
+    image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(copy))}`
+  })
+  silhouettes.set(name, promise)
+  return promise
+}
+
+/** Le masque de la silhouette d'une icône, et la référence à poser sur son dessin. */
+function useSilhouette(name: string, enabled: boolean) {
+  const [node, setNode] = useState<SVGSVGElement | null>(null)
+  const [mask, setMask] = useState<{ name: string; url: string } | null>(null)
+  useEffect(() => {
+    if (!enabled || !node) return
+    let alive = true
+    void silhouetteOf(name, node).then((url) => { if (alive) setMask({ name, url }) })
+    return () => { alive = false }
+  }, [enabled, name, node])
+  return [setNode, mask?.name === name ? mask.url : ""] as const
+}
+
+/**
  * Une icône d'index : une icône de la liste, ou un émoji / caractère tel quel. Pleine,
  * elle est remplie de sa couleur et ses traits (aiguilles d'une horloge, yeux d'un
  * sourire) restent visibles dans la couleur `stroke` ; vide, seul son contour est tracé.
  */
 export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = true, stroke }: { icon?: string; emoji?: string; className?: string; filled?: boolean; stroke?: string }) {
+  const entry = indexIcon(icon)
+  const [silhouetteRef, silhouetteMask] = useSilhouette(entry.name, filled && !emoji?.trim())
   if (emoji?.trim()) return <span aria-hidden="true" className={`inline-flex items-center justify-center leading-none ${className}`} style={{ fontSize: "0.95em", filter: filled ? undefined : "grayscale(1)" }}>{emoji.trim()}</span>
-  const { Icon } = indexIcon(icon)
+  const { Icon } = entry
   if (!filled) return <Icon aria-hidden="true" className={className} fill="none" strokeWidth={1.8} />
-  // Deux dessins superposés : la silhouette pleine, puis tous les traits par-dessus. Une
-  // icône dont le contour est tracé en dernier (le cercle du sourire) ne cache plus ses yeux.
+  // Trois dessins superposés : la silhouette (intérieur compris), les formes remplies, puis
+  // tous les traits par-dessus. Une icône dont le contour est tracé en dernier (le cercle
+  // du sourire) ne cache plus ses yeux, et le cerveau est plein.
+  const mask = silhouetteMask ? `url(${silhouetteMask}) center / 100% 100% no-repeat` : undefined
   return <span aria-hidden="true" className={`relative inline-flex shrink-0 ${className}`}>
+    {mask && <span className="absolute inset-0 bg-current" style={{ mask, WebkitMask: mask }} />}
     <Icon className="absolute inset-0 size-full" fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-    <Icon className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
+    <Icon ref={silhouetteRef} className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
   </span>
 }
 

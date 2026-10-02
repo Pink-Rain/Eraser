@@ -19,7 +19,9 @@ import {
   EFFECT_IMAGE_HEADER,
   EFFECT_FX_HEADER,
   EFFECT_TARGET_HEADER,
-  EFFECT_UNLINKED_HEADER,
+  EFFECT_APPLY_OPTIONS,
+  EFFECT_PAGE_HEADER,
+  EFFECT_PAGE_LEGACY_HEADERS,
   EFFECTS_TAB,
   STATE_LEVEL_HEADERS,
   STATES_TAB,
@@ -35,8 +37,8 @@ export type StateEffect = {
   change: number | null
   changeText: string
   image: string
-  /** Ne vise aucune caractéristique : sa couleur teinte toute la fiche. */
-  unlinked: boolean
+  /** Où sa couleur s'applique (colonne « Appliqué à la page ») ; nulle part si rien n'est choisi. */
+  apply: { page: boolean; skills: boolean; portrait: boolean }
   fx: StateFx[]
 }
 
@@ -85,6 +87,17 @@ export function changeAmount(text: string) {
   return match ? Number(match[0]) : null
 }
 
+/**
+ * Les choix de la colonne « Appliqué à la page » (« Page entière, Portrait »). Une ancienne
+ * case cochée (« TRUE », « Oui ») vaut « Page entière ».
+ */
+export function effectApply(value: string) {
+  const chosen = new Set(value.split(/[,;\n]+/).map((part) => foldName(part)).filter(Boolean))
+  const has = (option: (typeof EFFECT_APPLY_OPTIONS)[number]) => chosen.has(foldName(option))
+  const legacyChecked = /^(oui|vrai|true|x|1|yes|✓|☑)$/i.test(value.trim())
+  return { page: has("Page entière") || legacyChecked, skills: has("Compétence liée"), portrait: has("Portrait") }
+}
+
 /** L'Index des états lu tel qu'il est : onglets « États » et « Effets ». */
 export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCatalog {
   const statesTable = tables.find((table) => foldName(table.tabName) === foldName(STATES_TAB))
@@ -94,7 +107,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     const name = read(row, ["Nom"])
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), unlinked: /^(oui|vrai|true|x|1|✓|☑)$/i.test(read(row, [EFFECT_UNLINKED_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -162,10 +175,11 @@ export type StateContribution = { state: string; level: 1 | 2; effect: string; t
  */
 export function stateContributions(catalog: StatesCatalog, states: CharacterState[], targetOf: (name: string) => string | null): StateContribution[] {
   return states.flatMap((state) => activeEffectsOf(catalog, state).flatMap((effect) => {
-    if (effect.unlinked || effect.change === null || !effect.change) return []
+    if (effect.change === null || !effect.change) return []
     return effect.targets.flatMap((name) => {
       const target = targetOf(name)
-      return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change as number, color: effect.color }] : []
+      // La couleur ne teinte la case visée que si « Compétence liée » est choisi.
+      return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change as number, color: effect.apply.skills ? effect.color : "" }] : []
     })
   }))
 }
@@ -174,9 +188,9 @@ export function stateContributions(catalog: StatesCatalog, states: CharacterStat
 export function portraitLayers(catalog: StatesCatalog, states: CharacterState[]) {
   const effects = states.flatMap((state) => activeEffectsOf(catalog, state))
   const isColor = (color: string) => /^#[0-9a-f]{3,8}$/i.test(color)
-  // Un effet « non lié aux caractéristiques » teinte toute la fiche ; les autres, le portrait.
-  const colors = [...new Set(effects.filter((effect) => !effect.unlinked).map((effect) => effect.color).filter(isColor))]
-  const sheetColors = [...new Set(effects.filter((effect) => effect.unlinked).map((effect) => effect.color).filter(isColor))]
+  // La couleur ne s'applique qu'où c'est choisi : la page entière, le portrait.
+  const colors = [...new Set(effects.filter((effect) => effect.apply.portrait).map((effect) => effect.color).filter(isColor))]
+  const sheetColors = [...new Set(effects.filter((effect) => effect.apply.page).map((effect) => effect.color).filter(isColor))]
   const images = [...new Set(effects.map((effect) => effect.image).filter(Boolean))]
   const fx = effects.flatMap((effect) => effect.fx.map((name) => ({ name, color: isColor(effect.color) ? effect.color : "" })))
   return { colors, sheetColors, images, fx: [...new Map(fx.map((item) => [item.name, item])).values()] }

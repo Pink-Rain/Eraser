@@ -11,6 +11,7 @@ import {
   clearSpreadsheetReadCache,
   googleSheetsJson,
   readRange,
+  readRangeFreshWithOffset,
   sheetTabRange,
   spreadsheetTabs,
   updateRange,
@@ -21,8 +22,13 @@ import { findEntry, SCHEMA_TAB, type SchemaEntry } from "@/lib/index-schema-shar
 
 const HEADERS = ["Onglet", "Colonne", "Nom d’origine", "Type et réglages (JSON)", "État", "Supprimé le"]
 
-const cache = new Map<string, { expiresAt: number; promise: Promise<SchemaEntry[]> }>()
-const CACHE_MS = 60_000
+/**
+ * Le schéma de chaque classeur, gardé en mémoire. Passé CACHE_MS, il est rendu aussitôt
+ * et relu en arrière-plan (une modification faite ailleurs apparaît à la lecture
+ * suivante) ; les changements faits depuis Eraser relisent le schéma tout de suite.
+ */
+const cache = new Map<string, { expiresAt: number; promise: Promise<SchemaEntry[]>; loaded?: boolean; refreshing?: boolean }>()
+const CACHE_MS = 5 * 60_000
 
 function parseSpec(value: string): IndexColumnSpec | null {
   if (!value.trim()) return null
@@ -51,18 +57,29 @@ function parseState(value: string): SchemaEntry["state"] {
 export function readSchema(spreadsheetId: string, options: { refresh?: boolean } = {}) {
   const cached = cache.get(spreadsheetId)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
-  const promise = (async () => {
-    const tabs = await spreadsheetTabs(spreadsheetId)
-    if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return []
-    clearSpreadsheetReadCache(spreadsheetId)
-    const rows = await readRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
-    return rows.flatMap((row): SchemaEntry[] => row[0]?.trim()
-      ? [{ tab: row[0].trim(), column: (row[1] ?? "").trim(), origin: (row[2] ?? "").trim(), spec: parseSpec(row[3] ?? ""), state: parseState(row[4] ?? ""), deletedAt: (row[5] ?? "").trim() }]
-      : [])
-  })()
-  cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise })
-  promise.catch(() => { if (cache.get(spreadsheetId)?.promise === promise) cache.delete(spreadsheetId) })
+  if (!options.refresh && cached?.loaded) {
+    if (!cached.refreshing) {
+      cached.refreshing = true
+      const fresh = loadSchema(spreadsheetId)
+      fresh.then((entries) => { if (cache.get(spreadsheetId) === cached) cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(entries), loaded: true }) }, () => { cached.refreshing = false })
+    }
+    return cached.promise
+  }
+  const promise = loadSchema(spreadsheetId)
+  const entry: { expiresAt: number; promise: Promise<SchemaEntry[]>; loaded?: boolean } = { expiresAt: Date.now() + CACHE_MS, promise }
+  cache.set(spreadsheetId, entry)
+  promise.then(() => { entry.loaded = true }, () => { if (cache.get(spreadsheetId) === entry) cache.delete(spreadsheetId) })
   return promise
+}
+
+async function loadSchema(spreadsheetId: string) {
+  const tabs = await spreadsheetTabs(spreadsheetId)
+  if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return []
+  // Lu directement dans Sheets, sans vider le cache des autres onglets du classeur.
+  const { rows } = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
+  return rows.flatMap((row): SchemaEntry[] => row[0]?.trim()
+    ? [{ tab: row[0].trim(), column: (row[1] ?? "").trim(), origin: (row[2] ?? "").trim(), spec: parseSpec(row[3] ?? ""), state: parseState(row[4] ?? ""), deletedAt: (row[5] ?? "").trim() }]
+    : [])
 }
 
 /** Crée l'onglet de schéma, caché, s'il n'existe pas. */

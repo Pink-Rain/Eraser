@@ -31,13 +31,29 @@ export type CustomIndexEntry = {
   row: number
 }
 
-let registryCache: { expiresAt: number; promise: Promise<{ spreadsheetId: string | null; entries: CustomIndexEntry[] }> } | null = null
+type Registry = { spreadsheetId: string | null; entries: CustomIndexEntry[] }
+let registryCache: { expiresAt: number; promise: Promise<Registry>; loaded?: boolean; refreshing?: boolean } | null = null
+const REGISTRY_CACHE_MS = 5 * 60_000
 
+/**
+ * Le registre des index créés dans Eraser. Passé quelques minutes, il est rendu aussitôt
+ * et relu en arrière-plan (chercher le classeur dans Drive prend du temps) ; créer,
+ * renommer ou supprimer un index relit le registre tout de suite.
+ */
 function loadedRegistry(options: { refresh?: boolean } = {}) {
-  if (!options.refresh && registryCache && registryCache.expiresAt > Date.now()) return registryCache.promise
+  const cached = registryCache
+  if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
+  if (!options.refresh && cached?.loaded) {
+    if (!cached.refreshing) {
+      cached.refreshing = true
+      loadRegistry().then((registry) => { if (registryCache === cached) registryCache = { expiresAt: Date.now() + REGISTRY_CACHE_MS, promise: Promise.resolve(registry), loaded: true } }, () => { cached.refreshing = false })
+    }
+    return cached.promise
+  }
   const promise = loadRegistry()
-  registryCache = { expiresAt: Date.now() + 60_000, promise }
-  promise.catch(() => { registryCache = null })
+  const entry: { expiresAt: number; promise: Promise<Registry>; loaded?: boolean } = { expiresAt: Date.now() + REGISTRY_CACHE_MS, promise }
+  registryCache = entry
+  promise.then(() => { entry.loaded = true }, () => { if (registryCache === entry) registryCache = null })
   return promise
 }
 

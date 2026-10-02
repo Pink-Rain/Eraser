@@ -23,11 +23,12 @@ const tables = [
   },
   {
     tabName: "Effets",
-    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID"],
+    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID", "Appliqué à la page"],
     rows: [
-      row(["Effroi intense", "Volonté mentale", "#6b21a8", "-30", "", "EFF-1"]),
-      row(["Détermination", "Force, Dextérité", "#b8872a", "+10", "", "EFF-2"]),
-      row(["Détermination forte", "Force, Dextérité", "#b8872a", "+20", "", "EFF-3"]),
+      row(["Effroi intense", "Volonté mentale", "#6b21a8", "-30", "", "EFF-1", "Page entière, Compétence liée"]),
+      row(["Détermination", "Force, Dextérité", "#b8872a", "+10", "", "EFF-2", "Portrait"]),
+      // Ancienne case cochée : vaut « Page entière ».
+      row(["Détermination forte", "Force, Dextérité", "#b8872a", "+20", "", "EFF-3", "TRUE"]),
     ],
   },
 ];
@@ -66,7 +67,15 @@ test("les états posés sont relus prudemment et teintent le portrait", () => {
     { id: "ETA-1", name: "Faim", level: 1 },
   ]);
   const catalog = states.parseStatesCatalog(tables, columns);
-  assert.deepEqual(states.portraitLayers(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }]).colors, ["#b8872a"]);
+  // La couleur ne s'applique qu'où c'est choisi dans « Appliqué à la page ».
+  const portraitOnly = states.portraitLayers(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }]);
+  assert.deepEqual([portraitOnly.colors, portraitOnly.sheetColors], [["#b8872a"], []]);
+  const legacyPage = states.portraitLayers(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 2 }]);
+  assert.deepEqual([legacyPage.colors, legacyPage.sheetColors], [[], ["#b8872a"]]);
+  const target = (name) => `carac:${name}`;
+  assert.equal(states.stateContributions(catalog, [{ id: "x", name: "Effrayé", level: 2 }], target)[0].color, "#6b21a8");
+  assert.equal(states.stateContributions(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }], target)[0].color, "");
+  assert.deepEqual(states.effectApply("portrait ; page entiere"), { page: true, skills: false, portrait: true });
   assert.equal(states.changeAmount("− 15 %"), -15);
 });
 
