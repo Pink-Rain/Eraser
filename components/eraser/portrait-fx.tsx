@@ -34,3 +34,15 @@ export function PortraitFx({ fx }: { fx: Array<{ name: StateFx; color: string }>
     return className ? [<span key={item.name} aria-hidden="true" className={`pointer-events-none absolute inset-0 ${className}`} style={{ "--fx": item.color || "#a8a29e" } as CSSProperties} />] : []
   })}</>
 }
+
+/** Les FX des états posés sur une case de la fiche (« FX appliqué à » : compétences liées). */
+export function stateFxOf(items: Array<{ source?: string; fx?: Array<{ name: string; color: string }> }>) {
+  const fx = items.flatMap((item) => item.source === "état" ? item.fx ?? [] : []) as Array<{ name: StateFx; color: string }>
+  return [...new Map(fx.map((item) => [item.name, item])).values()]
+}
+
+/** Les calques de FX d'une case ou de la page, coupés à leurs bords (les survols restent libres). */
+export function FxOverlay({ fx, className = "" }: { fx: Array<{ name: StateFx; color: string }>; className?: string }) {
+  if (!fx.length) return null
+  return <span aria-hidden="true" className={`pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] ${className}`}><PortraitFx fx={fx} /></span>
+}

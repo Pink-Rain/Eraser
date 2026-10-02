@@ -17,6 +17,7 @@ import {
   EFFECT_CHANGE_HEADER,
   EFFECT_COLOR_HEADER,
   EFFECT_IMAGE_HEADER,
+  EFFECT_FX_APPLY_HEADER,
   EFFECT_FX_HEADER,
   EFFECT_TARGET_HEADER,
   EFFECT_APPLY_OPTIONS,
@@ -37,10 +38,14 @@ export type StateEffect = {
   change: number | null
   changeText: string
   image: string
-  /** Où sa couleur s'applique (colonne « Appliqué à la page ») ; nulle part si rien n'est choisi. */
-  apply: { page: boolean; skills: boolean; portrait: boolean }
+  /** Où sa couleur s'applique (colonne « Couleur appliquée à ») ; nulle part si rien n'est choisi. */
+  apply: EffectTargets
+  /** Où ses FX se dessinent (colonne « FX appliqué à ») ; nulle part si rien n'est choisi. */
+  fxApply: EffectTargets
   fx: StateFx[]
 }
+
+export type EffectTargets = { page: boolean; skills: boolean; portrait: boolean }
 
 export type StateDefinition = {
   id: string
@@ -88,10 +93,10 @@ export function changeAmount(text: string) {
 }
 
 /**
- * Les choix de la colonne « Appliqué à la page » (« Page entière, Portrait »). Une ancienne
+ * Les choix d'une colonne « … appliqué(e) à » (« Page entière, Portrait »). Une ancienne
  * case cochée (« TRUE », « Oui ») vaut « Page entière ».
  */
-export function effectApply(value: string) {
+export function effectApply(value: string): EffectTargets {
   const chosen = new Set(value.split(/[,;\n]+/).map((part) => foldName(part)).filter(Boolean))
   const has = (option: (typeof EFFECT_APPLY_OPTIONS)[number]) => chosen.has(foldName(option))
   const legacyChecked = /^(oui|vrai|true|x|1|yes|✓|☑)$/i.test(value.trim())
@@ -107,7 +112,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     const name = read(row, ["Nom"])
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -167,7 +172,7 @@ export function activeEffectsOf(catalog: StatesCatalog, state: CharacterState) {
   return names.flatMap((name) => catalog.effects.filter((effect) => foldName(effect.name) === foldName(name)))
 }
 
-export type StateContribution = { state: string; level: 1 | 2; effect: string; target: string; amount: number; color: string }
+export type StateContribution = { state: string; level: 1 | 2; effect: string; target: string; amount: number; color: string; fx: Array<{ name: StateFx; color: string }> }
 
 /**
  * Ce que les états posés changent : un changement par effet et par cible visée. `targetOf`
@@ -175,23 +180,30 @@ export type StateContribution = { state: string; level: 1 | 2; effect: string; t
  */
 export function stateContributions(catalog: StatesCatalog, states: CharacterState[], targetOf: (name: string) => string | null): StateContribution[] {
   return states.flatMap((state) => activeEffectsOf(catalog, state).flatMap((effect) => {
-    if (effect.change === null || !effect.change) return []
+    // Une cible sans changement de valeur peut tout de même recevoir la couleur ou des FX.
+    const decorates = (effect.apply.skills && isColor(effect.color)) || (effect.fxApply.skills && effect.fx.length > 0)
+    if ((effect.change === null || !effect.change) && !decorates) return []
     return effect.targets.flatMap((name) => {
       const target = targetOf(name)
-      // La couleur ne teinte la case visée que si « Compétence liée » est choisi.
-      return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change as number, color: effect.apply.skills ? effect.color : "" }] : []
+      // La couleur et les FX ne vont sur la case visée que si « Compétence liée » est choisi.
+      return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change ?? 0, color: effect.apply.skills ? effect.color : "", fx: effect.fxApply.skills ? effect.fx.map((fx) => ({ name: fx, color: isColor(effect.color) ? effect.color : "" })) : [] }] : []
     })
   }))
 }
 
-/** Les couleurs et images des effets en vigueur, pour le portrait. */
+const isColor = (color: string) => /^#[0-9a-f]{3,8}$/i.test(color)
+
+/** Les couleurs, images et FX des effets en vigueur, pour le portrait et la page. */
 export function portraitLayers(catalog: StatesCatalog, states: CharacterState[]) {
   const effects = states.flatMap((state) => activeEffectsOf(catalog, state))
-  const isColor = (color: string) => /^#[0-9a-f]{3,8}$/i.test(color)
   // La couleur ne s'applique qu'où c'est choisi : la page entière, le portrait.
   const colors = [...new Set(effects.filter((effect) => effect.apply.portrait).map((effect) => effect.color).filter(isColor))]
   const sheetColors = [...new Set(effects.filter((effect) => effect.apply.page).map((effect) => effect.color).filter(isColor))]
   const images = [...new Set(effects.map((effect) => effect.image).filter(Boolean))]
-  const fx = effects.flatMap((effect) => effect.fx.map((name) => ({ name, color: isColor(effect.color) ? effect.color : "" })))
-  return { colors, sheetColors, images, fx: [...new Map(fx.map((item) => [item.name, item])).values()] }
+  // Les FX ne se dessinent qu'où « FX appliqué à » le dit, teintés de la couleur de l'effet.
+  const fxOf = (where: (effect: StateEffect) => boolean) => {
+    const fx = effects.filter(where).flatMap((effect) => effect.fx.map((name) => ({ name, color: isColor(effect.color) ? effect.color : "" })))
+    return [...new Map(fx.map((item) => [item.name, item])).values()]
+  }
+  return { colors, sheetColors, images, fx: fxOf((effect) => effect.fxApply.portrait), sheetFx: fxOf((effect) => effect.fxApply.page) }
 }

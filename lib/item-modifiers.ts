@@ -227,8 +227,10 @@ export type LinkedModifierItem = {
   slotId: string
   /** « état » : un effet d'un état posé (Index des états), sans case à cocher. */
   source?: "objet" | "état"
-  /** La couleur de l'effet d'un état. */
+  /** La couleur de l'effet d'un état (si « Couleur appliquée à » vise les compétences liées). */
   color?: string
+  /** Les FX de l'effet d'un état à dessiner sur la case (« FX appliqué à » : compétences liées). */
+  fx?: Array<{ name: string; color: string }>
   /** Ce que l’objet modifie quand ce n’est pas la valeur principale (« Réussite critique »…). */
   tag?: string
   name: string
@@ -289,7 +291,7 @@ function fold(value: string) {
 }
 
 /** Ajoute aux objets les changements des états posés : ils comptent toujours (pas de case à cocher). */
-export function withStateModifiers(index: ModifierIndex, contributions: Array<{ state: string; level: number; effect: string; target: string; amount: number; color: string }>): ModifierIndex {
+export function withStateModifiers(index: ModifierIndex, contributions: Array<{ state: string; level: number; effect: string; target: string; amount: number; color: string; fx?: Array<{ name: string; color: string }> }>): ModifierIndex {
   if (!contributions.length) return index
   const totals = new Map(index.totals)
   const items = new Map(index.items)
@@ -299,6 +301,7 @@ export function withStateModifiers(index: ModifierIndex, contributions: Array<{ 
       slotId: `etat:${contribution.state}:${contribution.effect}`,
       source: "état",
       color: contribution.color,
+      fx: contribution.fx,
       name: `${contribution.state}${contribution.level === 2 ? " (niv. 2)" : ""}`,
       tag: contribution.effect !== contribution.state ? contribution.effect : undefined,
       equipped: true,

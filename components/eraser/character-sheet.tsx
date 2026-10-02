@@ -18,7 +18,7 @@ import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
-import { PortraitFx, portraitImageFxClass } from "@/components/eraser/portrait-fx"
+import { FxOverlay, PortraitFx, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
 import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -269,7 +269,7 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
       {items.map((entry) => entry.source === "état" ? <div key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex items-center gap-2 rounded-lg border border-l-4 bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor, borderLeftColor: entry.color || "#78716c" }}>
         <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
         {entry.tag && <span className="shrink-0 truncate text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.tag}</span>}
-        <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatModifierAmount(entry.amount)}</span>
+        {entry.amount !== 0 && <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatModifierAmount(entry.amount)}</span>}
       </div> : <label key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
         <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
         <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
@@ -298,7 +298,7 @@ function ModifierHoverShell({ items, toggle, title, color, total, children }: { 
 /** Les neuf colonnes d'une compétence dans la fiche, dans l'ordre de `characterSkillMetrics`. */
 type SkillCells = number[]
 
-function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, tint = "", toggle }: { skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; toggle: SlotToggle }) {
+function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, tint = "", fx = [], toggle }: { skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const shortName = skill.name
     .replace(/^Maîtrise\b/, "Maît")
@@ -319,8 +319,9 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
   const metricModifiers = [statModifier, successModifier, failureModifier]
   const { anchorRef, above, measure } = useFlipPlacement()
   return <div ref={anchorRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border, ...(tint ? { backgroundColor: `${tint}38`, boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}>
-      <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}</span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? "text-foreground" : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
+    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border, ...(tint ? { backgroundColor: `${tint}38`, boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}>
+      <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}</span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? `text-foreground ${portraitImageFxClass(fx)}` : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
+      <FxOverlay fx={fx} />
     </button>
     {open && <div ref={measure} className={`absolute left-2 right-2 ${above ? "bottom-[calc(100%-2px)]" : "top-[calc(100%-2px)]"} z-30 rounded-xl border bg-popover p-3 text-popover-foreground shadow-2xl`} style={{ borderColor: color.border }}>
       <p className="mb-2 font-display text-sm font-semibold" style={{ color: color.accent }}>{shortName}</p><div className="mb-2 grid grid-cols-[1fr_3.5rem_3.5rem] gap-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Calcul</span><span>B/M</span><span>Mod.</span></div>
@@ -353,9 +354,11 @@ function CharacteristicHeader({ characteristic, cells, color, values, commit, st
   const place = () => measure(panelRef.current)
   // Un état coloré qui vise la caractéristique teinte son en-tête de sa couleur.
   const tint = stateTint(linkedItems)
+  const fx = stateFxOf(linkedItems)
   const total = totalWithModifier(values[cells.value], statModifier)
   return <div ref={anchorRef} onMouseEnter={place} onFocusCapture={place} className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent, backgroundImage: tint ? `linear-gradient(${tint}d9, ${tint}d9)` : undefined }}>
-    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className="text-2xl font-bold tabular-nums" title={statModifier ? `Base ${values[cells.value] || "0"} ${formatModifierAmount(statModifier)}` : undefined}>{total}</span></InlineEdit></span></div>
+    <FxOverlay fx={fx} />
+    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className={`inline-block text-2xl font-bold tabular-nums ${portraitImageFxClass(fx)}`} title={statModifier ? `Base ${values[cells.value] || "0"} ${formatModifierAmount(statModifier)}` : undefined}>{total}</span></InlineEdit></span></div>
     <div ref={panelRef} className={`pointer-events-none absolute left-3 right-3 z-40 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${above ? "bottom-[calc(100%-2px)] -translate-y-1" : "top-[calc(100%-2px)] translate-y-1"}`} style={{ borderColor: color.border }}>
       <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{characteristic.name}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
       <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = cells[kind]; return <div key={kind}><p className="mb-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}<ModifierBadge amount={criticalModifiers[kind]} /></p><InlineEdit numeric singleClick compact label={`${characteristic.name} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
@@ -373,8 +376,9 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseCol
   const { anchorRef, above, measure } = useFlipPlacement()
   // Un état coloré qui vise cette case la teinte de sa couleur.
   const color = stateTint(linkedItems) || baseColor
+  const fx = stateFxOf(linkedItems)
   return <div ref={anchorRef} className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} font-semibold tabular-nums`} style={{ color }}>{total}</span></button>
+    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
     {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{modifier ? formatModifierAmount(modifier) : "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
@@ -388,14 +392,16 @@ function CounterTile({ label, color, span, value, modifier, linkedItems, toggle,
   const [open, setOpen] = useState(false)
   const { anchorRef, above, measure } = useFlipPlacement()
   const tint = stateTint(linkedItems)
+  const fx = stateFxOf(linkedItems)
   const shown = tint || color
   const numeric = Number.parseFloat(value || "0") || 0
   const total = totalWithModifier(value, modifier)
   return <div ref={anchorRef} className={`relative flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${span}`} style={{ backgroundColor: `${shown}${tint ? "33" : "16"}`, borderTop: `2px solid ${shown}` }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+    <FxOverlay fx={fx} />
     <p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p>
     <div className="mt-1 inline-flex items-center gap-1">
       <button type="button" onClick={() => onCommit(String(numeric - 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Diminuer ${label}`}><Minus className="size-3" /></button>
-      <InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className="min-w-7 text-center text-xl font-semibold tabular-nums" style={modifier || tint ? { color: shown } : undefined} title={modifier ? `Base ${value || "0"} ${formatModifierAmount(modifier)}` : undefined}>{total}</span></InlineEdit>
+      <InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className={`inline-block min-w-7 text-center text-xl font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={modifier || tint ? { color: shown } : undefined} title={modifier ? `Base ${value || "0"} ${formatModifierAmount(modifier)}` : undefined}>{total}</span></InlineEdit>
       <button type="button" onClick={() => onCommit(String(numeric + 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Augmenter ${label}`}><Plus className="size-3" /></button>
     </div>
     {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-60 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl`} style={{ borderColor: `${shown}66` }}>
@@ -802,7 +808,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(linkedForValue(9)) || item.color || "#6e9ee8"; return [<div key={item.key} className="xl:col-span-3 xl:row-span-2"><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10))}><LifePool label={item.name} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>] }
+    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(linkedForValue(9)) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...linkedForValue(9)])} /><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10))}><LifePool label={item.name} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
     if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
@@ -880,6 +886,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             tagLinkedItems(failureLabel, ...failureIndexes.map(linkedForValue)),
           )}
           tint={stateTint(linkedItemsFor(modifierIndex, skillModifierTargetId(skill.key)))}
+          fx={stateFxOf(linkedItemsFor(modifierIndex, skillModifierTargetId(skill.key)))}
           toggle={slotToggle}
         />
       })}
@@ -903,11 +910,13 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const activeCharacterTab = characterTabs.find((tab) => tab.id === activeTab) ?? characterTabs[0]
   const lifeState = characterLifeState(values[9], totalWithModifier(values[10], modifierForValue(10)))
 
-  return <div data-life={lifeState} className="character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
+  return <div data-life={lifeState} className={`character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10 ${portraitImageFxClass(portrait.sheetFx)}`} style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
     {/* Bichromie rouge sang de la fiche « morte » : la luminosité de chaque point devient
         un rouge, du plus sombre au rose pâle, comme le gris le fait pour une fiche à terre. */}
     {/* Un effet « appliqué à la page » teinte toute la fiche de sa couleur, comme à 0 PV. */}
     {portrait.sheetColors.length > 0 && <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] mix-blend-color" style={{ background: portrait.sheetColors.length > 1 ? `linear-gradient(160deg, ${portrait.sheetColors.join(", ")})` : portrait.sheetColors[0], opacity: 0.35 }} />}
+    {/* Les FX « appliqués à la page entière » se dessinent sur toute la fiche. */}
+    <FxOverlay fx={portrait.sheetFx} className="z-[5]" />
     <svg aria-hidden="true" width="0" height="0" className="pointer-events-none absolute"><filter id="eraser-life-dead" colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values="0.1318 0.4434 0.0448 0 0.35 0.1446 0.4863 0.0491 0 0.02 0.1382 0.4649 0.0469 0 0.03 0 0 0 1 0" /></filter></svg>
     <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: `${campaignAccent}55` }}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${campaignAccent}, ${campaignAccent}66 58%, transparent)` }} />

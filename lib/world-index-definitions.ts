@@ -52,11 +52,13 @@ export const EFFECT_IMAGE_HEADER = "Image"
  * 0 PV), les caractéristiques et compétences visées, le portrait. Rien de choisi : la
  * couleur ne s'applique nulle part.
  */
-export const EFFECT_PAGE_HEADER = "Appliqué à la page"
+export const EFFECT_PAGE_HEADER = "Couleur appliquée à"
 export const EFFECT_APPLY_OPTIONS = ["Page entière", "Compétence liée", "Portrait"] as const
 /** L'ancien nom de cette colonne : l'en-tête est renommé sur place dans la feuille. */
-export const EFFECT_PAGE_LEGACY_HEADERS = ["Non lié aux caractéristiques"]
+export const EFFECT_PAGE_LEGACY_HEADERS = ["Appliqué à la page", "Non lié aux caractéristiques"]
 export const EFFECT_FX_HEADER = "FX"
+/** Où les FX de l'effet se dessinent : mêmes choix que la couleur ; nulle part si rien n'est choisi. */
+export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills" | "achievements"
 
@@ -277,8 +279,8 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       {
         name: EFFECTS_TAB,
         itemLabel: "un effet",
-        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER],
-        widths: [240, 320, 130, 190, 160, 130, 200, 220],
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER],
+        widths: [240, 320, 130, 190, 160, 130, 220, 220, 220],
         idPrefix: "EFF",
         renamedHeaders: EFFECT_PAGE_LEGACY_HEADERS.map((legacy) => [legacy, EFFECT_PAGE_HEADER] as [string, string]),
       },
@@ -418,7 +420,8 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé : elle change de cette valeur les caractéristiques et compétences visées.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
     if (tab === EFFECTS_TAB && [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique la couleur de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
-    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_HEADER)) reasons.push("La fiche de personnage dessine ces FX sur le portrait (codés dans Eraser).")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_HEADER)) reasons.push("La fiche de personnage dessine ces FX (codés dans Eraser) là où « FX appliqué à » le dit.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_APPLY_HEADER)) reasons.push("La fiche de personnage dessine les FX de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
   }
   if (index === "skills") {
@@ -514,6 +517,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
       if (isHeader(header, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }
+      if (isHeader(header, [EFFECT_FX_APPLY_HEADER])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       return { kind: "rich" }
     }
     if (isHeader(header, [...STATE_LEVEL_HEADERS])) return { kind: "linked-choice", multiple: true, source: { index: "states", tab: EFFECTS_TAB, onlyTab: true } }
