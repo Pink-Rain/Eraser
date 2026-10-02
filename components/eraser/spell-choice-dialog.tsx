@@ -98,7 +98,7 @@ function AugmentCard({ spell, accent, accentLight, index, state, onPick }: { spe
  * Les trois sorts proposés à un rang, en grandes cartes. Choisir en garde une ; s'il reste
  * d'autres rangs à choisir, leurs propositions suivent aussitôt.
  */
-export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options, accent, accentLight, choiceKey, remaining, onChoose }: {
+export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options, accent, accentLight, choiceKey, remaining, onChoose, onLater }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   title: string
@@ -110,6 +110,8 @@ export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options
   choiceKey: string
   remaining: number
   onChoose: (spell: ClassSpell) => Promise<void> | void
+  /** « Choisir plus tard » : la fenêtre se ferme, l'emplacement « Nouveau sort » reste dans l'onglet Sorts. */
+  onLater?: () => void
 }) {
   // Le sort retenu, pour ce rang seulement : un nouveau rang (ou une réouverture) repart de zéro.
   const [pickedFor, setPickedFor] = useState<{ key: string; id: string } | null>(null)
@@ -146,7 +148,10 @@ export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options
         <div key={choiceKey} className="-mx-2 mt-0 flex justify-center gap-5 overflow-x-auto px-8 pb-8 pt-8">
           {options.map((spell, index) => <AugmentCard key={spell.id} spell={spell} accent={accent} accentLight={accentLight} index={index} state={!picked ? "idle" : picked === spell.id ? "picked" : "faded"} onPick={() => void pick(spell)} />)}
         </div>
-        <p className="mt-4 text-center text-xs text-white/60">Ton choix reste modifiable plus bas, dans la progression de la classe (« Rechoisir »).</p>
+        <div className="mt-4 flex flex-col items-center gap-3">
+          {onLater && <button type="button" onClick={() => { setPickedFor(null); onLater() }} disabled={Boolean(picked)} className="rounded-full border border-white/25 px-4 py-1.5 text-sm font-medium text-white/85 transition hover:bg-white/10 hover:text-white disabled:opacity-40">Choisir plus tard</button>}
+          <p className="text-center text-xs text-white/60">{onLater ? "Le choix t’attend dans l’onglet Sorts (« Nouveau sort »). " : ""}Il reste modifiable dans la progression de la classe (« Rechoisir »).</p>
+        </div>
       </div>
     </DialogContent>
   </Dialog>

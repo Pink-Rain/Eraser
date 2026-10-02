@@ -61,7 +61,23 @@ export function useNewSlots(ownerId: string) {
 
 export const NewSlotsContext = createContext<{ isNew: (slotId: string) => boolean; seen: (slotId: string) => void }>({ isNew: () => false, seen: () => undefined })
 
+/** Le temps pendant lequel une pastille toute neuve résiste au survol. */
+const ARMING_MS = 1200
+
+/**
+ * La pastille d'un emplacement. Elle ne s'efface qu'après un court instant : un sort
+ * choisi (ou un objet reçu) apparaît souvent juste sous la souris, et un survol qui
+ * n'en est pas un l'effaçait aussitôt. `seen` se branche sur le mouvement de la souris :
+ * une fois la pastille armée, passer dessus l'efface même sans quitter l'élément.
+ */
 export function useNewSlot(slotId: string) {
   const context = useContext(NewSlotsContext)
-  return { isNew: context.isNew(slotId), seen: () => context.seen(slotId) }
+  const isNew = context.isNew(slotId)
+  const [armed, setArmed] = useState("")
+  useEffect(() => {
+    if (!isNew) return
+    const timer = window.setTimeout(() => setArmed(slotId), ARMING_MS)
+    return () => window.clearTimeout(timer)
+  }, [isNew, slotId])
+  return { isNew, seen: () => { if (armed === slotId) context.seen(slotId) } }
 }

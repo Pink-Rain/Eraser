@@ -1,49 +1,52 @@
-# Eraser 0.1.1-alpha.93 — Profils des autres comptes, objets reçus partout, index d'objets regroupables
+# Eraser 0.1.1-alpha.94 — États sur la fiche, choix de sort au passage de niveau, pages plus rapides
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Fiche de personnage
+## États
 
-- **Nouveau sort** : le texte des cartes est posé sur un panneau clair, lisible quelle
-  que soit la couleur du sort (gris actif, blanc passif, violet bonus).
-- **Sorts tout juste obtenus** : une petite pastille, comme pour les objets reçus. Elle
-  disparaît au survol.
-- **Objets reçus** : un objet donné à un personnage est annoncé (notification, son,
-  pastille sur l'objet) à la prochaine ouverture de sa fiche, même s'il est arrivé
-  pendant que tu étais déconnecté, en vue MJ ou sur un autre personnage. Les objets
-  donnés à l'un de tes propres personnages sont annoncés aussi.
+- **Index des états** : un deuxième onglet **« Effets »** (Nom, Cible, Couleur, Changement
+  de valeur, Image) et, dans l'onglet États, deux colonnes **« Niveau 1 »** et
+  **« Niveau 2 »** qui lient un ou plusieurs effets. Ils s'ajoutent à droite et à la suite,
+  sans rien déplacer ni modifier dans ce qui existe.
+  - Cible : une ou plusieurs caractéristiques ou compétences, prises dans l'Index des
+    caractéristiques et compétences.
+  - Changement de valeur : un nombre (« -10 », « +20 »).
+- **Fiche de personnage** : sous le portrait et le token, **« États »** permet d'en
+  ajouter un ou plusieurs (recherche, rangés par type).
+  - Chaque état affiche sa jauge (l'icône de la colonne Jauge de l'index) : un clic choisit
+    le niveau 1 ou 2.
+  - Au survol : descriptions des deux niveaux (celui en cours mis en avant), effets liés
+    et règles liées.
+  - Les effets du niveau atteint s'appliquent aux valeurs de la fiche, comme un objet
+    équipé ; le survol d'une valeur montre les états qui la changent. Le niveau 2 remplace
+    le niveau 1.
+  - La couleur des effets teinte le portrait, et leur image s'y pose.
 
-## Accueil et profils
+## Sorts
 
-- **Joueurs et MJ** : l'accueil liste les autres comptes. Un clic ouvre leur profil :
-  personnages, campagnes et succès. Leur adresse e-mail n'est jamais affichée.
-- **Ce qui s'ouvre depuis un profil** :
-  - en vue joueur, aucune fiche d'un autre joueur ; une campagne seulement si l'un de
-    tes personnages y joue (tu arrives sur son tableau de bord) ;
-  - en vue MJ, les fiches des personnages de tes campagnes, et tes campagnes ;
-  - en vue administrateur, tout.
-  Les autres cartes restent visibles, sans lien.
-- Sur ton propre profil, les campagnes où tu joues s'ouvrent aussi.
+- **Passage de niveau** : la fenêtre « Nouveau sort » s'ouvre aussitôt, quel que soit
+  l'onglet affiché.
+- **« Choisir plus tard »** ferme la fenêtre ; « Nouveau sort » attend dans l'onglet Sorts.
+- **Retirer un sort choisi à un rang** propose tout de suite le nouveau choix (on peut aussi
+  choisir plus tard).
+- **Pastille des sorts récents** : elle ne s'efface plus toute seule quand le sort apparaît
+  sous la souris ; elle part quand on passe dessus. Elle vaut aussi pour un sort ajouté à la
+  main ou rétabli, et pour les objets reçus.
 
-## Campagnes
+## Index
 
-- **Inventaire de campagne** : chaque joueur dont un personnage est dans la campagne le
-  modifie comme le sien (ajouter, créer, ranger, quantités, donner). Il ne donne qu'aux
-  destinataires qu'il voit : les personnages et les PNJs du groupe ou de la campagne.
+- **Poignée de recopie** (coin bas-droit) pour tous les types de colonnes qu'on peut saisir :
+  listes, listes liées, cases à cocher, jauges, nombres, couleurs, fichiers, sorts. Les
+  colonnes calculées, l'ID et les liens automatiques restent exclus.
+- **Jauge en icônes** : une icône pleine garde ses traits visibles (aiguilles de l'horloge,
+  yeux du sourire). Nouveau réglage « Couleur des traits » ; par défaut, ils sont clairs.
 
-## Index des objets
+## Pages plus rapides
 
-- **Regrouper les index d'objets** (vue administrateur, en haut de l'Index des objets) :
-  les classeurs du dossier « Objets » deviennent un seul classeur « Index des objets »,
-  avec un onglet par index (Objets, Équipement, Parchemins, Consommables, Armes).
-  - Chaque tableau est copié tel quel (valeurs, couleurs, images).
-  - Les objets sans identifiant gardent celui que connaissent déjà les inventaires,
-    boutiques et fouilles, écrit dans une colonne ID.
-  - Les types de colonnes (« Modifier ») et les onglets-fenêtres suivent.
-  - La copie est relue et comparée ligne par ligne : à la moindre différence, rien ne
-    change et les index restent comme avant.
-  - Les anciens classeurs ne sont ni modifiés ni supprimés : ils sont rangés dans le
-    sous-dossier « Anciens index d'objets (avant regroupement) ».
-  - **Annuler le regroupement** remet les anciens classeurs en place. Ce qui a été changé
-    dans le classeur regroupé entre-temps y reste.
-  - Rien ne se fait tout seul : le regroupement attend ton clic.
+- Une page n'attend plus la relecture de l'index des personnages et campagnes (jusqu'à
+  2,5 s, une fois par minute) : elle s'affiche avec l'index connu, qui se met à jour en
+  arrière-plan. Une relecture ratée n'est plus retentée à chaque page.
+- La session n'est plus revérifiée en attendant toutes les 30 s : la revérification se fait
+  en arrière-plan.
+- **Administration › Google Drive et Sheets › Lenteurs** : les appels à Google et au
+  serveur partagé qui ont fait attendre les pages depuis le démarrage d'Eraser.

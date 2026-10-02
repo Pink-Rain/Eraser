@@ -126,6 +126,8 @@ export type GaugeSettings = {
   emoji?: string
   /** Couleur de remplissage (code CSS). */
   color?: string
+  /** Couleur des traits d'une icône pleine (l'horloge, le sourire…). Sans réglage : clairs. */
+  strokeColor?: string
   /** Couleur selon le niveau : rouge quand c'est bas, vert quand c'est plein. */
   levels?: boolean
   /** Jauge propre à chaque case : la valeur spéciale « sans limite » (« ✦ » des charges). */

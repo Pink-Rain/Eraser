@@ -5,6 +5,7 @@
 // configured, `lib/site-auth.ts` and `lib/google-oauth.ts` call out to that
 // shared Worker instead of touching the local database. When they are not
 // configured (the historical Sites Cloudflare deployment), nothing changes.
+import { traced } from "@/lib/perf-trace"
 
 export type RemoteAccountsConfig = {
   baseUrl: string
@@ -31,11 +32,11 @@ export async function remoteAccountsFetch(
     headers["content-type"] = "application/json"
     requestBody = JSON.stringify(init.body)
   }
-  const response = await fetch(`${config.baseUrl}${path}`, {
+  const response = await traced("partagé", `${init.method} ${path}`, () => fetch(`${config.baseUrl}${path}`, {
     method: init.method,
     headers,
     body: requestBody,
-  })
+  }), (reply) => String(reply.status))
   const payload = await response.json().catch(() => null)
   if (!response.ok) {
     const message =

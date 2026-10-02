@@ -153,7 +153,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
     effectHtml: changes.effectHtml,
   }, `slot:${slot.id}`)
   const internalTargets = compatibleContainers.filter((candidate) => candidate.id !== container.id)
-  return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onMouseEnter={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
+  return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
     {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Objet reçu — disparaît au survol" aria-label="Nouvel objet reçu" />}
     <div className="flex items-start gap-3">
       {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`)} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}

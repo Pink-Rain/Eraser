@@ -30,6 +30,7 @@ import { runInBackground } from "@/lib/background-work"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
+import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
 import {
@@ -320,13 +321,19 @@ const IDENTITY_INDEX_SYNC_TTL_MS = 60_000
 // Une page n'attend pas plus longtemps la resynchronisation : au-delà, elle
 // s'affiche avec l'index local et la synchro se termine en arrière-plan.
 const IDENTITY_INDEX_SYNC_WAIT_MS = 2_500
+const IDENTITY_INDEX_RETRY_MS = 20_000
 
 async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: number } = {}) {
   if (Date.now() - identityIndexSyncedAt < (options.maxAgeMs ?? IDENTITY_INDEX_SYNC_TTL_MS)) return
   if (!identityIndexSyncPromise) {
     identityIndexSyncPromise = syncExistingIdentityIndexes()
       .then(() => { identityIndexSyncedAt = Date.now() })
-      .catch((error) => console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+      .catch((error) => {
+        console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+        // Un échec (Google lent ou saturé) est retenté dans 20 s, pas à chaque page :
+        // sinon chaque page attendait de nouveau la resynchronisation.
+        identityIndexSyncedAt = Date.now() - IDENTITY_INDEX_SYNC_TTL_MS + IDENTITY_INDEX_RETRY_MS
+      })
       .finally(() => { identityIndexSyncPromise = null })
   }
   if (options.waitMs === undefined) {
@@ -345,7 +352,9 @@ async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: numb
  * lectures qui en dépendent le rafraîchissent au plus une fois par minute.
  */
 function refreshIdentityIndexes() {
-  return ensureIdentityIndexes({ waitMs: IDENTITY_INDEX_SYNC_WAIT_MS })
+  // Déjà lu une fois depuis le démarrage : la page s'affiche avec l'index connu et la
+  // relecture se fait en arrière-plan (les accès refusés relisent d'eux-mêmes au besoin).
+  return ensureIdentityIndexes({ waitMs: identityIndexSyncedAt ? 0 : IDENTITY_INDEX_SYNC_WAIT_MS })
 }
 
 async function charactersSource() {
@@ -375,11 +384,12 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
   const url = `https://sheets.googleapis.com/v4/${path}`
   let response: Response | null = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const label = `${init?.method ?? "GET"} ${path}`
     try {
-      response = await googleOAuthAuthorizedFetch(url, init)
+      response = await traced("sheets", label, () => googleOAuthAuthorizedFetch(url, init), (reply) => String(reply.status))
     } catch (error) {
       if (!(error instanceof Error) || error.message !== "GOOGLE_DRIVE_NOT_AUTHORIZED") throw error
-      response = await googleServiceAuthorizedFetch(url, init)
+      response = await traced("sheets", label, () => googleServiceAuthorizedFetch(url, init), (reply) => String(reply.status))
     }
     if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
     await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))

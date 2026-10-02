@@ -903,6 +903,8 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       break
     case "id":
       column.control = (rowKey) => <IdCell value={valueOf(rowKey, key)} computed={context.idComputed?.(rowKey)} />
+      // Un identifiant n'est jamais recopié ni collé : il doit rester unique.
+      column.computed = true
       break
     case "choice":
       column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
@@ -915,6 +917,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       break
     case "auto-links":
       column.control = (rowKey) => <AutoLinksCell links={context.autoLinks?.(rowKey) ?? []} />
+      column.computed = true
       break
     case "file":
       column.control = (rowKey) => <FileCell

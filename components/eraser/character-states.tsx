@@ -1,0 +1,165 @@
+"use client"
+
+import { useEffect, useMemo, useState } from "react"
+import { Activity, LoaderCircle, Plus, Search, X } from "lucide-react"
+
+import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { IndexImage } from "@/components/eraser/index-image"
+import { sanitizeRichText } from "@/components/eraser/rich-text"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
+import { Input } from "@/components/ui/input"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { activeEffectsOf, stateDefinitionOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
+import { foldName } from "@/lib/index-columns"
+import { cn } from "@/lib/utils"
+
+// Gardé d'une fiche à l'autre : l'index n'est relu qu'une fois par affichage de page.
+let knownCatalog: StatesCatalog | null = null
+
+/** L'Index des états, pour la fiche (lecture seule, joueurs compris). */
+export function useStatesCatalog() {
+  const [catalog, setCatalog] = useState<StatesCatalog | null>(knownCatalog)
+  const [error, setError] = useState("")
+  useEffect(() => {
+    let active = true
+    fetch("/api/states")
+      .then(async (response) => ({ response, payload: (await response.json().catch(() => ({}))) as { catalog?: StatesCatalog; error?: string } }))
+      .then(({ response, payload }) => {
+        if (!active) return
+        if (!response.ok || !payload.catalog) { setError(payload.error || "L’Index des états n’a pas pu être lu."); return }
+        knownCatalog = payload.catalog
+        setCatalog(payload.catalog)
+        setError("")
+      })
+      .catch(() => { if (active) setError("L’Index des états n’a pas pu être lu.") })
+    return () => { active = false }
+  }, [])
+  return { catalog: catalog ?? { states: [], effects: [] }, loaded: Boolean(catalog), error }
+}
+
+const DEFAULT_COLOR = "#78716c"
+
+/** La couleur d'un état posé : celle de son premier effet en vigueur, sinon celle de sa jauge. */
+function stateColor(catalog: StatesCatalog, state: CharacterState, definition: StateDefinition | undefined) {
+  return activeEffectsOf(catalog, state).find((effect) => /^#[0-9a-f]{3,8}$/i.test(effect.color))?.color || definition?.gauge.color || DEFAULT_COLOR
+}
+
+function changeLabel(effect: StateEffect) {
+  if (effect.change === null) return effect.changeText
+  return `${effect.change > 0 ? "+" : ""}${effect.change}`
+}
+
+function EffectPills({ catalog, names }: { catalog: StatesCatalog; names: string[] }) {
+  const effects = names.flatMap((name) => catalog.effects.filter((effect) => foldName(effect.name) === foldName(name)))
+  if (!effects.length) return null
+  return <div className="mt-1.5 flex flex-wrap gap-1">
+    {effects.map((effect) => <span key={effect.name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium" style={{ borderColor: `${effect.color || DEFAULT_COLOR}66`, backgroundColor: `${effect.color || DEFAULT_COLOR}14` }} title={effect.name}>
+      <span className="size-1.5 rounded-full" style={{ backgroundColor: effect.color || DEFAULT_COLOR }} />
+      {effect.targets.length ? effect.targets.join(", ") : effect.name}
+      {(effect.change !== null || effect.changeText) && <b className={effect.change !== null && effect.change < 0 ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
+    </span>)}
+  </div>
+}
+
+/** Le détail d'un état, au survol : ses deux niveaux, leurs effets, ses règles. */
+function StateDetails({ catalog, definition, level, color }: { catalog: StatesCatalog; definition: StateDefinition; level: 1 | 2 | 0; color: string }) {
+  return <div className="grid gap-2.5">
+    <div className="flex items-start gap-3">
+      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${color}, ${color}cc 60%, #1d140c 140%)` }}>
+        <IndexImage value={definition.image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-5" stroke={color} />} />
+      </span>
+      <div className="min-w-0">
+        <p className="font-display text-lg font-semibold leading-tight" style={{ color }}>{definition.name}</p>
+        {definition.type && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{definition.type}</p>}
+      </div>
+    </div>
+    {([1, 2] as const).slice(0, definition.levels).map((rank) => <div key={rank} className={cn("rounded-xl border px-3 py-2 text-xs leading-5 transition", level === rank ? "bg-background shadow-sm" : "bg-muted/25 opacity-75")} style={{ borderColor: level === rank ? `${color}88` : undefined }}>
+      <p className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[.14em]" style={{ color: level === rank ? color : undefined }}>
+        Niveau {rank}{level === rank && <span className="rounded-full px-1.5 py-px text-[9px] text-white" style={{ backgroundColor: color }}>en cours</span>}
+      </p>
+      {definition.descriptionHtml[rank - 1]
+        ? <div className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(definition.descriptionHtml[rank - 1]) }} />
+        : <p className="text-muted-foreground">Pas de description.</p>}
+      <EffectPills catalog={catalog} names={definition.effects[rank - 1]} />
+    </div>)}
+    {definition.rulesHtml && <div className="rounded-xl border border-dashed px-3 py-2 text-xs leading-5">
+      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Règles liées</p>
+      <div className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(definition.rulesHtml) }} />
+    </div>}
+  </div>
+}
+
+/**
+ * Les états d'un personnage, sous son portrait et son token : en ajouter (un ou
+ * plusieurs), choisir leur niveau d'un clic sur la jauge, les retirer. Le survol montre
+ * les descriptions des niveaux, leurs effets et les règles liées.
+ */
+export function CharacterStatesPanel({ states, catalog, loaded, error, onChange, disabled = false }: { states: CharacterState[]; catalog: StatesCatalog; loaded: boolean; error: string; onChange: (states: CharacterState[]) => void; disabled?: boolean }) {
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const groups = useMemo(() => {
+    const folded = foldName(query)
+    const taken = new Set(states.map((state) => foldName(state.name)))
+    const shown = catalog.states.filter((state) => !taken.has(foldName(state.name)) && (!folded || foldName(`${state.name} ${state.type}`).includes(folded)))
+    const byType = new Map<string, StateDefinition[]>()
+    for (const state of shown) byType.set(state.type || "Autres", [...(byType.get(state.type || "Autres") ?? []), state])
+    return [...byType.entries()]
+  }, [catalog.states, query, states])
+
+  function add(definition: StateDefinition) {
+    onChange([...states, { id: definition.id, name: definition.name, level: 1 }])
+    setOpen(false)
+    setQuery("")
+  }
+
+  return <div className="mt-2 grid gap-1.5">
+    <div className="flex items-center gap-2">
+      <p className="flex flex-1 items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[.2em] text-muted-foreground"><Activity className="size-3.5" />États</p>
+      <Popover open={open} onOpenChange={setOpen}>
+        <PopoverTrigger asChild>
+          <button type="button" disabled={disabled} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition hover:border-primary/40 hover:text-foreground disabled:opacity-50" aria-label="Ajouter un état"><Plus className="size-3" />Ajouter</button>
+        </PopoverTrigger>
+        {open && <PopoverContent align="start" className="w-72 p-2">
+          <div className="relative mb-2"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Effrayé, Brûlure, Poison…" className="h-8 pl-8 text-xs" /></div>
+          <div className="max-h-72 overflow-y-auto">
+            {!loaded && !error && <p className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Lecture de l’Index des états…</p>}
+            {error && <p className="py-4 text-center text-xs text-destructive">{error}</p>}
+            {loaded && !groups.length && <p className="py-4 text-center text-xs text-muted-foreground">{catalog.states.length ? "Aucun état de ce nom." : "L’Index des états est vide."}</p>}
+            {groups.map(([type, list]) => <div key={type} className="mb-1.5">
+              <p className="px-1.5 pb-0.5 text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{type}</p>
+              {list.map((definition) => <button key={definition.id} type="button" onClick={() => add(definition)} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-muted">
+                <span className="flex size-5 shrink-0 items-center justify-center" style={{ color: definition.gauge.color || DEFAULT_COLOR }}><IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-4" filled={false} /></span>
+                <span className="min-w-0 flex-1 truncate font-medium">{definition.name}</span>
+                {definition.levels === 2 && <span className="text-[9px] text-muted-foreground">2 niv.</span>}
+              </button>)}
+            </div>)}
+          </div>
+        </PopoverContent>}
+      </Popover>
+    </div>
+    {states.map((state) => {
+      const definition = stateDefinitionOf(catalog, state)
+      const color = stateColor(catalog, state, definition)
+      const levels = definition?.levels ?? 2
+      const level = Math.min(state.level, levels) as 1 | 2
+      return <HoverCard key={state.name} openDelay={180} closeDelay={80}>
+        <HoverCardTrigger asChild>
+          <div className="group flex items-center gap-2 rounded-xl border border-l-4 bg-background/50 px-2 py-1.5" style={{ borderLeftColor: color }}>
+            <span className="min-w-0 flex-1 truncate text-xs font-semibold" style={{ color }}>{state.name}</span>
+            <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
+              {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => onChange(states.map((candidate) => candidate === state ? { ...candidate, level: (index + 1) as 1 | 2 } : candidate))} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={`Niveau ${index + 1}`}>
+                <IndexIconGlyph icon={definition?.gauge.icon || "clock"} emoji={definition?.gauge.emoji} filled={index < level} stroke={definition?.gauge.strokeColor} className="size-4" />
+              </button>)}
+            </span>
+            <button type="button" disabled={disabled} onClick={() => onChange(states.filter((candidate) => candidate !== state))} className="rounded-full p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100" aria-label={`Retirer ${state.name}`} title="Retirer cet état"><X className="size-3" /></button>
+          </div>
+        </HoverCardTrigger>
+        <HoverCardContent side="right" align="start" className="w-80 rounded-2xl p-3.5" style={{ borderColor: `${color}55` }}>
+          {definition
+            ? <StateDetails catalog={catalog} definition={definition} level={level} color={color} />
+            : <p className="text-xs text-muted-foreground">« {state.name} » n’est plus dans l’Index des états : il reste posé, sans effet.</p>}
+        </HoverCardContent>
+      </HoverCard>
+    })}
+  </div>
+}

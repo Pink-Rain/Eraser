@@ -225,6 +225,10 @@ export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemA
 
 export type LinkedModifierItem = {
   slotId: string
+  /** « état » : un effet d'un état posé (Index des états), sans case à cocher. */
+  source?: "objet" | "état"
+  /** La couleur de l'effet d'un état. */
+  color?: string
   /** Ce que l’objet modifie quand ce n’est pas la valeur principale (« Réussite critique »…). */
   tag?: string
   name: string
@@ -260,6 +264,47 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
         }])
       }
     }
+  }
+  return { totals, items }
+}
+
+/**
+ * La cible de la fiche d'un nom de l'Index des caractéristiques et compétences (la
+ * « Cible » d'un effet d'état) : une secondaire, une caractéristique ou une compétence.
+ */
+export function modifierTargetIdForName(catalog: CharacterCatalog, name: string) {
+  const folded = fold(name)
+  if (!folded) return null
+  const characteristic = catalog.characteristics.find((item) => fold(item.name) === folded || fold(item.key) === folded)
+  if (characteristic) {
+    if (characteristic.kind === "secondaire") return listSecondaries.has(characteristic.key) ? null : generalTargets.find((target) => target.key === characteristic.key)?.id ?? characteristicModifierTargetId(characteristic.key)
+    return characteristicModifierTargetId(characteristic.key)
+  }
+  const skill = catalog.skills.find((item) => fold(item.name) === folded || fold(item.key) === folded)
+  return skill ? skillModifierTargetId(skill.key) : null
+}
+
+function fold(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[’']/g, "'").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
+}
+
+/** Ajoute aux objets les changements des états posés : ils comptent toujours (pas de case à cocher). */
+export function withStateModifiers(index: ModifierIndex, contributions: Array<{ state: string; level: number; effect: string; target: string; amount: number; color: string }>): ModifierIndex {
+  if (!contributions.length) return index
+  const totals = new Map(index.totals)
+  const items = new Map(index.items)
+  for (const contribution of contributions) {
+    totals.set(contribution.target, (totals.get(contribution.target) || 0) + contribution.amount)
+    items.set(contribution.target, [...(items.get(contribution.target) || []), {
+      slotId: `etat:${contribution.state}:${contribution.effect}`,
+      source: "état",
+      color: contribution.color,
+      name: `${contribution.state}${contribution.level === 2 ? " (niv. 2)" : ""}`,
+      tag: contribution.effect !== contribution.state ? contribution.effect : undefined,
+      equipped: true,
+      containerName: "États",
+      amount: contribution.amount,
+    }])
   }
   return { totals, items }
 }

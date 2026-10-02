@@ -329,9 +329,10 @@ function GaugeSettingsEditor({ spec, onChange, disabled, siblings }: Pick<Settin
     <div className="grid gap-2 sm:grid-cols-2">
       <div className={smallLabel}>Icône<IconPicker disabled={disabled} icon={gauge.icon} emoji={gauge.emoji} onChange={(value) => set({ icon: value.icon, emoji: value.emoji })} /></div>
       <div className={smallLabel}>Couleur<ColorSwatches disabled={disabled || Boolean(gauge.levels)} value={gauge.color} onChange={(color) => set({ color })} /></div>
+      {!gauge.emoji?.trim() && <div className={smallLabel}>Couleur des traits (icône pleine)<ColorSwatches disabled={disabled} value={gauge.strokeColor} onChange={(strokeColor) => set({ strokeColor })} /><span className="text-[10px] font-normal text-muted-foreground">« — » : traits clairs, comme découpés dans l’icône.</span></div>}
     </div>
     {scale !== "cell" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(gauge.levels)} onCheckedChange={(checked) => set({ levels: checked === true })} />Couleur selon le niveau : rouge quand c’est bas, vert quand c’est plein</label>}
-    <div className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 text-xs"><span className="text-muted-foreground">Aperçu :</span><span className="flex gap-0.5" style={{ color: gauge.color || "var(--primary)" }}>{Array.from({ length: scale === "cell" ? 3 : Math.min(gauge.max || 5, 10) }, (_, index) => <IndexIconGlyph key={index} icon={gauge.icon} emoji={gauge.emoji} filled={scale === "cell" || index < Math.ceil((gauge.max || 5) / 2)} />)}</span></div>
+    <div className="flex items-center gap-2 rounded-lg bg-muted/30 px-3 py-2 text-xs"><span className="text-muted-foreground">Aperçu :</span><span className="flex gap-0.5" style={{ color: gauge.color || "var(--primary)" }}>{Array.from({ length: scale === "cell" ? 3 : Math.min(gauge.max || 5, 10) }, (_, index) => <IndexIconGlyph key={index} icon={gauge.icon} emoji={gauge.emoji} stroke={gauge.strokeColor} filled={scale === "cell" || index < Math.ceil((gauge.max || 5) / 2)} />)}</span></div>
   </>
 }
 
@@ -464,7 +465,7 @@ function ButtonsEditor({ spec, onChange, disabled, siblings, tabs, targets, fami
     <div className="flex items-center justify-between"><p className={smallLabel}>Boutons ({buttons.length})</p><Button type="button" variant="ghost" size="sm" onClick={() => openGuide("buttons")}><CircleHelp />Toutes les actions</Button></div>
     {buttons.map((button, index) => <div key={button.id} className="grid gap-2 rounded-xl border bg-background/60 p-3">
       <div className="flex flex-wrap items-center gap-2">
-        <span className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-semibold" style={pillStyle(button.color || "#927640")}><IndexIconGlyph icon={button.icon || "zap"} className="size-3.5" />{!button.iconOnly && (button.label || "Bouton")}</span>
+        <span className="inline-flex h-7 items-center gap-1 rounded-md border px-2 text-xs font-semibold" style={pillStyle(button.color || "#927640")}><IndexIconGlyph icon={button.icon || "zap"} className="size-3.5" filled={false} />{!button.iconOnly && (button.label || "Bouton")}</span>
         <span className="ml-auto flex">
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => { const next = [...buttons]; next.splice(index - 1, 0, next.splice(index, 1)[0]); setButtons(next) }} aria-label="Monter"><ArrowUp /></Button>
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === buttons.length - 1} onClick={() => { const next = [...buttons]; next.splice(index + 1, 0, next.splice(index, 1)[0]); setButtons(next) }} aria-label="Descendre"><ArrowDown /></Button>

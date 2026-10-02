@@ -203,6 +203,8 @@ type SheetGridRowActions = {
   clearRowHeight: (key: string) => void
   commit: (rowKey: string, columnKey: string, value: string) => void
   activate: (editor: RichTextTarget, rowKey: string, columnKey: string) => void
+  /** Une case sans éditeur de texte (liste, jauge, case à cocher…) devient la case active. */
+  focusCell: (rowKey: string, columnKey: string) => void
   startFill: (event: ReactPointerEvent<HTMLSpanElement>, rowKey: string, columnKey: string) => void
 }
 
@@ -268,7 +270,9 @@ const SheetGridRowView = memo(function SheetGridRowView({
       const isActive = activeColumn === column.key
       return <td
         key={column.key}
-        className={`${cellBase} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${column.key === firstKey ? "z-10" : ""}`}
+        onPointerDownCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
+        onFocusCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
+        className={`${cellBase} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${isActive && column.control && !readOnly ? "ring-1 ring-inset ring-primary/45" : ""} ${column.key === firstKey ? "z-10" : ""}`}
         style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, ...column.cellStyle } : column.cellStyle}
       >
         {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
@@ -287,7 +291,8 @@ const SheetGridRowView = memo(function SheetGridRowView({
                 onActivate={(editor) => actions.activate(editor, rowKey, column.key)}
                 className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
               />}
-        {isActive && !readOnly && !column.custom && !column.control && <span
+        {/* La poignée de recopie, pour tous les types de colonnes qu'on peut saisir. */}
+        {isActive && !readOnly && !disabled && !column.custom && !column.computed && <span
           role="separator"
           aria-label="Recopier le contenu vers les lignes suivantes"
           title="Tirer pour recopier le contenu"
@@ -579,6 +584,9 @@ export function SheetGrid({
       activate(editor)
       setActiveCell((current) => current?.row === rowKey && current.column === columnKey ? current : { row: rowKey, column: columnKey })
       setSelection((current) => current.length ? [] : current)
+    },
+    focusCell: (rowKey, columnKey) => {
+      setActiveCell((current) => current?.row === rowKey && current.column === columnKey ? current : { row: rowKey, column: columnKey })
     },
     startFill: (event, rowKey, columnKey) => latest.current.startFill(event, rowKey, columnKey),
   }), [activate])

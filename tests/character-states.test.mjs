@@ -1,0 +1,85 @@
+import assert from "node:assert/strict";
+import test, { after } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { createServer } from "vite";
+
+const root = fileURLToPath(new URL("..", import.meta.url));
+const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
+after(async () => { await vite.close(); });
+const states = await vite.ssrLoadModule("/lib/character-states.ts");
+
+const row = (values) => ({ values, html: values });
+// Extrait de l'Index des états réel, plus l'onglet Effets et les colonnes Niveau 1 / Niveau 2.
+const tables = [
+  {
+    tabName: "États",
+    headers: ["Nom de l'état", "Nom", "Type de l'état", "Description niveau 1", "Description niveau 2", "Règles liées aux états", "Jauge icone", "Icone", "ID", "Niveau 1", "Niveau 2"],
+    rows: [
+      row(["Effrayé", "Effrayé", "Emotionnel", "Vous passez votre tour jusqu'à réussir un test de Volonté mental.", "Vous passez votre tour (-30% sur cette compétence).", "", "2", "", "ETA-321A6FEC", "", "Effroi intense"]),
+      row(["Folie", "Folie", "Emotionnel", "Vous perdez le contrôle de votre personnage.", "/", "", "", "", "ETA-289DCB2D", "", ""]),
+      row(["Déterminé", "Déterminé", "Emotionnel", "+10% dans toutes les compétances & +10 Points de dégats", "+20% dans toutes les compétances & +20 Points de dégats", "(Octroyée par le MJ)", "", "", "ETA-5872D5A6", "Détermination", "Détermination forte"]),
+    ],
+  },
+  {
+    tabName: "Effets",
+    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID"],
+    rows: [
+      row(["Effroi intense", "Volonté mentale", "#6b21a8", "-30", "", "EFF-1"]),
+      row(["Détermination", "Force, Dextérité", "#b8872a", "+10", "", "EFF-2"]),
+      row(["Détermination forte", "Force, Dextérité", "#b8872a", "+20", "", "EFF-3"]),
+    ],
+  },
+];
+const columns = { "États": [{ header: "Jauge icone", spec: { kind: "gauge", gauge: { style: "icons", max: 2, scale: "cell", icon: "clock", color: "#78716c" } } }, { header: "Icone", spec: { kind: "file", file: { accept: "image" } } }] };
+
+test("l'Index des états est lu avec ses niveaux, ses effets et l'icône de sa jauge", () => {
+  const catalog = states.parseStatesCatalog(tables, columns);
+  const effraye = catalog.states.find((state) => state.name === "Effrayé");
+  assert.equal(effraye.levels, 2);
+  assert.equal(effraye.type, "Emotionnel");
+  assert.deepEqual(effraye.effects, [[], ["Effroi intense"]]);
+  assert.equal(effraye.gauge.icon, "clock");
+  // « / » au niveau 2 : l'état n'a qu'un niveau.
+  assert.equal(catalog.states.find((state) => state.name === "Folie").levels, 1);
+  assert.equal(catalog.effects.find((effect) => effect.name === "Détermination").change, 10);
+  assert.deepEqual(catalog.effects.find((effect) => effect.name === "Détermination").targets, ["Force", "Dextérité"]);
+});
+
+test("seuls les effets du niveau atteint s'appliquent : le niveau 2 remplace le niveau 1", () => {
+  const catalog = states.parseStatesCatalog(tables, columns);
+  const target = (name) => `carac:${name}`;
+  const levelOne = states.stateContributions(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }], target);
+  assert.deepEqual(levelOne.map((change) => [change.target, change.amount]), [["carac:Force", 10], ["carac:Dextérité", 10]]);
+  const levelTwo = states.stateContributions(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 2 }], target);
+  assert.deepEqual(levelTwo.map((change) => change.amount), [20, 20]);
+  // Effrayé n'a pas d'effet au niveau 1, un malus au niveau 2.
+  assert.equal(states.stateContributions(catalog, [{ id: "x", name: "Effrayé", level: 1 }], target).length, 0);
+  assert.equal(states.stateContributions(catalog, [{ id: "x", name: "Effrayé", level: 2 }], target)[0].amount, -30);
+  // Une cible inconnue de la fiche est ignorée.
+  assert.equal(states.stateContributions(catalog, [{ id: "x", name: "Effrayé", level: 2 }], () => null).length, 0);
+});
+
+test("les états posés sont relus prudemment et teintent le portrait", () => {
+  assert.deepEqual(states.parseCharacterStates([{ name: "Rage", level: 2 }, { name: "rage" }, { name: "" }, "x", { id: "ETA-1", name: "Faim", level: 7 }]), [
+    { id: "etat:rage", name: "Rage", level: 2 },
+    { id: "ETA-1", name: "Faim", level: 1 },
+  ]);
+  const catalog = states.parseStatesCatalog(tables, columns);
+  assert.deepEqual(states.portraitLayers(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }]).colors, ["#b8872a"]);
+  assert.equal(states.changeAmount("− 15 %"), -15);
+});
+
+test("la cible d'un effet devient la bonne case de la fiche", async () => {
+  const modifiers = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+  const { builtinCharacterCatalog } = await vite.ssrLoadModule("/lib/character-catalog.ts");
+  const target = (name) => modifiers.modifierTargetIdForName(builtinCharacterCatalog, name);
+  assert.equal(target("Force"), "carac:Force");
+  assert.equal(target("Rapidité"), "rapidite");
+  assert.equal(target("Bonus de dégâts physiques"), "degats-physiques");
+  assert.equal(target("Points de vie"), "vie");
+  assert.equal(target("Classe sociale"), null);
+  assert.equal(target("Inconnue"), null);
+  const skill = builtinCharacterCatalog.skills.find((candidate) => candidate.name === "Perception");
+  assert.equal(target("perception"), `comp:${skill.key}`);
+});

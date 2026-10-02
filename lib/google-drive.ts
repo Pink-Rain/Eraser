@@ -1,4 +1,5 @@
 import { googleOAuthAuthorizedFetch } from "@/lib/google-oauth"
+import { traced } from "@/lib/perf-trace"
 
 const SPREADSHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
 const FOLDER_MIME_TYPE = "application/vnd.google-apps.folder"
@@ -18,7 +19,7 @@ export type DriveFile = {
 }
 
 async function driveJson<T>(path: string, init?: RequestInit) {
-  const response = await googleOAuthAuthorizedFetch(`https://www.googleapis.com/drive/v3/${path}`, init)
+  const response = await traced("drive", `${init?.method ?? "GET"} ${path.split("?")[0]}`, () => googleOAuthAuthorizedFetch(`https://www.googleapis.com/drive/v3/${path}`, init), (reply) => String(reply.status))
   const payload = (await response.json()) as T & { error?: { message?: string } }
   if (!response.ok) throw new Error(payload.error?.message || `DRIVE_API_ERROR:${response.status}`)
   return payload

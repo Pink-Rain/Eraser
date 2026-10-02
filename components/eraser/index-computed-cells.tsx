@@ -57,7 +57,7 @@ export function ActionButtonView({ button, disabled = false, onRun }: { button: 
     className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition hover:brightness-95 disabled:opacity-50"
     style={style}
   >
-    {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : (button.icon || !button.iconOnly) && <IndexIconGlyph icon={button.icon || "zap"} className="size-3.5" />}
+    {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : (button.icon || !button.iconOnly) && <IndexIconGlyph icon={button.icon || "zap"} className="size-3.5" filled={false} />}
     {!button.iconOnly && <span className="truncate">{button.label || "Bouton"}</span>}
   </button>
 }

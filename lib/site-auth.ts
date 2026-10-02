@@ -154,6 +154,7 @@ export async function loginAccount(email: string, password: string) {
 // removes that latency from navigation. A role or status change takes at most
 // this long to apply, and the paths that change one clear the cache directly.
 const SESSION_CACHE_MS = 30_000
+const SESSION_STALE_MS = 90_000
 const sessionAccountCache = new Map<string, { expiresAt: number; account: Promise<AccountRecord | null> }>()
 
 function forgetCachedSessions() {
@@ -178,6 +179,15 @@ export async function accountFromSession(token: string) {
       })
     if (sessionAccountCache.size >= 200) forgetCachedSessions()
     sessionAccountCache.set(token, { expiresAt: Date.now() + SESSION_CACHE_MS, account })
+    // Une session vérifiée il y a peu (moins de 2 min) sert la page tout de suite pendant
+    // la revérification : la page n'attend plus le serveur partagé toutes les 30 s.
+    if (cached && cached.expiresAt + SESSION_STALE_MS > Date.now()) {
+      const previous = await cached.account.catch(() => null)
+      if (previous) {
+        void account.then((fresh) => { if (!fresh) sessionAccountCache.delete(token) })
+        return previous
+      }
+    }
     return account
   }
 

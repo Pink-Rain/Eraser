@@ -38,6 +38,15 @@ import {
 
 export { foldName }
 
+/** L'Index des états : ses deux onglets et les colonnes que la fiche de personnage lit. */
+export const STATES_TAB = "États"
+export const EFFECTS_TAB = "Effets"
+export const STATE_LEVEL_HEADERS = ["Niveau 1", "Niveau 2"] as const
+export const EFFECT_TARGET_HEADER = "Cible"
+export const EFFECT_COLOR_HEADER = "Couleur"
+export const EFFECT_CHANGE_HEADER = "Changement de valeur"
+export const EFFECT_IMAGE_HEADER = "Image"
+
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills" | "achievements"
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
@@ -232,18 +241,31 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
   },
   // Quatre index préparés, à remplir : chacun a son propre classeur, créé la première
   // fois qu'on ouvre sa page (et relié s'il existe déjà sous ce nom dans Drive).
+  // Les états et leurs effets. Un état lie, à chacun de ses deux niveaux, un ou plusieurs
+  // effets de l'onglet « Effets » : la fiche de personnage les applique quand l'état est posé.
+  // Dans un classeur existant, « Niveau 1 », « Niveau 2 » et l'onglet « Effets » s'ajoutent
+  // à droite / à la suite, sans rien déplacer.
   states: {
     key: "states",
     sheetName: "Index des états",
     title: "États",
     path: "/ressources/index-des-etats",
-    tabs: [{
-      name: "États",
-      itemLabel: "un état",
-      headers: ["Nom", "Type", "Effet", "Durée", "Cumul", "Fin de l'état", "Description", "Note", ID_HEADER],
-      widths: [220, 140, 380, 140, 110, 260, 380, 280, 130],
-      idPrefix: "ETA",
-    }],
+    tabs: [
+      {
+        name: STATES_TAB,
+        itemLabel: "un état",
+        headers: ["Nom", "Type", "Effet", "Durée", "Cumul", "Fin de l'état", "Description", "Note", ID_HEADER, STATE_LEVEL_HEADERS[0], STATE_LEVEL_HEADERS[1]],
+        widths: [220, 140, 380, 140, 110, 260, 380, 280, 130, 240, 240],
+        idPrefix: "ETA",
+      },
+      {
+        name: EFFECTS_TAB,
+        itemLabel: "un effet",
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER],
+        widths: [240, 320, 130, 190, 160, 130],
+        idPrefix: "EFF",
+      },
+    ],
   },
   runes: {
     key: "runes",
@@ -375,6 +397,11 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === OBTAINED_TAB && folded === foldName(OBTAINED_ACCOUNT_HEADER)) reasons.push("L’identifiant du compte qui a obtenu le succès : écrit par « Attribuer un succès », il retrouve le joueur même s’il change de pseudo.")
     if (tab === OBTAINED_TAB && [OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER].some((header) => foldName(header) === folded)) reasons.push("Écrite par « Attribuer un succès » et affichée sur la carte du succès obtenu.")
   }
+  if (index === "states") {
+    if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé : elle change de cette valeur les caractéristiques et compétences visées.")
+    if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
+    if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
+  }
   if (index === "skills") {
     if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
     if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
@@ -457,6 +484,18 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     if (isHeader(header, [ACHIEVEMENT_SUBTYPE_HEADER])) return { kind: "choice", allowCustom: true, options: achievementSubtypes.map((value) => ({ value })) }
     if (isHeader(header, [ACHIEVEMENT_ICON_HEADER])) return { kind: "file", file: { accept: "image" } }
     if (isHeader(header, [ACHIEVEMENT_COLOR_HEADER])) return { kind: "color" }
+    return { kind: "rich" }
+  }
+  if (index === "states") {
+    if (tab === EFFECTS_TAB) {
+      // Les caractéristiques et compétences visées : les deux onglets de leur index.
+      if (isHeader(header, [EFFECT_TARGET_HEADER])) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: CHARACTERISTICS_TAB } }
+      if (isHeader(header, [EFFECT_COLOR_HEADER])) return { kind: "color" }
+      if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "number" }
+      if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
+      return { kind: "rich" }
+    }
+    if (isHeader(header, [...STATE_LEVEL_HEADERS])) return { kind: "linked-choice", multiple: true, source: { index: "states", tab: EFFECTS_TAB, onlyTab: true } }
     return { kind: "rich" }
   }
   if (index === "skills") {

@@ -12,9 +12,10 @@ import { RichTextInlineEditor } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { RankBonusLine } from "@/components/eraser/rank-bonus"
-import { NewSpellSlot, SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
+import { NewSpellSlot } from "@/components/eraser/spell-choice-dialog"
 import { markNewSlots, NewSlotsContext, useNewSlot, useNewSlots } from "@/components/eraser/new-inventory-items"
 import type { ClassSpell, RankBonus } from "@/lib/class-content"
+import { parseCharacterStates, type CharacterState } from "@/lib/character-states"
 import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
@@ -37,6 +38,8 @@ export type CharacterClassChoices = {
   edits: Record<string, CharacterSpellEdit>
   /** Sorts retirés de la fiche (acquis par la classe ou ajoutés à la main). */
   removed: string[]
+  /** Les états posés sur le personnage (Index des états) et leur niveau. */
+  states: CharacterState[]
 }
 
 const editableTextFields = ["name", "type", "effect", "effectHtml", "description", "descriptionHtml", "skillsRaw", "distance"] as const
@@ -63,9 +66,10 @@ export function parseClassChoices(value: string): CharacterClassChoices {
       order: parsed && Array.isArray(parsed.order) ? parsed.order.filter((item): item is string => typeof item === "string") : [],
       edits: parseSpellEdits(parsed?.edits),
       removed: parsed && Array.isArray(parsed.removed) ? parsed.removed.filter((item): item is string => typeof item === "string") : [],
+      states: parseCharacterStates(parsed?.states),
     }
   } catch {
-    return { choices: {}, charges: {}, extras: [], order: [], edits: {}, removed: [] }
+    return { choices: {}, charges: {}, extras: [], order: [], edits: {}, removed: [], states: [] }
   }
 }
 
@@ -138,6 +142,18 @@ export function pendingSpellChoices(classes: ClassRecord[], spells: ClassSpell[]
   }))
 }
 
+/** Les choix de sorts après avoir retenu `spellId` au rang `rank` de la classe. */
+export function chooseClassSpell(value: string, classId: string, rank: number, spellId: string) {
+  const state = parseClassChoices(value)
+  const previous = state.choices[classId]?.[String(rank)]
+  const choices = { ...state.choices, [classId]: { ...(state.choices[classId] || {}), [String(rank)]: spellId } }
+  // Le sort choisi n'est plus « retiré » ; l'ancien choix retiré n'a plus lieu d'être rétabli.
+  return JSON.stringify({ ...state, choices, removed: state.removed.filter((id) => id !== spellId && id !== previous) })
+}
+
+/** La clé des pastilles « nouveau sort » d'un personnage. */
+export const newSpellsKey = (ownerId: string) => `sorts:${ownerId}`
+
 function SpellGlyph({ category }: { category: ClassSpell["category"] }) {
   if (category === "bonus") return <Gauge />
   if (category === "passif") return <CircleDotDashed />
@@ -158,7 +174,7 @@ function KnownSpell({ spell, original, customized, rank, accent, currentCharges,
   const [confirmRemove, setConfirmRemove] = useState(false)
   const fresh = useNewSlot(spell.id)
   return <details
-    onMouseEnter={fresh.isNew ? fresh.seen : undefined}
+    onPointerMove={fresh.isNew ? fresh.seen : undefined}
     onFocusCapture={fresh.isNew ? fresh.seen : undefined}
     className={`group relative rounded-xl border bg-background/45 transition-colors ${dragOver ? "border-dashed" : ""}`}
     style={{ borderColor: dragOver ? accent : `${tone.background}66` }}
@@ -216,11 +232,16 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
 
 let knownRankBonuses: RankBonus[] = []
 
-export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "", ownerId = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string; ownerId?: string }) {
+/**
+ * La progression de classe d'un personnage. La fenêtre « Nouveau sort » appartient à la
+ * fiche (elle s'ouvre au passage de niveau, quel que soit l'onglet) : `onOpenChoice`
+ * l'ouvre, `onSpellRemoved` la propose après le retrait d'un sort choisi à un rang.
+ */
+export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "", ownerId = "", onOpenChoice, onSpellRemoved }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string; ownerId?: string; onOpenChoice?: () => void; onSpellRemoved?: () => void }) {
   const state = useMemo(() => parseClassChoices(value), [value])
-  // Les sorts tout juste choisis portent une pastille jusqu'à ce qu'on les survole.
-  const newSpellsKey = `sorts:${ownerId}`
-  const newSpells = useNewSlots(newSpellsKey)
+  // Les sorts tout juste obtenus portent une pastille jusqu'à ce qu'on les survole.
+  const spellsKey = newSpellsKey(ownerId)
+  const newSpells = useNewSlots(spellsKey)
   const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
   // Bonus de rang (communs à toutes les classes) : affichés sous le titre de chaque rang.
   // Gardés d'un affichage à l'autre : revenir sur l'onglet Sorts ne les fait pas disparaître.
@@ -242,23 +263,20 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
   const [searchCategory, setSearchCategory] = useState<"all" | ClassSpell["category"]>("all")
   const known = knownSpellsForCharacter(classes, spells, level, value)
   const pending = useMemo(() => pendingSpellChoices(classes, spells, level, value), [classes, spells, level, value])
-  const [choiceOpen, setChoiceOpen] = useState(false)
   const currentChoice = pending[0]
 
   async function update(next: CharacterClassChoices) { await onCommit(JSON.stringify(next)) }
   function choose(classId: string, rank: number, spellId: string) {
-    const previous = state.choices[classId]?.[String(rank)]
-    const choices = { ...state.choices, [classId]: { ...(state.choices[classId] || {}), [String(rank)]: spellId } }
     setReconsidering((current) => ({ ...current, [`${classId}:${rank}`]: false }))
-    if (ownerId) markNewSlots(newSpellsKey, [spellId])
-    // Le sort choisi n'est plus « retiré » ; l'ancien choix retiré n'a plus lieu d'être rétabli.
-    return update({ ...state, choices, removed: state.removed.filter((id) => id !== spellId && id !== previous) })
+    if (ownerId) markNewSlots(spellsKey, [spellId])
+    return onCommit(chooseClassSpell(value, classId, rank, spellId))
   }
   function setCharges(spell: ClassSpell, count: number) {
     return update({ ...state, charges: { ...state.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } })
   }
   function addExtra(spellId: string) {
     if (state.extras.includes(spellId) && !state.removed.includes(spellId)) return
+    if (ownerId) markNewSlots(spellsKey, [spellId])
     return update({ ...state, extras: [...state.extras.filter((id) => id !== spellId), spellId], removed: state.removed.filter((id) => id !== spellId), order: [...state.order.filter((id) => id !== spellId), spellId] })
   }
   const originals = useMemo(() => new Map(spells.map((spell) => [spell.id, spell])), [spells])
@@ -292,14 +310,18 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
       delete ranks[String(rank)]
       choices[classId] = ranks
     }
-    return update({
+    const saved = update({
       ...state,
       choices,
       extras: state.extras.filter((id) => id !== spell.id),
       removed: common && !chosenAt.length ? [...state.removed.filter((id) => id !== spell.id), spell.id] : state.removed.filter((id) => id !== spell.id),
     })
+    // Le rang libéré repropose ses sorts tout de suite (on peut aussi choisir plus tard).
+    if (chosenAt.length) onSpellRemoved?.()
+    return saved
   }
   function restoreSpell(spellId: string) {
+    if (ownerId) markNewSlots(spellsKey, [spellId])
     return update({ ...state, removed: state.removed.filter((id) => id !== spellId) })
   }
   // « Retirés de la fiche » : seulement ceux qu'un clic ferait revenir (acquis d'office au
@@ -341,26 +363,12 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
   if (!classes.length) return <div className="grid min-h-52 place-items-center rounded-2xl border border-dashed border-border/55 bg-card/20 p-8 text-center text-sm text-muted-foreground">Choisis une classe dans l’identité du personnage pour afficher sa progression.</div>
 
   return <NewSlotsContext.Provider value={newSpells}><div className="space-y-9">
-    {currentChoice && <>
-      <NewSpellSlot
-        count={pending.length}
-        accent={currentChoice.accent}
-        detail={`${currentChoice.className} · rang ${currentChoice.rank}`}
-        onOpen={() => setChoiceOpen(true)}
-      />
-      <SpellChoiceDialog
-        open={choiceOpen}
-        onOpenChange={setChoiceOpen}
-        title="Nouveau sort"
-        subtitle={`${currentChoice.className} · rang ${currentChoice.rank}`}
-        options={currentChoice.options}
-        accent={currentChoice.accent}
-        accentLight={currentChoice.accentLight}
-        choiceKey={`${currentChoice.classId}:${currentChoice.rank}`}
-        remaining={pending.length}
-        onChoose={(spell) => choose(currentChoice.classId, currentChoice.rank, spell.id)}
-      />
-    </>}
+    {currentChoice && onOpenChoice && <NewSpellSlot
+      count={pending.length}
+      accent={currentChoice.accent}
+      detail={`${currentChoice.className} · rang ${currentChoice.rank}`}
+      onOpen={onOpenChoice}
+    />}
     <section>
       <div className="flex flex-wrap items-end justify-between gap-3"><div><p className="text-[10px] font-semibold uppercase tracking-[.22em] text-muted-foreground">Répertoire</p><h2 className="font-display mt-1 text-2xl font-semibold">Capacités acquises</h2></div><div className="flex items-center gap-2"><label className="flex items-center gap-2 text-xs text-muted-foreground">Trier par<NativeSelect value={sort} onChange={(event) => setSort(event.target.value as "rank" | "name" | "type" | "manual")} className="h-10 min-w-40 py-0 pl-3 pr-10 leading-5"><NativeSelectOption value="rank">Rang</NativeSelectOption><NativeSelectOption value="name">Nom</NativeSelectOption><NativeSelectOption value="type">Type</NativeSelectOption><NativeSelectOption value="manual">Manuel</NativeSelectOption></NativeSelect></label><Button type="button" variant={searchOpen ? "secondary" : "outline"} size="icon-sm" aria-label="Ajouter une capacité" title="Ajouter une capacité" onClick={() => setSearchOpen((open) => !open)}>{searchOpen ? <X /> : <Plus />}</Button></div></div>
       {searchOpen && <div className="mt-4 rounded-xl border bg-card/55 p-3"><div className="flex flex-col gap-2 sm:flex-row"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, mot-clé, type ou compétence…" className="pl-9" /></div><NativeSelect value={searchCategory} onChange={(event) => setSearchCategory(event.target.value as typeof searchCategory)} className="h-9 min-w-36"><NativeSelectOption value="all">Tout</NativeSelectOption><NativeSelectOption value="actif">Actifs</NativeSelectOption><NativeSelectOption value="passif">Passifs</NativeSelectOption><NativeSelectOption value="bonus">Bonus</NativeSelectOption></NativeSelect></div><div className="mt-3 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{searchResults.map((spell) => <div key={spell.id} className="flex items-center gap-3 rounded-lg border bg-background/55 p-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg [&>svg]:size-4" style={{ backgroundColor: spellTone(spell).background, color: spellTone(spell).foreground }}><SpellGlyph category={spell.category} /></span><span className="min-w-0 flex-1"><b className="block truncate text-sm">{spell.name}</b><span className="block truncate text-xs text-muted-foreground">{spell.type}{spell.skills.length ? ` · ${spell.skills.join(" · ")}` : ""}</span></span><Button type="button" size="sm" variant="outline" onClick={() => void addExtra(spell.id)}><Plus />Ajouter</Button></div>)}</div>{matchingSearchResults.length > searchResults.length && <p className="pt-3 text-center text-xs text-muted-foreground">Affichage des 60 premiers résultats — précise ta recherche pour voir les autres.</p>}{!searchResults.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucune capacité correspondante.</p>}</div>}

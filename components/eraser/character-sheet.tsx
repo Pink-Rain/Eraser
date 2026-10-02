@@ -11,10 +11,14 @@ import type { ItemNotification } from "@/lib/item-notifications"
 import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
+import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
-import { ClassProgression, knownSpellsForCharacter, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
+import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
+import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
+import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
+import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -52,7 +56,9 @@ import {
   formatModifierAmount,
   indexInventoryModifiers,
   linkedItemsFor,
+  modifierTargetIdForName,
   modifierTotalFor,
+  withStateModifiers,
   skillModifierTargetId,
   type LinkedModifierItem,
 } from "@/lib/item-modifiers"
@@ -247,16 +253,20 @@ function ModifierBadge({ amount, plain = false }: { amount: number; plain?: bool
 function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: LinkedModifierItem[]; toggle: SlotToggle; borderColor: string; total?: string }) {
   if (!items.length) return null
   return <div className="mt-2 border-t pt-2" style={{ borderColor }}>
-    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Backpack className="size-3" />Objets liés</p>
+    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Backpack className="size-3" />{items.some((entry) => entry.source === "état") ? items.some((entry) => entry.source !== "état") ? "Objets et états liés" : "États" : "Objets liés"}</p>
     <div className="space-y-1">
-      {items.map((entry) => <label key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
+      {items.map((entry) => entry.source === "état" ? <div key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex items-center gap-2 rounded-lg border border-l-4 bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor, borderLeftColor: entry.color || "#78716c" }}>
+        <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
+        {entry.tag && <span className="shrink-0 truncate text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.tag}</span>}
+        <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatModifierAmount(entry.amount)}</span>
+      </div> : <label key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
         <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
         <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
         {entry.tag && <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.tag}</span>}
         <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"} ${entry.equipped ? "" : "opacity-40"}`}>{formatModifierAmount(entry.amount)}</span>
       </label>)}
     </div>
-    {total !== undefined && <p className="mt-1.5 text-right text-[10px] text-muted-foreground">Total avec objets : <b className="text-foreground">{total}</b></p>}
+    {total !== undefined && <p className="mt-1.5 text-right text-[10px] text-muted-foreground">Total avec {items.some((entry) => entry.source === "état") ? "objets et états" : "objets"} : <b className="text-foreground">{total}</b></p>}
   </div>
 }
 
@@ -416,7 +426,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const persistQueue = useRef(Promise.resolve())
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
-  const modifierIndex = useMemo(() => indexInventoryModifiers(inventory?.containers || []), [inventory])
+  // Les états posés (Index des états) changent les valeurs comme des objets équipés.
+  const statesCatalog = useStatesCatalog()
+  const characterStates = useMemo(() => parseClassChoices(values[characterClassChoicesIndex] || "").states, [values])
+  const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, (name) => modifierTargetIdForName(catalog, name)), [catalog, characterStates, statesCatalog.catalog])
+  const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateChanges), [inventory, stateChanges])
+  const portrait = useMemo(() => portraitLayers(statesCatalog.catalog, characterStates), [characterStates, statesCatalog.catalog])
   const modifiersByValueIndex = useMemo(() => {
     const map = new Map<number, { total: number; items: LinkedModifierItem[] }>()
     for (const target of modifierTargets) {
@@ -536,10 +551,40 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Des objets reçus pas encore survolés : la même pastille discrète sur l'onglet Inventaire.
   const newSlots = useNewSlots(character.id)
   const hasNewItems = Boolean(inventory?.containers.some((container) => container.slots.some((slot) => slot.item && newSlots.isNew(slot.id))))
-  const pendingChoiceCount = useMemo(
-    () => pendingSpellChoices(assignedClasses, availableClassSpells, currentLevel, classChoicesValue).length,
+  const pendingChoices = useMemo(
+    () => pendingSpellChoices(assignedClasses, availableClassSpells, currentLevel, classChoicesValue),
     [assignedClasses, availableClassSpells, currentLevel, classChoicesValue],
   )
+  const pendingChoiceCount = pendingChoices.length
+  const currentChoice = pendingChoices[0]
+  // La dernière proposition reste affichée le temps que la fenêtre se referme (après le
+  // dernier choix, il n'y en a plus) : elle ne disparaît plus d'un coup.
+  const [shownChoice, setShownChoice] = useState(currentChoice)
+  if (currentChoice && currentChoice !== shownChoice) setShownChoice(currentChoice)
+
+  // « Nouveau sort » : la fenêtre s'ouvre d'elle-même au passage de niveau et quand un sort
+  // choisi à un rang est retiré, quel que soit l'onglet affiché. « Choisir plus tard » la
+  // ferme ; l'emplacement brillant de l'onglet Sorts la rouvre.
+  const [spellChoiceOpen, setSpellChoiceOpen] = useState(false)
+  const [spellChoiceWanted, setSpellChoiceWanted] = useState(false)
+  useEffect(() => {
+    if (!spellChoiceWanted || classCatalogLoading) return
+    const timer = window.setTimeout(() => {
+      setSpellChoiceWanted(false)
+      if (currentChoice) setSpellChoiceOpen(true)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [classCatalogLoading, currentChoice, spellChoiceWanted])
+  function commitLevel(value: string) {
+    if (Math.trunc(Number(value) || 0) > currentLevel) setSpellChoiceWanted(true)
+    return commit(3, value)
+  }
+  function chooseSpell(spell: ClassSpell) {
+    if (!currentChoice) return
+    markNewSlots(newSpellsKey(character.id), [spell.id])
+    if (pendingChoiceCount <= 1) setSpellChoiceOpen(false)
+    return commit(characterClassChoicesIndex, chooseClassSpell(classChoicesValue, currentChoice.classId, currentChoice.rank, spell.id))
+  }
 
   function linkedAbilities(skillName: string) {
     const normalized = skillName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
@@ -547,6 +592,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       const candidate = skill.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
       return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)
     }))
+  }
+
+  function updateStates(next: CharacterState[]) {
+    void commit(characterClassChoicesIndex, JSON.stringify({ ...parseClassChoices(latestValues.current[characterClassChoicesIndex] || ""), states: next }))
   }
 
   function updateSpellCharges(spell: ClassSpell, count: number) {
@@ -796,7 +845,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "inventaire") return inventoryLoading
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
-    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} />
+    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }
@@ -817,10 +866,15 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             {/* eslint-disable-next-line @next/next/no-img-element */}
             <img src={values[characterNarrativeStart + 1]} alt={`Portrait de ${character.name}`} decoding="async" fetchPriority="high" className="size-full object-cover" />
           </> : <CircleUserRound className="size-20 opacity-30" />}
+          {/* Les états posés teintent le portrait (couleur de leurs effets) et y posent leurs images. */}
+          {portrait.colors.length > 0 && <span aria-hidden="true" className="pointer-events-none absolute inset-0 mix-blend-color" style={{ background: portrait.colors.length > 1 ? `linear-gradient(160deg, ${portrait.colors.join(", ")})` : portrait.colors[0], opacity: 0.55 }} />}
+          {portrait.colors.length > 0 && <span aria-hidden="true" className="pointer-events-none absolute inset-0" style={{ boxShadow: `inset 0 0 28px ${portrait.colors[0]}aa` }} />}
+          {portrait.images.map((image) => <span key={image} aria-hidden="true" className="pointer-events-none absolute inset-0"><IndexImage value={image} alt="" className="size-full object-contain" fallback={null} /></span>)}
           <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />{portraitPending ? "Envoi…" : "Changer"}</span>
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => changePortrait(event.target.files?.[0])} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
+        <CharacterStatesPanel states={characterStates} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -831,7 +885,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
               <div className="xl:col-span-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Peuples</p><MultipleValues label="un peuple" value={values[1]} onCommit={(value) => commit(1, value)} /></div>
               <div className="xl:col-span-5"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} /></div>
-              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={(value) => commit(3, value)} /></div>
+              <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={commitLevel} /></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
               <div className="xl:col-span-6"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Langues parlées</p><MultipleValues label="une langue" value={values[24]} onCommit={(value) => commit(24, value)} /></div>
@@ -871,6 +925,20 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
     </div>}
+
+    {shownChoice && <SpellChoiceDialog
+      open={spellChoiceOpen && Boolean(currentChoice)}
+      onOpenChange={setSpellChoiceOpen}
+      title="Nouveau sort"
+      subtitle={`${shownChoice.className} · rang ${shownChoice.rank}`}
+      options={shownChoice.options}
+      accent={shownChoice.accent}
+      accentLight={shownChoice.accentLight}
+      choiceKey={`${shownChoice.classId}:${shownChoice.rank}`}
+      remaining={Math.max(1, pendingChoiceCount)}
+      onChoose={chooseSpell}
+      onLater={() => setSpellChoiceOpen(false)}
+    />}
 
     <Dialog open={addingTab} onOpenChange={setAddingTab}>
       <DialogContent>

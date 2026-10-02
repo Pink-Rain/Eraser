@@ -167,10 +167,24 @@ export function indexIcon(name: string | undefined) {
 }
 
 /** Une icône d'index : une icône de la liste, ou un émoji / caractère tel quel. */
-export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = true }: { icon?: string; emoji?: string; className?: string; filled?: boolean }) {
+/** Les traits d'une icône pleine, par défaut : clairs, comme découpés dans la forme. */
+export const DEFAULT_GLYPH_STROKE = "#fffaf0"
+
+/**
+ * Une icône d'index : une icône de la liste, ou un émoji / caractère tel quel. Pleine,
+ * elle est remplie de sa couleur et ses traits (aiguilles d'une horloge, yeux d'un
+ * sourire) restent visibles dans la couleur `stroke` ; vide, seul son contour est tracé.
+ */
+export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = true, stroke }: { icon?: string; emoji?: string; className?: string; filled?: boolean; stroke?: string }) {
   if (emoji?.trim()) return <span aria-hidden="true" className={`inline-flex items-center justify-center leading-none ${className}`} style={{ fontSize: "0.95em", filter: filled ? undefined : "grayscale(1)" }}>{emoji.trim()}</span>
   const { Icon } = indexIcon(icon)
-  return <Icon aria-hidden="true" className={className} fill={filled ? "currentColor" : "none"} strokeWidth={filled ? 1.5 : 1.8} />
+  if (!filled) return <Icon aria-hidden="true" className={className} fill="none" strokeWidth={1.8} />
+  // Deux dessins superposés : la silhouette pleine, puis tous les traits par-dessus. Une
+  // icône dont le contour est tracé en dernier (le cercle du sourire) ne cache plus ses yeux.
+  return <span aria-hidden="true" className={`relative inline-flex shrink-0 ${className}`}>
+    <Icon className="absolute inset-0 size-full" fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+    <Icon className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
+  </span>
 }
 
 /** Choisir une icône (avec recherche) ou taper un émoji. */
@@ -182,7 +196,7 @@ export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone 
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
       <Button type="button" variant="outline" size="sm" disabled={disabled} className="justify-start gap-2">
-        {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} /> : <span className="text-muted-foreground">—</span>}
+        {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} filled={false} /> : <span className="text-muted-foreground">—</span>}
         <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? indexIcon(icon).label : "Aucune icône"}</span>
       </Button>
     </PopoverTrigger>
@@ -274,7 +288,7 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
     return <span className="flex min-h-8 items-center gap-0.5 px-1.5" style={{ color }} role="group" aria-label={`${label} : ${text || "vide"}`}>
       {special ? <span className="text-sm font-semibold" title="Sans limite">{settings.unlimited}</span>
         : number === null && text ? <span className="text-sm">{text}</span>
-        : Array.from({ length: Math.min(max, iconCap) }, (_, index) => <IndexIconGlyph key={index} icon={settings.icon} emoji={settings.emoji} />)}
+        : Array.from({ length: Math.min(max, iconCap) }, (_, index) => <IndexIconGlyph key={index} icon={settings.icon} emoji={settings.emoji} stroke={settings.strokeColor} />)}
       {max > iconCap && <span className="text-[11px] font-semibold">+{max - iconCap}</span>}
       {number === 0 && <span className="text-xs text-muted-foreground">0</span>}
       <span className="ml-auto">{editor}</span>
@@ -287,7 +301,7 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
       {Array.from({ length: count }, (_, index) => {
         const filled = current !== null && index < current
         return <button key={index} type="button" disabled={disabled} onClick={() => set(current !== null && index < current ? index : index + 1)} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 disabled:hover:scale-100 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>
-          <IndexIconGlyph icon={settings.icon} emoji={settings.emoji} filled={filled} />
+          <IndexIconGlyph icon={settings.icon} emoji={settings.emoji} filled={filled} stroke={settings.strokeColor} />
         </button>
       })}
       {!count && <span className="text-xs text-muted-foreground">{scale === "from-column" ? "Maximum vide" : "—"}</span>}
