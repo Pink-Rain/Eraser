@@ -558,30 +558,45 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 @keyframes eraser-fx-pulse-page { 0%, 100% { box-shadow: inset 0 0 40px 6px color-mix(in srgb, var(--fx) 45%, transparent); } 50% { box-shadow: inset 0 0 120px 30px color-mix(in srgb, var(--fx) 80%, transparent); } }
 
 /*
- * Aura : un halo d'énergie qui tourne et ondule autour des bords (deux couches qui
- * tournent en sens contraire), là où la pulsation bat sur place.
+ * Aura : une enveloppe de lumière qui épouse les bords. Un liseré presque blanc, une
+ * lueur colorée, des langues d'énergie qui montent en ondulant (un bruit étiré qui défile
+ * vers le haut, gardé sur les bords) et des particules qui s'élèvent.
  */
-.eraser-fx-aura {
-  mix-blend-mode: screen;
-  -webkit-mask: radial-gradient(ellipse 70% 66% at 50% 50%, transparent 38%, #000 88%);
-  mask: radial-gradient(ellipse 70% 66% at 50% 50%, transparent 38%, #000 88%);
+.eraser-fx-aura { mix-blend-mode: screen; }
+.eraser-fx-aura > u {
+  position: absolute; inset: 0;
+  box-shadow: inset 0 0 0 1.5px color-mix(in srgb, var(--fx) 35%, #fff), inset 0 0 10px 3px color-mix(in srgb, var(--fx) 85%, #fff), inset 0 0 34px 10px color-mix(in srgb, var(--fx) 70%, transparent);
+  animation: eraser-fx-aura-breathe 2.4s ease-in-out infinite;
 }
 .eraser-fx-aura > i {
-  position: absolute; left: 50%; top: 50%; width: 220%; aspect-ratio: 1; translate: -50% -50%;
-  background: conic-gradient(from 0deg, transparent 0 8%, var(--fx) 16%, transparent 27% 42%, color-mix(in srgb, var(--fx) 60%, #fff) 52%, transparent 63% 76%, var(--fx) 86%, transparent 96%);
-  filter: blur(10px) saturate(1.4);
-  animation: eraser-fx-spin 5.5s linear infinite;
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, color-mix(in srgb, var(--fx) 40%, #fff) 0%, var(--fx) 45%, color-mix(in srgb, var(--fx) 60%, transparent) 100%);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.07 0.014' numOctaves='3' seed='29' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 3.6 -1.5'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 120px 170px repeat, radial-gradient(ellipse 78% 74% at 50% 52%, transparent 52%, #000 90%) 0 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.07 0.014' numOctaves='3' seed='29' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 3.6 -1.5'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 120px 170px repeat, radial-gradient(ellipse 78% 74% at 50% 52%, transparent 52%, #000 90%) 0 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+  animation: eraser-fx-aura-rise 1.3s linear infinite;
 }
-.eraser-fx-aura > i + i { width: 200%; opacity: 0.7; filter: blur(22px); animation: eraser-fx-spin-back 8s linear infinite; background: conic-gradient(from 90deg, transparent 0 20%, color-mix(in srgb, var(--fx) 70%, #fff) 30%, transparent 45% 70%, var(--fx) 82%, transparent 95%); }
-.eraser-fx-aura-page { -webkit-mask: radial-gradient(ellipse 65% 60% at 50% 50%, transparent 62%, #000 100%); mask: radial-gradient(ellipse 65% 60% at 50% 50%, transparent 62%, #000 100%); }
-.eraser-fx-aura-page > i { width: 160vmax; filter: blur(28px); }
-.eraser-fx-aura-page > i + i { width: 150vmax; filter: blur(36px); }
+.eraser-fx-aura > i + i { opacity: 0.6; filter: blur(2px); -webkit-mask-size: 80px 120px, 100% 100%; mask-size: 80px 120px, 100% 100%; animation-name: eraser-fx-aura-rise-fast; animation-duration: 0.8s; }
+.eraser-fx-aura > s { position: absolute; inset: 0; background: radial-gradient(ellipse 80% 75% at 50% 55%, transparent 55%, color-mix(in srgb, var(--fx) 45%, transparent) 100%); filter: blur(6px); }
+.eraser-fx-aura > b { position: absolute; border-radius: 50%; background: color-mix(in srgb, var(--fx) 25%, #fff); box-shadow: 0 0 6px 2px var(--fx); opacity: 0; animation: eraser-fx-mote 3.5s ease-out infinite; }
+.eraser-fx-aura-page > u { box-shadow: inset 0 0 0 2px color-mix(in srgb, var(--fx) 35%, #fff), inset 0 0 18px 4px color-mix(in srgb, var(--fx) 85%, #fff), inset 0 0 70px 18px color-mix(in srgb, var(--fx) 60%, transparent); }
+.eraser-fx-aura-page > i { -webkit-mask-size: 180px 240px, 100% 100%; mask-size: 180px 240px, 100% 100%; }
+.eraser-fx-aura-page > i { -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.07 0.014' numOctaves='3' seed='29' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 3.6 -1.5'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 240px repeat, radial-gradient(ellipse 80% 76% at 50% 50%, transparent 66%, #000 96%) 0 0 / 100% 100% no-repeat; -webkit-mask-composite: source-in; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.07 0.014' numOctaves='3' seed='29' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 3.6 -1.5'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 180px 240px repeat, radial-gradient(ellipse 80% 76% at 50% 50%, transparent 66%, #000 96%) 0 0 / 100% 100% no-repeat; mask-composite: intersect; }
+.eraser-fx-aura-page > i + i { -webkit-mask-size: 120px 170px, 100% 100%; mask-size: 120px 170px, 100% 100%; }
+.eraser-fx-aura-page > b { animation-name: eraser-fx-mote-page; animation-duration: 5s; }
+@keyframes eraser-fx-aura-breathe { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes eraser-fx-aura-rise { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 0 -170px, 0 0; mask-position: 0 -170px, 0 0; } }
+@keyframes eraser-fx-aura-rise-fast { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 0 -120px, 0 0; mask-position: 0 -120px, 0 0; } }
+@keyframes eraser-fx-mote { 0% { opacity: 0; transform: translateY(0) scale(1); } 15% { opacity: 1; } 100% { opacity: 0; transform: translateY(-70px) scale(0.4); } }
+@keyframes eraser-fx-mote-page { 0% { opacity: 0; transform: translateY(0) scale(1); } 12% { opacity: 1; } 100% { opacity: 0; transform: translateY(-35vh) scale(0.4); } }
 @keyframes eraser-fx-spin-back { to { transform: rotate(-360deg); } }
 
 /* Spirale : une vraie spirale à trois bras qui s'enroule et tourne lentement. */
 .eraser-fx-spiral { mix-blend-mode: screen; opacity: 0.75; }
 .eraser-fx-spiral-turn { transform-box: view-box; transform-origin: 50% 50%; animation: eraser-fx-spin 14s linear infinite; }
-.eraser-fx-spiral-page { opacity: 0.2; mix-blend-mode: normal; }
+/* Sur la page, la spirale se tient sur le pourtour : le centre de l'écran reste net. */
+.eraser-fx-spiral-page { opacity: 0.22; mix-blend-mode: normal; -webkit-mask: radial-gradient(ellipse 62% 58% at 50% 50%, transparent 50%, #000 92%); mask: radial-gradient(ellipse 62% 58% at 50% 50%, transparent 50%, #000 92%); }
 .eraser-fx-spiral-page > svg { width: 150vmax; }
 
 /*

@@ -177,10 +177,21 @@ function Oozing({ style, variant }: { style: CSSProperties; variant: FxVariant }
 // Aura, Spirale, Brume
 // ---------------------------------------------------------------------------
 
-/** L'aura : un halo d'énergie qui tourne et ondule autour des bords (la pulsation, elle, bat sur place). */
+/**
+ * L'aura : une enveloppe de lumière collée aux bords, un liseré presque blanc, des langues
+ * d'énergie qui montent en ondulant tout autour et des particules qui s'élèvent. (La
+ * pulsation, elle, est une simple lueur qui bat ; les flammes brûlent par le bas.)
+ */
 function Aura({ style, variant }: { style: CSSProperties; variant: FxVariant }) {
+  const random = seeded(variant === "page" ? 71 : 29)
+  const motes = Array.from({ length: variant === "page" ? 18 : 9 }, () => {
+    // Le long des côtés, surtout : l'énergie monte autour du personnage.
+    const left = random() < 0.5
+    return { x: left ? random() * 14 : 86 + random() * 14, y: 30 + random() * 70, delay: random() * 3.5, size: 2 + random() * 2.5 }
+  })
   return <span aria-hidden="true" className={`eraser-fx-aura ${variant === "page" ? "eraser-fx-aura-page" : ""} pointer-events-none absolute inset-0 overflow-hidden`} style={style}>
-    <i /><i />
+    <u /><i /><i /><s />
+    {motes.map((mote, index) => <b key={index} style={{ left: `${mote.x}%`, top: `${mote.y}%`, width: mote.size, height: mote.size, animationDelay: `${mote.delay}s` }} />)}
   </span>
 }
 
