@@ -8,7 +8,6 @@
  */
 export const stateFxList = [
   { value: "Pulsation", hint: "Une lueur qui bat sur place, depuis les bords" },
-  { value: "Aura", hint: "Un halo d'énergie qui tourne et ondule autour" },
   { value: "Flammes", hint: "Des flammes qui montent du bas, des braises qui s'envolent" },
   { value: "Givre", hint: "Du givre et des éclats sur les bords" },
   { value: "Dégoulinant", hint: "Un liquide épais qui coule du haut et tombe en gouttes" },

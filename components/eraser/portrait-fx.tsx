@@ -174,26 +174,8 @@ function Oozing({ style, variant }: { style: CSSProperties; variant: FxVariant }
 }
 
 // ---------------------------------------------------------------------------
-// Aura, Spirale, Brume
+// Spirale, Brume
 // ---------------------------------------------------------------------------
-
-/**
- * L'aura : un anneau lumineux aux coins très arrondis (pilule, ovale) qui suit la forme du cadre, un peu en
- * retrait du bord pour que son halo pulse des deux côtés, un reflet qui en fait le tour
- * et des étincelles qui scintillent sur son pourtour.
- */
-function Aura({ style, variant }: { style: CSSProperties; variant: FxVariant }) {
-  const random = seeded(variant === "page" ? 71 : 29)
-  const count = variant === "page" ? 16 : 10
-  // Posées sur la courbe de l'anneau (offset-path), réparties tout autour.
-  const sparkles = Array.from({ length: count }, (_, index) => ({ at: ((index + 0.2 + random() * 0.6) / count) * 100, delay: random() * 2.8, size: variant === "page" ? 10 + random() * 8 : 7 + random() * 6 }))
-  return <span aria-hidden="true" className={`eraser-fx-aura ${variant === "page" ? "eraser-fx-aura-page" : ""} pointer-events-none absolute inset-0 overflow-hidden`} style={style}>
-    <span className="eraser-fx-aura-ring">
-      <s /><u /><i><em /></i>
-      {sparkles.map((sparkle, index) => <b key={index} style={{ offsetDistance: `${sparkle.at}%`, width: sparkle.size, height: sparkle.size, animationDelay: `${sparkle.delay}s` }} />)}
-    </span>
-  </span>
-}
 
 /** Les bras d'une spirale d'Archimède, en chemin SVG. */
 function spiralPath(arm: number, arms: number, turns: number) {
@@ -240,7 +222,6 @@ const components: Partial<Record<StateFx, (props: { style: CSSProperties; varian
   Givre: Frost,
   "Dégoulinant": Dripping,
   Suintement: Oozing,
-  Aura,
   Spirale: Spiral,
   Brume: Mist,
 }
@@ -250,7 +231,6 @@ const defaultColors: Partial<Record<StateFx, string>> = {
   Givre: "#9fd8ff",
   "Dégoulinant": "#3f6212",
   Suintement: "#9bbf2a",
-  Aura: "#a78bfa",
   Spirale: "#c084fc",
   Brume: "#d6d3d1",
 }

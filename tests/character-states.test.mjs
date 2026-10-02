@@ -26,7 +26,7 @@ const tables = [
     headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID", "Couleur appliquée à", "FX", "FX appliqué à"],
     rows: [
       row(["Effroi intense", "Volonté mentale", "#6b21a8", "-30", "", "EFF-1", "Page entière, Compétence liée", "Tremblement, Brume", "Compétence liée, Page entière"]),
-      row(["Détermination", "Force, Dextérité", "#b8872a", "+10", "", "EFF-2", "Portrait", "Aura", "Portrait"]),
+      row(["Détermination", "Force, Dextérité", "#b8872a", "+10", "", "EFF-2", "Portrait", "Rayons", "Portrait"]),
       // Ancienne case cochée : vaut « Page entière ». FX sans « FX appliqué à » : nulle part.
       row(["Détermination forte", "Force, Dextérité", "#b8872a", "+20", "", "EFF-3", "TRUE", "Flammes", ""]),
     ],
@@ -77,7 +77,7 @@ test("les états posés sont relus prudemment et teintent le portrait", () => {
   assert.equal(states.stateContributions(catalog, [{ id: "ETA-5872D5A6", name: "Déterminé", level: 1 }], target)[0].color, "");
   assert.deepEqual(states.effectApply("portrait ; page entiere"), { page: true, skills: false, portrait: true });
   // Les FX ne se dessinent qu'où « FX appliqué à » le dit.
-  assert.deepEqual(portraitOnly.fx.map((fx) => fx.name), ["Aura"]);
+  assert.deepEqual(portraitOnly.fx.map((fx) => fx.name), ["Rayons"]);
   assert.deepEqual([legacyPage.fx, legacyPage.sheetFx], [[], []]);
   const fear = states.portraitLayers(catalog, [{ id: "x", name: "Effrayé", level: 2 }]);
   assert.deepEqual([fear.fx, fear.sheetFx.map((fx) => fx.name)], [[], ["Tremblement", "Brume"]]);
