@@ -1,6 +1,6 @@
 /**
- * Les succès côté serveur : lus dans l'Index des succès (Google Sheets), attribués et
- * retirés dans son onglet « Obtenus ». Google Sheets reste la source : une attribution
+ * Les succès côté serveur : lus dans l'Index des succès (Google Sheets) et son onglet
+ * « Obtenus ». Google Sheets reste la source : une attribution
  * écrite ou effacée à la main dans la feuille compte comme les autres.
  */
 import {
@@ -18,7 +18,7 @@ import {
   obtainedFromTable,
 } from "@/lib/achievements-shared"
 import { resolveJdrSheet } from "@/lib/google-sheets"
-import { addWorldIndexRow, deleteWorldIndexRows, getWorldIndex, getWorldIndexQuick } from "@/lib/world-indexes"
+import { addWorldIndexRow, getWorldIndex, getWorldIndexQuick } from "@/lib/world-indexes"
 
 const KEY = "achievements" as const
 
@@ -43,7 +43,8 @@ export async function achievementsOf(account: { uid: string; displayName: string
 }
 
 /**
- * Attribue un succès à un compte. Un compte qui l'a déjà le garde tel quel : la même
+ * Attribue un succès à un compte : réservé à l'attribution automatique à venir (aucun
+ * bouton ne l'appelle pour l'instant). Un compte qui l'a déjà le garde tel quel : la même
  * attribution n'est jamais écrite deux fois.
  */
 export async function grantAchievement(input: { achievement: string; uid: string; player: string; grantedBy: string; note?: string }) {
@@ -69,13 +70,4 @@ export async function grantAchievement(input: { achievement: string; uid: string
   })
   await addWorldIndexRow(KEY, OBTAINED_TAB, values)
   return { achievement, created: true }
-}
-
-/** Retire une attribution, retrouvée par son identifiant (les lignes ont pu bouger). */
-export async function revokeAchievement(obtainedId: string) {
-  const { obtained } = await readAchievements({ fresh: true })
-  const entry = obtained.find((candidate) => candidate.id === obtainedId)
-  if (!entry) throw new Error("ACHIEVEMENT_GRANT_NOT_FOUND")
-  await deleteWorldIndexRows(KEY, OBTAINED_TAB, [entry.rowNumber])
-  return entry
 }

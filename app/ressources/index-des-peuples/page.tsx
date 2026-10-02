@@ -34,7 +34,7 @@ export default async function Page() {
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Index</p>
           <h1 className="font-display text-2xl font-semibold sm:text-3xl">{definition.title}</h1>
         </div>
-        <Suspense fallback={<DeferredContentLoading label="Chargement de l’index…" />}>
+        <Suspense fallback={<DeferredContentLoading variant="table" label="Chargement de l’index…" />}>
           <IndexData />
         </Suspense>
       </div>

@@ -455,7 +455,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     }
     if (isHeader(header, [ACHIEVEMENT_TYPE_HEADER])) return { kind: "choice", options: [{ value: "Joueur", color: achievementTypeColors.Joueur }, { value: "MJ", color: achievementTypeColors.MJ }] }
     if (isHeader(header, [ACHIEVEMENT_SUBTYPE_HEADER])) return { kind: "choice", allowCustom: true, options: achievementSubtypes.map((value) => ({ value })) }
-    if (isHeader(header, [ACHIEVEMENT_ICON_HEADER])) return { kind: "icon" }
+    if (isHeader(header, [ACHIEVEMENT_ICON_HEADER])) return { kind: "file", file: { accept: "image" } }
     if (isHeader(header, [ACHIEVEMENT_COLOR_HEADER])) return { kind: "color" }
     return { kind: "rich" }
   }

@@ -97,7 +97,8 @@ export type SchemaOperation =
   | { op: "order-tabs"; tabs: string[] }
 
 /** Les types proposés à la création ou au changement de type d'une colonne. */
-export const creatableKinds: IndexColumnKind[] = ["rich", "name-form", "number", "checkbox", "color", "gauge", "choice", "linked-choice", "linked", "lookup", "rollup", "formula", "random", "actions", "file", "spells"]
+// « Nom formulaire » n'y est pas : chaque index a déjà le sien, créé d'office ; on n'en veut pas deux.
+export const creatableKinds: IndexColumnKind[] = ["rich", "number", "checkbox", "color", "gauge", "choice", "linked-choice", "linked", "tab-sort", "lookup", "rollup", "formula", "random", "actions", "file", "spells"]
 
 export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, place, suppression." }
 

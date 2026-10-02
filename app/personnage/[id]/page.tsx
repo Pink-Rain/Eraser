@@ -46,7 +46,7 @@ export default async function CharacterPage({ params }: { params: Promise<{ id: 
 
   return (
     <AuthenticatedShell pageLabel={indexedCharacter.name}>
-      <Suspense key={id} fallback={<DeferredPageLoading label="Chargement de la fiche…" />}>
+      <Suspense key={id} fallback={<DeferredPageLoading variant="sheet" title={indexedCharacter.name} label="Chargement de la fiche…" />}>
         <CharacterData id={id} accountUid={account.uid} role={account.role} />
       </Suspense>
     </AuthenticatedShell>

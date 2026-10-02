@@ -65,7 +65,7 @@ import {
   type InventoryItemRecord,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
-import { parseItemModifiers, serializeItemModifiers } from "@/lib/item-modifiers"
+import { parseItemAttachments, parseItemModifiers, serializeItemLinks } from "@/lib/item-modifiers"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -829,6 +829,8 @@ export type ObjectIndexTable = {
   tabName: string
   headers: string[]
   rows: ObjectIndexRow[]
+  /** En-têtes absents de la feuille (case vide en ligne 1), repris des autres index. */
+  borrowedHeaders?: number[]
 }
 
 let objectIndexTableCache: { expiresAt: number; tables: ObjectIndexTable[] } | null = null
@@ -935,8 +937,72 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
-  scheduleObjectIndexIconSync(tables)
+  // Les icônes s'écrivent par numéro de colonne : jamais pendant une réparation des en-têtes.
+  if (tables.some(needsObjectIndexHeaderRepair)) scheduleObjectIndexHeaderRepair(tables)
+  else scheduleObjectIndexIconSync(tables)
   return tables
+}
+
+/**
+ * Les colonnes en double entièrement vides d'un tableau d'objets : la « Description »
+ * qu'une ancienne version ajoutait en fin de tableau quand la ligne d'en-têtes était
+ * vide. La première colonne du nom (celle qui contient le texte) est toujours gardée,
+ * et une colonne qui contient quoi que ce soit n'est jamais retenue.
+ */
+export function emptyDuplicateObjectColumns(table: Pick<ObjectIndexTable, "headers" | "rows">) {
+  const seen = new Set<string>()
+  const duplicates: number[] = []
+  table.headers.forEach((header, index) => {
+    const key = normalizedHeader(header)
+    if (!key || blankObjectIndexHeader.test(header)) return
+    // Seules les colonnes qu'Eraser ajoute lui-même en fin de tableau sont concernées.
+    if (seen.has(key) && ERASER_APPENDED_OBJECT_HEADERS.has(key) && table.rows.every((row) => !(row.values[index] ?? "").trim())) duplicates.push(index)
+    seen.add(key)
+  })
+  return duplicates
+}
+
+const ERASER_APPENDED_OBJECT_HEADERS = new Set(["description", "icone", "icon", "nombre max"])
+
+function needsObjectIndexHeaderRepair(table: ObjectIndexTable) {
+  return Boolean(table.borrowedHeaders?.length) || emptyDuplicateObjectColumns(table).length > 0
+}
+
+let objectHeaderRepairAttemptAt = 0
+
+function scheduleObjectIndexHeaderRepair(tables: ObjectIndexTable[]) {
+  if (Date.now() - objectHeaderRepairAttemptAt < 10 * 60_000) return
+  objectHeaderRepairAttemptAt = Date.now()
+  runInBackground(repairObjectIndexHeaders(tables.filter(needsObjectIndexHeaderRepair)), "OBJECT_HEADER_REPAIR_FAILED")
+}
+
+/**
+ * Répare la ligne d'en-têtes des tableaux d'objets, sans toucher à une seule valeur :
+ * les en-têtes repris des autres index sont écrits dans les cases vides de la ligne 1
+ * (la feuille devient lisible et modifiable dans Sheets comme dans Eraser), puis les
+ * colonnes en double entièrement vides sont supprimées.
+ */
+async function repairObjectIndexHeaders(tables: ObjectIndexTable[]) {
+  for (const table of tables) {
+    const duplicates = emptyDuplicateObjectColumns(table)
+    // On relit la ligne 1 : on n'écrit que dans des cases réellement vides.
+    const [firstRow = []] = await readRange(table.fileId, sheetTabRange(table.tabName, "A1:AZ1")).catch(() => [[] as string[]])
+    const writes = (table.borrowedHeaders ?? [])
+      .filter((index) => !duplicates.includes(index) && !(firstRow[index] ?? "").trim())
+      .map((index) => ({ range: sheetTabRange(table.tabName, `${columnName(index + 1)}1`), values: [[table.headers[index]]] }))
+    if (writes.length) await updateRanges(table.fileId, writes)
+    if (duplicates.length) {
+      await googleSheetsJson(`spreadsheets/${table.fileId}:batchUpdate`, {
+        method: "POST",
+        body: JSON.stringify({ requests: [...duplicates].sort((left, right) => right - left).map((index) => ({ deleteDimension: { range: { sheetId: table.sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 } } })) }),
+      })
+    }
+    if (writes.length || duplicates.length) {
+      console.info("OBJECT_HEADER_REPAIRED", table.fileName, table.tabName, { headersWritten: writes.length, emptyDuplicatesRemoved: duplicates.map((index) => table.headers[index]) })
+      clearSpreadsheetReadCache(table.fileId)
+    }
+  }
+  clearObjectIndexTableCache()
 }
 
 const blankObjectIndexHeader = /^Colonne \d+$/
@@ -967,7 +1033,8 @@ function fillMissingObjectIndexHeaders(tables: ObjectIndexTable[]) {
       return candidates[0]?.[0] || header
     })
     if (!headers.some((header) => nameAliases.has(normalizedHeader(header))) && blankObjectIndexHeader.test(table.headers[0] ?? "")) headers[0] = "Nom"
-    return { ...table, headers }
+    const borrowedHeaders = table.headers.flatMap((header, index) => blankObjectIndexHeader.test(header) && !blankObjectIndexHeader.test(headers[index]) ? [index] : [])
+    return { ...table, headers, borrowedHeaders }
   })
 }
 
@@ -5729,7 +5796,7 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   if (!content || !container || (!content.itemId && !content.customName) || inventoryContainerCategory(container, typeById) === "Bourse") {
     throw new Error("INVENTORY_SLOT_NOT_FOUND")
   }
-  const normalized = serializeItemModifiers(parseItemModifiers(modifiers))
+  const normalized = serializeItemLinks(parseItemModifiers(modifiers), parseItemAttachments(modifiers))
   if (normalized.length > 4000) throw new Error("INVALID_INVENTORY_MODIFIERS")
   await updateStoredInventoryContent(workbook, { ...content, modifiers: normalized, updatedAt: new Date().toISOString() })
   return buildCharacterInventory(characterId, workbook)

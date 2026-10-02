@@ -35,7 +35,7 @@ export type Achievement = {
   subtype: string
   /** HTML, mise en forme de Sheets comprise. */
   description: string
-  /** Nom d'une icône de la liste, nom français ou émoji (voir `parseIconValue`). */
+  /** Colonne Fichier image : l'adresse de l'image (ou un symbole court, comme ailleurs). */
   icon: string
   color: string
 }
@@ -56,8 +56,6 @@ export type ObtainedAchievement = {
 export type AchievementBoard = {
   achievements: Achievement[]
   obtained: ObtainedAchievement[]
-  /** MJ ou administrateur : peut attribuer et retirer des succès. */
-  canGrant: boolean
 }
 
 export function foldAchievementText(value: string) {

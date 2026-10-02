@@ -2,7 +2,7 @@
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRouter } from "next/navigation"
-import { CircleHelp, Coins, FileText, ImageIcon, LoaderCircle, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
+import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { addToInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
@@ -11,6 +11,8 @@ import { IndexEditor } from "@/components/eraser/index-editor"
 import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
+import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -25,6 +27,7 @@ import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/l
 import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
 import { numberCorrection, numberSortKey } from "@/lib/index-numbers"
 import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 
 function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -86,6 +89,12 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     "eraser:object-index:sort", null,
     (v): v is SheetGridSort => v === null || (typeof v === "object" && v !== null && typeof (v as { column?: unknown }).column === "string" && ((v as { direction?: unknown }).direction === "asc" || (v as { direction?: unknown }).direction === "desc")),
   )
+  // Les onglets-fenêtres de l'index des objets : des lignes de un ou plusieurs tableaux, selon des conditions.
+  const settings = useIndexSettings("objects")
+  const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
+  // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
+  const editedInView = useRef(false)
+  const activeView = useMemo(() => { const id = viewIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
   // Les cellules en cours d’enregistrement gardent la valeur saisie : le tableau
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
@@ -436,16 +445,23 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-medium">
           Tableau à afficher
-          <NativeSelect value={selected ? tableKey(selected) : ""} onChange={(event) => setSelectedKey(event.target.value)} disabled={!tables.length || busy}>
-            {!tables.length && <NativeSelectOption value="">Aucun tableau disponible</NativeSelectOption>}
-            {tables.map((table) => <NativeSelectOption key={tableKey(table)} value={tableKey(table)}>{table.fileName} · {table.tabName}</NativeSelectOption>)}
-          </NativeSelect>
+          <span className="flex items-center gap-1">
+            <NativeSelect value={activeView ? viewSelectKey(activeView.id) : selected ? tableKey(selected) : ""} onChange={(event) => { setSelectedKey(event.target.value); if (editedInView.current && !viewIdOfSelectKey(event.target.value)) { editedInView.current = false; void refresh(true) } }} disabled={!tables.length || busy}>
+              {!tables.length && <NativeSelectOption value="">Aucun tableau disponible</NativeSelectOption>}
+              {tables.map((table) => <NativeSelectOption key={tableKey(table)} value={tableKey(table)}>{table.fileName} · {table.tabName}</NativeSelectOption>)}
+              {settings.views.length > 0 && <optgroup label="Onglets-fenêtres">
+                {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
+              </optgroup>}
+            </NativeSelect>
+            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+          </span>
         </label>
-        {selected && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
+        {selected && !activeView && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
-          {selected && <DrawRowButton
+          <Button type="button" variant="outline" onClick={() => setViewDialog("new")} disabled={!tables.length || busy} title="Un onglet qui réaffiche les objets répondant à des conditions, sans les copier"><Filter />Onglet-fenêtre</Button>
+          {selected && !activeView && <DrawRowButton
             rows={displayedRows}
             weightColumns={weightColumns}
             weightOf={(rowKey, header) => { const index = columnOfHeader(header); return index >= 0 ? numericCellValue(valueOf(rowKey, String(index)), specs[index]) : null }}
@@ -453,10 +469,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
             onOpen={setDetails}
             disabled={busy}
           />}
-          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy || Boolean(activeView)} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplit les cases « Icône » vides avec les icônes d’Eraser du dossier « icone objet » ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
-          <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy}><Plus />Ajouter un objet</Button>
+          <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy || Boolean(activeView)}><Plus />Ajouter un objet</Button>
         </div>
       </div>
 
@@ -482,7 +498,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}
       />}
 
-      {selected ? (
+      {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected ? (
         <SheetGrid
           layoutKey={`eraser:object-index:grid:${selected.fileId}:${selected.sheetId}`}
           columns={columns}
@@ -519,6 +535,16 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         error={sheetError}
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError("") }}
+      />}
+      {viewDialog && <IndexViewDialog
+        open
+        onOpenChange={(open) => { if (!open) setViewDialog(null) }}
+        index="objects"
+        view={viewDialog === "edit" ? activeView : null}
+        sources={[{ value: ALL_SOURCES, label: "Tous les index d’objets" }, ...tables.map((table) => ({ value: tableKey(table), label: `${table.fileName} · ${table.tabName}` }))]}
+        columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}
+        onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(viewSelectKey(id)); return id }}
+        onDelete={async (id) => { await settings.deleteView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}

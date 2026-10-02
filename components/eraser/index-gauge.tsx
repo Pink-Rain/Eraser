@@ -166,25 +166,6 @@ export function indexIcon(name: string | undefined) {
   return iconByName.get(name ?? "") ?? iconByName.get("sparkle")!
 }
 
-const iconByLabel = new Map(indexIcons.map((entry) => [foldName(entry.label), entry]))
-
-/**
- * La valeur d'une case Icône : le nom d'une icône de la liste (« trophy »), son nom
- * français (« Trophée », tapé dans Sheets) ou un émoji, gardé tel quel.
- */
-export function parseIconValue(value: string): { icon?: string; emoji?: string } {
-  const trimmed = value.trim()
-  if (!trimmed) return {}
-  if (iconByName.has(trimmed)) return { icon: trimmed }
-  const byLabel = iconByLabel.get(foldName(trimmed))
-  return byLabel ? { icon: byLabel.name } : { emoji: trimmed }
-}
-
-/** Ce qu'on écrit dans la case : l'émoji s'il y en a un, sinon le nom de l'icône. */
-export function iconValueOf(choice: { icon?: string; emoji?: string }) {
-  return choice.emoji?.trim() || choice.icon || ""
-}
-
 /** Une icône d'index : une icône de la liste, ou un émoji / caractère tel quel. */
 export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = true }: { icon?: string; emoji?: string; className?: string; filled?: boolean }) {
   if (emoji?.trim()) return <span aria-hidden="true" className={`inline-flex items-center justify-center leading-none ${className}`} style={{ fontSize: "0.95em", filter: filled ? undefined : "grayscale(1)" }}>{emoji.trim()}</span>
@@ -193,22 +174,17 @@ export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = tru
 }
 
 /** Choisir une icône (avec recherche) ou taper un émoji. */
-export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone = false, variant = "button", label }: { icon?: string; emoji?: string; onChange: (value: { icon?: string; emoji?: string }) => void; disabled?: boolean; allowNone?: boolean; variant?: "button" | "cell"; label?: string }) {
+export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone = false }: { icon?: string; emoji?: string; onChange: (value: { icon?: string; emoji?: string }) => void; disabled?: boolean; allowNone?: boolean }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const folded = foldName(query)
   const shown = indexIcons.filter((entry) => !folded || foldName(`${entry.label} ${entry.name} ${entry.keywords ?? ""}`).includes(folded))
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      {variant === "cell"
-        ? <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent">
-          {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} className="size-4 text-primary" /> : <span className="text-muted-foreground">—</span>}
-          {(icon || emoji) && <span className="truncate text-muted-foreground">{emoji?.trim() ? emoji.trim() : indexIcon(icon).label}</span>}
-        </button>
-        : <Button type="button" variant="outline" size="sm" disabled={disabled} className="justify-start gap-2">
-          {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} /> : <span className="text-muted-foreground">—</span>}
-          <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? indexIcon(icon).label : "Aucune icône"}</span>
-        </Button>}
+      <Button type="button" variant="outline" size="sm" disabled={disabled} className="justify-start gap-2">
+        {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} /> : <span className="text-muted-foreground">—</span>}
+        <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? indexIcon(icon).label : "Aucune icône"}</span>
+      </Button>
     </PopoverTrigger>
     {open && <PopoverContent align="start" className="w-80 p-2">
       <Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher : cœur, tête de mort, graine…" className="mb-2 h-8 text-xs" />
@@ -223,15 +199,6 @@ export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone 
     </PopoverContent>}
   </Popover>
 }
-
-/** Une case Icône d'un index : la valeur de la feuille, lue et écrite par `parseIconValue`. */
-export const IconCell = memo(function IconCell({ label, value, disabled = false, onChange }: { label: string; value: string; disabled?: boolean; onChange: (value: string) => void }) {
-  const [shown, setShown] = useState(value)
-  const [seen, setSeen] = useState(value)
-  if (seen !== value) { setSeen(value); setShown(value) }
-  const parsed = parseIconValue(shown)
-  return <IconPicker variant="cell" label={label} icon={parsed.icon} emoji={parsed.emoji} disabled={disabled} allowNone onChange={(choice) => { const next = iconValueOf(choice); setShown(next); onChange(next) }} />
-})
 
 function parseCount(value: string) {
   const parsed = Number.parseFloat(value.replace(",", ".").replace(/[^0-9.-]/g, ""))

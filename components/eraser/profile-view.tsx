@@ -5,7 +5,7 @@ import Link from "next/link"
 import { CircleUserRound, Crown, Map, Plus, Settings2, Sparkles, Trophy, UsersRound, type LucideIcon } from "lucide-react"
 
 import { AccountAvatar } from "@/components/eraser/account-dialog"
-import { AchievementShowcase, GrantAchievementDialog, useAchievementBoard } from "@/components/eraser/achievements"
+import { AchievementShowcase, useAchievementBoard } from "@/components/eraser/achievements"
 import { useShellData } from "@/components/eraser/app-shell"
 import { QuietImage } from "@/components/eraser/home-shell"
 import { Button } from "@/components/ui/button"
@@ -45,10 +45,9 @@ function Empty({ children }: { children: React.ReactNode }) {
 }
 
 /** Le profil d'un compte : ses personnages, ses campagnes et ses succès, quelle que soit la vue. */
-export function ProfileView({ account, characters, campaigns, self }: { account: ProfileAccount; characters: CharacterRecord[]; campaigns: CampaignRecord[]; self: boolean }) {
+export function ProfileView({ account, characters, campaigns }: { account: ProfileAccount; characters: CharacterRecord[]; campaigns: CampaignRecord[] }) {
   const shell = useShellData()
-  const { board, loading, error, reload } = useAchievementBoard(self ? undefined : account.uid)
-  const [granting, setGranting] = useState(false)
+  const { board, loading, error } = useAchievementBoard()
   // Classe et rang, lus dans les fiches après l'affichage : le profil n'attend pas Sheets.
   const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string }>>({})
   // Tant que les fiches n'ont pas répondu, la classe reste en attente (pas « à choisir »).
@@ -56,13 +55,13 @@ export function ProfileView({ account, characters, campaigns, self }: { account:
   useEffect(() => {
     if (!characters.length) return
     let active = true
-    fetch(`/api/characters/summaries${self ? "" : `?uid=${encodeURIComponent(account.uid)}`}`)
+    fetch("/api/characters/summaries")
       .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string }> } : null)
       .then((payload) => { if (active && payload?.summaries) setSummaries(payload.summaries) })
       .catch(() => { /* les cartes restent lisibles sans la classe */ })
       .finally(() => { if (active) setSummariesLoaded(true) })
     return () => { active = false }
-  }, [account.uid, characters.length, self])
+  }, [characters.length])
 
   // Les campagnes menées, puis celles où joue l'un de ses personnages.
   const played = useMemo(() => {
@@ -87,16 +86,16 @@ export function ProfileView({ account, characters, campaigns, self }: { account:
       <div className="pointer-events-none absolute inset-0 bg-[radial-gradient(80%_120%_at_0%_0%,rgb(146_118_64/0.16),transparent_60%)]" />
       <Trophy className="pointer-events-none absolute -right-6 -top-6 size-44 text-primary/[.06]" />
       <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
-        <AccountAvatar user={account} version={self ? shell.avatarVersion : 0} className="size-24 rounded-[1.4rem] text-2xl shadow-md ring-4 ring-background" />
+        <AccountAvatar user={account} version={shell.avatarVersion} className="size-24 rounded-[1.4rem] text-2xl shadow-md ring-4 ring-background" />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">{self ? "Mon profil" : "Profil"}</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Mon profil</p>
           <h1 className="font-display truncate text-4xl font-semibold leading-tight tracking-[-0.02em]">{name}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
             <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary">{account.role === "joueur" ? <UsersRound className="size-3.5" /> : <Crown className="size-3.5" />}{roleLabels[account.role]}</span>
-            {self && <span className="truncate">{account.email}</span>}
+            <span className="truncate">{account.email}</span>
           </p>
         </div>
-        {self && <Button type="button" variant="outline" onClick={shell.openAccount} className="self-start sm:self-center"><Settings2 />Réglages du compte</Button>}
+        <Button type="button" variant="outline" onClick={shell.openAccount} className="self-start sm:self-center"><Settings2 />Réglages du compte</Button>
       </div>
       <div className="relative mt-6 grid gap-3 sm:grid-cols-3">
         <Stat icon={UsersRound} label={characters.length > 1 ? "personnages" : "personnage"} value={String(characters.length)} color="#927640" />
@@ -105,7 +104,7 @@ export function ProfileView({ account, characters, campaigns, self }: { account:
       </div>
     </header>
 
-    <Section title="Personnages" icon={UsersRound} count={characters.length} action={self ? <Button asChild size="sm" variant="outline"><Link href="/creation-de-personnage" prefetch={false}><Plus />Nouveau personnage</Link></Button> : undefined}>
+    <Section title="Personnages" icon={UsersRound} count={characters.length} action={<Button asChild size="sm" variant="outline"><Link href="/creation-de-personnage" prefetch={false}><Plus />Nouveau personnage</Link></Button>}>
       {characters.length
         ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
           {characters.map((character) => {
@@ -130,7 +129,7 @@ export function ProfileView({ account, characters, campaigns, self }: { account:
             </Link>
           })}
         </div>
-        : <Empty>{self ? "Aucun personnage pour l’instant." : "Aucun personnage."}</Empty>}
+        : <Empty>Aucun personnage pour l’instant.</Empty>}
     </Section>
 
     <Section title="Campagnes" icon={Map} count={campaigns.length + played.length}>
@@ -158,18 +157,16 @@ export function ProfileView({ account, characters, campaigns, self }: { account:
 
     <Section title="Succès" icon={Trophy} count={obtainedCount ?? undefined} action={<span className="flex items-center gap-2">
       {loading && board && <Sparkles className="size-4 animate-pulse text-muted-foreground" aria-label="Actualisation" />}
-      {board?.canGrant && <Button type="button" size="sm" variant="outline" onClick={() => setGranting(true)}><Plus />Attribuer un succès</Button>}
     </span>}>
       {board
         ? <div className="grid gap-6">
           {(["Joueur", "MJ"] as AchievementType[]).map((type) => <div key={type}>
             <h3 className={cn("mb-3 flex items-center gap-2 text-sm font-semibold uppercase tracking-[.14em]", type === "MJ" ? "text-[#9a4f2c]" : "text-[#397f88]")}>{type === "MJ" ? <Crown className="size-4" /> : <UsersRound className="size-4" />}Succès {type === "MJ" ? "de MJ" : "de joueur"}<span className="font-normal normal-case tracking-normal text-muted-foreground">· {countOf(type)} obtenu{countOf(type) > 1 ? "s" : ""}</span></h3>
-            <AchievementShowcase board={board} types={[type]} revocable={board.canGrant} onChanged={reload} />
+            <AchievementShowcase board={board} types={[type]} />
           </div>)}
         </div>
         : error ? <Empty>{error}</Empty>
           : <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">{[0, 1, 2].map((index) => <div key={index} className="h-44 animate-pulse rounded-2xl border bg-muted/30" />)}</div>}
     </Section>
-    {board && granting && <GrantAchievementDialog open onOpenChange={setGranting} achievements={board.achievements} uid={account.uid} playerName={name} onGranted={reload} />}
   </div>
 }

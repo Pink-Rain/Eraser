@@ -64,6 +64,7 @@ import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
 import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { AccountAvatar, AccountDialog } from "@/components/eraser/account-dialog"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
+import { PendingPage, usePendingPage } from "@/components/eraser/page-transition"
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
@@ -224,6 +225,14 @@ export function AppShell({
   const [visibleCharacters, setVisibleCharacters] = useState(characters)
   const [visibleCampaigns, setVisibleCampaigns] = useState(campaigns)
   const [visibleTodos, setVisibleTodos] = useState(todos)
+  // Au clic, la page de destination s'affiche aussitôt, sans ses données ; le titre d'un
+  // personnage ou d'une campagne est déjà connu ici.
+  const pendingPage = usePendingPage((to) => {
+    const match = to.match(/^\/(personnage|campagne)\/([^/]+)\/?$/)
+    if (!match) return undefined
+    const id = decodeURIComponent(match[2])
+    return match[1] === "personnage" ? visibleCharacters.find((character) => character.id === id)?.name : visibleCampaigns.find((campaign) => campaign.id === id)?.name
+  }, children)
   const [currentPageLabel, setCurrentPageLabel] = useState(pageLabel)
   // Le titre le plus précis l'emporte ; un titre retiré (page quittée) ne vide pas l'en-tête.
   const setShellLabel = useCallback((label: string | null) => { if (label) setCurrentPageLabel(label) }, [])
@@ -719,7 +728,7 @@ export function AppShell({
             <BookOpen className="size-4 shrink-0" />
             <span>Eraser</span>
             <span aria-hidden="true">/</span>
-            <span className="truncate text-foreground">{currentPageLabel}</span>
+            <span className="truncate text-foreground">{pendingPage?.title || currentPageLabel}</span>
           </div>
           <Badge variant="outline" className="ml-auto shrink-0 border-primary/20 bg-primary/5">
             {roleViewLabels[viewRole]}
@@ -727,7 +736,9 @@ export function AppShell({
         </header>
         <div className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain">
           <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user, avatarVersion, openAccount }}>
-            <div data-view-role={viewRole} className="contents">
+            {pendingPage && <PendingPage pending={pendingPage} />}
+            {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
+            <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
               {children}
             </div>
           </ShellDataContext.Provider>

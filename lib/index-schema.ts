@@ -16,7 +16,7 @@ import {
   updateRange,
 } from "@/lib/google-sheets"
 import type { IndexColumnSpec } from "@/lib/index-columns"
-import { foldName } from "@/lib/index-columns"
+import { foldName, indexColumnKinds } from "@/lib/index-columns"
 import { findEntry, SCHEMA_TAB, type SchemaEntry } from "@/lib/index-schema-shared"
 
 const HEADERS = ["Onglet", "Colonne", "Nom d’origine", "Type et réglages (JSON)", "État", "Supprimé le"]
@@ -28,7 +28,12 @@ function parseSpec(value: string): IndexColumnSpec | null {
   if (!value.trim()) return null
   try {
     const parsed = JSON.parse(value) as IndexColumnSpec
-    return parsed && typeof parsed === "object" && typeof parsed.kind === "string" ? parsed : null
+    if (!parsed || typeof parsed !== "object" || typeof parsed.kind !== "string") return null
+    // Le type « Icône » de l'alpha.91 a été retiré : une colonne enregistrée avec lui
+    // redevient un Fichier image (la colonne d'images qui existait déjà).
+    if ((parsed.kind as string) === "icon") return { ...parsed, kind: "file", file: { accept: "image" } }
+    // Un type inconnu de cette version : la colonne garde son type par défaut.
+    return parsed.kind in indexColumnKinds ? parsed : null
   } catch {
     return null
   }

@@ -179,6 +179,50 @@ export function serializeItemModifiers(modifiers: ItemModifier[]) {
   return kept.length ? JSON.stringify(kept) : ""
 }
 
+/**
+ * Runes, attributs et matériaux posés sur un objet, choisis dans leurs index. Ils sont
+ * rangés dans le même JSON que les liens, avec pour cible leur genre : les versions qui
+ * ne les connaissent pas les ignorent. Leurs effets seront définis plus tard.
+ */
+export type ItemAttachmentKind = "rune" | "attribut" | "materiau"
+export type ItemAttachment = { kind: ItemAttachmentKind; name: string }
+export const itemAttachmentKinds: ItemAttachmentKind[] = ["rune", "attribut", "materiau"]
+export const itemAttachmentLabels: Record<ItemAttachmentKind, { singular: string; plural: string }> = {
+  rune: { singular: "Rune", plural: "Runes" },
+  attribut: { singular: "Attribut", plural: "Attributs" },
+  materiau: { singular: "Matériau", plural: "Matériaux" },
+}
+
+export function parseItemAttachments(raw: string): ItemAttachment[] {
+  if (!raw.trim()) return []
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return []
+    return parsed.flatMap((entry) => {
+      const kind = entry && typeof entry === "object" ? (entry as { target?: unknown }).target : null
+      const name = entry && typeof entry === "object" && typeof (entry as { value?: unknown }).value === "string" ? (entry as { value: string }).value.trim() : ""
+      return typeof kind === "string" && (itemAttachmentKinds as string[]).includes(kind) && name ? [{ kind: kind as ItemAttachmentKind, name: name.slice(0, 160) }] : []
+    })
+  } catch { return [] }
+}
+
+/** Les liens chiffrés et les runes/attributs/matériaux, ensemble, sans doublon. */
+export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[]) {
+  const kept = modifiers
+    .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim() }))
+    .filter((modifier) => modifier.target && isItemModifierTargetId(modifier.target) && hasModifierAmount(modifier.value))
+  const seen = new Set<string>()
+  const extras = attachments.flatMap((attachment) => {
+    const name = attachment.name.trim()
+    const key = `${attachment.kind}:${name.toLocaleLowerCase("fr")}`
+    if (!name || seen.has(key) || !itemAttachmentKinds.includes(attachment.kind)) return []
+    seen.add(key)
+    return [{ target: attachment.kind, value: name }]
+  })
+  const all = [...kept, ...extras]
+  return all.length ? JSON.stringify(all) : ""
+}
+
 export type LinkedModifierItem = {
   slotId: string
   /** Ce que l’objet modifie quand ce n’est pas la valeur principale (« Réussite critique »…). */

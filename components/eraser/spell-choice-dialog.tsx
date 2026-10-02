@@ -6,13 +6,21 @@ import { CircleDotDashed, Crosshair, Gauge, Sparkles, Volume2, VolumeX, Zap } fr
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from "@/components/ui/dialog"
 import type { ClassSpell } from "@/lib/class-content"
+import { classSpellCategoryTones } from "@/lib/class-spell-utils"
 import { playSpellChoiceChime, playSpellChosen, setSoundsEnabled, soundsEnabled } from "@/lib/sounds"
 
-/** Couleur et libellé de chaque genre de sort : rouge (actif), vert sapin (passif), or (bonus de rang). */
-export const spellKindLook: Record<ClassSpell["category"], { label: string; color: string; glow: string }> = {
-  actif: { label: "Actif", color: "#c2412f", glow: "#ff7a59" },
-  passif: { label: "Passif", color: "#2f7d72", glow: "#5fd3bf" },
-  bonus: { label: "Bonus de rang", color: "#b8872a", glow: "#ffd36b" },
+/**
+ * La couleur d'un sort : celle de sa case Type dans l'index des sorts (gris pour les
+ * actifs, blanc pour les passifs, violet pour les bonus de rang…), comme partout ailleurs
+ * dans Eraser. Sans couleur lue, celle de sa catégorie par défaut.
+ */
+export function spellLook(spell: ClassSpell) {
+  const fallback = classSpellCategoryTones[spell.category]
+  return {
+    label: spell.type || (spell.category === "bonus" ? "Bonus de rang" : spell.category === "passif" ? "Passif" : "Actif"),
+    background: spell.tone?.background || fallback.background,
+    foreground: spell.tone?.foreground || fallback.foreground,
+  }
 }
 
 function KindIcon({ category, className, style }: { category: ClassSpell["category"]; className?: string; style?: CSSProperties }) {
@@ -45,9 +53,9 @@ export function NewSpellSlot({ count, accent, detail, onOpen }: { count: number;
   </button>
 }
 
-/** Une carte de sort à choisir : couleurs de la classe, icône du genre de sort en fond. */
+/** Une carte de sort à choisir : couleurs de la classe, couleur du sort (celle de l'index), icône du genre en fond. */
 function AugmentCard({ spell, accent, accentLight, index, state, onPick }: { spell: ClassSpell; accent: string; accentLight: string; index: number; state: "idle" | "picked" | "faded"; onPick: () => void }) {
-  const look = spellKindLook[spell.category]
+  const look = spellLook(spell)
   return <button
     type="button"
     onClick={onPick}
@@ -56,23 +64,22 @@ function AugmentCard({ spell, accent, accentLight, index, state, onPick }: { spe
     style={{
       animationDelay: `${index * 140}ms`,
       animationDuration: "520ms",
-      borderColor: state === "picked" ? look.glow : `${look.color}cc`,
+      borderColor: look.background,
       background: `radial-gradient(120% 70% at 50% 0%, ${accent}f2 0%, ${accent}b3 38%, #15100c 100%)`,
-      boxShadow: state === "picked" ? `0 0 0 3px ${look.glow}, 0 0 26px ${look.glow}99` : `0 18px 40px -12px #000c, inset 0 0 0 1px ${accentLight}33`,
+      boxShadow: state === "picked" ? `0 0 0 3px ${look.background}, 0 0 26px ${look.background}99` : `0 18px 40px -12px #000c, inset 0 0 0 1px ${accentLight}33`,
     }}
   >
-    {/* L'icône du genre de sort, en grand, en fond de carte. */}
-    <KindIcon category={spell.category} className="pointer-events-none absolute -bottom-10 -right-10 size-64 opacity-[.13] transition duration-500 group-hover:rotate-6 group-hover:opacity-20" style={{ color: look.glow }} />
-    <span className="pointer-events-none absolute inset-x-0 top-0 h-1.5" style={{ background: `linear-gradient(90deg, transparent, ${look.glow}, transparent)` }} />
+    {/* L'icône du genre de sort, en grand, en fond de carte, dans la couleur du sort. */}
+    <KindIcon category={spell.category} className="pointer-events-none absolute -bottom-10 -right-10 size-64 opacity-[.14] transition duration-500 group-hover:rotate-6 group-hover:opacity-20" style={{ color: look.background }} />
+    <span className="pointer-events-none absolute inset-x-0 top-0 h-1.5" style={{ background: `linear-gradient(90deg, transparent, ${look.background}, transparent)` }} />
     <span className="relative flex items-center justify-between">
-      <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[.18em]" style={{ backgroundColor: `${look.color}e6`, boxShadow: `0 0 12px ${look.glow}66` }}>{look.label}</span>
-      {spell.category === "actif" && spell.charges !== null && <SpellChargeStars total={spell.charges} accent={look.glow} />}
+      <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[.18em]" style={{ backgroundColor: look.background, color: look.foreground }}>{look.label}</span>
+      {spell.category === "actif" && spell.charges !== null && <SpellChargeStars total={spell.charges} accent={look.background} />}
     </span>
-    <span className="relative mx-auto mt-6 flex size-20 items-center justify-center rounded-full border-2" style={{ borderColor: look.glow, background: `radial-gradient(circle, ${look.color} 0%, #120d0a 75%)`, boxShadow: `0 0 26px ${look.glow}88` }}>
-      <KindIcon category={spell.category} className="size-9" style={{ color: "#fff" }} />
+    <span className="relative mx-auto mt-6 flex size-20 items-center justify-center rounded-full border-2" style={{ borderColor: look.background, backgroundColor: look.background, color: look.foreground, boxShadow: `0 0 22px ${look.background}88` }}>
+      <KindIcon category={spell.category} className="size-9" />
     </span>
     <span className="relative mt-5 text-center font-display text-2xl font-semibold leading-tight drop-shadow">{spell.name}</span>
-    <span className="relative mt-1 text-center text-[11px] uppercase tracking-[.16em] text-white/70">{spell.type}</span>
     <span className="relative mt-4 line-clamp-6 text-center text-[13px] leading-5 text-white/90">
       {(spell.effectHtml || spell.effect) && <span className="block font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
       {(spell.descriptionHtml || spell.description) && <span className="mt-1.5 block text-white/65" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}

@@ -15,7 +15,7 @@ async function ProfileData({ uid, email, displayName, role }: { uid: string; ema
     listCharactersForUser(uid).catch(() => []),
     role === "joueur" ? Promise.resolve([]) : listCampaignsForMj(uid).catch(() => []),
   ])
-  return <ProfileView account={{ uid, email, displayName, role }} characters={characters} campaigns={campaigns} self />
+  return <ProfileView account={{ uid, email, displayName, role }} characters={characters} campaigns={campaigns} />
 }
 
 export default async function ProfilePage() {

@@ -1044,9 +1044,8 @@ test("keeps computed character cells out of a partial save", async () => {
   assert.equal(computed.has(layout.index(skill, metrics[2])), true);
 });
 
-test("reads achievements, their grants and their icons from the index", async () => {
+test("reads achievements and who obtained them from the index", async () => {
   const shared = await vite.ssrLoadModule("/lib/achievements-shared.ts");
-  const { parseIconValue, iconValueOf } = await vite.ssrLoadModule("/components/eraser/index-gauge.tsx");
   const { worldColumnSpec, worldColumnPolicy, worldIndexDefinitions } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
   const { indexColumnKinds } = await vite.ssrLoadModule("/lib/index-columns.ts");
   const row = (rowNumber, values) => ({ rowNumber, values, html: values });
@@ -1065,19 +1064,67 @@ test("reads achievements, their grants and their icons from the index", async ()
   const mine = shared.obtainedBy(obtained, { uid: "uid-ayla", displayName: "ayla" });
   assert.deepEqual(mine.map((entry) => entry.id), ["OBT-1", "OBT-2"]);
   assert.equal(shared.achievementOf(achievements, mine[1]).name, "Conteur");
-  // Icône : nom de la liste, nom français tapé dans Sheets, ou émoji.
-  assert.deepEqual(parseIconValue("trophy"), { icon: "trophy" });
-  assert.deepEqual(parseIconValue("Trophée"), { icon: "trophy" });
-  assert.deepEqual(parseIconValue("🏆"), { emoji: "🏆" });
-  assert.equal(iconValueOf({ icon: "crown", emoji: "" }), "crown");
-  assert.equal(iconValueOf({ icon: "crown", emoji: "⭐" }), "⭐");
-  assert.equal(indexColumnKinds.icon.creatable, true);
+  // Pas de type « Icône » : la colonne Icône est une colonne Fichier image, comme ailleurs.
+  assert.equal(indexColumnKinds.icon, undefined);
   // L'index des succès : ses types de colonnes, et les colonnes lues par Eraser verrouillées.
-  assert.equal(worldColumnSpec("achievements", "Succès", "Icône").kind, "icon");
+  assert.deepEqual(worldColumnSpec("achievements", "Succès", "Icône"), { kind: "file", file: { accept: "image" } });
   assert.equal(worldColumnSpec("achievements", "Succès", "Sous-type").allowCustom, true);
   assert.deepEqual(worldColumnSpec("achievements", "Obtenus", "Succès").source, { index: "achievements", tab: "Succès", onlyTab: true });
   assert.equal(worldColumnSpec("achievements", "Obtenus", "Compte").hidden, true);
   assert.equal(worldColumnPolicy("achievements", "Succès", "Type", []).type, false);
   assert.equal(worldColumnPolicy("achievements", "Succès", "Sous-type", []).type, true);
   assert.deepEqual(worldIndexDefinitions.achievements.tabs.map((tab) => tab.name), ["Succès", "Obtenus"]);
+});
+
+test("shows existing rows in a view tab when they meet its conditions", async () => {
+  const { matchesView, parseViewConditions, describeCondition } = await vite.ssrLoadModule("/lib/index-views.ts");
+  const row = { Nom: "Épée runique", Type: "Arme, Rune", "Sous-type": "Épée", Prix: "120 PO", Note: "" };
+  const cell = (column) => row[column] ?? "";
+  // « est » vaut pour l'une des valeurs d'une case multiple, sans tenir compte des accents ni de la casse.
+  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "rune" }] }, cell), true);
+  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Nom", operator: "contient", value: "epee" }, { column: "Prix", operator: "superieur", value: "100" }] }, cell), true);
+  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), false);
+  assert.equal(matchesView({ match: "une", conditions: [{ column: "Type", operator: "est", value: "Armure" }, { column: "Note", operator: "vide", value: "" }] }, cell), true);
+  // Une colonne absente de l'onglet vaut une case vide ; sans condition, tout passe.
+  assert.equal(matchesView({ match: "toutes", conditions: [{ column: "Élément", operator: "non-vide", value: "" }] }, cell), false);
+  assert.equal(matchesView({ match: "toutes", conditions: [] }, cell), true);
+  // Des conditions abîmées dans la feuille sont ignorées, sans rien bloquer.
+  assert.deepEqual(parseViewConditions('[{"column":"Type","operator":"est","value":"Rune"},{"column":"","operator":"est"},{"column":"Nom","operator":"inconnu"}]'), [{ column: "Type", operator: "est", value: "Rune" }]);
+  assert.deepEqual(parseViewConditions("pas du json"), []);
+  assert.equal(describeCondition({ column: "Type", operator: "est", value: "Rune" }), "Type est « Rune »");
+});
+
+test("keeps runes, attributes and materials beside an item's links", async () => {
+  const { parseItemAttachments, parseItemModifiers, serializeItemLinks } = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+  const raw = serializeItemLinks([{ target: "comp:Perception", value: "+5" }, { target: "comp:Perception", value: "" }], [{ kind: "rune", name: "Rune de feu" }, { kind: "rune", name: "rune de feu" }, { kind: "materiau", name: "Mithril" }, { kind: "attribut", name: " " }]);
+  // Les liens chiffrés restent lus comme avant (les anciennes versions ignorent le reste)…
+  assert.deepEqual(parseItemModifiers(raw), [{ target: "comp:Perception", value: "+5" }]);
+  // …et les runes, attributs et matériaux sont gardés à côté, sans doublon ni nom vide.
+  assert.deepEqual(parseItemAttachments(raw), [{ kind: "rune", name: "Rune de feu" }, { kind: "materiau", name: "Mithril" }]);
+  assert.equal(serializeItemLinks([], []), "");
+});
+
+test("saves only reusable columns in a tab preset", async () => {
+  const { presetColumnsOf, parsePresetColumns } = await vite.ssrLoadModule("/lib/index-presets.ts");
+  const columns = presetColumnsOf([
+    { header: "Nom", spec: { kind: "name-form" } },
+    { header: "Type", spec: { kind: "choice", options: [{ value: "Rune" }] } },
+    { header: "type", spec: { kind: "rich" } },
+    { header: "ID", spec: { kind: "id" } },
+    { header: "Prix", spec: { kind: "number", number: { unit: "money" } } },
+    { header: "Ancienne", spec: { kind: "archived" } },
+  ]);
+  assert.deepEqual(columns.map((column) => column.header), ["Type", "Prix"]);
+  assert.deepEqual(parsePresetColumns(JSON.stringify(columns)), columns);
+  assert.deepEqual(parsePresetColumns("[1, {\"header\": \"X\"}]"), []);
+});
+
+test("offers a column type that sorts rows into tabs, and no second name column", async () => {
+  const { indexColumnKinds } = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const { creatableKinds } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+  assert.ok(creatableKinds.includes("tab-sort"));
+  assert.equal(creatableKinds.includes("name-form"), false);
+  assert.equal(indexColumnKinds["name-form"].creatable, false);
+  // Chaque type proposé a sa phrase courte, pour une liste compacte.
+  for (const kind of creatableKinds) assert.ok(indexColumnKinds[kind].short, kind);
 });

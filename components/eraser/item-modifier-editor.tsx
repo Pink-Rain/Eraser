@@ -7,16 +7,23 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
+import { LinkedChoicePicker } from "@/components/eraser/index-cells"
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
+import { splitNames } from "@/lib/world-index-definitions"
 import {
   buildItemModifierTargets,
+  itemAttachmentKinds,
+  itemAttachmentLabels,
+  serializeItemLinks,
+  type ItemAttachment,
+  type ItemAttachmentKind,
   formatModifierAmount,
   hasModifierAmount,
   itemModifierAspectLabels,
   itemModifierTargetLabel,
   joinModifierTarget,
   parseModifierAmount,
-  serializeItemModifiers,
   splitModifierTarget,
   type ItemModifier,
   type ItemModifierAspect,
@@ -106,10 +113,20 @@ function TargetPicker({ value, onChange }: { value: string; onChange: (target: s
   </Popover>
 }
 
+/** D'où viennent les noms proposés : l'Index des runes, des attributs, des matériaux. */
+const attachmentSources: Record<ItemAttachmentKind, { index: "runes" | "attributes" | "materials"; tab: string }> = {
+  rune: { index: "runes", tab: "Runes" },
+  attribut: { index: "attributes", tab: "Attributs" },
+  materiau: { index: "materials", tab: "Matériaux" },
+}
+
 /** Monté seulement à l’ouverture : le brouillon repart des liens enregistrés à chaque fois. */
-function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: ItemModifier[]; pending: boolean; onSave: (serialized: string) => Promise<boolean>; onClose: () => void }) {
+function ItemModifierForm({ modifiers, attachments, pending, onSave, onClose }: { modifiers: ItemModifier[]; attachments: ItemAttachment[]; pending: boolean; onSave: (serialized: string) => Promise<boolean>; onClose: () => void }) {
   const [draft, setDraft] = useState<ItemModifier[]>(() => modifiers.length ? modifiers : [{ value: "", target: "" }])
+  const [extras, setExtras] = useState<ItemAttachment[]>(attachments)
   const { byId } = useModifierTargets()
+  const namesOf = (kind: ItemAttachmentKind) => extras.filter((entry) => entry.kind === kind).map((entry) => entry.name)
+  const setNames = (kind: ItemAttachmentKind, value: string) => setExtras((current) => [...current.filter((entry) => entry.kind !== kind), ...splitNames(value).map((name) => ({ kind, name }))])
 
   function update(index: number, changes: Partial<ItemModifier>) {
     setDraft((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry))
@@ -119,10 +136,19 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
   const incomplete = draft.some((entry) => (entry.target && !hasModifierAmount(entry.value)) || (!entry.target && entry.value.trim()))
 
   async function save() {
-    if (await onSave(serializeItemModifiers(draft))) onClose()
+    if (await onSave(serializeItemLinks(draft, extras))) onClose()
   }
 
-  return <>
+  return <Tabs defaultValue="liens" className="gap-3">
+    <TabsList className="h-auto w-full flex-wrap justify-start">
+      <TabsTrigger value="liens">Caractéristiques et compétences{usable.length > 0 && <span className="ml-1 tabular-nums text-muted-foreground">{usable.length}</span>}</TabsTrigger>
+      {itemAttachmentKinds.map((kind) => <TabsTrigger key={kind} value={kind}>{itemAttachmentLabels[kind].plural}{namesOf(kind).length > 0 && <span className="ml-1 tabular-nums text-muted-foreground">{namesOf(kind).length}</span>}</TabsTrigger>)}
+    </TabsList>
+    {itemAttachmentKinds.map((kind) => <TabsContent key={kind} value={kind} className="grid gap-2">
+      <p className="text-xs leading-5 text-muted-foreground">Choisis dans l’Index des {itemAttachmentLabels[kind].plural.toLocaleLowerCase("fr")}. Leur effet sur l’objet sera défini plus tard.</p>
+      <div className="rounded-md border bg-background/55"><LinkedChoicePicker compact={false} multiple label={itemAttachmentLabels[kind].plural} source={attachmentSources[kind]} value={namesOf(kind).join(", ")} onChange={(value) => setNames(kind, value)} /></div>
+    </TabsContent>)}
+    <TabsContent value="liens" className="grid gap-3">
       <p className="-mt-1 text-xs leading-5 text-muted-foreground">Ces modificateurs ne comptent dans les totaux que lorsque la case de l’objet est cochée. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.</p>
       <div className="grid gap-2">
         {draft.map((entry, index) => {
@@ -154,34 +180,40 @@ function ItemModifierForm({ modifiers, pending, onSave, onClose }: { modifiers: 
         {usable.length > 0 && <p className="text-[11px] text-muted-foreground">{usable.length} lien{usable.length > 1 ? "s" : ""} actif{usable.length > 1 ? "s" : ""}</p>}
       </div>
       {incomplete && <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">Les lignes sans valeur chiffrée ou sans cible ne seront pas enregistrées.</p>}
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
-        <Button type="button" disabled={pending} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
-      </div>
-  </>
+    </TabsContent>
+    <div className="flex justify-end gap-2">
+      <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
+      <Button type="button" disabled={pending} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
+    </div>
+  </Tabs>
 }
 
-export function ItemModifierDialog({ open, onOpenChange, itemName, modifiers, pending, onSave }: {
+export function ItemModifierDialog({ open, onOpenChange, itemName, modifiers, attachments, pending, onSave }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   itemName: string
   modifiers: ItemModifier[]
+  attachments: ItemAttachment[]
   pending: boolean
   onSave: (serialized: string) => Promise<boolean>
 }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="sm:max-w-xl">
       <DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" />Lier « {itemName} »</DialogTitle></DialogHeader>
-      {open && <ItemModifierForm modifiers={modifiers} pending={pending} onSave={onSave} onClose={() => onOpenChange(false)} />}
+      {open && <ItemModifierForm modifiers={modifiers} attachments={attachments} pending={pending} onSave={onSave} onClose={() => onOpenChange(false)} />}
     </DialogContent>
   </Dialog>
 }
 
-export function ItemModifierSummary({ modifiers, className = "" }: { modifiers: ItemModifier[]; className?: string }) {
+export function ItemModifierSummary({ modifiers, attachments = [], className = "" }: { modifiers: ItemModifier[]; attachments?: ItemAttachment[]; className?: string }) {
   const { byId } = useModifierTargets()
-  if (!modifiers.length) return null
+  if (!modifiers.length && !attachments.length) return null
   return <div className={`flex flex-wrap items-center gap-1 ${className}`}>
-    <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>
+    {itemAttachmentKinds.map((kind) => {
+      const names = attachments.filter((entry) => entry.kind === kind).map((entry) => entry.name)
+      return names.length ? <span key={kind} className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/8 px-2 py-0.5 text-[10px] font-semibold text-primary"><span className="uppercase tracking-wider text-primary/70">{itemAttachmentLabels[kind].singular}{names.length > 1 ? "s" : ""}</span>{names.join(" · ")}</span> : null
+    })}
+    {modifiers.length > 0 && <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>}
     {modifiers.map((modifier, index) => {
       const amount = parseModifierAmount(modifier.value)
       return <span

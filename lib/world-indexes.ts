@@ -21,7 +21,7 @@ import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
-import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, isIdHeader, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
 import { columnMoves, headerProblem, isDisplayOnlyChange, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import {
@@ -886,6 +886,29 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     for (const rowNumber of moved.sort((left, right) => right - left)) await deleteGoogleSheetRow(sheet.spreadsheetId, fromTab, rowNumber, table.sheetId)
     invalidateWorldIndexes([key])
   })
+}
+
+/**
+ * Une colonne « Rangement en onglets » : sa valeur est le nom de l'onglet où la ligne
+ * doit vivre. La valeur est écrite, puis la ligne y est déplacée ; un onglet absent est
+ * d'abord créé avec les mêmes colonnes que l'onglet de départ. Une case vidée ne déplace rien.
+ */
+export async function sortWorldIndexRow(key: WorldIndexKey, fromTab: string, rowNumber: number, header: string, html: string) {
+  const value = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
+  const source = await plainTable(key, fromTab)
+  const column = columnOf(source.headers, header)
+  if (column < 0 || rowNumber < 2) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+  await updateWorldIndexCell(key, fromTab, rowNumber, column, escapeCellHtml(value))
+  if (!value) return
+  let target = (await tabsOf(key)).find((tab) => foldName(tab.name) === foldName(value))?.name
+  if (!target) {
+    const data = await getWorldIndex(key)
+    const columns = (data.columns[fromTab] ?? []).filter((entry) => !isNameColumn(entry.header) && !isIdHeader(entry.header)).map((entry) => ({ header: entry.header, spec: entry.spec }))
+    await applyWorldSchemaOperations(key, [{ op: "add-tab", name: value, columns }])
+    forgetEffectiveIndex(key)
+    target = value.replace(/\s+/g, " ").trim()
+  }
+  if (target !== fromTab) await moveWorldIndexRows(key, fromTab, target, [rowNumber])
 }
 
 /**

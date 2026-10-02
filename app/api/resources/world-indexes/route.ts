@@ -10,6 +10,7 @@ import {
   getWorldIndex,
   knownWorldIndexKey,
   moveWorldIndexRows,
+  sortWorldIndexRow,
   normalizeWorldIndexChoices,
   updateWorldIndexCell,
   updateWorldIndexFields,
@@ -42,7 +43,7 @@ export async function GET(request: Request) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number }
+    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; column?: number; html?: string; values?: unknown[]; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number; header?: string }
     const key = await knownWorldIndexKey(body.key)
     if (!key || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
@@ -66,6 +67,7 @@ export async function POST(request: Request) {
     else if (body.action === "duplicate" && rowNumbers.length) await duplicateWorldIndexRows(key, body.tabName, rowNumbers)
     else if (body.action === "delete" && rowNumbers.length) await deleteWorldIndexRows(key, body.tabName, rowNumbers)
     else if (body.action === "move" && rowNumbers.length && typeof body.toTab === "string") await moveWorldIndexRows(key, body.tabName, body.toTab, rowNumbers)
+    else if (body.action === "sort" && typeof body.rowNumber === "number" && typeof body.header === "string" && typeof body.html === "string") await sortWorldIndexRow(key, body.tabName, body.rowNumber, body.header, body.html)
     else if (body.action === "update-fields" && typeof body.rowNumber === "number" && body.fields && typeof body.fields === "object") {
       await updateWorldIndexFields(key, body.tabName, body.rowNumber, Object.fromEntries(Object.entries(body.fields).map(([header, value]) => [header, String(value ?? "")])))
     }

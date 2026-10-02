@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
-import { GaugeCell, IconCell } from "@/components/eraser/index-gauge"
+import { GaugeCell } from "@/components/eraser/index-gauge"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import {
   checkboxValue,
@@ -861,6 +861,8 @@ export type IndexColumnContext = {
   runButton?: (rowKey: string, button: ActionButton) => Promise<void>
   /** Nombre : montrer les conversions au survol (le MJ seulement dans une boutique). */
   showConversions?: boolean
+  /** Rangement en onglets : les onglets de l'index, proposés dans la liste. */
+  tabNames?: string[]
 }
 
 /**
@@ -933,9 +935,12 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     case "color":
       column.control = (rowKey) => <ColorCell label={label} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
-    case "icon":
-      column.control = (rowKey) => <IconCell label={label} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+    case "tab-sort": {
+      // Une valeur nouvelle crée l'onglet : la liste accepte un nom qui n'y est pas encore.
+      const options = (context.tabNames ?? []).map((value) => ({ value }))
+      column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={options} allowCustom disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
       break
+    }
     case "lookup":
     case "rollup":
       column.control = (rowKey) => <ComputedCell values={context.computed?.(rowKey, key, spec) ?? []} pills={spec.kind === "lookup"} />
@@ -1001,6 +1006,8 @@ export type IndexFieldProps = {
     draw?: (spec: IndexColumnSpec) => Promise<void>
     buttonVisible?: (button: ActionButton) => boolean
     runButton?: (button: ActionButton) => Promise<void>
+    /** Rangement en onglets : les onglets de l'index. */
+    tabNames?: string[]
   }
 }
 
@@ -1013,6 +1020,8 @@ export function IndexField({ label, spec: input, value, onChange, long = false, 
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} /></div>
+    case "tab-sort":
+      return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={(row?.tabNames ?? []).map((name) => ({ value: name }))} allowCustom disabled={disabled} onChange={onChange} /></div>
     case "linked-choice":
       return spec.source ? <div className={fieldLabel}>{title}<LinkedChoicePicker compact={false} label={label} source={spec.source} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} /></div> : null
     case "checkbox":
@@ -1023,8 +1032,6 @@ export function IndexField({ label, spec: input, value, onChange, long = false, 
         : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>
-    case "icon":
-      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><IconCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
     case "gauge": {

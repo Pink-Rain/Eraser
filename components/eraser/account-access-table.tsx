@@ -1,6 +1,5 @@
 "use client"
 
-import Link from "next/link"
 import { useState } from "react"
 import { LoaderCircle, Save, Trash2 } from "lucide-react"
 import { useRouter } from "next/navigation"
@@ -81,7 +80,7 @@ function AccountRow({ account, isCurrent, onDeleted }: { account: AccountRecord;
     <article className="grid items-center gap-4 rounded-2xl border bg-card/90 p-4 shadow-[0_8px_30px_rgb(67_50_31/0.05)] md:grid-cols-[minmax(0,1fr)_180px_160px_auto_auto]">
       <div className="min-w-0">
         <div className="flex items-center gap-2">
-          <Link href={`/profil/${encodeURIComponent(account.uid)}`} prefetch={false} className="block truncate font-medium hover:text-primary hover:underline" title="Voir le profil">{account.displayName || account.email}</Link>
+          <p className="truncate font-medium">{account.displayName || account.email}</p>
           {isCurrent && <Badge variant="outline">Ton compte</Badge>}
         </div>
         <p className="truncate text-sm text-muted-foreground">{account.email}</p>

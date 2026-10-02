@@ -39,7 +39,7 @@ export default async function CustomIndexPage({ params }: { params: Promise<{ cl
           <h1 className="font-display text-2xl font-semibold sm:text-3xl">{entry.title}</h1>
           {entry.description && <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{entry.description}</p>}
         </div>
-        <Suspense key={cle} fallback={<DeferredContentLoading label="Chargement de l’index…" />}>
+        <Suspense key={cle} fallback={<DeferredContentLoading variant="table" label="Chargement de l’index…" />}>
           <IndexData indexKey={entry.key} sheetName={entry.sheetName} />
         </Suspense>
       </div>

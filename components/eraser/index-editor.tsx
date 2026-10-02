@@ -2,11 +2,13 @@
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
 import {
-  ArrowDown, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Eye, EyeOff, GripVertical, Italic, ListChecks, LoaderCircle, Lock, LockOpen, Pencil, Plus, Save, Settings2, Strikethrough, Trash2, TriangleAlert, Underline, Undo2,
+  ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2,
+  type LucideIcon,
 } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
+import { PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -512,7 +514,7 @@ function TypeSettings(props: SettingsProps) {
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
     case "color": return <p className="text-xs text-muted-foreground">Une pastille et un sélecteur de couleur ; la feuille garde le code (#aa3355).</p>
-    case "icon": return <p className="text-xs text-muted-foreground">Une icône de la liste (avec recherche) ou un émoji. La feuille garde le nom de l’icône (trophy) ou l’émoji ; un nom français tapé dans Sheets (« Trophée ») est reconnu.</p>
+    case "tab-sort": return <p className="text-xs text-muted-foreground">La liste propose les onglets de l’index. Choisir un onglet y déplace la ligne ; taper un nom nouveau crée l’onglet (avec les mêmes colonnes) puis y range la ligne. Le nom de l’onglet est aussi écrit dans la case, lisible dans Sheets.</p>
     case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "linked-choice": {
       const source = spec.source ?? { index: targets[0]?.index ?? "peoples", tab: "" }
@@ -623,37 +625,62 @@ function PlacementSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec
   </div>
 }
 
-/** Le choix du type, en cartes rangées par famille. */
+/** L'icône de chaque type, pour le repérer d'un coup d'œil dans la liste. */
+const kindIcons: Partial<Record<IndexColumnKind, LucideIcon>> = {
+  "rich": TypeIcon, "number": Hash, "checkbox": SquareCheck, "color": Palette, "gauge": Gauge,
+  "choice": List, "linked-choice": ListTree, "linked": ArrowLeftRight, "tab-sort": FolderTree,
+  "lookup": SearchIcon, "rollup": Sigma, "formula": FunctionSquare, "random": Dices,
+  "actions": MousePointerClick, "file": Paperclip, "spells": Sparkles,
+}
+
+/**
+ * Le choix du type : une liste compacte, une ligne par type (icône, nom, ce qui le
+ * distingue des autres). Le détail du type survolé s'affiche dessous, sans tout déplier.
+ */
 function TypePicker({ spec, onPick, policy, disabled, family }: { spec: IndexColumnSpec; onPick: (kind: IndexColumnKind) => void; policy: ColumnPolicy; disabled: boolean; family: IndexEditorModel["family"] }) {
   const [open, setOpen] = useState(false)
+  const [hovered, setHovered] = useState<IndexColumnKind | null>(null)
   const objects = family === "objects"
   const blocked = (kind: IndexColumnKind) => {
     if (kind === spec.kind) return ""
     if (!policy.type && !(["name", "name-form"].includes(kind) && ["name", "name-form"].includes(spec.kind))) return "Type verrouillé : voir le cadenas."
-    if (objects && ["linked", "linked-choice", "lookup", "rollup"].includes(kind)) return "Pas encore dans l’index des objets : l’inventaire et les boutiques lisent leurs cases comme du texte."
+    if (objects && ["linked", "linked-choice", "lookup", "rollup", "tab-sort"].includes(kind)) return "Pas encore dans l’index des objets : l’inventaire et les boutiques lisent leurs cases comme du texte."
     return ""
   }
+  const current = indexColumnKinds[spec.kind]
+  const CurrentIcon = kindIcons[spec.kind] ?? TypeIcon
+  const detail = indexColumnKinds[hovered ?? spec.kind]
   return <div className={box}>
-    <div className="flex items-center justify-between gap-2">
-      <div><p className={sectionTitle}>Type</p><p className="font-semibold">{indexColumnKinds[spec.kind].label}</p></div>
-      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpen(!open)}>{open ? "Fermer" : "Changer de type"}</Button>
+    <div className="flex items-center gap-2">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><CurrentIcon className="size-4" /></span>
+      <div className="min-w-0 flex-1"><p className={sectionTitle}>Type</p><p className="truncate font-semibold">{current.label}</p></div>
+      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpen(!open)}>{open ? "Fermer" : "Changer"}</Button>
     </div>
-    <p className="text-xs text-muted-foreground">{indexColumnKinds[spec.kind].description}</p>
-    {open && <div className="grid gap-3">
-      {kindGroups.map((group) => {
-        const kinds = creatableKinds.filter((kind) => indexColumnKinds[kind].group === group)
-        if (!kinds.length) return null
-        return <div key={group}><p className={`${sectionTitle} mb-1`}>{group}</p><div className="grid gap-1.5 md:grid-cols-2">
-          {kinds.map((kind) => {
-            const reason = blocked(kind)
-            return <button key={kind} type="button" disabled={Boolean(reason) || disabled} title={reason || undefined} onClick={() => { onPick(kind); setOpen(false) }} className={`rounded-lg border p-2 text-left text-xs disabled:opacity-45 ${kind === spec.kind ? "border-primary bg-primary/10" : "hover:bg-muted"}`}>
-              <b className="flex items-center gap-1">{indexColumnKinds[kind].label}{reason && <Lock className="size-3" />}</b>
-              <span className="text-muted-foreground">{indexColumnKinds[kind].description}</span>
-            </button>
-          })}
-        </div></div>
-      })}
-    </div>}
+    {!open && <p className="text-xs text-muted-foreground">{current.short ?? current.description}</p>}
+    {open && <>
+      <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2" onMouseLeave={() => setHovered(null)}>
+        {kindGroups.map((group) => {
+          const kinds = creatableKinds.filter((kind) => indexColumnKinds[kind].group === group)
+          if (!kinds.length) return null
+          return <div key={group} className="grid content-start gap-0.5">
+            <p className={`${sectionTitle} px-1`}>{group}</p>
+            {kinds.map((kind) => {
+              const reason = blocked(kind)
+              const Icon = kindIcons[kind] ?? TypeIcon
+              return <button key={kind} type="button" disabled={Boolean(reason) || disabled} title={reason || indexColumnKinds[kind].description} onMouseEnter={() => setHovered(kind)} onFocus={() => setHovered(kind)} onClick={() => { onPick(kind); setOpen(false) }} className={`flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs disabled:opacity-40 ${kind === spec.kind ? "bg-primary/12 text-primary" : "hover:bg-muted"}`}>
+                <Icon className="size-3.5 shrink-0" />
+                <b className="shrink-0">{indexColumnKinds[kind].label}</b>
+                {reason ? <Lock className="ml-auto size-3 shrink-0" /> : <span className="min-w-0 truncate text-muted-foreground">{indexColumnKinds[kind].short}</span>}
+              </button>
+            })}
+          </div>
+        })}
+      </div>
+      <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-5">
+        <b>{detail.label}</b> — {detail.description}
+        {detail.example && <span className="block text-muted-foreground">Exemple : {detail.example}</span>}
+      </div>
+    </>}
   </div>
 }
 
@@ -723,6 +750,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [selectedColumn, setSelectedColumn] = useState(tabs[0]?.columns[0]?.id ?? "")
   const [renaming, setRenaming] = useState<string | null>(null)
   const [newTab, setNewTab] = useState("")
+  // Un nouvel onglet peut partir d'un preset : il reçoit aussitôt ses colonnes.
+  const { presets } = useColumnPresets()
+  const [newTabPreset, setNewTabPreset] = useState("")
   const [newColumn, setNewColumn] = useState("")
   const [showChanges, setShowChanges] = useState(false)
   const [guide, setGuide] = useState<GuideSection | null>(null)
@@ -747,10 +777,24 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   function addTab() {
     const name = newTab.trim()
     if (!name || tabProblem(name, liveTabs.map((candidate) => candidate.name))) return
-    const draft: DraftTab = { id: nextId(), name, columns: [], removed: false, remove: true, rename: true, addColumns: true }
+    const preset = presets.find((candidate) => candidate.id === newTabPreset)
+    const columns = (preset?.columns ?? []).map((item): DraftColumn => ({ id: nextId(), header: item.header, spec: item.spec, policy: freePolicy, removed: false }))
+    const draft: DraftTab = { id: nextId(), name, columns, removed: false, remove: true, rename: true, addColumns: true }
     setTabs((current) => [...current, draft])
     setSelectedTab(draft.id)
+    setSelectedColumn(columns[0]?.id ?? "")
     setNewTab("")
+    setNewTabPreset("")
+  }
+
+  /** Les colonnes d'un preset absentes de l'onglet choisi, ajoutées à la fin. */
+  function applyPreset(columns: Array<{ header: string; spec: IndexColumnSpec }>) {
+    if (!tab) return
+    const present = new Set(tab.columns.filter((item) => !item.removed).map((item) => item.header.trim().toLocaleLowerCase("fr")))
+    const added = columns.filter((item) => !present.has(item.header.trim().toLocaleLowerCase("fr"))).map((item): DraftColumn => ({ id: nextId(), header: item.header, spec: item.spec, policy: freePolicy, removed: false }))
+    if (!added.length) return
+    updateTab({ ...tab, columns: [...tab.columns, ...added] })
+    setSelectedColumn(added[0].id)
   }
 
   function addColumn() {
@@ -807,7 +851,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               : <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={readOnly || !candidate.remove || liveTabs.length <= 1} onClick={() => updateTab({ ...candidate, removed: true })} title={candidate.remove ? "Mettre l’onglet à la corbeille" : candidate.removeReason} aria-label="Supprimer l’onglet">{candidate.remove ? <Trash2 /> : <Lock />}</Button>}
           </div>)}
           {model.addTabs && !readOnly
-            ? <form className="mt-1 flex gap-1" onSubmit={(event) => { event.preventDefault(); addTab() }}><Input value={newTab} onChange={(event) => setNewTab(event.target.value)} placeholder="Nouvel onglet" className="h-8 text-xs" /><Button type="submit" size="icon-sm" variant="outline" aria-label="Ajouter l’onglet"><Plus /></Button></form>
+            ? <form className="mt-1 grid gap-1" onSubmit={(event) => { event.preventDefault(); addTab() }}>
+              <span className="flex gap-1"><Input value={newTab} onChange={(event) => setNewTab(event.target.value)} placeholder="Nouvel onglet" className="h-8 text-xs" /><Button type="submit" size="icon-sm" variant="outline" aria-label="Ajouter l’onglet"><Plus /></Button></span>
+              {presets.length > 0 && <NativeSelect value={newTabPreset} onChange={(event) => setNewTabPreset(event.target.value)} className="h-7 text-[11px]" aria-label="Colonnes du nouvel onglet">
+                <NativeSelectOption value="">Sans preset (Nom et ID)</NativeSelectOption>
+                {presets.map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>Preset : {preset.name}</NativeSelectOption>)}
+              </NativeSelect>}
+            </form>
             : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
           {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
@@ -841,6 +891,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {tab?.addColumns && !readOnly && !tab.removed
             ? <form className="mt-1 flex gap-1" onSubmit={(event) => { event.preventDefault(); addColumn() }}><Input value={newColumn} onChange={(event) => setNewColumn(event.target.value)} placeholder="Nouvelle colonne" className="h-8 text-xs" /><Button type="submit" size="icon-sm" variant="outline" aria-label="Ajouter la colonne"><Plus /></Button></form>
             : tab?.addColumnsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{tab.addColumnsReason}</p>}
+          {tab && !tab.removed && <div className="mt-2"><PresetBar tabName={tab.name} columns={tab.columns.filter((item) => !item.removed).map((item) => ({ header: item.header, spec: item.spec }))} canApply={Boolean(tab.addColumns) && !readOnly} readOnly={readOnly} onApply={applyPreset} /></div>}
           {!readOnly && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse une colonne (ou utilise les flèches) pour changer sa place, dans Eraser et dans Google Sheets.</p>}
         </section>
 
