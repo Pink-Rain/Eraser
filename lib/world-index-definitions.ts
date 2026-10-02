@@ -50,8 +50,8 @@ export const EFFECT_CHANGE_HEADER = "Changement de valeur"
 export const EFFECT_ROLL_HEADER = "Jet"
 
 /** Comment écrire ces deux colonnes : la description proposée d'office (modifiable dans « Modifier »). */
-export const EFFECT_CHANGE_DESCRIPTION = "Tant que l’état est posé : +10 ou 10 ajoute, -30 retire, =100 remplace, ≥1 (ou >=1) plancher, ≤50 (ou <=50) plafond ; tout revient quand l’état part. Des dés se lancent depuis la fiche et s’écrivent dans la fiche (dégâts, soins) : -1d20-20 retire, +2d6 ajoute."
-export const EFFECT_ROLL_DESCRIPTION = "La condition, lancée depuis la fiche avant le changement de valeur : les dés puis la plage qui réussit. 1d20 16-20, 1d20 : 16 & 20, 1d10 ≤3 (ou 3 ou moins), 1d10 ≥8 (ou 8 ou plus), 1d6 6. Réussi : le changement de valeur s’applique ; raté : rien. Sans plage, il réussit toujours. Les dégâts eux-mêmes (-1d20-20) vont dans « Changement de valeur »."
+export const EFFECT_CHANGE_DESCRIPTION = "Tant que l’état est posé : +10 ou 10 ajoute, -30 retire, =100 remplace, ≥1 (ou >=1) plancher, ≤50 (ou <=50) plafond ; tout revient quand l’état part. Des dés se lancent depuis la fiche et s’écrivent dans la fiche (dégâts, soins). Le signe tout devant vaut pour le total : -1d20+20 retire le total de 1d20+20, +2d6 ou 2d6 ajoute ; 1d20-20 ajoute (1d20-20), donc retire si le dé fait moins de 20."
+export const EFFECT_ROLL_DESCRIPTION = "La condition, lancée depuis la fiche avant le changement de valeur : les dés puis la plage qui réussit. 1d20 16-20, 1d20 : 16 & 20, 1d10 ≤3 (ou 3 ou moins), 1d10 ≥8 (ou 8 ou plus), 1d6 6. Réussi : le changement de valeur s’applique ; raté : rien. Sans plage, il réussit toujours. Les dégâts eux-mêmes (-1d20+20) vont dans « Changement de valeur »."
 /** Une cible de la fiche qui n'est pas dans l'Index des caractéristiques : la vie actuelle. */
 export const CURRENT_LIFE_TARGET = "Points de vie actuels"
 export const EFFECT_IMAGE_HEADER = "Image"
@@ -425,7 +425,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === OBTAINED_TAB && [OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER].some((header) => foldName(header) === folded)) reasons.push("Écrite par « Attribuer un succès » et affichée sur la carte du succès obtenu.")
   }
   if (index === "states") {
-    if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé aux cibles : +10 / -30 ajoutent, =100 remplace, ≥1 / ≤50 bornent, tant que l’état est posé. Des dés (-1d20-20) se lancent depuis la fiche.")
+    if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé aux cibles : +10 / -30 ajoutent, =100 remplace, ≥1 / ≤50 bornent, tant que l’état est posé. Des dés (-1d20+20 : retire le total de 1d20+20) se lancent depuis la fiche.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_ROLL_HEADER)) reasons.push("Le jet lancé depuis la fiche (« 1d20 16-20 ») : dans la plage, le changement de valeur s’applique ; vide, l’effet n’a pas de jet.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
     if (tab === EFFECTS_TAB && [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique la couleur de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
@@ -522,7 +522,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       // Les caractéristiques et compétences visées : les deux onglets de leur index.
       if (isHeader(header, [EFFECT_TARGET_HEADER])) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: CHARACTERISTICS_TAB, extra: [CURRENT_LIFE_TARGET] } }
       if (isHeader(header, [EFFECT_COLOR_HEADER])) return { kind: "color" }
-      // « +10 », « =100 », « ≥1 », « -1d20-20 » : du texte, lu par lib/state-change.
+      // « +10 », « =100 », « ≥1 », « -1d20+20 » : du texte, lu par lib/state-change.
       if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich", description: EFFECT_CHANGE_DESCRIPTION }
       if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich", description: EFFECT_ROLL_DESCRIPTION }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }

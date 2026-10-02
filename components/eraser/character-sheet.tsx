@@ -69,7 +69,7 @@ import {
 import { characterLifeState } from "@/lib/character-life"
 import { foldName } from "@/lib/index-columns"
 import { rollDiceExpression } from "@/lib/math-expression"
-import { rangeLabel, rollHits } from "@/lib/state-change"
+import { rangeLabel, rollHits, signedDice } from "@/lib/state-change"
 import type { StateEffect } from "@/lib/character-states"
 import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
@@ -734,9 +734,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       if (hit && operation) {
         let amount = operation.kind === "add" ? operation.amount : 0
         if (operation.kind === "roll") {
-          const rolled = rollDiceExpression(operation.expression)
-          amount = rolled.total
-          lines.push(`${operation.expression} → ${rolled.total}`)
+          // Le signe tout devant vaut pour le total : « -1d20+20 » retire (1d20+20).
+          const { sign, dice } = signedDice(operation.expression)
+          const rolled = rollDiceExpression(dice)
+          amount = sign * rolled.total
+          lines.push(`${operation.expression} : ${rolled.detail}${/^\d*d\d+$/i.test(dice) ? "" : ` → ${dice} = ${rolled.total}`} → ${amount > 0 ? "+" : ""}${amount}`)
         }
         for (const name of effect.targets) {
           const targetId = targetOfName(name)
@@ -753,7 +755,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       }
       // Rien n'a été écrit : on dit pourquoi plutôt que de laisser croire que ça a marché.
       if (hit && !operation && effect.roll && !effect.roll.range) {
-        const damage = `-${effect.roll.dice.replace(/^[+-]/, "").replace(/[+-]/g, (sign) => sign === "+" ? "-" : "+")}`
+        const damage = `-${effect.roll.dice.replace(/^[+-]/, "")}`
         lines.push(`Rien n’est appliqué : « Jet » est la condition et « Changement de valeur » est vide. Pour des dégâts, écrire ${damage} dans « Changement de valeur » et vider « Jet ».`)
       } else if (hit && operation && !changes.length) {
         lines.push(effect.targets.length ? `Rien n’est appliqué : « ${effect.targets.join(", ")} » n’est pas une valeur que la fiche peut écrire.` : "Rien n’est appliqué : l’effet n’a pas de cible.")

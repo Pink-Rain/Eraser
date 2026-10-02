@@ -62,7 +62,7 @@ function EffectPills({ catalog, names }: { catalog: StatesCatalog; names: string
     {effects.map((effect) => <span key={effect.name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium" style={{ borderColor: `${effect.color || DEFAULT_COLOR}66`, backgroundColor: `${effect.color || DEFAULT_COLOR}14` }} title={effect.name}>
       <span className="size-1.5 rounded-full" style={{ backgroundColor: effect.color || DEFAULT_COLOR }} />
       {effect.targets.length ? effect.targets.join(", ") : effect.name}
-      {(effect.operation || effect.changeText || effect.roll) && <b className={effect.change !== null && effect.change < 0 ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
+      {(effect.operation || effect.changeText || effect.roll) && <b className={(effect.change !== null && effect.change < 0) || (effect.operation?.kind === "roll" && effect.operation.expression.startsWith("-")) ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
     </span>)}
   </div>
 }

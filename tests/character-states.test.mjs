@@ -118,6 +118,10 @@ test("changement de valeur : +, -, =, bornes et dés ; jets lancés depuis la fi
   assert.deepEqual(change.parseValueChange("≥1"), { kind: "min", value: 1 });
   assert.deepEqual(change.parseValueChange("<= 50"), { kind: "max", value: 50 });
   assert.deepEqual(change.parseValueChange("- 1d20 - 20"), { kind: "roll", expression: "-1d20-20" });
+  // Le signe tout devant vaut pour le total des dés.
+  assert.deepEqual(change.signedDice("-1d20+20"), { sign: -1, dice: "1d20+20" });
+  assert.deepEqual(change.signedDice("+ 2d6"), { sign: 1, dice: "2d6" });
+  assert.deepEqual(change.signedDice("1d20-20"), { sign: 1, dice: "1d20-20" });
   assert.deepEqual(change.parseValueChange("-10 PV"), { kind: "add", amount: -10 });
   const roll = change.parseRoll("1d20 : 16 & 20");
   assert.equal(roll.dice, "1d20");

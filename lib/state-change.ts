@@ -2,13 +2,15 @@
  * Ce qu'un effet d'état fait à une valeur (colonne « Changement de valeur ») et le jet de
  * dés qui le déclenche (colonne « Jet »). Tant que l'état est posé, `+`, `-`, `=`, `≥` et
  * `≤` changent la valeur affichée ; quand il part, tout redevient comme avant. Les dés,
- * eux, se lancent depuis la fiche et changent la valeur pour de bon (des dégâts).
+ * eux, se lancent depuis la fiche et changent la valeur pour de bon (des dégâts). Le signe
+ * écrit tout devant vaut pour le total : « -1d20+20 » retire (1d20+20).
  *
  *   +10  -30  10      ajoute ou retire
  *   =100              remplace la valeur
  *   ≥1   >=1          plancher : jamais moins
  *   ≤50  <=50         plafond : jamais plus
- *   -1d20-20  +2d6    se lance depuis la fiche
+ *   -1d20+20  +2d6    se lance depuis la fiche : -1d20+20 retire le total de 1d20+20
+ *   1d20-20           sans signe devant : ajoute (1d20-20), négatif si le dé fait moins de 20
  *
  *   Jet : 1d20 16-20  (aussi « 1d20 : 16 & 20 », « 1d10 ≤3 », « 1d10 >=8 », « 1d6 6 »)
  *
@@ -52,13 +54,23 @@ export function parseValueChange(text: string): ValueOperation | null {
   return first ? { kind: "add", amount: Number(first[0]) } : null
 }
 
-/** L'opération telle qu'on l'écrit : « +10 », « =100 », « ≥1 », « -1d20-20 ». */
+/** L'opération telle qu'on l'écrit : « +10 », « =100 », « ≥1 », « -1d20+20 ». */
 export function operationLabel(operation: ValueOperation) {
   if (operation.kind === "add") return `${operation.amount >= 0 ? "+" : ""}${operation.amount}`
   if (operation.kind === "set") return `=${operation.value}`
   if (operation.kind === "min") return `≥${operation.value}`
   if (operation.kind === "max") return `≤${operation.value}`
   return operation.expression
+}
+
+/**
+ * Des dés à lancer, séparés du signe écrit tout devant : il vaut pour le total.
+ * « -1d20+20 » → retirer (1d20+20) ; « +2d6 » ou « 2d6 » → ajouter.
+ */
+export function signedDice(expression: string): { sign: 1 | -1; dice: string } {
+  const value = clean(expression)
+  const match = value.match(/^([+-])(.+)$/)
+  return match ? { sign: match[1] === "-" ? -1 : 1, dice: match[2] } : { sign: 1, dice: value }
 }
 
 /** Ajoute une règle à celles déjà posées : le dernier « = » l'emporte, les bornes se cumulent. */

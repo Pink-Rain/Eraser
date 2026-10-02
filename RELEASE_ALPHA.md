@@ -1,23 +1,17 @@
-# Eraser 0.1.1-alpha.108 — États lisibles, colonnes expliquées
+# Eraser 0.1.1-alpha.109 — Dés : le signe vaut pour le total
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Fiche de personnage
+## Changement de valeur avec des dés
 
-- **États sous le portrait** : ils ne débordent plus sur le reste de la fiche. Un nom
-  long passe à la ligne entre les mots, et s'il manque encore de place, les boutons
-  (dé, niveaux) descendent sous le nom. La ligne grandit en hauteur, jamais en largeur.
-- **Bouton dé qui ne change rien** : Eraser explique maintenant pourquoi au lieu de ne
-  rien faire en silence. Si les dés sont dans « Jet » et que « Changement de valeur » est
-  vide, il indique quoi écrire (par exemple -2d20-20 dans « Changement de valeur »). Si
-  la cible n'est pas une valeur que la fiche peut écrire, il le dit aussi.
-
-## Index des états, onglet Effets
-
-- **Description des colonnes « Changement de valeur » et « Jet »** : la façon de les
-  écrire s'affiche au survol de l'en-tête, dans la fiche de la ligne et dans « Modifier »
-  (champ Description, que tu peux changer).
-  - Changement de valeur : +10 ou 10, -30, =100, ≥1, ≤50 tant que l'état est posé ;
-    des dés (-1d20-20, +2d6) se lancent depuis la fiche et s'écrivent dedans.
-  - Jet : la condition, les dés puis la plage qui réussit (1d20 16-20, 1d10 ≤3,
-    1d10 8 ou plus, 1d6 6). Sans plage, il réussit toujours.
+- **Le signe écrit tout devant s'applique au total des dés.** `-1d20+20` lance 1d20,
+  ajoute 20, puis retire le tout : un 14 retire 34 points. Avant, le moins ne portait que
+  sur le dé, et le +20 s'ajoutait à part.
+- Sans signe devant, le total s'ajoute tel quel : `1d20-20` avec un 14 donne -6.
+- `+2d6` et `2d6` ajoutent le résultat des dés.
+- Le résultat affiché sous l'état détaille le lancer, par exemple
+  « -1d20+20 : 1d20 [14] → 1d20+20 = 34 → -34 ».
+- Un effet qui retire (`-…`) s'affiche en rouge au survol de l'état.
+- Les descriptions des colonnes « Changement de valeur » et « Jet » donnent maintenant
+  cette écriture, tout comme le conseil affiché quand des dés sont dans « Jet » avec un
+  « Changement de valeur » vide.
