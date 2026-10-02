@@ -1,28 +1,32 @@
-# Eraser 0.1.1-alpha.110 — Les index restent à jour, et là où tu les as laissés
+# Eraser 0.1.1-alpha.111 — 97 nouvelles icônes pour les jauges
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Index : fini les modifications qui semblent perdues
+## Icônes des jauges (et des boutons)
 
-- **Revenir sur un index montre tes dernières modifications.** Le routeur gardait une
-  copie de chaque page visitée (5 minutes, 30 avec Précédent / Suivant) et la
-  réaffichait telle quelle : l'index revenait à son état d'avant, alors que tout était
-  bien enregistré. Il fallait actualiser pour le voir.
-- Maintenant, chaque modification enregistrée (cellule, ligne, colonne, profil…) oublie
-  ces copies. La page suivante est relue sur le serveur, qui est à jour. Une
-  modification faite dans une autre fenêtre d'Eraser fait la même chose.
+97 icônes s'ajoutent au choix, pensées pour les états. On les trouve en tapant leur nom
+ou un mot-clé dans la recherche du sélecteur (« sommeil », « poison », « muet »,
+« malus »…).
 
-## Index : ta place et ta recherche sont gardées
+- **Émotions et esprit** : colère, agacé, indifférent, joie, masques de théâtre,
+  masque, esprit vif, esprit troublé, idée, esprit éteint, cœur barré, cœur allié,
+  pacte, main tendue.
+- **Sommeil et temps** : lit, grand lit, nuit étoilée, yeux fermés, minuteur, réveil,
+  infini, répétition, tourbillon.
+- **Corps et santé** : thermomètre, froid, chaleur, stéthoscope, éprouvettes, fiole
+  ronde, microscope, comprimés, insecte barré, biceps, haltère, silhouette, activité.
+- **Sens** : regard, oreille, sourd, muet, silence, bulle barrée, parole, porte-voix.
+- **Entraves et contrôle** : chaîne, maillon, chaîne brisée, poids, saisie, aimant,
+  interdit, rond barré, cadenas ouvert, clé ronde, automate, puzzle, débranché,
+  éclair barré, drapeau barré.
+- **Protection et alerte** : bouclier renforcé, validé, en alerte, barré, brisé ;
+  sirène, attention, arrêt, alerte, cloche qui sonne, cloche muette.
+- **Bonus et malus** : doubles flèches et grosses flèches vers le haut ou le bas,
+  cadran.
+- **Météo et magie** : braises, pluie, neige, brouillard, brume, nuageux, éclipse,
+  soleil voilé, constellation, rose, parchemin écrit.
+- **Faim et soif** : couverts, verre d'eau, café, soupe, jambon, cigarette.
+- **Personnes** : personne validée, affaiblie, barrée ; dé.
 
-- **La recherche** de chaque page d'index est retrouvée quand tu reviens : index du
-  monde, objets, PNJ, personnages, campagnes, sorts. Elle est gardée le temps de la
-  fenêtre, et l'effacer l'oublie.
-- **La position dans le tableau** (vertical et horizontal) est retrouvée, pour chaque
-  onglet de l'index.
-- **La position de la page** est retrouvée aussi, partout dans Eraser. Une page encore
-  jamais défilée s'ouvre en haut.
-
-## Fiche de personnage
-
-- Le survol d'un état ne montre plus les lignes de l'onglet Effets, seulement la
-  description de ses niveaux et ses règles liées.
+Toutes se remplissent de la couleur de la jauge et gardent leurs traits visibles une
+fois pleines.
