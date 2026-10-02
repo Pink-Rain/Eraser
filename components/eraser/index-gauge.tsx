@@ -3,13 +3,17 @@
 import { memo, useState, type ComponentType, type ReactNode } from "react"
 import {
   Anchor, Apple, Atom, Award, Axe, Baby, Banana, Bandage, Banknote, Battery, BatteryFull, Bean, Beef, Beer, Bell, Biohazard, Bird, Bomb, Bone, BookOpen, Brain, Bug, Candy, Carrot, Castle, Cat, Cherry, Church, Circle, Clock, Cloud, CloudLightning, Clover, Coins, Compass, Cookie, Cross, Crosshair, Crown, Diamond, Dices, Dna, Dog, Droplet, Droplets, Drumstick, Egg, Eye, EyeOff, Feather, Fingerprint, Fish, Flag, FlaskConical, Flame, Flower, Flower2, Footprints, Frown, Gavel, Gem, Ghost, Gift, Glasses, Grape, Hammer, Hand, HandHeart, Heart, HeartCrack, HeartPulse, Hexagon, Hourglass, Key, Landmark, Laugh, Leaf, Lock, Map as MapIcon, Medal, Minus, Moon, Mountain, MountainSnow, Music, Octagon, Orbit, PawPrint, Pentagon, Pickaxe, PiggyBank, Pill, Plus, Rabbit, Radiation, Rainbow, Rat, Rocket, Scale, Scroll, Shell, Shield, ShieldHalf, Ship, Shovel, Skull, Smile, Snail, Snowflake, Sparkle, Sparkles, Sprout, Square, Squirrel, Star, StarHalf, Sun, Sunrise, Sunset, Sword, Swords, Syringe, Target, Tent, Tornado, TreePine, Trees, Triangle, Trophy, Turtle, Umbrella, User, Users, WandSparkles, Waves, Wheat, Wind, Wine, Worm, Wrench, X, Zap,
+  Palette,
   type LucideProps,
 } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { foldName, gaugeScaleOf, type GaugeSettings } from "@/lib/index-columns"
+import { foldName, formatGaugeCell, gaugeScaleOf, parseGaugeCell, type GaugeRowStyle, type GaugeSettings } from "@/lib/index-columns"
+
+/** Les couleurs proposées pour une ligne d'une jauge « par ligne ». */
+const rowColors = ["#b9504e", "#c2410c", "#b8872a", "#4d7c0f", "#397f88", "#285f8f", "#6b21a8", "#78716c"]
 
 type IconEntry = { name: string; label: string; Icon: ComponentType<LucideProps>; keywords?: string }
 
@@ -243,8 +247,12 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
   disabled?: boolean
   onChange: (value: string) => void
 }) {
+  // Réglage « par ligne » : la case porte son icône et sa couleur après son nombre.
+  const row = settings.perRow ? parseGaugeCell(value) : null
+  const look = row ? { ...settings, icon: row.style.emoji ? undefined : row.style.icon ?? settings.icon, emoji: row.style.emoji ?? (row.style.icon ? undefined : settings.emoji), color: row.style.color ?? settings.color } : settings
+  const baseValue = row ? row.count : value
   const [local, setLocal] = useState<{ source: string; value: string } | null>(null)
-  const shown = local && local.source === value ? local.value : value
+  const shown = local && local.source === baseValue ? local.value : baseValue
   const [open, setOpen] = useState(false)
   const [draft, setDraft] = useState("")
   const scale = gaugeScaleOf(settings)
@@ -254,12 +262,28 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
   const max = scale === "from-column" ? Math.max(0, Math.round(maxValue ?? 0)) : scale === "cell" ? Math.max(0, Math.round(number ?? 0)) : columnMax
   const current = scale === "cell" ? max : number === null ? null : Math.max(0, Math.min(max, number))
   const ratio = max > 0 && current !== null ? current / max : 0
-  const color = settings.levels && scale !== "cell" ? levelColor(ratio) : settings.color || "var(--primary)"
+  const color = settings.levels && scale !== "cell" && !row?.style.color ? levelColor(ratio) : look.color || "var(--primary)"
   const set = (next: number | string | null) => {
     const textValue = next === null ? "" : String(next)
-    setLocal({ source: value, value: textValue })
-    onChange(textValue)
+    setLocal({ source: baseValue, value: textValue })
+    onChange(row ? formatGaugeCell(textValue, row.style) : textValue)
   }
+  const setStyle = (style: GaugeRowStyle) => onChange(formatGaugeCell(shown.trim(), style))
+  // Choisir l'icône et la couleur de cette ligne seulement.
+  const styler = row && <Popover>
+    <PopoverTrigger asChild>
+      <button type="button" disabled={disabled} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60" title="Icône et couleur de cette ligne" aria-label={`${label} : icône et couleur de cette ligne`}><Palette className="size-3" /></button>
+    </PopoverTrigger>
+    <PopoverContent align="start" className="grid w-64 gap-2 p-2.5">
+      <p className="text-[11px] font-semibold text-muted-foreground">Icône et couleur de cette ligne</p>
+      <IconPicker icon={row.style.icon} emoji={row.style.emoji} allowNone onChange={(next) => setStyle({ ...row.style, icon: next.icon, emoji: next.emoji })} />
+      <div className="flex flex-wrap items-center gap-1">
+        {rowColors.map((swatch) => <button key={swatch} type="button" onClick={() => setStyle({ ...row.style, color: swatch })} className={`size-6 rounded-full border ${row.style.color === swatch ? "ring-2 ring-primary ring-offset-1" : ""}`} style={{ backgroundColor: swatch }} aria-label={`Couleur ${swatch}`} />)}
+        <label className="relative size-6 cursor-pointer overflow-hidden rounded-full border" title="Autre couleur" style={{ background: "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)" }}><input type="color" value={row.style.color ?? "#927640"} onChange={(event) => setStyle({ ...row.style, color: event.target.value })} className="absolute inset-0 cursor-pointer opacity-0" /></label>
+        <button type="button" onClick={() => setStyle({ ...row.style, color: undefined })} className="ml-1 text-[11px] text-muted-foreground underline">Couleur de la colonne</button>
+      </div>
+    </PopoverContent>
+  </Popover>
   const special = settings.unlimited && text === settings.unlimited
   const iconCap = 20
 
@@ -288,10 +312,10 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
     return <span className="flex min-h-8 items-center gap-0.5 px-1.5" style={{ color }} role="group" aria-label={`${label} : ${text || "vide"}`}>
       {special ? <span className="text-sm font-semibold" title="Sans limite">{settings.unlimited}</span>
         : number === null && text ? <span className="text-sm">{text}</span>
-        : Array.from({ length: Math.min(max, iconCap) }, (_, index) => <IndexIconGlyph key={index} icon={settings.icon} emoji={settings.emoji} stroke={settings.strokeColor} />)}
+        : Array.from({ length: Math.min(max, iconCap) }, (_, index) => <IndexIconGlyph key={index} icon={look.icon} emoji={look.emoji} stroke={settings.strokeColor} />)}
       {max > iconCap && <span className="text-[11px] font-semibold">+{max - iconCap}</span>}
       {number === 0 && <span className="text-xs text-muted-foreground">0</span>}
-      <span className="ml-auto">{editor}</span>
+      <span className="ml-auto flex items-center">{styler}{editor}</span>
     </span>
   }
 
@@ -301,11 +325,11 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
       {Array.from({ length: count }, (_, index) => {
         const filled = current !== null && index < current
         return <button key={index} type="button" disabled={disabled} onClick={() => set(current !== null && index < current ? index : index + 1)} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 disabled:hover:scale-100 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>
-          <IndexIconGlyph icon={settings.icon} emoji={settings.emoji} filled={filled} stroke={settings.strokeColor} />
+          <IndexIconGlyph icon={look.icon} emoji={look.emoji} filled={filled} stroke={settings.strokeColor} />
         </button>
       })}
       {!count && <span className="text-xs text-muted-foreground">{scale === "from-column" ? "Maximum vide" : "—"}</span>}
-      <span className="ml-auto">{editor}</span>
+      <span className="ml-auto flex items-center">{styler}{editor}</span>
     </span>
   }
 
@@ -319,11 +343,11 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
         <span className="relative text-[10px] font-semibold tabular-nums">{current ?? "—"}</span>
       </span>
       <button type="button" disabled={disabled || current === max} onClick={() => set(Math.min(max, (current ?? 0) + 1))} className="rounded p-0.5 text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Augmenter ${label}`}><Plus className="size-3" /></button>
-      <span className="ml-auto">{editor}</span>
+      <span className="ml-auto flex items-center">{styler}{editor}</span>
     </span>
   }
 
-  return <GaugeBar label={label} current={current} max={max} color={color} disabled={disabled} editor={editor} onChange={set} />
+  return <GaugeBar label={label} current={current} max={max} color={color} disabled={disabled} editor={<span className="flex items-center">{styler}{editor}</span>} onChange={set} />
 })
 
 /** La barre : on la fait glisser, ou on tape la valeur. */

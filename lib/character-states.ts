@@ -10,13 +10,16 @@
  *
  * Ce fichier ne dépend que de règles partagées : la page et le serveur s'en servent.
  */
-import { foldName } from "@/lib/index-columns"
+import { foldName, parseGaugeCell } from "@/lib/index-columns"
+import { parseStateFx, type StateFx } from "@/lib/state-fx"
 import type { GaugeSettings, IndexColumnSpec } from "@/lib/index-columns"
 import {
   EFFECT_CHANGE_HEADER,
   EFFECT_COLOR_HEADER,
   EFFECT_IMAGE_HEADER,
+  EFFECT_FX_HEADER,
   EFFECT_TARGET_HEADER,
+  EFFECT_UNLINKED_HEADER,
   EFFECTS_TAB,
   STATE_LEVEL_HEADERS,
   STATES_TAB,
@@ -32,6 +35,9 @@ export type StateEffect = {
   change: number | null
   changeText: string
   image: string
+  /** Ne vise aucune caractéristique : sa couleur teinte toute la fiche. */
+  unlinked: boolean
+  fx: StateFx[]
 }
 
 export type StateDefinition = {
@@ -88,7 +94,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     const name = read(row, ["Nom"])
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]) }]
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), unlinked: /^(oui|vrai|true|x|1|✓|☑)$/i.test(read(row, [EFFECT_UNLINKED_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -100,7 +106,10 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     if (!name) return []
     const first = read(row, ["Description niveau 1", "Niveau 1 description", "Description"], true)
     const second = read(row, ["Description niveau 2", "Niveau 2 description"], true)
-    const declared = gaugeColumn ? changeAmount(read(row, [gaugeColumn.header])) : null
+    // Jauge « par ligne » : l'état a sa propre icône et sa couleur (« 2|skull|#b9504e »).
+    const cell = gaugeColumn ? parseGaugeCell(read(row, [gaugeColumn.header])) : null
+    const own = gaugeColumn?.spec.gauge?.perRow && cell ? cell.style : {}
+    const declared = cell ? changeAmount(cell.count) : null
     const levels: 1 | 2 = declared === 1 ? 1 : declared === 2 ? 2 : isEmptyLevel(second) ? 1 : 2
     return [{
       id: read(row, ["ID"]) || `etat:${foldName(name)}`,
@@ -110,7 +119,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
       descriptionHtml: [first, isEmptyLevel(second) ? "" : second],
       rulesHtml: isEmptyLevel(read(row, ["Règles liées aux états", "Règles"], true)) ? "" : read(row, ["Règles liées aux états", "Règles"], true),
       effects: [splitNames(read(row, [STATE_LEVEL_HEADERS[0]])), splitNames(read(row, [STATE_LEVEL_HEADERS[1]]))],
-      gauge,
+      gauge: { ...gauge, ...(own.emoji ? { icon: undefined, emoji: own.emoji } : own.icon ? { icon: own.icon, emoji: undefined } : {}), ...(own.color ? { color: own.color } : {}) },
       image: iconColumn ? read(row, [iconColumn.header]) : "",
     }]
   }) : []
@@ -153,7 +162,7 @@ export type StateContribution = { state: string; level: 1 | 2; effect: string; t
  */
 export function stateContributions(catalog: StatesCatalog, states: CharacterState[], targetOf: (name: string) => string | null): StateContribution[] {
   return states.flatMap((state) => activeEffectsOf(catalog, state).flatMap((effect) => {
-    if (effect.change === null || !effect.change) return []
+    if (effect.unlinked || effect.change === null || !effect.change) return []
     return effect.targets.flatMap((name) => {
       const target = targetOf(name)
       return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change as number, color: effect.color }] : []
@@ -164,7 +173,11 @@ export function stateContributions(catalog: StatesCatalog, states: CharacterStat
 /** Les couleurs et images des effets en vigueur, pour le portrait. */
 export function portraitLayers(catalog: StatesCatalog, states: CharacterState[]) {
   const effects = states.flatMap((state) => activeEffectsOf(catalog, state))
-  const colors = [...new Set(effects.map((effect) => effect.color).filter((color) => /^#[0-9a-f]{3,8}$/i.test(color)))]
+  const isColor = (color: string) => /^#[0-9a-f]{3,8}$/i.test(color)
+  // Un effet « non lié aux caractéristiques » teinte toute la fiche ; les autres, le portrait.
+  const colors = [...new Set(effects.filter((effect) => !effect.unlinked).map((effect) => effect.color).filter(isColor))]
+  const sheetColors = [...new Set(effects.filter((effect) => effect.unlinked).map((effect) => effect.color).filter(isColor))]
   const images = [...new Set(effects.map((effect) => effect.image).filter(Boolean))]
-  return { colors, images }
+  const fx = effects.flatMap((effect) => effect.fx.map((name) => ({ name, color: isColor(effect.color) ? effect.color : "" })))
+  return { colors, sheetColors, images, fx: [...new Map(fx.map((item) => [item.name, item])).values()] }
 }

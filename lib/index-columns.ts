@@ -128,10 +128,37 @@ export type GaugeSettings = {
   color?: string
   /** Couleur des traits d'une icône pleine (l'horloge, le sourire…). Sans réglage : clairs. */
   strokeColor?: string
+  /**
+   * Icône et couleur choisies ligne par ligne : chaque case garde les siennes après son
+   * nombre (« 2|skull|#b9504e »). Sans choix, celles de la colonne.
+   */
+  perRow?: boolean
   /** Couleur selon le niveau : rouge quand c'est bas, vert quand c'est plein. */
   levels?: boolean
   /** Jauge propre à chaque case : la valeur spéciale « sans limite » (« ✦ » des charges). */
   unlimited?: string
+}
+
+/** L'icône et la couleur propres à une case de jauge (réglage « par ligne »). */
+export type GaugeRowStyle = { icon?: string; emoji?: string; color?: string }
+
+const GAUGE_EMOJI = /[^\p{L}\p{N}\s_-]/u
+
+/** « 2|skull|#b9504e » → le nombre (texte) et le style de la case. */
+export function parseGaugeCell(value: string): { count: string; style: GaugeRowStyle } {
+  const [count = "", look = "", color = ""] = value.split("|").map((part) => part.trim())
+  const style: GaugeRowStyle = {}
+  if (look) { if (GAUGE_EMOJI.test(look)) style.emoji = look; else style.icon = look }
+  if (/^#[0-9a-f]{3,8}$/i.test(color)) style.color = color
+  return { count, style }
+}
+
+/** Le nombre et le style d'une case, réunis dans sa valeur (le nombre reste en tête : tri et formules le lisent). */
+export function formatGaugeCell(count: string, style: GaugeRowStyle) {
+  const look = style.emoji?.trim() || style.icon?.trim() || ""
+  const color = style.color?.trim() || ""
+  if (!look && !color) return count
+  return [count, look, color].join("|").replace(/\|+$/, "")
 }
 
 export function gaugeScaleOf(gauge: GaugeSettings | undefined): GaugeScale {

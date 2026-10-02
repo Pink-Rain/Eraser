@@ -181,8 +181,9 @@ function KnownSpell({ spell, original, customized, rank, accent, currentCharges,
     onDragOver={manual ? (event) => { event.preventDefault(); onDragOver?.(event) } : undefined}
     onDrop={manual ? (event) => { event.preventDefault(); onDrop?.() } : undefined}
   >
-    {fresh.isNew && <span className="absolute -left-1 -top-1 z-10 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Nouveau sort — disparaît au survol" aria-label="Nouveau sort" />}
-    <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+    {/* Dans l'en-tête : le reste d'un <details> replié n'est pas affiché, la pastille y restait invisible. */}
+    <summary className="relative flex cursor-pointer list-none items-center gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
+      {fresh.isNew && <span className="absolute -left-1 -top-1 z-10 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Nouveau sort — disparaît au survol" aria-label="Nouveau sort" />}
       {manual && <span
         draggable
         onDragStart={(event) => { event.stopPropagation(); event.dataTransfer.effectAllowed = "move"; onDragStart?.() }}

@@ -18,6 +18,7 @@ import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
 import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
+import { PortraitFx, portraitImageFxClass } from "@/components/eraser/portrait-fx"
 import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -853,9 +854,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const activeCharacterTab = characterTabs.find((tab) => tab.id === activeTab) ?? characterTabs[0]
   const lifeState = characterLifeState(values[9], totalWithModifier(values[10], modifierForValue(10)))
 
-  return <div data-life={lifeState} className="character-life w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
+  return <div data-life={lifeState} className="character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10" style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
     {/* Bichromie rouge sang de la fiche « morte » : la luminosité de chaque point devient
         un rouge, du plus sombre au rose pâle, comme le gris le fait pour une fiche à terre. */}
+    {/* Un effet « non lié aux caractéristiques » teinte toute la fiche de sa couleur, comme à 0 PV. */}
+    {portrait.sheetColors.length > 0 && <div aria-hidden="true" className="pointer-events-none absolute inset-0 z-[5] mix-blend-color" style={{ background: portrait.sheetColors.length > 1 ? `linear-gradient(160deg, ${portrait.sheetColors.join(", ")})` : portrait.sheetColors[0], opacity: 0.35 }} />}
     <svg aria-hidden="true" width="0" height="0" className="pointer-events-none absolute"><filter id="eraser-life-dead" colorInterpolationFilters="sRGB"><feColorMatrix type="matrix" values="0.1318 0.4434 0.0448 0 0.35 0.1446 0.4863 0.0491 0 0.02 0.1382 0.4649 0.0469 0 0.03 0 0 0 1 0" /></filter></svg>
     <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: `${campaignAccent}55` }}>
       <div className="absolute inset-x-0 top-0 h-1" style={{ background: `linear-gradient(90deg, ${campaignAccent}, ${campaignAccent}66 58%, transparent)` }} />
@@ -864,12 +867,13 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         <label className="group relative flex aspect-[3/4] w-full shrink-0 cursor-pointer items-center justify-center overflow-hidden rounded-2xl bg-muted text-muted-foreground shadow-inner">
           {values[characterNarrativeStart + 1] ? <>
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={values[characterNarrativeStart + 1]} alt={`Portrait de ${character.name}`} decoding="async" fetchPriority="high" className="size-full object-cover" />
+            <img src={values[characterNarrativeStart + 1]} alt={`Portrait de ${character.name}`} decoding="async" fetchPriority="high" className={`size-full object-cover ${portraitImageFxClass(portrait.fx)}`} />
           </> : <CircleUserRound className="size-20 opacity-30" />}
           {/* Les états posés teintent le portrait (couleur de leurs effets) et y posent leurs images. */}
           {portrait.colors.length > 0 && <span aria-hidden="true" className="pointer-events-none absolute inset-0 mix-blend-color" style={{ background: portrait.colors.length > 1 ? `linear-gradient(160deg, ${portrait.colors.join(", ")})` : portrait.colors[0], opacity: 0.55 }} />}
           {portrait.colors.length > 0 && <span aria-hidden="true" className="pointer-events-none absolute inset-0" style={{ boxShadow: `inset 0 0 28px ${portrait.colors[0]}aa` }} />}
           {portrait.images.map((image) => <span key={image} aria-hidden="true" className="pointer-events-none absolute inset-0"><IndexImage value={image} alt="" className="size-full object-contain" fallback={null} /></span>)}
+          <PortraitFx fx={portrait.fx} />
           <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />{portraitPending ? "Envoi…" : "Changer"}</span>
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => changePortrait(event.target.files?.[0])} />
         </label>

@@ -5,6 +5,7 @@
  */
 import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
+import { stateFxList } from "@/lib/state-fx"
 import {
   CATALOG_CHARACTERISTIC_HEADER,
   CATALOG_COLOR_HEADER,
@@ -46,6 +47,9 @@ export const EFFECT_TARGET_HEADER = "Cible"
 export const EFFECT_COLOR_HEADER = "Couleur"
 export const EFFECT_CHANGE_HEADER = "Changement de valeur"
 export const EFFECT_IMAGE_HEADER = "Image"
+/** Cochée : l'effet ne vise pas de caractéristique, sa couleur teinte toute la fiche (comme à 0 PV). */
+export const EFFECT_UNLINKED_HEADER = "Non lié aux caractéristiques"
+export const EFFECT_FX_HEADER = "FX"
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills" | "achievements"
 
@@ -261,8 +265,8 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       {
         name: EFFECTS_TAB,
         itemLabel: "un effet",
-        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER],
-        widths: [240, 320, 130, 190, 160, 130],
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_UNLINKED_HEADER, EFFECT_FX_HEADER],
+        widths: [240, 320, 130, 190, 160, 130, 200, 220],
         idPrefix: "EFF",
       },
     ],
@@ -400,6 +404,8 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
   if (index === "states") {
     if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé : elle change de cette valeur les caractéristiques et compétences visées.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_UNLINKED_HEADER)) reasons.push("Cochée, la fiche de personnage teinte toute la fiche de la couleur de l’effet, sans changer de valeur.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_HEADER)) reasons.push("La fiche de personnage dessine ces FX sur le portrait (codés dans Eraser).")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
   }
   if (index === "skills") {
@@ -493,6 +499,8 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       if (isHeader(header, [EFFECT_COLOR_HEADER])) return { kind: "color" }
       if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "number" }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
+      if (isHeader(header, [EFFECT_UNLINKED_HEADER])) return { kind: "checkbox" }
+      if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }
       return { kind: "rich" }
     }
     if (isHeader(header, [...STATE_LEVEL_HEADERS])) return { kind: "linked-choice", multiple: true, source: { index: "states", tab: EFFECTS_TAB, onlyTab: true } }

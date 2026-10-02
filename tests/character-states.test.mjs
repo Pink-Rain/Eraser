@@ -83,3 +83,15 @@ test("la cible d'un effet devient la bonne case de la fiche", async () => {
   const skill = builtinCharacterCatalog.skills.find((candidate) => candidate.name === "Perception");
   assert.equal(target("perception"), `comp:${skill.key}`);
 });
+
+test("une jauge « par ligne » garde son nombre en tête, puis son icône et sa couleur", async () => {
+  const columns = await vite.ssrLoadModule("/lib/index-columns.ts");
+  assert.deepEqual(columns.parseGaugeCell("2|skull|#b9504e"), { count: "2", style: { icon: "skull", color: "#b9504e" } });
+  assert.deepEqual(columns.parseGaugeCell("1|💧"), { count: "1", style: { emoji: "💧" } });
+  assert.deepEqual(columns.parseGaugeCell("3"), { count: "3", style: {} });
+  assert.equal(columns.formatGaugeCell("2", { icon: "heart", color: "#285f8f" }), "2|heart|#285f8f");
+  assert.equal(columns.formatGaugeCell("2", { icon: "heart" }), "2|heart");
+  assert.equal(columns.formatGaugeCell("2", {}), "2");
+  const fx = await vite.ssrLoadModule("/lib/state-fx.ts");
+  assert.deepEqual(fx.parseStateFx("flammes, Désaturé, inconnu, Flammes"), ["Flammes", "Désaturé"]);
+});
