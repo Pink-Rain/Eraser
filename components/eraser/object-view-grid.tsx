@@ -34,6 +34,8 @@ function specIn(table: ObjectIndexTable, header: string, schemas: Record<string,
 export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { view: IndexView; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void }) {
   const sources = useMemo(() => view.source === ALL_SOURCES ? tables : tables.filter((table) => objectTableKey(table) === view.source), [tables, view.source])
   const byKey = useMemo(() => new Map(sources.map((table) => [objectTableKey(table), table])), [sources])
+  // Un seul classeur (index regroupés) : la colonne « Tableau » montre l'onglet seul.
+  const originOf = useCallback((table: ObjectIndexTable) => tables.every((candidate) => candidate.fileId === table.fileId) ? table.tabName : `${table.fileName} · ${table.tabName}`, [tables])
   const [query, setQuery] = useState("")
   const [sort, setSort] = useState<SheetGridSort>(null)
   const [saving, setSaving] = useState(0)
@@ -62,11 +64,11 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
     if (local !== undefined) return local
     const found = locate(rowKey)
     if (!found) return ""
-    if (header === ORIGIN) return `${found.table.fileName} · ${found.table.tabName}`
+    if (header === ORIGIN) return originOf(found.table)
     const column = found.table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
     if (column < 0) return ""
     return (isRichSpec(specIn(found.table, header, schemas)) ? found.row.html[column] : found.row.values[column]) ?? ""
-  }, [locate, schemas])
+  }, [locate, originOf, schemas])
 
   const commit = useCallback(async (rowKey: string, header: string, html: string) => {
     const found = locate(rowKey)
@@ -98,7 +100,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
     if (!sort) return matched.map(({ key, rowNumber }) => ({ key, rowNumber }))
     const keyOf = (entry: (typeof matched)[number]) => {
       const column = entry.table.headers.findIndex((candidate) => foldName(candidate) === foldName(sort.column))
-      const text = sort.column === ORIGIN ? `${entry.table.fileName} · ${entry.table.tabName}` : column >= 0 ? entry.row.values[column] ?? "" : ""
+      const text = sort.column === ORIGIN ? originOf(entry.table) : column >= 0 ? entry.row.values[column] ?? "" : ""
       const spec = sort.column === ORIGIN ? null : specIn(entry.table, sort.column, schemas)
       return spec?.kind === "number" ? numberSortKey(text, spec.number ?? {}) : text
     }
@@ -107,7 +109,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
       const order = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "fr", { numeric: true })
       return order * (sort.direction === "asc" ? 1 : -1)
     }).map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [query, schemas, sort, sources, view])
+  }, [originOf, query, schemas, sort, sources, view])
 
   /* eslint-disable react-hooks/refs -- les cellules ne lisent les modifications en cours qu'en se dessinant, comme dans les autres index */
   const columns = useMemo<SheetGridColumn[]>(() => {

@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
 import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
@@ -20,6 +20,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { IN_PLACE_ATTRIBUTE } from "@/components/eraser/app-tabs"
+import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
@@ -137,7 +139,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [data, setData] = useState(initialData)
   const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
-  const [tabName, setTabName] = usePersistentState(`eraser:world-index:${indexKey}:view`, ALL_TABS, (value): value is string => typeof value === "string")
+  // L'onglet affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.
+  const pathname = usePathname()
+  const [tabName, setTabName, tabHref] = useIndexTabParam(pathname, `eraser:world-index:${indexKey}:view`, ALL_TABS)
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [saving, setSaving] = useState(0)
@@ -701,18 +705,24 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }
 
   return (
-    <section className="mt-4 flex flex-col gap-3">
+    <section className="mt-4 flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         {(tables.length > 1 || settings.views.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Onglet
           <span className="flex items-center gap-1">
-            <NativeSelect value={activeView ? viewSelectKey(activeView.id) : showAll ? ALL_TABS : table?.tabName ?? ""} onChange={(event) => { setTabName(event.target.value); setCreating(false); setDetails(null) }} disabled={busy} className="min-w-56 text-foreground">
-              {canShowAll && <NativeSelectOption value={ALL_TABS}>Tout ({tables.reduce((total, candidate) => total + candidate.rows.length, 0)})</NativeSelectOption>}
-              {tables.map((candidate) => <NativeSelectOption key={candidate.tabName} value={candidate.tabName}>{candidate.tabName} ({candidate.rows.length})</NativeSelectOption>)}
-              {settings.views.length > 0 && <optgroup label="Onglets-fenêtres">
-                {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
-              </optgroup>}
-            </NativeSelect>
+            <IndexTabPicker
+              value={activeView ? viewSelectKey(activeView.id) : showAll ? ALL_TABS : table?.tabName ?? ""}
+              options={[
+                ...(canShowAll ? [{ value: ALL_TABS, label: "Tout", detail: String(tables.reduce((total, candidate) => total + candidate.rows.length, 0)) }] : []),
+                ...tables.map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
+                ...settings.views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+              ]}
+              onChange={(value) => { setTabName(value); setCreating(false); setDetails(null) }}
+              hrefOf={tabHref}
+              tabLabel={(option) => option.value === ALL_TABS ? definition.title : `${definition.title} · ${option.label.replace(/^⧉ /, "")}`}
+              disabled={busy}
+              className="text-foreground"
+            />
             {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}

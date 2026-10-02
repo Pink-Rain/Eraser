@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
-import { useRouter } from "next/navigation"
+import { usePathname, useRouter } from "next/navigation"
 import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
@@ -15,12 +15,13 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
 import { ObjectIndexRegroup } from "@/components/eraser/object-index-regroup"
 import { useShellData } from "@/components/eraser/app-shell"
+import { IN_PLACE_ATTRIBUTE } from "@/components/eraser/app-tabs"
+import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { foldName, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
@@ -74,10 +75,11 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [schemas, setSchemas] = useState<Schemas>(initialSchemas)
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)
   const [editorError, setEditorError] = useState("")
-  const [selectedKey, setSelectedKey] = usePersistentState(
-    "eraser:object-index:selected-table", initialTables[0] ? tableKey(initialTables[0]) : "",
-    (v): v is string => typeof v === "string",
-  )
+  // Le tableau affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.
+  const pathname = usePathname()
+  const [selectedKey, setSelectedKey, tabHref] = useIndexTabParam(pathname, "eraser:object-index:selected-table", initialTables[0] ? tableKey(initialTables[0]) : "")
+  // Un seul classeur (index regroupés) : « Armes », « Équipement »… sans le nom du classeur devant.
+  const tableLabel = useCallback((table: ObjectIndexTable) => tables.every((candidate) => candidate.fileId === table.fileId) ? table.tabName : `${table.fileName} · ${table.tabName}`, [tables])
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [notice, setNotice] = useState("")
@@ -444,19 +446,24 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const inSheetOrder = !sort && !query.trim()
 
   return (
-    <section className="flex flex-col gap-3">
+    <section className="flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       {viewRole === "admin" && <ObjectIndexRegroup onChanged={() => void refresh(true)} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-medium">
           Tableau à afficher
           <span className="flex items-center gap-1">
-            <NativeSelect value={activeView ? viewSelectKey(activeView.id) : selected ? tableKey(selected) : ""} onChange={(event) => { setSelectedKey(event.target.value); if (editedInView.current && !viewIdOfSelectKey(event.target.value)) { editedInView.current = false; void refresh(true) } }} disabled={!tables.length || busy}>
-              {!tables.length && <NativeSelectOption value="">Aucun tableau disponible</NativeSelectOption>}
-              {tables.map((table) => <NativeSelectOption key={tableKey(table)} value={tableKey(table)}>{table.fileName} · {table.tabName}</NativeSelectOption>)}
-              {settings.views.length > 0 && <optgroup label="Onglets-fenêtres">
-                {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
-              </optgroup>}
-            </NativeSelect>
+            <IndexTabPicker
+              value={activeView ? viewSelectKey(activeView.id) : selected ? tableKey(selected) : ""}
+              options={[
+                ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table), detail: String(table.rows.length) })),
+                ...settings.views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+              ]}
+              onChange={(value) => { setSelectedKey(value); if (editedInView.current && !viewIdOfSelectKey(value)) { editedInView.current = false; void refresh(true) } }}
+              hrefOf={tabHref}
+              tabLabel={(option) => `Objets · ${option.label.replace(/^⧉ /, "")}`}
+              disabled={!tables.length || busy}
+              empty="Aucun tableau disponible"
+            />
             {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>
@@ -532,7 +539,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         key={`${tableKey(selected)}:${details}`}
         open
         title={nameColumn >= 0 ? savedCell(nameColumn).replace(/<[^>]+>/g, "") : `Ligne ${details}`}
-        subtitle={`${selected.fileName} · ${selected.tabName}`}
+        subtitle={tableLabel(selected)}
         fields={sheetColumns.filter((index) => !["auto-links", "ranked-links", "tab"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], value: savedCell(index), long: isLongField(selected.headers[index]) }))}
         rowFor={sheetRow}
         pending={sheetPending}
@@ -545,7 +552,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index="objects"
         view={viewDialog === "edit" ? activeView : null}
-        sources={[{ value: ALL_SOURCES, label: "Tous les index d’objets" }, ...tables.map((table) => ({ value: tableKey(table), label: `${table.fileName} · ${table.tabName}` }))]}
+        sources={[{ value: ALL_SOURCES, label: "Tous les index d’objets" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}
         onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(viewSelectKey(id)); return id }}
         onDelete={async (id) => { await settings.deleteView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
