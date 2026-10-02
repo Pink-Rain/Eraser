@@ -19,6 +19,10 @@ export type ItemNotification = {
   targetId: string
   /** « Reçu par Lina », « Rangé dans l’inventaire de La Couronne ». */
   targetLabel: string
+  /** Un personnage n'est prévenu qu'à l'ouverture de sa fiche ; PNJ et campagne, tout de suite. */
+  targetKind: "character" | "npc" | "campaign" | ""
+  /** La case où l'objet est arrivé, pour sa pastille. */
+  slotId: string
   createdAt: string
 }
 
@@ -55,7 +59,9 @@ export async function notifyItemReceived(sender: AuthorizedUser, moved: Inventor
     const recipient = await recipientOf(moved)
     if (!recipient) return
     const uid = await accountUid(recipient.uid)
-    if (!uid || uid === sender.uid) return
+    const targetKind = moved.targetId.startsWith("CAMPAGNE:") ? "campaign" : moved.targetMode === "npc" ? "npc" : "character"
+    // Un objet envoyé à l'un de ses propres personnages est annoncé aussi, à l'ouverture de sa fiche.
+    if (!uid || (uid === sender.uid && targetKind !== "character")) return
     const notification: ItemNotification = {
       id: crypto.randomUUID(),
       senderName: chatAuthorName(sender),
@@ -63,6 +69,8 @@ export async function notifyItemReceived(sender: AuthorizedUser, moved: Inventor
       quantity: Math.max(1, moved.quantity),
       targetId: moved.targetId,
       targetLabel: recipient.label,
+      targetKind,
+      slotId: moved.slotId ?? "",
       createdAt: new Date().toISOString(),
     }
     await writeSharedRecord(scopeFor(uid), notification.id, JSON.stringify(notification))
@@ -94,6 +102,8 @@ function parse(value: string): ItemNotification | null {
       quantity: typeof parsed.quantity === "number" ? parsed.quantity : 1,
       targetId: typeof parsed.targetId === "string" ? parsed.targetId : "",
       targetLabel: typeof parsed.targetLabel === "string" ? parsed.targetLabel : "",
+      targetKind: parsed.targetKind === "character" || parsed.targetKind === "npc" || parsed.targetKind === "campaign" ? parsed.targetKind : "",
+      slotId: typeof parsed.slotId === "string" ? parsed.slotId : "",
       createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
     }
   } catch {
@@ -101,16 +111,24 @@ function parse(value: string): ItemNotification | null {
   }
 }
 
-/** Relève les notifications du compte et les efface : chacune n'est montrée qu'une fois. */
-export async function takeItemNotifications(uid: string) {
+/**
+ * Relève des notifications du compte et efface celles rendues : chacune n'est montrée
+ * qu'une fois. Sans `targetId` : tout sauf les objets reçus par un personnage, qui
+ * attendent l'ouverture de sa fiche (même reçus hors ligne, en vue MJ ou sur un autre
+ * personnage). Avec `targetId` : celles de ce personnage seulement.
+ */
+export async function takeItemNotifications(uid: string, targetId = "") {
   if (!sharedStoreAvailable()) return []
   const scope = scopeFor(uid)
   const records = await listSharedRecords(scope).catch(() => [])
   if (!records.length) return []
-  await Promise.all(records.map((record) => deleteSharedRecord(scope, record.key).catch(() => undefined)))
   const now = Date.now()
-  return records
-    .map((record) => parse(record.value))
-    .filter((notification): notification is ItemNotification => Boolean(notification && now - Date.parse(notification.createdAt || "0") < MAX_AGE_MS))
+  const parsed = records.map((record) => ({ record, notification: parse(record.value) }))
+  const expired = parsed.filter(({ notification }) => !notification || now - Date.parse(notification.createdAt || "0") >= MAX_AGE_MS)
+  const wanted = parsed.filter(({ notification }) => notification && now - Date.parse(notification.createdAt || "0") < MAX_AGE_MS
+    && (targetId ? notification.targetKind === "character" && notification.targetId === targetId : notification.targetKind !== "character"))
+  await Promise.all([...expired, ...wanted].map(({ record }) => deleteSharedRecord(scope, record.key).catch(() => undefined)))
+  return wanted
+    .map(({ notification }) => notification as ItemNotification)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }

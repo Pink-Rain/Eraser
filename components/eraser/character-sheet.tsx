@@ -6,7 +6,8 @@ import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, Gra
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { InlineEdit } from "@/components/eraser/inline-edit"
-import { useInventoryReceived } from "@/components/eraser/item-notifications"
+import { showItemNotifications, useInventoryReceived } from "@/components/eraser/item-notifications"
+import type { ItemNotification } from "@/lib/item-notifications"
 import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
@@ -552,6 +553,43 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     void commit(characterClassChoicesIndex, JSON.stringify({ ...classChoiceState, charges: { ...classChoiceState.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } }))
   }
 
+  // Les objets reçus par ce personnage pendant qu'on n'était pas sur sa fiche (hors ligne,
+  // en vue MJ, sur un autre personnage) : annoncés à l'ouverture, avec leur pastille.
+  useEffect(() => {
+    let alive = true
+    let running = false
+    async function check() {
+      if (running || document.visibilityState !== "visible") return
+      running = true
+      try {
+        const response = await fetch(`/api/notifications?target=${encodeURIComponent(character.id)}`, { cache: "no-store" })
+        const payload = (await response.json().catch(() => ({}))) as { notifications?: ItemNotification[] }
+        const fresh = response.ok ? payload.notifications ?? [] : []
+        if (!alive || !fresh.length) return
+        showItemNotifications(fresh)
+        const loaded = await fetch(`${inventoryEndpoint}?summary=1`).then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null).catch(() => null)
+        if (!alive || !loaded) return
+        const slots = loaded.containers.flatMap((container) => container.slots)
+        const names = new Set(fresh.filter((item) => !item.slotId).map((item) => item.itemName.trim().toLocaleLowerCase("fr")))
+        markNewSlots(character.id, [
+          ...fresh.flatMap((item) => item.slotId && slots.some((slot) => slot.id === item.slotId && slot.item) ? [item.slotId] : []),
+          // Une notification plus ancienne, sans case : les objets du même nom.
+          ...slots.filter((slot) => slot.item && names.has(slot.item.name.trim().toLocaleLowerCase("fr"))).map((slot) => slot.id),
+        ])
+        setInventory((current) => ({ ...loaded, items: loaded.items.length ? loaded.items : current?.items || [] }))
+      } catch {
+        // Hors ligne : on réessaie plus tard.
+      } finally {
+        running = false
+      }
+    }
+    void check()
+    const timer = window.setInterval(() => void check(), 20_000)
+    const wake = () => void check()
+    window.addEventListener("focus", wake)
+    return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", wake) }
+  }, [character.id, inventoryEndpoint])
+
   // Un objet envoyé à ce personnage : l'inventaire affiché se met à jour tout seul.
   useInventoryReceived([character.id], () => {
     fetch(`${inventoryEndpoint}?summary=1`)
@@ -758,7 +796,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "inventaire") return inventoryLoading
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
-    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} />
+    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }

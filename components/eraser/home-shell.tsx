@@ -9,6 +9,7 @@ import {
   UsersRound, type LucideIcon,
 } from "lucide-react"
 
+import { HomeAccounts } from "@/components/eraser/account-directory"
 import { HomeAchievements } from "@/components/eraser/achievements"
 import { PageLabel, useShellData } from "@/components/eraser/app-shell"
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
@@ -129,6 +130,7 @@ function SideColumn({ withIndex, withTools }: { withIndex: boolean; withTools: b
   return (
     <aside className="space-y-5">
       <Panel title="Règles" icon={BookOpen}><LinkList links={ruleLinks} /></Panel>
+      <HomeAccounts />
       {withIndex && (
         <Panel title="Index" icon={LibraryBig} action={<Link href={indexHomeHref} prefetch={false} className="text-xs font-medium text-primary hover:underline">Tout voir</Link>}>
           <LinkList links={(starred.length ? starred : indexPages).map((page) => ({ href: page.href, label: page.label, icon: indexPageIcons[page.key] }))} />

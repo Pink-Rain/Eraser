@@ -102,6 +102,22 @@ export async function deleteIndexView(viewId: string) {
   clearSpreadsheetReadCache(id)
 }
 
+/**
+ * Change la source des onglets-fenêtres d'un index (`ancienne → nouvelle`) : le
+ * regroupement des index d'objets, et son annulation, y renvoient leurs tableaux.
+ * Rien n'est créé s'il n'y a pas encore de classeur de réglages.
+ */
+export async function remapIndexViewSources(index: string, mapping: Map<string, string>) {
+  const { id, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS.length)
+  if (!id) return 0
+  const writes = rows.flatMap((row, position) => row[1]?.trim() === index && mapping.has(row[3]?.trim() ?? "")
+    ? [{ position, source: mapping.get(row[3].trim()) as string }]
+    : [])
+  for (const write of writes) await updateRange(id, sheetTabRange(VIEWS_TAB, `D${write.position + 2}:D${write.position + 2}`), [[write.source]], { valueInputOption: "RAW" })
+  if (writes.length) clearSpreadsheetReadCache(id)
+  return writes.length
+}
+
 // ---------- Presets d'onglets ----------
 
 function presetFromRow(row: string[]): ColumnPreset | null {

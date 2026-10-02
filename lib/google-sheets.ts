@@ -858,76 +858,85 @@ async function objectIndexSpreadsheetFiles() {
   })
 }
 
+/**
+ * Les tableaux d'un classeur d'objets, lus tels qu'ils sont dans Sheets (sans les
+ * en-têtes repris des autres index). Le regroupement s'en sert aussi pour vérifier
+ * sa copie avant de basculer.
+ */
+export async function readObjectIndexSpreadsheet(file: { id: string; name: string; webViewLink?: string }): Promise<ObjectIndexTable[]> {
+  const metadata = await googleSheetsJson<{
+    sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }>
+  }>(`spreadsheets/${file.id}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`)
+  const sheets = (metadata.sheets ?? []).flatMap((sheet) => {
+    const sheetId = sheet.properties?.sheetId
+    const tabName = sheet.properties?.title
+    // L'onglet « Eraser · colonnes » décrit les colonnes : ce n'est pas un tableau d'objets.
+    return sheetId === undefined || !tabName || tabName.startsWith("Eraser ·") ? [] : [{ sheetId, tabName }]
+  })
+  // Un tableau mis à la corbeille depuis « Modifier » n'est plus lu : ni l'index, ni
+  // l'inventaire, ni les boutiques ne le voient, mais ses lignes restent dans Sheets.
+  const hasSchema = (metadata.sheets ?? []).some((sheet) => sheet.properties?.title === "Eraser · colonnes")
+  const trashedTabs = new Set(hasSchema
+    ? (await readRange(file.id, sheetTabRange("Eraser · colonnes", "A2:F")).catch(() => [] as string[][])).filter((row) => row[0]?.trim() && !row[1]?.trim() && (row[5]?.trim() || /supprim/i.test(row[4] ?? ""))).map((row) => row[0].trim())
+    : [])
+  sheets.splice(0, sheets.length, ...sheets.filter((sheet) => !trashedTabs.has(sheet.tabName)))
+  // Les cellules sont lues avec leur mise en forme (couleurs, gras, liens) afin que
+  // l’Index des objets l’affiche et la conserve, comme l’Index des classes.
+  const parameters = new URLSearchParams({
+    includeGridData: "true",
+    fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(textFormat)))))",
+  })
+  sheets.forEach((sheet) => parameters.append("ranges", sheetTabRange(sheet.tabName, "A1:AZ")))
+  const payload = sheets.length ? await googleSheetsJson<{
+    sheets?: Array<{
+      properties?: { sheetId?: number; title?: string }
+      data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
+    }>
+  }>(`spreadsheets/${file.id}?${parameters.toString()}`) : { sheets: [] }
+  return sheets.map((sheet) => {
+    const grid = payload.sheets?.find((candidate) => candidate.properties?.title === sheet.tabName)
+    const cells: Array<Array<{ value: string; html: string }>> = []
+    for (const block of grid?.data ?? []) {
+      const startRow = block.startRow ?? 0
+      const startColumn = block.startColumn ?? 0
+      for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
+        const target = cells[startRow + rowOffset] ||= []
+        for (const [columnOffset, cell] of (row.values ?? []).entries()) {
+          const value = gridCellValue(cell, true)
+          target[startColumn + columnOffset] = { value, html: richTextHtml(value, cell.textFormatRuns, cell.effectiveFormat?.textFormat) }
+        }
+      }
+    }
+    const usedWidth = Math.max(1, ...cells.map((row) => row.length))
+    const rawHeaders = cells[0] ?? []
+    const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.value.trim() || `Colonne ${index + 1}`)
+    const lastFilled = lastFilledRow(cells.slice(1))
+    return {
+      fileId: file.id,
+      fileName: file.name,
+      webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
+      sheetId: sheet.sheetId,
+      tabName: sheet.tabName,
+      headers,
+      // Les lignes vides entre deux lignes remplies restent affichées, comme dans
+      // Sheets : ce sont celles qu'on vient d'insérer.
+      rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim()) || index < lastFilled
+        ? [{
+            rowNumber: index + 2,
+            values: headers.map((_, column) => row[column]?.value ?? ""),
+            html: headers.map((_, column) => row[column]?.html ?? ""),
+          }]
+        : []),
+    } satisfies ObjectIndexTable
+  })
+}
+
 export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   if (objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now()) return objectIndexTableCache.tables
   const files = await objectIndexSpreadsheetFiles()
   const results = await Promise.all(files.map(async (file) => {
     try {
-      const metadata = await googleSheetsJson<{
-        sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }>
-      }>(`spreadsheets/${file.id}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`)
-      const sheets = (metadata.sheets ?? []).flatMap((sheet) => {
-        const sheetId = sheet.properties?.sheetId
-        const tabName = sheet.properties?.title
-        // L'onglet « Eraser · colonnes » décrit les colonnes : ce n'est pas un tableau d'objets.
-        return sheetId === undefined || !tabName || tabName.startsWith("Eraser ·") ? [] : [{ sheetId, tabName }]
-      })
-      // Un tableau mis à la corbeille depuis « Modifier » n'est plus lu : ni l'index, ni
-      // l'inventaire, ni les boutiques ne le voient, mais ses lignes restent dans Sheets.
-      const hasSchema = (metadata.sheets ?? []).some((sheet) => sheet.properties?.title === "Eraser · colonnes")
-      const trashedTabs = new Set(hasSchema
-        ? (await readRange(file.id, sheetTabRange("Eraser · colonnes", "A2:F")).catch(() => [] as string[][])).filter((row) => row[0]?.trim() && !row[1]?.trim() && (row[5]?.trim() || /supprim/i.test(row[4] ?? ""))).map((row) => row[0].trim())
-        : [])
-      sheets.splice(0, sheets.length, ...sheets.filter((sheet) => !trashedTabs.has(sheet.tabName)))
-      // Les cellules sont lues avec leur mise en forme (couleurs, gras, liens) afin que
-      // l’Index des objets l’affiche et la conserve, comme l’Index des classes.
-      const parameters = new URLSearchParams({
-        includeGridData: "true",
-        fields: "sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(textFormat)))))",
-      })
-      sheets.forEach((sheet) => parameters.append("ranges", sheetTabRange(sheet.tabName, "A1:AZ")))
-      const payload = sheets.length ? await googleSheetsJson<{
-        sheets?: Array<{
-          properties?: { sheetId?: number; title?: string }
-          data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
-        }>
-      }>(`spreadsheets/${file.id}?${parameters.toString()}`) : { sheets: [] }
-      return { tables: sheets.map((sheet) => {
-        const grid = payload.sheets?.find((candidate) => candidate.properties?.title === sheet.tabName)
-        const cells: Array<Array<{ value: string; html: string }>> = []
-        for (const block of grid?.data ?? []) {
-          const startRow = block.startRow ?? 0
-          const startColumn = block.startColumn ?? 0
-          for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
-            const target = cells[startRow + rowOffset] ||= []
-            for (const [columnOffset, cell] of (row.values ?? []).entries()) {
-              const value = gridCellValue(cell, true)
-              target[startColumn + columnOffset] = { value, html: richTextHtml(value, cell.textFormatRuns, cell.effectiveFormat?.textFormat) }
-            }
-          }
-        }
-        const usedWidth = Math.max(1, ...cells.map((row) => row.length))
-        const rawHeaders = cells[0] ?? []
-        const headers = Array.from({ length: usedWidth }, (_, index) => rawHeaders[index]?.value.trim() || `Colonne ${index + 1}`)
-        const lastFilled = lastFilledRow(cells.slice(1))
-        return {
-          fileId: file.id,
-          fileName: file.name,
-          webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
-          sheetId: sheet.sheetId,
-          tabName: sheet.tabName,
-          headers,
-          // Les lignes vides entre deux lignes remplies restent affichées, comme dans
-          // Sheets : ce sont celles qu'on vient d'insérer.
-          rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim()) || index < lastFilled
-            ? [{
-                rowNumber: index + 2,
-                values: headers.map((_, column) => row[column]?.value ?? ""),
-                html: headers.map((_, column) => row[column]?.html ?? ""),
-              }]
-            : []),
-        } satisfies ObjectIndexTable
-      }), error: null }
+      return { tables: await readObjectIndexSpreadsheet(file), error: null }
     } catch (error) {
       return { tables: [] as ObjectIndexTable[], error }
     }
@@ -1041,6 +1050,27 @@ function fillMissingObjectIndexHeaders(tables: ObjectIndexTable[]) {
 /** « #REF! », « #N/A »… : une formule cassée dans Sheets, pas une vraie valeur. */
 function isSheetErrorValue(value: string) {
   return /^#(REF!|N\/A|VALUE!|NAME\?|DIV\/0!|NUM!|NULL!|ERROR!)$/i.test(value.trim())
+}
+
+/**
+ * Les tableaux d'objets relus à l'instant, en-têtes réparés d'abord (sans attendre la
+ * tâche de fond) : le regroupement copie ainsi des feuilles qui ne bougent plus.
+ */
+export async function objectIndexTablesForRegroup() {
+  clearObjectIndexTableCache()
+  objectHeaderRepairAttemptAt = Date.now()
+  let tables = await listObjectIndexTables()
+  const broken = tables.filter(needsObjectIndexHeaderRepair)
+  if (broken.length) {
+    await repairObjectIndexHeaders(broken)
+    tables = await listObjectIndexTables()
+  }
+  return tables
+}
+
+/** Le nom d'un objet d'un tableau (colonne Nom ou ses variantes). */
+export function objectIndexRowName(table: ObjectIndexTable, row: ObjectIndexRow) {
+  return objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"])
 }
 
 export async function refreshObjectIndexTables() {
@@ -5896,7 +5926,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
 }
 
 /** Ce qui vient de changer de sac : sert à prévenir le destinataire. */
-export type InventoryTransferMoved = { name: string; quantity: number; targetId: string; targetMode: InventoryOwnerMode }
+export type InventoryTransferMoved = { name: string; quantity: number; targetId: string; targetMode: InventoryOwnerMode; /** La case où l'objet est arrivé (pastille « nouveau »). */ slotId?: string }
 
 export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character", onMoved?: (moved: InventoryTransferMoved) => void) {
   await inventoryStorageFor(sourceId, true, sourceMode)
@@ -5967,7 +5997,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
   })))
   workbook.contents = workbook.contents.map((content) => content.id === updatedTarget.id ? updatedTarget : content.id === updatedSource.id ? updatedSource : content)
   cacheInventoryWorkbook(workbook)
-  onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode })
+  onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode, slotId: updatedTarget.id })
   return buildCharacterInventory(sourceId, workbook)
 }
 

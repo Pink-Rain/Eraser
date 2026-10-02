@@ -287,7 +287,7 @@ export function CampaignDashboard({
 
         <section className="deferred-section mt-12 border-t pt-8">
           <h2 className="mb-6 flex items-center gap-2 font-display text-2xl font-semibold"><Backpack className="size-5" />Inventaire de la campagne</h2>
-          <DeferredCampaignInventory campaignId={campaign.id} readOnly={!canManage} />
+          <DeferredCampaignInventory campaignId={campaign.id} readOnly={!canManage && !ownedCharacterIds.length} />
         </section>
       </div>
     </div>

@@ -1,49 +1,49 @@
-# Eraser 0.1.1-alpha.92 — Pages instantanées, onglets-fenêtres, presets, runes sur les objets
+# Eraser 0.1.1-alpha.93 — Profils des autres comptes, objets reçus partout, index d'objets regroupables
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Corrections de l'alpha.91
+## Fiche de personnage
 
-- **Changer de page** : au clic, la nouvelle page s'affiche tout de suite avec sa
-  structure (titre, barre d'outils, tableau ou cartes vides), puis ses données se
-  remplissent. Plus d'attente sur l'ancienne page, plus d'écran « Ouverture de la page… ».
-- **Nouveau sort** : les cartes reprennent les couleurs des sorts de ton index (celles
-  de la case Type), au lieu de couleurs inventées.
-- **Succès** : plus d'attribution à la main ; elle sera automatique, une fois définie
-  la façon de remplir l'index. L'accueil et « Mon profil » affichent les succès.
-  La colonne Icône de l'Index des succès est une colonne Fichier (image), comme ailleurs.
-- **Type de colonne « Icône » retiré** : une colonne enregistrée avec ce type redevient
-  une colonne Fichier image.
+- **Nouveau sort** : le texte des cartes est posé sur un panneau clair, lisible quelle
+  que soit la couleur du sort (gris actif, blanc passif, violet bonus).
+- **Sorts tout juste obtenus** : une petite pastille, comme pour les objets reçus. Elle
+  disparaît au survol.
+- **Objets reçus** : un objet donné à un personnage est annoncé (notification, son,
+  pastille sur l'objet) à la prochaine ouverture de sa fiche, même s'il est arrivé
+  pendant que tu étais déconnecté, en vue MJ ou sur un autre personnage. Les objets
+  donnés à l'un de tes propres personnages sont annoncés aussi.
 
-## Index
+## Accueil et profils
 
-- **Onglets-fenêtres** (bouton « Onglet-fenêtre ») : un onglet qui ne contient aucune
-  donnée et réaffiche les lignes existantes qui remplissent des conditions (Nom, Type,
-  Sous-type… est / contient / est vide / supérieur à…), prises dans tout l'index ou dans
-  un seul onglet. Rien n'est copié : une case modifiée dans la fenêtre l'est dans son
-  onglet d'origine. Dans l'index des objets, la source peut être tous les index d'objets
-  ou un seul tableau.
-- **Presets d'onglets** : dans « Modifier », enregistrer les colonnes d'un onglet sous
-  un nom, puis les réutiliser pour un nouvel onglet ou en ajouter les colonnes à un
-  onglet existant. Renommer, remplacer, supprimer depuis « Gérer ».
-- Onglets-fenêtres et presets sont gardés dans le classeur « Eraser · Réglages des
-  index » du Drive, créé au premier enregistrement (relié s'il existe déjà).
-- **Nouveau type de colonne « Rangement en onglets »** : la valeur de la case est le nom
-  d'un onglet ; la ligne y est rangée, et une valeur nouvelle crée l'onglet avec les
-  mêmes colonnes.
-- **Choix du type de colonne plus clair** : une liste compacte, une ligne par type avec
-  ce qui le distingue (Liste / Liste liée / Colonne liée…), le détail au survol.
-- « Nom formulaire » n'est plus proposé : chaque index a déjà le sien.
+- **Joueurs et MJ** : l'accueil liste les autres comptes. Un clic ouvre leur profil :
+  personnages, campagnes et succès. Leur adresse e-mail n'est jamais affichée.
+- **Ce qui s'ouvre depuis un profil** :
+  - en vue joueur, aucune fiche d'un autre joueur ; une campagne seulement si l'un de
+    tes personnages y joue (tu arrives sur son tableau de bord) ;
+  - en vue MJ, les fiches des personnages de tes campagnes, et tes campagnes ;
+  - en vue administrateur, tout.
+  Les autres cartes restent visibles, sans lien.
+- Sur ton propre profil, les campagnes où tu joues s'ouvrent aussi.
+
+## Campagnes
+
+- **Inventaire de campagne** : chaque joueur dont un personnage est dans la campagne le
+  modifie comme le sien (ajouter, créer, ranger, quantités, donner). Il ne donne qu'aux
+  destinataires qu'il voit : les personnages et les PNJs du groupe ou de la campagne.
 
 ## Index des objets
 
-- Le classeur « Index Objet » n'avait pas d'en-têtes sur sa première ligne : Eraser les
-  y écrit (seulement dans les cases vides). La deuxième colonne « Description », vide,
-  qu'une ancienne version avait ajoutée en fin de tableau, est supprimée (une colonne
-  qui contient quoi que ce soit n'est jamais touchée).
-
-## Inventaire
-
-- Le bouton de liaison d'un objet ouvre une fenêtre à onglets : caractéristiques et
-  compétences (comme avant), **runes**, **attributs** et **matériaux**, choisis dans
-  leurs index. Ils s'affichent sur l'objet ; leurs effets seront définis plus tard.
+- **Regrouper les index d'objets** (vue administrateur, en haut de l'Index des objets) :
+  les classeurs du dossier « Objets » deviennent un seul classeur « Index des objets »,
+  avec un onglet par index (Objets, Équipement, Parchemins, Consommables, Armes).
+  - Chaque tableau est copié tel quel (valeurs, couleurs, images).
+  - Les objets sans identifiant gardent celui que connaissent déjà les inventaires,
+    boutiques et fouilles, écrit dans une colonne ID.
+  - Les types de colonnes (« Modifier ») et les onglets-fenêtres suivent.
+  - La copie est relue et comparée ligne par ligne : à la moindre différence, rien ne
+    change et les index restent comme avant.
+  - Les anciens classeurs ne sont ni modifiés ni supprimés : ils sont rangés dans le
+    sous-dossier « Anciens index d'objets (avant regroupement) ».
+  - **Annuler le regroupement** remet les anciens classeurs en place. Ce qui a été changé
+    dans le classeur regroupé entre-temps y reste.
+  - Rien ne se fait tout seul : le regroupement attend ton clic.

@@ -14,6 +14,7 @@ import {
   updateObjectIndexCell,
   updateObjectIndexRow,
 } from "@/lib/google-sheets"
+import { objectIndexRegroupStatus, regroupObjectIndexes, revertObjectIndexRegroup } from "@/lib/object-index-regroup-server"
 import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -35,10 +36,35 @@ export async function GET(request: Request) {
   }
 }
 
+const regroupMessages: Record<string, string> = {
+  OBJECT_INDEX_FOLDER_NOT_FOUND: "Le dossier « Objets » est introuvable dans le Drive connecté.",
+  OBJECT_REGROUP_NAME_TAKEN: "Un classeur « Index des objets » existe déjà dans le Drive : il n’est jamais recréé. Renomme-le ou range-le si c’est un ancien essai, puis relance.",
+  OBJECT_REGROUP_NOTHING_TO_DO: "Il n’y a qu’un classeur dans le dossier « Objets » : rien à regrouper.",
+  OBJECT_REGROUP_VERIFY_FAILED: "La copie ne correspond pas exactement aux index d’origine : rien n’a été basculé, les index restent comme avant.",
+  OBJECT_REGROUP_NOT_FOUND: "Aucun regroupement à annuler dans le dossier « Objets ».",
+}
+
+/** Regrouper les index d'objets en un classeur à onglets (ou l'annuler) : réservé à la vue administrateur. */
+async function regroupAction(action: string) {
+  const account = await authorized()
+  if (account?.role !== "admin") return NextResponse.json({ error: "Le regroupement des index d’objets se fait depuis la vue administrateur." }, { status: 403 })
+  try {
+    if (action === "regroup-status") return NextResponse.json({ status: await objectIndexRegroupStatus() })
+    const result = action === "regroup" ? await regroupObjectIndexes() : await revertObjectIndexRegroup()
+    return NextResponse.json({ ok: true, result, status: await objectIndexRegroupStatus().catch(() => null) })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    const details = (error as { details?: string[] } | null)?.details ?? []
+    console.error("OBJECT_REGROUP_FAILED", action, code, details)
+    return NextResponse.json({ error: regroupMessages[code] ?? "Le regroupement n’a pas pu se faire. Les index d’origine n’ont pas bougé.", details }, { status: 400 })
+  }
+}
+
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; count?: number; column?: number; html?: string; values?: unknown[] }
+    if (body.action === "regroup-status" || body.action === "regroup" || body.action === "regroup-revert") return regroupAction(body.action)
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
       return NextResponse.json({ ok: true, result, tables: await listObjectIndexTables() })

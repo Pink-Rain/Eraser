@@ -13,6 +13,13 @@ export function announceInventoryReceived(targetId: string) {
   window.dispatchEvent(new CustomEvent(inventoryReceivedEvent, { detail: { targetId } }))
 }
 
+const SHOW_EVENT = "eraser:item-notifications"
+
+/** Montre des notifications relevées ailleurs (la fiche d'un personnage), avec leur petit son. */
+export function showItemNotifications(notifications: ItemNotification[]) {
+  if (notifications.length) window.dispatchEvent(new CustomEvent(SHOW_EVENT, { detail: notifications }))
+}
+
 /** Appelle `onReceived` quand l'un de ces inventaires (personnage, PNJ, `CAMPAGNE:<id>`) reçoit un objet. */
 export function useInventoryReceived(ids: string[], onReceived: () => void) {
   const callback = useRef(onReceived)
@@ -38,6 +45,18 @@ const VISIBLE_MS = 12_000
  */
 export function ItemNotifications() {
   const [shown, setShown] = useState<ItemNotification[]>([])
+
+  // Les objets reçus par un personnage, relevés par sa fiche à son ouverture.
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const fresh = (event as CustomEvent<ItemNotification[]>).detail ?? []
+      if (!fresh.length) return
+      playItemReceived()
+      setShown((current) => [...current, ...fresh.filter((item) => !current.some((known) => known.id === item.id))].slice(-4))
+    }
+    window.addEventListener(SHOW_EVENT, listener)
+    return () => window.removeEventListener(SHOW_EVENT, listener)
+  }, [])
 
   useEffect(() => {
     let alive = true

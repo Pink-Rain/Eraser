@@ -14,7 +14,14 @@ import type { SiteRole } from "@/lib/auth-types"
 import type { CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { cn } from "@/lib/utils"
 
-export type ProfileAccount = { uid: string; email: string; displayName: string; role: SiteRole }
+export type ProfileAccount = { uid: string; email: string; displayName: string; role: SiteRole | null }
+
+/**
+ * Ce que la personne qui regarde peut ouvrir sur le profil d'un autre compte : les fiches
+ * (administrateur, ou MJ d'une campagne du personnage) et les campagnes (celles qu'elle
+ * mène ou où joue l'un de ses personnages). Absent sur son propre profil : tout s'ouvre.
+ */
+export type ProfileAccess = { characters: string[]; campaigns: string[] }
 
 const roleLabels: Record<SiteRole, string> = { admin: "Administrateur", mj: "Maître du jeu", joueur: "Joueur" }
 
@@ -40,14 +47,23 @@ function Stat({ icon: Icon, label, value, color }: { icon: LucideIcon; label: st
   </div>
 }
 
+/** Une carte qui s'ouvre si la personne qui regarde y a accès ; sinon elle reste affichée, sans lien. */
+function CardLink({ href, label, className, style, children }: { href: string | null; label: string; className: string; style?: React.CSSProperties; children: React.ReactNode }) {
+  if (!href) return <div className={className} style={style}>{children}</div>
+  return <Link href={href} prefetch={false} data-tab-href={href} data-tab-label={label} className={cn(className, "transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]")} style={style}>{children}</Link>
+}
+
 function Empty({ children }: { children: React.ReactNode }) {
   return <p className="rounded-2xl border border-dashed px-6 py-8 text-center text-sm text-muted-foreground">{children}</p>
 }
 
 /** Le profil d'un compte : ses personnages, ses campagnes et ses succès, quelle que soit la vue. */
-export function ProfileView({ account, characters, campaigns }: { account: ProfileAccount; characters: CharacterRecord[]; campaigns: CampaignRecord[] }) {
+export function ProfileView({ account, characters, campaigns, access }: { account: ProfileAccount; characters: CharacterRecord[]; campaigns: CampaignRecord[]; access?: ProfileAccess }) {
   const shell = useShellData()
-  const { board, loading, error } = useAchievementBoard()
+  const self = !access
+  const { board, loading, error } = useAchievementBoard(self ? "" : account.uid)
+  const canOpenCharacter = (id: string) => !access || access.characters.includes(id)
+  const canOpenCampaign = (id: string) => !access || access.campaigns.includes(id)
   // Classe et rang, lus dans les fiches après l'affichage : le profil n'attend pas Sheets.
   const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string }>>({})
   // Tant que les fiches n'ont pas répondu, la classe reste en attente (pas « à choisir »).
@@ -55,13 +71,13 @@ export function ProfileView({ account, characters, campaigns }: { account: Profi
   useEffect(() => {
     if (!characters.length) return
     let active = true
-    fetch("/api/characters/summaries")
+    fetch(self ? "/api/characters/summaries" : `/api/characters/summaries?uid=${encodeURIComponent(account.uid)}`)
       .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string }> } : null)
       .then((payload) => { if (active && payload?.summaries) setSummaries(payload.summaries) })
       .catch(() => { /* les cartes restent lisibles sans la classe */ })
       .finally(() => { if (active) setSummariesLoaded(true) })
     return () => { active = false }
-  }, [characters.length])
+  }, [account.uid, characters.length, self])
 
   // Les campagnes menées, puis celles où joue l'un de ses personnages.
   const played = useMemo(() => {
@@ -79,6 +95,8 @@ export function ProfileView({ account, characters, campaigns }: { account: Profi
   const obtainedCount = board ? board.obtained.filter((entry) => achievementOf(board.achievements, entry)).length : null
   const countOf = (type: AchievementType) => board ? board.obtained.filter((entry) => achievementOf(board.achievements, entry)?.type === type).length : 0
   const name = account.displayName || account.email.split("@")[0]
+  // Rôle inconnu (un joueur ne lit pas la liste des comptes) : celui de ce qu'il mène.
+  const role: SiteRole = account.role ?? (campaigns.length ? "mj" : "joueur")
 
   return <div className="flex w-full flex-1 flex-col gap-5 px-5 py-8 sm:px-8 md:py-10">
     {/* En-tête : l'avatar, le pseudo, le rôle. */}
@@ -88,14 +106,14 @@ export function ProfileView({ account, characters, campaigns }: { account: Profi
       <div className="relative flex flex-col gap-5 sm:flex-row sm:items-center">
         <AccountAvatar user={account} version={shell.avatarVersion} className="size-24 rounded-[1.4rem] text-2xl shadow-md ring-4 ring-background" />
         <div className="min-w-0 flex-1">
-          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Mon profil</p>
+          <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">{self ? "Mon profil" : "Profil"}</p>
           <h1 className="font-display truncate text-4xl font-semibold leading-tight tracking-[-0.02em]">{name}</h1>
           <p className="mt-1 flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
-            <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary">{account.role === "joueur" ? <UsersRound className="size-3.5" /> : <Crown className="size-3.5" />}{roleLabels[account.role]}</span>
-            <span className="truncate">{account.email}</span>
+            <span className="inline-flex items-center gap-1 rounded-full border border-primary/20 bg-primary/5 px-2.5 py-0.5 text-xs font-medium text-primary">{role === "joueur" ? <UsersRound className="size-3.5" /> : <Crown className="size-3.5" />}{roleLabels[role]}</span>
+            {self && <span className="truncate">{account.email}</span>}
           </p>
         </div>
-        <Button type="button" variant="outline" onClick={shell.openAccount} className="self-start sm:self-center"><Settings2 />Réglages du compte</Button>
+        {self && <Button type="button" variant="outline" onClick={shell.openAccount} className="self-start sm:self-center"><Settings2 />Réglages du compte</Button>}
       </div>
       <div className="relative mt-6 grid gap-3 sm:grid-cols-3">
         <Stat icon={UsersRound} label={characters.length > 1 ? "personnages" : "personnage"} value={String(characters.length)} color="#927640" />
@@ -104,14 +122,15 @@ export function ProfileView({ account, characters, campaigns }: { account: Profi
       </div>
     </header>
 
-    <Section title="Personnages" icon={UsersRound} count={characters.length} action={<Button asChild size="sm" variant="outline"><Link href="/creation-de-personnage" prefetch={false}><Plus />Nouveau personnage</Link></Button>}>
+    <Section title="Personnages" icon={UsersRound} count={characters.length} action={self ? <Button asChild size="sm" variant="outline"><Link href="/creation-de-personnage" prefetch={false}><Plus />Nouveau personnage</Link></Button> : undefined}>
       {characters.length
         ? <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4 2xl:grid-cols-6">
           {characters.map((character) => {
             const accent = character.campaigns[0]?.accentColor || "#927640"
             const summary = summaries[character.id]
             const classLine = summary?.classes ? (summary.level ? `${summary.classes} · rang ${summary.level}` : summary.classes) : character.classes ? (character.level ? `${character.classes} · rang ${character.level}` : character.classes) : ""
-            return <Link key={character.id} href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false} data-tab-href={`/personnage/${encodeURIComponent(character.id)}`} data-tab-label={character.name} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${accent}55` }}>
+            const href = `/personnage/${encodeURIComponent(character.id)}`
+            return <CardLink key={character.id} href={canOpenCharacter(character.id) ? href : null} label={character.name} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40" style={{ borderColor: `${accent}55` }}>
               <div className="relative flex aspect-[4/5] w-full items-center justify-center overflow-hidden bg-muted text-muted-foreground">
                 <CircleUserRound className="size-7 opacity-40" />
                 <QuietImage src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} />
@@ -126,31 +145,31 @@ export function ProfileView({ account, characters, campaigns }: { account: Profi
                   {character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="truncate text-[10px] font-medium" style={{ color: campaign.accentColor }}>{campaign.name}</span>) : <span className="text-[10px] text-muted-foreground/80">Sans campagne</span>}
                 </div>
               </div>
-            </Link>
+            </CardLink>
           })}
         </div>
-        : <Empty>Aucun personnage pour l’instant.</Empty>}
+        : <Empty>{self ? "Aucun personnage pour l’instant." : "Aucun personnage."}</Empty>}
     </Section>
 
     <Section title="Campagnes" icon={Map} count={campaigns.length + played.length}>
       {campaigns.length + played.length
         ? <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3 2xl:grid-cols-4">
-          {campaigns.map((campaign) => <Link key={campaign.id} href={`/campagne/${encodeURIComponent(campaign.id)}`} prefetch={false} data-tab-href={`/campagne/${encodeURIComponent(campaign.id)}`} data-tab-label={campaign.name} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40 transition hover:-translate-y-0.5 hover:shadow-[0_14px_35px_rgb(67_50_31/0.12)]" style={{ borderColor: `${campaign.accentColor}55` }}>
+          {campaigns.map((campaign) => <CardLink key={campaign.id} href={canOpenCampaign(campaign.id) ? `/campagne/${encodeURIComponent(campaign.id)}` : null} label={campaign.name} className="group flex flex-col overflow-hidden rounded-2xl border bg-background/40" style={{ borderColor: `${campaign.accentColor}55` }}>
             <div className="relative flex aspect-[16/6] w-full items-center justify-center overflow-hidden bg-muted" style={{ color: campaign.accentColor }}><Map className="size-6 opacity-60" /><QuietImage src={campaign.bannerUrl} /></div>
             <div className="h-1 w-full" style={{ backgroundColor: campaign.accentColor }} />
             <div className="flex flex-1 flex-col p-3.5">
               <div className="flex items-center gap-2"><h3 className="font-display min-w-0 flex-1 truncate text-lg font-semibold" style={{ color: campaign.accentColor }}>{campaign.name}</h3><span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ borderColor: `${campaign.accentColor}55`, color: campaign.accentColor }}><Crown className="size-3" />MJ</span></div>
               <p className="mt-1 line-clamp-2 min-h-10 text-xs leading-5 text-muted-foreground">{plainText(campaign.description) || "Pas encore de description."}</p>
             </div>
-          </Link>)}
-          {played.map((campaign) => <div key={campaign.id} className="flex flex-col overflow-hidden rounded-2xl border bg-background/40" style={{ borderColor: `${campaign.accentColor}55` }}>
+          </CardLink>)}
+          {played.map((campaign) => <CardLink key={campaign.id} href={canOpenCampaign(campaign.id) ? `/campagne/${encodeURIComponent(campaign.id)}` : null} label={campaign.name} className="flex flex-col overflow-hidden rounded-2xl border bg-background/40" style={{ borderColor: `${campaign.accentColor}55` }}>
             <div className="flex aspect-[16/6] w-full items-center justify-center" style={{ background: `linear-gradient(135deg, ${campaign.accentColor}33, ${campaign.accentColor}0d)`, color: campaign.accentColor }}><Map className="size-6 opacity-60" /></div>
             <div className="h-1 w-full" style={{ backgroundColor: campaign.accentColor }} />
             <div className="flex flex-1 flex-col p-3.5">
               <div className="flex items-center gap-2"><h3 className="font-display min-w-0 flex-1 truncate text-lg font-semibold" style={{ color: campaign.accentColor }}>{campaign.name}</h3><span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ borderColor: `${campaign.accentColor}55`, color: campaign.accentColor }}><UsersRound className="size-3" />Joueur</span></div>
               <p className="mt-1 truncate text-xs text-muted-foreground">Avec {campaign.characters.join(", ")}</p>
             </div>
-          </div>)}
+          </CardLink>)}
         </div>
         : <Empty>Aucune campagne.</Empty>}
     </Section>

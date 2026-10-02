@@ -76,17 +76,20 @@ function AugmentCard({ spell, accent, accentLight, index, state, onPick }: { spe
       <span className="rounded-full px-2.5 py-0.5 text-[10px] font-bold uppercase tracking-[.18em]" style={{ backgroundColor: look.background, color: look.foreground }}>{look.label}</span>
       {spell.category === "actif" && spell.charges !== null && <SpellChargeStars total={spell.charges} accent={look.background} />}
     </span>
-    <span className="relative mx-auto mt-6 flex size-20 items-center justify-center rounded-full border-2" style={{ borderColor: look.background, backgroundColor: look.background, color: look.foreground, boxShadow: `0 0 22px ${look.background}88` }}>
-      <KindIcon category={spell.category} className="size-9" />
+    <span className="relative mx-auto mt-3 flex size-16 shrink-0 items-center justify-center rounded-full border-2" style={{ borderColor: look.background, backgroundColor: look.background, color: look.foreground, boxShadow: `0 0 22px ${look.background}88` }}>
+      <KindIcon category={spell.category} className="size-7" />
     </span>
-    <span className="relative mt-5 text-center font-display text-2xl font-semibold leading-tight drop-shadow">{spell.name}</span>
-    <span className="relative mt-4 line-clamp-6 text-center text-[13px] leading-5 text-white/90">
-      {(spell.effectHtml || spell.effect) && <span className="block font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
-      {(spell.descriptionHtml || spell.description) && <span className="mt-1.5 block text-white/65" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}
-    </span>
-    <span className="relative mt-auto flex flex-wrap items-center justify-center gap-x-3 gap-y-1 pt-3 text-[11px] text-white/75">
-      {spell.skills.length > 0 && <span className="font-semibold text-[#ffb4a6]">{spell.skills.join(" · ")}</span>}
-      {spell.distance && <span className="flex items-center gap-1"><Crosshair className="size-3" />{spell.distance}</span>}
+    <span className="relative mt-3 shrink-0 text-center font-display text-xl font-semibold leading-tight drop-shadow">{spell.name}</span>
+    {/* Le texte du sort sur papier clair : ses couleurs (liens, mots clés) restent celles de l'index, lisibles. */}
+    <span className="relative mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-[#f7f0e3] text-left text-[#2b2118] shadow-inner">
+      <span className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5 text-[12.5px] leading-[1.45] [&_a]:underline">
+        {(spell.effectHtml || spell.effect) && <span className="block font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
+        {(spell.descriptionHtml || spell.description) && <span className="mt-1.5 block text-[#5c4d3f]" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}
+      </span>
+      {(spell.skills.length > 0 || spell.distance) && <span className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-[#2b2118]/10 px-3 py-1.5 text-[11px] text-[#5c4d3f]">
+        {spell.skills.length > 0 && <span className="font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}
+        {spell.distance && <span className="flex items-center gap-1"><Crosshair className="size-3" />{spell.distance}</span>}
+      </span>}
     </span>
   </button>
 }

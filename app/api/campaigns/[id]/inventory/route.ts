@@ -18,13 +18,22 @@ import {
 import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
+/**
+ * L'inventaire de campagne est celui du groupe : son MJ (ou un administrateur) et chaque
+ * joueur dont un personnage est dans la campagne le modifient comme le leur. Un joueur
+ * ne donne qu'aux destinataires qu'il voit (personnages, PNJs du groupe ou de la campagne).
+ */
 async function authorizedCampaign(id: string) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
   if (!account) return null
-  const campaign = await (account.role === "joueur"
-    ? getCampaignForPlayer(account.uid, id)
-    : getCampaignDashboard(account.role === "admin" ? null : account.uid, id)).catch(() => null)
-  return campaign ? { account, campaign, canManage: account.role !== "joueur" } : null
+  const led = account.role === "joueur" ? null : await getCampaignDashboard(account.role === "admin" ? null : account.uid, id).catch(() => null)
+  if (led) return { account, campaign: led, canManage: true }
+  const played = await getCampaignForPlayer(account.uid, id).catch(() => null)
+  return played ? { account, campaign: played, canManage: false } : null
+}
+
+function campaignTransferTargets(authorization: NonNullable<Awaited<ReturnType<typeof authorizedCampaign>>>, id: string) {
+  return listInventoryTransferTargets(id, campaignInventoryOwnerId(id), authorization.canManage ? undefined : { uid: authorization.account.uid, relatedNpcIds: new Set() })
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -34,7 +43,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   try {
     const url = new URL(request.url)
     if (url.searchParams.get("targets") === "1") {
-      return NextResponse.json({ transferTargets: authorization.canManage ? await listInventoryTransferTargets(id, campaignInventoryOwnerId(id)) : [] })
+      return NextResponse.json({ transferTargets: await campaignTransferTargets(authorization, id) })
     }
     const summary = url.searchParams.get("summary") === "1"
     const inventory = summary ? await getCampaignInventorySummary(id) : await getCampaignInventory(id)
@@ -47,7 +56,7 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   const authorization = await authorizedCampaign(id)
-  if (!authorization?.canManage) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  if (!authorization) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const ownerId = campaignInventoryOwnerId(id)
   try {
     const body = (await request.json()) as Record<string, unknown>
@@ -65,7 +74,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") {
       inventory = await moveCharacterInventoryItem(ownerId, body.slotId, body.containerId)
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
-      const targets = await listInventoryTransferTargets(id, ownerId)
+      const targets = await campaignTransferTargets(authorization, id)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
       const slotId = body.slotId, targetId = body.targetId
       inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(ownerId, slotId, targetId, "character", onMoved))

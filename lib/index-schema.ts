@@ -88,6 +88,25 @@ export async function writeSchema(spreadsheetId: string, entries: SchemaEntry[])
   cache.delete(spreadsheetId)
 }
 
+/** Les lignes du schéma telles qu'écrites dans la feuille (types inconnus compris). */
+export async function readRawSchemaRows(spreadsheetId: string) {
+  const tabs = await spreadsheetTabs(spreadsheetId)
+  if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return [] as string[][]
+  clearSpreadsheetReadCache(spreadsheetId)
+  return (await readRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))).filter((row) => row[0]?.trim())
+}
+
+/** Ajoute des lignes brutes au schéma d'un classeur (regroupement des index d'objets). */
+export async function appendRawSchemaRows(spreadsheetId: string, rows: string[][]) {
+  if (!rows.length) return
+  await ensureSchemaTab(spreadsheetId)
+  const previous = await readRawSchemaRows(spreadsheetId)
+  const width = HEADERS.length
+  const all = [...previous, ...rows].map((row) => Array.from({ length: width }, (_, index) => row[index] ?? ""))
+  await updateRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, `A2:F${all.length + 1}`), all, { valueInputOption: "RAW" })
+  cache.delete(spreadsheetId)
+}
+
 /** La ligne d'une colonne (ou d'un onglet quand `column` est vide). */
 export { findEntry } from "@/lib/index-schema-shared"
 

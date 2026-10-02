@@ -22,15 +22,15 @@ import { cn } from "@/lib/utils"
 
 const boards = new Map<string, AchievementBoard>()
 
-/** Les succès de la personne connectée, gardés en mémoire d'un affichage à l'autre. */
-export function useAchievementBoard() {
-  const key = "me"
+/** Les succès de la personne connectée (ou d'un autre compte : `uid`), gardés en mémoire d'un affichage à l'autre. */
+export function useAchievementBoard(uid = "") {
+  const key = uid || "me"
   const [board, setBoard] = useState<AchievementBoard | null>(() => boards.get(key) ?? null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState("")
   useEffect(() => {
     let active = true
-    fetch("/api/achievements", { cache: "no-store" })
+    fetch(uid ? `/api/achievements?uid=${encodeURIComponent(uid)}` : "/api/achievements", { cache: "no-store" })
       .then(async (response) => ({ response, payload: (await response.json().catch(() => ({}))) as AchievementBoard & { error?: string } }))
       .then(({ response, payload }) => {
         if (!active) return
@@ -42,7 +42,7 @@ export function useAchievementBoard() {
       .catch(() => { if (active) setError("Les succès n’ont pas pu être chargés.") })
       .finally(() => { if (active) setLoading(false) })
     return () => { active = false }
-  }, [key])
+  }, [key, uid])
   return { board, loading, error }
 }
 

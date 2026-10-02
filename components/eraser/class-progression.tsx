@@ -13,6 +13,7 @@ import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { RankBonusLine } from "@/components/eraser/rank-bonus"
 import { NewSpellSlot, SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
+import { markNewSlots, NewSlotsContext, useNewSlot, useNewSlots } from "@/components/eraser/new-inventory-items"
 import type { ClassSpell, RankBonus } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
@@ -155,12 +156,16 @@ function keepSummaryOpen(event: MouseEvent) {
 function KnownSpell({ spell, original, customized, rank, accent, currentCharges, onCharges, onEdit, onReset, onRemove, manual, dragOver, onDragStart, onDragEnd, onDragOver, onDrop }: { spell: ClassSpell; original: ClassSpell; customized: boolean; rank: number | null; accent: string; currentCharges: number; onCharges: (value: number) => void; onEdit: (patch: CharacterSpellEdit) => Promise<void>; onReset: () => Promise<void>; onRemove: () => Promise<void>; manual?: boolean; dragOver?: boolean; onDragStart?: () => void; onDragEnd?: () => void; onDragOver?: (event: DragEvent) => void; onDrop?: () => void }) {
   const tone = spellTone(spell)
   const [confirmRemove, setConfirmRemove] = useState(false)
+  const fresh = useNewSlot(spell.id)
   return <details
-    className={`group rounded-xl border bg-background/45 transition-colors ${dragOver ? "border-dashed" : ""}`}
+    onMouseEnter={fresh.isNew ? fresh.seen : undefined}
+    onFocusCapture={fresh.isNew ? fresh.seen : undefined}
+    className={`group relative rounded-xl border bg-background/45 transition-colors ${dragOver ? "border-dashed" : ""}`}
     style={{ borderColor: dragOver ? accent : `${tone.background}66` }}
     onDragOver={manual ? (event) => { event.preventDefault(); onDragOver?.(event) } : undefined}
     onDrop={manual ? (event) => { event.preventDefault(); onDrop?.() } : undefined}
   >
+    {fresh.isNew && <span className="absolute -left-1 -top-1 z-10 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Nouveau sort — disparaît au survol" aria-label="Nouveau sort" />}
     <summary className="flex cursor-pointer list-none items-center gap-3 px-3 py-3 [&::-webkit-details-marker]:hidden">
       {manual && <span
         draggable
@@ -211,8 +216,11 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
 
 let knownRankBonuses: RankBonus[] = []
 
-export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string }) {
+export function ClassProgression({ classes, spells, level, value, onCommit, loading = false, error = "", ownerId = "" }: { classes: ClassRecord[]; spells: ClassSpell[]; level: number; value: string; onCommit: (value: string) => Promise<void>; loading?: boolean; error?: string; ownerId?: string }) {
   const state = useMemo(() => parseClassChoices(value), [value])
+  // Les sorts tout juste choisis portent une pastille jusqu'à ce qu'on les survole.
+  const newSpellsKey = `sorts:${ownerId}`
+  const newSpells = useNewSlots(newSpellsKey)
   const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
   // Bonus de rang (communs à toutes les classes) : affichés sous le titre de chaque rang.
   // Gardés d'un affichage à l'autre : revenir sur l'onglet Sorts ne les fait pas disparaître.
@@ -242,6 +250,7 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
     const previous = state.choices[classId]?.[String(rank)]
     const choices = { ...state.choices, [classId]: { ...(state.choices[classId] || {}), [String(rank)]: spellId } }
     setReconsidering((current) => ({ ...current, [`${classId}:${rank}`]: false }))
+    if (ownerId) markNewSlots(newSpellsKey, [spellId])
     // Le sort choisi n'est plus « retiré » ; l'ancien choix retiré n'a plus lieu d'être rétabli.
     return update({ ...state, choices, removed: state.removed.filter((id) => id !== spellId && id !== previous) })
   }
@@ -331,7 +340,7 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
   if (error) return <div className="grid min-h-52 place-items-center rounded-2xl border border-destructive/30 bg-destructive/5 p-8 text-center text-sm text-destructive">{error}<span className="mt-2 block text-muted-foreground">La fiche reste utilisable dans les autres onglets.</span></div>
   if (!classes.length) return <div className="grid min-h-52 place-items-center rounded-2xl border border-dashed border-border/55 bg-card/20 p-8 text-center text-sm text-muted-foreground">Choisis une classe dans l’identité du personnage pour afficher sa progression.</div>
 
-  return <div className="space-y-9">
+  return <NewSlotsContext.Provider value={newSpells}><div className="space-y-9">
     {currentChoice && <>
       <NewSpellSlot
         count={pending.length}
@@ -388,5 +397,5 @@ export function ClassProgression({ classes, spells, level, value, onCommit, load
         </div>
       </details>
     })}
-  </div>
+  </div></NewSlotsContext.Provider>
 }

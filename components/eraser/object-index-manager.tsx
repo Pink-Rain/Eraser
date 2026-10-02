@@ -13,6 +13,8 @@ import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
+import { ObjectIndexRegroup } from "@/components/eraser/object-index-regroup"
+import { useShellData } from "@/components/eraser/app-shell"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -91,6 +93,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   )
   // Les onglets-fenêtres de l'index des objets : des lignes de un ou plusieurs tableaux, selon des conditions.
   const settings = useIndexSettings("objects")
+  const { viewRole } = useShellData()
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
   const editedInView = useRef(false)
@@ -442,6 +445,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
 
   return (
     <section className="flex flex-col gap-3">
+      {viewRole === "admin" && <ObjectIndexRegroup onChanged={() => void refresh(true)} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         <label className="grid min-w-0 flex-1 gap-1.5 text-sm font-medium">
           Tableau à afficher

@@ -198,13 +198,42 @@ export async function shareDriveFileWithLink(fileId: string) {
   })
 }
 
-export async function createGoogleSpreadsheet(name: string) {
+export async function createGoogleSpreadsheet(name: string, folderId?: string) {
   const normalizedName = name.trim()
   if (!normalizedName || normalizedName.length > 120) throw new Error("INVALID_SHEET_NAME")
+  if (folderId !== undefined && !/^[A-Za-z0-9_-]+$/.test(folderId)) throw new Error("INVALID_DRIVE_FILE_ID")
   return driveJson<DriveFile>("files?fields=id,name,mimeType,modifiedTime,webViewLink", {
     method: "POST",
-    body: JSON.stringify({ name: normalizedName, mimeType: SPREADSHEET_MIME_TYPE }),
+    body: JSON.stringify({ name: normalizedName, mimeType: SPREADSHEET_MIME_TYPE, ...(folderId ? { parents: [folderId] } : {}) }),
   })
+}
+
+/** Le sous-dossier `name` de `parentId`, créé s'il n'existe pas. */
+export async function ensureDriveSubfolder(parentId: string, name: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(parentId)) throw new Error("INVALID_DRIVE_FILE_ID")
+  const existing = (await listFilesMatching(
+    `name = '${driveQueryValue(name.trim())}' and mimeType = '${FOLDER_MIME_TYPE}' and '${parentId}' in parents and trashed = false`,
+  ))[0]
+  if (existing) return existing.id
+  const created = await driveJson<DriveFile>("files?fields=id,name,mimeType", {
+    method: "POST",
+    body: JSON.stringify({ name: name.trim(), mimeType: FOLDER_MIME_TYPE, parents: [parentId] }),
+  })
+  return created.id
+}
+
+/** Déplace un fichier (ou un raccourci) d'un dossier à un autre, sans le copier ni le modifier. */
+export async function moveDriveFile(fileId: string, toFolderId: string, fromFolderId: string) {
+  for (const id of [fileId, toFolderId, fromFolderId]) if (!/^[A-Za-z0-9_-]+$/.test(id)) throw new Error("INVALID_DRIVE_FILE_ID")
+  const parameters = new URLSearchParams({ addParents: toFolderId, removeParents: fromFolderId, fields: "id,parents" })
+  return driveJson<DriveFile>(`files/${encodeURIComponent(fileId)}?${parameters.toString()}`, { method: "PATCH", body: JSON.stringify({}) })
+}
+
+export async function renameDriveFile(fileId: string, name: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) throw new Error("INVALID_DRIVE_FILE_ID")
+  const normalizedName = name.trim()
+  if (!normalizedName || normalizedName.length > 200) throw new Error("INVALID_SHEET_NAME")
+  return driveJson<DriveFile>(`files/${encodeURIComponent(fileId)}?fields=id,name`, { method: "PATCH", body: JSON.stringify({ name: normalizedName }) })
 }
 
 export async function findGoogleSpreadsheetByName(name: string) {
