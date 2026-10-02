@@ -480,16 +480,69 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 /* FX des états (onglet Effets › FX) : dessinés sur le portrait, teintés par --fx. */
 @keyframes eraser-fx-pulse { 0%, 100% { box-shadow: inset 0 0 18px 2px color-mix(in srgb, var(--fx) 55%, transparent); } 50% { box-shadow: inset 0 0 42px 10px color-mix(in srgb, var(--fx) 85%, transparent); } }
 @keyframes eraser-fx-flicker { 0%, 100% { opacity: 0.85; transform: scaleY(1); } 33% { opacity: 1; transform: scaleY(1.06); } 66% { opacity: 0.7; transform: scaleY(0.96); } }
-@keyframes eraser-fx-drip { from { background-position: 0 -120px; } to { background-position: 0 120px; } }
 @keyframes eraser-fx-shake { 0%, 100% { transform: translate(0, 0); } 20% { transform: translate(-1.5px, 1px); } 40% { transform: translate(1.5px, -1px); } 60% { transform: translate(-1px, -1px); } 80% { transform: translate(1px, 1px); } }
 @keyframes eraser-fx-fade { 0%, 100% { opacity: 0.35; } 50% { opacity: 0.6; } }
 @keyframes eraser-fx-spin { to { transform: rotate(360deg); } }
 @keyframes eraser-fx-mist { from { transform: translateX(-30%); } to { transform: translateX(30%); } }
 .eraser-fx-pulse { animation: eraser-fx-pulse 1.6s ease-in-out infinite; }
 .eraser-fx-aura { box-shadow: inset 0 0 34px 8px color-mix(in srgb, var(--fx) 70%, transparent); }
-.eraser-fx-flames { background: radial-gradient(60% 45% at 50% 100%, color-mix(in srgb, var(--fx) 90%, #ffb347) 0%, color-mix(in srgb, var(--fx) 55%, transparent) 45%, transparent 75%); transform-origin: bottom; animation: eraser-fx-flicker 0.9s ease-in-out infinite; mix-blend-mode: screen; }
-.eraser-fx-frost { background: radial-gradient(120% 100% at 50% 50%, transparent 55%, color-mix(in srgb, var(--fx) 45%, #e0f2fe) 100%); box-shadow: inset 0 0 26px 4px color-mix(in srgb, var(--fx) 40%, #f0f9ff); }
-.eraser-fx-drip { background-image: repeating-linear-gradient(90deg, transparent 0 14px, color-mix(in srgb, var(--fx) 55%, transparent) 14px 17px, transparent 17px 31px); mask-image: linear-gradient(to bottom, black, transparent 85%); animation: eraser-fx-drip 3.5s linear infinite; }
+/*
+ * Flammes : un dégradé de feu découpé par un bruit qui monte (deux couches à deux
+ * vitesses), une lueur au pied et des braises qui s'envolent.
+ */
+.eraser-fx-flames { mix-blend-mode: screen; }
+.eraser-fx-flames > i {
+  position: absolute; inset: 0;
+  background: linear-gradient(to top, color-mix(in srgb, var(--fx) 10%, #fff8dc) 0%, color-mix(in srgb, var(--fx) 55%, #ffb000) 14%, color-mix(in srgb, var(--fx) 85%, #ff5a00) 32%, color-mix(in srgb, var(--fx) 70%, transparent) 58%, transparent 80%);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.05 0.011' numOctaves='4' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 4.2 -1.75'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 200px 260px repeat, linear-gradient(to top, #000 12%, rgba(0,0,0,.6) 40%, transparent 82%) 0 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='200' height='260'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.05 0.011' numOctaves='4' seed='7' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 4.2 -1.75'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 200px 260px repeat, linear-gradient(to top, #000 12%, rgba(0,0,0,.6) 40%, transparent 82%) 0 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+  animation: eraser-fx-rise 1.5s linear infinite;
+}
+.eraser-fx-flames > i + i { transform: scaleX(-1); opacity: 0.8; filter: blur(0.6px); -webkit-mask-size: 140px 180px, 100% 100%; mask-size: 140px 180px, 100% 100%; -webkit-mask-position: 37px 0, 0 0; mask-position: 37px 0, 0 0; animation-name: eraser-fx-rise-fast; animation-duration: 1s; }
+.eraser-fx-flames > s { position: absolute; inset: 0; background: radial-gradient(85% 30% at 50% 100%, color-mix(in srgb, var(--fx) 65%, #ffb347) 0%, transparent 75%); animation: eraser-fx-glow 1.1s ease-in-out infinite alternate; }
+.eraser-fx-flames > b { position: absolute; bottom: 4%; width: 3px; height: 3px; border-radius: 50%; background: color-mix(in srgb, var(--fx) 30%, #fff1b8); box-shadow: 0 0 6px 2px color-mix(in srgb, var(--fx) 80%, #ffb347); opacity: 0; animation: eraser-fx-ember 2.4s ease-out infinite; }
+@keyframes eraser-fx-rise { from { -webkit-mask-position: 0 0, 0 0; mask-position: 0 0, 0 0; } to { -webkit-mask-position: 0 -260px, 0 0; mask-position: 0 -260px, 0 0; } }
+@keyframes eraser-fx-rise-fast { from { -webkit-mask-position: 37px 0, 0 0; mask-position: 37px 0, 0 0; } to { -webkit-mask-position: 37px -180px, 0 0; mask-position: 37px -180px, 0 0; } }
+@keyframes eraser-fx-glow { from { opacity: 0.65; } to { opacity: 1; } }
+@keyframes eraser-fx-ember { 0% { opacity: 0; transform: translate(0, 0) scale(1); } 12% { opacity: 1; } 100% { opacity: 0; transform: translate(var(--sway, 10px), -160px) scale(0.3); } }
+
+/*
+ * Givre : les bords passent sous un verre dépoli, des cristaux s'y accrochent et
+ * quelques éclats scintillent.
+ */
+.eraser-fx-frost { box-shadow: inset 0 0 26px 6px color-mix(in srgb, var(--fx) 25%, #e6f6ff); }
+.eraser-fx-frost::before {
+  content: ""; position: absolute; inset: 0;
+  backdrop-filter: blur(3px) brightness(1.18) saturate(0.5);
+  -webkit-mask: radial-gradient(ellipse 72% 68% at 50% 50%, transparent 52%, #000 100%);
+  mask: radial-gradient(ellipse 72% 68% at 50% 50%, transparent 52%, #000 100%);
+}
+.eraser-fx-frost > i {
+  position: absolute; inset: 0;
+  background: color-mix(in srgb, var(--fx) 22%, #f3fbff);
+  filter: drop-shadow(0 0 1px #fff);
+  -webkit-mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.16' numOctaves='3' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 -9 2.4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 150px 150px repeat, radial-gradient(ellipse 80% 76% at 50% 50%, transparent 55%, rgba(0,0,0,.85) 100%) 0 0 / 100% 100% no-repeat;
+  -webkit-mask-composite: source-in;
+  mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='150' height='150'%3E%3Cfilter id='n' x='0' y='0' width='1' height='1'%3E%3CfeTurbulence type='turbulence' baseFrequency='0.16' numOctaves='3' seed='11' stitchTiles='stitch'/%3E%3CfeColorMatrix values='0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 -9 2.4'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E") 0 0 / 150px 150px repeat, radial-gradient(ellipse 80% 76% at 50% 50%, transparent 55%, rgba(0,0,0,.85) 100%) 0 0 / 100% 100% no-repeat;
+  mask-composite: intersect;
+  animation: eraser-fx-breathe 5s ease-in-out infinite;
+}
+.eraser-fx-frost > b {
+  position: absolute; width: 11px; height: 11px; opacity: 0;
+  background: radial-gradient(circle, #fff 0 1.2px, transparent 2.4px), linear-gradient(#fff, #fff) center / 1px 100% no-repeat, linear-gradient(#fff, #fff) center / 100% 1px no-repeat;
+  filter: drop-shadow(0 0 3px color-mix(in srgb, var(--fx) 40%, #bfe8ff));
+  animation: eraser-fx-twinkle 3.2s ease-in-out infinite;
+}
+@keyframes eraser-fx-breathe { 0%, 100% { opacity: 0.8; } 50% { opacity: 1; } }
+@keyframes eraser-fx-twinkle { 0%, 70%, 100% { opacity: 0; transform: scale(0.4) rotate(0deg); } 82% { opacity: 1; transform: scale(1) rotate(45deg); } }
+
+/* Suintement : un liquide « gluant » (flou + seuil) qui coule du haut en gouttes. */
+.eraser-fx-drip-hang { transform-box: fill-box; transform-origin: 50% 0; animation: eraser-fx-hang 4.5s ease-in-out infinite; }
+@keyframes eraser-fx-hang { 0%, 100% { transform: scale(1, 1); } 50% { transform: scale(0.8, 2.4); } }
+.eraser-fx-drip-drop { transform-box: fill-box; transform-origin: 50% 0; animation: eraser-fx-drop 3.4s cubic-bezier(0.55, 0, 0.9, 0.45) infinite; }
+@keyframes eraser-fx-drop { 0% { transform: translateY(0) scale(1, 1); } 30% { transform: translateY(3px) scale(0.85, 1.9); } 100% { transform: translateY(150px) scale(0.6, 1.3); } }
 .eraser-fx-shake { animation: eraser-fx-shake 0.35s linear infinite; }
 .eraser-fx-blur { filter: blur(1.6px); }
 .eraser-fx-ghost { animation: eraser-fx-fade 2.4s ease-in-out infinite; }

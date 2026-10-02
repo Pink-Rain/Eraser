@@ -473,7 +473,11 @@ function escapeCellHtml(value: string) {
 async function patchCachedRow(key: WorldIndexKey, tabName: string, rowNumber: number, cells: Array<{ column: number; html: string }>) {
   const entry = worldIndexCache.get(key)
   if (!entry) return
+  // Une cellule qu'on vient d'écrire rend l'index frais : sans ça, la lecture suivante
+  // relançait une relecture de Google qui pouvait encore renvoyer l'ancienne valeur et
+  // effacer celle qu'on venait d'enregistrer (Aura redevenait Pulsation).
   entry.patchedAt = Date.now()
+  entry.expiresAt = Math.max(entry.expiresAt, Date.now() + WORLD_INDEX_CACHE_MS)
   const data = await entry.promise.catch(() => null)
   const row = data?.tables.find((table) => table.tabName === tabName)?.rows.find((candidate) => candidate.rowNumber === rowNumber)
   if (!row) return invalidateWorldIndexes([key])
