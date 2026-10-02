@@ -1,16 +1,21 @@
-# Eraser 0.1.1-alpha.96 — Onglets d'index ouvrables ailleurs
+# Eraser 0.1.1-alpha.97 — États et Effets synchronisés, couleurs enregistrées
 
 Cette version arrive par la mise à jour sans réinstallation.
 
 ## Index
 
-- **Chaque onglet de l'application garde son propre onglet d'index** : l'onglet affiché
-  (« États », « Effets », un onglet-fenêtre…) est maintenant dans l'adresse. On peut avoir
-  « États » dans un onglet et « Effets » dans un autre sans que l'un change l'autre.
-- **Clic droit sur un onglet de la liste** : ouvrir dans un nouvel onglet, dans une
-  nouvelle fenêtre ou ici, comme partout ailleurs. Ctrl+clic et clic du milieu ouvrent
-  directement un nouvel onglet.
-- **Index des objets** : la liste ne répète plus « Index des objets · » devant chaque
-  tableau. Elle affiche seulement Armes, Équipement, Parchemins… Même chose dans la colonne
-  « Tableau » des onglets-fenêtres. Le nom du classeur ne revient que si les tableaux
-  viennent de classeurs différents.
+- **Les onglets se tiennent à jour entre eux** : un effet ajouté ou renommé dans « Effets »
+  apparaît aussitôt dans les listes « Niveau 1 » / « Niveau 2 » de « États », même ouvert
+  dans un autre onglet ou une autre fenêtre. Plus besoin d'« Actualiser » ni de recharger.
+  Valable pour tous les index et leurs listes liées.
+- **La fiche de personnage suit aussi** : un état ou un effet modifié dans l'Index des états
+  est relu par les fiches ouvertes.
+
+## Icônes et couleurs dans les cellules
+
+- **Plus d'erreur « Cette modification n'a pas pu être enregistrée »** en changeant une
+  couleur : le sélecteur envoyait une écriture à Google Sheets à chaque mouvement, et
+  Google refusait. L'aperçu suit maintenant en direct, et une seule écriture part quand la
+  fenêtre se ferme. Cela vaut pour la palette de la jauge par ligne (icône et couleur) et
+  pour la colonne Couleur.
+- Si Google Sheets refuse encore une modification, le message dit maintenant pourquoi.

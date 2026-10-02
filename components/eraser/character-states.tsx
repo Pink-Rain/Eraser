@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useState } from "react"
 import { Activity, LoaderCircle, Plus, Search, X } from "lucide-react"
 
+import { useWorldIndexVersion } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { sanitizeRichText } from "@/components/eraser/rich-text"
@@ -20,9 +21,11 @@ let knownCatalog: StatesCatalog | null = null
 export function useStatesCatalog() {
   const [catalog, setCatalog] = useState<StatesCatalog | null>(knownCatalog)
   const [error, setError] = useState("")
+  // Un état ou un effet modifié dans l'index (autre onglet, autre fenêtre) : la fiche relit.
+  const version = useWorldIndexVersion("states")
   useEffect(() => {
     let active = true
-    fetch("/api/states")
+    fetch(version ? "/api/states?fresh=1" : "/api/states", { cache: "no-store" })
       .then(async (response) => ({ response, payload: (await response.json().catch(() => ({}))) as { catalog?: StatesCatalog; error?: string } }))
       .then(({ response, payload }) => {
         if (!active) return
@@ -33,7 +36,7 @@ export function useStatesCatalog() {
       })
       .catch(() => { if (active) setError("L’Index des états n’a pas pu être lu.") })
     return () => { active = false }
-  }, [])
+  }, [version])
   return { catalog: catalog ?? { states: [], effects: [] }, loaded: Boolean(catalog), error }
 }
 

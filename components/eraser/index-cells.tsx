@@ -39,6 +39,7 @@ import {
 } from "@/lib/index-columns"
 import type { FormulaDisplay } from "@/lib/index-formula"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
+import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 
 /*
  * Le moteur de cellules de tous les index. Chaque type de colonne (lib/index-columns.ts)
@@ -266,15 +267,36 @@ export async function ensureWorldIndexName(source: ChoiceSource, name: string) {
   })
   if (!response.ok) throw new Error("Le nom n’a pas pu être ajouté à l’index.")
   namesCache.set(sourceKey(source), Promise.resolve([...known, clean].sort((left, right) => left.localeCompare(right, "fr"))))
+  announceWorldIndexChange([source.index])
+}
+
+// Un index changé ailleurs (autre onglet, autre fenêtre) : ses données gardées sont oubliées
+// une seule fois, puis chaque liste qui le lit se recharge.
+const reloadListeners = new Set<(index: string) => void>()
+if (typeof window !== "undefined") onWorldIndexChange((keys) => {
+  for (const key of keys) forgetWorldIndexData(key as WorldIndexKey)
+  for (const listener of [...reloadListeners]) for (const key of keys) listener(key)
+})
+
+/** Change quand l'index est modifié ailleurs : à mettre dans les dépendances d'un chargement. */
+export function useWorldIndexVersion(index: string) {
+  const [version, setVersion] = useState(0)
+  useEffect(() => {
+    const listener = (changed: string) => { if (changed === index) setVersion((current) => current + 1) }
+    reloadListeners.add(listener)
+    return () => { reloadListeners.delete(listener) }
+  }, [index])
+  return version
 }
 
 function useWorldIndexNames(source: ChoiceSource) {
   const [names, setNames] = useState<string[] | null>(null)
+  const version = useWorldIndexVersion(source.index)
   useEffect(() => {
     let alive = true
     void loadWorldIndexNames(source).then((loaded) => { if (alive) setNames(loaded) })
     return () => { alive = false }
-  }, [source])
+  }, [source, version])
   return names
 }
 
@@ -676,7 +698,16 @@ export const ColorCell = memo(function ColorCell({ label, value, disabled = fals
   const [open, setOpen] = useState(false)
   const color = shown.trim()
   const change = (next: string) => { setShown(next); onChange(next) }
-  return <Popover open={open} onOpenChange={setOpen}>
+  // Le sélecteur de couleur change à chaque mouvement : l'aperçu suit, et Google Sheets
+  // ne reçoit qu'une écriture, quand la fenêtre se ferme (sinon il refuse, trop d'écritures).
+  const preview = (next: string) => setShown(next)
+  const toggle = (next: boolean) => {
+    setOpen(next)
+    if (next || color === value.trim()) return
+    if (isColor(color) || !color) onChange(color)
+    else setShown(value)
+  }
+  return <Popover open={open} onOpenChange={toggle}>
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted">
         <span className="size-4 shrink-0 rounded-full border" style={isColor(color) ? { backgroundColor: color } : undefined} />
@@ -688,8 +719,8 @@ export const ColorCell = memo(function ColorCell({ label, value, disabled = fals
         {colorPalette.map((swatch) => <button key={swatch} type="button" onClick={() => { change(swatch); setOpen(false) }} className={`size-7 rounded-full border ${swatch === color ? "ring-2 ring-primary ring-offset-1" : ""}`} style={{ backgroundColor: swatch }} aria-label={swatch} />)}
       </div>
       <div className="mt-2 flex items-center gap-2">
-        <input type="color" value={isColor(color) ? color : "#927640"} onChange={(event) => change(event.target.value)} className="h-8 w-10 cursor-pointer rounded border bg-transparent" aria-label="Autre couleur" />
-        <Input value={color} onChange={(event) => { if (isColor(event.target.value) || !event.target.value) change(event.target.value) ; else setShown(event.target.value) }} placeholder="#927640" className="h-8 font-mono text-xs" />
+        <input type="color" value={isColor(color) ? color : "#927640"} onChange={(event) => preview(event.target.value)} className="h-8 w-10 cursor-pointer rounded border bg-transparent" aria-label="Autre couleur" />
+        <Input value={color} onChange={(event) => preview(event.target.value)} placeholder="#927640" className="h-8 font-mono text-xs" />
         {color && <Button type="button" variant="ghost" size="icon-sm" onClick={() => change("")} aria-label="Retirer la couleur"><X /></Button>}
       </div>
     </PopoverContent>}

@@ -248,7 +248,13 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
   onChange: (value: string) => void
 }) {
   // Réglage « par ligne » : la case porte son icône et sa couleur après son nombre.
-  const row = settings.perRow ? parseGaugeCell(value) : null
+  const parsedRow = settings.perRow ? parseGaugeCell(value) : null
+  // Pendant le choix (le sélecteur de couleur change à chaque mouvement), l'aperçu suit
+  // tout de suite et Google Sheets ne reçoit qu'une écriture, à la fermeture.
+  // Gardé tant que la case n'a pas changé : après l'écriture, la nouvelle valeur prend le relais.
+  const [styleDraft, setStyleDraft] = useState<{ source: string; style: GaugeRowStyle } | null>(null)
+  const draftStyle = styleDraft && styleDraft.source === value ? styleDraft.style : null
+  const row = parsedRow && draftStyle ? { ...parsedRow, style: draftStyle } : parsedRow
   const look = row ? { ...settings, icon: row.style.emoji ? undefined : row.style.icon ?? settings.icon, emoji: row.style.emoji ?? (row.style.icon ? undefined : settings.emoji), color: row.style.color ?? settings.color } : settings
   const baseValue = row ? row.count : value
   const [local, setLocal] = useState<{ source: string; value: string } | null>(null)
@@ -268,9 +274,14 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
     setLocal({ source: baseValue, value: textValue })
     onChange(row ? formatGaugeCell(textValue, row.style) : textValue)
   }
-  const setStyle = (style: GaugeRowStyle) => onChange(formatGaugeCell(shown.trim(), style))
+  const setStyle = (style: GaugeRowStyle) => setStyleDraft({ source: value, style })
+  const sameStyle = (left: GaugeRowStyle, right: GaugeRowStyle) => (left.icon ?? "") === (right.icon ?? "") && (left.emoji ?? "") === (right.emoji ?? "") && (left.color ?? "") === (right.color ?? "")
+  const closeStyler = (open: boolean) => {
+    if (open || !draftStyle || !parsedRow) return
+    if (!sameStyle(draftStyle, parsedRow.style)) onChange(formatGaugeCell(shown.trim(), draftStyle))
+  }
   // Choisir l'icône et la couleur de cette ligne seulement.
-  const styler = row && <Popover>
+  const styler = row && <Popover onOpenChange={closeStyler}>
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} className="shrink-0 rounded p-0.5 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-60" title="Icône et couleur de cette ligne" aria-label={`${label} : icône et couleur de cette ligne`}><Palette className="size-3" /></button>
     </PopoverTrigger>

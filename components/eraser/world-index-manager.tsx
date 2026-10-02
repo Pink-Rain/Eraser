@@ -6,6 +6,7 @@ import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, Load
 
 import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
+import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { IndexEditor } from "@/components/eraser/index-editor"
 import { IndexGuide } from "@/components/eraser/index-guide"
@@ -145,6 +146,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [saving, setSaving] = useState(0)
+  // Cette vue, pour reconnaître ses propres annonces de changement.
+  const [origin] = useState(() => `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
+  const relatedRef = useRef<Record<string, LoadedWorldIndex | null>>({})
   const [creating, setCreating] = useState(false)
   const [creatingTab, setCreatingTab] = useState(definition.tabs[0]?.name ?? "")
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)
@@ -246,8 +250,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     })
     const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; changed?: string[]; error?: string }
     if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
+    // Les autres vues (onglet « États » ailleurs, listes liées, fiches) relisent aussitôt.
+    announceWorldIndexChange([indexKey, ...(payload.changed ?? [])], origin)
     return { ...payload, seq }
-  }, [indexKey])
+  }, [indexKey, origin])
+
 
   const commitCell = useCallback(async (rowKey: string, columnKey: string, value: string) => {
     const found = locate(rowKey)
@@ -320,6 +327,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     // Les formules au hasard (ALEA, DES…) sont retirées à chaque actualisation.
     setSeed(`${indexKey}:${Date.now()}`)
     applyData(payload.data, seq)
+    announceWorldIndexChange([indexKey], origin)
   }
 
   // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
@@ -338,6 +346,33 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   // Recherche, Agrégat, formules et tirages lisent d'autres index : chargés une fois pour la page.
   const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
+  useEffect(() => { relatedRef.current = related }, [related])
+  /**
+   * Un autre onglet ou une autre fenêtre a modifié cet index (ou un index qu'il lit) : on
+   * relit la copie du serveur, déjà à jour, sans attendre « Actualiser ». Pendant un
+   * enregistrement d'ici, on attend qu'il soit fini pour ne pas effacer la saisie.
+   */
+  const savingRef = useRef(0)
+  useEffect(() => { savingRef.current = saving }, [saving])
+  useEffect(() => {
+    let timer = 0
+    let alive = true
+    const reload = () => {
+      window.clearTimeout(timer)
+      timer = window.setTimeout(async () => {
+        if (savingRef.current > 0) return reload()
+        const seq = ++requestSeq.current
+        const response = await fetch(`/api/resources/world-indexes?key=${indexKey}`, { cache: "no-store" }).catch(() => null)
+        const payload = (await response?.json().catch(() => ({})) ?? {}) as { data?: WorldIndexData }
+        if (alive && response?.ok && payload.data) applyData(payload.data, seq)
+      }, 250)
+    }
+    const stop = onWorldIndexChange((keys, from) => {
+      if (from !== origin && keys.includes(indexKey)) reload()
+      for (const key of keys) if (key !== indexKey && key in relatedRef.current) void loadWorldIndexData(key as WorldIndexKey).then((loaded) => { if (alive) setRelated((current) => ({ ...current, [key]: loaded })) })
+    })
+    return () => { alive = false; window.clearTimeout(timer); stop() }
+  }, [applyData, indexKey, origin])
   const relationOf = useCallback((tab: string, via: string): { index: WorldIndexKey; tabs: string[] | null } | null => {
     const spec = specOf(tab, via)
     if (spec.kind === "linked-choice" && spec.source) return { index: spec.source.index, tabs: null }
@@ -515,6 +550,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         if (!response.ok) throw new Error(payload.error || "La ligne n’a pas pu être créée.")
         forgetWorldIndexData(index as WorldIndexKey)
         if (index === indexKey && payload.data) applyData(payload.data, ++requestSeq.current)
+        announceWorldIndexChange([index], index === indexKey ? origin : "")
         const name = row[nameColumnOf(table.headers)] ?? ""
         return { href: `${pathOf(index)}${name ? `?q=${encodeURIComponent(name)}` : ""}` }
       },
@@ -529,7 +565,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         await sendToCampaignChat(campaign, message, audience)
       },
     }
-  }, [applyData, ask, commitCell, data, drawCell, engine, indexKey, locate, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
@@ -697,6 +733,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
       if (!response.ok || !payload.data) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
       applyData(payload.data, seq)
+      announceWorldIndexChange([indexKey], origin)
       setEditor(null)
     } catch (reason) {
       setEditorError(reason instanceof Error ? reason.message : "Les changements n’ont pas pu être écrits.")

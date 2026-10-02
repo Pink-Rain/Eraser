@@ -24,7 +24,12 @@ function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : ""
   if (code === "WORLD_INDEX_NAME_REQUIRED") return "Le nom est obligatoire."
   if (code === "WORLD_INDEX_ROW_NOT_FOUND") return "Cette ligne n’existe plus dans Google Sheets. Actualise le tableau."
-  return "Cette modification n’a pas pu être enregistrée dans Google Sheets."
+  if (code === "WORLD_INDEX_TAB_NOT_FOUND") return "Cet onglet n’existe plus dans Google Sheets. Actualise le tableau."
+  // Le refus de Google, tel quel : sans lui, impossible de savoir ce qui bloque.
+  const google = code.match(/^SHEETS_API_ERROR:(\d+)(?::([\s\S]*))?$/)
+  if (google?.[1] === "429") return "Google Sheets refuse : trop de modifications d’un coup. Attends une minute puis recommence."
+  if (google) return `Google Sheets a refusé la modification (${google[1]}${google[2] ? ` : ${google[2].slice(0, 300)}` : ""}).`
+  return `Cette modification n’a pas pu être enregistrée dans Google Sheets.${/^[A-Z0-9_]{3,60}$/.test(code) ? ` (${code})` : ""}`
 }
 
 export async function GET(request: Request) {
@@ -74,6 +79,7 @@ export async function POST(request: Request) {
     else throw new Error("INVALID_WORLD_INDEX_ACTION")
     return NextResponse.json({ ok: true, changed, data: await getWorldIndex(key) })
   } catch (error) {
+    console.error("WORLD_INDEX_WRITE_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: errorMessage(error) }, { status: 400 })
   }
 }
