@@ -12,7 +12,6 @@ import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { activeEffectsOf, isRolledEffect, stateDefinitionOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
 import { foldName } from "@/lib/index-columns"
-import { operationLabel, rangeLabel } from "@/lib/state-change"
 import { cn } from "@/lib/utils"
 
 // Gardé d'une fiche à l'autre : l'index n'est relu qu'une fois par affichage de page.
@@ -48,27 +47,8 @@ function stateColor(catalog: StatesCatalog, state: CharacterState, definition: S
   return activeEffectsOf(catalog, state).find((effect) => /^#[0-9a-f]{3,8}$/i.test(effect.color))?.color || definition?.gauge.color || DEFAULT_COLOR
 }
 
-/** Ce que fait l'effet, en clair : « +10 », « =100 », « ≥1 », « 1d20 16-20 → -60 ». */
-function changeLabel(effect: StateEffect) {
-  const change = effect.operation ? operationLabel(effect.operation) : effect.changeText
-  if (!effect.roll) return change
-  return `${effect.roll.dice}${effect.roll.range ? ` ${rangeLabel(effect.roll.range)}` : ""}${change ? ` → ${change}` : ""}`
-}
-
-function EffectPills({ catalog, names }: { catalog: StatesCatalog; names: string[] }) {
-  const effects = names.flatMap((name) => catalog.effects.filter((effect) => foldName(effect.name) === foldName(name)))
-  if (!effects.length) return null
-  return <div className="mt-1.5 flex flex-wrap gap-1">
-    {effects.map((effect) => <span key={effect.name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium" style={{ borderColor: `${effect.color || DEFAULT_COLOR}66`, backgroundColor: `${effect.color || DEFAULT_COLOR}14` }} title={effect.name}>
-      <span className="size-1.5 rounded-full" style={{ backgroundColor: effect.color || DEFAULT_COLOR }} />
-      {effect.targets.length ? effect.targets.join(", ") : effect.name}
-      {(effect.operation || effect.changeText || effect.roll) && <b className={(effect.change !== null && effect.change < 0) || (effect.operation?.kind === "roll" && effect.operation.expression.startsWith("-")) ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
-    </span>)}
-  </div>
-}
-
-/** Le détail d'un état, au survol : ses deux niveaux, leurs effets, ses règles. */
-function StateDetails({ catalog, definition, level, color }: { catalog: StatesCatalog; definition: StateDefinition; level: 1 | 2 | 0; color: string }) {
+/** Le détail d'un état, au survol : la description de ses niveaux et ses règles (pas les lignes de l'onglet Effets). */
+function StateDetails({ definition, level, color }: { definition: StateDefinition; level: 1 | 2 | 0; color: string }) {
   return <div className="grid gap-2.5">
     <div className="flex items-start gap-3">
       <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${color}, ${color}cc 60%, #1d140c 140%)` }}>
@@ -86,7 +66,6 @@ function StateDetails({ catalog, definition, level, color }: { catalog: StatesCa
       {definition.descriptionHtml[rank - 1]
         ? <div className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(definition.descriptionHtml[rank - 1]) }} />
         : <p className="text-muted-foreground">Pas de description.</p>}
-      <EffectPills catalog={catalog} names={definition.effects[rank - 1]} />
     </div>)}
     {definition.rulesHtml && <div className="rounded-xl border border-dashed px-3 py-2 text-xs leading-5">
       <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Règles liées</p>
@@ -98,7 +77,7 @@ function StateDetails({ catalog, definition, level, color }: { catalog: StatesCa
 /**
  * Les états d'un personnage, sous son portrait et son token : en ajouter (un ou
  * plusieurs), choisir leur niveau d'un clic sur la jauge, les retirer. Le survol montre
- * les descriptions des niveaux, leurs effets et les règles liées.
+ * les descriptions des niveaux et les règles liées.
  */
 /** Le résultat d'un effet lancé depuis la fiche : réussi ou non, le détail, de quoi annuler. */
 export type StateRollOutcome = { hit: boolean; lines: string[]; undo?: () => void }
@@ -188,7 +167,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
         </HoverCardTrigger>
         <HoverCardContent side="right" align="start" className="w-80 rounded-2xl p-3.5" style={{ borderColor: `${color}55` }}>
           {definition
-            ? <StateDetails catalog={catalog} definition={definition} level={level} color={color} />
+            ? <StateDetails definition={definition} level={level} color={color} />
             : <p className="text-xs text-muted-foreground">« {state.name} » n’est plus dans l’Index des états : il reste posé, sans effet.</p>}
         </HoverCardContent>
       </HoverCard>
