@@ -494,6 +494,9 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
 .eraser-fx-blur { filter: blur(1.6px); }
 .eraser-fx-ghost { animation: eraser-fx-fade 2.4s ease-in-out infinite; }
 .eraser-fx-grey { filter: grayscale(1); }
+/* Coma et Mort : les apparences de la fiche à 0 PV et morte, posées par leur état. */
+.eraser-fx-coma { filter: grayscale(1); transition: filter 0.6s ease; }
+.eraser-fx-mort { filter: url(#eraser-life-dead); transition: filter 0.6s ease; }
 .eraser-fx-spiral { background: repeating-conic-gradient(from 0deg, color-mix(in srgb, var(--fx) 35%, transparent) 0 18deg, transparent 18deg 36deg); border-radius: 50%; inset: -40%; animation: eraser-fx-spin 9s linear infinite; mix-blend-mode: soft-light; }
 .eraser-fx-mist { background: radial-gradient(40% 30% at 30% 60%, color-mix(in srgb, var(--fx) 40%, #e7e5e4) 0%, transparent 70%), radial-gradient(35% 25% at 70% 40%, color-mix(in srgb, var(--fx) 35%, #e7e5e4) 0%, transparent 70%); filter: blur(6px); inset: 0 -30%; animation: eraser-fx-mist 7s ease-in-out infinite alternate; }
 @media (prefers-reduced-motion: reduce) { [class*="eraser-fx-"] { animation: none !important; } }

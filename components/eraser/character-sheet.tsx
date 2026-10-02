@@ -19,6 +19,7 @@ import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsK
 import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
 import { FxOverlay, PortraitFx, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
+import { applyRule, hasRule, ruleLabel, type ModifierRule } from "@/lib/state-change"
 import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -59,11 +60,18 @@ import {
   linkedItemsFor,
   modifierTargetIdForName,
   modifierTotalFor,
+  modifierRuleFor,
+  CURRENT_LIFE_TARGET_ID,
   withStateModifiers,
   skillModifierTargetId,
   type LinkedModifierItem,
 } from "@/lib/item-modifiers"
 import { characterLifeState } from "@/lib/character-life"
+import { foldName } from "@/lib/index-columns"
+import { rollDiceExpression } from "@/lib/math-expression"
+import { rangeLabel, rollHits } from "@/lib/state-change"
+import type { StateEffect } from "@/lib/character-states"
+import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
@@ -203,13 +211,19 @@ function sheetNumber(value: string) {
 }
 
 /** Affiche un total en y ajoutant les modificateurs d’objets, sans toucher à la valeur de la feuille. */
-function totalWithModifier(raw: string, modifier: number, fallback = "0") {
-  if (!modifier) return raw || fallback
+function totalWithModifier(raw: string, modifier: number, fallback = "0", rule?: ModifierRule) {
+  if (!modifier && !hasRule(rule)) return raw || fallback
   // Une case vide vaut 0 : Folie vide avec un état à +100 donne 100.
   const text = String(raw ?? "").trim()
   const parsed = text ? Number.parseFloat(text.replace(",", ".")) : 0
   if (!Number.isFinite(parsed)) return raw || fallback
-  return String(Math.round((parsed + modifier) * 100) / 100)
+  // « = », plancher et plafond des états posés, après les ajouts.
+  return String(Math.round(applyRule(parsed + modifier, rule) * 100) / 100)
+}
+
+/** Le modificateur en clair : « +10 », « =100 », « +10 ≥1 ». */
+function modifierText(modifier: number, rule?: ModifierRule) {
+  return [modifier ? formatModifierAmount(modifier) : "", ruleLabel(rule)].filter(Boolean).join(" ")
 }
 
 /**
@@ -269,7 +283,7 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
       {items.map((entry) => entry.source === "état" ? <div key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex items-center gap-2 rounded-lg border border-l-4 bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor, borderLeftColor: entry.color || "#78716c" }}>
         <span className="min-w-0 flex-1 truncate font-medium">{entry.name}</span>
         {entry.tag && <span className="shrink-0 truncate text-[9px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.tag}</span>}
-        {entry.amount !== 0 && <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatModifierAmount(entry.amount)}</span>}
+        {entry.label ? <span className="shrink-0 font-semibold tabular-nums text-sky-300">{entry.label}</span> : entry.amount !== 0 && <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"}`}>{formatModifierAmount(entry.amount)}</span>}
       </div> : <label key={`${entry.slotId}:${entry.tag ?? ""}`} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
         <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
         <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
@@ -298,7 +312,7 @@ function ModifierHoverShell({ items, toggle, title, color, total, children }: { 
 /** Les neuf colonnes d'une compétence dans la fiche, dans l'ordre de `characterSkillMetrics`. */
 type SkillCells = number[]
 
-function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, tint = "", fx = [], toggle }: { skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; toggle: SlotToggle }) {
+function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, tint = "", fx = [], skillRule, characteristicRule, toggle }: { skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const shortName = skill.name
     .replace(/^Maîtrise\b/, "Maît")
@@ -308,8 +322,10 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
   // La feuille calcule déjà « caractéristique + bonus », borné entre 10 et 90. Tant qu’aucun
   // objet équipé ne vise cette compétence, on réaffiche sa valeur telle quelle.
   const statModifier = skillModifier + characteristicModifier
-  const statTotal = statModifier
-    ? String(cappedSkillTotal((characteristicCell >= 0 ? sheetNumber(values[characteristicCell]) : 0) + characteristicModifier + sheetNumber(values[cells[0]]) + skillModifier))
+  // « = », plancher et plafond : sur la caractéristique d'abord, puis sur la compétence.
+  const ruled = hasRule(skillRule) || hasRule(characteristicRule)
+  const statTotal = statModifier || ruled
+    ? String(cappedSkillTotal(applyRule(applyRule((characteristicCell >= 0 ? sheetNumber(values[characteristicCell]) : 0) + characteristicModifier, characteristicRule) + sheetNumber(values[cells[0]]) + skillModifier, skillRule)))
     : values[cells[2]] || "—"
   const totals = [
     statTotal,
@@ -330,7 +346,7 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
         const lineModifier = metricModifiers[lineIndex]
         return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className={`rounded px-1.5 py-1 text-center font-semibold ${lineModifier ? (lineModifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted font-normal text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{lineModifier ? formatModifierAmount(lineModifier) : "0"}</span></div>
       })}
-      <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={statModifier ? statTotal : undefined} />
+      <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={statModifier || ruled ? statTotal : undefined} />
       {abilities.length > 0 && <div className="mt-2 border-t pt-2" style={{ borderColor: color.border }}><p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Actifs et passifs liés</p><div className="space-y-1.5">{abilities.map((spell) => {
         const active = spell.category === "actif"
         // Le nom d'abord. Un actif montre ses charges à côté, son type passe sous la
@@ -348,38 +364,39 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
  * En-tête coloré d’une caractéristique. Son survol montre les seuils critiques propres à la
  * caractéristique et les objets liés, au-dessus quand la place manque en dessous.
  */
-function CharacteristicHeader({ characteristic, cells, color, values, commit, statModifier, criticalModifiers, linkedItems, toggle }: { characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CharacteristicHeader({ characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, toggle }: { characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
   const { anchorRef, above, measure } = useFlipPlacement()
   const panelRef = useRef<HTMLDivElement>(null)
   const place = () => measure(panelRef.current)
   // Un état coloré qui vise la caractéristique teinte son en-tête de sa couleur.
   const tint = stateTint(linkedItems)
   const fx = stateFxOf(linkedItems)
-  const total = totalWithModifier(values[cells.value], statModifier)
+  const total = totalWithModifier(values[cells.value], statModifier, "0", statRule)
+  const changed = statModifier !== 0 || hasRule(statRule)
   return <div ref={anchorRef} onMouseEnter={place} onFocusCapture={place} className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent, backgroundImage: tint ? `linear-gradient(${tint}d9, ${tint}d9)` : undefined }}>
     <FxOverlay fx={fx} />
-    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className={`inline-block text-2xl font-bold tabular-nums ${portraitImageFxClass(fx)}`} title={statModifier ? `Base ${values[cells.value] || "0"} ${formatModifierAmount(statModifier)}` : undefined}>{total}</span></InlineEdit></span></div>
+    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className={`inline-block text-2xl font-bold tabular-nums ${portraitImageFxClass(fx)}`} title={changed ? `Base ${values[cells.value] || "0"} ${modifierText(statModifier, statRule)}` : undefined}>{total}</span></InlineEdit></span></div>
     <div ref={panelRef} className={`pointer-events-none absolute left-3 right-3 z-40 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${above ? "bottom-[calc(100%-2px)] -translate-y-1" : "top-[calc(100%-2px)] translate-y-1"}`} style={{ borderColor: color.border }}>
       <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{characteristic.name}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
       <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = cells[kind]; return <div key={kind}><p className="mb-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}<ModifierBadge amount={criticalModifiers[kind]} /></p><InlineEdit numeric singleClick compact label={`${characteristic.name} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
-      {statModifier !== 0 && <p className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: color.border }}><span className="text-muted-foreground">Base</span><InlineEdit numeric singleClick compact label={`${characteristic.name} : valeur de base`} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold tabular-nums text-primary">{values[cells.value] || "0"}</span></InlineEdit><ModifierBadge amount={statModifier} /></p>}
+      {changed && <p className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: color.border }}><span className="text-muted-foreground">Base</span><InlineEdit numeric singleClick compact label={`${characteristic.name} : valeur de base`} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold tabular-nums text-primary">{values[cells.value] || "0"}</span></InlineEdit><span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-300">{modifierText(statModifier, statRule)}</span></p>}
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={total} />
     </div>
   </div>
 }
 
-function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseColor, values, commit, compact = false, modifier = 0, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseColor, values, commit, compact = false, modifier = 0, rule, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; rule?: ModifierRule; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const definitionIndex = characterSecondaryCalculatedFields.findIndex((field) => field.valueIndex === fieldIndex)
   const bonusIndex = characterSecondaryCalculationValueIndex(definitionIndex, "bonus")
-  const total = totalWithModifier(values[fieldIndex], modifier)
+  const total = totalWithModifier(values[fieldIndex], modifier, "0", rule)
   const { anchorRef, above, measure } = useFlipPlacement()
   // Un état coloré qui vise cette case la teinte de sa couleur.
   const color = stateTint(linkedItems) || baseColor
   const fx = stateFxOf(linkedItems)
   return <div ref={anchorRef} className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
     <button type="button" onClick={() => setOpen((current) => !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
-    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{modifier ? formatModifierAmount(modifier) : "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
+    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier || hasRule(rule) ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés, les états et la classe">{modifierText(modifier, rule) || "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
 
@@ -388,20 +405,21 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseCol
  * objets et états, et au survol son calcul (valeur de base modifiable, modificateur) et ce
  * qui le change. − et + changent la valeur de base ; un état coloré teinte la carte.
  */
-function CounterTile({ label, color, span, value, modifier, linkedItems, toggle, onCommit }: { label: string; color: string; span: string; value: string; modifier: number; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
+function CounterTile({ label, color, span, value, modifier, rule, linkedItems, toggle, onCommit }: { label: string; color: string; span: string; value: string; modifier: number; rule?: ModifierRule; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const { anchorRef, above, measure } = useFlipPlacement()
   const tint = stateTint(linkedItems)
   const fx = stateFxOf(linkedItems)
   const shown = tint || color
   const numeric = Number.parseFloat(value || "0") || 0
-  const total = totalWithModifier(value, modifier)
+  const total = totalWithModifier(value, modifier, "0", rule)
+  const changed = modifier !== 0 || hasRule(rule)
   return <div ref={anchorRef} className={`relative flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${span}`} style={{ backgroundColor: `${shown}${tint ? "33" : "16"}`, borderTop: `2px solid ${shown}` }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     <FxOverlay fx={fx} />
     <p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p>
     <div className="mt-1 inline-flex items-center gap-1">
       <button type="button" onClick={() => onCommit(String(numeric - 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Diminuer ${label}`}><Minus className="size-3" /></button>
-      <InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className={`inline-block min-w-7 text-center text-xl font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={modifier || tint ? { color: shown } : undefined} title={modifier ? `Base ${value || "0"} ${formatModifierAmount(modifier)}` : undefined}>{total}</span></InlineEdit>
+      <InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className={`inline-block min-w-7 text-center text-xl font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={changed || tint ? { color: shown } : undefined} title={changed ? `Base ${value || "0"} ${modifierText(modifier, rule)}` : undefined}>{total}</span></InlineEdit>
       <button type="button" onClick={() => onCommit(String(numeric + 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Augmenter ${label}`}><Plus className="size-3" /></button>
     </div>
     {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-60 -translate-x-1/2 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl`} style={{ borderColor: `${shown}66` }}>
@@ -409,7 +427,7 @@ function CounterTile({ label, color, span, value, modifier, linkedItems, toggle,
       <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p>
       <div className="grid grid-cols-3 gap-2">
         <div><p className="mb-1 text-[10px] text-muted-foreground">Base</p><InlineEdit numeric singleClick compact label={`${label} : valeur de base`} value={value} onCommit={onCommit}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold tabular-nums text-primary">{value || "0"}</span></InlineEdit></div>
-        <div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${modifier ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et les états">{modifier ? formatModifierAmount(modifier) : "0"}</span></div>
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
         <div><p className="mb-1 text-[10px] text-muted-foreground">Total</p><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums" style={{ color: shown }}>{total}</span></div>
       </div>
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${shown}40`} />
@@ -417,29 +435,34 @@ function CounterTile({ label, color, span, value, modifier, linkedItems, toggle,
   </div>
 }
 
-function CombinedCalculatedCard({ label, groupColor, fields, values, commit, modifierFor, linkedFor, toggle }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string }>; values: string[]; commit: (index: number, value: string) => Promise<void>; modifierFor: (valueIndex: number) => number; linkedFor: (valueIndex: number) => LinkedModifierItem[]; toggle: SlotToggle }) {
+function CombinedCalculatedCard({ label, groupColor, fields, values, commit, modifierFor, ruleFor, linkedFor, toggle }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string }>; values: string[]; commit: (index: number, value: string) => Promise<void>; modifierFor: (valueIndex: number) => number; ruleFor: (valueIndex: number) => ModifierRule | undefined; linkedFor: (valueIndex: number) => LinkedModifierItem[]; toggle: SlotToggle }) {
   return <div className="h-full min-h-20 rounded-xl border p-1.5 shadow-sm" style={{ backgroundColor: `${groupColor}18`, borderColor: `${groupColor}55`, borderTop: `2px solid ${groupColor}` }}>
     <p className="mb-1 text-center text-[9px] font-semibold uppercase tracking-[.18em]" style={{ color: groupColor }}>{label}</p>
     <div className="grid grid-cols-2 gap-1">
-      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} color={field.color} values={values} commit={commit} modifier={modifierFor(field.index)} linkedItems={linkedFor(field.index)} toggle={toggle} />)}
+      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} color={field.color} values={values} commit={commit} modifier={modifierFor(field.index)} rule={ruleFor(field.index)} linkedItems={linkedFor(field.index)} toggle={toggle} />)}
     </div>
   </div>
 }
 
-function LifePool({ label = "Points de vie", color = "#6e9ee8", current, total, commit, modifier = 0 }: { label?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number }) {
+function LifePool({ label = "Points de vie", color = "#6e9ee8", current, total, commit, modifier = 0, rule, currentModifier = 0, currentRule }: { label?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number; rule?: ModifierRule; currentModifier?: number; currentRule?: ModifierRule }) {
   const [editing, setEditing] = useState(false)
   const [expression, setExpression] = useState(current || "0")
   const [editingTotal, setEditingTotal] = useState(false)
   const [totalExpression, setTotalExpression] = useState(total || "0")
-  const currentNumber = Number.parseFloat(current || "0") || 0
-  const totalNumber = (Number.parseFloat(total || "0") || 0) + modifier
+  // Ce que les états font à la vie : affiché, la base reste celle de la feuille.
+  const shownCurrent = totalWithModifier(current, currentModifier, "0", currentRule)
+  const shownTotal = totalWithModifier(total, modifier, "0", rule)
+  const currentChanged = currentModifier !== 0 || hasRule(currentRule)
+  const totalChanged = modifier !== 0 || hasRule(rule)
+  const currentNumber = Number.parseFloat(shownCurrent || "0") || 0
+  const totalNumber = Number.parseFloat(shownTotal || "0") || 0
   const healthRatio = totalNumber > 0 ? Math.max(0, Math.min(100, (currentNumber / totalNumber) * 100)) : 0
   // Une expression (« -10 », « *2 ») s'applique aussi en cliquant ailleurs, sans Entrée.
   const leaveCurrent = useCommitOnLeave(editing, expression, current || "0", (next) => commit(9, String(calculateExpression(next, Number(current) || 0))))
   const leaveTotal = useCommitOnLeave(editingTotal, totalExpression, total || "0", (next) => commit(10, String(calculateExpression(next, Number(total) || 0))))
   async function save() { if (await leaveCurrent.save()) setEditing(false) }
   async function saveTotal() { if (await leaveTotal.save()) setEditingTotal(false) }
-  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title="Valeur, +10, -10%, *2 ou /3">{current || "0"}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={modifier ? `Base ${total || "0"} ${formatModifierAmount(modifier)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{totalWithModifier(total, modifier)}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
+  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title={currentChanged ? `Base ${current || "0"} ${modifierText(currentModifier, currentRule)} — valeur, +10, -10%, *2 ou /3` : "Valeur, +10, -10%, *2 ou /3"}>{shownCurrent}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={totalChanged ? `Base ${total || "0"} ${modifierText(modifier, rule)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{shownTotal}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
 }
 
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
@@ -483,19 +506,42 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
   // Les états posés (Index des états) changent les valeurs comme des objets équipés.
   const statesCatalog = useStatesCatalog()
-  const characterStates = useMemo(() => parseClassChoices(values[characterClassChoicesIndex] || "").states, [values])
-  const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, (name) => modifierTargetIdForName(catalog, name)), [catalog, characterStates, statesCatalog.catalog])
+  const postedStates = useMemo(() => parseClassChoices(values[characterClassChoicesIndex] || "").states, [values])
+  const targetOfName = useCallback((name: string) => modifierTargetIdForName(catalog, name), [catalog])
+  // Coma et Mort se posent seuls, d'après la vie (avec les états posés à la main), et partent
+  // quand elle remonte. Ils ne sont pas enregistrés dans la fiche.
+  const autoLife = useMemo(() => {
+    const posted = withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateContributions(statesCatalog.catalog, postedStates, targetOfName))
+    const generalId = modifierTargets.find((target) => target.valueIndex === 10)?.id ?? ""
+    const state = characterLifeState(
+      totalWithModifier(values[9], modifierTotalFor(posted, CURRENT_LIFE_TARGET_ID), "", modifierRuleFor(posted, CURRENT_LIFE_TARGET_ID)),
+      totalWithModifier(values[10], modifierTotalFor(posted, generalId), "0", modifierRuleFor(posted, generalId)),
+    )
+    const named = (name: string) => statesCatalog.catalog.states.find((definition) => foldName(definition.name) === foldName(name))
+    const definition = state === "dead" ? named("Mort") : state === "down" ? named("Coma") : undefined
+    const auto: CharacterState[] = definition && !postedStates.some((posted) => foldName(posted.name) === foldName(definition.name)) ? [{ id: definition.id, name: definition.name, level: 1 }] : []
+    // L'ancien filtre (gris, rouge) reste tant que l'état n'existe pas ou n'a aucun effet.
+    const styledByState = Boolean(definition && definition.effects[0].length > 0)
+    return { state, auto, styledByState }
+  }, [inventory, modifierTargets, postedStates, statesCatalog.catalog, targetOfName, values])
+  const characterStates = useMemo(() => [...postedStates, ...autoLife.auto], [autoLife.auto, postedStates])
+  const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, targetOfName), [characterStates, statesCatalog.catalog, targetOfName])
   const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateChanges), [inventory, stateChanges])
   const portrait = useMemo(() => portraitLayers(statesCatalog.catalog, characterStates), [characterStates, statesCatalog.catalog])
   const modifiersByValueIndex = useMemo(() => {
-    const map = new Map<number, { total: number; items: LinkedModifierItem[] }>()
+    const map = new Map<number, { total: number; rule?: ModifierRule; items: LinkedModifierItem[] }>()
     for (const target of modifierTargets) {
       if (target.valueIndex < 0) continue
-      map.set(target.valueIndex, { total: modifierTotalFor(modifierIndex, target.id), items: linkedItemsFor(modifierIndex, target.id) })
+      map.set(target.valueIndex, { total: modifierTotalFor(modifierIndex, target.id), rule: modifierRuleFor(modifierIndex, target.id), items: linkedItemsFor(modifierIndex, target.id) })
     }
     return map
   }, [modifierIndex, modifierTargets])
   const modifierForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.total || 0
+  const ruleForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.rule
+  // La vie actuelle : un état peut la borner (« ≥1 » : plus de dégâts létaux) ou la changer.
+  const currentLifeRule = modifierRuleFor(modifierIndex, CURRENT_LIFE_TARGET_ID)
+  const currentLifeModifier = modifierTotalFor(modifierIndex, CURRENT_LIFE_TARGET_ID)
+  const currentLifeItems = linkedItemsFor(modifierIndex, CURRENT_LIFE_TARGET_ID)
   const linkedForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.items || []
 
   async function setSlotEquipped(slotId: string, equipped: boolean) {
@@ -554,6 +600,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   }
 
   async function commit(index: number, value: string) {
+    // Un plancher ou un plafond sur la vie actuelle (« ≥1 » : plus de dégâts létaux) vaut
+    // aussi pour ce qui est enregistré : tant que l'état est posé, la vie n'y descend pas.
+    if (index === 9 && (currentLifeRule?.min !== undefined || currentLifeRule?.max !== undefined)) {
+      const typed = Number.parseFloat(String(value).replace(",", "."))
+      if (Number.isFinite(typed)) value = String(applyRule(typed, { min: currentLifeRule.min, max: currentLifeRule.max }))
+    }
     const next = latestValues.current.map((cell, cellIndex) => cellIndex === index ? value : cell)
     latestValues.current = next
     setValues(next)
@@ -647,6 +699,62 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       const candidate = skill.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
       return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)
     }))
+  }
+
+  /**
+   * La case où un effet lancé écrit : la vie actuelle, le bonus d'une compétence ou d'une
+   * carte calculée (jamais un total calculé par la feuille), sinon la valeur de base.
+   */
+  function writableIndexFor(targetId: string) {
+    if (targetId === CURRENT_LIFE_TARGET_ID) return 9
+    if (targetId.startsWith("comp:")) return layout.index(targetId.slice(5), characterSkillMetrics[0])
+    const target = modifierTargets.find((candidate) => candidate.id === targetId)
+    if (!target || target.valueIndex < 0 || target.kind === "critique") return -1
+    const calculated = characterSecondaryCalculatedFields.findIndex((field) => field.valueIndex === target.valueIndex)
+    return calculated >= 0 ? characterSecondaryCalculationValueIndex(calculated, "bonus") : target.valueIndex
+  }
+
+  /**
+   * Lance un effet d'état depuis la fiche : le jet (« 1d20 16-20 »), puis, s'il réussit (ou
+   * sans jet), le changement de valeur, dés compris (« -1d20-20 »). Contrairement aux
+   * modificateurs, le résultat est écrit dans la fiche : ce sont des dégâts. « Annuler »
+   * remet les valeurs d'avant.
+   */
+  function rollStateEffect(effect: StateEffect): StateRollOutcome {
+    const lines: string[] = []
+    let hit = true
+    try {
+      if (effect.roll) {
+        const rolled = rollDiceExpression(effect.roll.dice)
+        hit = rollHits(rolled.total, effect.roll.range)
+        lines.push(`${effect.roll.dice} → ${rolled.total}${effect.roll.range ? ` (${rangeLabel(effect.roll.range)}) : ${hit ? "réussi" : "raté"}` : ""}`)
+      }
+      const operation = effect.operation
+      const changes: Array<{ index: number; before: string; label: string }> = []
+      if (hit && operation) {
+        let amount = operation.kind === "add" ? operation.amount : 0
+        if (operation.kind === "roll") {
+          const rolled = rollDiceExpression(operation.expression)
+          amount = rolled.total
+          lines.push(`${operation.expression} → ${rolled.total}`)
+        }
+        for (const name of effect.targets) {
+          const targetId = targetOfName(name)
+          const index = targetId ? writableIndexFor(targetId) : -1
+          if (index < 0) continue
+          const before = latestValues.current[index] ?? ""
+          const base = sheetNumber(before)
+          let after = operation.kind === "set" ? operation.value : operation.kind === "min" ? Math.max(base, operation.value) : operation.kind === "max" ? Math.min(base, operation.value) : base + amount
+          // Le plancher de la vie actuelle (« ≥1 ») vaut aussi pour un lancer.
+          if (index === 9) after = applyRule(after, { min: currentLifeRule?.min, max: currentLifeRule?.max })
+          changes.push({ index, before, label: `${name} ${base} → ${Math.round(after * 100) / 100}` })
+          void commit(index, String(Math.round(after * 100) / 100))
+        }
+      }
+      return { hit, lines: [...lines, ...changes.map((change) => change.label)], undo: changes.length ? () => { for (const change of changes) void commit(change.index, change.before) } : undefined }
+    } catch {
+      return { hit: false, lines: ["Ces dés n’ont pas pu être lancés : vérifier l’écriture dans l’Index des états."] }
+    }
   }
 
   function updateStates(next: CharacterState[]) {
@@ -802,16 +910,16 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     "Folie": { color: "#8f79b5", span: "xl:col-span-2" },
     "Destin": { color: "#e7ae69", span: "xl:col-span-3" },
   }
-  const counterTile = (key: string, label: string, index: number, style: { color: string; span: string }) => <CounterTile key={key} label={label} color={style.color} span={style.span} value={values[index]} modifier={modifierForValue(index)} linkedItems={linkedForValue(index)} toggle={slotToggle} onCommit={(value) => commit(index, value)} />
+  const counterTile = (key: string, label: string, index: number, style: { color: string; span: string }) => <CounterTile key={key} label={label} color={style.color} span={style.span} value={values[index]} modifier={modifierForValue(index)} rule={ruleForValue(index)} linkedItems={linkedForValue(index)} toggle={slotToggle} onCommit={(value) => commit(index, value)} />
   const listTile = (key: string, label: string, index: number, options: string[], color: string) => <div key={key} className="flex min-h-20 flex-col items-center justify-center rounded-xl px-3 py-2 text-center xl:col-span-3" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="mt-1 max-w-full"><SelectEdit label={label} value={values[index]} options={options} onCommit={(value) => commit(index, value)} /></div></div>
   const renderedCombined = new Set<string>()
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(linkedForValue(9)) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...linkedForValue(9)])} /><ModifierHoverShell items={linkedForValue(10)} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10))}><LifePool label={item.name} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} /></ModifierHoverShell></div>] }
+    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} /><ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell></div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
-    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
+    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
     const combined = combinedCards.find((card) => card.members.some((member) => member.key === item.key))
     if (combined) {
       if (renderedCombined.has(combined.label)) return []
@@ -821,7 +929,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         const name = secondaryName(member.key, member.key)
         return { index: member.index, label: name === member.key ? member.label : name, shortLabel: name === member.key ? member.short : name, color: secondaryColor(member.key, member.color) }
       })
-      return [<div key={combined.label} className={combined.span}><CombinedCalculatedCard label={combined.label} groupColor={combined.color} fields={fields} values={values} commit={commit} modifierFor={modifierForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>]
+      return [<div key={combined.label} className={combined.span}><CombinedCalculatedCard label={combined.label} groupColor={combined.color} fields={fields} values={values} commit={commit} modifierFor={modifierForValue} ruleFor={ruleForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>]
     }
     const style = counterStyles[item.key] ?? { color: "#8a9bb0", span: "xl:col-span-2" }
     return [counterTile(item.key, item.name, index, { ...style, color: item.color || style.color })]
@@ -855,6 +963,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           values={values}
           commit={commit}
           statModifier={modifierForValue(characteristicCells.value)}
+          statRule={ruleForValue(characteristicCells.value)}
           criticalModifiers={{ success: modifierForValue(characteristicCells.success), failure: modifierForValue(characteristicCells.failure) }}
           linkedItems={mergeLinkedItems(linkedForValue(characteristicCells.value), tagLinkedItems(successLabel, linkedForValue(characteristicCells.success)), tagLinkedItems(failureLabel, linkedForValue(characteristicCells.failure)))}
           toggle={slotToggle}
@@ -877,6 +986,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           setCharges={updateSpellCharges}
           skillModifier={modifierTotalFor(modifierIndex, skillModifierTargetId(skill.key))}
           characteristicModifier={characteristicId ? modifierTotalFor(modifierIndex, characteristicId) : 0}
+          skillRule={modifierRuleFor(modifierIndex, skillModifierTargetId(skill.key))}
+          characteristicRule={characteristicId ? modifierRuleFor(modifierIndex, characteristicId) : undefined}
           successModifier={successIndexes.reduce((total, index) => total + modifierForValue(index), 0)}
           failureModifier={failureIndexes.reduce((total, index) => total + modifierForValue(index), 0)}
           linkedItems={mergeLinkedItems(
@@ -908,9 +1019,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   }
 
   const activeCharacterTab = characterTabs.find((tab) => tab.id === activeTab) ?? characterTabs[0]
-  const lifeState = characterLifeState(values[9], totalWithModifier(values[10], modifierForValue(10)))
+  // Coma et Mort donnent leur propre apparence quand ils existent avec un effet.
+  const lifeState = autoLife.styledByState ? "alive" : autoLife.state
 
-  return <div data-life={lifeState} className={`character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10 ${portraitImageFxClass(portrait.sheetFx)}`} style={{ "--character-accent": campaignAccent } as CSSProperties} title={lifeState === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : lifeState === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
+  return <div data-life={lifeState} className={`character-life relative w-full flex-1 px-4 py-7 sm:px-7 md:py-10 ${portraitImageFxClass(portrait.sheetFx)}`} style={{ "--character-accent": campaignAccent } as CSSProperties} title={autoLife.state === "dead" ? "Vie actuelle à moins la vie totale ou en dessous" : autoLife.state === "down" ? "Vie actuelle à 0 ou moins" : undefined}>
     {/* Bichromie rouge sang de la fiche « morte » : la luminosité de chaque point devient
         un rouge, du plus sombre au rose pâle, comme le gris le fait pour une fiche à terre. */}
     {/* Un effet « appliqué à la page » teinte toute la fiche de sa couleur, comme à 0 PV. */}
@@ -936,7 +1048,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => changePortrait(event.target.files?.[0])} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
-        <CharacterStatesPanel states={characterStates} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} />
+        <CharacterStatesPanel states={postedStates} autoStates={autoLife.auto} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">

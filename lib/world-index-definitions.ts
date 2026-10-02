@@ -46,6 +46,10 @@ export const STATE_LEVEL_HEADERS = ["Niveau 1", "Niveau 2"] as const
 export const EFFECT_TARGET_HEADER = "Cible"
 export const EFFECT_COLOR_HEADER = "Couleur"
 export const EFFECT_CHANGE_HEADER = "Changement de valeur"
+/** Le jet de dés qui déclenche l'effet depuis la fiche (« 1d20 16-20 »). */
+export const EFFECT_ROLL_HEADER = "Jet"
+/** Une cible de la fiche qui n'est pas dans l'Index des caractéristiques : la vie actuelle. */
+export const CURRENT_LIFE_TARGET = "Points de vie actuels"
 export const EFFECT_IMAGE_HEADER = "Image"
 /**
  * Où la couleur de l'effet s'applique, un ou plusieurs choix : toute la fiche (comme à
@@ -279,8 +283,8 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       {
         name: EFFECTS_TAB,
         itemLabel: "un effet",
-        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER],
-        widths: [240, 320, 130, 190, 160, 130, 220, 220, 220],
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER, EFFECT_ROLL_HEADER],
+        widths: [240, 320, 130, 190, 160, 130, 220, 220, 220, 170],
         idPrefix: "EFF",
         renamedHeaders: EFFECT_PAGE_LEGACY_HEADERS.map((legacy) => [legacy, EFFECT_PAGE_HEADER] as [string, string]),
       },
@@ -417,7 +421,8 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === OBTAINED_TAB && [OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER].some((header) => foldName(header) === folded)) reasons.push("Écrite par « Attribuer un succès » et affichée sur la carte du succès obtenu.")
   }
   if (index === "states") {
-    if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé : elle change de cette valeur les caractéristiques et compétences visées.")
+    if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé aux cibles : +10 / -30 ajoutent, =100 remplace, ≥1 / ≤50 bornent, tant que l’état est posé. Des dés (-1d20-20) se lancent depuis la fiche.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_ROLL_HEADER)) reasons.push("Le jet lancé depuis la fiche (« 1d20 16-20 ») : dans la plage, le changement de valeur s’applique ; vide, l’effet n’a pas de jet.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
     if (tab === EFFECTS_TAB && [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique la couleur de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_HEADER)) reasons.push("La fiche de personnage dessine ces FX (codés dans Eraser) là où « FX appliqué à » le dit.")
@@ -511,9 +516,11 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   if (index === "states") {
     if (tab === EFFECTS_TAB) {
       // Les caractéristiques et compétences visées : les deux onglets de leur index.
-      if (isHeader(header, [EFFECT_TARGET_HEADER])) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: CHARACTERISTICS_TAB } }
+      if (isHeader(header, [EFFECT_TARGET_HEADER])) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: CHARACTERISTICS_TAB, extra: [CURRENT_LIFE_TARGET] } }
       if (isHeader(header, [EFFECT_COLOR_HEADER])) return { kind: "color" }
-      if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "number" }
+      // « +10 », « =100 », « ≥1 », « -1d20-20 » : du texte, lu par lib/state-change.
+      if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich" }
+      if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich" }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
       if (isHeader(header, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }

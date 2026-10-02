@@ -229,7 +229,7 @@ export function loadWorldIndexData(index: WorldIndexKey) {
 }
 
 function sourceKey(source: ChoiceSource) {
-  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}`
+  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}:${(source.extra ?? []).join("|")}`
 }
 
 export function loadWorldIndexNames(source: ChoiceSource) {
@@ -247,7 +247,7 @@ export function loadWorldIndexNames(source: ChoiceSource) {
           .filter((row) => excluded < 0 || foldName(row.values[excluded] ?? "") !== foldName(source.exclude!.value))
           .map((row) => row.values[column]?.trim() ?? "") : []
       })
-      return [...new Set(names.filter(Boolean))].sort((left, right) => left.localeCompare(right, "fr"))
+      return [...new Set([...names.filter(Boolean), ...(source.extra ?? [])])].sort((left, right) => left.localeCompare(right, "fr"))
     })
     namesCache.set(key, promise)
   }
@@ -258,6 +258,8 @@ export function loadWorldIndexNames(source: ChoiceSource) {
 export async function ensureWorldIndexName(source: ChoiceSource, name: string) {
   const clean = name.replace(/\s+/g, " ").trim()
   if (!clean) return
+  // Un nom proposé en plus de l'index (« Points de vie actuels ») n'y est jamais créé.
+  if ((source.extra ?? []).some((extra) => foldName(extra) === foldName(clean))) return
   const known = await loadWorldIndexNames(source)
   if (known.some((candidate) => foldName(candidate) === foldName(clean))) return
   const response = await fetch("/api/resources/world-indexes", {

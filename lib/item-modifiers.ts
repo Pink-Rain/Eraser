@@ -1,3 +1,4 @@
+import { mergeRule, type ModifierRule, type ValueOperation } from "@/lib/state-change"
 import {
   builtinCharacterCatalog,
   catalogGroups,
@@ -237,6 +238,8 @@ export type LinkedModifierItem = {
   equipped: boolean
   containerName: string
   amount: number
+  /** L'opération d'un effet d'état en clair (« =100 », « ≥1 ») quand ce n'est pas un ajout. */
+  label?: string
 }
 
 type ModifierIndex = {
@@ -244,7 +247,12 @@ type ModifierIndex = {
   totals: Map<string, number>
   /** Objets porteurs d’un modificateur, cochés ou non, par cible. */
   items: Map<string, LinkedModifierItem[]>
+  /** Ce que les états posés imposent : « = », plancher, plafond. Rien ne reste après eux. */
+  rules?: Map<string, ModifierRule>
 }
+
+/** La vie actuelle : visée par un effet d'état (« Points de vie actuels ≥1 »), pas par un objet. */
+export const CURRENT_LIFE_TARGET_ID = "vie-actuelle"
 
 export function indexInventoryModifiers(containers: InventoryContainerRecord[]): ModifierIndex {
   const totals = new Map<string, number>()
@@ -277,6 +285,7 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
 export function modifierTargetIdForName(catalog: CharacterCatalog, name: string) {
   const folded = fold(name)
   if (!folded) return null
+  if (["points de vie actuels", "pv actuels", "vie actuelle", "points de vie actuel"].includes(folded)) return CURRENT_LIFE_TARGET_ID
   const characteristic = catalog.characteristics.find((item) => fold(item.name) === folded || fold(item.key) === folded)
   if (characteristic) {
     if (characteristic.kind === "secondaire") return listSecondaries.has(characteristic.key) ? null : generalTargets.find((target) => target.key === characteristic.key)?.id ?? characteristicModifierTargetId(characteristic.key)
@@ -291,12 +300,17 @@ function fold(value: string) {
 }
 
 /** Ajoute aux objets les changements des états posés : ils comptent toujours (pas de case à cocher). */
-export function withStateModifiers(index: ModifierIndex, contributions: Array<{ state: string; level: number; effect: string; target: string; amount: number; color: string; fx?: Array<{ name: string; color: string }> }>): ModifierIndex {
+export function withStateModifiers(index: ModifierIndex, contributions: Array<{ state: string; level: number; effect: string; target: string; amount: number; operation?: ValueOperation; label?: string; color: string; fx?: Array<{ name: string; color: string }> }>): ModifierIndex {
   if (!contributions.length) return index
   const totals = new Map(index.totals)
   const items = new Map(index.items)
+  const rules = new Map(index.rules)
   for (const contribution of contributions) {
     totals.set(contribution.target, (totals.get(contribution.target) || 0) + contribution.amount)
+    if (contribution.operation) {
+      const rule = mergeRule(rules.get(contribution.target), contribution.operation)
+      if (rule) rules.set(contribution.target, rule)
+    }
     items.set(contribution.target, [...(items.get(contribution.target) || []), {
       slotId: `etat:${contribution.state}:${contribution.effect}`,
       source: "état",
@@ -307,9 +321,15 @@ export function withStateModifiers(index: ModifierIndex, contributions: Array<{ 
       equipped: true,
       containerName: "États",
       amount: contribution.amount,
+      label: contribution.operation ? contribution.label : undefined,
     }])
   }
-  return { totals, items }
+  return { totals, items, rules }
+}
+
+/** Le « = », le plancher et le plafond que les états posés imposent à une cible. */
+export function modifierRuleFor(index: ModifierIndex, targetId: string) {
+  return index.rules?.get(targetId)
 }
 
 export function modifierTotalFor(index: ModifierIndex, targetId: string) {

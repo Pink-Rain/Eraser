@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useState } from "react"
-import { Activity, LoaderCircle, Plus, Search, X } from "lucide-react"
+import { Activity, Dices, LoaderCircle, Plus, Search, Undo2, X } from "lucide-react"
 
 import { useWorldIndexVersion } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -10,8 +10,9 @@ import { sanitizeRichText } from "@/components/eraser/rich-text"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { activeEffectsOf, stateDefinitionOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
+import { activeEffectsOf, isRolledEffect, stateDefinitionOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
 import { foldName } from "@/lib/index-columns"
+import { operationLabel, rangeLabel } from "@/lib/state-change"
 import { cn } from "@/lib/utils"
 
 // Gardé d'une fiche à l'autre : l'index n'est relu qu'une fois par affichage de page.
@@ -47,9 +48,11 @@ function stateColor(catalog: StatesCatalog, state: CharacterState, definition: S
   return activeEffectsOf(catalog, state).find((effect) => /^#[0-9a-f]{3,8}$/i.test(effect.color))?.color || definition?.gauge.color || DEFAULT_COLOR
 }
 
+/** Ce que fait l'effet, en clair : « +10 », « =100 », « ≥1 », « 1d20 16-20 → -60 ». */
 function changeLabel(effect: StateEffect) {
-  if (effect.change === null) return effect.changeText
-  return `${effect.change > 0 ? "+" : ""}${effect.change}`
+  const change = effect.operation ? operationLabel(effect.operation) : effect.changeText
+  if (!effect.roll) return change
+  return `${effect.roll.dice}${effect.roll.range ? ` ${rangeLabel(effect.roll.range)}` : ""}${change ? ` → ${change}` : ""}`
 }
 
 function EffectPills({ catalog, names }: { catalog: StatesCatalog; names: string[] }) {
@@ -59,7 +62,7 @@ function EffectPills({ catalog, names }: { catalog: StatesCatalog; names: string
     {effects.map((effect) => <span key={effect.name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-medium" style={{ borderColor: `${effect.color || DEFAULT_COLOR}66`, backgroundColor: `${effect.color || DEFAULT_COLOR}14` }} title={effect.name}>
       <span className="size-1.5 rounded-full" style={{ backgroundColor: effect.color || DEFAULT_COLOR }} />
       {effect.targets.length ? effect.targets.join(", ") : effect.name}
-      {(effect.change !== null || effect.changeText) && <b className={effect.change !== null && effect.change < 0 ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
+      {(effect.operation || effect.changeText || effect.roll) && <b className={effect.change !== null && effect.change < 0 ? "text-rose-600" : "text-emerald-700"}>{changeLabel(effect)}</b>}
     </span>)}
   </div>
 }
@@ -97,17 +100,33 @@ function StateDetails({ catalog, definition, level, color }: { catalog: StatesCa
  * plusieurs), choisir leur niveau d'un clic sur la jauge, les retirer. Le survol montre
  * les descriptions des niveaux, leurs effets et les règles liées.
  */
-export function CharacterStatesPanel({ states, catalog, loaded, error, onChange, disabled = false }: { states: CharacterState[]; catalog: StatesCatalog; loaded: boolean; error: string; onChange: (states: CharacterState[]) => void; disabled?: boolean }) {
+/** Le résultat d'un effet lancé depuis la fiche : réussi ou non, le détail, de quoi annuler. */
+export type StateRollOutcome = { hit: boolean; lines: string[]; undo?: () => void }
+
+export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded, error, onChange, onRoll, disabled = false }: {
+  states: CharacterState[]
+  /** Coma, Mort : posés d'après la vie, ni retirables ni réglables à la main. */
+  autoStates?: CharacterState[]
+  catalog: StatesCatalog
+  loaded: boolean
+  error: string
+  onChange: (states: CharacterState[]) => void
+  /** Lance un effet (jet, dés) et écrit son résultat dans la fiche. */
+  onRoll?: (effect: StateEffect) => StateRollOutcome
+  disabled?: boolean
+}) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  // Le dernier lancer de chaque état, affiché sous lui jusqu'au suivant.
+  const [outcomes, setOutcomes] = useState<Record<string, { effect: string; outcome: StateRollOutcome; undone?: boolean }>>({})
   const groups = useMemo(() => {
     const folded = foldName(query)
-    const taken = new Set(states.map((state) => foldName(state.name)))
+    const taken = new Set([...states, ...autoStates].map((state) => foldName(state.name)))
     const shown = catalog.states.filter((state) => !taken.has(foldName(state.name)) && (!folded || foldName(`${state.name} ${state.type}`).includes(folded)))
     const byType = new Map<string, StateDefinition[]>()
     for (const state of shown) byType.set(state.type || "Autres", [...(byType.get(state.type || "Autres") ?? []), state])
     return [...byType.entries()]
-  }, [catalog.states, query, states])
+  }, [autoStates, catalog.states, query, states])
 
   function add(definition: StateDefinition) {
     onChange([...states, { id: definition.id, name: definition.name, level: 1 }])
@@ -140,21 +159,27 @@ export function CharacterStatesPanel({ states, catalog, loaded, error, onChange,
         </PopoverContent>}
       </Popover>
     </div>
-    {states.map((state) => {
+    {[...states, ...autoStates].map((state) => {
+      const automatic = autoStates.includes(state)
       const definition = stateDefinitionOf(catalog, state)
       const color = stateColor(catalog, state, definition)
       const levels = definition?.levels ?? 2
       const level = Math.min(state.level, levels) as 1 | 2
-      return <HoverCard key={state.name} openDelay={180} closeDelay={80}>
+      const rolled = onRoll ? activeEffectsOf(catalog, state).filter(isRolledEffect) : []
+      const last = outcomes[state.name]
+      return <div key={state.name} className="grid gap-1"><HoverCard openDelay={180} closeDelay={80}>
         <HoverCardTrigger asChild>
           <div className="group flex items-center gap-2 rounded-xl border border-l-4 bg-background/50 px-2 py-1.5" style={{ borderLeftColor: color }}>
             <span className="min-w-0 flex-1 truncate text-xs font-semibold" style={{ color }}>{state.name}</span>
-            <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
+            {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title="Posé tout seul d’après les points de vie">Auto</span>}
+            {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
+            {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
+            {!automatic && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
               {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => onChange(states.map((candidate) => candidate === state ? { ...candidate, level: (index + 1) as 1 | 2 } : candidate))} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={`Niveau ${index + 1}`}>
                 <IndexIconGlyph icon={definition?.gauge.icon || "clock"} emoji={definition?.gauge.emoji} filled={index < level} stroke={definition?.gauge.strokeColor} className="size-4" />
               </button>)}
-            </span>
-            <button type="button" disabled={disabled} onClick={() => onChange(states.filter((candidate) => candidate !== state))} className="rounded-full p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100" aria-label={`Retirer ${state.name}`} title="Retirer cet état"><X className="size-3" /></button>
+            </span>}
+            {!automatic && <button type="button" disabled={disabled} onClick={() => onChange(states.filter((candidate) => candidate !== state))} className="rounded-full p-0.5 text-muted-foreground opacity-0 transition hover:bg-destructive/10 hover:text-destructive group-hover:opacity-100 focus:opacity-100" aria-label={`Retirer ${state.name}`} title="Retirer cet état"><X className="size-3" /></button>}
           </div>
         </HoverCardTrigger>
         <HoverCardContent side="right" align="start" className="w-80 rounded-2xl p-3.5" style={{ borderColor: `${color}55` }}>
@@ -163,6 +188,12 @@ export function CharacterStatesPanel({ states, catalog, loaded, error, onChange,
             : <p className="text-xs text-muted-foreground">« {state.name} » n’est plus dans l’Index des états : il reste posé, sans effet.</p>}
         </HoverCardContent>
       </HoverCard>
+      {last && <div className={cn("ml-2 rounded-lg border-l-2 bg-background/40 px-2 py-1 text-[11px] leading-4", last.undone && "opacity-50")} style={{ borderLeftColor: last.outcome.hit ? color : "#a8a29e" }}>
+        <p className="flex items-center gap-1 font-semibold" style={{ color: last.outcome.hit ? color : undefined }}><Dices className="size-3" />{last.effect}{last.undone && <span className="font-normal text-muted-foreground"> · annulé</span>}</p>
+        {last.outcome.lines.map((line, index) => <p key={index} className="tabular-nums text-muted-foreground">{line}</p>)}
+        {last.outcome.undo && !last.undone && <button type="button" onClick={() => { last.outcome.undo?.(); setOutcomes((current) => ({ ...current, [state.name]: { ...last, undone: true } })) }} className="mt-0.5 inline-flex items-center gap-1 text-[10px] font-medium text-muted-foreground underline-offset-2 hover:text-foreground hover:underline"><Undo2 className="size-3" />Annuler</button>}
+      </div>}
+      </div>
     })}
   </div>
 }

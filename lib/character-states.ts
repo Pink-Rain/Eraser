@@ -12,6 +12,7 @@
  */
 import { foldName, parseGaugeCell } from "@/lib/index-columns"
 import { parseStateFx, type StateFx } from "@/lib/state-fx"
+import { operationLabel, parseRoll, parseValueChange, type RollSpec, type ValueOperation } from "@/lib/state-change"
 import type { GaugeSettings, IndexColumnSpec } from "@/lib/index-columns"
 import {
   EFFECT_CHANGE_HEADER,
@@ -23,6 +24,7 @@ import {
   EFFECT_APPLY_OPTIONS,
   EFFECT_PAGE_HEADER,
   EFFECT_PAGE_LEGACY_HEADERS,
+  EFFECT_ROLL_HEADER,
   EFFECTS_TAB,
   STATE_LEVEL_HEADERS,
   STATES_TAB,
@@ -34,9 +36,13 @@ export type StateEffect = {
   /** Les noms visés, tels qu'écrits dans l'Index des caractéristiques et compétences. */
   targets: string[]
   color: string
-  /** Le changement chiffré (« -10 », « +20 ») ; null s'il n'est pas lisible. */
+  /** L'ajout chiffré (« -10 », « +20 ») ; null pour un « = », une borne, des dés ou rien. */
   change: number | null
   changeText: string
+  /** Ce que l'effet fait à ses cibles : ajout, « = », plancher, plafond ou dés. */
+  operation: ValueOperation | null
+  /** Le jet qui le déclenche depuis la fiche (colonne « Jet ») ; null sans jet. */
+  roll: RollSpec | null
   image: string
   /** Où sa couleur s'applique (colonne « Couleur appliquée à ») ; nulle part si rien n'est choisi. */
   apply: EffectTargets
@@ -112,7 +118,8 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     const name = read(row, ["Nom"])
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: changeAmount(changeText), changeText, image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
+    const operation = parseValueChange(changeText)
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: operation?.kind === "add" ? operation.amount : null, changeText, operation, roll: parseRoll(read(row, [EFFECT_ROLL_HEADER])), image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -172,7 +179,25 @@ export function activeEffectsOf(catalog: StatesCatalog, state: CharacterState) {
   return names.flatMap((name) => catalog.effects.filter((effect) => foldName(effect.name) === foldName(name)))
 }
 
-export type StateContribution = { state: string; level: 1 | 2; effect: string; target: string; amount: number; color: string; fx: Array<{ name: StateFx; color: string }> }
+export type StateContribution = {
+  state: string
+  level: 1 | 2
+  effect: string
+  target: string
+  /** L'ajout (0 pour un « = », une borne ou un effet seulement décoratif). */
+  amount: number
+  /** Un « = », un plancher ou un plafond, tant que l'état est posé. */
+  operation?: ValueOperation
+  /** L'opération en clair pour le survol (« +10 », « =100 », « ≥1 »). */
+  label: string
+  color: string
+  fx: Array<{ name: StateFx; color: string }>
+}
+
+/** Un effet qui se lance depuis la fiche : un jet, ou des dés dans son changement de valeur. */
+export function isRolledEffect(effect: StateEffect) {
+  return Boolean(effect.roll) || effect.operation?.kind === "roll"
+}
 
 /**
  * Ce que les états posés changent : un changement par effet et par cible visée. `targetOf`
@@ -180,13 +205,27 @@ export type StateContribution = { state: string; level: 1 | 2; effect: string; t
  */
 export function stateContributions(catalog: StatesCatalog, states: CharacterState[], targetOf: (name: string) => string | null): StateContribution[] {
   return states.flatMap((state) => activeEffectsOf(catalog, state).flatMap((effect) => {
+    // Un effet lancé (jet, dés) ne change rien tant qu'on ne le lance pas depuis la fiche.
+    const lasting = isRolledEffect(effect) ? null : effect.operation
+    const changes = Boolean(lasting && (lasting.kind !== "add" || lasting.amount))
     // Une cible sans changement de valeur peut tout de même recevoir la couleur ou des FX.
     const decorates = (effect.apply.skills && isColor(effect.color)) || (effect.fxApply.skills && effect.fx.length > 0)
-    if ((effect.change === null || !effect.change) && !decorates) return []
+    if (!changes && !decorates) return []
     return effect.targets.flatMap((name) => {
       const target = targetOf(name)
+      if (!target) return []
       // La couleur et les FX ne vont sur la case visée que si « Compétence liée » est choisi.
-      return target ? [{ state: state.name, level: state.level, effect: effect.name, target, amount: effect.change ?? 0, color: effect.apply.skills ? effect.color : "", fx: effect.fxApply.skills ? effect.fx.map((fx) => ({ name: fx, color: isColor(effect.color) ? effect.color : "" })) : [] }] : []
+      return [{
+        state: state.name,
+        level: state.level,
+        effect: effect.name,
+        target,
+        amount: changes && lasting?.kind === "add" ? lasting.amount : 0,
+        operation: changes && lasting && lasting.kind !== "add" ? lasting : undefined,
+        label: changes && lasting ? operationLabel(lasting) : "",
+        color: effect.apply.skills ? effect.color : "",
+        fx: effect.fxApply.skills ? effect.fx.map((fx) => ({ name: fx, color: isColor(effect.color) ? effect.color : "" })) : [],
+      }]
     })
   }))
 }

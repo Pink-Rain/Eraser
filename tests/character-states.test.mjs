@@ -111,3 +111,45 @@ test("une jauge « par ligne » garde son nombre en tête, puis son icône et sa
   const fx = await vite.ssrLoadModule("/lib/state-fx.ts");
   assert.deepEqual(fx.parseStateFx("flammes, Désaturé, inconnu, Flammes"), ["Flammes", "Désaturé"]);
 });
+
+test("changement de valeur : +, -, =, bornes et dés ; jets lancés depuis la fiche", async () => {
+  const change = await vite.ssrLoadModule("/lib/state-change.ts");
+  assert.deepEqual(change.parseValueChange("=100"), { kind: "set", value: 100 });
+  assert.deepEqual(change.parseValueChange("≥1"), { kind: "min", value: 1 });
+  assert.deepEqual(change.parseValueChange("<= 50"), { kind: "max", value: 50 });
+  assert.deepEqual(change.parseValueChange("- 1d20 - 20"), { kind: "roll", expression: "-1d20-20" });
+  assert.deepEqual(change.parseValueChange("-10 PV"), { kind: "add", amount: -10 });
+  const roll = change.parseRoll("1d20 : 16 & 20");
+  assert.equal(roll.dice, "1d20");
+  assert.equal(change.rangeLabel(roll.range), "16-20");
+  assert.equal(change.rollHits(17, roll.range), true);
+  assert.equal(change.rollHits(15, roll.range), false);
+  assert.equal(change.rangeLabel(change.parseRoll("1d10 3 ou moins").range), "≤3");
+  // Le dernier « = » l'emporte, les bornes se cumulent ; « = » d'abord, puis bornes.
+  let rule = change.mergeRule(undefined, { kind: "set", value: 100 });
+  rule = change.mergeRule(rule, { kind: "min", value: 1 });
+  rule = change.mergeRule(rule, { kind: "max", value: 80 });
+  assert.equal(change.applyRule(5, rule), 80);
+  assert.equal(change.applyRule(-12, { min: 1 }), 1);
+
+  const effectsTable = {
+    tabName: "Effets",
+    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID", "Jet"],
+    rows: [
+      row(["Folie forcée", "Folie", "", "=100", "", "E1", ""]),
+      row(["Increvable", "Points de vie actuels", "", "≥1", "", "E2", ""]),
+      row(["Malédiction", "Points de vie actuels", "", "-60", "", "E3", "1d20 16-20"]),
+      row(["Saignement", "Points de vie actuels", "", "-1d20-20", "", "E4", ""]),
+    ],
+  };
+  const statesTable = {
+    tabName: "États",
+    headers: ["Nom", "Description niveau 1", "Description niveau 2", "ID", "Niveau 1", "Niveau 2"],
+    rows: [row(["Test", "x", "/", "T1", "Folie forcée, Increvable, Malédiction, Saignement", ""])],
+  };
+  const catalog = states.parseStatesCatalog([statesTable, effectsTable], {});
+  const contributions = states.stateContributions(catalog, [{ id: "T1", name: "Test", level: 1 }], (name) => name);
+  // Les effets lancés (jet, dés) ne changent rien tant qu'on ne les lance pas.
+  assert.deepEqual(contributions.map((item) => [item.target, item.amount, item.label]), [["Folie", 0, "=100"], ["Points de vie actuels", 0, "≥1"]]);
+  assert.deepEqual(catalog.effects.filter(states.isRolledEffect).map((effect) => effect.name), ["Malédiction", "Saignement"]);
+});

@@ -18,6 +18,8 @@ export const stateFxList = [
   { value: "Désaturé", hint: "Le portrait passe en gris" },
   { value: "Spirale", hint: "Un tourbillon lent sur le portrait" },
   { value: "Brume", hint: "Une brume qui passe" },
+  { value: "Coma", hint: "Tout passe en gris (l'apparence de la fiche à 0 PV)" },
+  { value: "Mort", hint: "Tout passe en rouge sang (l'apparence de la fiche morte)" },
 ] as const
 
 export type StateFx = (typeof stateFxList)[number]["value"]

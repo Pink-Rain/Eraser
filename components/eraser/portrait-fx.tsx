@@ -20,6 +20,8 @@ const imageClass: Partial<Record<StateFx, string>> = {
   Flou: "eraser-fx-blur",
   Transparence: "eraser-fx-ghost",
   "Désaturé": "eraser-fx-grey",
+  Coma: "eraser-fx-coma",
+  Mort: "eraser-fx-mort",
 }
 
 /** Les classes à poser sur l'image du portrait (tremblement, flou…). */

@@ -88,7 +88,14 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
  * `exclude` écarte les lignes dont une colonne vaut une valeur (les caractéristiques
  * secondaires, pour la Caractéristique d'une compétence).
  */
-export type ChoiceSource = { index: WorldIndexKey; tab: string; onlyTab?: boolean; exclude?: { column: string; value: string } }
+export type ChoiceSource = {
+  index: WorldIndexKey
+  tab: string
+  onlyTab?: boolean
+  exclude?: { column: string; value: string }
+  /** Des noms proposés en plus de ceux de l'index, jamais ajoutés à l'index (« Points de vie actuels »). */
+  extra?: string[]
+}
 
 export type ChoiceOption = {
   value: string
