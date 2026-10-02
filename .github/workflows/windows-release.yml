@@ -74,8 +74,16 @@ jobs:
         shell: pwsh
         run: |
           $installer = Join-Path $PWD "release/Eraser-Setup.exe"
-          $setup = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
-          Write-Host "Installateur terminé (code $($setup.ExitCode))."
+          # Sur les machines GitHub, l'installateur plante parfois dès son lancement
+          # (0xC0000005, code -1073741819) sans rien installer : on le relance,
+          # jusqu'à trois fois, tant qu'il sort sur ce code. Une vraie erreur de
+          # l'installateur (autre code) n'est jamais masquée.
+          for ($attempt = 1; $attempt -le 3; $attempt++) {
+            $setup = Start-Process -FilePath $installer -ArgumentList "/S" -Wait -PassThru
+            Write-Host "Installateur terminé (essai $attempt, code $($setup.ExitCode))."
+            if ($setup.ExitCode -ne -1073741819) { break }
+            if ($attempt -lt 3) { Start-Sleep -Seconds (5 * $attempt) }
+          }
           # L'installateur assisté (non one-click) peut se relancer lui-même : -Wait
           # rend la main quand le premier processus sort, pas quand la copie est
           # finie. On attend donc aussi ses processus enfants encore actifs.
