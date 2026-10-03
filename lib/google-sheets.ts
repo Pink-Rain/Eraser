@@ -5149,7 +5149,7 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       })(),
       notes: objectIndexCell(table, row, ["Notes", "Note"]),
       link: objectIndexCell(table, row, ["Lien", "URL"]),
-      rarity: objectIndexCell(table, row, ["Rareté", "Rarete"]),
+      rarity: objectIndexCell(table, row, ["Rareté principale", "Rareté principal", "Rareté", "Rarete"]),
       attributes: objectIndexCell(table, row, ["Attributs", "Attribut"]),
       prerequisites: objectIndexCell(table, row, ["Prérequis", "Prerequis"]),
       edition: objectIndexCell(table, row, ["Édition", "Edition"]),

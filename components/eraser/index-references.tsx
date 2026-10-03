@@ -13,6 +13,7 @@ import { useWorldIndexVersion } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-text"
+import { pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
 import { foldName } from "@/lib/index-columns"
@@ -129,19 +130,13 @@ export function StateDetails({ definition, level, color }: { definition: StateDe
   </div>
 }
 
-/** Le détail d'un attribut ou d'un matériau : type, description et charges. */
+/** Le détail d'un attribut, d'un matériau ou d'une rune : son nom et sa description. */
 function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; color: string }) {
   return <div className="grid gap-2">
-    <div>
-      <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierName modifier={modifier} color={color} /></p>
-      {modifier.type && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{modifier.type}</p>}
-    </div>
+    <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierName modifier={modifier} color={color} /></p>
     {modifier.descriptionHtml
       ? <IndexRichText html={modifier.descriptionHtml} className="text-xs leading-5 [&_a]:underline" />
       : <p className="text-xs text-muted-foreground">Pas de description.</p>}
-    {modifier.charges.trim() && <div className="flex flex-wrap gap-1.5 text-[11px]">
-      <span className="rounded-full border px-2 py-0.5" style={{ borderColor: `${color}55` }}><span className="font-semibold">Charges :</span> {modifier.charges}</span>
-    </div>}
   </div>
 }
 
@@ -249,14 +244,26 @@ export function IndexRichText({ html, fill, className = "", as = "div", style }:
 }
 
 /**
- * Des noms d'attributs ou de matériaux (« Lourde, Assommante ») : ceux qui sont dans
- * « Armes - Modificateurs » s'affichent mis en forme, avec leur détail au survol.
+ * Des attributs, matériaux ou runes (« Lourde, Acier trempé ») en pastilles, comme dans
+ * leur colonne : à la couleur de leur ligne d'« Armes - Modificateurs », avec leur nom et
+ * leur description au survol. Un nom absent de l'index reste une pastille simple.
  */
-export function CitedModifierNames({ names }: { names: string[] }) {
+export function ModifierPills({ names }: { names: string[] }) {
   const modifiers = useWeaponModifiers(names.length > 0)
   const byName = useMemo(() => new Map((modifiers ?? []).map((modifier) => [foldName(modifier.name), modifier])), [modifiers])
   return <>{names.map((name, index) => {
     const modifier = byName.get(foldName(name))
-    return <span key={`${name}:${index}`}>{index > 0 && ", "}{modifier ? <ModifierChip modifier={modifier} /> : name}</span>
+    if (!modifier) return <span key={`${name}:${index}`} className={pillClass}>{name}</span>
+    const color = modifier.color || "#7f5a3a"
+    return <HoverCard key={`${name}:${index}`} openDelay={180} closeDelay={80}>
+      <HoverCardTrigger asChild>
+        <span tabIndex={0} className={cn(pillClass, "cursor-help font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={pillStyle(modifier.color) ?? undefined}>{modifier.name}</span>
+      </HoverCardTrigger>
+      <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
+        <ModifierDetails modifier={modifier} color={color} />
+      </HoverCardContent>
+    </HoverCard>
   })}</>
 }
+
+export const pillClass = "inline-block max-w-full whitespace-normal break-words rounded-full border border-foreground/25 bg-muted/40 px-2 py-0.5 text-[11px] leading-4 [overflow-wrap:anywhere]"

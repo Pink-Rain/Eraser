@@ -1,28 +1,38 @@
-# Eraser 0.1.1-alpha.117 — Style imposé réparé
+# Eraser 0.1.1-alpha.118 — Objets : affichage revu, Matériaux et Runes
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Le style imposé s'enregistre à nouveau
+## Un objet dans un inventaire ou un magasin
 
-Dans « Modifier », le bouton « Enregistrer » restait grisé dès qu'un onglet contenait
-deux colonnes du même nom, même si on ne touchait qu'au style d'une autre colonne.
-C'est le cas de la plupart des onglets de l'Index des objets, qui ont deux colonnes
-« Rareté ». Seuls les noms ajoutés ou modifiés sont maintenant vérifiés : les doublons
-déjà présents dans la feuille n'empêchent plus d'enregistrer.
+Sous la description, dans cet ordre :
 
-## Le style imposé s'affiche sur tous les types de colonnes
+1. **Effet : …** (c'est là que s'écrit la valeur, avec {Valeur}) ;
+2. les **attributs, matériaux et runes** de l'objet, en pastilles à leur couleur, sans
+   titre. Au survol : leur nom et leur description ;
+3. l'**action**, la **distance** et la **compétence**, en pastilles comme dans leurs
+   colonnes, sans titre.
 
-Le style (gras, italique, souligné, barré, taille, police, casse, couleur) ne s'appliquait
-vraiment qu'aux colonnes Texte. Il s'applique maintenant aussi au Nom, aux listes, aux
-rangements en onglets, aux nombres, aux identifiants et aux autres types de colonnes.
-Un Nom avec un style imposé suit ce style (il n'est plus forcé en gras). Les bordures du
-tableau gardent leur couleur : un style imposé ne colore que le texte.
+La ligne « Valeur » ne s'affiche plus. C'est pareil dans la fouille et la fenêtre de
+magasin sur la table.
 
-## Index des objets
+## Index des objets : colonnes Matériaux et Runes
 
-- La colonne **Compétence** accepte plusieurs compétences ou caractéristiques.
+Deux nouvelles colonnes, ajoutées à droite de chaque tableau : **Matériaux** et **Runes**.
+Elles proposent les matériaux et les runes d'« Armes - Modificateurs » et acceptent
+plusieurs choix. Elles sont masquées dans le tableau (le bouton « Colonnes masquées » les
+montre) mais présentes dans la fiche et le formulaire d'ajout.
 
-## Survol des attributs et matériaux
+## Rareté principale et rareté secondaire
 
-- La ligne « Chance » n'apparaît plus dans le détail au survol. Les charges restent
-  affichées quand elles sont remplies.
+Les onglets qui avaient deux colonnes « Rareté » les voient renommées « Rareté
+principale » (celle de l'emplacement principal) et « Rareté secondaire ». Seuls les
+en-têtes changent : aucune case n'est modifiée. L'onglet Armes, qui les nommait déjà,
+ne change pas.
+
+## Les magasins lisent les colonnes par leur nom
+
+Les magasins et la fouille lisaient l'emplacement et la rareté par la position des
+colonnes, ce qui était dangereux. Dans l'onglet Parchemins, dont l'ordre diffère, la
+rareté était même associée au mauvais emplacement. Ils les lisent maintenant par le nom
+des colonnes (« Emplacement principal » avec « Rareté principale », « Emplacement
+secondaire » avec « Rareté secondaire »), quel que soit leur ordre.

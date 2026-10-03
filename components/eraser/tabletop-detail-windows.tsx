@@ -2,7 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- portraits use authenticated, dynamic API URLs */
 
-import { ObjectAttributesLine, ObjectCombatDetails, ObjectText } from "@/components/eraser/object-combat-details"
+import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
 import dynamic from "next/dynamic"
 
 import { characteristicColor } from "@/lib/characteristics"
@@ -91,9 +91,8 @@ function ShopContent({ shop }: { shop: TabletopShopDetail | null }) {
               <div className="flex flex-wrap items-center gap-1.5"><p className="font-semibold">{item.nameHtml?.trim() ? <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : item.name}</p><Badge variant="outline" className="text-[9px]">{rarityLabels[item.rarity]}</Badge></div>
               <p className="text-[10px] text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}</p>
               {(item.descriptionHtml?.trim() || item.description) && <ObjectText as="div" html={item.descriptionHtml} text={item.description} item={item} className={`mt-1 text-xs leading-5 text-muted-foreground ${detailRichText}`} />}
-              <ObjectCombatDetails item={item} className="mt-1" />
               {(item.effectHtml?.trim() || item.effect) && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <ObjectText html={item.effectHtml} text={item.effect} item={item} className={detailRichText} /></p>}
-              <ObjectAttributesLine item={item} className="mt-1" />
+              <ObjectTraits item={item} className="mt-1.5" />
             </div>
             {item.price && <Badge variant="secondary" className="shrink-0">{item.price}</Badge>}
           </div>

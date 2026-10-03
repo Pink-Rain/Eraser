@@ -3,7 +3,7 @@
  * où les lire, quels en-têtes ajouter ou renommer, et comment remplacer « {Valeur} » dans
  * une description ou un effet affiché hors du tableau. Sans dépendance au serveur.
  */
-import { legacyObjectValueHeaders, objectCombatColumns, objectPriceHeaders, type ObjectCombatFields } from "@/lib/inventory-schema"
+import { legacyObjectValueHeaders, objectCombatColumns, objectPriceHeaders, objectPrimaryRarityHeaders, objectSecondaryRarityHeaders, type ObjectCombatFields } from "@/lib/inventory-schema"
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, " ").trim().toLowerCase()
@@ -38,15 +38,44 @@ export function objectCombatColumn(headers: string[], key: (typeof objectCombatC
   return column ? columnOf(headers, column.aliases) : -1
 }
 
+/** Les colonnes « Rareté » sans précision, dans l'ordre de la feuille. */
+function plainRarityColumns(headers: string[]) {
+  return headers.flatMap((header, index) => normalized(header ?? "") === "rarete" ? [index] : [])
+}
+
+/**
+ * Les emplacements où un objet se trouve, lus par le nom des colonnes (jamais par leur
+ * position) : « Emplacement principal » avec « Rareté principale », « Emplacement
+ * secondaire » avec « Rareté secondaire ». Deux « Rareté » sans précision (avant leur
+ * renommage) : la première va avec l'emplacement principal, la seconde avec l'autre.
+ */
+export function objectLocationColumns(headers: string[]) {
+  const plain = plainRarityColumns(headers)
+  const namedPrimary = columnOf(headers, objectPrimaryRarityHeaders)
+  const namedSecondary = columnOf(headers, objectSecondaryRarityHeaders)
+  const primary = namedPrimary >= 0 ? namedPrimary : plain.shift() ?? -1
+  const secondary = namedSecondary >= 0 ? namedSecondary : plain.shift() ?? -1
+  return [
+    { rarity: primary, place: columnOf(headers, ["Emplacement principal"]) },
+    { rarity: secondary, place: columnOf(headers, ["Emplacement secondaire"]) },
+  ]
+}
+
 /**
  * Ce qu'il faut écrire dans la ligne 1 d'un tableau d'objets pour avoir toutes les
  * colonnes de combat. Seuls des en-têtes changent, jamais une case en dessous :
+ * - deux « Rareté » sans précision deviennent « Rareté principale » et « Rareté secondaire » ;
  * - une « Valeur » qui sert de prix (aucun « Prix », « Coût », « Cout ») devient « Prix » ;
  * - l'ancienne colonne « Dégâts » devient « Valeur » ;
  * - les colonnes absentes sont ajoutées à droite, dans l'ordre de `objectCombatColumns`.
  */
 export function planObjectCombatHeaders(headers: string[]) {
   const renames: Array<{ index: number; header: string }> = []
+  // Deux « Rareté » sans précision : la principale puis la secondaire.
+  const plain = plainRarityColumns(headers)
+  if (plain.length >= 2 && columnOf(headers, objectPrimaryRarityHeaders) < 0 && columnOf(headers, objectSecondaryRarityHeaders) < 0) {
+    renames.push({ index: plain[0], header: "Rareté principale" }, { index: plain[1], header: "Rareté secondaire" })
+  }
   let valeur = columnOf(headers, ["Valeur"])
   const legacy = columnOf(headers, legacyObjectValueHeaders)
   if (columnOf(headers, objectPriceHeaders) < 0 && valeur >= 0) {

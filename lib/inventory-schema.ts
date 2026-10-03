@@ -53,10 +53,16 @@ export const objectCombatColumns = [
   { key: "action", header: "Action", aliases: ["Action", "Actions"] },
   { key: "value", header: "Valeur", aliases: ["Valeur"] },
   { key: "attributes", header: "Attributs", aliases: ["Attributs", "Attribut"] },
+  { key: "materials", header: "Matériaux", aliases: ["Matériaux", "Matériau", "Materiaux", "Materiau"] },
+  { key: "runes", header: "Runes", aliases: ["Runes", "Rune"] },
 ] as const
 
 /** Les en-têtes du prix. Un tableau sans aucun d'eux qui a une « Valeur » : c'est son prix (avant « Prix partout »). */
 export const objectPriceHeaders = ["Prix", "Coût", "Cout"]
+
+/** Les en-têtes de la rareté de l'emplacement principal et du secondaire (« Rareté » en double avant). */
+export const objectPrimaryRarityHeaders = ["Rareté principale", "Rareté principal", "Rarete principale", "Rarete principal"]
+export const objectSecondaryRarityHeaders = ["Rareté secondaire", "Rarete secondaire"]
 
 /** Le nom qu'avait la colonne Valeur dans la version précédente. */
 export const legacyObjectValueHeaders = ["Dégâts", "Dégât", "Degats", "Degat", "Dommages"]

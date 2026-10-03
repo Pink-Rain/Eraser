@@ -1,5 +1,6 @@
 import { listObjectIndexTables, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
+import { objectLocationColumns } from "@/lib/object-combat"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type ShopKey = "market" | "bookshop" | "antique" | "armory" | "black-market" | "alchemist" | "tavern"
@@ -99,10 +100,10 @@ export async function loadShopGeneratorItems() {
   return tables.flatMap<ShopGeneratorItem>((table) => table.rows.flatMap((row) => {
     const name = cell(table.headers, row.values, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
     if (!name) return []
-    const locations = [
-      { rarity: row.values[6] || "", place: row.values[7] || "" },
-      { rarity: row.values[8] || "", place: row.values[9] || "" },
-    ].filter((location) => location.rarity.trim() && location.place.trim())
+    // Lus par le nom des colonnes, jamais par leur position : les onglets ne les rangent pas tous pareil.
+    const locations = objectLocationColumns(table.headers)
+      .map((columns) => ({ rarity: columns.rarity >= 0 ? row.values[columns.rarity] || "" : "", place: columns.place >= 0 ? row.values[columns.place] || "" : "" }))
+      .filter((location) => location.rarity.trim() && location.place.trim())
     if (!locations.length) return []
     return [{
       id: cell(table.headers, row.values, ["ID", "Identifiant"]).trim() || `${table.fileId}-${table.sheetId}-${row.rowNumber}`,

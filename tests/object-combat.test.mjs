@@ -26,8 +26,9 @@ function applied(headers) {
 
 test("Dégâts devient Valeur et Attributs est ajouté, sans déplacer de colonne", () => {
   const { plan, next } = applied(armes);
+  // « Rareté principal » et « Rareté secondaire » : déjà précisées, rien à renommer.
   assert.deepEqual(plan.renames, [{ index: 16, header: "Valeur" }]);
-  assert.deepEqual(plan.append, ["Attributs"]);
+  assert.deepEqual(plan.append, ["Attributs", "Matériaux", "Runes"]);
   assert.deepEqual(next.slice(0, armes.length - 1), armes.slice(0, -1));
   assert.equal(combat.objectPriceColumn(next), 5);
   assert.equal(combat.objectValueColumn(next), 16);
@@ -39,7 +40,7 @@ test("une Valeur qui sert de prix devient Prix, à sa place", () => {
     assert.equal(combat.objectPriceColumn(headers), priceAt);
     assert.equal(combat.objectValueColumn(headers), 16);
     const { plan, next } = applied(headers);
-    assert.deepEqual(plan.renames, [{ index: priceAt, header: "Prix" }, { index: 16, header: "Valeur" }]);
+    assert.deepEqual(plan.renames.slice(2), [{ index: priceAt, header: "Prix" }, { index: 16, header: "Valeur" }]);
     assert.equal(next[priceAt], "Prix");
     // Après : mêmes colonnes, mêmes données.
     assert.equal(combat.objectPriceColumn(next), priceAt);
@@ -51,14 +52,15 @@ test("une Valeur qui sert de prix devient Prix, à sa place", () => {
 
 test("« Cout » reste le prix : seule Dégâts est renommée", () => {
   const { plan, next } = applied(ressources);
-  assert.deepEqual(plan.renames, [{ index: 16, header: "Valeur" }]);
+  assert.deepEqual(plan.renames, [{ index: 6, header: "Rareté principale" }, { index: 8, header: "Rareté secondaire" }, { index: 16, header: "Valeur" }]);
   assert.equal(combat.objectPriceColumn(next), 5);
 });
 
 test("un tableau sans colonnes de combat les reçoit toutes", () => {
-  assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Prix", "ID"]).append, ["Compétence", "Distance", "Action", "Valeur", "Attributs"]);
+  const all = ["Compétence", "Distance", "Action", "Valeur", "Attributs", "Matériaux", "Runes"];
+  assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Prix", "ID"]).append, all);
   // Sans prix, la « Valeur » existante est le prix : renommée, puis une vraie Valeur ajoutée.
-  assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Valeur"]), { renames: [{ index: 1, header: "Prix" }], append: ["Compétence", "Distance", "Action", "Valeur", "Attributs"] });
+  assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Valeur"]), { renames: [{ index: 1, header: "Prix" }], append: all });
 });
 
 test("{Valeur} et les autres accolades sont remplacées hors du tableau", () => {
@@ -101,4 +103,33 @@ test("« Armes - Modificateurs » lu pour les accolades : attributs et matériau
   assert.ok(parsed[1].nameHtml.includes("color:#285f8f"));
   assert.equal(parsed[1].color, "");
   assert.deepEqual(parsed.map((entry) => modifiers.isCitableModifier(entry.type)), [true, true, false]);
+});
+
+test("emplacements des magasins lus par nom de colonne, Rareté en double renommée", () => {
+  // Parchemins : « Emplacement principal » AVANT sa rareté, contrairement aux autres onglets.
+  const read = (headers, values) => combat.objectLocationColumns(headers).map((pair) => [values[pair.rarity] ?? "", values[pair.place] ?? ""]);
+  const parcheminRow = ["Chanson", "", "Parchemin", "Musical", "", "Librairie", "Rare", "Ville", "Très rare", "3 PO"];
+  assert.deepEqual(read(parchemins, parcheminRow), [["Rare", "Librairie"], ["Très rare", "Ville"]]);
+  const objetRow = ["Canot", "", "Objet", "Transport", "", "2 PO", "Commun", "Bateau", "Rare", "Marché ordinaire"];
+  const objets = ["Nom", "Description", "Type", "Sous-type", "Effets", "Prix", "Rareté", "Emplacement principal", "Rareté", "Emplacement secondaire", ...common];
+  assert.deepEqual(read(objets, objetRow), [["Commun", "Bateau"], ["Rare", "Marché ordinaire"]]);
+  // Après le renommage : mêmes paires, et plus rien à renommer.
+  const { next } = applied(objets);
+  assert.equal(next[6], "Rareté principale");
+  assert.equal(next[8], "Rareté secondaire");
+  assert.deepEqual(read(next, objetRow), [["Commun", "Bateau"], ["Rare", "Marché ordinaire"]]);
+  assert.deepEqual(combat.planObjectCombatHeaders(next), { renames: [], append: [] });
+  // Armes : « Rareté principal » / « Rareté secondaire » déjà nommées.
+  assert.deepEqual(read(armes, ["Arbalète", "", "", "", "", "5 PO", "Rare", "Armurier", "Très rare", "Bateau"]), [["Rare", "Armurier"], ["Très rare", "Bateau"]]);
+});
+
+test("Matériaux et Runes : listes multiples masquées du tableau", () => {
+  const headers = ["Nom", "Matériaux", "Runes"];
+  const materials = columns.objectColumnSpec("Matériaux", headers);
+  assert.equal(materials.kind, "linked-choice");
+  assert.equal(materials.multiple, true);
+  assert.equal(materials.hidden, true);
+  assert.deepEqual(materials.source.include, { column: "Type", value: "Matériau" });
+  assert.deepEqual(columns.objectColumnSpec("Runes", headers).source.include, { column: "Type", value: "Rune" });
+  assert.equal(columns.isSheetSpec(materials), true);
 });
