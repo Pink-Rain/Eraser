@@ -88,7 +88,7 @@ function loadModifiers(fresh: boolean) {
 }
 
 /** Les attributs et matériaux d'« Armes - Modificateurs ». */
-function useWeaponModifiers(enabled: boolean) {
+export function useWeaponModifiers(enabled: boolean) {
   const [modifiers, setModifiers] = useState<WeaponModifierRef[] | null>(knownModifiers)
   const version = useWorldIndexVersion("weapon-modifiers")
   useEffect(() => {

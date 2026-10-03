@@ -18,6 +18,8 @@ export type WeaponModifierRef = {
   color: string
   /** Une icône d'Eraser (« flame ») ou un émoji, devant le nom. */
   icon: string
+  /** Le sous-type (colonne « Sous-type », si l'index en a une) : « Feu » pour une rune de feu. */
+  subtype: string
 }
 
 type Table = { headers: string[]; rows: Array<{ values: string[]; html: string[] }> }
@@ -29,7 +31,7 @@ export function parseWeaponModifiers(tables: Table[]): WeaponModifierRef[] {
     const at = (header: string) => table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
     const name = at("Nom")
     if (name < 0) continue
-    const columns = { type: at(WEAPON_MODIFIER_TYPE_HEADER), description: at("Description"), number: at(WEAPON_MODIFIER_NUMBER_HEADER), charges: at(WEAPON_MODIFIER_CHARGES_HEADER), color: at(WEAPON_MODIFIER_COLOR_HEADER), icon: Math.max(at(WEAPON_MODIFIER_ICON_HEADER), at("Icone")), id: at("ID") }
+    const columns = { type: at(WEAPON_MODIFIER_TYPE_HEADER), description: at("Description"), number: at(WEAPON_MODIFIER_NUMBER_HEADER), charges: at(WEAPON_MODIFIER_CHARGES_HEADER), color: at(WEAPON_MODIFIER_COLOR_HEADER), icon: Math.max(at(WEAPON_MODIFIER_ICON_HEADER), at("Icone")), id: at("ID"), subtype: Math.max(at("Sous-type"), at("Sous type")) }
     for (const row of table.rows) {
       const text = (row.values[name] ?? "").trim()
       if (!text || found.has(foldName(text))) continue
@@ -45,8 +47,34 @@ export function parseWeaponModifiers(tables: Table[]): WeaponModifierRef[] {
         charges: value(columns.charges),
         color: /^#[0-9a-f]{3,8}$/i.test(value(columns.color)) ? value(columns.color) : "",
         icon: value(columns.icon),
+        subtype: value(columns.subtype),
       })
     }
   }
   return [...found.values()]
+}
+
+/** Le % de chance d'un attribut ou d'un matériau (colonne Nombre), ou null : chance normale. */
+export function modifierChance(modifier: Pick<WeaponModifierRef, "number">) {
+  const parsed = Number.parseFloat(String(modifier.number ?? "").replace(",", ".").replace(/[%\s]/g, ""))
+  return Number.isFinite(parsed) && parsed >= 0 ? parsed : null
+}
+
+/**
+ * Tire un modificateur au hasard parmi `candidates`. Un « Nombre » rempli est son % de
+ * chance ; vide, il a la chance normale : la part qu'il aurait si tous étaient égaux
+ * (100 / nombre de candidats). `random` : pour les tests.
+ */
+export function drawWeaponModifier<T extends Pick<WeaponModifierRef, "number">>(candidates: T[], random = Math.random): T | null {
+  if (!candidates.length) return null
+  const normal = 100 / candidates.length
+  const weights = candidates.map((candidate) => modifierChance(candidate) ?? normal)
+  const total = weights.reduce((sum, weight) => sum + weight, 0)
+  if (total <= 0) return null
+  let roll = random() * total
+  for (const [index, weight] of weights.entries()) {
+    roll -= weight
+    if (roll < 0) return candidates[index]
+  }
+  return candidates[candidates.length - 1]
 }

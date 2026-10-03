@@ -11,7 +11,12 @@ import {
 import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { InventoryContainerRecord } from "@/lib/inventory-schema"
 
-export type ItemModifier = { value: string; target: string }
+/**
+ * Un lien chiffré vers une caractéristique ou une compétence. `from` : l'attribut, le
+ * matériau ou la rune de l'objet qui l'apporte (« attribut:Lourde ») ; absent, il vient de
+ * l'objet lui-même. Il part avec ce qui l'apporte.
+ */
+export type ItemModifier = { value: string; target: string; from?: string }
 
 export type ItemModifierTargetKind = "valeur" | "calcul" | "caracteristique" | "competence" | "critique"
 
@@ -168,7 +173,8 @@ export function parseItemModifiers(raw: string): ItemModifier[] {
       if (!entry || typeof entry !== "object") return []
       const target = typeof (entry as ItemModifier).target === "string" ? (entry as ItemModifier).target.trim() : ""
       const value = typeof (entry as ItemModifier).value === "string" ? (entry as ItemModifier).value.trim() : String((entry as { value?: unknown }).value ?? "").trim()
-      return target && isItemModifierTargetId(target) ? [{ target, value }] : []
+      const from = typeof (entry as ItemModifier).from === "string" ? (entry as ItemModifier).from!.trim().slice(0, 200) : ""
+      return target && isItemModifierTargetId(target) ? [{ target, value, ...(from ? { from } : {}) }] : []
     })
   } catch { return [] }
 }
@@ -267,10 +273,21 @@ export function effectiveItemFields<T extends Partial<Record<ItemOverrideKey, st
   return result
 }
 
+/** Ce qui apporte un lien : « attribut:Lourde ». */
+export function modifierSource(kind: ItemAttachmentKind, name: string) {
+  return `${kind}:${name.trim()}`
+}
+
+/** Le lien vient-il de cet attribut, matériau ou rune ? */
+export function isFromSource(modifier: ItemModifier, kind: ItemAttachmentKind, name: string) {
+  const match = /^([a-z]+):(.+)$/.exec(modifier.from ?? "")
+  return Boolean(match && match[1] === kind && fold(match[2]) === fold(name))
+}
+
 /** Les liens chiffrés, les runes/attributs/matériaux et ce que l'exemplaire change, ensemble, sans doublon. */
 export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[], overrides: ItemOverrides = {}) {
   const kept = modifiers
-    .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim() }))
+    .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim(), ...(modifier.from?.trim() ? { from: modifier.from.trim() } : {}) }))
     .filter((modifier) => modifier.target && isItemModifierTargetId(modifier.target) && hasModifierAmount(modifier.value))
   const seen = new Set<string>()
   const extras = attachments.flatMap((attachment) => {
@@ -329,6 +346,8 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
         items.set(modifier.target, [...(items.get(modifier.target) || []), {
           slotId: slot.id,
           name: slot.item.name,
+          // Un lien apporté par un attribut, un matériau ou une rune porte son nom.
+          ...(modifier.from ? { tag: modifier.from.replace(/^[a-z]+:/, "") } : {}),
           equipped: slot.equipped,
           containerName: container.name,
           amount,

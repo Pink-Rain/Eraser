@@ -229,3 +229,24 @@ test("un exemplaire change sa compétence, sa valeur, ses attributs sans toucher
   assert.deepEqual(links.usageItemsFor(usage, "Maîtrise des armes d’escrime", "maitrise-escrime").map((entry) => entry.slotId), ["S1"]);
   assert.deepEqual(links.usageItemsFor(usage, "Parade"), []);
 });
+
+test("dé des attributs : Nombre = % de chance, vide = chance normale ; liens rattachés à un attribut", async () => {
+  const modifiers = await vite.ssrLoadModule("/lib/weapon-modifiers.ts");
+  const links = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+  const candidates = [{ name: "Lourde", number: "" }, { name: "Combo", number: "5 %" }, { name: "Légère", number: "" }];
+  assert.equal(modifiers.modifierChance(candidates[1]), 5);
+  assert.equal(modifiers.modifierChance(candidates[0]), null);
+  // Chance normale : 100 / 3 ≈ 33,3 chacun ; Combo 5. Total ≈ 71,7.
+  assert.equal(modifiers.drawWeaponModifier(candidates, () => 0).name, "Lourde");
+  assert.equal(modifiers.drawWeaponModifier(candidates, () => 0.47).name, "Combo");
+  assert.equal(modifiers.drawWeaponModifier(candidates, () => 0.99).name, "Légère");
+  assert.equal(modifiers.drawWeaponModifier([]), null);
+  // Un lien rattaché à « Lourde » garde son origine et la fiche l'étiquette.
+  const saved = links.serializeItemLinks([{ target: "carac:Vitesse", value: "-10", from: links.modifierSource("attribut", "Lourde") }, { target: "comp:Tir", value: "+2" }], [], {});
+  const parsed = links.parseItemModifiers(saved);
+  assert.ok(links.isFromSource(parsed[0], "attribut", "lourde"));
+  assert.equal(parsed[1].from, undefined);
+  const index = links.indexInventoryModifiers([{ category: "Arme", name: "Armes", slots: [{ id: "S1", quantity: 1, equipped: true, modifiers: saved, item: { name: "Arbalète" } }] }]);
+  assert.equal(links.modifierTotalFor(index, "carac:Vitesse"), -10);
+  assert.equal(links.linkedItemsFor(index, "carac:Vitesse")[0].tag, "Lourde");
+});
