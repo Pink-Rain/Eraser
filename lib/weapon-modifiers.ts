@@ -4,7 +4,7 @@
  * couleur. Lecture seule, sans dépendance au serveur.
  */
 import { foldName } from "@/lib/index-columns"
-import { WEAPON_MODIFIER_CHARGES_HEADER, WEAPON_MODIFIER_COLOR_HEADER, WEAPON_MODIFIER_NUMBER_HEADER, WEAPON_MODIFIER_TYPE_HEADER } from "@/lib/world-index-definitions"
+import { WEAPON_MODIFIER_CHARGES_HEADER, WEAPON_MODIFIER_COLOR_HEADER, WEAPON_MODIFIER_ICON_HEADER, WEAPON_MODIFIER_NUMBER_HEADER, WEAPON_MODIFIER_TYPE_HEADER } from "@/lib/world-index-definitions"
 
 export type WeaponModifierRef = {
   name: string
@@ -14,6 +14,8 @@ export type WeaponModifierRef = {
   number: string
   charges: string
   color: string
+  /** Une icône d'Eraser (« flame ») ou un émoji, devant le nom. */
+  icon: string
 }
 
 type Table = { headers: string[]; rows: Array<{ values: string[]; html: string[] }> }
@@ -32,7 +34,7 @@ export function parseWeaponModifiers(tables: Table[]): WeaponModifierRef[] {
     const at = (header: string) => table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
     const name = at("Nom")
     if (name < 0) continue
-    const columns = { type: at(WEAPON_MODIFIER_TYPE_HEADER), description: at("Description"), number: at(WEAPON_MODIFIER_NUMBER_HEADER), charges: at(WEAPON_MODIFIER_CHARGES_HEADER), color: at(WEAPON_MODIFIER_COLOR_HEADER) }
+    const columns = { type: at(WEAPON_MODIFIER_TYPE_HEADER), description: at("Description"), number: at(WEAPON_MODIFIER_NUMBER_HEADER), charges: at(WEAPON_MODIFIER_CHARGES_HEADER), color: at(WEAPON_MODIFIER_COLOR_HEADER), icon: Math.max(at(WEAPON_MODIFIER_ICON_HEADER), at("Icone")) }
     for (const row of table.rows) {
       const text = (row.values[name] ?? "").trim()
       if (!text || found.has(foldName(text))) continue
@@ -46,6 +48,7 @@ export function parseWeaponModifiers(tables: Table[]): WeaponModifierRef[] {
         number: value(columns.number),
         charges: value(columns.charges),
         color: /^#[0-9a-f]{3,8}$/i.test(value(columns.color)) ? value(columns.color) : "",
+        icon: value(columns.icon),
       })
     }
   }

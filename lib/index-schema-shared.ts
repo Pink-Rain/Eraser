@@ -206,7 +206,8 @@ export const objectReadHeaders: Array<{ names: string[]; label: string }> = [
   { names: ["Actif", "Active", "Disponible"], label: "la disponibilité (boutiques, recherche d’objets)" },
   { names: ["Compétence", "Competence", "Compétences", "Competences"], label: "la compétence (affichée avec la description)" },
   { names: ["Distance", "Portée", "Portee"], label: "la distance (affichée avec la description)" },
-  { names: ["Action", "Actions"], label: "l’action (affichée avec la description)" },
+  { names: ["Action", "Actions"], label: "l’action (affichée sous l’effet)" },
+  { names: ["Action de rechargement", "Rechargement"], label: "l’action de rechargement (affichée sous l’effet, avant l’action)" },
   { names: ["Valeur"], label: "la valeur (affichée avec la description, et à la place de {Valeur} dans la description ou l’effet)" },
 ]
 

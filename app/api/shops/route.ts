@@ -43,7 +43,7 @@ function validShops(value: unknown): value is GeneratedShop[] {
       && (candidate.type === undefined || typeof candidate.type === "string" && candidate.type.length <= 300)
       && (candidate.subtype === undefined || typeof candidate.subtype === "string" && candidate.subtype.length <= 300)
       && (candidate.icon === undefined || typeof candidate.icon === "string" && candidate.icon.length <= 2_000)
-      && ["skill", "distance", "action", "value", "attributes", "materials", "runes"].every((key) => candidate[key] === undefined || typeof candidate[key] === "string" && (candidate[key] as string).length <= 2_000)
+      && ["skill", "distance", "action", "reload", "value", "attributes", "materials", "runes"].every((key) => candidate[key] === undefined || typeof candidate[key] === "string" && (candidate[key] as string).length <= 2_000)
   }
   return Array.isArray(value) && value.length <= 100 && value.every((shop) => {
     if (!shop || typeof shop !== "object") return false

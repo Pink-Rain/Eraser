@@ -1,25 +1,36 @@
-# Eraser 0.1.1-alpha.119 — Armes à plusieurs modes, rendu des colonnes
+# Eraser 0.1.1-alpha.120 — Inventaire réparé, action de rechargement, icônes des modificateurs
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Plusieurs valeurs dans une case, séparées par « | »
+## L'inventaire reste correct après un rafraîchissement
 
-Pour une arme à plusieurs modes, écris une valeur par mode dans la même case, séparées
-par « | » : Valeur « 20+ Flèche | 1d30+20 », Distance « 60 | 1 », Action « Actif -Action
-mineur | Actif -Action majeur ».
+Au chargement, la page reçoit d'abord un inventaire rapide (sans le catalogue des
+objets), puis le complet. Quand le rapide arrivait en second, il effaçait les colonnes
+de combat des objets : « {Valeur} » restait écrit tel quel et rien ne s'affichait sous
+l'effet. L'inventaire rapide garde maintenant ce que le complet a déjà apporté, et il
+reprend lui-même le catalogue quand celui-ci est déjà en mémoire.
 
-Dans la description ou l'effet, **{Valeur}** donne la première valeur, **{Valeur 2}** la
-deuxième, **{Valeur 3}** la troisième… Pareil pour {Distance 2}, {Action 2}, etc. Sans
-« | », {Valeur} est toute la case. Un mode qui n'existe pas reste écrit tel quel.
+## Sous l'effet : du texte, sans étiquettes
 
-Dans le tableau, la colonne Distance écrit « 60 m | 1 m », et une liste comme Action
-montre une pastille par mode. Sous l'effet d'un objet, chaque mode a sa propre valeur.
+L'action, la distance et la compétence s'affichent en texte, séparées par « · », chacune
+dans le style imposé de sa colonne. Il n'y a plus d'étiquettes, ni de pastille d'unité.
+Les attributs s'écrivent dans le style de leur colonne, séparés par des virgules. Les
+matériaux et les runes gardent leur couleur.
 
-## Sous l'effet : le rendu des colonnes
+## {Valeur} dans le style de sa colonne
 
-Les **attributs**, l'**action**, la **distance** et la **compétence** s'affichent comme
-dans leurs colonnes de l'Index des objets, avec le style imposé choisi dans « Modifier »
-(couleur, gras, italique…), les couleurs des options et la pastille d'unité de la
-distance. Plusieurs valeurs dans une liste s'affichent en pastilles, comme dans le
-tableau. Les **matériaux** et les **runes** gardent la couleur de leur ligne
-d'« Armes - Modificateurs ». Pour un attribut, sa couleur sert à son survol.
+Une valeur insérée dans l'effet ou la description par {Valeur}, {Valeur 2}, {Distance}…
+prend le style imposé de sa colonne (par exemple en gras).
+
+## Colonne « Action de rechargement »
+
+Nouvelle colonne de l'Index des objets, ajoutée à droite, avec la même liste que
+l'Action. Sous l'effet, elle s'affiche avant l'action, seulement si elle est remplie.
+Elle s'écrit aussi {Action de rechargement} dans un effet.
+
+## Icônes des modificateurs d'armes
+
+« Armes - Modificateurs » reçoit une colonne **Icône** (ajoutée à droite), avec toutes
+les icônes d'Eraser ou un émoji. L'icône s'affiche devant le nom de l'attribut, du
+matériau ou de la rune : sous l'effet des objets, dans les survols et dans les noms
+cités entre accolades.

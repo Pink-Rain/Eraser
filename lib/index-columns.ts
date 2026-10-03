@@ -627,7 +627,7 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   // les types d'action des sorts, les attributs d'« Armes - Modificateurs ».
   if (["competence", "competences"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: "Caractéristiques" } }
   if (["distance", "portee"].includes(folded)) return { kind: "number", number: { unit: "distance", defaultUnit: "m" } }
-  if (["action", "actions"].includes(folded)) return { kind: "choice", allowCustom: true, options: classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background })) }
+  if (["action", "actions", "action de rechargement", "rechargement", "action rechargement"].includes(folded)) return { kind: "choice", allowCustom: true, options: classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background })) }
   if (["attributs", "attribut"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Attribut" } } }
   // Matériaux et runes : masqués du tableau, remplis dans la fiche de l'objet.
   if (["materiaux", "materiau"].includes(folded)) return { kind: "linked-choice", multiple: true, hidden: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Matériau" } } }

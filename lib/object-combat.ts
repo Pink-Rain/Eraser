@@ -3,6 +3,7 @@
  * où les lire, quels en-têtes ajouter ou renommer, et comment remplacer « {Valeur} » dans
  * une description ou un effet affiché hors du tableau. Sans dépendance au serveur.
  */
+import { columnStyleCss } from "@/components/eraser/index-style"
 import { normalizeSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import { legacyObjectValueHeaders, objectCombatColumns, objectPriceHeaders, objectPrimaryRarityHeaders, objectSecondaryRarityHeaders, type ObjectCombatFields, type ObjectTraitLook, type ObjectTraitLookKey } from "@/lib/inventory-schema"
 
@@ -116,6 +117,12 @@ function displayedField(item: ObjectCombatFields, key: (typeof objectCombatColum
 
 const placeholder = /\{\s*([^{}<>\n]{1,40}?)\s*\}/g
 
+function placeholderColumn(name: string) {
+  const numbered = name.trim().match(/^(.*\S)\s+(\d{1,2})$/)
+  const key = normalized(numbered ? numbered[1] : name)
+  return objectCombatColumns.find((candidate) => normalized(candidate.header) === key || candidate.aliases.some((alias) => normalized(alias) === key) || (candidate.key === "value" && legacyObjectValueHeaders.some((alias) => normalized(alias) === key)))
+}
+
 function placeholderValue(name: string, item: ObjectCombatFields) {
   // « {Valeur 2} » : la deuxième valeur de la case ; « {Valeur} » : la première.
   const numbered = name.trim().match(/^(.*\S)\s+(\d{1,2})$/)
@@ -144,7 +151,15 @@ export function fillObjectTemplateHtml(html: string, item: ObjectCombatFields) {
   if (!html.includes("{")) return html
   return html.replace(placeholder, (match, name: string) => {
     const value = placeholderValue(name, item)
-    return value === null ? match : value.replace(/[&<>"']/g, (character) => htmlEscapes[character])
+    if (value === null) return match
+    const escaped = value.replace(/[&<>"']/g, (character) => htmlEscapes[character])
+    // La valeur insérée garde le style imposé de sa colonne (gras, couleur…).
+    const column = placeholderColumn(name)
+    const style = column && column.key in (item.looks ?? {}) ? item.looks?.[column.key as ObjectTraitLookKey]?.style : undefined
+    if (!style) return escaped
+    const look = columnStyleCss(style)
+    const css = Object.entries(look.style).map(([property, setting]) => `${property.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)}:${String(setting)}`).join(";")
+    return `<span${look.className ? ` class="${look.className}"` : ""}${css ? ` style="${css.replace(/"/g, "&quot;")}"` : ""}>${escaped}</span>`
   })
 }
 
@@ -155,7 +170,7 @@ export function fillObjectTemplateHtml(html: string, item: ObjectCombatFields) {
  */
 export function objectTraitLooks(headers: string[], columnSpecs: Record<string, IndexColumnSpec> = {}) {
   const looks: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>> = {}
-  for (const key of ["skill", "distance", "action", "attributes"] as const) {
+  for (const key of ["skill", "distance", "action", "reload", "attributes", "value"] as const) {
     const index = objectCombatColumn(headers, key)
     if (index < 0) continue
     const header = headers[index]

@@ -54,6 +54,7 @@ export const WEAPON_MODIFIER_TYPE_HEADER = "Type"
 export const WEAPON_MODIFIER_NUMBER_HEADER = "Nombre"
 export const WEAPON_MODIFIER_CHARGES_HEADER = "Charges"
 export const WEAPON_MODIFIER_COLOR_HEADER = "Couleur"
+export const WEAPON_MODIFIER_ICON_HEADER = "Icône"
 export const EFFECT_ROLL_HEADER = "Jet"
 /** Case à cocher : l'effet s'écrit pour de bon à chaque fois qu'il est déclenché. */
 export const EFFECT_RETRIGGER_HEADER = "Redéclencher l'effet"
@@ -315,8 +316,9 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
     tabs: [{
       name: WEAPON_MODIFIERS_TAB,
       itemLabel: "un modificateur",
-      headers: ["Nom", WEAPON_MODIFIER_TYPE_HEADER, "Description", WEAPON_MODIFIER_NUMBER_HEADER, WEAPON_MODIFIER_CHARGES_HEADER, WEAPON_MODIFIER_COLOR_HEADER, ID_HEADER],
-      widths: [220, 150, 420, 110, 110, 120, 130],
+      // « Icône » vient après l'identifiant : ajoutée à droite des feuilles qui existaient déjà.
+      headers: ["Nom", WEAPON_MODIFIER_TYPE_HEADER, "Description", WEAPON_MODIFIER_NUMBER_HEADER, WEAPON_MODIFIER_CHARGES_HEADER, WEAPON_MODIFIER_COLOR_HEADER, ID_HEADER, WEAPON_MODIFIER_ICON_HEADER],
+      widths: [220, 150, 420, 110, 110, 120, 130, 90],
       idPrefix: "MOD",
     }],
   },
@@ -528,6 +530,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     if (isHeader(header, [WEAPON_MODIFIER_NUMBER_HEADER])) return { kind: "number", description: "Le % de chance d’un matériau ou d’un attribut (vide : chance normale), le nombre de runes d’un palier." }
     if (isHeader(header, [WEAPON_MODIFIER_CHARGES_HEADER])) return { kind: "number", description: "Les charges ajoutées à l’arme ; vide : pas de charge." }
     if (isHeader(header, [WEAPON_MODIFIER_COLOR_HEADER])) return { kind: "color" }
+    if (isHeader(header, [WEAPON_MODIFIER_ICON_HEADER, "Icone"])) return { kind: "glyph", description: "La petite icône affichée devant le nom (inventaires, magasins, survols)." }
     return { kind: "rich" }
   }
   if (index === "skills") {

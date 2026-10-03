@@ -5212,7 +5212,9 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     googleSheetsJson<{ valueRanges?: Array<{ values?: GoogleSheetCellValue[][] }> }>(
       `spreadsheets/${sheet.spreadsheetId}/values:batchGet?${parameters.toString()}`,
     ),
-    includeCatalog ? listObjectIndexTables().catch(() => []) : Promise.resolve([]),
+    // Sans le catalogue (lecture rapide), les objets prennent quand même ses colonnes
+    // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
+    includeCatalog ? listObjectIndexTables().catch(() => []) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : []),
   ])
   const [typeRows, containerRows, itemRows, contentRows] = ranges.map((_, index) => normalizeGoogleSheetRows(payload.valueRanges?.[index]?.values))
   const mergedItems = [...parseInventoryItemRows(itemRows), ...parseObjectIndexItems(objectIndexTables)]

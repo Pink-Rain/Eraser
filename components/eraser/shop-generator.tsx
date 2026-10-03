@@ -107,7 +107,7 @@ export function shopItemsWithCatalogRichText<T extends { items: GeneratedShopIte
       const source = byId.get(item.id)
       if (!source) return item
       // Compétence, Distance, Action, Dégâts : lus dans l'index, même pour un magasin enregistré avant.
-      const combat = { skill: source.skill, distance: source.distance, action: source.action, value: source.value, attributes: source.attributes, materials: source.materials, runes: source.runes, looks: source.looks }
+      const combat = { skill: source.skill, distance: source.distance, action: source.action, reload: source.reload, value: source.value, attributes: source.attributes, materials: source.materials, runes: source.runes, looks: source.looks }
       if (item.nameHtml || item.descriptionHtml || item.effectHtml) return { ...item, ...combat }
       return {
         ...item,

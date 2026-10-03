@@ -51,7 +51,7 @@ import {
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
-import type { CharacterInventoryRecord } from "@/lib/inventory-schema"
+import { keepCatalogFields, type CharacterInventoryRecord } from "@/lib/inventory-schema"
 import {
   buildItemModifierTargets,
   cappedSkillTotal,
@@ -798,7 +798,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           // Une notification plus ancienne, sans case : les objets du même nom.
           ...slots.filter((slot) => slot.item && names.has(slot.item.name.trim().toLocaleLowerCase("fr"))).map((slot) => slot.id),
         ])
-        setInventory((current) => ({ ...loaded, items: loaded.items.length ? loaded.items : current?.items || [] }))
+        setInventory((current) => keepCatalogFields(loaded, current))
       } catch {
         // Hors ligne : on réessaie plus tard.
       } finally {
@@ -820,7 +820,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         if (!ok || !payload.inventory) return
         // La pastille de l'objet reçu, même si l'onglet Inventaire n'est pas ouvert.
         markNewSlots(character.id, receivedSlots(inventoryRef.current, payload.inventory))
-        setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] }))
+        setInventory((current) => keepCatalogFields(payload.inventory!, current))
       })
       .catch(() => { /* la notification a suffi */ })
   })
@@ -830,7 +830,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     let active = true
     fetch(`${inventoryEndpoint}?summary=1`)
       .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
-      .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory(payload.inventory) })
+      // Le résumé n'efface pas ce que le chargement complet aurait déjà apporté (il peut arriver après lui).
+      .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory((current) => keepCatalogFields(payload.inventory!, current)) })
       .catch(() => { /* la fiche reste utilisable sans ses objets */ })
       .finally(() => { if (active) setInventoryLoading(false) })
     // Puis le catalogue complet, en tâche de fond : il porte la mise en forme et les

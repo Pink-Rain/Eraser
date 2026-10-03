@@ -37,12 +37,7 @@ export type InventoryItemRecord = {
   prerequisites: string
   edition: string
   active: boolean
-  /** Colonnes Compétence, Distance, Action et Valeur de l'index des objets (vides sinon). */
-  skill?: string
-  distance?: string
-  action?: string
-  value?: string
-}
+} & ObjectCombatFields // Compétence, Distance, Action, Valeur… de l'index des objets (absentes sinon).
 
 /**
  * Les colonnes de combat des index d'objets. Eraser les ajoute à droite des tableaux
@@ -53,6 +48,7 @@ export const objectCombatColumns = [
   { key: "skill", header: "Compétence", aliases: ["Compétence", "Competence", "Compétences", "Competences"] },
   { key: "distance", header: "Distance", aliases: ["Distance", "Portée", "Portee"] },
   { key: "action", header: "Action", aliases: ["Action", "Actions"] },
+  { key: "reload", header: "Action de rechargement", aliases: ["Action de rechargement", "Rechargement", "Action rechargement"] },
   { key: "value", header: "Valeur", aliases: ["Valeur"] },
   { key: "attributes", header: "Attributs", aliases: ["Attributs", "Attribut"] },
   { key: "materials", header: "Matériaux", aliases: ["Matériaux", "Matériau", "Materiaux", "Materiau"] },
@@ -73,7 +69,7 @@ export const legacyObjectValueHeaders = ["Dégâts", "Dégât", "Degats", "Degat
 export type ObjectTraitLook = { style?: ColumnStyle; options?: Array<{ value: string; color?: string }>; unit?: string }
 
 /** Les colonnes affichées sous l'effet dans le rendu de leur colonne (Matériaux et Runes : à leur couleur). */
-export type ObjectTraitLookKey = "skill" | "distance" | "action" | "attributes"
+export type ObjectTraitLookKey = "skill" | "distance" | "action" | "reload" | "attributes" | "value"
 
 export type ObjectCombatFields = Partial<Record<(typeof objectCombatColumns)[number]["key"], string>> & {
   looks?: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>>
@@ -192,4 +188,31 @@ export function canItemBeAutoPlacedInInventoryCategory(itemType: string, categor
 
 export function emptyCharacterInventory(): CharacterInventoryRecord {
   return { containerTypes: baseInventoryContainerTypes, containers: [], items: [] }
+}
+
+const catalogExtras = ["skill", "distance", "action", "reload", "value", "attributes", "materials", "runes", "looks"] as const
+
+/**
+ * Un inventaire « résumé » (lu sans le catalogue des objets, pour aller vite) n'a pas les
+ * colonnes de combat des objets. Il garde celles qu'un chargement complet a déjà
+ * apportées, objet par objet : sans cela, le résumé arrivé après coup les effaçait
+ * (« {Valeur} » brut, plus rien sous l'effet).
+ */
+export function keepCatalogFields(next: CharacterInventoryRecord, previous: CharacterInventoryRecord | null | undefined): CharacterInventoryRecord {
+  if (!previous) return next
+  const known = new Map<string, InventoryItemRecord>()
+  for (const item of previous.items) known.set(item.id, item)
+  for (const container of previous.containers) for (const slot of container.slots) if (slot.item) known.set(slot.item.id, slot.item)
+  const enrich = (item: InventoryItemRecord) => {
+    const source = known.get(item.id)
+    if (!source) return item
+    const extras: Partial<InventoryItemRecord> = {}
+    for (const key of catalogExtras) if (item[key] === undefined && source[key] !== undefined) (extras as Record<string, unknown>)[key] = source[key]
+    return Object.keys(extras).length ? { ...item, ...extras } : item
+  }
+  return {
+    ...next,
+    items: next.items.length ? next.items.map(enrich) : previous.items,
+    containers: next.containers.map((container) => ({ ...container, slots: container.slots.map((slot) => slot.item ? { ...slot, item: enrich(slot.item) } : slot) })),
+  }
 }

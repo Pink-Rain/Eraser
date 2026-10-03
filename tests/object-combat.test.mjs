@@ -28,7 +28,7 @@ test("Dégâts devient Valeur et Attributs est ajouté, sans déplacer de colonn
   const { plan, next } = applied(armes);
   // « Rareté principal » et « Rareté secondaire » : déjà précisées, rien à renommer.
   assert.deepEqual(plan.renames, [{ index: 16, header: "Valeur" }]);
-  assert.deepEqual(plan.append, ["Attributs", "Matériaux", "Runes"]);
+  assert.deepEqual(plan.append, ["Action de rechargement", "Attributs", "Matériaux", "Runes"]);
   assert.deepEqual(next.slice(0, armes.length - 1), armes.slice(0, -1));
   assert.equal(combat.objectPriceColumn(next), 5);
   assert.equal(combat.objectValueColumn(next), 16);
@@ -57,7 +57,7 @@ test("« Cout » reste le prix : seule Dégâts est renommée", () => {
 });
 
 test("un tableau sans colonnes de combat les reçoit toutes", () => {
-  const all = ["Compétence", "Distance", "Action", "Valeur", "Attributs", "Matériaux", "Runes"];
+  const all = ["Compétence", "Distance", "Action", "Action de rechargement", "Valeur", "Attributs", "Matériaux", "Runes"];
   assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Prix", "ID"]).append, all);
   // Sans prix, la « Valeur » existante est le prix : renommée, puis une vraie Valeur ajoutée.
   assert.deepEqual(combat.planObjectCombatHeaders(["Nom", "Valeur"]), { renames: [{ index: 1, header: "Prix" }], append: all });
@@ -158,4 +158,33 @@ test("le rendu des colonnes d'objets suit les réglages de « Modifier »", () =
   // Action sans réglage : ses options par défaut, aux couleurs des types de sorts.
   assert.ok(looks.action.options.some((option) => option.value === "Actif -Action majeur" && option.color));
   assert.equal(looks.action.style, undefined);
+});
+
+test("{Valeur} garde le style imposé de sa colonne", () => {
+  const item = { value: "20+ Flèche | 1d30+20", looks: { value: { style: { bold: true, color: "#7f1d1d" } } } };
+  assert.equal(combat.fillObjectTemplateHtml("Inflige {Valeur 2}", item), 'Inflige <span class="font-semibold" style="color:#7f1d1d">1d30+20</span>');
+  assert.equal(combat.fillObjectTemplateHtml("Inflige {Valeur}", { value: "5" }), "Inflige 5");
+});
+
+test("un inventaire résumé garde les colonnes déjà apportées par le catalogue", async () => {
+  const schema = await vite.ssrLoadModule("/lib/inventory-schema.ts");
+  const item = (extra) => ({ id: "OBJ-1", name: "Arc", description: "", type: "Arme", subtype: "", effect: "Inflige {Valeur}", ...extra });
+  const inventory = (slotItem, items = []) => ({ containerTypes: [], items, containers: [{ id: "C", slots: [{ id: "S", item: slotItem }] }] });
+  const full = inventory(item({ value: "1d8", action: "Actif -Action majeur", looks: { value: {} } }), [item({ value: "1d8" })]);
+  const summary = inventory(item({}));
+  const kept = schema.keepCatalogFields(summary, full);
+  assert.equal(kept.containers[0].slots[0].item.value, "1d8");
+  assert.equal(kept.containers[0].slots[0].item.action, "Actif -Action majeur");
+  assert.equal(kept.items.length, 1);
+  // Sans chargement précédent : le résumé tel quel.
+  assert.equal(schema.keepCatalogFields(summary, null), summary);
+});
+
+test("l'icône d'un modificateur d'arme est lue dans sa colonne Icône", async () => {
+  const modifiers = await vite.ssrLoadModule("/lib/weapon-modifiers.ts");
+  const [withIcon, without] = modifiers.parseWeaponModifiers([{ headers: ["Nom", "Type", "ID", "Icône"], rows: [{ values: ["Lame de feu", "Rune", "MOD-1", "flame"], html: [] }, { values: ["Lourde", "Attribut", "MOD-2", ""], html: [] }] }]);
+  assert.equal(withIcon.icon, "flame");
+  assert.equal(without.icon, "");
+  const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  assert.equal(definitions.worldColumnSpec("weapon-modifiers", "Tout", "Icône").kind, "glyph");
 });

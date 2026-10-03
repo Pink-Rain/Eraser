@@ -16,7 +16,7 @@ import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-te
 import { pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
-import { foldName } from "@/lib/index-columns"
+import { foldName, parseGlyphValue } from "@/lib/index-columns"
 import { cn } from "@/lib/utils"
 import { isCitableModifier, type WeaponModifierRef } from "@/lib/weapon-modifiers"
 
@@ -150,8 +150,15 @@ function FormattedName({ name, html, color }: { name: string; html?: string; col
   return <span style={{ color }}>{name}</span>
 }
 
+/** La petite icône d'un modificateur (colonne Icône), devant son nom, à la couleur du texte. */
+function ModifierIcon({ modifier }: { modifier: WeaponModifierRef }) {
+  const look = parseGlyphValue(modifier.icon ?? "")
+  if (!look.icon && !look.emoji) return null
+  return <span className="mr-1 inline-flex translate-y-[0.12em]"><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={false} /></span>
+}
+
 function ModifierName({ modifier, color }: { modifier: WeaponModifierRef; color: string }) {
-  return <FormattedName name={modifier.name} html={modifier.nameHtml} color={color} />
+  return <span style={{ color }}><ModifierIcon modifier={modifier} /><FormattedName name={modifier.name} html={modifier.nameHtml} color={color} /></span>
 }
 
 const chipClass = "inline cursor-help rounded-sm font-semibold underline decoration-dotted decoration-1 underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
@@ -247,27 +254,28 @@ export function IndexRichText({ html, fill, className = "", as = "div", style }:
  * Des attributs, matériaux ou runes (« Lourde, Acier trempé »), avec leur nom et leur
  * description au survol (aux couleurs de leur ligne d'« Armes - Modificateurs »).
  * `look` absent : une pastille à la couleur de la ligne (matériaux, runes). `look`
- * donné : le rendu de la colonne de l'objet (attributs), en pastille neutre s'il y en a
- * plusieurs, comme dans le tableau. Un nom absent de l'index s'affiche sans survol.
+ * donné : du texte dans le style de la colonne de l'objet (attributs), sans étiquette.
+ * Un nom absent de l'index s'affiche sans survol.
  */
 export function ModifierPills({ names, look }: { names: string[]; look?: { className: string; style: CSSProperties } }) {
   const modifiers = useWeaponModifiers(names.length > 0)
   const byName = useMemo(() => new Map((modifiers ?? []).map((modifier) => [foldName(modifier.name), modifier])), [modifiers])
-  const boxed = Boolean(look) && names.length > 1
   return <>{names.map((name, index) => {
     const modifier = byName.get(foldName(name))
-    const shape = look ? cn(boxed ? pillClass : "inline-block max-w-full whitespace-normal break-words text-xs [overflow-wrap:anywhere]", look.className) : pillClass
+    // Dans le style d'une colonne : du texte, séparé par des virgules, sans étiquette.
+    const shape = look ? cn("whitespace-normal break-words [overflow-wrap:anywhere]", look.className) : pillClass
     const style = look ? look.style : pillStyle(modifier?.color) ?? undefined
-    if (!modifier) return <span key={`${name}:${index}`} className={shape} style={style}>{name}</span>
+    const comma = look && index > 0 ? ", " : null
+    if (!modifier) return <span key={`${name}:${index}`}>{comma}<span className={shape} style={style}>{name}</span></span>
     const color = modifier.color || "#7f5a3a"
-    return <HoverCard key={`${name}:${index}`} openDelay={180} closeDelay={80}>
+    return <span key={`${name}:${index}`}>{comma}<HoverCard openDelay={180} closeDelay={80}>
       <HoverCardTrigger asChild>
-        <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}>{modifier.name}</span>
+        <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}><ModifierIcon modifier={modifier} />{modifier.name}</span>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
         <ModifierDetails modifier={modifier} color={color} />
       </HoverCardContent>
-    </HoverCard>
+    </HoverCard></span>
   })}</>
 }
 
