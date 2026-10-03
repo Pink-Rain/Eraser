@@ -393,20 +393,25 @@ export function ItemModifierDialog({ open, onOpenChange, itemName, base, effecti
   </Dialog>
 }
 
-/** Les compétences liées d'un exemplaire (ses attributs, matériaux et runes s'affichent sous son effet). */
-export function ItemModifierSummary({ modifiers, className = "" }: { modifiers: ItemModifier[]; className?: string }) {
+/**
+ * Les compétences liées d'un exemplaire (ses attributs, matériaux et runes s'affichent sous
+ * son effet). `stacked` : en colonne, sans titre, sous l'icône de l'objet.
+ */
+export function ItemModifierSummary({ modifiers, stacked = false, className = "" }: { modifiers: ItemModifier[]; stacked?: boolean; className?: string }) {
   const { byId } = useModifierTargets()
   if (!modifiers.length) return null
-  return <div className={`flex flex-wrap items-center gap-1 ${className}`}>
-    {modifiers.length > 0 && <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>}
+  return <div className={stacked ? `grid w-full justify-items-center gap-1 ${className}` : `flex flex-wrap items-center gap-1 ${className}`}>
+    {!stacked && <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>}
     {modifiers.map((modifier, index) => {
       const amount = parseModifierAmount(modifier.value)
+      const label = itemModifierTargetLabel(modifier.target, byId)
       return <span
         key={`${modifier.target}:${index}`}
-        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px] font-semibold ${amount < 0 ? "bg-rose-500/12 text-rose-400" : "bg-emerald-500/12 text-emerald-400"}`}
+        title={`${formatModifierAmount(amount)} ${label}${modifier.from ? ` (${modifier.from.replace(/^[a-z]+:/, "")})` : ""}`}
+        className={`${stacked ? "flex w-full flex-col items-center rounded-md px-1 py-0.5 text-center text-[9px] leading-tight" : "inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[10px]"} font-semibold ${amount < 0 ? "bg-rose-500/12 text-rose-500" : "bg-emerald-500/12 text-emerald-600"}`}
       >
         <span className="tabular-nums">{formatModifierAmount(amount)}</span>
-        <span className="font-medium text-foreground/70">{itemModifierTargetLabel(modifier.target, byId)}</span>
+        <span className="max-w-full break-words font-medium text-foreground/70 [overflow-wrap:anywhere]">{label}</span>
       </span>
     })}
   </div>

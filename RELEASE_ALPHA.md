@@ -1,22 +1,15 @@
-# Eraser 0.1.1-alpha.126 — Charges sur les objets, icônes nettes
+# Eraser 0.1.1-alpha.127 — Des objets plus compacts
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Les charges des attributs, matériaux et runes
+## Inventaire
 
-Un attribut, un matériau ou une rune dont la colonne **Charges** d'« Armes -
-Modificateurs » est remplie donne ses charges à l'objet qui le porte. Elles s'affichent
-sur l'objet, dans l'inventaire, avec les mêmes étincelles que les sorts : un clic sur une
-étincelle pleine dépense les charges jusqu'à elle, un clic sur une vide les récupère.
-Chaque exemplaire garde ses propres charges, pleines tant qu'on n'y touche pas.
-
-## Icônes
-
-Les icônes faites de traits (un maillon, un signal, une radiation…) ne deviennent plus
-une tache quand elles sont « pleines » : elles restent un trait net de leur couleur. Les
-icônes fermées (cœur, bouclier, crâne) restent pleines.
-
-## Aide de l'enclume
-
-Plus de « ? » sur Action et Rechargement ; l'aide de l'effet ne parle que de {Valeur} et
-{Valeur 2}, et l'exemple de Valeur devient « 20 | 1d30+20 ».
+- Les **compétences liées** d'un objet passent **sous son icône**, en colonne, sans le
+  titre « Liens » : la place sous l'icône était vide.
+- L'action de rechargement est précédée d'une petite **icône ↻** (« Rechargement » au
+  survol) au lieu du mot : elle tient sur la ligne de la compétence, de la distance et de
+  l'action.
+- Les **charges** (attributs, matériaux, runes) s'affichent **à côté du nom** de l'objet,
+  sans répéter le nom de ce qui les donne (il apparaît au survol). Un clic se voit tout de
+  suite, on peut cliquer plusieurs fois d'affilée, et les étincelles ne changent plus de
+  taille : l'enregistrement part un instant après le dernier clic.

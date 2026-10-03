@@ -1,3 +1,5 @@
+import { RefreshCw } from "lucide-react"
+
 import type { ObjectCombatFields, ObjectTraitLook } from "@/lib/inventory-schema"
 import { IndexRichText, ModifierPills } from "@/components/eraser/index-references"
 import { columnStyleCss } from "@/components/eraser/index-style"
@@ -31,7 +33,7 @@ function StyledValues({ values, look, fallback }: { values: string[]; look?: Obj
  * style de leur colonne de l'Index des objets), ses matériaux et ses runes (à leur couleur,
  * leur icône dans celle de leur colonne), avec leur nom et leur description au survol.
  * Puis, si elles sont remplies, sa compétence, sa distance, son action et son action de
- * rechargement (« Rechargement : »), chacune dans le style de sa colonne. La Valeur n'y est
+ * rechargement (précédée de son icône), chacune dans le style de sa colonne. La Valeur n'y est
  * pas : elle s'écrit dans l'effet ({Valeur}).
  */
 export function ObjectTraits({ item, className = "" }: { item: ObjectCombatFields; className?: string }) {
@@ -48,11 +50,12 @@ export function ObjectTraits({ item, className = "" }: { item: ObjectCombatField
   // L'icône d'un matériau ou d'une rune prend la couleur imposée à sa colonne dans l'objet.
   const columnColor = (key: "materials" | "runes") => { const color = looks[key]?.style?.color; return color && color !== "muted" ? color : undefined }
   const usage = [
-    // Compétence, distance, action, puis le rechargement (« Rechargement : » le distingue de l'action).
+    // Compétence, distance, action, puis le rechargement (son icône le distingue de l'action).
     skills.length ? <StyledValues key="skill" values={skills} look={looks.skill} /> : null,
     distances.length ? <StyledValues key="distance" values={distances} look={looks.distance} /> : null,
     actions.length ? <StyledValues key="action" values={actions} look={looks.action} fallback={actionColors} /> : null,
-    reloads.length ? <span key="reload" className="inline-flex flex-wrap items-baseline gap-1"><span className="text-[11px] text-muted-foreground">Rechargement :</span><StyledValues values={reloads} look={looks.reload} fallback={actionColors} /></span> : null,
+    // Une petite icône de rechargement (le mot au survol) : la ligne tient sans passer à la suivante.
+    reloads.length ? <span key="reload" className="inline-flex items-center gap-0.5" title="Rechargement"><RefreshCw aria-hidden="true" className="size-3 shrink-0 text-muted-foreground" /><span className="sr-only">Rechargement :</span><StyledValues values={reloads} look={looks.reload} fallback={actionColors} /></span> : null,
   ].filter(Boolean)
   if (!attributes.length && !materials.length && !runes.length && !usage.length) return null
   return <div className={`grid gap-1 ${className}`}>
