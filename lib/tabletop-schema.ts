@@ -1,3 +1,5 @@
+import type { ObjectCombatFields } from "@/lib/inventory-schema"
+
 export type TabletopMapRecord = {
   id: string
   pageLinked: string
@@ -97,7 +99,7 @@ export type TabletopShopDetail = {
     price: string
     icon: string
     rarity: "very-common" | "common" | "rare" | "very-rare" | "ultimate"
-  }>
+  } & ObjectCombatFields>
 }
 
 export type TabletopNpcDetail = {

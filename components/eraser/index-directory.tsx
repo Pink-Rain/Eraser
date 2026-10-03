@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { LibraryBig, Activity, Gauge, Church, CircleUserRound, Drama, Flame, Gem, Hexagon, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Tag, Trophy, Users, type LucideIcon } from "lucide-react"
+import { LibraryBig, Activity, Gauge, Church, CircleUserRound, Drama, Flame, Hexagon, Languages, Map, MapPin, Package, PawPrint, Star, Swords, Trophy, Users, type LucideIcon } from "lucide-react"
 
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexPages, type IndexPage, type IndexPageKey } from "@/lib/index-pages"
@@ -20,9 +20,7 @@ export const indexPageIcons: Record<IndexPageKey, LucideIcon> = {
   religions: Church,
   "sorts-creatures": Flame,
   etats: Activity,
-  runes: Hexagon,
-  attributs: Tag,
-  materiaux: Gem,
+  "armes-modificateurs": Hexagon,
   caracteristiques: Gauge,
   succes: Trophy,
 }

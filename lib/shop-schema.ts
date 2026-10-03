@@ -1,4 +1,5 @@
-import { listObjectIndexTables } from "@/lib/google-sheets"
+import { listObjectIndexTables, objectCombatFields } from "@/lib/google-sheets"
+import type { ObjectCombatFields } from "@/lib/inventory-schema"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type ShopKey = "market" | "bookshop" | "antique" | "armory" | "black-market" | "alchemist" | "tavern"
@@ -21,7 +22,7 @@ export type ShopGeneratorItem = {
   price: string
   icon: string
   locations: Array<{ place: string; rarity: string }>
-}
+} & ObjectCombatFields
 
 export type GeneratedShopItem = ShopGeneratorItem & { rarity: ShopRarity }
 
@@ -116,6 +117,7 @@ export async function loadShopGeneratorItems() {
       price: cell(table.headers, row.values, ["Prix", "Valeur", "Coût", "Cout"]),
       icon: cell(table.headers, row.values, ["Icône", "Icone", "Icon"]),
       locations,
+      ...objectCombatFields(table, row),
     }]
   }))
 }

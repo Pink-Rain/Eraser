@@ -2,6 +2,7 @@
 
 /* eslint-disable @next/next/no-img-element -- portraits use authenticated, dynamic API URLs */
 
+import { ObjectCombatDetails } from "@/components/eraser/object-combat-details"
 import dynamic from "next/dynamic"
 
 import { characteristicColor } from "@/lib/characteristics"
@@ -92,6 +93,7 @@ function ShopContent({ shop }: { shop: TabletopShopDetail | null }) {
               {item.descriptionHtml?.trim()
                 ? <p className={`mt-1 text-xs leading-5 text-muted-foreground ${detailRichText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.descriptionHtml) }} />
                 : item.description && <p className="mt-1 text-xs leading-5 text-muted-foreground">{item.description}</p>}
+              <ObjectCombatDetails item={item} className="mt-1" />
               {item.effectHtml?.trim()
                 ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={detailRichText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /></p>
                 : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>}

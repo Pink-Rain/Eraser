@@ -35,7 +35,26 @@ export type InventoryItemRecord = {
   prerequisites: string
   edition: string
   active: boolean
+  /** Colonnes Compétence, Distance, Action et Dégâts de l'index des objets (vides sinon). */
+  skill?: string
+  distance?: string
+  action?: string
+  damage?: string
 }
+
+/**
+ * Les colonnes de combat des index d'objets. Eraser les ajoute à droite des tableaux
+ * qui ne les ont pas ; l'inventaire et les magasins les affichent avec la description
+ * quand elles sont remplies.
+ */
+export const objectCombatColumns = [
+  { key: "skill", header: "Compétence", aliases: ["Compétence", "Competence", "Compétences", "Competences"] },
+  { key: "distance", header: "Distance", aliases: ["Distance", "Portée", "Portee"] },
+  { key: "action", header: "Action", aliases: ["Action", "Actions"] },
+  { key: "damage", header: "Dégâts", aliases: ["Dégâts", "Dégât", "Degats", "Degat", "Dommages"] },
+] as const
+
+export type ObjectCombatFields = Partial<Record<(typeof objectCombatColumns)[number]["key"], string>>
 
 export type InventorySlotRecord = {
   id: string

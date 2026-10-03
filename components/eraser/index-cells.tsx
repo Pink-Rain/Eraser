@@ -60,7 +60,7 @@ function useOptimistic(value: string) {
   return [shown, (next: string) => setState({ source: value, local: next })] as const
 }
 
-const cellButton = "flex min-h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 text-left text-sm hover:border-input disabled:opacity-50"
+const cellButton = "flex min-h-8 w-full items-center justify-between gap-2 rounded-md border border-transparent px-2 py-1 text-left text-sm hover:border-input disabled:opacity-50"
 
 // ---------------------------------------------------------------------------
 // Listes déroulantes : liste fermée, liste libre et liste liée partagent un sélecteur.
@@ -90,9 +90,9 @@ type PickerProps = {
 /** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
 function ChoicePill({ value, option, group, outside, renderValue }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode }) {
   const color = option?.color ?? group?.color
-  if (renderValue) return <span className="min-w-0 truncate">{renderValue(value)}</span>
-  if (!color) return <span className={`min-w-0 truncate ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
-  return <span className={`inline-flex max-w-full items-center truncate rounded-full border px-2 py-0.5 text-xs font-medium ${outside ? "italic" : ""}`} style={pillStyle(color)}>{value}</span>
+  if (renderValue) return <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{renderValue(value)}</span>
+  if (!color) return <span className={`min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
+  return <span className={`inline-block max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border px-2 py-0.5 text-xs font-medium ${outside ? "italic" : ""}`} style={pillStyle(color)}>{value}</span>
 }
 
 /**
@@ -229,7 +229,7 @@ export function loadWorldIndexData(index: WorldIndexKey) {
 }
 
 function sourceKey(source: ChoiceSource) {
-  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}:${(source.extra ?? []).join("|")}`
+  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}:${source.include ? `${source.include.column}^${source.include.value}` : ""}:${(source.extra ?? []).join("|")}`
 }
 
 export function loadWorldIndexNames(source: ChoiceSource) {
@@ -243,8 +243,11 @@ export function loadWorldIndexNames(source: ChoiceSource) {
       const names = tables.flatMap((table) => {
         const column = table.headers.findIndex((header) => foldName(header) === "nom")
         const excluded = source.exclude ? table.headers.findIndex((header) => foldName(header) === foldName(source.exclude!.column)) : -1
+        const included = source.include ? table.headers.findIndex((header) => foldName(header) === foldName(source.include!.column)) : -1
+        if (source.include && included < 0) return []
         return column >= 0 ? table.rows
           .filter((row) => excluded < 0 || foldName(row.values[excluded] ?? "") !== foldName(source.exclude!.value))
+          .filter((row) => included < 0 || foldName(row.values[included] ?? "").startsWith(foldName(source.include!.value)))
           .map((row) => row.values[column]?.trim() ?? "") : []
       })
       return [...new Set([...names.filter(Boolean), ...(source.extra ?? [])])].sort((left, right) => left.localeCompare(right, "fr"))
@@ -265,7 +268,7 @@ export async function ensureWorldIndexName(source: ChoiceSource, name: string) {
   const response = await fetch("/api/resources/world-indexes", {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ action: "ensure", key: source.index, tabName: source.tab, name: clean }),
+    body: JSON.stringify({ action: "ensure", key: source.index, tabName: source.tab, name: clean, fields: source.include ? { [source.include.column]: source.include.value } : undefined }),
   })
   if (!response.ok) throw new Error("Le nom n’a pas pu être ajouté à l’index.")
   namesCache.set(sourceKey(source), Promise.resolve([...known, clean].sort((left, right) => left.localeCompare(right, "fr"))))
@@ -337,7 +340,7 @@ export const CheckCell = memo(function CheckCell({ label, value, disabled = fals
 
 export function IdCell({ value, computed = false }: { value: string; computed?: boolean }) {
   return <span
-    className={`flex min-h-8 items-center truncate px-2 font-mono text-[11px] ${computed ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}
+    className={`flex min-h-8 min-w-0 items-center break-all px-2 py-1 font-mono text-[11px] ${computed ? "italic text-muted-foreground/70" : "text-muted-foreground"}`}
     title={computed ? "Identifiant calculé : ajoute une colonne « ID » dans la feuille pour le figer" : value ? "Identifiant généré par Eraser" : "Identifiant en cours d’attribution"}
   >{value || "…"}</span>
 }
@@ -348,8 +351,8 @@ export function NameFormCell({ value, onOpen, href, color }: { value: string; on
     {color && <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
     {/<[a-z]/i.test(value)
       // Un nom mis en forme (objets) garde sa mise en forme.
-      ? <span className="min-w-0 truncate" dangerouslySetInnerHTML={{ __html: sanitizeRichText(value) }} />
-      : <span className="min-w-0 truncate">{value || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</span>}
+      ? <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: sanitizeRichText(value) }} />
+      : <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{value || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</span>}
   </>
   const className = "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
   if (href) return <Link href={href} className={className} title="Ouvrir">{content}</Link>
@@ -373,7 +376,7 @@ export const AutoLinksCell = memo(function AutoLinksCell({ links }: { links: Aut
       key={`${link.href}:${link.label}`}
       href={link.href}
       title={link.title}
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground ${link.emphasis ? "border-primary/40 text-primary" : "text-muted-foreground"}`}
+      className={`max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border px-2 py-0.5 text-xs font-medium hover:bg-primary hover:text-primary-foreground ${link.emphasis ? "border-primary/40 text-primary" : "text-muted-foreground"}`}
       style={link.color ? { color: link.color, borderColor: `${link.color}66` } : undefined}
     >{link.label}</Link>)}
   </span>
@@ -410,8 +413,8 @@ export function RankedLinksCell({ links, options, ranks, rankLabel, rankShort, i
     {linked.map(([id, linkedRank]) => {
       const option = options.find((item) => item.id === id)
       const accent = option?.color || "#7f5a3a"
-      return <span key={id} className="inline-flex items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold" style={{ borderColor: `${accent}55`, backgroundColor: `${accent}14`, color: accent }}>
-        <span className="max-w-28 truncate">{option?.name || id}</span>
+      return <span key={id} className="inline-flex max-w-full items-center gap-1 rounded-full border px-1.5 py-0.5 text-[11px] font-semibold" style={{ borderColor: `${accent}55`, backgroundColor: `${accent}14`, color: accent }}>
+        <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{option?.name || id}</span>
         <select
           aria-label={`Rang de ${option?.name || id}`}
           value={linkedRank}
@@ -587,8 +590,8 @@ export const SpellsCell = memo(function SpellsCell({ value, source, category, di
   const matches = spellsFor(options, source, category).filter((spell) => !chosen.has(foldName(spell.name)) && (!query.trim() || foldName(`${spell.name} ${spell.type}`).includes(foldName(query)))).slice(0, 60)
   const change = (next: string) => { setShown(next); onChange(next) }
   return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1">
-    {selected.map((name) => <span key={name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">
-      {name}
+    {selected.map((name) => <span key={name} className="inline-flex max-w-full items-center gap-1 rounded-full border px-2 py-0.5 text-[11px] font-medium">
+      <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{name}</span>
       <button type="button" disabled={disabled} onClick={() => change(selected.filter((item) => foldName(item) !== foldName(name)).join(", "))} className="rounded-full hover:text-destructive" aria-label={`Retirer ${name}`}><X className="size-3" /></button>
     </span>)}
     <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
@@ -662,12 +665,12 @@ export const NumberCell = memo(function NumberCell({ label, value, format, disab
 
   const amountText = parsed && units.length ? text.replace(new RegExp(`\\s${parsed.unit ?? format.defaultUnit ?? ""}$`), "") : text
   const unit = parsed?.unit ?? (parsed ? findUnit(family, format.defaultUnit ?? "")?.code : undefined)
-  return <span className={`flex min-h-8 w-full items-center gap-1.5 px-1 ${compact ? "" : "h-9 rounded-md border bg-background/50"}`} title={conversions}>
+  return <span className={`flex min-h-8 w-full flex-wrap items-center gap-1.5 px-1 ${compact ? "" : "h-9 rounded-md border bg-background/50"}`} title={conversions}>
     <button
       type="button"
       disabled={disabled}
       onClick={() => { setDraft(shown.trim()); setEditing(true) }}
-      className={`min-w-0 flex-1 truncate rounded-md px-1 py-1 text-right tabular-nums hover:bg-muted ${parsed && !parsed.unknown ? "" : "italic text-muted-foreground"}`}
+      className={`min-w-0 flex-1 whitespace-normal break-words [overflow-wrap:anywhere] rounded-md px-1 py-1 text-right tabular-nums hover:bg-muted ${parsed && !parsed.unknown ? "" : "italic text-muted-foreground"}`}
       aria-label={`Modifier ${label}`}
     >{amountText || "—"}</button>
     {parsed && unit && units.length > 0 && <Popover open={unitsOpen} onOpenChange={setUnitsOpen}>
@@ -713,7 +716,7 @@ export const ColorCell = memo(function ColorCell({ label, value, disabled = fals
     <PopoverTrigger asChild>
       <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-2 rounded-md px-2 text-left text-xs hover:bg-muted">
         <span className="size-4 shrink-0 rounded-full border" style={isColor(color) ? { backgroundColor: color } : undefined} />
-        <span className="truncate font-mono text-muted-foreground">{color || "—"}</span>
+        <span className="min-w-0 break-all font-mono text-muted-foreground">{color || "—"}</span>
       </button>
     </PopoverTrigger>
     {open && <PopoverContent align="start" className="w-56 p-2">
@@ -840,7 +843,7 @@ export const FileCell = memo(function FileCell({ label, value, accept, multiple 
   const change = (next: string[]) => { const joined = next.join("\n"); setShown(joined); onChange(joined) }
   return <Popover open={open} onOpenChange={setOpen}>
     <PopoverTrigger asChild>
-      <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full items-center gap-1 overflow-hidden rounded-md px-1.5 py-1 text-left hover:bg-muted">
+      <button type="button" disabled={disabled} aria-label={label} className="flex min-h-8 w-full flex-wrap items-center gap-1 rounded-md px-1.5 py-1 text-left hover:bg-muted">
         {files.slice(0, 5).map((item, index) => <FileGlyph key={`${item}:${index}`} info={fileInfo(item)} className="size-7" />)}
         {files.length > 5 && <span className="text-[11px] text-muted-foreground">+{files.length - 5}</span>}
         {!files.length && <span className="flex items-center gap-1 text-xs text-muted-foreground"><Paperclip className="size-3.5" />—</span>}
@@ -856,9 +859,9 @@ export const FileCell = memo(function FileCell({ label, value, accept, multiple 
 
 export const ComputedCell = memo(function ComputedCell({ values, pills = false }: { values: string[]; pills?: boolean }) {
   if (!values.length || values.every((value) => !value.trim())) return <span className="flex min-h-8 items-center px-2 text-xs text-muted-foreground">—</span>
-  if (!pills) return <span className="flex min-h-8 items-center px-2 text-sm tabular-nums" title="Calculé par Eraser">{values.join(" · ")}</span>
+  if (!pills) return <span className="flex min-h-8 items-center px-2 py-1 text-sm tabular-nums" title="Calculé par Eraser"><span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{values.join(" · ")}</span></span>
   return <span className="flex min-h-8 flex-wrap items-center gap-1 px-1.5 py-1" title="Calculé par Eraser à partir des lignes reliées">
-    {values.map((value, index) => <span key={`${value}:${index}`} className="max-w-full truncate rounded-full border bg-muted/40 px-2 py-0.5 text-[11px]">{value}</span>)}
+    {values.map((value, index) => <span key={`${value}:${index}`} className="max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border bg-muted/40 px-2 py-0.5 text-[11px]">{value}</span>)}
   </span>
 })
 

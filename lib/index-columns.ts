@@ -69,7 +69,7 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "auto-links": { label: "Liens automatiques", group: "Système", creatable: false, description: "Calculée par Eraser : chaque élément trouvé ailleurs devient un lien (campagnes d'un PNJ…). Rien à saisir." },
   "ranked-links": { label: "Liens classés", group: "Système", creatable: false, description: "Des pastilles reliées à d'autres éléments, chacune avec son rang (« Classes et rangs » des sorts)." },
   "tab": { label: "Onglet", group: "Système", creatable: false, description: "L'onglet de la ligne dans la vue « Tout » ; le changer la déplace." },
-  "tab-sort": { label: "Rangement en onglets", short: "Range la ligne dans l’onglet qui porte sa valeur ; une valeur nouvelle crée l’onglet.", group: "Listes et relations", creatable: true, description: "La valeur de la case est le nom d'un onglet de l'index : la ligne y est rangée. Choisir une autre valeur la déplace dans cet onglet ; une valeur qui n'est pas encore un onglet le crée, avec les mêmes colonnes.", example: "Le Type d'un lieu : « Villes », « Pays », « Régions »… chaque lieu va dans l'onglet de son type." },
+  "tab-sort": { label: "Rangement en onglets", short: "Chaque valeur a son onglet, où la ligne apparaît aussi, sans quitter le sien.", group: "Listes et relations", creatable: true, description: "Chaque valeur de la colonne devient un onglet qui porte son nom et montre les lignes qui ont cette valeur. La ligne ne bouge pas : elle reste dans son onglet (« Tout »…) et apparaît en plus dans celui de sa valeur. Une valeur nouvelle crée son onglet ; plus aucune ligne avec cette valeur, l'onglet disparaît.", example: "Le Type d'un modificateur d'arme : « Rune », « Matériau », « Attribut »… chaque ligne reste dans Tout et se range aussi dans l'onglet de son type." },
   "file": { label: "Fichier", short: "Image, son, PDF… un ou plusieurs (galerie).", group: "Médias", creatable: true, description: "Un ou plusieurs fichiers importés dans le Drive, ou des adresses collées. Une galerie, c'est un Fichier « images, plusieurs ».", settings: ["Fichiers acceptés : images, sons, vidéos, PDF ou tous.", "Un seul ou plusieurs (galerie)."], example: "Portrait, Carte du lieu, Thème musical." },
   "color": { label: "Couleur", short: "Une couleur.", group: "Saisie", creatable: true, description: "Une couleur, choisie dans une palette ou par son code (#aa3355).", example: "Couleur d'une faction sur la carte." },
   "lookup": { label: "Recherche", short: "Affiche une info des lignes liées.", group: "Calculs", creatable: true, description: "Affiche, en face, une colonne des lignes reliées par une relation (colonne liée ou liste d'un index). Rien à saisir.", settings: ["Relation à suivre.", "Colonne à afficher en face."], example: "La région de chaque peuple d'un lieu." },
@@ -95,6 +95,11 @@ export type ChoiceSource = {
   tab: string
   onlyTab?: boolean
   exclude?: { column: string; value: string }
+  /**
+   * Ne garde que les lignes dont une colonne commence par une valeur (« Rune » garde
+   * « Rune » et « Runes ») ; un nom créé depuis la liste reçoit cette valeur.
+   */
+  include?: { column: string; value: string }
   /** Des noms proposés en plus de ceux de l'index, jamais ajoutés à l'index (« Points de vie actuels »). */
   extra?: string[]
 }

@@ -47,6 +47,13 @@ export const EFFECT_TARGET_HEADER = "Cible"
 export const EFFECT_COLOR_HEADER = "Couleur"
 export const EFFECT_CHANGE_HEADER = "Changement de valeur"
 /** Le jet de dés qui déclenche l'effet depuis la fiche (« 1d20 16-20 »). */
+/** Armes - Modificateurs : runes, matériaux et attributs, rangés par Type. */
+export const WEAPON_MODIFIERS_SHEET = "Armes - Modificateurs"
+export const WEAPON_MODIFIERS_TAB = "Tout"
+export const WEAPON_MODIFIER_TYPE_HEADER = "Type"
+export const WEAPON_MODIFIER_NUMBER_HEADER = "Nombre"
+export const WEAPON_MODIFIER_CHARGES_HEADER = "Charges"
+export const WEAPON_MODIFIER_COLOR_HEADER = "Couleur"
 export const EFFECT_ROLL_HEADER = "Jet"
 /** Case à cocher : l'effet s'écrit pour de bon à chaque fois qu'il est déclenché. */
 export const EFFECT_RETRIGGER_HEADER = "Redéclencher l'effet"
@@ -71,7 +78,7 @@ export const EFFECT_FX_HEADER = "FX"
 /** Où les FX de l'effet se dessinent : mêmes choix que la couleur ; nulle part si rien n'est choisi. */
 export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
 
-export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "runes" | "attributes" | "materials" | "skills" | "achievements"
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements"
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
 export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
@@ -297,30 +304,20 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       },
     ],
   },
-  runes: {
-    key: "runes",
-    sheetName: "Index des runes",
-    title: "Runes",
-    path: "/ressources/index-des-runes",
+  // Runes, matériaux et attributs des armes, dans un seul classeur : la colonne Type range
+  // chaque ligne dans l'onglet qui porte sa valeur, sans la sortir de « Tout ».
+  "weapon-modifiers": {
+    key: "weapon-modifiers",
+    sheetName: WEAPON_MODIFIERS_SHEET,
+    title: "Armes - Modificateurs",
+    path: "/ressources/armes-modificateurs",
+    itemLabel: "un modificateur",
     tabs: [{
-      name: "Runes",
-      itemLabel: "une rune",
-      headers: ["Nom", "Type", "Élément", "Effet", "Se pose sur", "Rareté", "Description", "Note", ID_HEADER],
-      widths: [220, 140, 140, 380, 200, 130, 380, 280, 130],
-      idPrefix: "RUN",
-    }],
-  },
-  attributes: {
-    key: "attributes",
-    sheetName: "Index des attributs",
-    title: "Attributs",
-    path: "/ressources/index-des-attributs",
-    tabs: [{
-      name: "Attributs",
-      itemLabel: "un attribut",
-      headers: ["Nom", "Type", "Effet", "Description", "Note", ID_HEADER],
-      widths: [220, 160, 420, 380, 280, 130],
-      idPrefix: "ATT",
+      name: WEAPON_MODIFIERS_TAB,
+      itemLabel: "un modificateur",
+      headers: ["Nom", WEAPON_MODIFIER_TYPE_HEADER, "Description", WEAPON_MODIFIER_NUMBER_HEADER, WEAPON_MODIFIER_CHARGES_HEADER, WEAPON_MODIFIER_COLOR_HEADER, ID_HEADER],
+      widths: [220, 150, 420, 110, 110, 120, 130],
+      idPrefix: "MOD",
     }],
   },
   // Les succès des joueurs et des MJ, et qui les a obtenus : l'accueil et le profil les
@@ -334,19 +331,6 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       { name: ACHIEVEMENTS_TAB, itemLabel: "un succès", headers: ["Nom", ACHIEVEMENT_TYPE_HEADER, ACHIEVEMENT_SUBTYPE_HEADER, ACHIEVEMENT_DESCRIPTION_HEADER, ACHIEVEMENT_ICON_HEADER, ACHIEVEMENT_COLOR_HEADER, ID_HEADER], widths: [240, 120, 170, 420, 150, 140, 130], idPrefix: "SUC" },
       { name: OBTAINED_TAB, itemLabel: "une attribution", headers: [OBTAINED_ACHIEVEMENT_HEADER, OBTAINED_PLAYER_HEADER, OBTAINED_BY_HEADER, OBTAINED_DATE_HEADER, OBTAINED_NOTE_HEADER, OBTAINED_ACCOUNT_HEADER, ID_HEADER], widths: [240, 200, 200, 130, 320, 220, 130], idPrefix: "OBT" },
     ],
-  },
-  materials: {
-    key: "materials",
-    sheetName: "Index des matériaux",
-    title: "Matériaux",
-    path: "/ressources/index-des-materiaux",
-    tabs: [{
-      name: "Matériaux",
-      itemLabel: "un matériau",
-      headers: ["Nom", "Type", "Rareté", "Emplacement principal", "Emplacement secondaire", "Propriétés", "Description", "Note", ID_HEADER],
-      widths: [220, 150, 130, 200, 200, 320, 380, 280, 130],
-      idPrefix: "MAT",
-    }],
   },
 }
 
@@ -537,6 +521,13 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       return { kind: "rich" }
     }
     if (isHeader(header, [...STATE_LEVEL_HEADERS])) return { kind: "linked-choice", multiple: true, source: { index: "states", tab: EFFECTS_TAB, onlyTab: true } }
+    return { kind: "rich" }
+  }
+  if (index === "weapon-modifiers") {
+    if (isHeader(header, [WEAPON_MODIFIER_TYPE_HEADER])) return { kind: "tab-sort", description: "Rune, Matériau, Attribut… Chaque valeur a son onglet, où la ligne apparaît aussi ; elle reste dans « Tout »." }
+    if (isHeader(header, [WEAPON_MODIFIER_NUMBER_HEADER])) return { kind: "number", description: "Le % de chance d’un matériau, le nombre de runes d’un palier, le numéro du dé d’un attribut." }
+    if (isHeader(header, [WEAPON_MODIFIER_CHARGES_HEADER])) return { kind: "number", description: "Les charges ajoutées à l’arme ; vide : pas de charge." }
+    if (isHeader(header, [WEAPON_MODIFIER_COLOR_HEADER])) return { kind: "color" }
     return { kind: "rich" }
   }
   if (index === "skills") {

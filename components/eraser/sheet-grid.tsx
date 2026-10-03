@@ -290,7 +290,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
                 delay={column.commitDelay === Infinity ? 2_147_483_647 : column.commitDelay}
                 onCommit={(value) => actions.commit(rowKey, column.key, value)}
                 onActivate={(editor) => actions.activate(editor, rowKey, column.key)}
-                className={`min-h-full w-full rounded-md px-2 py-1.5 focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
+                className={`min-h-full w-full break-words rounded-md px-2 py-1.5 [overflow-wrap:anywhere] focus:bg-background focus:ring-2 focus:ring-ring/45 ${column.cellClassName || ""}`}
               />}
         {/* La poignée de recopie, pour tous les types de colonnes qu'on peut saisir. */}
         {isActive && !readOnly && !disabled && !column.custom && !column.computed && <span

@@ -59,6 +59,8 @@ import {
   canItemGoInInventoryCategory,
   inventoryCategories,
   inventoryWorkbookTabs,
+  objectCombatColumns,
+  type ObjectCombatFields,
   parseInventoryCategory,
   type CharacterInventoryRecord,
   type InventoryCategory,
@@ -991,8 +993,50 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
   // Les icônes s'écrivent par numéro de colonne : jamais pendant une réparation des en-têtes.
   if (tables.some(needsObjectIndexHeaderRepair)) scheduleObjectIndexHeaderRepair(tables)
-  else scheduleObjectIndexIconSync(tables)
+  else {
+    scheduleObjectIndexIconSync(tables)
+    // Des en-têtes ajoutés après la dernière colonne ne déplacent pas la colonne Icône.
+    if (tables.some((table) => missingObjectCombatHeaders(table).length)) scheduleObjectCombatColumns(tables)
+  }
   return tables
+}
+
+/** Les colonnes Compétence, Distance, Action, Dégâts absentes d'un tableau d'objets. */
+function missingObjectCombatHeaders(table: ObjectIndexTable) {
+  return objectCombatColumns.filter((column) => objectIndexColumn(table, [...column.aliases]) < 0).map((column) => column.header)
+}
+
+let objectCombatColumnsAttemptAt = 0
+
+function scheduleObjectCombatColumns(tables: ObjectIndexTable[]) {
+  if (Date.now() - objectCombatColumnsAttemptAt < 10 * 60_000) return
+  objectCombatColumnsAttemptAt = Date.now()
+  runInBackground(appendObjectCombatColumns(tables), "OBJECT_COMBAT_COLUMNS_FAILED")
+}
+
+/**
+ * Ajoute les en-têtes Compétence, Distance, Action, Dégâts à droite des tableaux
+ * d'objets qui ne les ont pas. Seule la ligne 1 change, au-delà de la dernière colonne
+ * utilisée : aucune colonne existante ne bouge et aucune valeur n'est touchée (les
+ * magasins lisent certaines colonnes par leur position).
+ */
+async function appendObjectCombatColumns(tables: ObjectIndexTable[]) {
+  for (const table of tables) {
+    const missing = missingObjectCombatHeaders(table)
+    if (!missing.length || needsObjectIndexHeaderRepair(table)) continue
+    // On relit la ligne 1 : un en-tête ajouté entre-temps (à la main, dans Sheets) n'est pas doublé.
+    const [firstRow = []] = await readRange(table.fileId, sheetTabRange(table.tabName, "A1:AZ1")).catch(() => [[] as string[]])
+    const present = new Set(firstRow.map((header) => normalizedHeader(header ?? "")))
+    const headers = missing.filter((header) => !objectCombatColumns.find((column) => column.header === header)?.aliases.some((alias) => present.has(normalizedHeader(alias))))
+    // Après la dernière colonne qui contient quelque chose, en-tête ou valeur.
+    const start = Math.max(table.headers.length, firstRow.length)
+    if (!headers.length || start + headers.length > 52) continue
+    await ensureSheetColumnCount(table.fileId, table.tabName, start + headers.length)
+    await updateRanges(table.fileId, [{ range: sheetTabRange(table.tabName, `${columnName(start + 1)}1:${columnName(start + headers.length)}1`), values: [headers] }], { valueInputOption: "RAW" })
+    console.info("OBJECT_COMBAT_COLUMNS_ADDED", table.fileName, table.tabName, headers)
+    clearSpreadsheetReadCache(table.fileId)
+  }
+  clearObjectIndexTableCache()
 }
 
 /**
@@ -5103,8 +5147,19 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       prerequisites: objectIndexCell(table, row, ["Prérequis", "Prerequis"]),
       edition: objectIndexCell(table, row, ["Édition", "Edition"]),
       active: sheetValueIsActive(objectIndexCell(table, row, ["Actif", "Active", "Disponible"])),
+      ...objectCombatFields(table, row),
     }]
   }))
+}
+
+/** Compétence, Distance, Action, Dégâts d'un objet (les cases vides sont omises). */
+export function objectCombatFields(table: ObjectIndexTable, row: ObjectIndexRow): ObjectCombatFields {
+  const fields: ObjectCombatFields = {}
+  for (const column of objectCombatColumns) {
+    const value = objectIndexCell(table, row, [...column.aliases]).trim()
+    if (value && !isSheetErrorValue(value)) fields[column.key] = value
+  }
+  return fields
 }
 
 async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWorkbook> {

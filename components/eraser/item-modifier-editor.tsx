@@ -10,7 +10,8 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import { LinkedChoicePicker } from "@/components/eraser/index-cells"
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
-import { splitNames } from "@/lib/world-index-definitions"
+import { splitNames, WEAPON_MODIFIER_TYPE_HEADER, WEAPON_MODIFIERS_TAB } from "@/lib/world-index-definitions"
+import type { ChoiceSource } from "@/lib/index-columns"
 import {
   buildItemModifierTargets,
   itemAttachmentKinds,
@@ -113,11 +114,14 @@ function TargetPicker({ value, onChange }: { value: string; onChange: (target: s
   </Popover>
 }
 
-/** D'où viennent les noms proposés : l'Index des runes, des attributs, des matériaux. */
-const attachmentSources: Record<ItemAttachmentKind, { index: "runes" | "attributes" | "materials"; tab: string }> = {
-  rune: { index: "runes", tab: "Runes" },
-  attribut: { index: "attributes", tab: "Attributs" },
-  materiau: { index: "materials", tab: "Matériaux" },
+/**
+ * D'où viennent les noms proposés : « Armes - Modificateurs », les lignes dont le Type
+ * commence par Rune, Attribut ou Matériau (au singulier comme au pluriel).
+ */
+const attachmentSources: Record<ItemAttachmentKind, ChoiceSource> = {
+  rune: { index: "weapon-modifiers", tab: WEAPON_MODIFIERS_TAB, include: { column: WEAPON_MODIFIER_TYPE_HEADER, value: "Rune" } },
+  attribut: { index: "weapon-modifiers", tab: WEAPON_MODIFIERS_TAB, include: { column: WEAPON_MODIFIER_TYPE_HEADER, value: "Attribut" } },
+  materiau: { index: "weapon-modifiers", tab: WEAPON_MODIFIERS_TAB, include: { column: WEAPON_MODIFIER_TYPE_HEADER, value: "Matériau" } },
 }
 
 /** Monté seulement à l’ouverture : le brouillon repart des liens enregistrés à chaque fois. */
@@ -145,7 +149,7 @@ function ItemModifierForm({ modifiers, attachments, pending, onSave, onClose }: 
       {itemAttachmentKinds.map((kind) => <TabsTrigger key={kind} value={kind}>{itemAttachmentLabels[kind].plural}{namesOf(kind).length > 0 && <span className="ml-1 tabular-nums text-muted-foreground">{namesOf(kind).length}</span>}</TabsTrigger>)}
     </TabsList>
     {itemAttachmentKinds.map((kind) => <TabsContent key={kind} value={kind} className="grid gap-2">
-      <p className="text-xs leading-5 text-muted-foreground">Choisis dans l’Index des {itemAttachmentLabels[kind].plural.toLocaleLowerCase("fr")}. Leur effet sur l’objet sera défini plus tard.</p>
+      <p className="text-xs leading-5 text-muted-foreground">Choisis dans « Armes - Modificateurs » (Type : {itemAttachmentLabels[kind].singular}). Un nom tapé ici y est ajouté avec ce Type.</p>
       <div className="rounded-md border bg-background/55"><LinkedChoicePicker compact={false} multiple label={itemAttachmentLabels[kind].plural} source={attachmentSources[kind]} value={namesOf(kind).join(", ")} onChange={(value) => setNames(kind, value)} /></div>
     </TabsContent>)}
     <TabsContent value="liens" className="grid gap-3">

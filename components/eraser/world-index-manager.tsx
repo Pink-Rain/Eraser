@@ -49,6 +49,15 @@ import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world
 const ALL_TABS = "*"
 /** Colonne propre à la vue « Tout » : l'onglet de chaque ligne, qu'on peut changer. */
 const TAB_COLUMN = "__onglet"
+/** Un onglet de rangement dans la liste des onglets : « rangement:Rune ». */
+const SORT_PREFIX = "rangement:"
+
+/**
+ * Un onglet de rangement : une valeur d'une colonne « Rangement en onglets ». Il montre
+ * les lignes qui portent cette valeur, sans les sortir de leur onglet ; un vrai onglet du
+ * même nom (lignes rangées par une version d'avant) y est réuni, rien n'est caché.
+ */
+type SortTab = { value: string; columns: string[]; count: number }
 
 function columnWidthFor(header: string, fallback?: number) {
   if (fallback) return fallback
@@ -181,22 +190,55 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const settings = useIndexSettings(indexKey)
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   const activeView = useMemo(() => { const id = viewIdOfSelectKey(tabName); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [settings.views, tabName])
-  const selectedTable = activeView ? undefined : tables.find((candidate) => candidate.tabName === tabName)
-  // « Tout » n'a de sens que si les onglets ont les mêmes colonnes : les lieux, pas les religions.
-  const canShowAll = useMemo(() => {
-    const signature = (tab: string) => (data?.columns[tab] ?? []).map((column) => foldName(column.header)).sort().join("|")
-    return tables.length > 1 && tables.every((candidate) => signature(candidate.tabName) === signature(tables[0].tabName))
+  // Les onglets de rangement : une par valeur des colonnes « Rangement en onglets ».
+  const sortTabs = useMemo(() => {
+    const found = new Map<string, SortTab>()
+    for (const owner of tables) {
+      for (const column of data?.columns[owner.tabName] ?? []) {
+        if (column.spec.kind !== "tab-sort") continue
+        const at = columnIndexOf(owner, column.header)
+        if (at < 0) continue
+        for (const row of owner.rows) {
+          const value = (row.values[at] ?? "").replace(/<[^>]+>/g, "").trim()
+          if (!value || foldName(value) === foldName(owner.tabName)) continue
+          const entry = found.get(foldName(value)) ?? { value, columns: [], count: 0 }
+          if (!entry.columns.some((header) => foldName(header) === foldName(column.header))) entry.columns.push(column.header)
+          entry.count += 1
+          found.set(foldName(value), entry)
+        }
+      }
+    }
+    // Un vrai onglet du même nom (rangement d'avant) : ses lignes comptent aussi.
+    for (const entry of found.values()) entry.count += tables.find((candidate) => foldName(candidate.tabName) === foldName(entry.value))?.rows.length ?? 0
+    return [...found.values()].sort((left, right) => left.value.localeCompare(right.value, "fr"))
   }, [data, tables])
-  const showAll = !activeView && canShowAll && tables.length > 1 && !selectedTable
+  const activeSort = useMemo(() => activeView || !tabName.startsWith(SORT_PREFIX) ? null : sortTabs.find((entry) => foldName(entry.value) === foldName(tabName.slice(SORT_PREFIX.length))) ?? null, [activeView, sortTabs, tabName])
+  const absorbed = useMemo(() => new Set(sortTabs.map((entry) => foldName(entry.value))), [sortTabs])
+  const selectedTable = activeView || activeSort ? undefined : tables.find((candidate) => candidate.tabName === tabName)
+  // « Tout » n'a de sens que si les onglets ont les mêmes colonnes : les lieux, pas les religions.
+  // Un vrai onglet nommé comme une valeur de rangement se fond dans l'onglet de rangement : il ne compte pas ici.
+  const visibleTables = useMemo(() => {
+    const kept = tables.filter((candidate) => !absorbed.has(foldName(candidate.tabName)))
+    return kept.length ? kept : tables
+  }, [absorbed, tables])
+  const signatureOf = useCallback((tab: string) => (data?.columns[tab] ?? []).map((column) => foldName(column.header)).sort().join("|"), [data])
+  const canShowAll = useMemo(() => visibleTables.length > 1 && visibleTables.every((candidate) => signatureOf(candidate.tabName) === signatureOf(visibleTables[0].tabName)), [signatureOf, visibleTables])
+  const allTables = useMemo(() => canShowAll ? tables.filter((candidate) => signatureOf(candidate.tabName) === signatureOf(visibleTables[0].tabName)) : [], [canShowAll, signatureOf, tables, visibleTables])
+  const showAll = !activeView && !activeSort && canShowAll && tables.length > 1 && !selectedTable
   const viewTables = useMemo(() => {
+    if (activeSort) {
+      // Les onglets qui ont la colonne de rangement, et le vrai onglet du même nom s'il existe.
+      const owners = tables.filter((candidate) => foldName(candidate.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => columnIndexOf(candidate, header) >= 0))
+      return owners.length ? owners : tables.slice(0, 1)
+    }
     if (activeView) {
       const source = activeView.source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === activeView.source)
       return source.length ? source : tables.slice(0, 1)
     }
-    return showAll ? tables : selectedTable ? [selectedTable] : tables.slice(0, 1)
-  }, [activeView, selectedTable, showAll, tables])
+    return showAll ? allTables : selectedTable ? [selectedTable] : visibleTables.slice(0, 1)
+  }, [activeSort, activeView, allTables, selectedTable, showAll, tables, visibleTables])
   // Plusieurs onglets à la fois (« Tout » ou une fenêtre sur tout l'index) : la colonne Onglet dit d'où vient la ligne.
-  const spanning = showAll || Boolean(activeView && viewTables.length > 1)
+  const spanning = showAll || Boolean((activeView || activeSort) && viewTables.length > 1)
   // Le premier tableau affiché donne les colonnes : les onglets d'un même index ont les mêmes.
   const table: WorldIndexTable | null = viewTables[0] ?? null
   const tabDefinition = useMemo(() => definition.tabs.find((tab) => tab.name === table?.tabName) ?? definition.tabs[0] ?? { name: "", itemLabel: "une ligne", headers: [], widths: [], idPrefix: "IDX" }, [definition, table])
@@ -261,19 +303,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const found = locate(rowKey)
     const column = found ? columnIndexOf(found.table, columnKey) : -1
     if (!found || column < 0) return
-    // Rangement en onglets : la valeur choisit l'onglet ; la ligne y part (il est créé au besoin).
-    if (specOf(found.table.tabName, columnKey).kind === "tab-sort") {
-      setSaving((current) => current + 1)
-      try {
-        const payload = await post({ action: "sort", tabName: found.table.tabName, rowNumber: found.row.rowNumber, header: columnKey, html: value })
-        setError("")
-        if (payload.data) applyData(payload.data, payload.seq)
-      } catch (reason) {
-        setError(reason instanceof Error ? reason.message : "La ligne n’a pas pu être rangée dans cet onglet.")
-      }
-      setSaving((current) => current - 1)
-      return
-    }
+    // Rangement en onglets : la valeur est écrite comme une autre ; la ligne reste dans son
+    // onglet et apparaît aussi dans l'onglet de rangement qui porte cette valeur.
     localEdits.current[`${rowKey}:${columnKey}`] = value
     engineRef.current?.invalidate()
     setSaving((current) => current + 1)
@@ -281,6 +312,23 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       const payload = await post({ action: "update-cell", tabName: found.table.tabName, rowNumber: found.row.rowNumber, column, html: value })
       setError("")
       if (payload.data) applyData(payload.data, payload.seq)
+      // Une valeur de rangement fait naître (ou disparaître) son onglet : l'index gardé ici
+      // reçoit la valeur tout de suite, sans attendre une relecture.
+      else if (specOf(found.table.tabName, columnKey).kind === "tab-sort") {
+        const text = value.replace(/<[^>]+>/g, "").trim()
+        setData((current) => current && {
+          ...current,
+          tables: current.tables.map((owner) => owner.tabName !== found.table.tabName ? owner : {
+            ...owner,
+            rows: owner.rows.map((row) => row.rowNumber !== found.row.rowNumber ? row : {
+              ...row,
+              // Une ligne de Sheets s'arrête à sa dernière case remplie : on l'allonge au besoin.
+              values: Array.from({ length: Math.max(row.values.length, column + 1) }, (_, index) => index === column ? text : row.values[index] ?? ""),
+              html: Array.from({ length: Math.max(row.html.length, column + 1) }, (_, index) => index === column ? value : row.html[index] ?? ""),
+            }),
+          }),
+        })
+      }
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Cette cellule n’a pas pu être enregistrée.")
     }
@@ -472,8 +520,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     if (found && columnKey !== TAB_COLUMN) {
       const spec = specOf(found.table.tabName, columnKey)
       if (isComputedSpec(spec) && spec.kind !== "auto-links" && spec.kind !== "actions") return engine.computedText(rowKey, columnKey, spec) ?? ""
-      // Une case de rangement vide montre l'onglet où la ligne se trouve déjà.
-      if (spec.kind === "tab-sort") return rawOf(rowKey, columnKey).trim() || found.table.tabName
     }
     return rawOf(rowKey, columnKey)
   }, [engine, locate, rawOf, specOf])
@@ -589,12 +635,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         draw: async (rowKey, columnKey, spec) => { await drawCell(rowKey, columnKey, spec) },
         buttonVisible: (rowKey, button) => engine.buttonVisible(rowKey, button),
         runButton,
-        tabNames: definition.tabs.map((tab) => tab.name),
+        tabNames: sortTabs.map((entry) => entry.value),
       },
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     return list
-  }, [busy, commitCell, computed, definition, drawCell, engine, runButton, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, computed, drawCell, engine, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -615,6 +661,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const folded = foldName(query)
     const rows = viewTables.flatMap((owner) => owner.rows
       .filter((row) => !activeView || matchesView(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
+      // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
+      .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
       .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
       .map((row) => {
         const column = sort ? (sort.column === TAB_COLUMN ? -1 : columnIndexOf(owner, sort.column)) : -1
@@ -628,7 +676,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       ? [...rows].sort((left, right) => compareSortKeys(left.sortValue, right.sortValue) * (sort.direction === "asc" ? 1 : -1))
       : rows
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [activeView, query, sort, specOf, viewTables])
+  }, [activeSort, activeView, query, sort, specOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
@@ -676,7 +724,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     draw: async (spec) => { await drawCell(details, header, spec) },
     buttonVisible: (button) => engine.buttonVisible(details, button),
     runButton: (button) => runButton(details, button),
-    tabNames: definition.tabs.map((tab) => tab.name),
+    tabNames: sortTabs.map((entry) => entry.value),
   }
 
   async function saveSheet(changes: Record<string, string>) {
@@ -684,15 +732,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     setSheetPending(true); setSheetError("")
     try {
       // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs effets.
-      // Le rangement en onglets passe en dernier : il déplace la ligne, la fiche se ferme ensuite.
-      const tabName = parseRowKey(details).tabName
-      const entries = Object.entries(changes).sort(([left], [right]) => Number(specOf(tabName, left).kind === "tab-sort") - Number(specOf(tabName, right).kind === "tab-sort"))
-      let moved = false
-      for (const [header, value] of entries) {
-        await commitCell(details, header, value)
-        if (specOf(tabName, header).kind === "tab-sort") moved = true
-      }
-      if (moved) setDetails(null)
+      for (const [header, value] of Object.entries(changes)) await commitCell(details, header, value)
     } catch (reason) {
       setSheetError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")
     }
@@ -745,14 +785,16 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   return (
     <section className="mt-4 flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        {(tables.length > 1 || settings.views.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+        {(tables.length > 1 || settings.views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Onglet
           <span className="flex items-center gap-1">
             <IndexTabPicker
-              value={activeView ? viewSelectKey(activeView.id) : showAll ? ALL_TABS : table?.tabName ?? ""}
+              value={activeView ? viewSelectKey(activeView.id) : activeSort ? `${SORT_PREFIX}${activeSort.value}` : showAll ? ALL_TABS : table?.tabName ?? ""}
               options={[
-                ...(canShowAll ? [{ value: ALL_TABS, label: "Tout", detail: String(tables.reduce((total, candidate) => total + candidate.rows.length, 0)) }] : []),
-                ...tables.map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
+                ...(canShowAll ? [{ value: ALL_TABS, label: "Tout", detail: String(allTables.reduce((total, candidate) => total + candidate.rows.length, 0)) }] : []),
+                // Un vrai onglet qui porte le nom d'une valeur de rangement est réuni à son onglet de rangement.
+                ...tables.filter((candidate) => !absorbed.has(foldName(candidate.tabName))).map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
+                ...sortTabs.map((entry) => ({ value: `${SORT_PREFIX}${entry.value}`, label: entry.value, detail: String(entry.count) })),
                 ...settings.views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
               ]}
               onChange={(value) => { setTabName(value); setCreating(false); setDetails(null) }}
@@ -814,12 +856,13 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           </NativeSelect>
         </label> : undefined}
         onCancel={() => setCreating(false)}
-        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] ?? ""))}
+        // Ajouter depuis un onglet de rangement : la ligne reçoit sa valeur (elle y apparaît aussitôt).
+        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")))}
       />}
 
       {table ? (
         <SheetGrid
-          layoutKey={`eraser:world-index:grid:${indexKey}:${activeView ? `fenetre:${activeView.id}` : showAll ? "tout" : table.tabName}`}
+          layoutKey={`eraser:world-index:grid:${indexKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
           columns={columns}
           rows={displayedRows}
           valueOf={valueOf}

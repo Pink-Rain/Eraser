@@ -600,9 +600,9 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
   </Popover>
 
   if (scale === "cell") {
-    return <span className="flex min-h-8 items-center gap-0.5 px-1.5" style={{ color }} role="group" aria-label={`${label} : ${text || "vide"}`}>
+    return <span className="flex min-h-8 flex-wrap items-center gap-0.5 px-1.5 py-1" style={{ color }} role="group" aria-label={`${label} : ${text || "vide"}`}>
       {special ? <span className="text-sm font-semibold" title="Sans limite">{settings.unlimited}</span>
-        : number === null && text ? <span className="text-sm">{text}</span>
+        : number === null && text ? <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] text-sm">{text}</span>
         : Array.from({ length: Math.min(max, iconCap) }, (_, index) => <IndexIconGlyph key={index} icon={look.icon} emoji={look.emoji} stroke={settings.strokeColor} />)}
       {max > iconCap && <span className="text-[11px] font-semibold">+{max - iconCap}</span>}
       {number === 0 && <span className="text-xs text-muted-foreground">0</span>}
@@ -612,7 +612,7 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
 
   if (settings.style === "icons") {
     const count = Math.min(max, iconCap)
-    return <span className="flex min-h-8 items-center gap-0.5 px-1.5" style={{ color }} role="group" aria-label={`${label} : ${current ?? "vide"} sur ${max}`}>
+    return <span className="flex min-h-8 flex-wrap items-center gap-0.5 px-1.5 py-1" style={{ color }} role="group" aria-label={`${label} : ${current ?? "vide"} sur ${max}`}>
       {Array.from({ length: count }, (_, index) => {
         const filled = current !== null && index < current
         return <button key={index} type="button" disabled={disabled} onClick={() => set(current !== null && index < current ? index : index + 1)} className={`inline-flex rounded-sm p-0.5 transition hover:scale-110 disabled:hover:scale-100 ${filled ? "opacity-100" : "opacity-30 hover:opacity-60"}`} aria-label={`${label} : ${index + 1}`}>

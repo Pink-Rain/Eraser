@@ -60,7 +60,9 @@ export async function POST(request: Request) {
     }
     if (body.action === "ensure" && typeof body.name === "string") {
       // Liste déroulante liée : la réponse reste légère, la page n'affiche pas cet index.
-      const created = await ensureWorldIndexEntry(key, body.tabName, body.name)
+      // Une liste filtrée (« Type : Rune ») remplit aussi ce champ dans la ligne créée.
+      const fields = body.fields && typeof body.fields === "object" ? Object.fromEntries(Object.entries(body.fields as Record<string, unknown>).filter((entry): entry is [string, string] => typeof entry[1] === "string")) : undefined
+      const created = await ensureWorldIndexEntry(key, body.tabName, body.name, fields)
       return NextResponse.json({ ok: true, created })
     }
     if (body.action === "normalize-choices") {

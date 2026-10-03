@@ -12,17 +12,17 @@ import type { FormulaDisplay } from "@/lib/index-formula"
 export const FormulaCell = memo(function FormulaCell({ display }: { display: FormulaDisplay }) {
   switch (display.kind) {
     case "error":
-      return <span className="flex min-h-8 items-center px-2 text-xs font-semibold text-destructive" title={display.message}>#ERREUR <span className="ml-1 truncate font-normal">{display.message}</span></span>
+      return <span className="flex min-h-8 flex-wrap items-center px-2 py-1 text-xs font-semibold text-destructive" title={display.message}>#ERREUR <span className="ml-1 min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] font-normal">{display.message}</span></span>
     case "checkbox":
       return <span className="flex min-h-8 items-center px-2" aria-label={display.value ? "Vrai" : "Faux"}>{display.value ? <Check className="size-4 text-primary" /> : <X className="size-4 text-muted-foreground/60" />}</span>
     case "list":
-      return <span className="flex min-h-8 flex-wrap items-center gap-1 px-2 py-1">{display.items.map((item, index) => <span key={`${item}:${index}`} className="rounded-full border bg-muted/60 px-2 py-0.5 text-[11px]">{item}</span>)}</span>
+      return <span className="flex min-h-8 flex-wrap items-center gap-1 px-2 py-1">{display.items.map((item, index) => <span key={`${item}:${index}`} className="max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border bg-muted/60 px-2 py-0.5 text-[11px]">{item}</span>)}</span>
     case "color":
-      return <span className="flex min-h-8 items-center gap-2 px-2 text-xs text-muted-foreground">{display.value && <span className="size-4 rounded-full border" style={{ backgroundColor: display.value }} />}{display.value}</span>
+      return <span className="flex min-h-8 items-center gap-2 px-2 text-xs text-muted-foreground">{display.value && <span className="size-4 shrink-0 rounded-full border" style={{ backgroundColor: display.value }} />}<span className="min-w-0 break-all">{display.value}</span></span>
     case "number":
-      return <span className="flex min-h-8 items-center justify-end px-2 text-sm tabular-nums">{display.text}</span>
+      return <span className="flex min-h-8 items-center justify-end px-2 py-1 text-right text-sm tabular-nums"><span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{display.text}</span></span>
     default:
-      return <span className="flex min-h-8 items-center whitespace-pre-wrap px-2 py-1 text-sm">{display.text}</span>
+      return <span className="flex min-h-8 items-center whitespace-pre-wrap break-words px-2 py-1 text-sm [overflow-wrap:anywhere]">{display.text}</span>
   }
 })
 
@@ -35,7 +35,7 @@ export const RandomCell = memo(function RandomCell({ label, value, settings, dis
   const [pending, setPending] = useState(false)
   const fixed = settings.mode === "fixed" && Boolean(value.trim())
   return <span className="group/random flex min-h-8 items-center gap-1 px-2">
-    <span className="min-w-0 flex-1 whitespace-pre-wrap text-sm">{value || <span className="text-xs text-muted-foreground">—</span>}</span>
+    <span className="min-w-0 flex-1 whitespace-pre-wrap break-words py-1 text-sm [overflow-wrap:anywhere]">{value || <span className="text-xs text-muted-foreground">—</span>}</span>
     {fixed
       ? <span className="shrink-0 text-muted-foreground/60" title="Tirage figé : vide la case (clic droit › Vider) ou utilise un bouton « Tirer au sort » pour retirer."><Lock className="size-3.5" /></span>
       : <button type="button" disabled={disabled || pending} onClick={async () => { setPending(true); try { await onDraw() } finally { setPending(false) } }} className="shrink-0 rounded-md p-1 text-primary hover:bg-primary/10 disabled:opacity-40" title={value ? "Relancer le tirage" : "Tirer au sort"} aria-label={`${label} : ${value ? "relancer" : "tirer"}`}>
@@ -54,11 +54,11 @@ export function ActionButtonView({ button, disabled = false, onRun }: { button: 
     onClick={async (event) => { event.stopPropagation(); setPending(true); try { await onRun() } finally { setPending(false) } }}
     title={button.iconOnly ? button.label : undefined}
     aria-label={button.label}
-    className="inline-flex h-7 shrink-0 items-center gap-1 rounded-md border px-2 text-xs font-semibold transition hover:brightness-95 disabled:opacity-50"
+    className="inline-flex min-h-7 max-w-full items-center gap-1 rounded-md border px-2 py-1 text-left text-xs font-semibold transition hover:brightness-95 disabled:opacity-50"
     style={style}
   >
     {pending ? <LoaderCircle className="size-3.5 animate-spin" /> : (button.icon || !button.iconOnly) && <IndexIconGlyph icon={button.icon || "zap"} className="size-3.5" filled={false} />}
-    {!button.iconOnly && <span className="truncate">{button.label || "Bouton"}</span>}
+    {!button.iconOnly && <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{button.label || "Bouton"}</span>}
   </button>
 }
 

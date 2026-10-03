@@ -1,5 +1,6 @@
 "use client"
 
+import { ObjectCombatDetails } from "@/components/eraser/object-combat-details"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Backpack, Check, CloudOff, Dices, LoaderCircle, MapPin, MoveRight, PackageOpen, Pin, RefreshCw, Search, Shuffle, UserRound, Users, X } from "lucide-react"
 
@@ -171,6 +172,7 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
         {item && (item.descriptionHtml?.trim()
           ? <p className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.descriptionHtml) }} />
           : item.description && <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{item.description}</p>)}
+        {item && <ObjectCombatDetails item={item} className="mt-1" />}
         {item && (item.effectHtml?.trim()
           ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /></p>
           : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>)}

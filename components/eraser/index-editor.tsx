@@ -519,7 +519,7 @@ function TypeSettings(props: SettingsProps) {
       <div className="grid gap-1"><span className="font-semibold">Couleur</span><ColorSwatches value={spec.glyph?.color} disabled={disabled} onChange={(color) => set({ glyph: { ...spec.glyph, color } })} /></div>
       <label className="flex items-center gap-2"><Checkbox disabled={disabled} checked={spec.glyph?.filled !== false} onCheckedChange={(checked) => set({ glyph: { ...spec.glyph, filled: checked === true } })} />Icône pleine (décochée : seulement son contour)</label>
     </div>
-    case "tab-sort": return <p className="text-xs text-muted-foreground">La liste propose les onglets de l’index. Choisir un onglet y déplace la ligne ; taper un nom nouveau crée l’onglet (avec les mêmes colonnes) puis y range la ligne. Le nom de l’onglet est aussi écrit dans la case, lisible dans Sheets.</p>
+    case "tab-sort": return <p className="text-xs text-muted-foreground">Chaque valeur devient un onglet qui porte son nom et montre les lignes qui l’ont. La ligne reste dans son onglet et apparaît en plus dans celui de sa valeur : rien n’est déplacé dans Sheets. La liste propose les valeurs déjà utilisées ; une valeur nouvelle crée son onglet.</p>
     case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "linked-choice": {
       const source = spec.source ?? { index: targets[0]?.index ?? "peoples", tab: "" }

@@ -1018,7 +1018,7 @@ export function normalizeWorldIndexChoices(key: WorldIndexKey) {
  * Liste déroulante liée : le nom choisi existe-t-il dans l'index source ? Sinon sa
  * ligne y est créée, comme pour une colonne liée. Renvoie `true` si une ligne a été créée.
  */
-export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name: string) {
+export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name: string, fields: Record<string, string> = {}) {
   return serialized(async () => {
     const clean = name.replace(/\s+/g, " ").trim()
     if (!clean) return false
@@ -1028,7 +1028,9 @@ export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name:
     const table = await plainTable(key, tabName)
     const nameColumn = columnOf(table.headers, "Nom")
     if (nameColumn < 0) return false
-    await writeNewRow(key, table, tabName, table.headers.map((_, index) => index === nameColumn ? clean : ""))
+    // Les autres champs donnés (le Type d'une liste filtrée) sont écrits avec le nom.
+    const extra = new Map(Object.entries(fields).map(([header, value]) => [foldName(header), value.trim()]))
+    await writeNewRow(key, table, tabName, table.headers.map((header, index) => index === nameColumn ? clean : extra.get(foldName(header)) ?? ""))
     invalidateWorldIndexes([key])
     return true
   })
