@@ -72,7 +72,7 @@ test("{Valeur} et les autres accolades sont remplacées hors du tableau", () => 
 test("types des colonnes de combat dans l'Index des objets", () => {
   const headers = [...armes.slice(0, -1), "Valeur", "Attributs"];
   const spec = (header) => columns.objectColumnSpec(header, headers);
-  assert.deepEqual(spec("Compétence"), { kind: "linked-choice", source: { index: "skills", tab: "Caractéristiques" } });
+  assert.deepEqual(spec("Compétence"), { kind: "linked-choice", multiple: true, source: { index: "skills", tab: "Caractéristiques" } });
   assert.deepEqual(spec("Distance"), { kind: "number", number: { unit: "distance", defaultUnit: "m" } });
   assert.equal(spec("Action").kind, "choice");
   assert.ok(spec("Action").options.some((option) => option.value === "Actif -Action majeur"));

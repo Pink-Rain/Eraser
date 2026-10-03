@@ -1,37 +1,28 @@
-# Eraser 0.1.1-alpha.116 — États, attributs et matériaux cités entre accolades
+# Eraser 0.1.1-alpha.117 — Style imposé réparé
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## {Empoisonnement}, {Lourde}, {Acier trempé}
+## Le style imposé s'enregistre à nouveau
 
-Dans la description ou l'effet d'un index (objets, sorts, succès, et même les états et
-les modificateurs d'armes entre eux), écris le nom d'un état, d'un attribut ou d'un
-matériau entre accolades : « Applique {Empoisonnement} ». Hors des tableaux, le nom
-s'affiche avec sa propre mise en forme (celle de sa case Nom, sinon sa couleur ; un état
-garde aussi son icône), souligné en pointillés.
+Dans « Modifier », le bouton « Enregistrer » restait grisé dès qu'un onglet contenait
+deux colonnes du même nom, même si on ne touchait qu'au style d'une autre colonne.
+C'est le cas de la plupart des onglets de l'Index des objets, qui ont deux colonnes
+« Rareté ». Seuls les noms ajoutés ou modifiés sont maintenant vérifiés : les doublons
+déjà présents dans la feuille n'empêchent plus d'enregistrer.
 
-Au survol :
+## Le style imposé s'affiche sur tous les types de colonnes
 
-- un **état** montre le même résumé que sur la fiche d'un personnage : son icône, son
-  type, la description du niveau 1 et du niveau 2, et ses règles liées ;
-- un **attribut** ou un **matériau** montre son type, sa description, sa chance et ses
-  charges.
+Le style (gras, italique, souligné, barré, taille, police, casse, couleur) ne s'appliquait
+vraiment qu'aux colonnes Texte. Il s'applique maintenant aussi au Nom, aux listes, aux
+rangements en onglets, aux nombres, aux identifiants et aux autres types de colonnes.
+Un Nom avec un style imposé suit ce style (il n'est plus forcé en gras). Les bordures du
+tableau gardent leur couleur : un style imposé ne colore que le texte.
 
-Dans le tableau de l'index, le texte reste tel que tu l'as écrit. Une accolade qui ne
-nomme rien de connu reste écrite telle quelle. Les noms sont reconnus sans tenir compte
-des majuscules ni des accents. Pour un objet, {Valeur}, {Distance} et les autres
-colonnes de la ligne passent en premier.
+## Index des objets
 
-Cela marche dans les inventaires, les magasins, la fouille, la fenêtre de magasin sur la
-table, les sorts (fiche, cartes de choix, liste des sorts, détail de classe) et les
-succès.
+- La colonne **Compétence** accepte plusieurs compétences ou caractéristiques.
 
-## Attributs : la colonne Nombre est un % de chance
+## Survol des attributs et matériaux
 
-Comme pour les matériaux, Nombre donne le pourcentage de chance d'un attribut. Une case
-vide veut dire chance normale (« Chance : normale » au survol).
-
-## Petits plus
-
-- La ligne « Attributs : » d'un objet montre chaque attribut connu avec son détail au
-  survol.
+- La ligne « Chance » n'apparaît plus dans le détail au survol. Les charges restent
+  affichées quand elles sont remplies.

@@ -240,7 +240,8 @@ const SheetGridRowView = memo(function SheetGridRowView({
   // Le fond reste opaque : une cellule figée laisserait sinon voir la colonne
   // qui défile derrière elle. La teinte de sélection est posée par-dessus.
   // Teinte opaque : les colonnes figées recouvrent celles qui défilent.
-  const cellBase = `relative border-b border-r p-1 align-top ${striped ? "bg-[color-mix(in_oklab,var(--background)_95%,var(--foreground))]" : "bg-background"} ${manualHeight ? "overflow-hidden" : ""}`
+  // Bordures toujours de la couleur du tableau : un style imposé ne colore que le texte.
+  const cellBase = `relative border-b border-r border-foreground p-1 align-top ${striped ? "bg-[color-mix(in_oklab,var(--background)_95%,var(--foreground))]" : "bg-background"} ${manualHeight ? "overflow-hidden" : ""}`
   return <tr data-row-key={rowKey} data-row-index={rowIndex} style={manualHeight ? { height: manualHeight } : undefined}>
     <ContextMenu>
       <ContextMenuTrigger asChild>
@@ -273,7 +274,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
         key={column.key}
         onPointerDownCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
         onFocusCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
-        className={`${cellBase} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${isActive && column.control && !readOnly ? "ring-1 ring-inset ring-primary/45" : ""} ${column.key === firstKey ? "z-10" : ""}`}
+        className={`${cellBase} ${column.control ? column.cellClassName ?? "" : ""} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${isActive && column.control && !readOnly ? "ring-1 ring-inset ring-primary/45" : ""} ${column.key === firstKey ? "z-10" : ""}`}
         style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, ...column.cellStyle } : column.cellStyle}
       >
         {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}

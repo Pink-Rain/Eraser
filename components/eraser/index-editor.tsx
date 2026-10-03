@@ -768,7 +768,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const liveTabs = tabs.filter((candidate) => !candidate.removed)
   const problems = useMemo(() => tabs.flatMap((candidate) => candidate.removed ? [] : [
     ...(candidate.name.trim() !== candidate.original ? [tabProblem(candidate.name, tabs.filter((other) => other.id !== candidate.id && !other.removed).map((other) => other.name))] : []),
-    ...candidate.columns.filter((item) => !item.removed).map((item) => headerProblem(item.header, candidate.columns.filter((other) => other.id !== item.id && !other.removed).map((other) => other.header))),
+    // Seuls les noms ajoutés ou modifiés sont vérifiés : deux colonnes du même nom déjà dans
+    // la feuille (« Rareté » en double) ne doivent pas empêcher d'enregistrer autre chose.
+    ...candidate.columns.filter((item) => !item.removed && item.header.trim() !== item.original).map((item) => headerProblem(item.header, candidate.columns.filter((other) => other.id !== item.id && !other.removed).map((other) => other.header))),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "linked" && item.spec.link && !item.spec.link.column.trim() && !item.original).map((item) => `« ${item.header} » : une colonne liée doit nommer la colonne qui lui répond en face.`),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "formula" && item.spec.formula?.expression.trim() && formulaProblem(item.spec.formula.expression)).map((item) => `« ${item.header} » : ${formulaProblem(item.spec.formula!.expression)}`),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "gauge" && gaugeScaleOf(item.spec.gauge) === "from-column" && !item.spec.gauge?.maxColumn).map((item) => `« ${item.header} » : choisis la colonne qui donne le maximum de la jauge.`),

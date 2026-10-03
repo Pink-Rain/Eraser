@@ -129,9 +129,8 @@ export function StateDetails({ definition, level, color }: { definition: StateDe
   </div>
 }
 
-/** Le détail d'un attribut ou d'un matériau : type, description, chance et charges. */
+/** Le détail d'un attribut ou d'un matériau : type, description et charges. */
 function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; color: string }) {
-  const chance = modifier.number.trim()
   return <div className="grid gap-2">
     <div>
       <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierName modifier={modifier} color={color} /></p>
@@ -140,10 +139,9 @@ function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; col
     {modifier.descriptionHtml
       ? <IndexRichText html={modifier.descriptionHtml} className="text-xs leading-5 [&_a]:underline" />
       : <p className="text-xs text-muted-foreground">Pas de description.</p>}
-    <div className="flex flex-wrap gap-1.5 text-[11px]">
-      <span className="rounded-full border px-2 py-0.5" style={{ borderColor: `${color}55` }}><span className="font-semibold">Chance :</span> {chance ? `${chance.replace(/\s*%$/, "")} %` : "normale"}</span>
-      {modifier.charges.trim() && <span className="rounded-full border px-2 py-0.5" style={{ borderColor: `${color}55` }}><span className="font-semibold">Charges :</span> {modifier.charges}</span>}
-    </div>
+    {modifier.charges.trim() && <div className="flex flex-wrap gap-1.5 text-[11px]">
+      <span className="rounded-full border px-2 py-0.5" style={{ borderColor: `${color}55` }}><span className="font-semibold">Charges :</span> {modifier.charges}</span>
+    </div>}
   </div>
 }
 

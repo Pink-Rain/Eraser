@@ -625,7 +625,7 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   // Les colonnes de combat : la liste des caractéristiques et compétences de la fiche
   // (index « Caractéristiques et compétences », ses deux onglets), une distance en mètres,
   // les types d'action des sorts, les attributs d'« Armes - Modificateurs ».
-  if (["competence", "competences"].includes(folded)) return { kind: "linked-choice", source: { index: "skills", tab: "Caractéristiques" } }
+  if (["competence", "competences"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: "Caractéristiques" } }
   if (["distance", "portee"].includes(folded)) return { kind: "number", number: { unit: "distance", defaultUnit: "m" } }
   if (["action", "actions"].includes(folded)) return { kind: "choice", allowCustom: true, options: classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background })) }
   if (["attributs", "attribut"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Attribut" } } }

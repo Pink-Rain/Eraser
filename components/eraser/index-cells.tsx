@@ -348,7 +348,7 @@ export function IdCell({ value, computed = false }: { value: string; computed?: 
 }
 
 /** Le nom qui ouvre la fiche (ou la page) de la ligne. */
-export function NameFormCell({ value, onOpen, href, color }: { value: string; onOpen?: () => void; href?: string; color?: string }) {
+export function NameFormCell({ value, onOpen, href, color, styled = false }: { value: string; onOpen?: () => void; href?: string; color?: string; styled?: boolean }) {
   const content = <>
     {color && <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
     {/<[a-z]/i.test(value)
@@ -356,7 +356,8 @@ export function NameFormCell({ value, onOpen, href, color }: { value: string; on
       ? <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: sanitizeRichText(value) }} />
       : <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{value || <span className="font-normal italic text-muted-foreground">Sans nom</span>}</span>}
   </>
-  const className = "flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left font-semibold hover:bg-muted hover:text-primary hover:underline"
+  // Un style imposé à la colonne décide de la graisse ; sinon le nom est en gras.
+  const className = `flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${styled ? "" : "font-semibold"} hover:bg-muted hover:text-primary hover:underline`
   if (href) return <Link href={href} className={className} title="Ouvrir">{content}</Link>
   return <button type="button" onClick={onOpen} className={className} title="Ouvrir la fiche">{content}</button>
 }
@@ -937,7 +938,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       column.commitDelay = Infinity
       break
     case "name-form":
-      column.control = (rowKey) => <NameFormCell value={valueOf(rowKey, key)} onOpen={context.openForm ? () => context.openForm?.(rowKey) : undefined} href={context.hrefOf?.(rowKey)} color={context.colorOf?.(rowKey)} />
+      column.control = (rowKey) => <NameFormCell value={valueOf(rowKey, key)} onOpen={context.openForm ? () => context.openForm?.(rowKey) : undefined} href={context.hrefOf?.(rowKey)} color={context.colorOf?.(rowKey)} styled={Boolean(spec.style && !spec.style.keepCellFormatting)} />
       break
     case "id":
       column.control = (rowKey) => <IdCell value={valueOf(rowKey, key)} computed={context.idComputed?.(rowKey)} />
