@@ -1,41 +1,16 @@
-# Eraser 0.1.1-alpha.112 — Toutes les icônes, une colonne Icône, des effets qui se redéclenchent
+# Eraser 0.1.1-alpha.113 — Catégories d'icônes
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Icônes : les 1 768 icônes Lucide
+## Sélecteur d'icônes (jauges, colonnes Icône, boutons)
 
-- **Toutes les icônes Lucide** sont maintenant proposées dans le sélecteur des jauges, des
-  boutons et de la nouvelle colonne Icône. Celles d'Eraser restent en tête de liste, puis
-  toutes les autres suivent. « Afficher plus » charge la suite.
-- **Recherche en français et en anglais** : « oeil », « œil » ou « yeux » trouvent les
-  yeux, « personne » trouve aussi user, users et contact, « groupe » trouve users et
-  team. Les mots-clés anglais de Lucide marchent aussi (skull, eye…). Les accents et le
-  « œ » ne comptent pas, et un début de mot suffit (« pers »).
-- Les icônes déjà choisies dans tes index ne changent pas.
-- Elles se chargent seulement quand on en a besoin (à l'ouverture du sélecteur, ou pour
-  afficher une icône hors de la liste d'Eraser) : les pages ne sont pas plus lourdes.
-
-## Icônes pleines : un rendu propre
-
-- Une icône pleine (dans une jauge remplie) n'a plus de liseré clair sur son contour : le
-  bord garde la couleur de l'icône, et seuls les détails intérieurs (yeux, aiguilles,
-  coche…) sont tracés en clair. Les icônes rondes (sourire, horloge, alerte) sont nettes.
-
-## Nouveau type de colonne : Icône
-
-- Dans « Modifier », le type **Icône** propose toutes les icônes (avec la même recherche)
-  ou un émoji. La feuille garde le nom de l'icône.
-- Réglages : une couleur (facultative) et l'affichage plein ou en contour.
-
-## Index des états, onglet Effets : « Redéclencher l'effet »
-
-- Nouvelle colonne à cocher, ajoutée à droite. Un effet coché n'est plus temporaire : il
-  s'écrit pour de bon dans la fiche (dégâts, soin), comme un dé, avec « Annuler » :
-  - quand l'état est posé ;
-  - quand il monte à ce niveau ;
-  - à chaque nouveau clic sur le niveau en cours (« recliquer redéclenche l'effet » au
-    survol).
-- Avec des dés ou un Jet, ils sont lancés à ces moments-là. Redescendre d'un niveau ne
-  déclenche rien.
-- Exemple : Brûlure niveau 2, Cible « Points de vie actuels », Changement « -40 », case
-  cochée. Chaque clic sur le niveau 2 retire 40 PV.
+- **Des catégories à gauche** pour naviguer parmi les 1 768 icônes : Sélection Eraser,
+  Toutes, puis 42 catégories en français. Celles qui servent le plus en jeu de rôle
+  viennent en premier : Jeux (épées, potions, dés, coffres, parchemins…), Émotions,
+  Personnes, Profils, Animaux, Nature, Météo, Saisons, Écologie, Nourriture, Santé,
+  Sciences, Protection, Outils, Bâtiments… jusqu'à Informatique.
+- Chaque catégorie affiche son nombre d'icônes.
+- **La recherche marche avec les catégories** : les nombres suivent ce qui est tapé, et
+  les catégories sans résultat se grisent. Par exemple, « feu » montre d'un coup d'œil
+  qu'il y a des résultats dans Jeux, Météo et Nature.
+- Les catégories sont celles de Lucide, traduites : une icône peut être dans plusieurs.

@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react"
+import { memo, useEffect, useMemo, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react"
 import {
   Anchor, Apple, Atom, Award, Axe, Baby, Banana, Bandage, Banknote, Battery, BatteryFull, Bean, Beef, Beer, Bell, Biohazard, Bird, Bomb, Bone, BookOpen, Brain, Bug, Candy, Carrot, Castle, Cat, Cherry, Church, Circle, Clock, Cloud, CloudLightning, Clover, Coins, Compass, Cookie, Cross, Crosshair, Crown, Diamond, Dices, Dna, Dog, Droplet, Droplets, Drumstick, Egg, Eye, EyeOff, Feather, Fingerprint, Fish, Flag, FlaskConical, Flame, Flower, Flower2, Footprints, Frown, Gavel, Gem, Ghost, Gift, Glasses, Grape, Hammer, Hand, HandHeart, Heart, HeartCrack, HeartPulse, Hexagon, Hourglass, Key, Landmark, Laugh, Leaf, Lock, Map as MapIcon, Medal, Minus, Moon, Mountain, MountainSnow, Music, Octagon, Orbit, PawPrint, Pentagon, Pickaxe, PiggyBank, Pill, Plus, Rabbit, Radiation, Rainbow, Rat, Rocket, Scale, Scroll, Shell, Shield, ShieldHalf, Ship, Shovel, Skull, Smile, Snail, Snowflake, Sparkle, Sparkles, Sprout, Square, Squirrel, Star, StarHalf, Sun, Sunrise, Sunset, Sword, Swords, Syringe, Target, Tent, Tornado, TreePine, Trees, Triangle, Trophy, Turtle, Umbrella, User, Users, WandSparkles, Waves, Wheat, Wind, Wine, Worm, Wrench, X, Zap,
   Palette,
@@ -450,13 +450,17 @@ export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone 
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [limit, setLimit] = useState(PICKER_PAGE)
+  const [category, setCategory] = useState("all")
   // Le catalogue complet se charge à l'ouverture ; en attendant, la liste d'Eraser.
   const catalog = useIconCatalog(open)
   const folded = foldName(query)
-  const matches: IconEntry[] = catalog ? catalog.searchIconCatalog(query) : indexIcons.filter((entry) => !folded || foldName(`${entry.label} ${entry.name} ${entry.keywords ?? ""}`).includes(folded))
+  const found = useMemo(() => catalog ? catalog.searchIconCatalog(query) : null, [catalog, query])
+  const counts = useMemo(() => catalog && found ? catalog.countByIconCategory(found) : null, [catalog, found])
+  const matches: IconEntry[] = catalog && found ? found.filter((entry) => catalog.inIconCategory(entry, category)) : indexIcons.filter((entry) => !folded || foldName(`${entry.label} ${entry.name} ${entry.keywords ?? ""}`).includes(folded))
   const shown = matches.slice(0, limit)
+  const tabLabel = catalog?.iconCategoryTabs.find((tab) => tab.key === category)?.label ?? "Toutes"
   const current = useIndexIcon(emoji?.trim() ? undefined : icon)
-  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setQuery(""); setLimit(PICKER_PAGE) } }}>
+  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setQuery(""); setLimit(PICKER_PAGE); setCategory("all") } }}>
     <PopoverTrigger asChild>
       {cell
         ? <button type="button" disabled={disabled} aria-label={`${cell.label} : ${emoji?.trim() || (icon ? current?.label ?? icon : "aucune icône")}`} title={emoji?.trim() || (icon ? current?.label ?? icon : "Choisir une icône")} className="flex min-h-8 w-full items-center px-2 hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent" style={cell.color ? { color: cell.color } : undefined}>
@@ -467,13 +471,24 @@ export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone 
           <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? current?.label ?? icon : "Aucune icône"}</span>
         </Button>}
     </PopoverTrigger>
-    {open && <PopoverContent align="start" className="w-80 p-2">
+    {open && <PopoverContent align="start" className="w-[31rem] max-w-[calc(100vw-1rem)] p-2">
       <Input autoFocus value={query} onChange={(event) => { setQuery(event.target.value); setLimit(PICKER_PAGE) }} placeholder="Chercher en français ou en anglais : œil, personne, skull…" className="mb-1 h-8 text-xs" />
-      <p className="mb-1.5 px-0.5 text-[10px] text-muted-foreground">{catalog ? `${matches.length} icône${matches.length > 1 ? "s" : ""}${query.trim() ? "" : " au total"}` : "Chargement de toutes les icônes…"}</p>
-      <div className="grid max-h-64 grid-cols-8 gap-1 overflow-y-auto">
+      <p className="mb-1.5 px-0.5 text-[10px] text-muted-foreground">{catalog ? `${tabLabel} : ${matches.length} icône${matches.length > 1 ? "s" : ""}${query.trim() ? " pour cette recherche" : ""}` : "Chargement de toutes les icônes…"}</p>
+      <div className="flex gap-2">
+      {/* Les catégories : la recherche s'y applique aussi, leurs nombres suivent ce qui est tapé. */}
+      {catalog && counts && <nav aria-label="Catégories d'icônes" className="flex max-h-72 w-36 shrink-0 flex-col gap-px overflow-y-auto border-r pr-1">
+        {catalog.iconCategoryTabs.map((tab) => {
+          const count = counts.get(tab.key) ?? 0
+          return <button key={tab.key} type="button" disabled={!count} onClick={() => { setCategory(tab.key); setLimit(PICKER_PAGE) }} className={`flex items-center justify-between gap-1 rounded-md px-2 py-1 text-left text-[11px] transition hover:bg-muted disabled:opacity-35 disabled:hover:bg-transparent ${tab.key === category ? "bg-primary/15 font-semibold text-primary" : ""}`}>
+            <span className="truncate">{tab.label}</span><span className="tabular-nums text-[10px] text-muted-foreground">{count}</span>
+          </button>
+        })}
+      </nav>}
+      <div className="grid max-h-72 min-w-0 flex-1 auto-rows-min grid-cols-8 content-start gap-1 overflow-y-auto">
         {allowNone && <button type="button" onClick={() => { onChange({}); setOpen(false) }} className="grid size-8 place-items-center rounded-md text-xs text-muted-foreground hover:bg-muted" title="Aucune icône">—</button>}
         {shown.map((entry) => <button key={entry.name} type="button" title={entry.label} aria-label={entry.label} onClick={() => { onChange({ icon: entry.name }); setOpen(false) }} className={`grid size-8 place-items-center rounded-md hover:bg-muted ${entry.name === icon && !emoji ? "bg-primary/15 text-primary" : ""}`}><entry.Icon className="size-4" /></button>)}
         {matches.length > shown.length && <button type="button" onClick={() => setLimit((current) => current + PICKER_PAGE)} className="col-span-8 rounded-md py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Afficher {Math.min(PICKER_PAGE, matches.length - shown.length)} de plus ({matches.length - shown.length} restantes)</button>}
+      </div>
       </div>
       {!shown.length && <p className="py-3 text-center text-xs text-muted-foreground">Aucune icône de ce nom. Tape plutôt un émoji ci-dessous.</p>}
       <label className="mt-2 grid gap-1 border-t pt-2 text-[11px] font-semibold text-muted-foreground">Ou un émoji / caractère

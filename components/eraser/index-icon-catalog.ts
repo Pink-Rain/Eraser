@@ -8,10 +8,37 @@
  */
 import { icons, type LucideIcon } from "lucide-react"
 import tags from "@/lib/icon-tags.json"
+import categories from "@/lib/icon-categories.json"
 import { iconHaystack, iconSearchScore, type IconSearchEntry } from "@/lib/icon-search-fr"
 import { indexIcons, type IconEntry } from "@/components/eraser/index-gauge"
 
 const tagsByName = tags as Record<string, string[]>
+const categoriesByName = categories as Record<string, string[]>
+
+/**
+ * Les catégories de Lucide, en français, dans l'ordre du sélecteur : celles qui servent le
+ * plus en jeu de rôle d'abord.
+ */
+const categoryLabels: Array<[string, string]> = [
+  ["gaming", "Jeux"], ["emoji", "Émotions"], ["people", "Personnes"], ["account", "Profils"], ["animals", "Animaux"],
+  ["nature", "Nature"], ["weather", "Météo"], ["seasons", "Saisons"], ["sustainability", "Écologie"], ["food-beverage", "Nourriture"],
+  ["medical", "Santé"], ["science", "Sciences"], ["security", "Protection"], ["tools", "Outils"], ["buildings", "Bâtiments"],
+  ["home", "Maison"], ["travel", "Voyage"], ["transportation", "Transports"], ["navigation", "Cartes"], ["time", "Temps"],
+  ["finance", "Argent"], ["shopping", "Commerce"], ["sports", "Sports"], ["shapes", "Formes"], ["arrows", "Flèches"],
+  ["math", "Maths"], ["communication", "Communication"], ["social", "Social"], ["mail", "Courrier"], ["notifications", "Alertes"],
+  ["multimedia", "Multimédia"], ["photography", "Photo"], ["devices", "Appareils"], ["connectivity", "Connexion"], ["files", "Fichiers"],
+  ["text", "Texte"], ["layout", "Mise en page"], ["design", "Dessin"], ["charts", "Graphiques"], ["cursors", "Curseurs"],
+  ["accessibility", "Accessibilité"], ["development", "Informatique"],
+]
+
+/** Les onglets du sélecteur : la sélection d'Eraser, tout, puis chaque catégorie. */
+export const ERASER_CATEGORY = "eraser"
+export const ALL_CATEGORY = "all"
+export const iconCategoryTabs: Array<{ key: string; label: string }> = [
+  { key: ERASER_CATEGORY, label: "Sélection Eraser" },
+  { key: ALL_CATEGORY, label: "Toutes" },
+  ...categoryLabels.map(([key, label]) => ({ key, label })),
+]
 
 /** « EyeClosed » → « eye-closed », comparé sans tirets (les noms Lucide ont des chiffres). */
 const squash = (name: string) => name.toLowerCase().replace(/[^a-z0-9]/g, "")
@@ -23,11 +50,11 @@ function humanize(name: string) {
   return text.charAt(0).toUpperCase() + text.slice(1)
 }
 
-export type CatalogEntry = IconEntry & { lucide: string; curated: boolean; search: IconSearchEntry; haystack: string[] }
+export type CatalogEntry = IconEntry & { lucide: string; curated: boolean; categories: string[]; search: IconSearchEntry; haystack: string[] }
 
 function entryOf(base: IconEntry, lucide: string, curated: boolean): CatalogEntry {
   const search: IconSearchEntry = { name: base.name, lucide, label: base.label, french: curated ? `${base.label} ${base.keywords ?? ""}` : undefined, tags: tagsByName[lucide] }
-  return { ...base, lucide, curated, search, haystack: iconHaystack(search) }
+  return { ...base, lucide, curated, categories: categoriesByName[lucide] ?? [], search, haystack: iconHaystack(search) }
 }
 
 const componentNames = new Map<LucideIcon, string>(Object.entries(icons).map(([pascal, Icon]) => [Icon as LucideIcon, pascal]))
@@ -66,3 +93,19 @@ export function searchIconCatalog(query: string) {
     .sort((left, right) => right.score - left.score || Number(right.entry.curated) - Number(left.entry.curated) || left.order - right.order)
     .map((result) => result.entry)
 }
+
+/** Une icône est-elle dans cet onglet du sélecteur ? */
+export function inIconCategory(entry: CatalogEntry, category: string) {
+  return category === ALL_CATEGORY || (category === ERASER_CATEGORY ? entry.curated : entry.categories.includes(category))
+}
+
+/** Combien d'icônes (parmi celles données, par exemple une recherche) dans chaque onglet. */
+export function countByIconCategory(entries: CatalogEntry[]) {
+  const counts = new Map<string, number>([[ALL_CATEGORY, entries.length], [ERASER_CATEGORY, 0]])
+  for (const entry of entries) {
+    if (entry.curated) counts.set(ERASER_CATEGORY, (counts.get(ERASER_CATEGORY) ?? 0) + 1)
+    for (const category of entry.categories) counts.set(category, (counts.get(category) ?? 0) + 1)
+  }
+  return counts
+}
+
