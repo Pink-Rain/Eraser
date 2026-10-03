@@ -693,9 +693,9 @@ test("renders the read-only editor of a system index with its locks", async () =
 test("counts each spell's own charges instead of filling a shared gauge", async () => {
   const { GaugeCell } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
   const render = (value) => renderToStaticMarkup(React.createElement(GaugeCell, { label: "Charges", value, settings: { style: "icons", max: 5, mode: "count", unlimited: "✦" }, onChange: () => {} }));
-  // « 3 » : trois étincelles, pas trois sur cinq. Une icône pleine est dessinée en deux
-  // couches (silhouette, puis traits) : on compte les silhouettes.
-  const glyphs = (markup) => (markup.match(/fill="currentColor" stroke="currentColor"/g) || []).length;
+  // « 3 » : trois étincelles, pas trois sur cinq. Seule une icône pleine a la couche des
+  // traits clairs (ses détails) : on compte ces couches.
+  const glyphs = (markup) => (markup.match(/stroke="#fffaf0"/g) || []).length;
   assert.equal(glyphs(render("3")), 3);
   assert.equal(glyphs(render("1")), 1);
   // « ✦ » (charges sans nombre) reste tel quel.

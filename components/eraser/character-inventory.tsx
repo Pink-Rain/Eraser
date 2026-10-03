@@ -20,7 +20,11 @@ import { ItemModifierDialog, ItemModifierSummary } from "@/components/eraser/ite
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { escapeRichText, richTextPlainText, RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
 import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type ObjectCombatFields, keepCatalogFields } from "@/lib/inventory-schema"
-import { effectiveItemFields, parseItemAttachments, parseItemModifiers, parseItemOverrides } from "@/lib/item-modifiers"
+import { effectiveItemFields, itemChargeKey, keepItemCharges, parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, withItemCharge, type ItemAttachmentKind } from "@/lib/item-modifiers"
+import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { useWeaponModifiers } from "@/components/eraser/index-references"
+import { SpellChargeStars } from "@/components/eraser/spell-charges"
+import { parseGlyphValue } from "@/lib/index-columns"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
 import { loadFullInventory } from "@/lib/inventory-fetch"
@@ -132,6 +136,45 @@ function InventoryTransferPicker({ itemName, slotId, internalTargets, transferTa
   </div>
 }
 
+const chargeFamilies: Array<{ kind: ItemAttachmentKind; key: "attributes" | "materials" | "runes"; type: string }> = [
+  { kind: "attribut", key: "attributes", type: "attribut" },
+  { kind: "materiau", key: "materials", type: "materiau" },
+  { kind: "rune", key: "runes", type: "rune" },
+]
+
+function chargeFold(value: string) {
+  return value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
+}
+
+/**
+ * Les charges que les attributs, matériaux et runes d'un objet lui donnent (colonne
+ * Charges d'« Armes - Modificateurs ») : des étincelles comme celles des sorts, qu'on
+ * dépense et récupère d'un clic. Rangées dans l'exemplaire ; pleines tant qu'on n'y touche pas.
+ */
+function ItemCharges({ item, raw, readOnly, pending, onChange }: { item: Partial<Record<"attributes" | "materials" | "runes", string>>; raw: string; readOnly: boolean; pending: boolean; onChange: (raw: string) => void }) {
+  const names = chargeFamilies.flatMap((family) => (item[family.key] ?? "").split(/\s*[,;\n]\s*/).map((name) => name.trim()).filter(Boolean).map((name) => ({ family, name })))
+  const modifiers = useWeaponModifiers(names.length > 0)
+  const current = parseItemCharges(raw)
+  const charged = names.flatMap(({ family, name }) => {
+    const modifier = modifiers?.find((candidate) => chargeFold(candidate.name) === chargeFold(name) && chargeFold(candidate.type).startsWith(family.type.slice(0, 5)))
+      ?? modifiers?.find((candidate) => chargeFold(candidate.name) === chargeFold(name))
+    const total = Number.parseInt(modifier?.charges ?? "", 10)
+    return modifier && Number.isFinite(total) && total > 0 ? [{ family, name: modifier.name, total, color: modifier.color || "#7f5a3a", icon: modifier.icon }] : []
+  })
+  if (!charged.length) return null
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
+    {charged.map(({ family, name, total, color, icon }) => {
+      const left = current[itemChargeKey(family.kind, name)] ?? total
+      const look = parseGlyphValue(icon)
+      return <span key={`${family.kind}:${name}`} className="inline-flex items-center gap-1 text-xs font-medium" style={{ color }}>
+        {(look.icon || look.emoji) && <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-3.5" filled={Boolean(look.emoji)} />}
+        <span>{name}</span>
+        <SpellChargeStars total={total} current={left} accent={color} interactive={!readOnly && !pending} onChange={(value) => onChange(withItemCharge(raw, family.kind, name, value))} />
+      </span>
+    })}
+  </div>
+}
+
 function InventoryItemLine({ slot, container, compatibleContainers, transferTargets, targetsLoading, pending, readOnly, flat, ensureTargets, mutate }: { slot: InventorySlotRecord; container: InventoryContainerRecord; compatibleContainers: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; targetsLoading: boolean; pending: boolean; readOnly: boolean; flat: boolean; ensureTargets: () => Promise<void>; mutate: Mutate }) {
   const item = slot.item
   const fresh = useNewSlot(slot.id)
@@ -174,10 +217,10 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={shown} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={shown} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectTraits item={shown} className="mt-0.5" /><ItemModifierSummary modifiers={modifiers} className={slot.equipped ? "" : "opacity-55"} /></div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={shown} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={shown} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectTraits item={shown} className="mt-0.5" /><ItemCharges item={shown} raw={slot.modifiers} readOnly={readOnly} pending={pending} onChange={(modifiers) => void mutate({ action: "set-modifiers", slotId: slot.id, modifiers }, `slot:${slot.id}`)} /><ItemModifierSummary modifiers={modifiers} className={slot.equipped ? "" : "opacity-55"} /></div>
       </div>
     </div>
-    {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} base={item} effective={shown} modifiers={modifiers} effectHtml={item.effectHtml?.trim() ? sanitizeRichText(item.effectHtml) : escapeRichText(item.effect).replace(/\n/g, "<br>")} onSaveEffect={(effectHtml) => update({ effect: richTextPlainText(effectHtml), effectHtml })} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: serialized }, `slot:${slot.id}`)} />}
+    {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} base={item} effective={shown} modifiers={modifiers} effectHtml={item.effectHtml?.trim() ? sanitizeRichText(item.effectHtml) : escapeRichText(item.effect).replace(/\n/g, "<br>")} onSaveEffect={(effectHtml) => update({ effect: richTextPlainText(effectHtml), effectHtml })} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: keepItemCharges(serialized, slot.modifiers) }, `slot:${slot.id}`)} />}
   </article>
 }
 

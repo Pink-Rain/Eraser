@@ -420,14 +420,17 @@ export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = tru
   if (!entry) return <span aria-hidden="true" className={`inline-flex shrink-0 ${className}`} />
   const { Icon } = entry
   if (!filled) return <Icon aria-hidden="true" className={className} fill="none" strokeWidth={1.8} />
-  // Trois dessins superposés : la silhouette (intérieur compris), les formes remplies, puis
-  // les traits clairs des détails. Ces derniers sont coupés à l'intérieur rentré : le
-  // contour extérieur reste entier, de la couleur de l'icône, au lieu d'un liseré clair.
+  // Trois dessins superposés : la silhouette (ce qui est fermé, rempli), le dessin net de
+  // l'icône, puis les traits clairs des détails, coupés à l'intérieur rentré : le contour
+  // extérieur reste entier, de la couleur de l'icône, au lieu d'un liseré clair.
+  // Le dessin n'est pas « rempli » lui-même : un trait ouvert (un maillon, un signal) se
+  // remplirait d'une corde entre ses deux bouts et deviendrait une tache. Une icône faite
+  // de traits reste ainsi un trait de sa couleur ; une icône fermée (cœur, bouclier) est pleine.
   const mask = silhouette?.full ? `url(${silhouette.full}) center / 100% 100% no-repeat` : undefined
   const inner = silhouette?.inner ? `url(${silhouette.inner}) center / 100% 100% no-repeat` : undefined
   return <span aria-hidden="true" className={`relative inline-flex shrink-0 ${className}`}>
     {mask && <span className="absolute inset-0 bg-current" style={{ mask, WebkitMask: mask }} />}
-    <Icon className="absolute inset-0 size-full" fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
+    <Icon className="absolute inset-0 size-full" fill="none" stroke="currentColor" strokeWidth={1.8} />
     <span className="absolute inset-0" style={inner ? { mask: inner, WebkitMask: inner } : silhouette ? { opacity: 0 } : undefined}>
       <Icon ref={silhouetteRef} className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
     </span>

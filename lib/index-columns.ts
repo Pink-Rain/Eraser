@@ -602,7 +602,7 @@ export function compactRichText(html: string) {
 }
 
 /** Comment remplir la Valeur d'un objet : affiché au survol de l'en-tête et dans la fenêtre de l'enclume. */
-export const OBJECT_VALUE_HELP = "Plusieurs modes (une arme qui tire et frappe) : sépare les valeurs par « | », par exemple « 20 + Flèche | 1d30+20 ». Dans la description ou l’effet, {Valeur} affiche la première, {Valeur 2} la deuxième, {Valeur 3} la troisième."
+export const OBJECT_VALUE_HELP = "Plusieurs modes (une arme qui tire et frappe) : sépare les valeurs par « | », par exemple « 20 | 1d30+20 ». Dans la description ou l’effet, {Valeur} affiche la première, {Valeur 2} la deuxième, {Valeur 3} la troisième."
 
 /** Comment remplir la Distance d'un objet. */
 export const OBJECT_DISTANCE_HELP = "En mètres : « 12 » s’affiche « 12 m ». Plusieurs modes : sépare par « | », par exemple « 60 | 1 ». Dans la description ou l’effet, {Distance} affiche la première, {Distance 2} la deuxième."

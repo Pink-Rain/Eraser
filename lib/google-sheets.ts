@@ -70,7 +70,7 @@ import {
   type InventoryItemRecord,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
-import { parseItemAttachments, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
+import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -6017,7 +6017,7 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   if (!content || !container || (!content.itemId && !content.customName) || inventoryContainerCategory(container, typeById) === "Bourse") {
     throw new Error("INVENTORY_SLOT_NOT_FOUND")
   }
-  const normalized = serializeItemLinks(parseItemModifiers(modifiers), parseItemAttachments(modifiers), parseItemOverrides(modifiers))
+  const normalized = serializeItemLinks(parseItemModifiers(modifiers), parseItemAttachments(modifiers), parseItemOverrides(modifiers), parseItemCharges(modifiers))
   if (normalized.length > 4000) throw new Error("INVALID_INVENTORY_MODIFIERS")
   await updateStoredInventoryContent(workbook, { ...content, modifiers: normalized, updatedAt: new Date().toISOString() })
   return buildCharacterInventory(characterId, workbook)

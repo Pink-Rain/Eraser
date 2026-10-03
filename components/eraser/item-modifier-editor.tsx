@@ -150,11 +150,9 @@ const modifierFamilies: Array<{ kind: ItemAttachmentKind; key: "attributes" | "m
 /** Comment remplir chaque partie de la fenêtre, au survol du petit « ? ». */
 const forgeHelp: Partial<Record<ItemOverrideKey, string>> & Record<"effect" | "links" | "rune" | "draw", string> = {
   skill: "Les compétences (ou caractéristiques) avec lesquelles l’objet s’utilise, une ou plusieurs. La fiche de personnage le montre sous chacune, avec sa case pour l’équiper.",
-  action: "Le type d’action pour utiliser l’objet. Plusieurs modes : sépare par « | », par exemple « Action mineur | Action majeur ».",
-  reload: "L’action pour recharger, affichée après l’action, précédée de « Rechargement : ». Vide : rien ne s’affiche. Plusieurs modes : sépare par « | ».",
   value: OBJECT_VALUE_HELP,
   distance: OBJECT_DISTANCE_HELP,
-  effect: "Le texte de l’effet. {Valeur}, {Distance}, {Prix}… y affichent les cases de l’objet ; {Valeur 2} la deuxième valeur d’une case « a | b ». Tape « { » pour citer un état, un attribut, un lieu…",
+  effect: "Le texte de l’effet. {Valeur} y affiche la valeur de l’objet ; s’il en a plusieurs (« 20 | 1d30+20 »), {Valeur 2} affiche la deuxième. Tape « { » pour citer un état, un attribut, un lieu…",
   links: "Un nombre (+2, -10) et la caractéristique ou la compétence qu’il change. Il ne compte que lorsque l’objet est équipé. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.",
   draw: "« Tirer » en ajoute un au hasard parmi ceux qui ne sont pas encore posés : le Nombre de sa ligne est son % de chance, vide c’est la chance normale. La recherche porte sur le nom ; Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",
   rune: "Cherche par sous-type et nombre, par exemple « Feu 2 » ; le nom s’affiche à côté. Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",

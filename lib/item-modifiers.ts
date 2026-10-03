@@ -273,6 +273,50 @@ export function effectiveItemFields<T extends Partial<Record<ItemOverrideKey, st
   return result
 }
 
+/**
+ * Les charges restantes de ce qu'un exemplaire porte (colonne Charges d'« Armes -
+ * Modificateurs ») : cible « charge:rune:Lame de feu », valeur le nombre restant. Absente,
+ * la charge est pleine. Clé : « rune:lame de feu ».
+ */
+const CHARGE_PREFIX = "charge:"
+export type ItemCharges = Record<string, number>
+
+export function itemChargeKey(kind: ItemAttachmentKind, name: string) {
+  return `${kind}:${fold(name)}`
+}
+
+export function parseItemCharges(raw: string): ItemCharges {
+  if (!raw.trim()) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return {}
+    const charges: ItemCharges = {}
+    for (const entry of parsed) {
+      const target = entry && typeof entry === "object" ? (entry as { target?: unknown }).target : null
+      const value = Number.parseInt(String(entry && typeof entry === "object" ? (entry as { value?: unknown }).value : ""), 10)
+      const match = typeof target === "string" ? /^charge:(rune|attribut|materiau):(.+)$/.exec(target) : null
+      if (match && Number.isFinite(value) && value >= 0) charges[itemChargeKey(match[1] as ItemAttachmentKind, match[2])] = Math.min(value, 99)
+    }
+    return charges
+  } catch { return {} }
+}
+
+/** Les charges, telles qu'on les range dans le JSON de l'exemplaire. */
+function chargeEntries(charges: ItemCharges) {
+  return Object.entries(charges).flatMap(([key, value]) => Number.isFinite(value) && value >= 0 ? [{ target: `${CHARGE_PREFIX}${key}`, value: String(Math.trunc(value)) }] : [])
+}
+
+/** Le même exemplaire, avec la charge restante de cet attribut, matériau ou rune changée. */
+export function withItemCharge(raw: string, kind: ItemAttachmentKind, name: string, count: number) {
+  const charges = { ...parseItemCharges(raw), [itemChargeKey(kind, name)]: Math.max(0, Math.trunc(count)) }
+  return serializeItemLinks(parseItemModifiers(raw), parseItemAttachments(raw), parseItemOverrides(raw), charges)
+}
+
+/** Garde les charges d'un exemplaire dans des liens réécrits (fenêtre de l'enclume). */
+export function keepItemCharges(serialized: string, previous: string) {
+  return serializeItemLinks(parseItemModifiers(serialized), parseItemAttachments(serialized), parseItemOverrides(serialized), { ...parseItemCharges(previous), ...parseItemCharges(serialized) })
+}
+
 /** Ce qui apporte un lien : « attribut:Lourde ». */
 export function modifierSource(kind: ItemAttachmentKind, name: string) {
   return `${kind}:${name.trim()}`
@@ -285,7 +329,7 @@ export function isFromSource(modifier: ItemModifier, kind: ItemAttachmentKind, n
 }
 
 /** Les liens chiffrés, les runes/attributs/matériaux et ce que l'exemplaire change, ensemble, sans doublon. */
-export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[], overrides: ItemOverrides = {}) {
+export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[], overrides: ItemOverrides = {}, charges: ItemCharges = {}) {
   const kept = modifiers
     .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim(), ...(modifier.from?.trim() ? { from: modifier.from.trim() } : {}) }))
     .filter((modifier) => modifier.target && isItemModifierTargetId(modifier.target) && hasModifierAmount(modifier.value))
@@ -298,7 +342,7 @@ export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemA
     return [{ target: attachment.kind, value: name }]
   })
   const fields = itemOverrideKeys.flatMap((key) => typeof overrides[key] === "string" ? [{ target: `${OVERRIDE_PREFIX}${key}`, value: overrides[key]!.trim().slice(0, 400) }] : [])
-  const all = [...kept, ...extras, ...fields]
+  const all = [...kept, ...extras, ...fields, ...chargeEntries(charges)]
   return all.length ? JSON.stringify(all) : ""
 }
 

@@ -253,3 +253,18 @@ test("dé des attributs : Nombre = % de chance, vide = chance normale ; liens ra
   assert.equal(links.modifierTotalFor(index, "carac:Vitesse"), -10);
   assert.equal(links.linkedItemsFor(index, "carac:Vitesse")[0].tag, "Lourde");
 });
+
+test("charges des attributs, matériaux et runes, rangées dans l'exemplaire", async () => {
+  const links = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+  const raw = links.serializeItemLinks([{ target: "comp:Tir", value: "+2" }], [], { runes: "Lame de feu" });
+  assert.deepEqual(links.parseItemCharges(raw), {});
+  const spent = links.withItemCharge(raw, "rune", "Lame de feu", 1);
+  assert.deepEqual(links.parseItemCharges(spent), { "rune:lame de feu": 1 });
+  // Le reste de l'exemplaire ne bouge pas.
+  assert.deepEqual(links.parseItemModifiers(spent), [{ target: "comp:Tir", value: "+2" }]);
+  assert.deepEqual(links.parseItemOverrides(spent), { runes: "Lame de feu" });
+  // La fenêtre de l'enclume réécrit les liens sans perdre les charges.
+  const rewritten = links.keepItemCharges(links.serializeItemLinks([], [], { value: "1d12" }), spent);
+  assert.deepEqual(links.parseItemCharges(rewritten), { "rune:lame de feu": 1 });
+  assert.deepEqual(links.parseItemOverrides(rewritten), { value: "1d12" });
+});
