@@ -62,6 +62,8 @@ export type EffectTargets = { page: boolean; skills: boolean; portrait: boolean 
 export type StateDefinition = {
   id: string
   name: string
+  /** Le nom avec sa mise en forme de l'index (couleur, gras…), s'il en a une. */
+  nameHtml?: string
   type: string
   /** 1 quand le niveau 2 n'existe pas (description vide ou « / »). */
   levels: 1 | 2
@@ -145,6 +147,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     return [{
       id: read(row, ["ID"]) || `etat:${foldName(name)}`,
       name,
+      nameHtml: /<[a-z]/i.test(read(row, ["Nom", "Nom de l'état"], true)) ? read(row, ["Nom", "Nom de l'état"], true) : "",
       type: read(row, ["Type de l'état", "Type"]),
       levels,
       descriptionHtml: [first, isEmptyLevel(second) ? "" : second],

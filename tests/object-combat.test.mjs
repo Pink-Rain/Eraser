@@ -83,3 +83,22 @@ test("types des colonnes de combat dans l'Index des objets", () => {
   // Dans un tableau qui n'a pas encore de « Prix », la « Valeur » reste le prix.
   assert.equal(columns.objectColumnSpec("Valeur", parchemins).kind, "number");
 });
+
+test("« Armes - Modificateurs » lu pour les accolades : attributs et matériaux seulement", async () => {
+  const modifiers = await vite.ssrLoadModule("/lib/weapon-modifiers.ts");
+  const parsed = modifiers.parseWeaponModifiers([{
+    headers: ["Nom", "Type", "Description", "Nombre", "Charges", "Couleur", "ID"],
+    rows: [
+      { values: ["Lourde", "Attribut", "Deux mains.", "", "", "#9d174d", "MOD-1"], html: ["Lourde", "", "Deux <b>mains</b>.", "", "", "", ""] },
+      { values: ["Acier trempé", "Matériaux", "+30", "10", "2", "pas une couleur", "MOD-2"], html: ["<span style=\"color:#285f8f\">Acier trempé</span>", "", "", "", "", "", ""] },
+      { values: ["Lame de feu", "Rune", "", "1", "", "", "MOD-3"], html: [] },
+      { values: ["lourde", "Attribut", "doublon", "", "", "", "MOD-4"], html: [] },
+    ],
+  }]);
+  assert.deepEqual(parsed.map((entry) => entry.name), ["Lourde", "Acier trempé", "Lame de feu"]);
+  assert.equal(parsed[0].descriptionHtml, "Deux <b>mains</b>.");
+  assert.equal(parsed[0].nameHtml, "");
+  assert.ok(parsed[1].nameHtml.includes("color:#285f8f"));
+  assert.equal(parsed[1].color, "");
+  assert.deepEqual(parsed.map((entry) => modifiers.isCitableModifier(entry.type)), [true, true, false]);
+});

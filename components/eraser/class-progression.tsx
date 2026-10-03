@@ -1,5 +1,6 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useEffect, useMemo, useState, type DragEvent, type MouseEvent } from "react"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, Trash2, Undo2, X, Zap } from "lucide-react"
@@ -226,7 +227,7 @@ function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; 
   const tone = spellTone(spell)
   return <button type="button" onClick={onChoose} className="min-h-32 rounded-2xl border bg-card/70 p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md" style={{ borderColor: selected ? accent : `${accent}38`, backgroundColor: selected ? `${accent}12` : undefined }}>
     <div className="flex items-start gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><span className="flex size-4 items-center justify-center [&>svg]:size-4"><SpellGlyph category={spell.category} /></span></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="font-display text-lg font-semibold leading-tight">{spell.name}</span>{selected && <Check className="size-4" style={{ color: accent }} />}</span><span className="mt-1 block text-xs text-muted-foreground">{spell.type}</span></span></div>
-    {(spell.effect || spell.description) && <span className="mt-3 line-clamp-4 block text-sm leading-5"><span className="block font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />{spell.description && <span className="mt-1 block text-muted-foreground" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}</span>}
+    {(spell.effect || spell.description) && <span className="mt-3 line-clamp-4 block text-sm leading-5"><IndexRichText as="span" html={spell.effectHtml || spell.effect} className="block font-medium" />{spell.description && <IndexRichText as="span" html={spell.descriptionHtml || spell.description} className="mt-1 block text-muted-foreground" />}</span>}
     {spell.category === "actif" && <SpellChargeStars total={spell.charges} accent={accent} className="mt-3" />}
   </button>
 }

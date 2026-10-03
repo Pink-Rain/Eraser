@@ -1,11 +1,11 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useEffect, useState } from "react"
 import Link from "next/link"
 import { ChevronDown, Crown, LoaderCircle, Lock, Trophy } from "lucide-react"
 
 import { IndexImage } from "@/components/eraser/index-image"
-import { sanitizeRichText } from "@/components/eraser/rich-text"
 import {
   achievementDateLabel,
   achievementOf,
@@ -81,7 +81,7 @@ export function AchievementCard({ achievement, obtained, className }: { achievem
         <h3 className="font-display text-lg font-semibold leading-tight" style={{ color: locked ? undefined : color }}>{achievement.name}</h3>
       </div>
     </div>
-    {achievement.description && <div className="relative mt-2.5 line-clamp-3 text-xs leading-5 text-muted-foreground [&_p]:m-0" dangerouslySetInnerHTML={{ __html: sanitizeRichText(achievement.description) }} />}
+    {achievement.description && <IndexRichText html={achievement.description} className="relative mt-2.5 line-clamp-3 text-xs leading-5 text-muted-foreground [&_p]:m-0" />}
     <div className="relative mt-auto pt-3 text-[10px] text-muted-foreground">
       {locked
         ? <span className="uppercase tracking-wider">À débloquer</span>

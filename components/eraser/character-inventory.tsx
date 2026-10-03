@@ -22,8 +22,7 @@ import { escapeRichText, richTextPlainText, RichTextField, sanitizeRichText } fr
 import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type ObjectCombatFields } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemModifiers } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
-import { ObjectAttributesLine, ObjectCombatDetails } from "@/components/eraser/object-combat-details"
-import { fillObjectTemplate, fillObjectTemplateHtml } from "@/lib/object-combat"
+import { ObjectAttributesLine, ObjectCombatDetails, ObjectText } from "@/components/eraser/object-combat-details"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
   Armes: { icon: Sword, color: "#b9504e", singular: "un rangement d’armes" },
@@ -80,9 +79,10 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   // ici revient à saisir du texte brut, qui remplace alors cette mise en forme.
   const safeHtml = html.trim() ? sanitizeRichText(html) : ""
   // « {Valeur} » affiche la valeur de l'objet ; la modification garde le texte écrit.
-  const display = safeHtml
-    ? <span className={richTextRendering} dangerouslySetInnerHTML={{ __html: template ? fillObjectTemplateHtml(safeHtml, template) : safeHtml }} />
-    : (template ? fillObjectTemplate(value, template) : value) || <span className="text-muted-foreground/45">—</span>
+  // Les états, attributs et matériaux cités entre accolades sont mis en forme, avec leur détail au survol.
+  const display = safeHtml || value.trim()
+    ? <ObjectText html={safeHtml} text={value} item={template ?? {}} />
+    : <span className="text-muted-foreground/45">—</span>
   if (readOnly) return <span className={`min-w-0 ${className}`}>{display}</span>
   if (multiline && editing) return <div className={`min-w-0 ${className}`}>
     <RichTextField

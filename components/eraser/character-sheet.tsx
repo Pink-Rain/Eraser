@@ -1,5 +1,6 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
 import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
@@ -354,7 +355,7 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
         // entier, par-dessus l'étiquette ou les charges.
         return <details key={spell.id} className="rounded-lg border bg-background/45 px-2.5 py-2" style={{ borderColor: color.border }}><summary className="flex cursor-pointer list-none items-center gap-2 text-xs font-semibold [&::-webkit-details-marker]:hidden"><span className="peer min-w-0 flex-1 truncate hover:whitespace-normal hover:break-words" title={spell.name}>{spell.name}</span>{active
           ? <span className="shrink-0 peer-hover:hidden"><SpellChargeStars total={spell.charges} current={charges[spell.id] ?? spell.charges ?? 0} interactive onChange={(value) => setCharges(spell, value)} accent={color.accent} /></span>
-          : <span className="shrink-0 text-[9px] text-muted-foreground peer-hover:hidden">{spell.type}</span>}</summary><blockquote className="mt-2 border-l-2 pl-2 text-xs leading-5 text-muted-foreground" style={{ borderColor: color.accent }}>{spell.effect && <div dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}{spell.description && <div className="mt-1" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}{active && spell.type && <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: color.accent }}>{spell.type}</p>}</blockquote></details>
+          : <span className="shrink-0 text-[9px] text-muted-foreground peer-hover:hidden">{spell.type}</span>}</summary><blockquote className="mt-2 border-l-2 pl-2 text-xs leading-5 text-muted-foreground" style={{ borderColor: color.accent }}>{spell.effect && <IndexRichText as="div" html={spell.effectHtml || spell.effect} />}{spell.description && <IndexRichText as="div" html={spell.descriptionHtml || spell.description} className="mt-1" />}{active && spell.type && <p className="mt-1.5 text-[10px] font-semibold uppercase tracking-wider" style={{ color: color.accent }}>{spell.type}</p>}</blockquote></details>
       })}</div></div>}
     </div>}
   </div>

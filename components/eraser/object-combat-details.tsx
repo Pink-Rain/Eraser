@@ -1,5 +1,7 @@
 import { objectCombatColumns, type ObjectCombatFields } from "@/lib/inventory-schema"
-import { objectDistanceText } from "@/lib/object-combat"
+import { CitedModifierNames, IndexRichText } from "@/components/eraser/index-references"
+import { escapeRichText } from "@/components/eraser/rich-text"
+import { fillObjectTemplateHtml, objectDistanceText } from "@/lib/object-combat"
 
 /**
  * Compétence, Distance, Action, Valeur d'un objet, sous sa description : seulement les
@@ -28,6 +30,16 @@ export function ObjectAttributesLine({ item, className = "" }: { item: ObjectCom
   if (!attributes) return null
   return <p className={`flex min-w-0 gap-1 text-xs leading-5 ${className}`}>
     <span className="shrink-0 font-semibold text-foreground/65">Attributs :</span>
-    <span className="min-w-0 break-words text-muted-foreground">{attributes}</span>
+    <span className="min-w-0 break-words text-muted-foreground"><CitedModifierNames names={attributes.split(/\s*[,;\n]\s*/).filter(Boolean)} /></span>
   </p>
+}
+
+/**
+ * La description ou l'effet d'un objet hors du tableau : « {Valeur} » et les autres
+ * colonnes de la ligne remplacées, puis les états, attributs et matériaux cités mis en
+ * forme avec leur détail au survol. Le texte mis en forme prime sur le texte brut.
+ */
+export function ObjectText({ html, text, item, as = "span", className = "" }: { html?: string; text: string; item: ObjectCombatFields; as?: "div" | "span"; className?: string }) {
+  const source = html?.trim() ? html : escapeRichText(text).replace(/\n/g, "<br>")
+  return <IndexRichText html={source} fill={(safe) => fillObjectTemplateHtml(safe, item)} as={as} className={className} />
 }

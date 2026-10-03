@@ -1,12 +1,10 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useMemo, useState } from "react"
 import { Activity, Dices, LoaderCircle, Plus, Search, Undo2, X } from "lucide-react"
 
-import { useWorldIndexVersion } from "@/components/eraser/index-cells"
+import { StateDetails, useStatesCatalog } from "@/components/eraser/index-references"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { IndexImage } from "@/components/eraser/index-image"
-import { sanitizeRichText } from "@/components/eraser/rich-text"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
@@ -14,64 +12,13 @@ import { activeEffectsOf, isRolledEffect, stateDefinitionOf, triggeredEffectsOf,
 import { foldName } from "@/lib/index-columns"
 import { cn } from "@/lib/utils"
 
-// Gardé d'une fiche à l'autre : l'index n'est relu qu'une fois par affichage de page.
-let knownCatalog: StatesCatalog | null = null
-
-/** L'Index des états, pour la fiche (lecture seule, joueurs compris). */
-export function useStatesCatalog() {
-  const [catalog, setCatalog] = useState<StatesCatalog | null>(knownCatalog)
-  const [error, setError] = useState("")
-  // Un état ou un effet modifié dans l'index (autre onglet, autre fenêtre) : la fiche relit.
-  const version = useWorldIndexVersion("states")
-  useEffect(() => {
-    let active = true
-    fetch(version ? "/api/states?fresh=1" : "/api/states", { cache: "no-store" })
-      .then(async (response) => ({ response, payload: (await response.json().catch(() => ({}))) as { catalog?: StatesCatalog; error?: string } }))
-      .then(({ response, payload }) => {
-        if (!active) return
-        if (!response.ok || !payload.catalog) { setError(payload.error || "L’Index des états n’a pas pu être lu."); return }
-        knownCatalog = payload.catalog
-        setCatalog(payload.catalog)
-        setError("")
-      })
-      .catch(() => { if (active) setError("L’Index des états n’a pas pu être lu.") })
-    return () => { active = false }
-  }, [version])
-  return { catalog: catalog ?? { states: [], effects: [] }, loaded: Boolean(catalog), error }
-}
+export { useStatesCatalog }
 
 const DEFAULT_COLOR = "#78716c"
 
 /** La couleur d'un état posé : celle de son premier effet en vigueur, sinon celle de sa jauge. */
 function stateColor(catalog: StatesCatalog, state: CharacterState, definition: StateDefinition | undefined) {
   return activeEffectsOf(catalog, state).find((effect) => /^#[0-9a-f]{3,8}$/i.test(effect.color))?.color || definition?.gauge.color || DEFAULT_COLOR
-}
-
-/** Le détail d'un état, au survol : la description de ses niveaux et ses règles (pas les lignes de l'onglet Effets). */
-function StateDetails({ definition, level, color }: { definition: StateDefinition; level: 1 | 2 | 0; color: string }) {
-  return <div className="grid gap-2.5">
-    <div className="flex items-start gap-3">
-      <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${color}, ${color}cc 60%, #1d140c 140%)` }}>
-        <IndexImage value={definition.image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-5" stroke={color} />} />
-      </span>
-      <div className="min-w-0">
-        <p className="font-display text-lg font-semibold leading-tight" style={{ color }}>{definition.name}</p>
-        {definition.type && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{definition.type}</p>}
-      </div>
-    </div>
-    {([1, 2] as const).slice(0, definition.levels).map((rank) => <div key={rank} className={cn("rounded-xl border px-3 py-2 text-xs leading-5 transition", level === rank ? "bg-background shadow-sm" : "bg-muted/25 opacity-75")} style={{ borderColor: level === rank ? `${color}88` : undefined }}>
-      <p className="mb-0.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-[.14em]" style={{ color: level === rank ? color : undefined }}>
-        Niveau {rank}{level === rank && <span className="rounded-full px-1.5 py-px text-[9px] text-white" style={{ backgroundColor: color }}>en cours</span>}
-      </p>
-      {definition.descriptionHtml[rank - 1]
-        ? <div className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(definition.descriptionHtml[rank - 1]) }} />
-        : <p className="text-muted-foreground">Pas de description.</p>}
-    </div>)}
-    {definition.rulesHtml && <div className="rounded-xl border border-dashed px-3 py-2 text-xs leading-5">
-      <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Règles liées</p>
-      <div className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(definition.rulesHtml) }} />
-    </div>}
-  </div>
 }
 
 /**

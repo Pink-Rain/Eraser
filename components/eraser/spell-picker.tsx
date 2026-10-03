@@ -1,5 +1,6 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Crosshair, LoaderCircle, Plus, Search, X } from "lucide-react"
 
@@ -61,8 +62,8 @@ function SpellCard({ name, spell, showSource, loading, onRemove }: { name: strin
       ? <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Lecture de l’index des sorts…</p>
       : <p className="mt-1 text-xs text-muted-foreground">Ce sort n’est pas (ou plus) dans les index de sorts.</p>)}
     {spell && (spell.effect || spell.description) && <div className="mt-2 grid gap-1 leading-6">
-      {spell.effect && <div className="font-medium [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
-      {spell.description && <div className="text-muted-foreground [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}
+      {spell.effect && <IndexRichText as="div" html={spell.effectHtml || spell.effect} className="font-medium [&_a]:underline" />}
+      {spell.description && <IndexRichText as="div" html={spell.descriptionHtml || spell.description} className="text-muted-foreground [&_a]:underline" />}
     </div>}
     {spell && (spell.skills.length > 0 || spell.distance) && <footer className="mt-2 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
       {spell.skills.length > 0 && <span className="font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}

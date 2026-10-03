@@ -1,36 +1,37 @@
-# Eraser 0.1.1-alpha.115 — Colonnes de combat des objets
+# Eraser 0.1.1-alpha.116 — États, attributs et matériaux cités entre accolades
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Les bons types de colonnes dans l'Index des objets
+## {Empoisonnement}, {Lourde}, {Acier trempé}
 
-- **Compétence** propose toutes les caractéristiques et compétences de la fiche de
-  personnage, lues dans l'index « Caractéristiques et compétences » (ses deux onglets).
-- **Distance** est un nombre en mètres : « 60 » s'écrit « 60 m ».
-- **Action** propose les mêmes types que les sorts (Bonus, Passif, Actif -Action
-  mineur, majeur, instantanée, gratuite, de déplacement), avec les mêmes couleurs. Une
-  autre valeur peut toujours être tapée.
-- **Attributs** est une nouvelle colonne, ajoutée à droite : elle propose tous les
-  attributs d'« Armes - Modificateurs » (les lignes dont le Type est Attribut), et en
-  accepte plusieurs. Les attributs s'affichent avec l'effet de l'objet.
-- **Dégâts** s'appelle maintenant **Valeur**.
+Dans la description ou l'effet d'un index (objets, sorts, succès, et même les états et
+les modificateurs d'armes entre eux), écris le nom d'un état, d'un attribut ou d'un
+matériau entre accolades : « Applique {Empoisonnement} ». Hors des tableaux, le nom
+s'affiche avec sa propre mise en forme (celle de sa case Nom, sinon sa couleur ; un état
+garde aussi son icône), souligné en pointillés.
 
-## « Prix » partout
+Au survol :
 
-Les onglets Parchemins, Consommables et Livres appelaient leur prix « Valeur ». Leur
-en-tête devient « Prix », comme dans les autres onglets, pour ne pas être confondu avec
-la nouvelle colonne Valeur. Seuls les en-têtes changent : aucun prix n'est modifié et
-les boutiques les lisent comme avant. « Coût » reste reconnu comme un prix.
+- un **état** montre le même résumé que sur la fiche d'un personnage : son icône, son
+  type, la description du niveau 1 et du niveau 2, et ses règles liées ;
+- un **attribut** ou un **matériau** montre son type, sa description, sa chance et ses
+  charges.
 
-## {Valeur} dans la description ou l'effet
+Dans le tableau de l'index, le texte reste tel que tu l'as écrit. Une accolade qui ne
+nomme rien de connu reste écrite telle quelle. Les noms sont reconnus sans tenir compte
+des majuscules ni des accents. Pour un objet, {Valeur}, {Distance} et les autres
+colonnes de la ligne passent en premier.
 
-Écris par exemple « Inflige {Valeur} à {Distance} » dans l'effet d'un objet : dans les
-inventaires, les magasins, la fouille et la table, la phrase devient « Inflige 40 +
-Carreaux à 60 m ». Dans le tableau de l'index, le texte reste tel que tu l'as écrit.
-{Compétence}, {Action} et {Attributs} marchent aussi. Une accolade dont la case est
-vide reste écrite telle quelle, pour voir tout de suite ce qui manque.
+Cela marche dans les inventaires, les magasins, la fouille, la fenêtre de magasin sur la
+table, les sorts (fiche, cartes de choix, liste des sorts, détail de classe) et les
+succès.
+
+## Attributs : la colonne Nombre est un % de chance
+
+Comme pour les matériaux, Nombre donne le pourcentage de chance d'un attribut. Une case
+vide veut dire chance normale (« Chance : normale » au survol).
 
 ## Petits plus
 
-- Une liste à choix multiple sans couleurs (comme Attributs) affiche chaque valeur dans
-  sa propre pastille, pour bien les séparer.
+- La ligne « Attributs : » d'un objet montre chaque attribut connu avec son détail au
+  survol.

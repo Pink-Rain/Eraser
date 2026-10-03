@@ -525,7 +525,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   }
   if (index === "weapon-modifiers") {
     if (isHeader(header, [WEAPON_MODIFIER_TYPE_HEADER])) return { kind: "tab-sort", description: "Rune, Matériau, Attribut… Chaque valeur a son onglet, où la ligne apparaît aussi ; elle reste dans « Tout »." }
-    if (isHeader(header, [WEAPON_MODIFIER_NUMBER_HEADER])) return { kind: "number", description: "Le % de chance d’un matériau, le nombre de runes d’un palier, le numéro du dé d’un attribut." }
+    if (isHeader(header, [WEAPON_MODIFIER_NUMBER_HEADER])) return { kind: "number", description: "Le % de chance d’un matériau ou d’un attribut (vide : chance normale), le nombre de runes d’un palier." }
     if (isHeader(header, [WEAPON_MODIFIER_CHARGES_HEADER])) return { kind: "number", description: "Les charges ajoutées à l’arme ; vide : pas de charge." }
     if (isHeader(header, [WEAPON_MODIFIER_COLOR_HEADER])) return { kind: "color" }
     return { kind: "rich" }

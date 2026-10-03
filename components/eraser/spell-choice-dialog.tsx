@@ -1,5 +1,6 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useEffect, useState, type CSSProperties } from "react"
 import { CircleDotDashed, Crosshair, Gauge, Sparkles, Volume2, VolumeX, Zap } from "lucide-react"
 
@@ -83,8 +84,8 @@ function AugmentCard({ spell, accent, accentLight, index, state, onPick }: { spe
     {/* Le texte du sort sur papier clair : ses couleurs (liens, mots clés) restent celles de l'index, lisibles. */}
     <span className="relative mt-3 flex min-h-0 flex-1 flex-col overflow-hidden rounded-xl bg-[#f7f0e3] text-left text-[#2b2118] shadow-inner">
       <span className="min-h-0 flex-1 overflow-y-auto px-3 py-2.5 text-[12.5px] leading-[1.45] [&_a]:underline">
-        {(spell.effectHtml || spell.effect) && <span className="block font-medium" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}
-        {(spell.descriptionHtml || spell.description) && <span className="mt-1.5 block text-[#5c4d3f]" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}
+        {(spell.effectHtml || spell.effect) && <IndexRichText as="span" html={spell.effectHtml || spell.effect} className="block font-medium" />}
+        {(spell.descriptionHtml || spell.description) && <IndexRichText as="span" html={spell.descriptionHtml || spell.description} className="mt-1.5 block text-[#5c4d3f]" />}
       </span>
       {(spell.skills.length > 0 || spell.distance) && <span className="flex shrink-0 flex-wrap items-center justify-center gap-x-3 gap-y-1 border-t border-[#2b2118]/10 px-3 py-1.5 text-[11px] text-[#5c4d3f]">
         {spell.skills.length > 0 && <span className="font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}

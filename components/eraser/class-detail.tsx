@@ -1,5 +1,6 @@
 "use client"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useMemo, useState, type CSSProperties } from "react"
 import { CircleDotDashed, Crosshair, ExternalLink, Gauge, LibraryBig, LoaderCircle, Search, Zap } from "lucide-react"
 
@@ -39,7 +40,7 @@ function SpellCard({ spell, rank, accentDark, accentLight, canEdit, onEdit }: { 
     <div className="absolute inset-x-0 top-0 h-0.5" style={{ backgroundColor: tone.background }} />
     <div className="flex items-start gap-3"><div className="flex size-9 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background || `${accentLight}35`, color: tone.foreground || accentDark }}>{spellIcon(spell)}</div><div className="min-w-0 flex-1">
       <div className="flex flex-wrap items-center gap-2"><h3 className="font-display text-lg font-semibold leading-tight">{spell.name}</h3><Badge className="text-[10px]" style={{ backgroundColor: tone.background, color: tone.foreground }}>{spell.type || "Type non renseigné"}</Badge></div>
-      {(spell.effect || spell.description) && <blockquote className="mt-3 border-l-2 pl-3 text-sm leading-6" style={{ borderColor: tone.background || accentDark }}>{spell.effect && <div className="font-medium [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.effectHtml || spell.effect }} />}{spell.description && <div className="mt-1 text-muted-foreground [&_a]:underline" dangerouslySetInnerHTML={{ __html: spell.descriptionHtml || spell.description }} />}</blockquote>}
+      {(spell.effect || spell.description) && <blockquote className="mt-3 border-l-2 pl-3 text-sm leading-6" style={{ borderColor: tone.background || accentDark }}>{spell.effect && <IndexRichText as="div" html={spell.effectHtml || spell.effect} className="font-medium [&_a]:underline" />}{spell.description && <IndexRichText as="div" html={spell.descriptionHtml || spell.description} className="mt-1 text-muted-foreground [&_a]:underline" />}</blockquote>}
       <div className="mt-3 flex flex-wrap items-center gap-x-4 gap-y-2 text-xs text-muted-foreground">{spell.skills.length > 0 && <span className="font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}{spell.distance && <span className="flex items-center gap-1.5"><Crosshair className="size-3.5" />Distance : {spell.distance}</span>}{spell.category === "actif" && <SpellChargeStars total={spell.charges} accent={accentDark} />}</div>
     </div></div><span className="sr-only">Rang {rank}</span>
   </article>
