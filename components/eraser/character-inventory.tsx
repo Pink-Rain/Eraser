@@ -64,7 +64,7 @@ function normalizedSearch(value: string) {
 
 const richTextRendering = "[&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
-function InlineField({ label, value, html = "", multiline = false, className = "", readOnly = false, template, onCommit, onRichCommit }: { label: string; value: string; html?: string; multiline?: boolean; className?: string; readOnly?: boolean; template?: ObjectCombatFields; onCommit: (value: string) => Promise<void>; onRichCommit?: (html: string) => void }) {
+function InlineField({ label, value, html = "", multiline = false, className = "", readOnly = false, template, onCommit, onRichCommit }: { label: string; value: string; html?: string; multiline?: boolean; className?: string; readOnly?: boolean; template?: ObjectCombatFields & { id?: string }; onCommit: (value: string) => Promise<void>; onRichCommit?: (html: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [pending, setPending] = useState(false)
@@ -80,7 +80,7 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   // ici revient à saisir du texte brut, qui remplace alors cette mise en forme.
   const safeHtml = html.trim() ? sanitizeRichText(html) : ""
   // « {Valeur} » affiche la valeur de l'objet ; la modification garde le texte écrit.
-  // Les états, attributs et matériaux cités entre accolades sont mis en forme, avec leur détail au survol.
+  // Les lignes d’index citées (menu « { ») affichent leur nom actuel, avec leur détail au survol.
   const display = safeHtml || value.trim()
     ? <ObjectText html={safeHtml} text={value} item={template ?? {}} />
     : <span className="text-muted-foreground/45">—</span>

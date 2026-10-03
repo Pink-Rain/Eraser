@@ -1,10 +1,11 @@
 "use client"
 
 import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react"
-import { Bold, Check, Eraser, ExternalLink, FileText, Heading2, Italic, Link2, List, ListChecks, ListOrdered, LoaderCircle, Minus, Palette, Search, Strikethrough, Underline, X } from "lucide-react"
+import { Bold, Braces, Check, Eraser, ExternalLink, FileText, Heading2, Italic, Link2, List, ListChecks, ListOrdered, LoaderCircle, Minus, Palette, Search, Strikethrough, Underline, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { prepareReferenceAnchors, useReferenceMenu } from "@/components/eraser/reference-menu"
 import { internalAppPath, type AppLinkTarget } from "@/lib/app-links"
 import { normalizeCssColorToHex } from "@/lib/google-sheet-rich-text"
 
@@ -85,7 +86,7 @@ export const richTextColors = ["#1f1b16", "#b3261e", "#7f1d1d", "#315b55", "#285
 export type RichTextCommand =
   | "bold" | "italic" | "underline" | "strike"
   | "heading" | "bulletList" | "orderedList" | "rule" | "checkbox"
-  | "link" | "color" | "clear"
+  | "link" | "color" | "clear" | "reference"
 
 /** Classes de rendu d'un contenu enrichi, identiques en lecture et en édition. */
 export const richTextRendering = "[&_a]:underline [&_h2]:font-display [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:font-display [&_h3]:text-lg [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-border [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc [&_input]:mr-2 [&_input]:accent-primary"
@@ -169,6 +170,8 @@ export function runRichTextCommand(target: RichTextTarget | null, saved: Mutable
     else if (name === "rule") document.execCommand("insertHorizontalRule")
     else if (name === "checkbox") document.execCommand("insertHTML", false, '<input type="checkbox"> ')
     else if (name === "clear") { document.execCommand("removeFormat"); document.execCommand("unlink") }
+    // « { » ouvre le menu des références, comme s'il avait été tapé.
+    else if (name === "reference") document.execCommand("insertText", false, "{")
     else if (name === "color") {
       const color = normalizeCssColorToHex(value || "")
       if (!color) return false
@@ -317,6 +320,7 @@ export function RichTextToolbar({ targetRef, ready, compact = false, leading, tr
     <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("checkbox")} title="Case à cocher"><ListChecks /></Button>
     <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("rule")} title="Ligne de séparation"><Minus /></Button>
     <RichTextLinkPicker disabled={off} onPrepare={() => rememberRichTextSelection(targetRef.current?.node ?? null, saved)} onPick={(href, label) => { runRichTextCommand(targetRef.current, saved, "link", href, label); refresh((tick) => tick + 1) }} />
+    <Button type="button" size={size} variant="ghost" disabled={off} onMouseDown={keep} onClick={() => run("reference")} title="Citer une ligne d’un index (ou taper « { »)"><Braces /></Button>
     <span className="mx-1 h-5 w-px bg-border" />
     <span className="flex items-center gap-1" aria-label="Couleur du texte">
       <Palette className="mr-0.5 size-3.5 text-muted-foreground" />
@@ -354,6 +358,8 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
   const applied = useRef(initialHtml)
   const commit = useRef(onCommit)
   useEffect(() => { commit.current = onCommit })
+  // « { » : citer une ligne d'index. Pas dans un texte brut, qui perdrait le lien.
+  const references = useReferenceMenu(editor, !plain && !disabled)
 
   const flush = useCallback(() => {
     const node = editor.current
@@ -367,7 +373,10 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
 
   useEffect(() => {
     // Une seule fois : la suite appartient au navigateur.
-    if (editor.current) editor.current.innerHTML = applied.current
+    if (!editor.current) return
+    editor.current.innerHTML = applied.current
+    // Les références forment un bloc et reprennent le nom actuel de leur ligne.
+    if (applied.current.includes("/reference/")) prepareReferenceAnchors(editor.current)
   }, [])
 
   useEffect(() => () => { if (timer.current) window.clearTimeout(timer.current) }, [])
@@ -380,23 +389,27 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
     flush()
   }
 
-  return <div
-    ref={editor}
-    contentEditable={!disabled}
-    suppressContentEditableWarning
-    spellCheck
-    role="textbox"
-    aria-multiline="true"
-    aria-label={ariaLabel}
-    tabIndex={0}
-    data-placeholder={placeholder}
-    onInput={() => { if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, delay) }}
-    onBlur={flush}
-    onClick={toggleCheckbox}
-    onFocus={() => { if (editor.current && onActivate) onActivate({ node: editor.current, flush }) }}
-    className={`whitespace-pre-wrap break-words outline-none empty:before:text-muted-foreground/50 empty:before:content-[attr(data-placeholder)] ${richTextRendering} ${className}`}
-    style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
-  />
+  return <>
+    <div
+      ref={editor}
+      contentEditable={!disabled}
+      suppressContentEditableWarning
+      spellCheck
+      role="textbox"
+      aria-multiline="true"
+      aria-label={ariaLabel}
+      tabIndex={0}
+      data-placeholder={placeholder}
+      onKeyDown={references.onKeyDown}
+      onInput={(event) => { references.onInput(event); if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, delay) }}
+      onBlur={() => { references.close(); flush() }}
+      onClick={toggleCheckbox}
+      onFocus={() => { if (editor.current && onActivate) onActivate({ node: editor.current, flush }) }}
+      className={`whitespace-pre-wrap break-words outline-none empty:before:text-muted-foreground/50 empty:before:content-[attr(data-placeholder)] ${richTextRendering} ${className}`}
+      style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
+    />
+    {references.element}
+  </>
 })
 
 /** Affichage seul d'un contenu enrichi, avec le même rendu que l'éditeur. */

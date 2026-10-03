@@ -1,10 +1,11 @@
 "use client"
 
 /**
- * Les états, attributs et matériaux cités entre accolades dans un texte d'index
- * (« Applique {Empoisonnement} », « Attribut {Lourde} ») : hors des tableaux, le nom
- * s'affiche avec sa mise en forme, et son détail au survol. Le texte écrit dans la
- * feuille ne change pas.
+ * Les références à une ligne d'index dans un texte, posées par le menu « { » de
+ * l'éditeur : hors des tableaux, « {État:Sérénité} » devient le nom actuel de la ligne,
+ * mis en forme, avec son détail au survol ; « {État:Sérénité:Type} » devient la valeur
+ * de la case, dans le style de sa colonne, sans survol. Le texte enregistré ne change pas :
+ * la ligne est retrouvée par son identifiant, même renommée.
  */
 import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react"
 import { createPortal } from "react-dom"
@@ -12,13 +13,15 @@ import { createPortal } from "react-dom"
 import { useWorldIndexVersion } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
+import { useResolvedReferences } from "@/components/eraser/reference-store"
 import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-text"
-import { pillStyle } from "@/components/eraser/index-style"
+import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
-import { foldName, parseGlyphValue } from "@/lib/index-columns"
+import { foldName, matchChoice, parseGlyphValue } from "@/lib/index-columns"
+import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedReference } from "@/lib/index-references"
 import { cn } from "@/lib/utils"
-import { isCitableModifier, type WeaponModifierRef } from "@/lib/weapon-modifiers"
+import type { WeaponModifierRef } from "@/lib/weapon-modifiers"
 
 export const DEFAULT_STATE_COLOR = "#78716c"
 
@@ -120,12 +123,12 @@ export function StateDetails({ definition, level, color }: { definition: StateDe
         Niveau {rank}{level === rank && <span className="rounded-full px-1.5 py-px text-[9px] text-white" style={{ backgroundColor: color }}>en cours</span>}
       </p>
       {definition.descriptionHtml[rank - 1]
-        ? <IndexRichText html={definition.descriptionHtml[rank - 1]} className="[&_a]:underline" />
+        ? <IndexRichText html={definition.descriptionHtml[rank - 1]} self={{ index: "states", id: definition.id }} className="[&_a]:underline" />
         : <p className="text-muted-foreground">Pas de description.</p>}
     </div>)}
     {definition.rulesHtml && <div className="rounded-xl border border-dashed px-3 py-2 text-xs leading-5">
       <p className="mb-0.5 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Règles liées</p>
-      <IndexRichText html={definition.rulesHtml} className="[&_a]:underline" />
+      <IndexRichText html={definition.rulesHtml} self={{ index: "states", id: definition.id }} className="[&_a]:underline" />
     </div>}
   </div>
 }
@@ -135,7 +138,7 @@ function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; col
   return <div className="grid gap-2">
     <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierName modifier={modifier} color={color} /></p>
     {modifier.descriptionHtml
-      ? <IndexRichText html={modifier.descriptionHtml} className="text-xs leading-5 [&_a]:underline" />
+      ? <IndexRichText html={modifier.descriptionHtml} self={modifier.id ? { index: "weapon-modifiers", id: modifier.id } : undefined} className="text-xs leading-5 [&_a]:underline" />
       : <p className="text-xs text-muted-foreground">Pas de description.</p>}
   </div>
 }
@@ -145,9 +148,9 @@ function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; col
 // ---------------------------------------------------------------------------
 
 /** Le nom avec sa propre mise en forme (celle de la case Nom de l'index), sinon dans sa couleur. */
-function FormattedName({ name, html, color }: { name: string; html?: string; color: string }) {
+function FormattedName({ name, html, color }: { name: string; html?: string; color?: string }) {
   if (html) return <span className="[&_a]:underline" dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }} />
-  return <span style={{ color }}>{name}</span>
+  return <span style={color ? { color } : undefined}>{name}</span>
 }
 
 /** La petite icône d'un modificateur (colonne Icône), devant son nom, à la couleur du texte. */
@@ -196,56 +199,166 @@ function ModifierChip({ modifier }: { modifier: WeaponModifierRef }) {
 // Le texte
 // ---------------------------------------------------------------------------
 
-const placeholder = /\{\s*([^{}<>\n]{1,60}?)\s*\}/g
+/** Une citation trouvée dans le texte : un lien de référence, ou « {Colonne} » de la ligne même. */
+type Citation = { request: ReferenceRequest; label: string; raw: string; self: boolean }
 
-type Reference = { kind: "state"; definition: StateDefinition } | { kind: "modifier"; modifier: WeaponModifierRef }
+/** Les liens de référence posés par le menu « { » (le lien seul, sans autre balise autour). */
+const referenceAnchor = /<a\b[^>]*\bhref="([^"]*)"[^>]*>([\s\S]*?)<\/a>/gi
+/** « {Prix} », « {Valeur 2} » : une case de la ligne dont on affiche le texte. */
+const selfPlaceholder = /\{\s*([^{}<>\n:]{1,60}?)\s*\}/g
+
+function plainLabel(html: string) {
+  return html.replace(/<[^>]+>/g, "").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&quot;/g, "\"").replace(/&#39;/g, "'").replace(/\s+/g, " ").trim()
+}
+
+/** Au-delà, une référence citée dans une case citée s'affiche sans être relue (une ligne qui se cite elle-même). */
+const MAX_DEPTH = 3
+
+/** Une ligne qui n'existe plus : son dernier nom connu, barré. */
+function MissingReference({ label }: { label: string }) {
+  return <span className="text-muted-foreground line-through decoration-dotted" title="Cette ligne n’existe plus dans son index.">{label}</span>
+}
+
+/** Le détail d'une ligne d'un index sans affichage propre : son image ou son icône, son type, sa description. */
+function RowDetails({ reference, color, depth }: { reference: ResolvedReference; color?: string; depth: number }) {
+  const look = parseGlyphValue(reference.icon ?? "")
+  return <div className="grid gap-2">
+    <div className="flex items-start gap-3">
+      {(reference.image || look.icon || look.emoji) && <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={color ? { color } : undefined}>
+        {reference.image
+          ? <IndexImage value={reference.image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} />
+          : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={false} />}
+      </span>}
+      <div className="min-w-0">
+        <p className="font-display text-lg font-semibold leading-tight" style={color ? { color } : undefined}><FormattedName name={reference.name} html={reference.nameHtml} color={color} /></p>
+        <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{reference.type || reference.tab}</p>
+      </div>
+    </div>
+    {reference.descriptionHtml
+      ? <IndexRichText html={reference.descriptionHtml} self={{ index: reference.index, id: reference.id }} depth={depth + 1} className="text-xs leading-5 [&_a]:underline" />
+      : <p className="text-xs text-muted-foreground">Pas de description.</p>}
+  </div>
+}
+
+/** Le nom d'une ligne citée, avec son détail au survol. */
+function RowChip({ reference, depth }: { reference: ResolvedReference; depth: number }) {
+  const color = reference.color
+  const look = parseGlyphValue(reference.icon ?? "")
+  return <HoverCard openDelay={180} closeDelay={80}>
+    <HoverCardTrigger asChild>
+      <span tabIndex={0} className={chipClass} style={color ? { textDecorationColor: `${color}99` } as CSSProperties : undefined}>
+        {(look.icon || look.emoji) && <span className="mr-0.5 inline-flex translate-y-[2px]" style={color ? { color } : undefined}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={false} /></span>}
+        <FormattedName name={reference.name} html={reference.nameHtml} color={color} />
+      </span>
+    </HoverCardTrigger>
+    <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={color ? { borderColor: `${color}55` } : undefined}>
+      <RowDetails reference={reference} color={color} depth={depth} />
+    </HoverCardContent>
+  </HoverCard>
+}
+
+/** Retire les couleurs écrites dans une case quand sa colonne impose la sienne. */
+function withoutColors(html: string) {
+  return html.replace(/<span style="color:[^"]*">/gi, "<span>")
+}
+
+/**
+ * La valeur d'une case citée, sans survol, dans le style imposé de sa colonne. Les choix
+ * d'une liste prennent leur couleur (si la colonne n'impose pas la sienne) ; un texte
+ * garde sa mise en forme, et les références qu'il contient sont affichées à leur tour.
+ */
+function CellValue({ reference, depth }: { reference: ResolvedReference; depth: number }) {
+  const look = reference.look ?? {}
+  const css = columnStyleCss(look.style)
+  if (look.kind === "choice" || look.kind === "linked-choice" || look.options?.length) {
+    const pieces = (reference.value ?? "").split(/(\s*[,;|\n]\s*)/)
+    return <span className={css.className} style={css.style}>{pieces.map((piece, index) => {
+      if (index % 2) return <span key={index}>{piece.includes("|") ? " | " : ", "}</span>
+      const value = piece.trim()
+      if (!value) return null
+      const color = !look.style?.color && look.options ? matchChoice(value, look.options)?.color : undefined
+      return <span key={index} className={color ? "font-medium" : undefined} style={color ? { color } : undefined}>{value}</span>
+    })}</span>
+  }
+  const html = reference.valueHtml?.trim() ?? ""
+  if (!html) return null
+  return <IndexRichText as="span" html={look.style?.color ? withoutColors(html) : html} self={{ index: reference.index, id: reference.id }} depth={depth + 1} className={css.className} style={css.style} />
+}
+
+function Cited({ citation, value, depth, states, modifiers }: { citation: Citation; value: ResolvedReference | null | undefined; depth: number; states: StateDefinition[]; modifiers: WeaponModifierRef[] | null }) {
+  const name = referenceNameFromLabel(citation.label)
+  // Pas encore lue : le dernier nom connu (rien pour « {Prix} », qui ne doit pas clignoter).
+  if (value === undefined) return citation.self ? null : <span>{name}</span>
+  if (!value) return citation.self ? <span>{citation.raw}</span> : <MissingReference label={name} />
+  if (citation.request.column) return <CellValue reference={value} depth={depth} />
+  if (value.index === "states") {
+    const definition = states.find((candidate) => candidate.id === value.id) ?? states.find((candidate) => foldName(candidate.name) === foldName(value.name))
+    if (definition) return <StateChip definition={definition} />
+  }
+  if (value.index === "weapon-modifiers") {
+    const modifier = modifiers?.find((candidate) => candidate.id === value.id) ?? modifiers?.find((candidate) => foldName(candidate.name) === foldName(value.name))
+    if (modifier) return <ModifierChip modifier={modifier} />
+  }
+  return <RowChip reference={value} depth={depth} />
+}
 
 /**
  * Un texte d'index affiché hors tableau. `html` est la case mise en forme (ou son texte) ;
- * `fill` remplace d'abord les accolades propres à la ligne (« {Valeur} » d'un objet).
- * Les accolades qui restent et qui nomment un état, un attribut ou un matériau
- * deviennent ce nom mis en forme, avec son détail au survol. Une accolade inconnue reste
- * écrite telle quelle.
+ * `fill` remplace d'abord les accolades propres à la ligne (« {Valeur 2} » d'un objet).
+ *
+ * Les références posées par le menu « { » s'affichent avec le nom actuel de leur ligne
+ * (avec son détail au survol) ou la valeur de la case citée (sans survol, dans le style
+ * de sa colonne). `self` : la ligne dont vient le texte, pour que « {Prix} » y affiche sa
+ * propre case. Une accolade qui ne nomme aucune colonne reste écrite telle quelle.
  */
-export function IndexRichText({ html, fill, className = "", as = "div", style }: { html: string; fill?: (html: string) => string; className?: string; as?: "div" | "span"; style?: CSSProperties }) {
+export function IndexRichText({ html, fill, self, depth = 0, className = "", as = "div", style }: { html: string; fill?: (html: string) => string; self?: { index: string; id: string }; depth?: number; className?: string; as?: "div" | "span"; style?: CSSProperties }) {
   const filled = useMemo(() => { const safe = sanitizeRichText(html); return fill ? fill(safe) : safe }, [fill, html])
-  const cites = filled.includes("{")
-  const { catalog, loaded } = useStatesCatalog(cites)
-  const modifiers = useWeaponModifiers(cites)
-  const { marked, references } = useMemo(() => {
-    const found: Reference[] = []
-    if (!cites || (!loaded && !modifiers)) return { marked: filled, references: found }
-    const states = new Map(catalog.states.map((definition) => [foldName(definition.name), definition]))
-    const citable = new Map((modifiers ?? []).filter((modifier) => isCitableModifier(modifier.type)).map((modifier) => [foldName(modifier.name), modifier]))
-    const marked = filled.replace(placeholder, (match, name: string) => {
-      const key = foldName(name.replace(/&amp;/g, "&").replace(/&#39;|&apos;/g, "'"))
-      const definition = states.get(key)
-      const modifier = definition ? undefined : citable.get(key)
-      if (!definition && !modifier) return match
-      found.push(definition ? { kind: "state", definition } : { kind: "modifier", modifier: modifier! })
+  const selfIndex = self?.index ?? ""
+  const selfId = self?.id ?? ""
+  const { marked, citations } = useMemo(() => {
+    const found: Citation[] = []
+    if (depth > MAX_DEPTH) return { marked: filled, citations: found }
+    let marked = filled.includes("/reference/") ? filled.replace(referenceAnchor, (match, href: string, label: string) => {
+      const reference = parseReferenceHref(href)
+      if (!reference) return match
+      found.push({ request: { ...reference, name: referenceNameFromLabel(plainLabel(label)) }, label: plainLabel(label), raw: match, self: false })
       return `<span data-eraser-ref="${found.length - 1}"></span>`
-    })
-    return { marked, references: found }
-  }, [catalog, cites, filled, loaded, modifiers])
+    }) : filled
+    if (selfIndex && selfId && marked.includes("{")) {
+      marked = marked.replace(selfPlaceholder, (match, column: string) => {
+        const name = plainLabel(column)
+        if (!name) return match
+        found.push({ request: { index: selfIndex, id: selfId, column: name }, label: name, raw: plainLabel(match), self: true })
+        return `<span data-eraser-ref="${found.length - 1}"></span>`
+      })
+    }
+    return { marked, citations: found }
+  }, [depth, filled, selfId, selfIndex])
+  const requests = useMemo(() => citations.map((citation) => citation.request), [citations])
+  const values = useResolvedReferences(requests)
+  const citesStates = citations.some((citation) => citation.request.index === "states" && !citation.request.column)
+  const citesModifiers = citations.some((citation) => citation.request.index === "weapon-modifiers" && !citation.request.column)
+  const { catalog } = useStatesCatalog(citesStates)
+  const modifiers = useWeaponModifiers(citesModifiers)
   const [targets, setTargets] = useState<HTMLElement[]>([])
-  // Les noms cités sont dessinés dans des emplacements du texte : sa mise en forme (gras,
+  // Les citations sont dessinées dans des emplacements du texte : sa mise en forme (gras,
   // couleur, listes) reste celle de la case. Relus à chaque nouveau texte.
   const attach = useCallback((node: HTMLElement | null) => {
     // Un détachement (nouveau rendu) ne vide rien : seul le texte posé compte.
     if (!node) return
-    const next = references.length ? [...node.querySelectorAll<HTMLElement>("[data-eraser-ref]")] : []
+    const next = citations.length ? [...node.querySelectorAll<HTMLElement>(":scope [data-eraser-ref]")].filter((element) => element.closest("[data-eraser-text]") === node) : []
     setTargets((current) => current.length === next.length && current.every((element, index) => element === next[index]) ? current : next)
-  }, [references])
+  }, [citations])
   // Le même objet tant que le texte ne change pas : React réécrirait sinon tout le texte
-  // à chaque rendu, et les noms posés dedans disparaîtraient.
+  // à chaque rendu, et les citations posées dedans disparaîtraient.
   const inner = useMemo(() => ({ __html: marked }), [marked])
   const Tag = as
   return <>
-    <Tag ref={attach as never} className={cn(richTextRendering, "[&_input]:pointer-events-none", className)} style={style} dangerouslySetInnerHTML={inner} />
+    <Tag ref={attach as never} data-eraser-text="" className={cn(richTextRendering, "[&_input]:pointer-events-none", className)} style={style} dangerouslySetInnerHTML={inner} />
     {targets.map((target) => {
-      const reference = references[Number(target.dataset.eraserRef)]
-      if (!reference) return null
-      return createPortal(reference.kind === "state" ? <StateChip definition={reference.definition} /> : <ModifierChip modifier={reference.modifier} />, target, target.dataset.eraserRef)
+      const citation = citations[Number(target.dataset.eraserRef)]
+      if (!citation) return null
+      return createPortal(<Cited citation={citation} value={values.get(referenceKey(citation.request))} depth={depth} states={catalog.states} modifiers={modifiers} />, target, target.dataset.eraserRef)
     })}
   </>
 }

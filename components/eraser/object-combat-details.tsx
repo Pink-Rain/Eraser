@@ -4,6 +4,7 @@ import { columnStyleCss } from "@/components/eraser/index-style"
 import { matchChoice } from "@/lib/index-columns"
 import { cn } from "@/lib/utils"
 import { escapeRichText } from "@/components/eraser/rich-text"
+import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import { fillObjectTemplateHtml, objectDistanceText, objectModes } from "@/lib/object-combat"
 
 const splitList = (value?: string) => (value ?? "").split(/\s*[,;\n|]\s*/).map((part) => part.trim()).filter(Boolean)
@@ -60,10 +61,12 @@ export function ObjectTraits({ item, className = "" }: { item: ObjectCombatField
 
 /**
  * La description ou l'effet d'un objet hors du tableau : « {Valeur} » et les autres
- * colonnes de la ligne remplacées, puis les états, attributs et matériaux cités mis en
- * forme avec leur détail au survol. Le texte mis en forme prime sur le texte brut.
+ * colonnes de la ligne remplacées, puis les lignes d'index citées (menu « { ») affichées
+ * avec leur nom actuel et leur détail au survol. Le texte mis en forme prime sur le texte brut.
  */
-export function ObjectText({ html, text, item, as = "span", className = "" }: { html?: string; text: string; item: ObjectCombatFields; as?: "div" | "span"; className?: string }) {
+export function ObjectText({ html, text, item, as = "span", className = "" }: { html?: string; text: string; item: ObjectCombatFields & { id?: string }; as?: "div" | "span"; className?: string }) {
   const source = html?.trim() ? html : escapeRichText(text).replace(/\n/g, "<br>")
-  return <IndexRichText html={source} fill={(safe) => fillObjectTemplateHtml(safe, item)} as={as} className={className} />
+  // Les autres colonnes de l'objet (« {Prix} », « {Poids} ») sont lues dans sa ligne de l'index.
+  const self = typeof item.id === "string" && item.id && !item.id.startsWith("PERSONNALISE-") ? { index: OBJECT_REFERENCE_INDEX, id: item.id } : undefined
+  return <IndexRichText html={source} fill={(safe) => fillObjectTemplateHtml(safe, item)} self={self} as={as} className={className} />
 }

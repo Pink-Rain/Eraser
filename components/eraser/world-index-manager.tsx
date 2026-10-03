@@ -44,6 +44,7 @@ import {
   type WorldIndexLink,
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world-indexes"
+import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 
 /** Le choix « Tout » de la liste des onglets : toutes les lignes de l'index ensemble. */
 const ALL_TABS = "*"
@@ -693,6 +694,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [busy, moveTargetsOf])
 
   const detailsFound = details !== null ? locate(details) : null
+  // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
+  const referenceTab = detailsFound?.table.tabName ?? table?.tabName
+  const referenceScope = { index: indexKey, tab: referenceTab }
   const hints = table ? linkHints(links, indexKey, table.tabName) : []
   const formTable = spanning ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
@@ -783,6 +787,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }
 
   return (
+    <ReferenceScopeProvider scope={referenceScope}>
     <section className="mt-4 flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
         {(tables.length > 1 || settings.views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
@@ -938,5 +943,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {noticesView}
       {choiceView}
     </section>
+    </ReferenceScopeProvider>
   )
 }

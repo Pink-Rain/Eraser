@@ -12,6 +12,8 @@ import { IndexEditor } from "@/components/eraser/index-editor"
 import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
+import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
 import { ObjectIndexRegroup } from "@/components/eraser/object-index-regroup"
@@ -102,6 +104,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const editedInView = useRef(false)
   const activeView = useMemo(() => { const id = viewIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
+  // « {Prix} » écrit dans une description : le menu « { » propose les colonnes de l'objet.
+  const selectedTab = selected?.tabName
+  const referenceScope = useMemo(() => ({ index: OBJECT_REFERENCE_INDEX, tab: selectedTab }), [selectedTab])
   // Les cellules en cours d’enregistrement gardent la valeur saisie : le tableau
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
   const localEdits = useRef<Record<string, string>>({})
@@ -447,6 +452,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const inSheetOrder = !sort && !query.trim()
 
   return (
+    <ReferenceScopeProvider scope={referenceScope}>
     <section className="flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       {viewRole === "admin" && <ObjectIndexRegroup onChanged={() => void refresh(true)} />}
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
@@ -562,5 +568,6 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       {noticesView}
       {choiceView}
     </section>
+    </ReferenceScopeProvider>
   )
 }

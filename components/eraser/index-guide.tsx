@@ -91,6 +91,14 @@ function SettingsSection() {
     <p className={p}>Un cadenas marque ce qu’Eraser lit ailleurs (inventaire, boutiques, fiches, liens…). Son survol dit ce qui casserait et ce qu’on peut quand même changer. L’affichage reste toujours modifiable : description, masquée, style imposé, emplacement, place, et passer de Nom à Nom formulaire.</p>
     <h3 className={h3}>Corbeille</h3>
     <p className={p}>Une colonne ou un onglet supprimé part dans la corbeille (Administration › Corbeille), d’où on peut le restaurer. « Supprimer définitivement » l’efface de la feuille.</p>
+    <h3 className={h3}>Citer une ligne d’index dans un texte</h3>
+    <p className={p}>Dans n’importe quel texte, tape <code className={code}>{"{"}</code> (ou clique sur le bouton <code className={code}>{"{}"}</code> de la barre) : Eraser propose les index (« État », « Lieu », « Attribut »…), puis leurs lignes, puis le nom ou une case de la ligne choisie. <code className={code}>{"}"}</code> termine une référence tapée en entier, comme <code className={code}>{"{État:Sérénité}"}</code> ou <code className={code}>{"{État:Sérénité:Type}"}</code>.</p>
+    <ul className="mt-2 list-disc space-y-1 pl-5 text-sm text-muted-foreground">
+      <li><b>Le nom</b> s’affiche hors du tableau avec sa mise en forme et son détail au survol.</li>
+      <li><b>Une case</b> s’affiche avec sa valeur, dans le style de sa colonne, sans survol.</li>
+      <li><b>{"{Prix}"}</b>, sans index devant, affiche la case de la ligne même (les colonnes de la ligne sont proposées en premier).</li>
+    </ul>
+    <p className={p}>La référence retrouve sa ligne par son identifiant : renommer la ligne renomme toutes ses citations. Une ligne supprimée s’affiche barrée.</p>
   </>
 }
 

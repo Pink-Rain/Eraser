@@ -86,7 +86,7 @@ test("types des colonnes de combat dans l'Index des objets", () => {
   assert.equal(columns.objectColumnSpec("Valeur", parchemins).kind, "number");
 });
 
-test("« Armes - Modificateurs » lu pour les accolades : attributs et matériaux seulement", async () => {
+test("« Armes - Modificateurs » lu pour l'affichage : nom, description, identifiant", async () => {
   const modifiers = await vite.ssrLoadModule("/lib/weapon-modifiers.ts");
   const parsed = modifiers.parseWeaponModifiers([{
     headers: ["Nom", "Type", "Description", "Nombre", "Charges", "Couleur", "ID"],
@@ -102,7 +102,8 @@ test("« Armes - Modificateurs » lu pour les accolades : attributs et matériau
   assert.equal(parsed[0].nameHtml, "");
   assert.ok(parsed[1].nameHtml.includes("color:#285f8f"));
   assert.equal(parsed[1].color, "");
-  assert.deepEqual(parsed.map((entry) => modifiers.isCitableModifier(entry.type)), [true, true, false]);
+  // L'identifiant : une référence (menu « { ») retrouve la ligne même renommée.
+  assert.deepEqual(parsed.map((entry) => entry.id), ["MOD-1", "MOD-2", "MOD-3"]);
 });
 
 test("emplacements des magasins lus par nom de colonne, Rareté en double renommée", () => {

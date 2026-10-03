@@ -1,0 +1,410 @@
+"use client"
+
+/**
+ * Le menu « { » de l'éditeur de texte. On tape « { » (ou on clique sur le bouton {} de la
+ * barre) et Eraser propose les colonnes de la ligne en cours, puis les index : « État »,
+ * « Lieu », « Attribut »… Un index choisi, il propose ses lignes ; une ligne choisie, son
+ * nom (avec son détail au survol) ou l'une de ses cases (sa valeur, sans survol).
+ *
+ * La référence est enregistrée comme un lien vers l'identifiant de la ligne : renommer la
+ * ligne renomme toutes ses citations. Dans l'éditeur, elle forme un bloc qu'on efface
+ * d'un coup ; son libellé est remis au nom actuel à l'ouverture.
+ */
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
+import { createPortal } from "react-dom"
+import { ChevronRight, LoaderCircle, Rows3, TableProperties, Tag } from "lucide-react"
+
+import { loadReferenceCatalog, referenceCatalogDenied, resolveReference } from "@/components/eraser/reference-store"
+import {
+  entryColumns,
+  entryRows,
+  findEntry,
+  foldReferenceText,
+  matchesQuery,
+  parseReferenceHref,
+  rankByQuery,
+  referenceHref,
+  referenceLabel,
+  referenceNameFromLabel,
+  type ReferenceCatalog,
+  type ReferenceEntry,
+  type ReferenceRow,
+} from "@/lib/index-references"
+
+// ---------------------------------------------------------------------------
+// La ligne en cours : « {Prix} » y lit sa propre case
+// ---------------------------------------------------------------------------
+
+/** L'index (et l'onglet) dont le texte édité fait partie. */
+export type ReferenceScope = { index: string; tab?: string }
+
+const ReferenceScopeContext = createContext<ReferenceScope | null>(null)
+
+export function ReferenceScopeProvider({ scope, children }: { scope: ReferenceScope | null; children: ReactNode }) {
+  return <ReferenceScopeContext.Provider value={scope}>{children}</ReferenceScopeContext.Provider>
+}
+
+// ---------------------------------------------------------------------------
+// Les références déjà écrites
+// ---------------------------------------------------------------------------
+
+const ANCHORS = 'a[href^="/reference/"]'
+
+/**
+ * Les références d'une zone éditable forment chacune un bloc (effacé d'un coup, jamais
+ * modifié lettre à lettre) et reprennent le nom actuel de leur ligne. Le texte n'est pas
+ * enregistré pour autant : il le sera avec la prochaine modification.
+ */
+export function prepareReferenceAnchors(root: HTMLElement, refreshLabels = true) {
+  for (const anchor of root.querySelectorAll<HTMLAnchorElement>(ANCHORS)) {
+    anchor.contentEditable = "false"
+    if (!refreshLabels) continue
+    const reference = parseReferenceHref(anchor.getAttribute("href") ?? "")
+    if (!reference) continue
+    void resolveReference({ ...reference, name: referenceNameFromLabel(anchor.textContent ?? "") }).then((resolved) => {
+      if (!resolved || !anchor.isConnected) return
+      const next = referenceLabel(resolved.name, reference.column ? resolved.column ?? reference.column : undefined)
+      if (next !== anchor.textContent) anchor.textContent = next
+    })
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Ce qui est tapé depuis « { »
+// ---------------------------------------------------------------------------
+
+/** Le texte entre le dernier « { » et le curseur, dans le même morceau de texte. */
+type Token = { node: Text; start: number; end: number; query: string }
+
+function caretToken(root: HTMLElement): Token | null {
+  const selection = window.getSelection()
+  if (!selection?.rangeCount || !selection.isCollapsed) return null
+  const range = selection.getRangeAt(0)
+  const node = range.startContainer
+  if (node.nodeType !== Node.TEXT_NODE || !root.contains(node)) return null
+  const before = (node.textContent ?? "").slice(0, range.startOffset)
+  const start = before.lastIndexOf("{")
+  if (start < 0) return null
+  const query = before.slice(start + 1).replace(/ /g, " ")
+  if (query.includes("}") || query.includes("\n") || query.length > 120) return null
+  return { node: node as Text, start, end: range.startOffset, query }
+}
+
+type Stage =
+  | { kind: "start"; text: string }
+  | { kind: "unknown"; text: string }
+  | { kind: "rows"; entry: ReferenceEntry; text: string }
+  | { kind: "row"; entry: ReferenceEntry; row: ReferenceRow; others: string }
+  | { kind: "column"; entry: ReferenceEntry; row: ReferenceRow; text: string }
+
+/**
+ * « État » → les index ; « État:sér » → les états ; « État:Sérénité » → la ligne trouvée ;
+ * « État:Sérénité:ty » → ses colonnes. Un nom qui contient lui-même « : » est reconnu.
+ */
+function stageOf(catalog: ReferenceCatalog, query: string): Stage {
+  const colon = query.indexOf(":")
+  if (colon < 0) return { kind: "start", text: query }
+  const entry = findEntry(catalog, query.slice(0, colon))
+  if (!entry) return { kind: "unknown", text: query.slice(0, colon) }
+  const rest = query.slice(colon + 1)
+  let row: ReferenceRow | null = null
+  for (const candidate of entryRows(catalog, entry)) {
+    const head = rest.slice(0, candidate.name.length)
+    const after = rest.charAt(candidate.name.length)
+    if ((after === "" || after === ":") && foldReferenceText(head) === foldReferenceText(candidate.name) && (!row || candidate.name.length > row.name.length)) row = candidate
+  }
+  if (row && rest.length === row.name.length) return { kind: "row", entry, row, others: rest }
+  if (row) return { kind: "column", entry, row, text: rest.slice(row.name.length + 1) }
+  return { kind: "rows", entry, text: rest }
+}
+
+type Option =
+  | { kind: "self"; column: string }
+  | { kind: "entry"; entry: ReferenceEntry }
+  | { kind: "row"; entry: ReferenceEntry; row: ReferenceRow }
+  | { kind: "name"; entry: ReferenceEntry; row: ReferenceRow }
+  | { kind: "column"; entry: ReferenceEntry; row: ReferenceRow; column: string }
+
+const LIMIT = 60
+
+/** Les colonnes proposées pour une ligne : toutes, sauf l'identifiant. */
+function citableColumns(columns: string[]) {
+  return columns.filter((column) => !["id", "identifiant"].includes(foldReferenceText(column)))
+}
+
+function optionsOf(catalog: ReferenceCatalog, stage: Stage, scope: ReferenceScope | null): Option[] {
+  if (stage.kind === "start") {
+    const scoped = scope ? catalog.indexes.find((index) => index.key === scope.index) : undefined
+    const columns = scoped ? citableColumns(scope?.tab ? entryColumns(catalog, scoped.key, scope.tab) : scoped.tabs[0]?.columns ?? []) : []
+    // Les index d'abord, puis les cases de la ligne ; ce qui commence comme la frappe passe devant.
+    const all: Option[] = [
+      ...catalog.entries.map((entry): Option => ({ kind: "entry", entry })),
+      ...columns.map((column): Option => ({ kind: "self", column })),
+    ]
+    return rankByQuery(all, (option) => option.kind === "entry" ? option.entry.label : option.kind === "self" ? option.column : "", stage.text).slice(0, LIMIT)
+  }
+  if (stage.kind === "rows") {
+    return rankByQuery(entryRows(catalog, stage.entry), (row) => row.name, stage.text).slice(0, LIMIT).map((row): Option => ({ kind: "row", entry: stage.entry, row }))
+  }
+  if (stage.kind === "row") {
+    const columns = citableColumns(entryColumns(catalog, stage.entry.index, stage.row.tab))
+    const others = entryRows(catalog, stage.entry).filter((row) => row.id !== stage.row.id && matchesQuery(row.name, stage.others))
+    const name: Option = { kind: "name", entry: stage.entry, row: stage.row }
+    return [
+      name,
+      ...columns.map((column): Option => ({ kind: "column", entry: stage.entry, row: stage.row, column })),
+      ...others.map((row): Option => ({ kind: "row", entry: stage.entry, row })),
+    ].slice(0, LIMIT)
+  }
+  if (stage.kind === "column") {
+    const columns = citableColumns(entryColumns(catalog, stage.entry.index, stage.row.tab))
+    return rankByQuery(columns, (column) => column, stage.text).map((column): Option => ({ kind: "column", entry: stage.entry, row: stage.row, column }))
+  }
+  return []
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
+}
+
+/** Remplace « {… » par `text` (le menu continue) ou par le lien d'une référence (le menu se ferme). */
+function replaceToken(token: Token, content: { text: string } | { html: string }) {
+  const selection = window.getSelection()
+  if (!selection || !token.node.isConnected) return false
+  const range = document.createRange()
+  range.setStart(token.node, token.start)
+  range.setEnd(token.node, Math.min(token.end, token.node.length))
+  selection.removeAllRanges()
+  selection.addRange(range)
+  // execCommand : l'annulation (Ctrl+Z) et l'enregistrement suivent comme pour une frappe.
+  if ("text" in content) document.execCommand("insertText", false, content.text)
+  else document.execCommand("insertHTML", false, content.html)
+  return true
+}
+
+function referenceHtml(option: Extract<Option, { kind: "name" | "column" }>) {
+  const column = option.kind === "column" ? option.column : undefined
+  const href = referenceHref({ index: option.entry.index, id: option.row.id, column })
+  return `<a href="${escapeHtml(href)}" contenteditable="false">${escapeHtml(referenceLabel(option.row.name, column))}</a>&nbsp;`
+}
+
+// ---------------------------------------------------------------------------
+// Le menu
+// ---------------------------------------------------------------------------
+
+type Position = { left: number; top?: number; bottom?: number }
+
+function caretPosition(token: Token): Position {
+  const range = document.createRange()
+  range.setStart(token.node, Math.min(token.end, token.node.length))
+  range.collapse(true)
+  let rect: DOMRect | undefined = range.getClientRects()[0]
+  if (!rect || (!rect.width && !rect.height && !rect.top)) rect = token.node.parentElement?.getBoundingClientRect()
+  const left = Math.max(8, Math.min((rect?.left ?? 8) - 8, window.innerWidth - 336))
+  const below = (rect?.bottom ?? 0) + 6
+  // Trop bas dans la fenêtre : le menu s'ouvre au-dessus de la ligne.
+  return below + 320 > window.innerHeight ? { left, bottom: window.innerHeight - (rect?.top ?? 0) + 6 } : { left, top: below }
+}
+
+/**
+ * Le menu d'une zone éditable. Renvoie les gestionnaires à poser sur la zone et le menu à
+ * afficher à côté d'elle. `enabled` : faux pour un texte brut ou en lecture seule.
+ */
+export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabled: boolean, afterInsert?: () => void) {
+  const scope = useContext(ReferenceScopeContext)
+  const active = useRef(false)
+  const [token, setToken] = useState<Token | null>(null)
+  const [catalog, setCatalog] = useState<ReferenceCatalog | null>(null)
+  const [loading, setLoading] = useState(false)
+  // La ligne surlignée, pour ce qui est tapé : une nouvelle frappe repart de la première.
+  const [highlighted, setHighlighted] = useState({ query: "", index: 0 })
+  const [position, setPosition] = useState<Position | null>(null)
+  const list = useRef<HTMLDivElement>(null)
+
+  const close = useCallback(() => {
+    active.current = false
+    setToken(null)
+  }, [])
+
+  const refresh = useCallback(() => {
+    const node = editor.current
+    if (!active.current || !node) return
+    const next = caretToken(node)
+    if (!next) { close(); return }
+    setToken(next)
+    setPosition(caretPosition(next))
+  }, [close, editor])
+
+  const open = useCallback(() => {
+    if (referenceCatalogDenied()) return
+    active.current = true
+    setLoading(true)
+    void loadReferenceCatalog().then((loaded) => {
+      setLoading(false)
+      // Un compte qui ne peut pas citer d'index (joueur) : « { » reste un simple caractère.
+      if (!loaded) { close(); return }
+      setCatalog(loaded)
+    })
+    refresh()
+  }, [close, refresh])
+
+  // Le curseur déplacé (clic, flèches gauche/droite) : le menu suit ou se ferme.
+  useEffect(() => {
+    if (!token) return
+    const onSelection = () => refresh()
+    // Échap ferme le menu sans fermer la fenêtre qui contient l'éditeur.
+    const onEscape = (event: KeyboardEvent) => {
+      if (event.key !== "Escape" || !active.current) return
+      event.preventDefault()
+      event.stopPropagation()
+      close()
+    }
+    document.addEventListener("selectionchange", onSelection)
+    window.addEventListener("keydown", onEscape, true)
+    return () => {
+      document.removeEventListener("selectionchange", onSelection)
+      window.removeEventListener("keydown", onEscape, true)
+    }
+  }, [close, refresh, token])
+
+  const stage = useMemo(() => catalog && token ? stageOf(catalog, token.query) : null, [catalog, token])
+  const options = useMemo(() => catalog && stage ? optionsOf(catalog, stage, scope) : [], [catalog, scope, stage])
+  const query = token?.query ?? ""
+  const highlight = highlighted.query === query ? highlighted.index : 0
+  const setHighlight = useCallback((next: number | ((current: number) => number)) => {
+    setHighlighted((current) => {
+      const from = current.query === query ? current.index : 0
+      return { query, index: typeof next === "function" ? next(from) : next }
+    })
+  }, [query])
+  useEffect(() => {
+    list.current?.querySelector<HTMLElement>(`[data-option="${highlight}"]`)?.scrollIntoView({ block: "nearest" })
+  }, [highlight])
+
+  const choose = useCallback((option: Option) => {
+    const current = editor.current ? caretToken(editor.current) : null
+    if (!current) { close(); return }
+    if (option.kind === "self") {
+      close()
+      replaceToken(current, { text: `{${option.column}}` })
+      return
+    }
+    if (option.kind === "entry") { replaceToken(current, { text: `{${option.entry.label}:` }); return }
+    if (option.kind === "row") { replaceToken(current, { text: `{${option.entry.label}:${option.row.name}` }); return }
+    close()
+    if (replaceToken(current, { html: referenceHtml(option) }) && editor.current) {
+      prepareReferenceAnchors(editor.current, false)
+      afterInsert?.()
+    }
+  }, [afterInsert, close, editor])
+
+  /** « } » : la référence tapée en entier est terminée (le nom, ou la case nommée). */
+  const finishTyped = useCallback(() => {
+    if (!stage) return false
+    if (stage.kind === "row") { choose({ kind: "name", entry: stage.entry, row: stage.row }); return true }
+    if (stage.kind === "column") {
+      const column = citableColumns(entryColumns(catalog!, stage.entry.index, stage.row.tab)).find((candidate) => foldReferenceText(candidate) === foldReferenceText(stage.text))
+      if (column) { choose({ kind: "column", entry: stage.entry, row: stage.row, column }); return true }
+      if (!stage.text.trim()) { choose({ kind: "name", entry: stage.entry, row: stage.row }); return true }
+    }
+    return false
+  }, [catalog, choose, stage])
+
+  const onKeyDown = useCallback((event: ReactKeyboardEvent<HTMLDivElement>) => {
+    if (!token) return
+    if (event.key === "}") {
+      if (finishTyped()) { event.preventDefault(); event.stopPropagation() }
+      else close()
+      return
+    }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return }
+    if (!options.length) return
+    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+      event.preventDefault()
+      event.stopPropagation()
+      setHighlight((current) => (current + (event.key === "ArrowDown" ? 1 : -1) + options.length) % options.length)
+      return
+    }
+    if (event.key === "Enter" || event.key === "Tab") {
+      event.preventDefault()
+      event.stopPropagation()
+      const option = options[Math.min(highlight, options.length - 1)]
+      if (option) choose(option)
+    }
+  }, [choose, close, finishTyped, highlight, options, setHighlight, token])
+
+  const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
+    if (!enabled) return
+    const native = event.nativeEvent as InputEvent
+    if (native.data?.endsWith("{")) open()
+    else if (active.current) refresh()
+  }, [enabled, open, refresh])
+
+  const element = enabled && token && position && typeof document !== "undefined" ? createPortal(<div
+    data-rich-text-popover=""
+    role="listbox"
+    aria-label="Citer une ligne d’index"
+    onMouseDown={(event) => event.preventDefault()}
+    className="fixed z-[300] w-80 overflow-hidden rounded-xl border bg-popover text-popover-foreground shadow-xl"
+    style={position}
+  >
+    <div className="border-b bg-muted/40 px-3 py-1.5 text-[11px] text-muted-foreground">{headerOf(stage)}</div>
+    <div ref={list} className="max-h-72 overflow-y-auto p-1">
+      {loading && !catalog ? <p className="flex items-center justify-center gap-2 px-2 py-5 text-xs text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Lecture des index…</p>
+        : options.length ? options.map((option, index) => <button
+          key={optionKey(option)}
+          type="button"
+          data-option={index}
+          role="option"
+          aria-selected={index === highlight}
+          onMouseEnter={() => setHighlight(index)}
+          onClick={() => choose(option)}
+          className={`flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm ${index === highlight ? "bg-accent" : ""}`}
+        >
+          <OptionIcon option={option} />
+          <span className="min-w-0 flex-1"><span className="block truncate">{optionLabel(option)}</span><span className="block truncate text-[11px] text-muted-foreground">{optionHint(option)}</span></span>
+          {(option.kind === "entry" || option.kind === "row") && <ChevronRight className="size-3.5 shrink-0 text-muted-foreground" />}
+        </button>)
+          : <p className="px-2 py-5 text-center text-xs text-muted-foreground">{stage?.kind === "unknown" ? `Aucun index ne s’appelle « ${stage.text} ».` : "Rien ne correspond."}</p>}
+    </div>
+    <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer</div>
+  </div>, document.body) : null
+
+  return { onKeyDown, onInput, close, element, open }
+}
+
+function headerOf(stage: Stage | null) {
+  if (!stage || stage.kind === "start") return "Une colonne de cette ligne, ou un index"
+  if (stage.kind === "unknown") return "Index inconnu"
+  if (stage.kind === "rows") return `${stage.entry.label} : choisis une ligne`
+  return `${stage.row.name} : son nom, ou une de ses cases`
+}
+
+function optionKey(option: Option) {
+  if (option.kind === "self") return `self:${option.column}`
+  if (option.kind === "entry") return `entry:${option.entry.label}`
+  if (option.kind === "column") return `column:${option.row.id}:${option.column}`
+  return `${option.kind}:${option.row.id}`
+}
+
+function optionLabel(option: Option) {
+  if (option.kind === "self") return `{${option.column}}`
+  if (option.kind === "entry") return option.entry.label
+  if (option.kind === "column") return option.column
+  return option.row.name
+}
+
+function optionHint(option: Option) {
+  if (option.kind === "self") return "Une case de cette ligne"
+  if (option.kind === "entry") return option.entry.hint
+  if (option.kind === "name") return "Le nom, avec son détail au survol"
+  if (option.kind === "column") return `La case de ${option.row.name}, sans survol`
+  return option.row.tab
+}
+
+function OptionIcon({ option }: { option: Option }) {
+  const className = "size-3.5 shrink-0 text-muted-foreground"
+  if (option.kind === "self" || option.kind === "column") return <TableProperties className={className} />
+  if (option.kind === "entry") return <Rows3 className={className} />
+  return <Tag className={className} />
+}
