@@ -10,7 +10,7 @@
  *
  * Ce fichier ne dépend que de règles partagées : la page et le serveur s'en servent.
  */
-import { foldName, parseGaugeCell } from "@/lib/index-columns"
+import { foldName, isCheckedValue, parseGaugeCell } from "@/lib/index-columns"
 import { parseStateFx, type StateFx } from "@/lib/state-fx"
 import { operationLabel, parseRoll, parseValueChange, type RollSpec, type ValueOperation } from "@/lib/state-change"
 import type { GaugeSettings, IndexColumnSpec } from "@/lib/index-columns"
@@ -24,6 +24,7 @@ import {
   EFFECT_APPLY_OPTIONS,
   EFFECT_PAGE_HEADER,
   EFFECT_PAGE_LEGACY_HEADERS,
+  EFFECT_RETRIGGER_HEADER,
   EFFECT_ROLL_HEADER,
   EFFECTS_TAB,
   STATE_LEVEL_HEADERS,
@@ -43,6 +44,11 @@ export type StateEffect = {
   operation: ValueOperation | null
   /** Le jet qui le déclenche depuis la fiche (colonne « Jet ») ; null sans jet. */
   roll: RollSpec | null
+  /**
+   * « Redéclencher l'effet » coché : il n'est jamais temporaire, il s'écrit dans la fiche
+   * quand l'état est posé ou monte à ce niveau, et à chaque reclic sur le niveau en cours.
+   */
+  retrigger: boolean
   image: string
   /** Où sa couleur s'applique (colonne « Couleur appliquée à ») ; nulle part si rien n'est choisi. */
   apply: EffectTargets
@@ -119,7 +125,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
     const operation = parseValueChange(changeText)
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: operation?.kind === "add" ? operation.amount : null, changeText, operation, roll: parseRoll(read(row, [EFFECT_ROLL_HEADER])), image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: operation?.kind === "add" ? operation.amount : null, changeText, operation, roll: parseRoll(read(row, [EFFECT_ROLL_HEADER])), retrigger: isCheckedValue(read(row, [EFFECT_RETRIGGER_HEADER, "Redéclencher", "Redéclancher l'effet"])), image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -194,6 +200,11 @@ export type StateContribution = {
   fx: Array<{ name: StateFx; color: string }>
 }
 
+/** Les effets d'un niveau qui se déclenchent (« Redéclencher l'effet » coché). */
+export function triggeredEffectsOf(catalog: StatesCatalog, state: CharacterState) {
+  return activeEffectsOf(catalog, state).filter((effect) => effect.retrigger)
+}
+
 /** Un effet qui se lance depuis la fiche : un jet, ou des dés dans son changement de valeur. */
 export function isRolledEffect(effect: StateEffect) {
   return Boolean(effect.roll) || effect.operation?.kind === "roll"
@@ -205,8 +216,9 @@ export function isRolledEffect(effect: StateEffect) {
  */
 export function stateContributions(catalog: StatesCatalog, states: CharacterState[], targetOf: (name: string) => string | null): StateContribution[] {
   return states.flatMap((state) => activeEffectsOf(catalog, state).flatMap((effect) => {
-    // Un effet lancé (jet, dés) ne change rien tant qu'on ne le lance pas depuis la fiche.
-    const lasting = isRolledEffect(effect) ? null : effect.operation
+    // Un effet lancé (jet, dés) ne change rien tant qu'on ne le lance pas depuis la fiche ;
+    // un effet à redéclencher s'écrit dans la fiche quand il se déclenche, jamais en plus.
+    const lasting = isRolledEffect(effect) || effect.retrigger ? null : effect.operation
     const changes = Boolean(lasting && (lasting.kind !== "add" || lasting.amount))
     // Une cible sans changement de valeur peut tout de même recevoir la couleur ou des FX.
     const decorates = (effect.apply.skills && isColor(effect.color)) || (effect.fxApply.skills && effect.fx.length > 0)

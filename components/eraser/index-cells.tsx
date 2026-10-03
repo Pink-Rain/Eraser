@@ -15,7 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
-import { GaugeCell } from "@/components/eraser/index-gauge"
+import { GaugeCell, GlyphCell } from "@/components/eraser/index-gauge"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import {
   checkboxValue,
@@ -971,6 +971,9 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     case "color":
       column.control = (rowKey) => <ColorCell label={label} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
       break
+    case "glyph":
+      column.control = (rowKey) => <GlyphCell label={label} value={valueOf(rowKey, key)} color={spec.glyph?.color} filled={spec.glyph?.filled} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
+      break
     case "tab-sort": {
       // Une valeur nouvelle crée l'onglet : la liste accepte un nom qui n'y est pas encore.
       const options = (context.tabNames ?? []).map((value) => ({ value }))
@@ -1068,6 +1071,8 @@ export function IndexField({ label, spec: input, value, onChange, long = false, 
         : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>
+    case "glyph":
+      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><GlyphCell label={label} value={value} color={spec.glyph?.color} filled={spec.glyph?.filled} disabled={disabled} onChange={onChange} /></span></div>
     case "spells":
       return <div className="md:col-span-2"><SpellsField label={label} value={value} source={spec.spells?.source ?? "all"} category={spec.spells?.category} onChange={onChange} /></div>
     case "gauge": {

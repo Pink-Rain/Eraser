@@ -1,32 +1,41 @@
-# Eraser 0.1.1-alpha.111 — 97 nouvelles icônes pour les jauges
+# Eraser 0.1.1-alpha.112 — Toutes les icônes, une colonne Icône, des effets qui se redéclenchent
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Icônes des jauges (et des boutons)
+## Icônes : les 1 768 icônes Lucide
 
-97 icônes s'ajoutent au choix, pensées pour les états. On les trouve en tapant leur nom
-ou un mot-clé dans la recherche du sélecteur (« sommeil », « poison », « muet »,
-« malus »…).
+- **Toutes les icônes Lucide** sont maintenant proposées dans le sélecteur des jauges, des
+  boutons et de la nouvelle colonne Icône. Celles d'Eraser restent en tête de liste, puis
+  toutes les autres suivent. « Afficher plus » charge la suite.
+- **Recherche en français et en anglais** : « oeil », « œil » ou « yeux » trouvent les
+  yeux, « personne » trouve aussi user, users et contact, « groupe » trouve users et
+  team. Les mots-clés anglais de Lucide marchent aussi (skull, eye…). Les accents et le
+  « œ » ne comptent pas, et un début de mot suffit (« pers »).
+- Les icônes déjà choisies dans tes index ne changent pas.
+- Elles se chargent seulement quand on en a besoin (à l'ouverture du sélecteur, ou pour
+  afficher une icône hors de la liste d'Eraser) : les pages ne sont pas plus lourdes.
 
-- **Émotions et esprit** : colère, agacé, indifférent, joie, masques de théâtre,
-  masque, esprit vif, esprit troublé, idée, esprit éteint, cœur barré, cœur allié,
-  pacte, main tendue.
-- **Sommeil et temps** : lit, grand lit, nuit étoilée, yeux fermés, minuteur, réveil,
-  infini, répétition, tourbillon.
-- **Corps et santé** : thermomètre, froid, chaleur, stéthoscope, éprouvettes, fiole
-  ronde, microscope, comprimés, insecte barré, biceps, haltère, silhouette, activité.
-- **Sens** : regard, oreille, sourd, muet, silence, bulle barrée, parole, porte-voix.
-- **Entraves et contrôle** : chaîne, maillon, chaîne brisée, poids, saisie, aimant,
-  interdit, rond barré, cadenas ouvert, clé ronde, automate, puzzle, débranché,
-  éclair barré, drapeau barré.
-- **Protection et alerte** : bouclier renforcé, validé, en alerte, barré, brisé ;
-  sirène, attention, arrêt, alerte, cloche qui sonne, cloche muette.
-- **Bonus et malus** : doubles flèches et grosses flèches vers le haut ou le bas,
-  cadran.
-- **Météo et magie** : braises, pluie, neige, brouillard, brume, nuageux, éclipse,
-  soleil voilé, constellation, rose, parchemin écrit.
-- **Faim et soif** : couverts, verre d'eau, café, soupe, jambon, cigarette.
-- **Personnes** : personne validée, affaiblie, barrée ; dé.
+## Icônes pleines : un rendu propre
 
-Toutes se remplissent de la couleur de la jauge et gardent leurs traits visibles une
-fois pleines.
+- Une icône pleine (dans une jauge remplie) n'a plus de liseré clair sur son contour : le
+  bord garde la couleur de l'icône, et seuls les détails intérieurs (yeux, aiguilles,
+  coche…) sont tracés en clair. Les icônes rondes (sourire, horloge, alerte) sont nettes.
+
+## Nouveau type de colonne : Icône
+
+- Dans « Modifier », le type **Icône** propose toutes les icônes (avec la même recherche)
+  ou un émoji. La feuille garde le nom de l'icône.
+- Réglages : une couleur (facultative) et l'affichage plein ou en contour.
+
+## Index des états, onglet Effets : « Redéclencher l'effet »
+
+- Nouvelle colonne à cocher, ajoutée à droite. Un effet coché n'est plus temporaire : il
+  s'écrit pour de bon dans la fiche (dégâts, soin), comme un dé, avec « Annuler » :
+  - quand l'état est posé ;
+  - quand il monte à ce niveau ;
+  - à chaque nouveau clic sur le niveau en cours (« recliquer redéclenche l'effet » au
+    survol).
+- Avec des dés ou un Jet, ils sont lancés à ces moments-là. Redescendre d'un niveau ne
+  déclenche rien.
+- Exemple : Brûlure niveau 2, Cible « Points de vie actuels », Changement « -40 », case
+  cochée. Chaque clic sur le niveau 2 retire 40 PV.

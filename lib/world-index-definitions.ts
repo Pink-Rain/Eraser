@@ -48,6 +48,9 @@ export const EFFECT_COLOR_HEADER = "Couleur"
 export const EFFECT_CHANGE_HEADER = "Changement de valeur"
 /** Le jet de dés qui déclenche l'effet depuis la fiche (« 1d20 16-20 »). */
 export const EFFECT_ROLL_HEADER = "Jet"
+/** Case à cocher : l'effet s'écrit pour de bon à chaque fois qu'il est déclenché. */
+export const EFFECT_RETRIGGER_HEADER = "Redéclencher l'effet"
+export const EFFECT_RETRIGGER_DESCRIPTION = "Cochée : l'effet n'est plus temporaire. Il s'écrit pour de bon dans la fiche (des dégâts, un soin), comme un dé : quand l'état est posé ou monte à ce niveau, puis à chaque nouveau clic sur le niveau en cours. Avec des dés ou un Jet, ils sont lancés à ces moments-là."
 
 /** Comment écrire ces deux colonnes : la description proposée d'office (modifiable dans « Modifier »). */
 export const EFFECT_CHANGE_DESCRIPTION = "Tant que l’état est posé : +10 ou 10 ajoute, -30 retire, =100 remplace, ≥1 (ou >=1) plancher, ≤50 (ou <=50) plafond ; tout revient quand l’état part. Des dés se lancent depuis la fiche et s’écrivent dans la fiche (dégâts, soins). Le signe tout devant vaut pour le total : -1d20+20 retire le total de 1d20+20, +2d6 ou 2d6 ajoute ; 1d20-20 ajoute (1d20-20), donc retire si le dé fait moins de 20."
@@ -287,7 +290,7 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
       {
         name: EFFECTS_TAB,
         itemLabel: "un effet",
-        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER, EFFECT_ROLL_HEADER],
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER, EFFECT_ROLL_HEADER, EFFECT_RETRIGGER_HEADER],
         widths: [240, 320, 130, 190, 160, 130, 220, 220, 220, 170],
         idPrefix: "EFF",
         renamedHeaders: EFFECT_PAGE_LEGACY_HEADERS.map((legacy) => [legacy, EFFECT_PAGE_HEADER] as [string, string]),
@@ -426,6 +429,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
   }
   if (index === "states") {
     if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé aux cibles : +10 / -30 ajoutent, =100 remplace, ≥1 / ≤50 bornent, tant que l’état est posé. Des dés (-1d20+20 : retire le total de 1d20+20) se lancent depuis la fiche.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_RETRIGGER_HEADER)) reasons.push("La fiche de personnage écrit l’effet coché pour de bon quand l’état est posé, monte à ce niveau ou qu’on reclique sur le niveau en cours.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_ROLL_HEADER)) reasons.push("Le jet lancé depuis la fiche (« 1d20 16-20 ») : dans la plage, le changement de valeur s’applique ; vide, l’effet n’a pas de jet.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
     if (tab === EFFECTS_TAB && [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique la couleur de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
@@ -525,6 +529,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       // « +10 », « =100 », « ≥1 », « -1d20+20 » : du texte, lu par lib/state-change.
       if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich", description: EFFECT_CHANGE_DESCRIPTION }
       if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich", description: EFFECT_ROLL_DESCRIPTION }
+      if (isHeader(header, [EFFECT_RETRIGGER_HEADER, "Redéclencher", "Redéclancher l'effet"])) return { kind: "checkbox", description: EFFECT_RETRIGGER_DESCRIPTION }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
       if (isHeader(header, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }

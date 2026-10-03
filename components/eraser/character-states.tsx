@@ -10,7 +10,7 @@ import { sanitizeRichText } from "@/components/eraser/rich-text"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { activeEffectsOf, isRolledEffect, stateDefinitionOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
+import { activeEffectsOf, isRolledEffect, stateDefinitionOf, triggeredEffectsOf, type CharacterState, type StateDefinition, type StateEffect, type StatesCatalog } from "@/lib/character-states"
 import { foldName } from "@/lib/index-columns"
 import { cn } from "@/lib/utils"
 
@@ -107,10 +107,38 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
     return [...byType.entries()]
   }, [autoStates, catalog.states, query, states])
 
+  /**
+   * Les effets à redéclencher d'un niveau (« Redéclencher l'effet » coché) : écrits dans
+   * la fiche comme un dé, leur résultat affiché sous l'état, avec « Annuler ».
+   */
+  function trigger(state: CharacterState, level: 1 | 2) {
+    if (!onRoll) return
+    const effects = triggeredEffectsOf(catalog, { ...state, level })
+    if (!effects.length) return
+    const results = effects.map((effect) => ({ effect, outcome: onRoll(effect) }))
+    const undos = results.flatMap((result) => result.outcome.undo ? [result.outcome.undo] : [])
+    const outcome: StateRollOutcome = {
+      hit: results.some((result) => result.outcome.hit),
+      lines: results.flatMap((result) => results.length > 1 ? [`${result.effect.name} :`, ...result.outcome.lines] : result.outcome.lines),
+      // Dans l'ordre inverse : la première valeur d'avant est remise en dernier.
+      undo: undos.length ? () => { for (const undo of [...undos].reverse()) undo() } : undefined,
+    }
+    setOutcomes((current) => ({ ...current, [state.name]: { effect: results.length > 1 ? "Effets déclenchés" : effects[0].name, outcome } }))
+  }
+
   function add(definition: StateDefinition) {
-    onChange([...states, { id: definition.id, name: definition.name, level: 1 }])
+    const state: CharacterState = { id: definition.id, name: definition.name, level: 1 }
+    onChange([...states, state])
+    trigger(state, 1)
     setOpen(false)
     setQuery("")
+  }
+
+  /** Choisir un niveau : monter déclenche ses effets, recliquer le niveau en cours les redéclenche. */
+  function chooseLevel(state: CharacterState, current: 1 | 2, next: 1 | 2) {
+    if (next === current) { trigger(state, current); return }
+    onChange(states.map((candidate) => candidate === state ? { ...candidate, level: next } : candidate))
+    if (next > current) trigger(state, next)
   }
 
   return <div className="mt-2 grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1.5">
@@ -145,6 +173,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
       const levels = definition?.levels ?? 2
       const level = Math.min(state.level, levels) as 1 | 2
       const rolled = onRoll ? activeEffectsOf(catalog, state).filter(isRolledEffect) : []
+      const retriggers = Boolean(onRoll) && triggeredEffectsOf(catalog, { ...state, level }).length > 0
       const last = outcomes[state.name]
       return <div key={state.name} className="grid min-w-0 grid-cols-[minmax(0,1fr)] gap-1"><HoverCard openDelay={180} closeDelay={80}>
         <HoverCardTrigger asChild>
@@ -157,7 +186,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
             {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
             {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
             {!automatic && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
-              {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => onChange(states.map((candidate) => candidate === state ? { ...candidate, level: (index + 1) as 1 | 2 } : candidate))} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={`Niveau ${index + 1}`}>
+              {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => chooseLevel(state, level, (index + 1) as 1 | 2)} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={index + 1 === level && retriggers ? `Niveau ${index + 1} : recliquer redéclenche l’effet` : `Niveau ${index + 1}`}>
                 <IndexIconGlyph icon={definition?.gauge.icon || "clock"} emoji={definition?.gauge.emoji} filled={index < level} stroke={definition?.gauge.strokeColor} className="size-4" />
               </button>)}
             </span>}

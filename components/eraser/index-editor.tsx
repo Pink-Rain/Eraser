@@ -1,10 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import {
-  ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2,
-  type LucideIcon,
-} from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
@@ -151,6 +148,7 @@ function defaultSpec(kind: IndexColumnKind, targets: RelationTarget[], relations
     case "file": return { kind: "file", file: { accept: "any", multiple: true } }
     case "color": return { kind: "color" }
     case "gauge": return { kind: "gauge", gauge: { style: "icons", max: 5, scale: "column", icon: "star" } }
+    case "glyph": return { kind: "glyph", glyph: { filled: true } }
     case "lookup": return { kind: "lookup", lookup: { via: relations[0]?.header ?? "", field: "" } }
     case "rollup": return { kind: "rollup", rollup: { via: relations[0]?.header ?? "", fn: "count" } }
     case "formula": return { kind: "formula", formula: { expression: "", result: "auto" } }
@@ -516,6 +514,11 @@ function TypeSettings(props: SettingsProps) {
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
     case "color": return <p className="text-xs text-muted-foreground">Une pastille et un sélecteur de couleur ; la feuille garde le code (#aa3355).</p>
+    case "glyph": return <div className="grid gap-2 text-xs">
+      <p className="text-muted-foreground">Chaque case propose toutes les icônes (recherche en français ou en anglais) ou un émoji ; la feuille garde le nom de l’icône.</p>
+      <div className="grid gap-1"><span className="font-semibold">Couleur</span><ColorSwatches value={spec.glyph?.color} disabled={disabled} onChange={(color) => set({ glyph: { ...spec.glyph, color } })} /></div>
+      <label className="flex items-center gap-2"><Checkbox disabled={disabled} checked={spec.glyph?.filled !== false} onCheckedChange={(checked) => set({ glyph: { ...spec.glyph, filled: checked === true } })} />Icône pleine (décochée : seulement son contour)</label>
+    </div>
     case "tab-sort": return <p className="text-xs text-muted-foreground">La liste propose les onglets de l’index. Choisir un onglet y déplace la ligne ; taper un nom nouveau crée l’onglet (avec les mêmes colonnes) puis y range la ligne. Le nom de l’onglet est aussi écrit dans la case, lisible dans Sheets.</p>
     case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "linked-choice": {
@@ -629,7 +632,7 @@ function PlacementSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec
 
 /** L'icône de chaque type, pour le repérer d'un coup d'œil dans la liste. */
 const kindIcons: Partial<Record<IndexColumnKind, LucideIcon>> = {
-  "rich": TypeIcon, "number": Hash, "checkbox": SquareCheck, "color": Palette, "gauge": Gauge,
+  "rich": TypeIcon, "number": Hash, "checkbox": SquareCheck, "color": Palette, "gauge": Gauge, "glyph": Shapes,
   "choice": List, "linked-choice": ListTree, "linked": ArrowLeftRight, "tab-sort": FolderTree,
   "lookup": SearchIcon, "rollup": Sigma, "formula": FunctionSquare, "random": Dices,
   "actions": MousePointerClick, "file": Paperclip, "spells": Sparkles,

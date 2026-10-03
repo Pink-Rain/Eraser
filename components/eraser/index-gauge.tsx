@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useEffect, useState, type ComponentType, type ReactNode } from "react"
+import { memo, useEffect, useState, useSyncExternalStore, type ComponentType, type ReactNode } from "react"
 import {
   Anchor, Apple, Atom, Award, Axe, Baby, Banana, Bandage, Banknote, Battery, BatteryFull, Bean, Beef, Beer, Bell, Biohazard, Bird, Bomb, Bone, BookOpen, Brain, Bug, Candy, Carrot, Castle, Cat, Cherry, Church, Circle, Clock, Cloud, CloudLightning, Clover, Coins, Compass, Cookie, Cross, Crosshair, Crown, Diamond, Dices, Dna, Dog, Droplet, Droplets, Drumstick, Egg, Eye, EyeOff, Feather, Fingerprint, Fish, Flag, FlaskConical, Flame, Flower, Flower2, Footprints, Frown, Gavel, Gem, Ghost, Gift, Glasses, Grape, Hammer, Hand, HandHeart, Heart, HeartCrack, HeartPulse, Hexagon, Hourglass, Key, Landmark, Laugh, Leaf, Lock, Map as MapIcon, Medal, Minus, Moon, Mountain, MountainSnow, Music, Octagon, Orbit, PawPrint, Pentagon, Pickaxe, PiggyBank, Pill, Plus, Rabbit, Radiation, Rainbow, Rat, Rocket, Scale, Scroll, Shell, Shield, ShieldHalf, Ship, Shovel, Skull, Smile, Snail, Snowflake, Sparkle, Sparkles, Sprout, Square, Squirrel, Star, StarHalf, Sun, Sunrise, Sunset, Sword, Swords, Syringe, Target, Tent, Tornado, TreePine, Trees, Triangle, Trophy, Turtle, Umbrella, User, Users, WandSparkles, Waves, Wheat, Wind, Wine, Worm, Wrench, X, Zap,
   Palette,
@@ -11,12 +11,12 @@ import {
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { foldName, formatGaugeCell, gaugeScaleOf, parseGaugeCell, type GaugeRowStyle, type GaugeSettings } from "@/lib/index-columns"
+import { foldName, formatGaugeCell, gaugeScaleOf, parseGaugeCell, parseGlyphValue, type GaugeRowStyle, type GaugeSettings } from "@/lib/index-columns"
 
 /** Les couleurs proposées pour une ligne d'une jauge « par ligne ». */
 const rowColors = ["#b9504e", "#c2410c", "#b8872a", "#4d7c0f", "#397f88", "#285f8f", "#6b21a8", "#78716c"]
 
-type IconEntry = { name: string; label: string; Icon: ComponentType<LucideProps>; keywords?: string }
+export type IconEntry = { name: string; label: string; Icon: ComponentType<LucideProps>; keywords?: string }
 
 /**
  * Les icônes proposées pour les jauges et les boutons, avec leur nom français pour la
@@ -265,8 +265,48 @@ export const indexIcons: IconEntry[] = [
 
 const iconByName = new Map(indexIcons.map((entry) => [entry.name, entry]))
 
+/**
+ * Toutes les autres icônes Lucide (plus de 1 700) vivent dans un module à part, chargé
+ * seulement quand on ouvre le sélecteur ou qu'une case montre une icône hors de la liste.
+ */
+type IconCatalogModule = typeof import("@/components/eraser/index-icon-catalog")
+let iconCatalogModule: IconCatalogModule | null = null
+let iconCatalogLoading: Promise<IconCatalogModule> | null = null
+const iconCatalogListeners = new Set<() => void>()
+
+export function loadIconCatalog() {
+  iconCatalogLoading ??= import("@/components/eraser/index-icon-catalog").then((loaded) => {
+    iconCatalogModule = loaded
+    for (const listener of [...iconCatalogListeners]) listener()
+    return loaded
+  })
+  return iconCatalogLoading
+}
+
+function subscribeIconCatalog(listener: () => void) {
+  iconCatalogListeners.add(listener)
+  return () => { iconCatalogListeners.delete(listener) }
+}
+
+/** Le catalogue complet, une fois chargé (null avant). Le demander le charge. */
+export function useIconCatalog(enabled = true) {
+  const catalog = useSyncExternalStore(subscribeIconCatalog, () => iconCatalogModule, () => null)
+  useEffect(() => { if (enabled && !iconCatalogModule) void loadIconCatalog() }, [enabled])
+  return catalog
+}
+
+/** L'icône d'un nom : de la liste d'Eraser, sinon du catalogue complet s'il est chargé. */
 export function indexIcon(name: string | undefined) {
-  return iconByName.get(name ?? "") ?? iconByName.get("sparkle")!
+  return iconByName.get(name ?? "") ?? iconCatalogModule?.catalogByName.get(name ?? "") ?? iconByName.get("sparkle")!
+}
+
+/** Comme indexIcon, mais charge le catalogue si le nom n'est pas dans la liste (null en attendant). */
+function useIndexIcon(name: string | undefined) {
+  const known = iconByName.get(name ?? "")
+  const catalog = useIconCatalog(Boolean(name) && !known)
+  if (known || !name) return known ?? iconByName.get("sparkle")!
+  if (!catalog) return null
+  return catalog.catalogByName.get(name) ?? iconByName.get("sparkle")!
 }
 
 /** Une icône d'index : une icône de la liste, ou un émoji / caractère tel quel. */
@@ -279,13 +319,29 @@ export const DEFAULT_GLYPH_STROKE = "#fffaf0"
  * milieu. On dessine l'icône, on remplit depuis les bords tout ce qui est dehors, et tout
  * ce que ce remplissage n'atteint pas est l'intérieur. Calculée une fois par icône.
  */
-const silhouettes = new Map<string, Promise<string>>()
+type Silhouette = { full: string; inner: string }
+const silhouettes = new Map<string, Promise<Silhouette>>()
 const SILHOUETTE_SIZE = 96
+/**
+ * De combien rentrer l'intérieur (en pixels du dessin à 96) pour les traits clairs : le
+ * contour extérieur, tracé à 1,8 sur 24, en fait 7 ; on le laisse entier à la couleur de
+ * l'icône, et seuls les détails intérieurs (yeux, aiguilles…) sont dessinés en clair.
+ */
+const CONTOUR_INSET = 8
+
+function maskUrl(context: CanvasRenderingContext2D, pixels: ImageData, keep: Uint8Array) {
+  for (let at = 0; at < keep.length; at += 1) {
+    pixels.data[at * 4] = pixels.data[at * 4 + 1] = pixels.data[at * 4 + 2] = 0
+    pixels.data[at * 4 + 3] = keep[at] ? 255 : 0
+  }
+  context.putImageData(pixels, 0, 0)
+  return context.canvas.toDataURL()
+}
 
 function silhouetteOf(name: string, svg: SVGSVGElement) {
   let promise = silhouettes.get(name)
   if (promise) return promise
-  promise = new Promise<string>((resolve) => {
+  promise = new Promise<Silhouette>((resolve) => {
     const copy = svg.cloneNode(true) as SVGSVGElement
     copy.setAttribute("width", String(SILHOUETTE_SIZE))
     copy.setAttribute("height", String(SILHOUETTE_SIZE))
@@ -298,7 +354,7 @@ function silhouetteOf(name: string, svg: SVGSVGElement) {
       const canvas = document.createElement("canvas")
       canvas.width = canvas.height = SILHOUETTE_SIZE
       const context = canvas.getContext("2d")
-      if (!context) return resolve("")
+      if (!context) return resolve({ full: "", inner: "" })
       context.drawImage(image, 0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
       const pixels = context.getImageData(0, 0, SILHOUETTE_SIZE, SILHOUETTE_SIZE)
       const size = SILHOUETTE_SIZE
@@ -315,14 +371,23 @@ function silhouetteOf(name: string, svg: SVGSVGElement) {
         if (at >= size) stack.push(at - size)
         if (at < size * (size - 1)) stack.push(at + size)
       }
-      for (let at = 0; at < size * size; at += 1) {
-        pixels.data[at * 4] = pixels.data[at * 4 + 1] = pixels.data[at * 4 + 2] = 0
-        pixels.data[at * 4 + 3] = outside[at] ? 0 : 255
+      const inside = new Uint8Array(size * size)
+      for (let at = 0; at < size * size; at += 1) inside[at] = outside[at] ? 0 : 1
+      // L'intérieur rentré : chaque passe retire une couche de pixels au bord.
+      let inner = inside
+      for (let pass = 0; pass < CONTOUR_INSET; pass += 1) {
+        const next = new Uint8Array(size * size)
+        for (let at = 0; at < size * size; at += 1) {
+          if (!inner[at]) continue
+          const x = at % size
+          next[at] = x > 0 && x < size - 1 && at >= size && at < size * (size - 1) && inner[at - 1] && inner[at + 1] && inner[at - size] && inner[at + size] ? 1 : 0
+        }
+        inner = next
       }
-      context.putImageData(pixels, 0, 0)
-      resolve(canvas.toDataURL())
+      const full = maskUrl(context, pixels, inside)
+      resolve({ full, inner: maskUrl(context, pixels, inner) })
     }
-    image.onerror = () => resolve("")
+    image.onerror = () => resolve({ full: "", inner: "" })
     image.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(new XMLSerializer().serializeToString(copy))}`
   })
   silhouettes.set(name, promise)
@@ -332,14 +397,14 @@ function silhouetteOf(name: string, svg: SVGSVGElement) {
 /** Le masque de la silhouette d'une icône, et la référence à poser sur son dessin. */
 function useSilhouette(name: string, enabled: boolean) {
   const [node, setNode] = useState<SVGSVGElement | null>(null)
-  const [mask, setMask] = useState<{ name: string; url: string } | null>(null)
+  const [mask, setMask] = useState<{ name: string; shape: Silhouette } | null>(null)
   useEffect(() => {
     if (!enabled || !node) return
     let alive = true
-    void silhouetteOf(name, node).then((url) => { if (alive) setMask({ name, url }) })
+    void silhouetteOf(name, node).then((shape) => { if (alive) setMask({ name, shape }) })
     return () => { alive = false }
   }, [enabled, name, node])
-  return [setNode, mask?.name === name ? mask.url : ""] as const
+  return [setNode, mask?.name === name ? mask.shape : null] as const
 }
 
 /**
@@ -348,40 +413,67 @@ function useSilhouette(name: string, enabled: boolean) {
  * sourire) restent visibles dans la couleur `stroke` ; vide, seul son contour est tracé.
  */
 export function IndexIconGlyph({ icon, emoji, className = "size-4", filled = true, stroke }: { icon?: string; emoji?: string; className?: string; filled?: boolean; stroke?: string }) {
-  const entry = indexIcon(icon)
-  const [silhouetteRef, silhouetteMask] = useSilhouette(entry.name, filled && !emoji?.trim())
+  const entry = useIndexIcon(emoji?.trim() ? undefined : icon)
+  const [silhouetteRef, silhouette] = useSilhouette(entry?.name ?? "", Boolean(entry) && filled && !emoji?.trim())
   if (emoji?.trim()) return <span aria-hidden="true" className={`inline-flex items-center justify-center leading-none ${className}`} style={{ fontSize: "0.95em", filter: filled ? undefined : "grayscale(1)" }}>{emoji.trim()}</span>
+  // Une icône hors de la liste attend le catalogue complet : la place est gardée.
+  if (!entry) return <span aria-hidden="true" className={`inline-flex shrink-0 ${className}`} />
   const { Icon } = entry
   if (!filled) return <Icon aria-hidden="true" className={className} fill="none" strokeWidth={1.8} />
   // Trois dessins superposés : la silhouette (intérieur compris), les formes remplies, puis
-  // tous les traits par-dessus. Une icône dont le contour est tracé en dernier (le cercle
-  // du sourire) ne cache plus ses yeux, et le cerveau est plein.
-  const mask = silhouetteMask ? `url(${silhouetteMask}) center / 100% 100% no-repeat` : undefined
+  // les traits clairs des détails. Ces derniers sont coupés à l'intérieur rentré : le
+  // contour extérieur reste entier, de la couleur de l'icône, au lieu d'un liseré clair.
+  const mask = silhouette?.full ? `url(${silhouette.full}) center / 100% 100% no-repeat` : undefined
+  const inner = silhouette?.inner ? `url(${silhouette.inner}) center / 100% 100% no-repeat` : undefined
   return <span aria-hidden="true" className={`relative inline-flex shrink-0 ${className}`}>
     {mask && <span className="absolute inset-0 bg-current" style={{ mask, WebkitMask: mask }} />}
     <Icon className="absolute inset-0 size-full" fill="currentColor" stroke="currentColor" strokeWidth={1.8} />
-    <Icon ref={silhouetteRef} className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
+    <span className="absolute inset-0" style={inner ? { mask: inner, WebkitMask: inner } : silhouette ? { opacity: 0 } : undefined}>
+      <Icon ref={silhouetteRef} className="absolute inset-0 size-full" fill="none" stroke={stroke || DEFAULT_GLYPH_STROKE} strokeWidth={1.6} />
+    </span>
   </span>
 }
 
 /** Choisir une icône (avec recherche) ou taper un émoji. */
-export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone = false }: { icon?: string; emoji?: string; onChange: (value: { icon?: string; emoji?: string }) => void; disabled?: boolean; allowNone?: boolean }) {
+/** Les icônes montrées d'un coup dans le sélecteur (« Afficher plus » pour la suite). */
+const PICKER_PAGE = 240
+
+export function IconPicker({ icon, emoji, onChange, disabled = false, allowNone = false, cell }: {
+  icon?: string
+  emoji?: string
+  onChange: (value: { icon?: string; emoji?: string }) => void
+  disabled?: boolean
+  allowNone?: boolean
+  /** Dans une case de tableau : l'icône seule, à sa couleur, sans libellé. */
+  cell?: { label: string; color?: string; filled?: boolean }
+}) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
+  const [limit, setLimit] = useState(PICKER_PAGE)
+  // Le catalogue complet se charge à l'ouverture ; en attendant, la liste d'Eraser.
+  const catalog = useIconCatalog(open)
   const folded = foldName(query)
-  const shown = indexIcons.filter((entry) => !folded || foldName(`${entry.label} ${entry.name} ${entry.keywords ?? ""}`).includes(folded))
-  return <Popover open={open} onOpenChange={setOpen}>
+  const matches: IconEntry[] = catalog ? catalog.searchIconCatalog(query) : indexIcons.filter((entry) => !folded || foldName(`${entry.label} ${entry.name} ${entry.keywords ?? ""}`).includes(folded))
+  const shown = matches.slice(0, limit)
+  const current = useIndexIcon(emoji?.trim() ? undefined : icon)
+  return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setQuery(""); setLimit(PICKER_PAGE) } }}>
     <PopoverTrigger asChild>
-      <Button type="button" variant="outline" size="sm" disabled={disabled} className="justify-start gap-2">
-        {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} filled={false} /> : <span className="text-muted-foreground">—</span>}
-        <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? indexIcon(icon).label : "Aucune icône"}</span>
-      </Button>
+      {cell
+        ? <button type="button" disabled={disabled} aria-label={`${cell.label} : ${emoji?.trim() || (icon ? current?.label ?? icon : "aucune icône")}`} title={emoji?.trim() || (icon ? current?.label ?? icon : "Choisir une icône")} className="flex min-h-8 w-full items-center px-2 hover:bg-muted disabled:cursor-default disabled:hover:bg-transparent" style={cell.color ? { color: cell.color } : undefined}>
+          {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} filled={cell.filled !== false} className="size-5" /> : <span className="text-xs text-muted-foreground">—</span>}
+        </button>
+        : <Button type="button" variant="outline" size="sm" disabled={disabled} className="justify-start gap-2">
+          {icon || emoji ? <IndexIconGlyph icon={icon} emoji={emoji} filled={false} /> : <span className="text-muted-foreground">—</span>}
+          <span className="truncate text-xs">{emoji?.trim() ? `Émoji ${emoji.trim()}` : icon ? current?.label ?? icon : "Aucune icône"}</span>
+        </Button>}
     </PopoverTrigger>
     {open && <PopoverContent align="start" className="w-80 p-2">
-      <Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher : cœur, tête de mort, graine…" className="mb-2 h-8 text-xs" />
-      <div className="grid max-h-60 grid-cols-8 gap-1 overflow-y-auto">
+      <Input autoFocus value={query} onChange={(event) => { setQuery(event.target.value); setLimit(PICKER_PAGE) }} placeholder="Chercher en français ou en anglais : œil, personne, skull…" className="mb-1 h-8 text-xs" />
+      <p className="mb-1.5 px-0.5 text-[10px] text-muted-foreground">{catalog ? `${matches.length} icône${matches.length > 1 ? "s" : ""}${query.trim() ? "" : " au total"}` : "Chargement de toutes les icônes…"}</p>
+      <div className="grid max-h-64 grid-cols-8 gap-1 overflow-y-auto">
         {allowNone && <button type="button" onClick={() => { onChange({}); setOpen(false) }} className="grid size-8 place-items-center rounded-md text-xs text-muted-foreground hover:bg-muted" title="Aucune icône">—</button>}
         {shown.map((entry) => <button key={entry.name} type="button" title={entry.label} aria-label={entry.label} onClick={() => { onChange({ icon: entry.name }); setOpen(false) }} className={`grid size-8 place-items-center rounded-md hover:bg-muted ${entry.name === icon && !emoji ? "bg-primary/15 text-primary" : ""}`}><entry.Icon className="size-4" /></button>)}
+        {matches.length > shown.length && <button type="button" onClick={() => setLimit((current) => current + PICKER_PAGE)} className="col-span-8 rounded-md py-1.5 text-[11px] font-medium text-muted-foreground hover:bg-muted hover:text-foreground">Afficher {Math.min(PICKER_PAGE, matches.length - shown.length)} de plus ({matches.length - shown.length} restantes)</button>}
       </div>
       {!shown.length && <p className="py-3 text-center text-xs text-muted-foreground">Aucune icône de ce nom. Tape plutôt un émoji ci-dessous.</p>}
       <label className="mt-2 grid gap-1 border-t pt-2 text-[11px] font-semibold text-muted-foreground">Ou un émoji / caractère
@@ -558,3 +650,16 @@ function GaugeBar({ label, current, max, color, disabled, editor, onChange }: { 
     {editor}
   </span>
 }
+
+/**
+ * Une case « Icône » : le nom d'une icône (ou un émoji) gardé dans la feuille, montré à la
+ * couleur de la colonne. Un clic ouvre le sélecteur complet.
+ */
+export const GlyphCell = memo(function GlyphCell({ label, value, color, filled, disabled = false, onChange }: { label: string; value: string; color?: string; filled?: boolean; disabled?: boolean; onChange: (value: string) => void }) {
+  const look = parseGlyphValue(value)
+  return <IconPicker icon={look.icon} emoji={look.emoji} disabled={disabled} allowNone cell={{ label, color, filled }} onChange={(next) => {
+    const written = next.emoji?.trim() || next.icon || ""
+    if (written !== value.trim()) onChange(written)
+  }} />
+})
+

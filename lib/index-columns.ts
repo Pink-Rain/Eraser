@@ -33,6 +33,7 @@ export type IndexColumnKind =
   | "actions"
   | "spells"
   | "gauge"
+  | "glyph"
   | "number"
   | "archived"
 
@@ -78,6 +79,7 @@ export const indexColumnKinds: Record<IndexColumnKind, KindInfo> = {
   "actions": { label: "Boutons", short: "Des boutons qui enchaînent des actions.", group: "Jeu", creatable: true, description: "Un ou plusieurs boutons par case. Chaque bouton enchaîne des actions : ouvrir, changer une valeur, +1/−1, dupliquer, créer ailleurs, tirer au sort, envoyer dans le chat… Les valeurs et conditions peuvent être des formules.", settings: ["Boutons : libellé, icône, couleur, confirmation, condition d'affichage.", "Étapes de chaque bouton, exécutées dans l'ordre."], example: "« −1 charge », « Lancer l'attaque », « Créer un PNJ de ce peuple »." },
   "spells": { label: "Sélecteur de sorts", short: "Des sorts, affichés en cartes.", group: "Listes et relations", creatable: true, description: "Des sorts des classes, des créatures ou des deux, gardés par leur nom et affichés en cartes.", settings: ["Sorts proposés : classes, créatures ou les deux.", "Catégorie : tous, actifs ou passifs."] },
   "gauge": { label: "Jauge", short: "Un nombre en icônes, barre ou anneau.", group: "Saisie", creatable: true, description: "Un nombre affiché en icônes à cliquer, en barre ou en anneau. La jauge peut avoir le même maximum pour toute la colonne, être propre à chaque case, ou prendre son maximum dans une autre colonne.", settings: ["Affichage : icônes, barre, anneau.", "Maximum : le même pour la colonne, propre à chaque case, ou lu dans une autre colonne.", "Icône (une centaine au choix, ou un émoji) et couleur.", "Couleur selon le niveau (rouge quand c'est bas)."], example: "Charges d'un sort (propre à chaque case), Note sur 5 (même maximum), PV sur « PV max » (autre colonne)." },
+  "glyph": { label: "Icône", short: "Une icône (plus de 1 700) ou un émoji.", group: "Saisie", creatable: true, description: "Une icône choisie parmi plus de 1 700, avec une recherche en français ou en anglais (œil, personne, skull…), ou un émoji. La feuille garde le nom de l'icône.", settings: ["Couleur de l'icône (facultative : sinon, celle du texte).", "Pleine ou en contour."], example: "L'icône d'un état, d'une faction, d'un type d'objet." },
   "number": { label: "Nombre", short: "Un nombre : unité, monnaie, plage, pourcentage.", group: "Saisie", creatable: true, description: "Un nombre, trié sur sa vraie valeur : unité (monnaie PO/PC/PN, distance, poids), décimales, texte avant/après, pourcentage, plage « 2–5 ».", settings: ["Unité et unité par défaut.", "Décimales.", "Texte avant / après.", "Pourcentage.", "Plage."], example: "Prix « 1,5 PO », Portée « 2–5 m », Poids « 12 kg »." },
   "archived": { label: "Archivée", group: "Système", creatable: false, description: "Ancienne colonne gardée dans Sheets, jamais affichée ni modifiée." },
 }
@@ -150,6 +152,13 @@ export type GaugeSettings = {
 export type GaugeRowStyle = { icon?: string; emoji?: string; color?: string }
 
 const GAUGE_EMOJI = /[^\p{L}\p{N}\s_-]/u
+
+/** Une case Icône : le nom d'une icône (« eye », « skull ») ou un émoji tel quel. */
+export function parseGlyphValue(value: string): { icon?: string; emoji?: string } {
+  const look = value.trim()
+  if (!look) return {}
+  return GAUGE_EMOJI.test(look) ? { emoji: look } : { icon: look }
+}
 
 /** « 2|skull|#b9504e » → le nombre (texte) et le style de la case. */
 export function parseGaugeCell(value: string): { count: string; style: GaugeRowStyle } {
@@ -338,6 +347,8 @@ export type IndexColumnSpec = {
    */
   link?: { index: WorldIndexKey; tab: string; column: string }
   gauge?: GaugeSettings
+  /** Icône : sa couleur et son dessin (plein ou contour). */
+  glyph?: { color?: string; filled?: boolean }
   spells?: { source: SpellSource; category?: "actif" | "passif" }
   /** Nombre (et résultat numérique d'une formule) : unité, décimales, plage, pourcentage… */
   number?: NumberFormat
@@ -435,6 +446,7 @@ export function columnTypeLabel(input: IndexColumnSpec) {
     details.push(spec.gauge.style === "bar" ? "barre" : spec.gauge.style === "icons" ? "icônes" : "anneau")
     details.push(scale === "cell" ? "propre à chaque case" : scale === "from-column" ? `maximum : ${spec.gauge.maxColumn || "?"}` : `sur ${spec.gauge.max}`)
   }
+  if (spec.kind === "glyph") details.push(spec.glyph?.filled === false ? "contour" : "pleine")
   if (spec.kind === "spells" && spec.spells) details.push(spec.spells.source === "class" ? "sorts de classe" : spec.spells.source === "creature" ? "sorts de créature" : "tous les sorts")
   if (spec.kind === "file" && spec.file) details.push(fileAcceptLabels[spec.file.accept].toLocaleLowerCase("fr"), spec.file.multiple ? "plusieurs" : "un seul")
   if (spec.kind === "number" && spec.number) {

@@ -138,22 +138,25 @@ test("changement de valeur : +, -, =, bornes et dés ; jets lancés depuis la fi
 
   const effectsTable = {
     tabName: "Effets",
-    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID", "Jet"],
+    headers: ["Nom", "Cible", "Couleur", "Changement de valeur", "Image", "ID", "Jet", "Redéclencher l'effet"],
     rows: [
-      row(["Folie forcée", "Folie", "", "=100", "", "E1", ""]),
-      row(["Increvable", "Points de vie actuels", "", "≥1", "", "E2", ""]),
-      row(["Malédiction", "Points de vie actuels", "", "-60", "", "E3", "1d20 16-20"]),
-      row(["Saignement", "Points de vie actuels", "", "-1d20-20", "", "E4", ""]),
+      row(["Folie forcée", "Folie", "", "=100", "", "E1", "", ""]),
+      row(["Increvable", "Points de vie actuels", "", "≥1", "", "E2", "", "Non"]),
+      row(["Malédiction", "Points de vie actuels", "", "-60", "", "E3", "1d20 16-20", ""]),
+      row(["Saignement", "Points de vie actuels", "", "-1d20-20", "", "E4", "", ""]),
+      row(["Brûlure", "Points de vie actuels", "", "-40", "", "E5", "", "Oui"]),
     ],
   };
   const statesTable = {
     tabName: "États",
     headers: ["Nom", "Description niveau 1", "Description niveau 2", "ID", "Niveau 1", "Niveau 2"],
-    rows: [row(["Test", "x", "/", "T1", "Folie forcée, Increvable, Malédiction, Saignement", ""])],
+    rows: [row(["Test", "x", "/", "T1", "Folie forcée, Increvable, Malédiction, Saignement, Brûlure", ""])],
   };
   const catalog = states.parseStatesCatalog([statesTable, effectsTable], {});
   const contributions = states.stateContributions(catalog, [{ id: "T1", name: "Test", level: 1 }], (name) => name);
   // Les effets lancés (jet, dés) ne changent rien tant qu'on ne les lance pas.
   assert.deepEqual(contributions.map((item) => [item.target, item.amount, item.label]), [["Folie", 0, "=100"], ["Points de vie actuels", 0, "≥1"]]);
   assert.deepEqual(catalog.effects.filter(states.isRolledEffect).map((effect) => effect.name), ["Malédiction", "Saignement"]);
+  // « Redéclencher l'effet » coché : jamais temporaire (absent ci-dessus), déclenché à la demande.
+  assert.deepEqual(states.triggeredEffectsOf(catalog, { id: "T1", name: "Test", level: 1 }).map((effect) => effect.name), ["Brûlure"]);
 });
