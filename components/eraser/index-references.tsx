@@ -18,8 +18,9 @@ import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-te
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
-import { foldName, matchChoice, parseGlyphValue } from "@/lib/index-columns"
+import { foldName, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
 import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedReference } from "@/lib/index-references"
+import { objectIconImage } from "@/lib/object-icons"
 import { cn } from "@/lib/utils"
 import type { WeaponModifierRef } from "@/lib/weapon-modifiers"
 
@@ -133,10 +134,13 @@ export function StateDetails({ definition, level, color }: { definition: StateDe
   </div>
 }
 
-/** Le détail d'un attribut, d'un matériau ou d'une rune : son nom et sa description. */
+/**
+ * Le détail d'un attribut, d'un matériau ou d'une rune : son nom et sa description. Son
+ * icône y prend la couleur de sa colonne Couleur.
+ */
 function ModifierDetails({ modifier, color }: { modifier: WeaponModifierRef; color: string }) {
   return <div className="grid gap-2">
-    <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierName modifier={modifier} color={color} /></p>
+    <p className="font-display text-lg font-semibold leading-tight" style={{ color }}><ModifierIcon modifier={modifier} color={modifier.color || undefined} /><FormattedName name={modifier.name} html={modifier.nameHtml} color={color} /></p>
     {modifier.descriptionHtml
       ? <IndexRichText html={modifier.descriptionHtml} self={modifier.id ? { index: "weapon-modifiers", id: modifier.id } : undefined} className="text-xs leading-5 [&_a]:underline" />
       : <p className="text-xs text-muted-foreground">Pas de description.</p>}
@@ -153,26 +157,66 @@ function FormattedName({ name, html, color }: { name: string; html?: string; col
   return <span style={color ? { color } : undefined}>{name}</span>
 }
 
-/** La petite icône d'un modificateur (colonne Icône), devant son nom, à la couleur du texte. */
-function ModifierIcon({ modifier }: { modifier: WeaponModifierRef }) {
-  const look = parseGlyphValue(modifier.icon ?? "")
-  if (!look.icon && !look.emoji) return null
-  return <span className="mr-1 inline-flex translate-y-[0.12em]"><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={false} /></span>
+/**
+ * La première couleur écrite dans un nom mis en forme : son icône la reprend, pour être de
+ * la couleur du mot qu'elle précède.
+ */
+function firstHtmlColor(html?: string) {
+  return html?.match(/color:\s*(#[0-9a-f]{3,8})\b/i)?.[1]
 }
 
+/**
+ * La petite icône d'un modificateur (colonne Icône), devant son nom : de la couleur du
+ * texte, ou de `color`. Un émoji garde ses couleurs.
+ */
+function ModifierIcon({ modifier, color }: { modifier: WeaponModifierRef; color?: string }) {
+  const look = parseGlyphValue(modifier.icon ?? "")
+  if (!look.icon && !look.emoji) return null
+  return <span className="mr-1 inline-flex translate-y-[0.12em]" style={color ? { color } : undefined}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span>
+}
+
+/** Le nom cité dans un texte : son icône a la couleur du mot (sa mise en forme, sinon sa couleur). */
 function ModifierName({ modifier, color }: { modifier: WeaponModifierRef; color: string }) {
-  return <span style={{ color }}><ModifierIcon modifier={modifier} /><FormattedName name={modifier.name} html={modifier.nameHtml} color={color} /></span>
+  return <span style={{ color }}><ModifierIcon modifier={modifier} color={firstHtmlColor(modifier.nameHtml)} /><FormattedName name={modifier.name} html={modifier.nameHtml} color={color} /></span>
+}
+
+/**
+ * L'icône d'un objet (colonne Icône, ou celle qu'Eraser lui choisit) teintée d'une couleur :
+ * son dessin sert de pochoir. Sans couleur, l'image telle quelle.
+ */
+function ObjectGlyph({ object, name, color, className = "size-[1em]" }: { object: NonNullable<ResolvedReference["object"]>; name: string; color?: string; className?: string }) {
+  const image = objectIconImage(object.icon, name, object.type, object.subtype)
+  if (!image) {
+    const emoji = object.icon.trim()
+    return emoji && !emoji.startsWith("=") ? <span aria-hidden="true" className="leading-none">{emoji}</span> : null
+  }
+  // eslint-disable-next-line @next/next/no-img-element
+  if (!color) return <img src={image.src} alt="" aria-hidden="true" loading="lazy" decoding="async" draggable={false} className={cn("inline-block object-contain", className)} />
+  const mask = `url("${image.src.replace(/"/g, "%22")}") center / contain no-repeat`
+  return <span aria-hidden="true" className={cn("inline-block", className)} style={{ backgroundColor: color, mask, WebkitMask: mask }} />
 }
 
 const chipClass = "inline cursor-help rounded-sm font-semibold underline decoration-dotted decoration-1 underline-offset-2 outline-none focus-visible:ring-2 focus-visible:ring-ring/50"
 
-function StateChip({ definition }: { definition: StateDefinition }) {
+/**
+ * Le style imposé à la colonne Nom de l'index de la ligne citée : le nom le prend, à la
+ * place de la mise en forme de sa case, comme dans le tableau. Son icône en prend la couleur.
+ */
+function nameLook(style: ColumnStyle | undefined) {
+  if (!style) return null
+  const css = columnStyleCss(style)
+  const color = style.color === "muted" ? "var(--muted-foreground)" : style.color || undefined
+  return { className: css.className, style: css.style, color }
+}
+
+function StateChip({ definition, nameStyle }: { definition: StateDefinition; nameStyle?: ColumnStyle }) {
   const color = definition.gauge.color || DEFAULT_STATE_COLOR
+  const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
     <HoverCardTrigger asChild>
-      <span tabIndex={0} className={chipClass} style={{ textDecorationColor: `${color}99` } as CSSProperties}>
-        <span className="mr-0.5 inline-flex translate-y-[2px]" style={{ color }}><IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-[1em]" filled={false} /></span>
-        <FormattedName name={definition.name} html={definition.nameHtml} color={color} />
+      <span tabIndex={0} className={cn(chipClass, look && "font-normal", look?.className)} style={{ textDecorationColor: `${color}99`, ...look?.style } as CSSProperties}>
+        <span className="mr-0.5 inline-flex translate-y-[2px]" style={{ color: look ? look.color : firstHtmlColor(definition.nameHtml) ?? color }}><IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-[1em]" filled={false} /></span>
+        {look ? <span>{definition.name}</span> : <FormattedName name={definition.name} html={definition.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
@@ -181,12 +225,13 @@ function StateChip({ definition }: { definition: StateDefinition }) {
   </HoverCard>
 }
 
-function ModifierChip({ modifier }: { modifier: WeaponModifierRef }) {
+function ModifierChip({ modifier, nameStyle }: { modifier: WeaponModifierRef; nameStyle?: ColumnStyle }) {
   const color = modifier.color || "#7f5a3a"
+  const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
     <HoverCardTrigger asChild>
-      <span tabIndex={0} className={chipClass} style={{ textDecorationColor: `${color}99` } as CSSProperties}>
-        <ModifierName modifier={modifier} color={color} />
+      <span tabIndex={0} className={cn(chipClass, look && "font-normal", look?.className)} style={{ textDecorationColor: `${color}99`, ...look?.style } as CSSProperties}>
+        {look ? <span style={look.color ? { color: look.color } : undefined}><ModifierIcon modifier={modifier} />{modifier.name}</span> : <ModifierName modifier={modifier} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
@@ -219,15 +264,21 @@ function MissingReference({ label }: { label: string }) {
   return <span className="text-muted-foreground line-through decoration-dotted" title="Cette ligne n’existe plus dans son index.">{label}</span>
 }
 
-/** Le détail d'une ligne d'un index sans affichage propre : son image ou son icône, son type, sa description. */
+/**
+ * Le détail d'une ligne d'un index sans affichage propre : son image ou son icône (de la
+ * couleur de sa colonne Couleur), son type, sa description.
+ */
 function RowDetails({ reference, color, depth }: { reference: ResolvedReference; color?: string; depth: number }) {
   const look = parseGlyphValue(reference.icon ?? "")
+  const glyph = Boolean(look.icon || look.emoji)
   return <div className="grid gap-2">
     <div className="flex items-start gap-3">
-      {(reference.image || look.icon || look.emoji) && <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={color ? { color } : undefined}>
+      {(reference.image || glyph || reference.object) && <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={color ? { color } : undefined}>
         {reference.image
           ? <IndexImage value={reference.image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} />
-          : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={false} />}
+          : reference.object && !glyph
+            ? <ObjectGlyph object={reference.object} name={reference.name} color={color} className="size-8" />
+            : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} />}
       </span>}
       <div className="min-w-0">
         <p className="font-display text-lg font-semibold leading-tight" style={color ? { color } : undefined}><FormattedName name={reference.name} html={reference.nameHtml} color={color} /></p>
@@ -240,15 +291,23 @@ function RowDetails({ reference, color, depth }: { reference: ResolvedReference;
   </div>
 }
 
-/** Le nom d'une ligne citée, avec son détail au survol. */
+/**
+ * Le nom d'une ligne citée, dans le style de la colonne Nom de son index, avec son détail
+ * au survol. Son icône a la couleur du mot.
+ */
 function RowChip({ reference, depth }: { reference: ResolvedReference; depth: number }) {
   const color = reference.color
   const look = parseGlyphValue(reference.icon ?? "")
+  const nameCss = columnStyleCss(reference.nameStyle)
+  const styleColor = reference.nameStyle?.color && reference.nameStyle.color !== "muted" ? reference.nameStyle.color : undefined
+  const wordColor = reference.nameStyle ? styleColor ?? (reference.nameStyle.color === "muted" ? "var(--muted-foreground)" : undefined) : firstHtmlColor(reference.nameHtml) ?? color
   return <HoverCard openDelay={180} closeDelay={80}>
     <HoverCardTrigger asChild>
-      <span tabIndex={0} className={chipClass} style={color ? { textDecorationColor: `${color}99` } as CSSProperties : undefined}>
-        {(look.icon || look.emoji) && <span className="mr-0.5 inline-flex translate-y-[2px]" style={color ? { color } : undefined}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={false} /></span>}
-        <FormattedName name={reference.name} html={reference.nameHtml} color={color} />
+      <span tabIndex={0} className={cn(chipClass, reference.nameStyle && "font-normal", nameCss.className)} style={{ ...nameCss.style, ...(color ? { textDecorationColor: `${color}99` } : {}) } as CSSProperties}>
+        {(look.icon || look.emoji)
+          ? <span className="mr-0.5 inline-flex translate-y-[2px]" style={wordColor ? { color: wordColor } : undefined}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span>
+          : reference.object && <span className="mr-0.5 inline-flex translate-y-[2px]"><ObjectGlyph object={reference.object} name={reference.name} color={wordColor ?? "currentColor"} /></span>}
+        {reference.nameStyle ? <span>{reference.name}</span> : <FormattedName name={reference.name} html={reference.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={color ? { borderColor: `${color}55` } : undefined}>
@@ -293,11 +352,11 @@ function Cited({ citation, value, depth, states, modifiers }: { citation: Citati
   if (citation.request.column) return <CellValue reference={value} depth={depth} />
   if (value.index === "states") {
     const definition = states.find((candidate) => candidate.id === value.id) ?? states.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (definition) return <StateChip definition={definition} />
+    if (definition) return <StateChip definition={definition} nameStyle={value.nameStyle} />
   }
   if (value.index === "weapon-modifiers") {
     const modifier = modifiers?.find((candidate) => candidate.id === value.id) ?? modifiers?.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (modifier) return <ModifierChip modifier={modifier} />
+    if (modifier) return <ModifierChip modifier={modifier} nameStyle={value.nameStyle} />
   }
   return <RowChip reference={value} depth={depth} />
 }
@@ -370,7 +429,7 @@ export function IndexRichText({ html, fill, self, depth = 0, className = "", as 
  * donné : du texte dans le style de la colonne de l'objet (attributs), sans étiquette.
  * Un nom absent de l'index s'affiche sans survol.
  */
-export function ModifierPills({ names, look }: { names: string[]; look?: { className: string; style: CSSProperties } }) {
+export function ModifierPills({ names, look, iconColor }: { names: string[]; look?: { className: string; style: CSSProperties }; /** Pastilles : la couleur de leur icône (celle de leur colonne dans l'objet). */ iconColor?: string }) {
   const modifiers = useWeaponModifiers(names.length > 0)
   const byName = useMemo(() => new Map((modifiers ?? []).map((modifier) => [foldName(modifier.name), modifier])), [modifiers])
   return <>{names.map((name, index) => {
@@ -383,7 +442,7 @@ export function ModifierPills({ names, look }: { names: string[]; look?: { class
     const color = modifier.color || "#7f5a3a"
     return <span key={`${name}:${index}`}>{comma}<HoverCard openDelay={180} closeDelay={80}>
       <HoverCardTrigger asChild>
-        <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}><ModifierIcon modifier={modifier} />{modifier.name}</span>
+        <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}><ModifierIcon modifier={modifier} color={look ? undefined : iconColor} />{modifier.name}</span>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
         <ModifierDetails modifier={modifier} color={color} />

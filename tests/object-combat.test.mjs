@@ -204,3 +204,28 @@ test("un inventaire revenu sans catalogue est redemandé", async () => {
   assert.equal(received.length, 2);
   assert.equal(received[1].items[0].id, "A");
 });
+
+test("un exemplaire change sa compétence, sa valeur, ses attributs sans toucher à l'objet", async () => {
+  const links = await vite.ssrLoadModule("/lib/item-modifiers.ts");
+  const item = { name: "Arc'Säy", skill: "Maîtrise des arcs", value: "20 | 1d30+20", attributes: "Combo", materials: "", runes: "" };
+  // Anciens ajouts (onglets « Attributs », « Matériaux ») : ajoutés à la liste de l'objet.
+  const legacy = JSON.stringify([{ target: "comp:Tir", value: "+2" }, { target: "attribut", value: "Lourde" }, { target: "materiau", value: "Acier trempé" }]);
+  const before = links.effectiveItemFields(item, legacy);
+  assert.equal(before.attributes, "Combo, Lourde");
+  assert.equal(before.materials, "Acier trempé");
+  assert.equal(item.attributes, "Combo");
+  // Le formulaire enregistre ce qui diffère de l'index ; une liste vidée reste vide.
+  const saved = links.serializeItemLinks(links.parseItemModifiers(legacy), [], { value: "1d12", attributes: "", skill: "Maîtrise des arcs, Maîtrise des armes d'escrime" });
+  assert.deepEqual(links.parseItemOverrides(saved), { value: "1d12", attributes: "", skill: "Maîtrise des arcs, Maîtrise des armes d'escrime" });
+  assert.deepEqual(links.parseItemModifiers(saved), [{ target: "comp:Tir", value: "+2" }]);
+  const after = links.effectiveItemFields(item, saved);
+  assert.equal(after.value, "1d12");
+  assert.equal(after.attributes, "");
+  assert.equal(after.distance, undefined);
+  assert.ok(links.sameItemField("attributes", "Lourde, Combo", "combo,lourde"));
+  assert.ok(!links.sameItemField("value", "1d12", "1d20"));
+  // La fiche retrouve l'objet par la compétence qu'il utilise, nom de l'exemplaire compris.
+  const usage = links.indexItemUsage([{ category: "Arme", slots: [{ id: "S1", quantity: 1, equipped: false, modifiers: saved, item }] }]);
+  assert.deepEqual(links.usageItemsFor(usage, "Maîtrise des armes d’escrime", "maitrise-escrime").map((entry) => entry.slotId), ["S1"]);
+  assert.deepEqual(links.usageItemsFor(usage, "Parade"), []);
+});

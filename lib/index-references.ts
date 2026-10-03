@@ -161,6 +161,10 @@ export type ResolvedReference = {
   tab: string
   name: string
   nameHtml?: string
+  /** Le style imposé à la colonne du nom de son index. */
+  nameStyle?: ColumnStyle
+  /** Une ligne de l'Index des objets : de quoi dessiner son icône comme dans l'inventaire. */
+  object?: { icon: string; type: string; subtype: string }
   /** Le survol d'une ligne : son type, sa description, sa couleur, son icône, son image. */
   type?: string
   descriptionHtml?: string

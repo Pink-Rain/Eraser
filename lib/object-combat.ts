@@ -170,7 +170,7 @@ export function fillObjectTemplateHtml(html: string, item: ObjectCombatFields) {
  */
 export function objectTraitLooks(headers: string[], columnSpecs: Record<string, IndexColumnSpec> = {}) {
   const looks: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>> = {}
-  for (const key of ["skill", "distance", "action", "reload", "attributes", "value"] as const) {
+  for (const key of ["skill", "distance", "action", "reload", "attributes", "materials", "runes", "value"] as const) {
     const index = objectCombatColumn(headers, key)
     if (index < 0) continue
     const header = headers[index]

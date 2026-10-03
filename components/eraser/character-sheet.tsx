@@ -3,7 +3,7 @@
 import { IndexRichText } from "@/components/eraser/index-references"
 import dynamic from "next/dynamic"
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react"
-import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, X } from "lucide-react"
+import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, GraduationCap, ImagePlus, LoaderCircle, Minus, NotebookPen, PawPrint, Plus, Sparkles, Swords, X } from "lucide-react"
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { InlineEdit } from "@/components/eraser/inline-edit"
@@ -52,6 +52,7 @@ import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
 import { keepCatalogFields, type CharacterInventoryRecord } from "@/lib/inventory-schema"
+import { ObjectIcon } from "@/components/eraser/object-icon"
 import { loadFullInventory } from "@/lib/inventory-fetch"
 import {
   buildItemModifierTargets,
@@ -59,7 +60,9 @@ import {
   characteristicModifierTargetId,
   formatModifierAmount,
   indexInventoryModifiers,
+  indexItemUsage,
   linkedItemsFor,
+  usageItemsFor,
   modifierTargetIdForName,
   modifierTotalFor,
   modifierRuleFor,
@@ -67,6 +70,7 @@ import {
   withStateModifiers,
   skillModifierTargetId,
   type LinkedModifierItem,
+  type UsageItem,
 } from "@/lib/item-modifiers"
 import { characterLifeState } from "@/lib/character-life"
 import { foldName } from "@/lib/index-columns"
@@ -297,6 +301,27 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
   </div>
 }
 
+/**
+ * Les objets qui s'utilisent avec cette compétence (leur colonne Compétence), à équiper ou
+ * déséquiper d'ici, en plus des objets liés par un modificateur.
+ */
+function UsageItemsPanel({ items, toggle, borderColor }: { items: UsageItem[]; toggle: SlotToggle; borderColor: string }) {
+  if (!items.length) return null
+  return <div className="mt-2 border-t pt-2" style={{ borderColor }}>
+    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Swords className="size-3" />Objets qui l’utilisent</p>
+    <div className="space-y-1">
+      {items.map((entry) => <label key={entry.slotId} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
+        <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
+        <span className={`flex size-5 shrink-0 items-center justify-center overflow-hidden rounded ${entry.equipped ? "" : "opacity-50"}`}>{/^(?:https?:\/\/|\/)/i.test(entry.image)
+          // eslint-disable-next-line @next/next/no-img-element
+          ? <img src={entry.image} alt="" className="size-full object-cover" />
+          : <ObjectIcon icon={entry.icon} name={entry.name} type={entry.type} subtype={entry.subtype} className="size-full" emojiClassName="text-sm" fallback={<Swords className="size-3 text-muted-foreground" />} />}</span>
+        <span className={`min-w-0 flex-1 truncate font-medium ${entry.equipped ? "" : "text-muted-foreground"}`}>{entry.name}</span>
+      </label>)}
+    </div>
+  </div>
+}
+
 /** Entoure une carte non dépliable (vie, folie, caractéristique…) d’un survol listant ses objets liés. */
 function ModifierHoverShell({ items, toggle, title, color, total, children }: { items: LinkedModifierItem[]; toggle: SlotToggle; title: string; color: string; total?: string; children: ReactNode }) {
   const [open, setOpen] = useState(false)
@@ -314,7 +339,7 @@ function ModifierHoverShell({ items, toggle, title, color, total, children }: { 
 /** Les neuf colonnes d'une compétence dans la fiche, dans l'ordre de `characterSkillMetrics`. */
 type SkillCells = number[]
 
-function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, tint = "", fx = [], skillRule, characteristicRule, toggle }: { skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
+function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, usageItems = [], tint = "", fx = [], skillRule, characteristicRule, toggle }: { /** Les objets qui s'utilisent avec cette compétence. */ usageItems?: UsageItem[]; skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const shortName = skill.name
     .replace(/^Maîtrise\b/, "Maît")
@@ -349,6 +374,7 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
         return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className={`rounded px-1.5 py-1 text-center font-semibold ${lineModifier ? (lineModifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted font-normal text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{lineModifier ? formatModifierAmount(lineModifier) : "0"}</span></div>
       })}
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={statModifier || ruled ? statTotal : undefined} />
+      <UsageItemsPanel items={usageItems} toggle={toggle} borderColor={color.border} />
       {abilities.length > 0 && <div className="mt-2 border-t pt-2" style={{ borderColor: color.border }}><p className="mb-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Actifs et passifs liés</p><div className="space-y-1.5">{abilities.map((spell) => {
         const active = spell.category === "actif"
         // Le nom d'abord. Un actif montre ses charges à côté, son type passe sous la
@@ -366,7 +392,7 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
  * En-tête coloré d’une caractéristique. Son survol montre les seuils critiques propres à la
  * caractéristique et les objets liés, au-dessus quand la place manque en dessous.
  */
-function CharacteristicHeader({ characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, toggle }: { characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CharacteristicHeader({ characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, usageItems = [], toggle }: { /** Les objets qui s'utilisent avec cette caractéristique. */ usageItems?: UsageItem[]; characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
   const { anchorRef, above, measure } = useFlipPlacement()
   const panelRef = useRef<HTMLDivElement>(null)
   const place = () => measure(panelRef.current)
@@ -383,6 +409,7 @@ function CharacteristicHeader({ characteristic, cells, color, values, commit, st
       <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = cells[kind]; return <div key={kind}><p className="mb-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}<ModifierBadge amount={criticalModifiers[kind]} /></p><InlineEdit numeric singleClick compact label={`${characteristic.name} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
       {changed && <p className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: color.border }}><span className="text-muted-foreground">Base</span><InlineEdit numeric singleClick compact label={`${characteristic.name} : valeur de base`} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className="rounded bg-primary/10 px-1.5 py-0.5 font-semibold tabular-nums text-primary">{values[cells.value] || "0"}</span></InlineEdit><span className="rounded-full bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold tabular-nums text-emerald-300">{modifierText(statModifier, statRule)}</span></p>}
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={total} />
+      <UsageItemsPanel items={usageItems} toggle={toggle} borderColor={color.border} />
     </div>
   </div>
 }
@@ -529,6 +556,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const characterStates = useMemo(() => [...postedStates, ...autoLife.auto], [autoLife.auto, postedStates])
   const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, targetOfName), [characterStates, statesCatalog.catalog, targetOfName])
   const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateChanges), [inventory, stateChanges])
+  // Les objets rangés par la compétence qu'ils utilisent (colonne Compétence de chaque exemplaire).
+  const itemUsage = useMemo(() => indexItemUsage(inventory?.containers || []), [inventory])
   const portrait = useMemo(() => portraitLayers(statesCatalog.catalog, characterStates), [characterStates, statesCatalog.catalog])
   const modifiersByValueIndex = useMemo(() => {
     const map = new Map<number, { total: number; rule?: ModifierRule; items: LinkedModifierItem[] }>()
@@ -976,6 +1005,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           statRule={ruleForValue(characteristicCells.value)}
           criticalModifiers={{ success: modifierForValue(characteristicCells.success), failure: modifierForValue(characteristicCells.failure) }}
           linkedItems={mergeLinkedItems(linkedForValue(characteristicCells.value), tagLinkedItems(successLabel, linkedForValue(characteristicCells.success)), tagLinkedItems(failureLabel, linkedForValue(characteristicCells.failure)))}
+          usageItems={usageItemsFor(itemUsage, group.characteristic.name, group.characteristic.key)}
           toggle={slotToggle}
         />
         : <div className="rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent }}><h3 className="font-display text-lg font-semibold">{group.characteristic?.name ?? "Autres compétences"}</h3>{!group.characteristic && <p className="text-[10px] text-white/75">Sans caractéristique reconnue dans l’index</p>}</div>}
@@ -1006,6 +1036,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             tagLinkedItems(successLabel, ...successIndexes.map(linkedForValue)),
             tagLinkedItems(failureLabel, ...failureIndexes.map(linkedForValue)),
           )}
+          usageItems={usageItemsFor(itemUsage, skill.name, skill.key)}
           tint={stateTint(linkedItemsFor(modifierIndex, skillModifierTargetId(skill.key)))}
           fx={stateFxOf(linkedItemsFor(modifierIndex, skillModifierTargetId(skill.key)))}
           toggle={slotToggle}

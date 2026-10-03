@@ -1,38 +1,31 @@
-# Eraser 0.1.1-alpha.122 — Citer une ligne d'index avec « { »
+# Eraser 0.1.1-alpha.123 — La forge de l'inventaire
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Le menu « { »
+## L'enclume remplace le bouton « Lier »
 
-Dans n'importe quel texte de l'application (cases des index, fiches de ligne, descriptions
-d'objets, notes…), tape « { » ou clique sur le nouveau bouton **{}** de la barre d'outils.
-Un menu s'ouvre sous le curseur :
+Sur chaque objet de l'inventaire, le bouton **enclume** ouvre un seul formulaire, sans
+onglets, pour **cet exemplaire seulement** (l'Index des objets ne change pas) :
 
-1. il propose les index : « État », « Lieu », « Ville », « Attribut », « Matériau »,
-   « Objet »… et, dans un index, les colonnes de la ligne en cours ;
-2. un index choisi, il propose ses lignes, avec une recherche au fil de la frappe ;
-3. une ligne choisie, il propose son **nom** ou l'une de ses **cases**.
+- **Utilisation** : compétence (une ou plusieurs), valeur, distance, action et action de
+  rechargement ;
+- **Attributs, matériaux et runes** : en ajouter, en changer, en retirer ;
+- **Compétences liées** : les modificateurs, comme avant.
 
-Tout se fait au clavier (flèches, Entrée, Échap) ou à la souris. On peut aussi taper la
-référence en entier, comme `{État:Sérénité}` ou `{État:Sérénité:Type}`, puis la fermer
-avec « } ».
+Un champ changé est entouré, et « Comme l'index » le remet à la valeur de l'Index des
+objets. Seul ce qui diffère de l'index est enregistré : le reste suit l'index s'il change.
+Les runes, attributs et matériaux déjà ajoutés à un objet sont repris tels quels.
 
-## Ce que ça affiche hors du tableau
+## La fiche montre les objets qui utilisent une compétence
 
-- **Le nom** (`{État:Sérénité}`) s'affiche avec sa mise en forme, et son détail au survol.
-- **Une case** (`{État:Sérénité:Type}`, même `{État:Sérénité:Nom}`) affiche sa valeur
-  dans le style de sa colonne, **sans** survol.
-- **`{Prix}`**, sans index devant, affiche la case de la ligne même : un objet peut écrire
-  `{Prix}`, `{Poids}` ou n'importe laquelle de ses colonnes dans sa description.
+Au survol d'une compétence (ou d'une caractéristique), en plus des objets liés, une
+partie **« Objets qui l'utilisent »** liste les objets dont la Compétence la nomme, avec
+leur case pour les équiper ou les déséquiper d'ici.
 
-Dans l'éditeur, une référence forme une petite étiquette qu'un retour arrière efface d'un
-coup.
+## Affichage
 
-## Renommer sans rien casser
-
-Une référence retrouve sa ligne par son **identifiant**, pas par son nom. Renommer
-« Sérénité » renomme donc toutes ses citations, partout dans l'application, sans réécrire
-aucun texte. Une ligne supprimée s'affiche barrée.
-
-L'ancienne écriture `{Sérénité}` (le nom seul entre accolades) n'est plus reconnue : les
-textes qui l'utilisent l'affichent telle quelle, à refaire avec le menu.
+- L'action de rechargement s'affiche précédée de **« Rechargement : »**.
+- Les icônes des attributs, matériaux, runes et objets prennent, dans les effets, la
+  couleur de la colonne de leur mot, et au survol celle de leur colonne Couleur.
+- Un nom cité avec « { » (`{État:Immobilisé}`) prend le **style imposé à la colonne Nom**
+  de son index, comme dans le tableau.

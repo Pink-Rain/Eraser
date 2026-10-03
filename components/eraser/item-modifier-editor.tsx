@@ -1,24 +1,24 @@
 "use client"
 
-import { useMemo, useState } from "react"
-import { Check, ChevronsUpDown, LoaderCircle, Plus, Search, Sparkles, X } from "lucide-react"
+import { useMemo, useState, type ReactNode } from "react"
+import { Anvil, Check, ChevronsUpDown, LoaderCircle, Plus, RotateCcw, Search, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { LinkedChoicePicker } from "@/components/eraser/index-cells"
+import { ChoicePicker, LinkedChoicePicker } from "@/components/eraser/index-cells"
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
-import { splitNames, WEAPON_MODIFIER_TYPE_HEADER, WEAPON_MODIFIERS_TAB } from "@/lib/world-index-definitions"
-import type { ChoiceSource } from "@/lib/index-columns"
+import { WEAPON_MODIFIER_TYPE_HEADER, WEAPON_MODIFIERS_TAB } from "@/lib/world-index-definitions"
+import { objectColumnSpec, type ChoiceSource } from "@/lib/index-columns"
 import {
   buildItemModifierTargets,
-  itemAttachmentKinds,
-  itemAttachmentLabels,
+  itemOverrideKeys,
+  sameItemField,
   serializeItemLinks,
-  type ItemAttachment,
   type ItemAttachmentKind,
+  type ItemOverrideKey,
+  type ItemOverrides,
   formatModifierAmount,
   hasModifierAmount,
   itemModifierAspectLabels,
@@ -124,13 +124,50 @@ const attachmentSources: Record<ItemAttachmentKind, ChoiceSource> = {
   materiau: { index: "weapon-modifiers", tab: WEAPON_MODIFIERS_TAB, include: { column: WEAPON_MODIFIER_TYPE_HEADER, value: "Matériau" } },
 }
 
-/** Monté seulement à l’ouverture : le brouillon repart des liens enregistrés à chaque fois. */
-function ItemModifierForm({ modifiers, attachments, pending, onSave, onClose }: { modifiers: ItemModifier[]; attachments: ItemAttachment[]; pending: boolean; onSave: (serialized: string) => Promise<boolean>; onClose: () => void }) {
+/** Les champs d'un exemplaire, dans l'ordre du formulaire. */
+const fieldLabels: Record<ItemOverrideKey, string> = {
+  skill: "Compétence",
+  value: "Valeur",
+  distance: "Distance",
+  action: "Action",
+  reload: "Action de rechargement",
+  attributes: "Attributs",
+  materials: "Matériaux",
+  runes: "Runes",
+}
+
+const skillSource = objectColumnSpec("Compétence", []).source!
+const actionOptions = objectColumnSpec("Action", []).options ?? []
+const modifierSources: Partial<Record<ItemOverrideKey, ChoiceSource>> = { attributes: attachmentSources.attribut, materials: attachmentSources.materiau, runes: attachmentSources.rune }
+
+/** Un champ du formulaire : son titre et, s'il diffère de l'Index des objets, de quoi y revenir. */
+function ForgeField({ label, changed, base, onReset, wide = false, children }: { label: string; changed: boolean; base: string; onReset: () => void; wide?: boolean; children: ReactNode }) {
+  return <div className={wide ? "sm:col-span-2" : ""}>
+    <div className="mb-1 flex min-h-5 items-center justify-between gap-2">
+      <span className={`text-[11px] font-semibold uppercase tracking-wider ${changed ? "text-primary" : "text-muted-foreground"}`}>{label}</span>
+      {changed && <button type="button" onClick={onReset} className="inline-flex items-center gap-1 text-[10px] text-muted-foreground hover:text-primary" title={`Dans l’Index des objets : ${base.trim() || "vide"}`}><RotateCcw className="size-3" />Comme l’index</button>}
+    </div>
+    <div className={`rounded-md ${changed ? "ring-1 ring-primary/35" : ""}`}>{children}</div>
+  </div>
+}
+
+function ForgeSection({ title, hint, children }: { title: string; hint?: string; children: ReactNode }) {
+  return <section className="rounded-xl border bg-background/40 p-3">
+    <h3 className="font-display text-sm font-semibold">{title}</h3>
+    {hint && <p className="mt-0.5 text-[11px] leading-4 text-muted-foreground">{hint}</p>}
+    <div className="mt-2.5">{children}</div>
+  </section>
+}
+
+/** Monté seulement à l’ouverture : le brouillon repart de l'exemplaire enregistré à chaque fois. */
+function ItemModifierForm({ base, effective, modifiers, pending, onSave, onClose }: { base: ItemOverrides; effective: ItemOverrides; modifiers: ItemModifier[]; pending: boolean; onSave: (serialized: string) => Promise<boolean>; onClose: () => void }) {
   const [draft, setDraft] = useState<ItemModifier[]>(() => modifiers.length ? modifiers : [{ value: "", target: "" }])
-  const [extras, setExtras] = useState<ItemAttachment[]>(attachments)
+  const [fields, setFields] = useState<Record<ItemOverrideKey, string>>(() => Object.fromEntries(itemOverrideKeys.map((key) => [key, effective[key] ?? ""])) as Record<ItemOverrideKey, string>)
   const { byId } = useModifierTargets()
-  const namesOf = (kind: ItemAttachmentKind) => extras.filter((entry) => entry.kind === kind).map((entry) => entry.name)
-  const setNames = (kind: ItemAttachmentKind, value: string) => setExtras((current) => [...current.filter((entry) => entry.kind !== kind), ...splitNames(value).map((name) => ({ kind, name }))])
+  const setField = (key: ItemOverrideKey, value: string) => setFields((current) => ({ ...current, [key]: value }))
+  const changed = (key: ItemOverrideKey) => !sameItemField(key, fields[key], base[key])
+  const field = (key: ItemOverrideKey, input: ReactNode, wide = false) => <ForgeField key={key} label={fieldLabels[key]} changed={changed(key)} base={base[key] ?? ""} onReset={() => setField(key, base[key] ?? "")} wide={wide}>{input}</ForgeField>
+  const picker = (key: ItemOverrideKey, source: ChoiceSource) => <div className="rounded-md border bg-background/55"><LinkedChoicePicker compact={false} multiple label={fieldLabels[key]} source={source} value={fields[key]} onChange={(value) => setField(key, value)} /></div>
 
   function update(index: number, changes: Partial<ItemModifier>) {
     setDraft((current) => current.map((entry, entryIndex) => entryIndex === index ? { ...entry, ...changes } : entry))
@@ -140,83 +177,97 @@ function ItemModifierForm({ modifiers, attachments, pending, onSave, onClose }: 
   const incomplete = draft.some((entry) => (entry.target && !hasModifierAmount(entry.value)) || (!entry.target && entry.value.trim()))
 
   async function save() {
-    if (await onSave(serializeItemLinks(draft, extras))) onClose()
+    // Seul ce qui diffère de l'Index des objets est gardé : le reste suit l'index.
+    const overrides: ItemOverrides = Object.fromEntries(itemOverrideKeys.filter(changed).map((key) => [key, fields[key].trim()]))
+    if (await onSave(serializeItemLinks(draft, [], overrides))) onClose()
   }
 
-  return <Tabs defaultValue="liens" className="gap-3">
-    <TabsList className="h-auto w-full flex-wrap justify-start">
-      <TabsTrigger value="liens">Caractéristiques et compétences{usable.length > 0 && <span className="ml-1 tabular-nums text-muted-foreground">{usable.length}</span>}</TabsTrigger>
-      {itemAttachmentKinds.map((kind) => <TabsTrigger key={kind} value={kind}>{itemAttachmentLabels[kind].plural}{namesOf(kind).length > 0 && <span className="ml-1 tabular-nums text-muted-foreground">{namesOf(kind).length}</span>}</TabsTrigger>)}
-    </TabsList>
-    {itemAttachmentKinds.map((kind) => <TabsContent key={kind} value={kind} className="grid gap-2">
-      <p className="text-xs leading-5 text-muted-foreground">Choisis dans « Armes - Modificateurs » (Type : {itemAttachmentLabels[kind].singular}). Un nom tapé ici y est ajouté avec ce Type.</p>
-      <div className="rounded-md border bg-background/55"><LinkedChoicePicker compact={false} multiple label={itemAttachmentLabels[kind].plural} source={attachmentSources[kind]} value={namesOf(kind).join(", ")} onChange={(value) => setNames(kind, value)} /></div>
-    </TabsContent>)}
-    <TabsContent value="liens" className="grid gap-3">
-      <p className="-mt-1 text-xs leading-5 text-muted-foreground">Ces modificateurs ne comptent dans les totaux que lorsque la case de l’objet est cochée. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.</p>
+  return <div className="grid gap-3">
+    <ForgeSection title="Utilisation">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {field("skill", <div className="rounded-md border bg-background/55"><LinkedChoicePicker compact={false} multiple label={fieldLabels.skill} source={skillSource} value={fields.skill} onChange={(value) => setField("skill", value)} /></div>, true)}
+        {field("value", <Input value={fields.value} onChange={(event) => setField("value", event.target.value)} placeholder="1d20+5, ou 20 | 1d30 pour deux modes" className="h-9" />)}
+        {field("distance", <div className="relative"><Input value={fields.distance} onChange={(event) => setField("distance", event.target.value)} placeholder="12, ou 60 | 1" className="h-9 pr-8" /><span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">m</span></div>)}
+        {field("action", <div className="rounded-md border bg-background/55"><ChoicePicker compact={false} allowCustom label={fieldLabels.action} options={actionOptions} value={fields.action} onChange={(value) => setField("action", value)} /></div>)}
+        {field("reload", <div className="rounded-md border bg-background/55"><ChoicePicker compact={false} allowCustom label={fieldLabels.reload} options={actionOptions} value={fields.reload} onChange={(value) => setField("reload", value)} /></div>)}
+      </div>
+    </ForgeSection>
+    <ForgeSection title="Attributs, matériaux et runes" hint="Choisis dans « Armes - Modificateurs ». Un nom tapé ici y est ajouté avec son Type.">
+      <div className="grid gap-3 sm:grid-cols-2">
+        {(["attributes", "materials", "runes"] as const).map((key) => field(key, picker(key, modifierSources[key]!), key === "attributes"))}
+      </div>
+    </ForgeSection>
+    <ForgeSection title="Compétences liées" hint="Ces modificateurs ne comptent dans les totaux que lorsque l’objet est équipé. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.">
       <div className="grid gap-2">
         {draft.map((entry, index) => {
           const { baseId, aspect } = splitModifierTarget(entry.target)
-          const base = byId.get(baseId)
-          const hasCritical = base ? base.kind === "caracteristique" || base.kind === "competence" : /^(?:carac|comp):/.test(baseId)
+          const target = byId.get(baseId)
+          const hasCritical = target ? target.kind === "caracteristique" || target.kind === "competence" : /^(?:carac|comp):/.test(baseId)
           return <div key={index} className="grid grid-cols-[5rem_minmax(0,1fr)_2rem] items-start gap-x-2 gap-y-1.5">
-          <Input
-            value={entry.value}
-            onChange={(event) => update(index, { value: event.target.value })}
-            placeholder="+2"
-            inputMode="text"
-            className="h-9 text-center font-semibold tabular-nums"
-            aria-label={`Modificateur ${index + 1}`}
-          />
-          <TargetPicker value={baseId} onChange={(target) => update(index, { target: joinModifierTarget(target, aspect) })} />
-          <button
-            type="button"
-            onClick={() => setDraft((current) => current.length > 1 ? current.filter((_, entryIndex) => entryIndex !== index) : [{ value: "", target: "" }])}
-            className="mt-0.5 flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
-            aria-label={`Retirer le lien ${index + 1}`}
-          ><X className="size-3.5" /></button>
-          {hasCritical && <div className="col-start-2 col-end-4"><AspectPicker value={aspect} onChange={(next) => update(index, { target: joinModifierTarget(baseId, next) })} /></div>}
-        </div>
+            <Input
+              value={entry.value}
+              onChange={(event) => update(index, { value: event.target.value })}
+              placeholder="+2"
+              inputMode="text"
+              className="h-9 text-center font-semibold tabular-nums"
+              aria-label={`Modificateur ${index + 1}`}
+            />
+            <TargetPicker value={baseId} onChange={(next) => update(index, { target: joinModifierTarget(next, aspect) })} />
+            <button
+              type="button"
+              onClick={() => setDraft((current) => current.length > 1 ? current.filter((_, entryIndex) => entryIndex !== index) : [{ value: "", target: "" }])}
+              className="mt-0.5 flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
+              aria-label={`Retirer le lien ${index + 1}`}
+            ><X className="size-3.5" /></button>
+            {hasCritical && <div className="col-start-2 col-end-4"><AspectPicker value={aspect} onChange={(next) => update(index, { target: joinModifierTarget(baseId, next) })} /></div>}
+          </div>
         })}
       </div>
-      <div className="flex flex-wrap items-center justify-between gap-2">
+      <div className="mt-2 flex flex-wrap items-center justify-between gap-2">
         <Button type="button" variant="ghost" size="sm" onClick={() => setDraft((current) => [...current, { value: "", target: "" }])}><Plus />Ajouter un lien</Button>
         {usable.length > 0 && <p className="text-[11px] text-muted-foreground">{usable.length} lien{usable.length > 1 ? "s" : ""} actif{usable.length > 1 ? "s" : ""}</p>}
       </div>
-      {incomplete && <p className="rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">Les lignes sans valeur chiffrée ou sans cible ne seront pas enregistrées.</p>}
-    </TabsContent>
+      {incomplete && <p className="mt-2 rounded-lg border border-amber-500/30 bg-amber-500/5 px-3 py-2 text-xs text-amber-700 dark:text-amber-300">Les lignes sans valeur chiffrée ou sans cible ne seront pas enregistrées.</p>}
+    </ForgeSection>
     <div className="flex justify-end gap-2">
       <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
       <Button type="button" disabled={pending} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
     </div>
-  </Tabs>
+  </div>
 }
 
-export function ItemModifierDialog({ open, onOpenChange, itemName, modifiers, attachments, pending, onSave }: {
+/**
+ * La fenêtre d'un exemplaire (bouton enclume de l'inventaire) : sa compétence, sa valeur,
+ * sa distance, ses actions, ses attributs, matériaux et runes, et ses compétences liées.
+ * `base` : les champs de l'objet dans l'Index des objets ; `effective` : ceux de cet
+ * exemplaire, changements compris.
+ */
+export function ItemModifierDialog({ open, onOpenChange, itemName, base, effective, modifiers, pending, onSave }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   itemName: string
+  base: ItemOverrides
+  effective: ItemOverrides
   modifiers: ItemModifier[]
-  attachments: ItemAttachment[]
   pending: boolean
   onSave: (serialized: string) => Promise<boolean>
 }) {
   return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-xl">
-      <DialogHeader><DialogTitle className="flex items-center gap-2"><Sparkles className="size-4 text-primary" />Lier « {itemName} »</DialogTitle></DialogHeader>
-      {open && <ItemModifierForm modifiers={modifiers} attachments={attachments} pending={pending} onSave={onSave} onClose={() => onOpenChange(false)} />}
+    <DialogContent className="max-h-[90vh] overflow-y-auto sm:max-w-2xl">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><Anvil className="size-4 text-primary" />{itemName}</DialogTitle>
+        <DialogDescription>Ce que tu changes ici ne vaut que pour cet exemplaire : l’Index des objets ne bouge pas.</DialogDescription>
+      </DialogHeader>
+      {open && <ItemModifierForm base={base} effective={effective} modifiers={modifiers} pending={pending} onSave={onSave} onClose={() => onOpenChange(false)} />}
     </DialogContent>
   </Dialog>
 }
 
-export function ItemModifierSummary({ modifiers, attachments = [], className = "" }: { modifiers: ItemModifier[]; attachments?: ItemAttachment[]; className?: string }) {
+/** Les compétences liées d'un exemplaire (ses attributs, matériaux et runes s'affichent sous son effet). */
+export function ItemModifierSummary({ modifiers, className = "" }: { modifiers: ItemModifier[]; className?: string }) {
   const { byId } = useModifierTargets()
-  if (!modifiers.length && !attachments.length) return null
+  if (!modifiers.length) return null
   return <div className={`flex flex-wrap items-center gap-1 ${className}`}>
-    {itemAttachmentKinds.map((kind) => {
-      const names = attachments.filter((entry) => entry.kind === kind).map((entry) => entry.name)
-      return names.length ? <span key={kind} className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/8 px-2 py-0.5 text-[10px] font-semibold text-primary"><span className="uppercase tracking-wider text-primary/70">{itemAttachmentLabels[kind].singular}{names.length > 1 ? "s" : ""}</span>{names.join(" · ")}</span> : null
-    })}
     {modifiers.length > 0 && <span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Liens</span>}
     {modifiers.map((modifier, index) => {
       const amount = parseModifierAmount(modifier.value)

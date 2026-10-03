@@ -60,8 +60,11 @@ export function citedCell(table: SourceTable, row: SourceRow, column: string) {
   }
 }
 
-/** Ce que le survol d'une ligne montre. */
-export function rowDetails(table: SourceTable, row: SourceRow) {
+/**
+ * Ce que le nom cité et son survol montrent. `object` : une ligne de l'Index des objets,
+ * dont l'icône (colonne Icône) se dessine comme dans l'inventaire.
+ */
+export function rowDetails(table: SourceTable, row: SourceRow, options: { object?: boolean } = {}) {
   const at = (names: string[]) => columnAt(table.headers, names)
   const description = [at(["Description", "Déscription"]), at(["Effet", "Effets"])].find((index) => index >= 0 && (row.values[index] ?? "").trim())
   const type = at(["Type", "Catégorie"])
@@ -70,8 +73,15 @@ export function rowDetails(table: SourceTable, row: SourceRow) {
   const image = at(["Image", "Portrait", "Illustration"])
   const nameHtml = table.name >= 0 && /<[a-z]/i.test(row.html[table.name] ?? "") ? row.html[table.name] : undefined
   const colorValue = color >= 0 ? (row.values[color] ?? "").trim() : ""
+  // Le style imposé à la colonne du nom : le nom cité le garde.
+  const nameSpec = table.name >= 0 ? table.specs.get(foldName(table.headers[table.name])) : undefined
+  const nameStyle = nameSpec?.style && !nameSpec.style.keepCellFormatting ? nameSpec.style : undefined
+  const objectIcon = options.object ? at(["Icône", "Icone", "Icon"]) : -1
+  const subtype = at(["Sous-type", "Sous type"])
   return {
     ...(nameHtml ? { nameHtml } : {}),
+    ...(nameStyle ? { nameStyle } : {}),
+    ...(options.object ? { object: { icon: objectIcon >= 0 ? (row.values[objectIcon] ?? "").trim() : "", type: type >= 0 ? (row.values[type] ?? "").trim() : "", subtype: subtype >= 0 ? (row.values[subtype] ?? "").trim() : "" } } : {}),
     ...(type >= 0 && row.values[type]?.trim() ? { type: row.values[type].trim() } : {}),
     ...(description !== undefined ? { descriptionHtml: (row.html[description] || escapeHtml(row.values[description] ?? "")).trim() } : {}),
     ...(/^#[0-9a-f]{3,8}$/i.test(colorValue) ? { color: colorValue } : {}),

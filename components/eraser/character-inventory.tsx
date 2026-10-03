@@ -1,7 +1,7 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type Dispatch, type KeyboardEvent, type SetStateAction } from "react"
-import { ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Link2, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
+import { Anvil, ArrowLeft, Backpack, Check, Coins, Gem, LoaderCircle, Minus, MoveRight, PackageOpen, Pencil, Plus, Search, Shield, Sword, Trash2, UserRound, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { useInventoryReceived } from "@/components/eraser/item-notifications"
@@ -20,7 +20,7 @@ import { ItemModifierDialog, ItemModifierSummary } from "@/components/eraser/ite
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { escapeRichText, richTextPlainText, RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
 import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type ObjectCombatFields, keepCatalogFields } from "@/lib/inventory-schema"
-import { parseItemAttachments, parseItemModifiers } from "@/lib/item-modifiers"
+import { effectiveItemFields, parseItemAttachments, parseItemModifiers, parseItemOverrides } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
 import { loadFullInventory } from "@/lib/inventory-fetch"
@@ -138,11 +138,14 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   const [moving, setMoving] = useState(false)
   const [linking, setLinking] = useState(false)
   const modifiers = parseItemModifiers(slot.modifiers)
-  const attachments = parseItemAttachments(slot.modifiers)
+  // Ce que cet exemplaire change de son objet (fenêtre de l'enclume) : affiché à la place.
+  const changes = parseItemOverrides(slot.modifiers)
+  const customized = Object.keys(changes).length > 0 || parseItemAttachments(slot.modifiers).length > 0
   // Équiper et lier n’ont de sens que sur une fiche de personnage : les inventaires
   // plats (campagne, PNJ) n’alimentent aucun total de compétence.
   const equippable = !readOnly && !flat && container.category !== "Bourse"
   if (!item) return null
+  const shown = effectiveItemFields(item, slot.modifiers)
   // Une illustration propre à l'objet passe avant l'icône.
   const visualIsImage = /^(?:https?:\/\/|\/)/i.test(item.image || "")
   const update = (changes: Partial<ItemFields> & { descriptionHtml?: string; effectHtml?: string }) => mutate({
@@ -167,14 +170,14 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           <div className="min-w-0 flex-1"><InlineField readOnly={readOnly} label="le nom" value={item.name} html={item.nameHtml} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><InlineField readOnly={readOnly} label="le type" value={item.type} onCommit={(type) => update({ type }).then(() => undefined)} /><span>·</span><InlineField readOnly={readOnly} label="le sous-type" value={item.subtype} onCommit={(subtype) => update({ subtype }).then(() => undefined)} /></div></div>
           {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
-          {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length || attachments.length ? "text-primary" : "text-muted-foreground"}`} aria-label={`Lier ${item.name} : caractéristiques, compétences, runes, attributs, matériaux`} title="Lier à une caractéristique ou une compétence ; ajouter une rune, un attribut, un matériau"><Link2 className="size-3.5" /></button>}
+          {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length || customized ? "text-primary" : "text-muted-foreground"}`} aria-label={`Modifier cet exemplaire de ${item.name} : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées`} title="Cet exemplaire : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées"><Anvil className="size-3.5" /></button>}
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={item} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={item} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectTraits item={item} className="mt-0.5" /><ItemModifierSummary modifiers={modifiers} attachments={attachments} className={slot.equipped ? "" : "opacity-55"} /></div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={shown} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={shown} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectTraits item={shown} className="mt-0.5" /><ItemModifierSummary modifiers={modifiers} className={slot.equipped ? "" : "opacity-55"} /></div>
       </div>
     </div>
-    {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} modifiers={modifiers} attachments={attachments} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: serialized }, `slot:${slot.id}`)} />}
+    {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} base={item} effective={shown} modifiers={modifiers} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: serialized }, `slot:${slot.id}`)} />}
   </article>
 }
 

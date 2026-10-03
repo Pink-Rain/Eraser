@@ -68,8 +68,8 @@ export const legacyObjectValueHeaders = ["Dégâts", "Dégât", "Degats", "Degat
 /** Le rendu d'une colonne d'objets : son style imposé, ses options (couleurs), son unité. */
 export type ObjectTraitLook = { style?: ColumnStyle; options?: Array<{ value: string; color?: string }>; unit?: string }
 
-/** Les colonnes affichées sous l'effet dans le rendu de leur colonne (Matériaux et Runes : à leur couleur). */
-export type ObjectTraitLookKey = "skill" | "distance" | "action" | "reload" | "attributes" | "value"
+/** Les colonnes affichées sous l’effet dans le rendu de leur colonne (Matériaux et Runes : à leur couleur, leur icône dans celle de la colonne). */
+export type ObjectTraitLookKey = "skill" | "distance" | "action" | "reload" | "attributes" | "materials" | "runes" | "value"
 
 export type ObjectCombatFields = Partial<Record<(typeof objectCombatColumns)[number]["key"], string>> & {
   looks?: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>>

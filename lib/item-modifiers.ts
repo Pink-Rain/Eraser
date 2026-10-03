@@ -207,8 +207,68 @@ export function parseItemAttachments(raw: string): ItemAttachment[] {
   } catch { return [] }
 }
 
-/** Les liens chiffrés et les runes/attributs/matériaux, ensemble, sans doublon. */
-export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[]) {
+/**
+ * Ce qu'un exemplaire change de son objet, pour lui seul : sa compétence, sa valeur, sa
+ * distance, ses actions, ses attributs, matériaux et runes. L'Index des objets ne change
+ * pas. Rangés dans le même JSON que les liens, avec pour cible « champ:… » : les versions
+ * qui ne les connaissent pas les ignorent. Une valeur vide est voulue (plus d'attribut).
+ */
+export const itemOverrideKeys = ["skill", "value", "distance", "action", "reload", "attributes", "materials", "runes"] as const
+export type ItemOverrideKey = (typeof itemOverrideKeys)[number]
+export type ItemOverrides = Partial<Record<ItemOverrideKey, string>>
+const OVERRIDE_PREFIX = "champ:"
+/** Les champs qui tiennent une liste de noms : comparés sans ordre ni casse. */
+export const itemOverrideListKeys: ItemOverrideKey[] = ["skill", "attributes", "materials", "runes"]
+
+export function parseItemOverrides(raw: string): ItemOverrides {
+  if (!raw.trim()) return {}
+  try {
+    const parsed = JSON.parse(raw)
+    if (!Array.isArray(parsed)) return {}
+    const overrides: ItemOverrides = {}
+    for (const entry of parsed) {
+      const target = entry && typeof entry === "object" ? (entry as { target?: unknown }).target : null
+      const value = entry && typeof entry === "object" ? (entry as { value?: unknown }).value : null
+      if (typeof target !== "string" || !target.startsWith(OVERRIDE_PREFIX) || typeof value !== "string") continue
+      const key = target.slice(OVERRIDE_PREFIX.length) as ItemOverrideKey
+      if ((itemOverrideKeys as readonly string[]).includes(key)) overrides[key] = value.trim().slice(0, 400)
+    }
+    return overrides
+  } catch { return {} }
+}
+
+const attachmentFields: Record<ItemAttachmentKind, ItemOverrideKey> = { attribut: "attributes", materiau: "materials", rune: "runes" }
+
+function splitList(value: string | undefined) {
+  return String(value ?? "").split(/\s*[,;\n]\s*/).map((part) => part.trim()).filter(Boolean)
+}
+
+/** « Lourde, Combo » et « combo, lourde » sont la même liste. */
+export function sameItemField(key: ItemOverrideKey, left: string | undefined, right: string | undefined) {
+  if (!itemOverrideListKeys.includes(key)) return String(left ?? "").trim() === String(right ?? "").trim()
+  const set = (value: string | undefined) => [...new Set(splitList(value).map(fold))].sort().join("\u0001")
+  return set(left) === set(right)
+}
+
+/**
+ * Les champs d'un exemplaire tels qu'il les montre : ceux de l'objet, ses anciens ajouts
+ * (runes, attributs, matériaux posés avant ce formulaire) à la suite, puis ce qu'il change.
+ */
+export function effectiveItemFields<T extends Partial<Record<ItemOverrideKey, string>>>(item: T, raw: string): T {
+  const overrides = parseItemOverrides(raw)
+  const result: T = { ...item }
+  for (const attachment of parseItemAttachments(raw)) {
+    const key = attachmentFields[attachment.kind]
+    if (overrides[key] !== undefined) continue
+    const names = splitList(result[key])
+    if (!names.some((name) => fold(name) === fold(attachment.name))) (result as Record<string, string>)[key] = [...names, attachment.name].join(", ")
+  }
+  for (const key of itemOverrideKeys) if (overrides[key] !== undefined) (result as Record<string, string>)[key] = overrides[key]!
+  return result
+}
+
+/** Les liens chiffrés, les runes/attributs/matériaux et ce que l'exemplaire change, ensemble, sans doublon. */
+export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemAttachment[], overrides: ItemOverrides = {}) {
   const kept = modifiers
     .map((modifier) => ({ target: modifier.target.trim(), value: modifier.value.trim() }))
     .filter((modifier) => modifier.target && isItemModifierTargetId(modifier.target) && hasModifierAmount(modifier.value))
@@ -220,7 +280,8 @@ export function serializeItemLinks(modifiers: ItemModifier[], attachments: ItemA
     seen.add(key)
     return [{ target: attachment.kind, value: name }]
   })
-  const all = [...kept, ...extras]
+  const fields = itemOverrideKeys.flatMap((key) => typeof overrides[key] === "string" ? [{ target: `${OVERRIDE_PREFIX}${key}`, value: overrides[key]!.trim().slice(0, 400) }] : [])
+  const all = [...kept, ...extras, ...fields]
   return all.length ? JSON.stringify(all) : ""
 }
 
@@ -276,6 +337,34 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
     }
   }
   return { totals, items }
+}
+
+/** Un objet de l'inventaire qui s'utilise avec une caractéristique ou une compétence (sa colonne Compétence). */
+export type UsageItem = { slotId: string; name: string; equipped: boolean; icon: string; image: string; type: string; subtype: string }
+
+/**
+ * Les objets de l'inventaire rangés par la caractéristique ou la compétence qu'ils
+ * utilisent (clé : le nom replié), d'après la Compétence de chaque exemplaire.
+ */
+export function indexItemUsage(containers: InventoryContainerRecord[]) {
+  const usage = new Map<string, UsageItem[]>()
+  for (const container of containers) {
+    if (container.category === "Bourse") continue
+    for (const slot of container.slots) {
+      if (!slot.item || slot.quantity <= 0) continue
+      const { skill } = effectiveItemFields(slot.item, slot.modifiers)
+      for (const name of new Set(splitList(skill).map(fold))) {
+        usage.set(name, [...(usage.get(name) ?? []), { slotId: slot.id, name: slot.item.name, equipped: slot.equipped, icon: slot.item.icon ?? "", image: slot.item.image ?? "", type: slot.item.type ?? "", subtype: slot.item.subtype ?? "" }])
+      }
+    }
+  }
+  return usage
+}
+
+/** Les objets qui utilisent l'une de ces caractéristiques ou compétences (nom ou clé), une fois chacun. */
+export function usageItemsFor(usage: Map<string, UsageItem[]>, ...names: string[]) {
+  const seen = new Set<string>()
+  return names.flatMap((name) => usage.get(fold(name)) ?? []).filter((item) => !seen.has(item.slotId) && Boolean(seen.add(item.slotId)))
 }
 
 /**

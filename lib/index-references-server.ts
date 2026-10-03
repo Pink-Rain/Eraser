@@ -193,7 +193,7 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
       const cell = citedCell(table, row, request.column)
       results[key] = cell ? { ...base, ...cell } : null
     } else {
-      results[key] = { ...base, ...rowDetails(table, row) }
+      results[key] = { ...base, ...rowDetails(table, row, { object: source.key === OBJECT_REFERENCE_INDEX }) }
     }
   }
   return results

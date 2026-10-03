@@ -70,7 +70,7 @@ import {
   type InventoryItemRecord,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
-import { parseItemAttachments, parseItemModifiers, serializeItemLinks } from "@/lib/item-modifiers"
+import { parseItemAttachments, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -5224,13 +5224,13 @@ export function objectCombatFields(table: ObjectIndexTable, row: ObjectIndexRow)
     if (value && !isSheetErrorValue(value)) fields[column.key] = value
   }
   // Le rendu de leurs colonnes (style imposé, couleur des options choisies), pour l'inventaire
-  // et les magasins : seulement pour les cases remplies, et seulement les options utilisées.
+  // et les magasins. Le style de chaque colonne présente (une case vide peut être remplie pour
+  // un seul exemplaire), mais seulement les options utilisées : la liste des actions est longue.
   let tableLooks = objectTraitLooksCache.get(table)
   if (!tableLooks) { tableLooks = objectTraitLooks(table.headers, table.columnSpecs); objectTraitLooksCache.set(table, tableLooks) }
   const looks: NonNullable<ObjectCombatFields["looks"]> = {}
   for (const [key, look] of Object.entries(tableLooks) as Array<[keyof typeof tableLooks, NonNullable<(typeof tableLooks)[keyof typeof tableLooks]>]>) {
-    const value = fields[key]
-    if (!value) continue
+    const value = fields[key] ?? ""
     const used = new Set(value.split(/\s*[|,;\n]\s*/).map((part) => foldName(part)).filter(Boolean))
     const options = look.options?.filter((option) => used.has(foldName(option.value)))
     const slim = { ...(look.style ? { style: look.style } : {}), ...(options?.length ? { options } : {}), ...(look.unit ? { unit: look.unit } : {}) }
@@ -6017,7 +6017,7 @@ export async function setCharacterInventoryItemModifiers(characterId: string, sl
   if (!content || !container || (!content.itemId && !content.customName) || inventoryContainerCategory(container, typeById) === "Bourse") {
     throw new Error("INVENTORY_SLOT_NOT_FOUND")
   }
-  const normalized = serializeItemLinks(parseItemModifiers(modifiers), parseItemAttachments(modifiers))
+  const normalized = serializeItemLinks(parseItemModifiers(modifiers), parseItemAttachments(modifiers), parseItemOverrides(modifiers))
   if (normalized.length > 4000) throw new Error("INVALID_INVENTORY_MODIFIERS")
   await updateStoredInventoryContent(workbook, { ...content, modifiers: normalized, updatedAt: new Date().toISOString() })
   return buildCharacterInventory(characterId, workbook)
