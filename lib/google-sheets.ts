@@ -27,6 +27,7 @@ import {
   type ClassImageScriptAction,
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
+import { objectCombatColumn, objectPriceColumn, planObjectCombatHeaders } from "@/lib/object-combat"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
@@ -996,14 +997,15 @@ export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   else {
     scheduleObjectIndexIconSync(tables)
     // Des en-têtes ajoutés après la dernière colonne ne déplacent pas la colonne Icône.
-    if (tables.some((table) => missingObjectCombatHeaders(table).length)) scheduleObjectCombatColumns(tables)
+    if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
   }
   return tables
 }
 
-/** Les colonnes Compétence, Distance, Action, Dégâts absentes d'un tableau d'objets. */
-function missingObjectCombatHeaders(table: ObjectIndexTable) {
-  return objectCombatColumns.filter((column) => objectIndexColumn(table, [...column.aliases]) < 0).map((column) => column.header)
+/** Un tableau d'objets à qui il manque une colonne de combat, ou qui a encore l'ancien en-tête. */
+function needsObjectCombatHeaders(table: ObjectIndexTable) {
+  const plan = planObjectCombatHeaders(table.headers)
+  return plan.renames.length > 0 || plan.append.length > 0
 }
 
 let objectCombatColumnsAttemptAt = 0
@@ -1011,29 +1013,34 @@ let objectCombatColumnsAttemptAt = 0
 function scheduleObjectCombatColumns(tables: ObjectIndexTable[]) {
   if (Date.now() - objectCombatColumnsAttemptAt < 10 * 60_000) return
   objectCombatColumnsAttemptAt = Date.now()
-  runInBackground(appendObjectCombatColumns(tables), "OBJECT_COMBAT_COLUMNS_FAILED")
+  runInBackground(updateObjectCombatHeaders(tables), "OBJECT_COMBAT_COLUMNS_FAILED")
 }
 
 /**
- * Ajoute les en-têtes Compétence, Distance, Action, Dégâts à droite des tableaux
- * d'objets qui ne les ont pas. Seule la ligne 1 change, au-delà de la dernière colonne
- * utilisée : aucune colonne existante ne bouge et aucune valeur n'est touchée (les
- * magasins lisent certaines colonnes par leur position).
+ * Met la ligne 1 des tableaux d'objets à jour (voir `planObjectCombatHeaders`) : une
+ * « Valeur » qui sert de prix devient « Prix », l'ancienne « Dégâts » devient « Valeur »,
+ * les colonnes absentes sont ajoutées après la dernière colonne utilisée. Seuls des
+ * en-têtes changent : aucune colonne ne bouge et aucune case en dessous n'est touchée
+ * (les magasins lisent certaines colonnes par leur position).
  */
-async function appendObjectCombatColumns(tables: ObjectIndexTable[]) {
+async function updateObjectCombatHeaders(tables: ObjectIndexTable[]) {
   for (const table of tables) {
-    const missing = missingObjectCombatHeaders(table)
-    if (!missing.length || needsObjectIndexHeaderRepair(table)) continue
-    // On relit la ligne 1 : un en-tête ajouté entre-temps (à la main, dans Sheets) n'est pas doublé.
+    if (!needsObjectCombatHeaders(table) || needsObjectIndexHeaderRepair(table)) continue
+    // On relit la ligne 1 : un en-tête changé entre-temps (à la main, dans Sheets) est respecté.
     const [firstRow = []] = await readRange(table.fileId, sheetTabRange(table.tabName, "A1:AZ1")).catch(() => [[] as string[]])
-    const present = new Set(firstRow.map((header) => normalizedHeader(header ?? "")))
-    const headers = missing.filter((header) => !objectCombatColumns.find((column) => column.header === header)?.aliases.some((alias) => present.has(normalizedHeader(alias))))
+    if (!firstRow.some((header) => header?.trim())) continue
+    const plan = planObjectCombatHeaders(firstRow.map((header) => header ?? ""))
     // Après la dernière colonne qui contient quelque chose, en-tête ou valeur.
     const start = Math.max(table.headers.length, firstRow.length)
-    if (!headers.length || start + headers.length > 52) continue
-    await ensureSheetColumnCount(table.fileId, table.tabName, start + headers.length)
-    await updateRanges(table.fileId, [{ range: sheetTabRange(table.tabName, `${columnName(start + 1)}1:${columnName(start + headers.length)}1`), values: [headers] }], { valueInputOption: "RAW" })
-    console.info("OBJECT_COMBAT_COLUMNS_ADDED", table.fileName, table.tabName, headers)
+    if (start + plan.append.length > 52) continue
+    const writes = plan.renames.map((rename) => ({ range: sheetTabRange(table.tabName, `${columnName(rename.index + 1)}1`), values: [[rename.header]] }))
+    if (plan.append.length) {
+      await ensureSheetColumnCount(table.fileId, table.tabName, start + plan.append.length)
+      writes.push({ range: sheetTabRange(table.tabName, `${columnName(start + 1)}1:${columnName(start + plan.append.length)}1`), values: [plan.append] })
+    }
+    if (!writes.length) continue
+    await updateRanges(table.fileId, writes, { valueInputOption: "RAW" })
+    console.info("OBJECT_COMBAT_HEADERS_UPDATED", table.fileName, table.tabName, { renamed: plan.renames.map((rename) => `${firstRow[rename.index]} → ${rename.header}`), added: plan.append })
     clearSpreadsheetReadCache(table.fileId)
   }
   clearObjectIndexTableCache()
@@ -5132,7 +5139,7 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
       effectHtml: objectIndexCellHtml(table, row, ["Effet", "Effets"]),
       maxQuantity: positiveInteger(objectIndexCell(table, row, ["Nombre max", "Quantité max", "Quantite max", "Maximum", "Max"]), 1),
       weight: objectIndexCell(table, row, ["Poids", "Masse"]),
-      price: objectIndexCell(table, row, ["Prix", "Valeur", "Coût", "Cout"]),
+      price: objectIndexPrice(table, row),
       bulk: objectIndexCell(table, row, ["Encombrement"]),
       image: objectIndexCell(table, row, ["Image", "Illustration", "URL image"]),
       icon: (() => {
@@ -5152,14 +5159,21 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
   }))
 }
 
-/** Compétence, Distance, Action, Dégâts d'un objet (les cases vides sont omises). */
+/** Compétence, Distance, Action, Valeur, Attributs d'un objet (les cases vides sont omises). */
 export function objectCombatFields(table: ObjectIndexTable, row: ObjectIndexRow): ObjectCombatFields {
   const fields: ObjectCombatFields = {}
   for (const column of objectCombatColumns) {
-    const value = objectIndexCell(table, row, [...column.aliases]).trim()
+    const index = objectCombatColumn(table.headers, column.key)
+    const value = index >= 0 ? (row.values[index] || "").trim() : ""
     if (value && !isSheetErrorValue(value)) fields[column.key] = value
   }
   return fields
+}
+
+/** Le prix d'un objet (« Prix », « Coût », ou l'ancienne « Valeur » d'un tableau sans prix). */
+export function objectIndexPrice(table: ObjectIndexTable, row: ObjectIndexRow) {
+  const index = objectPriceColumn(table.headers)
+  return index >= 0 ? row.values[index] || "" : ""
 }
 
 async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWorkbook> {

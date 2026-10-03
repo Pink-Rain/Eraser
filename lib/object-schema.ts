@@ -78,7 +78,8 @@ async function appendHeader(fileId: string, tabName: string, header: string) {
   await updateRange(fileId, sheetTabRange(tabName, `${cell}:${cell}`), [[header]], { valueInputOption: "RAW" })
 }
 
-const relationKinds = ["linked", "lookup", "rollup", "linked-choice"]
+// Une « Liste liée » reste permise : elle écrit un simple nom dans la case.
+const relationKinds = ["linked", "lookup", "rollup"]
 function assertNoRelation(spec: IndexColumnSpec) {
   if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les objets : les cases d’objets sont lues comme du texte par l’inventaire et les boutiques.")
 }

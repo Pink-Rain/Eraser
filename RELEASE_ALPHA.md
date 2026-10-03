@@ -1,48 +1,36 @@
-# Eraser 0.1.1-alpha.114 — Armes - Modificateurs
+# Eraser 0.1.1-alpha.115 — Colonnes de combat des objets
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Un seul index : « Armes - Modificateurs »
+## Les bons types de colonnes dans l'Index des objets
 
-Les index des runes, des matériaux et des attributs laissent la place à un seul
-tableau, **Armes - Modificateurs** (dans Ressources). Ses colonnes : Nom, **Type**,
-Description, **Nombre**, **Charges** et **Couleur**.
+- **Compétence** propose toutes les caractéristiques et compétences de la fiche de
+  personnage, lues dans l'index « Caractéristiques et compétences » (ses deux onglets).
+- **Distance** est un nombre en mètres : « 60 » s'écrit « 60 m ».
+- **Action** propose les mêmes types que les sorts (Bonus, Passif, Actif -Action
+  mineur, majeur, instantanée, gratuite, de déplacement), avec les mêmes couleurs. Une
+  autre valeur peut toujours être tapée.
+- **Attributs** est une nouvelle colonne, ajoutée à droite : elle propose tous les
+  attributs d'« Armes - Modificateurs » (les lignes dont le Type est Attribut), et en
+  accepte plusieurs. Les attributs s'affichent avec l'effet de l'objet.
+- **Dégâts** s'appelle maintenant **Valeur**.
 
-La colonne **Type** est une colonne « Rangement en onglets » : chaque valeur écrite
-(Rune, Matériau, Attribut, ou tout autre mot) a son onglet. **Nombre** sert au % d'un
-matériau, au nombre de runes ou au dé d'un attribut. **Charges** donne le nombre de
-charges ajoutées à l'arme ; vide, pas de charge.
+## « Prix » partout
 
-Les anciennes feuilles des runes, matériaux et attributs ne sont ni modifiées ni
-supprimées dans le Drive : elles ne sont simplement plus affichées. Les anciennes
-adresses mènent au nouvel index. La feuille « Armes - Modificateurs » est créée au
-premier passage si elle n'existe pas encore, et reprise telle quelle si elle existe.
+Les onglets Parchemins, Consommables et Livres appelaient leur prix « Valeur ». Leur
+en-tête devient « Prix », comme dans les autres onglets, pour ne pas être confondu avec
+la nouvelle colonne Valeur. Seuls les en-têtes changent : aucun prix n'est modifié et
+les boutiques les lisent comme avant. « Coût » reste reconnu comme un prix.
 
-La pop-up « lié » de l'inventaire lit maintenant ce tableau : pour une rune, elle
-propose les lignes dont le Type est Rune (et de même pour Matériau et Attribut). Un nom
-tapé qui n'existe pas encore y est ajouté avec le bon Type.
+## {Valeur} dans la description ou l'effet
 
-## Rangement en onglets : les lignes restent dans leur onglet
+Écris par exemple « Inflige {Valeur} à {Distance} » dans l'effet d'un objet : dans les
+inventaires, les magasins, la fouille et la table, la phrase devient « Inflige 40 +
+Carreaux à 60 m ». Dans le tableau de l'index, le texte reste tel que tu l'as écrit.
+{Compétence}, {Action} et {Attributs} marchent aussi. Une accolade dont la case est
+vide reste écrite telle quelle, pour voir tout de suite ce qui manque.
 
-Une colonne « Rangement en onglets » ne déplace plus aucune ligne. Toutes les lignes
-restent dans leur onglet d'origine (par exemple « Tout »), et chaque valeur de la
-colonne crée en plus un onglet du même nom qui les affiche aussi. Changer la valeur
-d'une case met l'onglet à jour aussitôt. Un ancien onglet du même nom, créé par un
-rangement d'avant, est réuni à ce nouvel onglet sans que rien ne soit effacé.
+## Petits plus
 
-## Objets : Compétence, Distance, Action, Dégâts
-
-Les tableaux d'objets reçoivent quatre colonnes, ajoutées à droite : **Compétence**,
-**Distance**, **Action** et **Dégâts**. Aucune colonne existante ne bouge et aucune
-valeur n'est touchée. Une colonne déjà présente sous ce nom n'est pas doublée.
-
-Quand elles sont remplies, elles s'affichent sous la description de l'objet dans les
-inventaires, les magasins (détails d'un objet), la fouille et la fenêtre d'un magasin
-sur la table.
-
-## Index : tout revient à la ligne
-
-Dans tous les index, chaque type de case revient à la ligne quand la place manque, au
-lieu d'être coupé par « … » : le Nom, les listes et les rangements en onglets, les
-nombres, les identifiants, les liens, les jauges, les formules, les boutons, les
-résultats calculés… La ligne s'agrandit en hauteur.
+- Une liste à choix multiple sans couleurs (comme Attributs) affiche chaque valeur dans
+  sa propre pastille, pour bien les séparer.

@@ -1,4 +1,4 @@
-import { listObjectIndexTables, objectCombatFields } from "@/lib/google-sheets"
+import { listObjectIndexTables, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
@@ -114,7 +114,7 @@ export async function loadShopGeneratorItems() {
       effectHtml: cell(table.headers, row.html, ["Effet", "Effets", "Propriété", "Propriete"]),
       type: cell(table.headers, row.values, ["Type", "Catégorie", "Categorie"]) || table.tabName,
       subtype: cell(table.headers, row.values, ["Sous-type", "Sous type", "Subtype"]),
-      price: cell(table.headers, row.values, ["Prix", "Valeur", "Coût", "Cout"]),
+      price: objectIndexPrice(table, row),
       icon: cell(table.headers, row.values, ["Icône", "Icone", "Icon"]),
       locations,
       ...objectCombatFields(table, row),

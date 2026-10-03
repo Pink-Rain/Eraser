@@ -88,9 +88,11 @@ type PickerProps = {
 }
 
 /** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
-function ChoicePill({ value, option, group, outside, renderValue }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode }) {
+function ChoicePill({ value, option, group, outside, renderValue, boxed = false }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode; boxed?: boolean }) {
   const color = option?.color ?? group?.color
   if (renderValue) return <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{renderValue(value)}</span>
+  // Plusieurs valeurs sans couleur : une pastille neutre chacune, pour bien les séparer.
+  if (!color && boxed) return <span className={`inline-block max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border bg-muted/40 px-2 py-0.5 text-xs ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
   if (!color) return <span className={`min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
   return <span className={`inline-block max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border px-2 py-0.5 text-xs font-medium ${outside ? "italic" : ""}`} style={pillStyle(color)}>{value}</span>
 }
@@ -146,7 +148,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   }
 
   const closed = values.length
-    ? <span className={`flex min-w-0 ${multiple ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item) => <ChoicePill key={item.raw} value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} />)}</span>
+    ? <span className={`flex min-w-0 ${multiple ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item) => <ChoicePill key={item.raw} value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} />)}</span>
     : <span className="text-muted-foreground">—</span>
 
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>

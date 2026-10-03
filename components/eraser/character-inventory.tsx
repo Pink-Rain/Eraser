@@ -19,10 +19,11 @@ import { Textarea } from "@/components/ui/textarea"
 import { ItemModifierDialog, ItemModifierSummary } from "@/components/eraser/item-modifier-editor"
 import { ObjectIcon } from "@/components/eraser/object-icon"
 import { escapeRichText, richTextPlainText, RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
-import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget } from "@/lib/inventory-schema"
+import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterInventoryRecord, type InventoryCategory, type InventoryContainerRecord, type InventorySlotRecord, type InventoryTransferTarget, type ObjectCombatFields } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemModifiers } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
-import { ObjectCombatDetails } from "@/components/eraser/object-combat-details"
+import { ObjectAttributesLine, ObjectCombatDetails } from "@/components/eraser/object-combat-details"
+import { fillObjectTemplate, fillObjectTemplateHtml } from "@/lib/object-combat"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
   Armes: { icon: Sword, color: "#b9504e", singular: "un rangement d’armes" },
@@ -63,7 +64,7 @@ function normalizedSearch(value: string) {
 
 const richTextRendering = "[&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
-function InlineField({ label, value, html = "", multiline = false, className = "", readOnly = false, onCommit, onRichCommit }: { label: string; value: string; html?: string; multiline?: boolean; className?: string; readOnly?: boolean; onCommit: (value: string) => Promise<void>; onRichCommit?: (html: string) => void }) {
+function InlineField({ label, value, html = "", multiline = false, className = "", readOnly = false, template, onCommit, onRichCommit }: { label: string; value: string; html?: string; multiline?: boolean; className?: string; readOnly?: boolean; template?: ObjectCombatFields; onCommit: (value: string) => Promise<void>; onRichCommit?: (html: string) => void }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState(value)
   const [pending, setPending] = useState(false)
@@ -78,9 +79,10 @@ function InlineField({ label, value, html = "", multiline = false, className = "
   // L'objet garde la mise en forme saisie dans l'Index des objets ; la modifier
   // ici revient à saisir du texte brut, qui remplace alors cette mise en forme.
   const safeHtml = html.trim() ? sanitizeRichText(html) : ""
+  // « {Valeur} » affiche la valeur de l'objet ; la modification garde le texte écrit.
   const display = safeHtml
-    ? <span className={richTextRendering} dangerouslySetInnerHTML={{ __html: safeHtml }} />
-    : value || <span className="text-muted-foreground/45">—</span>
+    ? <span className={richTextRendering} dangerouslySetInnerHTML={{ __html: template ? fillObjectTemplateHtml(safeHtml, template) : safeHtml }} />
+    : (template ? fillObjectTemplate(value, template) : value) || <span className="text-muted-foreground/45">—</span>
   if (readOnly) return <span className={`min-w-0 ${className}`}>{display}</span>
   if (multiline && editing) return <div className={`min-w-0 ${className}`}>
     <RichTextField
@@ -168,7 +170,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
           {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
           {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
-        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} /><ObjectCombatDetails item={item} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ItemModifierSummary modifiers={modifiers} attachments={attachments} className={slot.equipped ? "" : "opacity-55"} /></div>
+        <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={item} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} /><ObjectCombatDetails item={item} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={item} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectAttributesLine item={item} /><ItemModifierSummary modifiers={modifiers} attachments={attachments} className={slot.equipped ? "" : "opacity-55"} /></div>
       </div>
     </div>
     {equippable && <ItemModifierDialog open={linking} onOpenChange={setLinking} itemName={item.name} modifiers={modifiers} attachments={attachments} pending={pending} onSave={(serialized) => mutate({ action: "set-modifiers", slotId: slot.id, modifiers: serialized }, `slot:${slot.id}`)} />}

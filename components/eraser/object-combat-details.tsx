@@ -1,13 +1,17 @@
 import { objectCombatColumns, type ObjectCombatFields } from "@/lib/inventory-schema"
+import { objectDistanceText } from "@/lib/object-combat"
 
 /**
- * Compétence, Distance, Action, Dégâts d'un objet, sous sa description : seulement les
- * cases remplies dans l'index des objets. Rien n'est affiché si toutes sont vides.
+ * Compétence, Distance, Action, Valeur d'un objet, sous sa description : seulement les
+ * cases remplies dans l'index des objets. Rien n'est affiché si toutes sont vides. Les
+ * attributs s'affichent avec l'effet (`ObjectAttributesLine`).
  */
 export function ObjectCombatDetails({ item, className = "" }: { item: ObjectCombatFields; className?: string }) {
   const filled = objectCombatColumns.flatMap((column) => {
-    const value = item[column.key]?.trim()
-    return value ? [{ label: column.header, value }] : []
+    if (column.key === "attributes") return []
+    const raw = item[column.key]?.trim()
+    if (!raw) return []
+    return [{ label: column.header, value: column.key === "distance" ? objectDistanceText(raw) : raw }]
   })
   if (!filled.length) return null
   return <dl className={`flex flex-wrap gap-x-3 gap-y-0.5 text-xs leading-5 ${className}`}>
@@ -16,4 +20,14 @@ export function ObjectCombatDetails({ item, className = "" }: { item: ObjectComb
       <dd className="min-w-0 break-words text-muted-foreground">{entry.value}</dd>
     </div>)}
   </dl>
+}
+
+/** Les attributs d'un objet (« Épuisante, Fatigante »), affichés avec son effet. */
+export function ObjectAttributesLine({ item, className = "" }: { item: ObjectCombatFields; className?: string }) {
+  const attributes = item.attributes?.trim()
+  if (!attributes) return null
+  return <p className={`flex min-w-0 gap-1 text-xs leading-5 ${className}`}>
+    <span className="shrink-0 font-semibold text-foreground/65">Attributs :</span>
+    <span className="min-w-0 break-words text-muted-foreground">{attributes}</span>
+  </p>
 }

@@ -1,6 +1,7 @@
 "use client"
 
-import { ObjectCombatDetails } from "@/components/eraser/object-combat-details"
+import { ObjectAttributesLine, ObjectCombatDetails } from "@/components/eraser/object-combat-details"
+import { fillObjectTemplate, fillObjectTemplateHtml } from "@/lib/object-combat"
 import { memo, useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { ArrowLeft, Backpack, Check, CloudOff, Dices, LoaderCircle, MapPin, MoveRight, PackageOpen, Pin, RefreshCw, Search, Shuffle, UserRound, Users, X } from "lucide-react"
 
@@ -170,12 +171,13 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
         <p className="font-display text-lg font-semibold leading-tight">{item?.nameHtml?.trim() ? <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.nameHtml) }} /> : name}</p>
         {item && <p className="mt-0.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{[item.type, item.subtype].filter(Boolean).join(" · ")}{item.price ? ` · ${item.price}` : ""}</p>}
         {item && (item.descriptionHtml?.trim()
-          ? <p className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.descriptionHtml) }} />
-          : item.description && <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{item.description}</p>)}
+          ? <p className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} dangerouslySetInnerHTML={{ __html: fillObjectTemplateHtml(sanitizeRichText(item.descriptionHtml), item) }} />
+          : item.description && <p className="mt-1.5 text-xs leading-5 text-muted-foreground">{fillObjectTemplate(item.description, item)}</p>)}
         {item && <ObjectCombatDetails item={item} className="mt-1" />}
         {item && (item.effectHtml?.trim()
-          ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={richText} dangerouslySetInnerHTML={{ __html: sanitizeRichText(item.effectHtml) }} /></p>
-          : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {item.effect}</p>)}
+          ? <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <span className={richText} dangerouslySetInnerHTML={{ __html: fillObjectTemplateHtml(sanitizeRichText(item.effectHtml), item) }} /></p>
+          : item.effect && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> {fillObjectTemplate(item.effect, item)}</p>)}
+        {item && <ObjectAttributesLine item={item} className="mt-1" />}
         {!item && <p className="mt-1 text-xs text-muted-foreground">Cet objet n’est plus dans l’index Objets.</p>}
         {draw.elsewhere && <p className="mt-1.5 text-[11px] italic text-muted-foreground">Trouvé hors de ce lieu : aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’y est répertorié.</p>}
         {draw.givenTo && <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800"><Check className="size-3" />Donné à {draw.givenTo}</p>}

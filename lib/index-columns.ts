@@ -9,6 +9,7 @@
  */
 import { formatIndexNumber, parseIndexNumber, type NumberFormat } from "@/lib/index-numbers"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
+import { classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions } from "@/lib/class-spell-utils"
 
 export type IndexColumnKind =
   | "rich"
@@ -615,8 +616,19 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   const nameHeader = headers.find((candidate) => names.has(foldName(candidate)))
   if (nameHeader && foldName(nameHeader) === folded) return { kind: "name-form", also: ["rich"] }
   if (["image", "illustration", "url image", "icone", "icon"].includes(folded)) return { kind: "file", file: { accept: "image" } }
-  if (["prix", "valeur", "cout"].includes(folded)) return { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
+  if (["prix", "cout"].includes(folded)) return { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
+  // Une « Valeur » sans « Prix » ni « Coût » dans le tableau est encore son prix.
+  if (folded === "valeur") return headers.some((candidate) => ["prix", "cout"].includes(foldName(candidate)))
+    ? { kind: "rich", description: "Écris {Valeur} dans la description ou l’effet : hors du tableau, la valeur s’y affiche." }
+    : { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
+  // Les colonnes de combat : la liste des caractéristiques et compétences de la fiche
+  // (index « Caractéristiques et compétences », ses deux onglets), une distance en mètres,
+  // les types d'action des sorts, les attributs d'« Armes - Modificateurs ».
+  if (["competence", "competences"].includes(folded)) return { kind: "linked-choice", source: { index: "skills", tab: "Caractéristiques" } }
+  if (["distance", "portee"].includes(folded)) return { kind: "number", number: { unit: "distance", defaultUnit: "m" } }
+  if (["action", "actions"].includes(folded)) return { kind: "choice", allowCustom: true, options: classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background })) }
+  if (["attributs", "attribut"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Attribut" } } }
   return { kind: "rich" }
 }
 
