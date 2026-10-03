@@ -39,7 +39,7 @@ export function entityReferencePath(key: EntityReferenceKey, id: string) {
   if (key === "campaigns") return `/campagne/${encodeURIComponent(id)}`
   if (key === "classes") return `/regles/classes/${encodeURIComponent(id)}`
   if (key === "npcs") return "/ressources/index-des-pnjs"
-  if (key === "class-spells") return "/creation-de-classe"
+  if (key === "class-spells") return "/ressources/sorts-des-classes"
   return "/ressources/sorts-des-creatures"
 }
 

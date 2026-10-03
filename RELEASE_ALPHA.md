@@ -1,28 +1,41 @@
-# Eraser 0.1.1-alpha.129 — Citer personnages, campagnes, PNJs, classes et sorts
+# Eraser 0.1.1-alpha.130 — PNJs, campagnes, personnages, classes et sorts sur le moteur des index
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Les références « {} » s'ouvrent à tous les index
+## Six index de plus sur le moteur
 
-Dans n'importe quel texte, `{` propose désormais aussi :
+Les index des **PNJs**, **Campagnes**, **Personnages**, **Classes**, **Sorts des classes**
+et **Sorts des créatures** passent sur le même moteur que les lieux, les créatures ou les
+états. On y retrouve tout ce que ce moteur sait faire : le tableau, la fiche d'une ligne,
+« Modifier » (colonnes, types, verrous, corbeille), les onglets-fenêtres, les presets, les
+formules, Recherche et Agrégat, l'aléatoire, « Tirer », les boutons et les relations.
 
-- **Personnage** : `{Personnage:Brin}`, ou une case de sa fiche (`{Personnage:Brin:Force}`).
-  Au survol : sa classe, son titre honorifique, son portrait.
-- **Campagne** : `{Campagne:Les Brumes}`, avec sa description, sa bannière et sa couleur.
-- **PNJ** : `{PNJ:Aldor}`, avec son métier, ses notes joueurs et son portrait. Le menu
-  indique la campagne de chaque PNJ (plusieurs PNJs peuvent porter le même nom). Les PNJs
-  d'une campagne fermée ne sont plus proposés.
-- **Classe**, **Sort** (sorts des classes) et **Sort de créature**.
+Chaque index lit la feuille que le reste d'Eraser utilise déjà, colonne par colonne et par
+leur nom. Rien n'est copié, et aucune ligne existante n'est réécrite.
 
-Comme pour les autres index, une référence suit sa ligne par son identifiant : renommer
-un PNJ ou une campagne renomme toutes ses citations. Suivre le lien mène à la fiche du
-personnage, à la campagne, à la classe ou à la page de l'index.
+Ce qui change d'un index à l'autre :
 
-## Ce qu'un joueur voit
+- **PNJs** : tous les PNJ de la feuille sont dans le tableau. Un PNJ ajouté depuis l'index
+  rejoint la bibliothèque. Deux PNJ peuvent porter le même nom.
+- **Personnages**, **Campagnes**, **Classes** : leur nom ouvre leur page. « Ajouter » mène à
+  leur page de création. Le tableau n'en supprime aucun : ils partent à la corbeille comme
+  avant.
+- **Classes** et **Sorts des classes** ont désormais leur page dans les index.
 
-Un joueur ne lit jamais par une référence ce qu'il ne voit pas ailleurs : ni les notes MJ
-ni l'histoire d'un PNJ, et d'un personnage seulement son nom, son peuple, sa classe, son
-rang, son titre et son portrait. Une case privée citée reste introuvable pour lui.
+Les colonnes qu'Eraser lit lui-même sont verrouillées dans « Modifier ». On peut les
+déverrouiller, avec un avertissement. Les colonnes techniques (page d'un PNJ, compte d'un
+joueur, dates) sont masquées dans la grille et s'affichent d'un clic.
 
-Rappel de la version précédente : toutes les feuilles sont lues par le nom de leurs
-colonnes ; les ranger autrement dans Sheets ne casse plus rien.
+## Ce qui reste à portée de main
+
+Les anciennes vues sont gardées, chacune via un lien sous le titre de l'index :
+
+- pour les personnages et les campagnes, l'attribution à un compte et la corbeille ;
+- pour les PNJs, la récupération depuis une campagne ;
+- pour les sorts des créatures, les doublons et la fusion.
+
+## Sous le capot
+
+- Une modification faite ailleurs dans Eraser est vue par l'index sans « Actualiser ». Par
+  exemple un PNJ enregistré dans sa campagne, ou une classe créée.
+- Les colonnes au-delà de AZ sont lues.

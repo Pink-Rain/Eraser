@@ -7,13 +7,13 @@ import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-/** PNJs : une feuille lue par le reste d'Eraser, branchée sur le moteur des index. */
+/** Sorts des classes : une feuille lue par le reste d'Eraser, branchée sur le moteur des index. */
 export default async function Page() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return (
-    <AuthenticatedShell pageLabel="PNJs" roles={["admin", "mj"]}>
-      <WorldIndexPage indexKey="npcs" aside={<Link href="/ressources/index-des-pnjs/recuperer" className="text-primary underline-offset-4 hover:underline">Ancienne vue : récupérer des PNJs d’une campagne</Link>} />
+    <AuthenticatedShell pageLabel="Sorts des classes" roles={["admin", "mj"]}>
+      <WorldIndexPage indexKey="class-spells" aside={<Link href="/creation-de-classe" className="text-primary underline-offset-4 hover:underline">Rangs, doublons et fusion (Création de classe)</Link>} />
     </AuthenticatedShell>
   )
 }

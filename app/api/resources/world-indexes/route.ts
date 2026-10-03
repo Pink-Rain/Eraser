@@ -25,6 +25,7 @@ function errorMessage(error: unknown) {
   if (code === "WORLD_INDEX_NAME_REQUIRED") return "Le nom est obligatoire."
   if (code === "WORLD_INDEX_ROW_NOT_FOUND") return "Cette ligne n’existe plus dans Google Sheets. Actualise le tableau."
   if (code === "WORLD_INDEX_TAB_NOT_FOUND") return "Cet onglet n’existe plus dans Google Sheets. Actualise le tableau."
+  if (code === "WORLD_INDEX_ROWS_LOCKED") return "Les lignes de cet index se créent depuis leur page et partent à la corbeille : le tableau n’en ajoute, n’en copie ni n’en supprime."
   // Le refus de Google, tel quel : sans lui, impossible de savoir ce qui bloque.
   const google = code.match(/^SHEETS_API_ERROR:(\d+)(?::([\s\S]*))?$/)
   if (google?.[1] === "429") return "Google Sheets refuse : trop de modifications d’un coup. Attends une minute puis recommence."

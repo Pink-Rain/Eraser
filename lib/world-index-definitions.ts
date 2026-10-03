@@ -36,6 +36,8 @@ import {
   achievementSubtypes,
   achievementTypeColors,
 } from "@/lib/achievements-shared"
+import { classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions } from "@/lib/class-spell-utils"
+import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders, spellSheetHeaders } from "@/lib/entity-sheets"
 
 export { foldName }
 
@@ -79,7 +81,14 @@ export const EFFECT_FX_HEADER = "FX"
 /** Où les FX de l'effet se dessinent : mêmes choix que la couleur ; nulle part si rien n'est choisi. */
 export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
 
-export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements"
+/**
+ * Les index d'entités : PNJs, campagnes, personnages, classes et sorts. Leurs lignes sont
+ * lues et écrites ailleurs par le code d'Eraser (par le nom de leurs colonnes) ; le moteur
+ * leur donne tout le reste : tableau, fiche, « Modifier », onglets-fenêtres, formules…
+ */
+export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells"
+
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | EntityWorldIndexKey
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
 export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
@@ -105,6 +114,26 @@ export type WorldIndexTabDefinition = {
   renamedHeaders?: Array<[string, string]>
 }
 
+/**
+ * Ce qui distingue un index d'entités. Le moteur n'y ajoute ni n'y renomme aucun
+ * en-tête (le code de chaque feuille s'en charge), n'y réécrit aucun identifiant, et
+ * n'y insère ni n'y supprime de lignes : on les crée depuis leurs pages.
+ */
+export type EntityIndexOptions = {
+  /** La colonne du nom de chaque ligne. */
+  nameHeader: string
+  /** Le nom mène à cette page plutôt qu'à la fiche de la ligne (« {id} » : son identifiant). */
+  nameHref?: string
+  /** « Ajouter » mène à cette page ; sans elle, le formulaire du moteur ajoute la ligne. */
+  addHref?: string
+  /** Valeurs données d'office à une ligne ajoutée par le formulaire (la page d'un PNJ…). */
+  addDefaults?: Record<string, string>
+  /** Dupliquer et supprimer des lignes depuis le tableau (les sorts, pas les personnages). */
+  rowCommands?: boolean
+  /** Seules ces colonnes (et celles ajoutées dans « Modifier ») sont lues : la feuille est immense. */
+  readHeaders?: string[]
+}
+
 export type WorldIndexDefinition = {
   key: WorldIndexKey
   /** Nom du classeur dans Google Drive. */
@@ -117,6 +146,8 @@ export type WorldIndexDefinition = {
   /** Index créé depuis « Nouvel index ». */
   custom?: boolean
   description?: string
+  /** Index d'entités (PNJs, campagnes, personnages, classes, sorts). */
+  entity?: EntityIndexOptions
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
@@ -198,7 +229,7 @@ export const placeTabs = [
   ["Environnement", "un environnement"],
 ] as const
 
-export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefinition> = {
+const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldIndexKey>, WorldIndexDefinition> = {
   // Lu par la fiche de personnage : ses caractéristiques, ses compétences et leurs
   // valeurs de départ. Rempli à sa création avec la liste d'origine de la fiche.
   skills: {
@@ -336,6 +367,79 @@ export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefin
   },
 }
 
+
+/** Les colonnes d'un personnage que l'Index des personnages lit : la feuille en a des centaines. */
+export const characterIndexHeaders = ["ID", "Joueur", "Nom personnage", "Peuple", "Classe", "Level", "Titre honorifique", "Portrait"]
+
+/** Les index d'entités, branchés sur le moteur : chacun garde sa feuille et ses pages. */
+const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> = {
+  npcs: {
+    key: "npcs",
+    sheetName: "PNJs",
+    title: "PNJs",
+    path: "/ressources/index-des-pnjs",
+    itemLabel: "un PNJ",
+    tabs: [{ name: "PNJs", itemLabel: "un PNJ", headers: npcSheetHeaders, widths: npcSheetHeaders.map((header) => foldName(header) === foldName("Nom du PNJ") ? 240 : isLongColumn(header) ? 360 : 160), idPrefix: "PNJ" }],
+    entity: {
+      nameHeader: "Nom du PNJ",
+      rowCommands: true,
+      // Un PNJ ajouté depuis l'index rejoint sa bibliothèque, hors de toute campagne.
+      addDefaults: { "Page lié": "index-des-pnjs", "Ajouté au créateur de session": "Non", "Dans le groupe joueur": "Non", "PNJ important": "Non" },
+    },
+  },
+  campaigns: {
+    key: "campaigns",
+    sheetName: "Campagnes",
+    title: "Campagnes",
+    path: "/ressources/index-des-campagnes",
+    itemLabel: "une campagne",
+    tabs: [{ name: "Campagnes", itemLabel: "une campagne", headers: campaignSheetHeaders, widths: [160, 200, 280, 420, 260, 140], idPrefix: "CAM" }],
+    entity: { nameHeader: "Nom de la campagne", nameHref: "/campagne/{id}", addHref: "/creation-de-campagne" },
+  },
+  characters: {
+    key: "characters",
+    sheetName: "Feuille de personnage",
+    title: "Personnages",
+    path: "/ressources/index-des-personnages",
+    itemLabel: "un personnage",
+    tabs: [{ name: "Personnages", itemLabel: "un personnage", headers: characterIndexHeaders, widths: [150, 190, 260, 180, 200, 90, 220, 200], idPrefix: "PER" }],
+    entity: { nameHeader: "Nom personnage", nameHref: "/personnage/{id}", addHref: "/creation-de-personnage", readHeaders: characterIndexHeaders },
+  },
+  classes: {
+    key: "classes",
+    sheetName: "Classes",
+    title: "Classes",
+    path: "/ressources/index-des-classes",
+    itemLabel: "une classe",
+    tabs: [{ name: "Classes", itemLabel: "une classe", headers: classSheetHeaders, widths: [130, 150, 240, 160, 180, 180, 180, 130, 110, 150, 150], idPrefix: "CLA" }],
+    entity: { nameHeader: "Nom de la classe", nameHref: "/regles/classes/{id}", addHref: "/creation-de-classe" },
+  },
+  "class-spells": {
+    key: "class-spells",
+    sheetName: "Sorts de classe",
+    title: "Sorts des classes",
+    path: "/ressources/sorts-des-classes",
+    itemLabel: "un sort",
+    tabs: [{ name: "Sorts", itemLabel: "un sort", headers: spellSheetHeaders, widths: [130, 240, 380, 320, 190, 200, 160, 120], idPrefix: "SOR" }],
+    entity: { nameHeader: "Nom", rowCommands: true },
+  },
+  "creature-spells": {
+    key: "creature-spells",
+    sheetName: "Index des créatures",
+    title: "Sorts des créatures",
+    path: "/ressources/sorts-des-creatures",
+    itemLabel: "un sort",
+    tabs: [{ name: "Sorts des créatures", itemLabel: "un sort", headers: spellSheetHeaders, widths: [130, 240, 380, 320, 190, 200, 160, 120], idPrefix: "SOR" }],
+    entity: { nameHeader: "Nom", rowCommands: true },
+  },
+}
+
+export const worldIndexDefinitions: Record<BuiltinWorldIndexKey, WorldIndexDefinition> = { ...worldBaseDefinitions, ...entityIndexDefinitions }
+
+export function isEntityWorldIndexKey(value: unknown): value is EntityWorldIndexKey {
+  return typeof value === "string" && value in entityIndexDefinitions
+}
+
 /**
  * Lignes de départ d'un index prévu par Eraser, écrites une seule fois, quand son
  * classeur vient d'être créé et que tous ses onglets sont vides : par onglet, une
@@ -423,6 +527,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_APPLY_HEADER)) reasons.push("La fiche de personnage dessine les FX de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
   }
+  if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header))
   if (index === "skills") {
     if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
     if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
@@ -431,6 +536,17 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (folded === foldName(CATALOG_KEY_HEADER)) reasons.push("Relie les lignes d’origine aux colonnes déjà remplies de la feuille de personnage. Vide pour une ligne ajoutée : son ID fait ce lien.")
   }
   return reasons
+}
+
+/** Pourquoi le code d'Eraser lit une colonne d'un index d'entités (son verrou dans « Modifier »). */
+function entityReaders(index: EntityWorldIndexKey, header: string): string[] {
+  const among = (headers: readonly string[]) => headers.some((candidate) => foldName(candidate) === foldName(header))
+  if (index === "npcs" && among(npcSheetHeaders)) return ["Les PNJ des campagnes, les sessions, le groupe des joueurs, les tokens du tabletop et le pont Roll20 lisent cette colonne par son nom."]
+  if (index === "campaigns" && among(campaignSheetHeaders)) return ["Les campagnes (tableau de bord, accès des joueurs, couleur, bannière) lisent cette colonne par son nom."]
+  if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le tabletop lisent cette colonne par son nom."]
+  if (index === "classes" && among(classSheetHeaders)) return ["Les pages de classes, la création de personnage et les statistiques lisent cette colonne par son nom."]
+  if ((index === "class-spells" || index === "creature-spells") && (among(spellSheetHeaders) || /^CLA-/i.test(header.trim()))) return ["Les fiches de classe, les créatures, les PNJ et les personnages retrouvent les sorts par cette colonne (rangs des classes compris)."]
+  return []
 }
 
 /**
@@ -465,8 +581,21 @@ export function splitNames(value: string) {
   })
 }
 
+/**
+ * La colonne du nom d'une ligne : « Nom », ou le nom historique de celle des index
+ * d'entités (« Nom du PNJ », « Nom de la campagne »…), que leurs feuilles gardent.
+ */
+const entityNameHeaders = new Set(["Nom du PNJ", "Nom de la campagne", "Nom personnage", "Nom de la classe", "Nom du sort"].map(foldName))
+
 export function isNameColumn(header: string) {
-  return foldName(header) === "nom"
+  const folded = foldName(header)
+  return folded === "nom" || entityNameHeaders.has(folded)
+}
+
+/** La colonne du nom parmi des en-têtes : « Nom » d'abord, sinon celle d'un index d'entités. */
+export function nameColumnIndex(headers: readonly string[]) {
+  const exact = headers.findIndex((header) => foldName(header) === "nom")
+  return exact >= 0 ? exact : headers.findIndex((header) => isNameColumn(header))
 }
 
 /** Colonnes de liste de noms : saisies en texte brut pour que les liens restent lisibles. */
@@ -494,6 +623,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   if (isIdHeader(header)) return { kind: "id", hidden: true }
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
   if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
+  if (isEntityWorldIndexKey(index)) return entityColumnSpec(index, header)
   if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
   if (index === "achievements") {
     if (tab === OBTAINED_TAB) {
@@ -555,6 +685,48 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     if (isHeader(header, creatureFormTexts)) return { kind: "rich", form: true }
     return { kind: "rich", form }
   }
+  return { kind: "rich" }
+}
+
+const spellTypeOptions = classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background }))
+
+/**
+ * Le type des colonnes d'un index d'entités, modifiable dans « Modifier » comme pour tout
+ * index. Seules les colonnes techniques (page d'un PNJ, compte d'un joueur, dates) sont
+ * masquées : la grille les montre d'un clic. Dans le doute, une colonne reste un texte.
+ */
+function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColumnSpec {
+  const is = (...candidates: string[]) => isHeader(header, candidates)
+  if (index === "npcs") {
+    if (is("Page lié", "Inventaire JSON (archive)", "Créé le", "Modifié le", "Créé par", "Dossier")) return { kind: "rich", hidden: true }
+    if (is("Ajouté au créateur de session", "Dans le groupe joueur")) return { kind: "checkbox", hidden: true }
+    if (is("PNJ important")) return { kind: "checkbox" }
+    if (is("Peuple")) return { kind: "linked-choice", source: { index: "peoples", tab: "Peuples" } }
+    if (is("Vie actuelle", "Vie totale", "Rapidité", "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat", "Capacité de tir", "Capacité magique", "Force mentale", "Constitution")) return { kind: "number" }
+    if (is("Sorts actifs")) return { kind: "spells", spells: { source: "creature", category: "actif" } }
+    if (is("Sorts passifs")) return { kind: "spells", spells: { source: "creature", category: "passif" } }
+    return { kind: "rich" }
+  }
+  if (index === "campaigns") {
+    if (is("MJ")) return { kind: "rich", hidden: true }
+    if (is("Couleur d’accent")) return { kind: "color" }
+    return { kind: "rich" }
+  }
+  if (index === "characters") {
+    if (is("Joueur")) return { kind: "rich", hidden: true }
+    return { kind: "rich" }
+  }
+  if (index === "classes") {
+    // L'image est souvent une formule =IMAGE(…) : la réécrire en texte l'effacerait.
+    if (is("Image")) return { kind: "archived" }
+    if (is("Type")) return { kind: "choice", options: classTypeValues.map((value) => ({ value })) }
+    if (is("Difficulté")) return { kind: "choice", options: classDifficultyValues.map((value) => ({ value })) }
+    if (is("Couleur d’accent sombre", "Couleur d’accent clair")) return { kind: "color" }
+    return { kind: "rich" }
+  }
+  // Sorts des classes et des créatures : une colonne par classe donne le rang du sort.
+  if (/^CLA-/i.test(header.trim())) return { kind: "number", hidden: true, description: "Le rang du sort dans cette classe (vide : pas dans la classe)." }
+  if (is("Type", "Type de sort")) return { kind: "choice", allowCustom: true, options: index === "creature-spells" ? spellTypeOptions.filter((option) => classSpellCategory(option.value) !== "bonus") : spellTypeOptions }
   return { kind: "rich" }
 }
 

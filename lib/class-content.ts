@@ -342,6 +342,15 @@ async function spellSource(kind: SpellIndexKind, refresh = false) {
   return { file, candidates: SPELL_TAB_CANDIDATES, classes }
 }
 
+/** Le classeur et l'onglet des sorts (des classes ou des créatures), pour le moteur des index. */
+export async function spellSheetLocation(kind: SpellIndexKind) {
+  const { file, candidates } = await spellSource(kind)
+  const tabs = await spreadsheetTabs(file.id)
+  const found = candidates.map((candidate) => tabs.find((item) => item.title === candidate)).find(Boolean)
+  if (!found) throw new Error("SHEET_TAB_NOT_FOUND")
+  return { spreadsheetId: file.id, tabName: found.title, webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit` }
+}
+
 /** Onglet des sorts déjà reconnu, par classeur : un enregistrement n'a pas à le rechercher. */
 const spellTabs = new Map<string, { sheetId: number; tabName: string }>()
 

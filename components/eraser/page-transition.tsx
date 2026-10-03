@@ -14,7 +14,7 @@ type Pending = { from: string; to: string; title: string }
 export function skeletonFor(pathname: string): { variant: PageSkeletonVariant; eyebrow?: string } {
   if (pathname.startsWith("/personnage/")) return { variant: "sheet" }
   if (/^\/campagne\/[^/]+\/?$/.test(pathname)) return { variant: "dashboard" }
-  if (/^\/ressources\/(index-des-|index\/|sorts-des-creatures)/.test(pathname)) return { variant: "index", eyebrow: "Index" }
+  if (/^\/ressources\/(index-des-|index\/|sorts-des-)/.test(pathname)) return { variant: "index", eyebrow: "Index" }
   if (pathname.startsWith("/administration")) return { variant: "page", eyebrow: "Administration" }
   if (pathname.startsWith("/regles")) return { variant: "page", eyebrow: "Règles" }
   return { variant: "page" }

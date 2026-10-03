@@ -130,6 +130,10 @@ function handleSheets(path: string, init: RequestInit) {
         const { sheetId, startIndex, endIndex } = request.insertDimension.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
         tab.grid.splice(startIndex, 0, ...Array.from({ length: endIndex - startIndex }, () => [] as string[]))
+      } else if (request.deleteDimension?.range?.dimension === "ROWS") {
+        const { sheetId, startIndex, endIndex } = request.deleteDimension.range
+        const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
+        tab.grid.splice(startIndex, endIndex - startIndex)
       } else if (request.addSheet) {
         const sheetId = Math.max(0, ...file.tabs.map((tab) => tab.sheetId)) + 1
         file.tabs.push({ sheetId, title: request.addSheet.properties.title, grid: [], columnCount: request.addSheet.properties.gridProperties?.columnCount ?? 26, rowCount: 1000 })
@@ -147,6 +151,18 @@ function handleSheets(path: string, init: RequestInit) {
       replies.push({})
     }
     return json({ replies })
+  }
+  if (!rest.length && url.searchParams.get("includeGridData") === "true") {
+    // Les cellules mises en forme (le tableau des index) : une zone par plage demandée.
+    const blocks = new Map<Tab, Array<{ startRow: number; startColumn: number; rowData: Array<{ values: Array<{ formattedValue: string }> }> }>>()
+    for (const range of url.searchParams.getAll("ranges")) {
+      const area = parseRange(file, range)
+      const values = readArea(area)
+      const list = blocks.get(area.tab) ?? []
+      list.push({ startRow: area.top, startColumn: area.left, rowData: values.map((line) => ({ values: line.map((value) => ({ formattedValue: value })) })) })
+      blocks.set(area.tab, list)
+    }
+    return json({ sheets: [...blocks].map(([tab, data]) => ({ properties: { sheetId: tab.sheetId, title: tab.title }, data })) })
   }
   if (!rest.length) {
     return json({ sheets: file.tabs.map((tab) => ({ properties: { sheetId: tab.sheetId, title: tab.title, gridProperties: { rowCount: tab.rowCount, columnCount: tab.columnCount } } })) })

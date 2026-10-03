@@ -28,7 +28,7 @@ import {
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
-import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
+import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
 import { foldName, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
@@ -76,6 +76,7 @@ import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOv
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
 import { listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
@@ -132,9 +133,9 @@ export type AdminTodoRecord = {
   deletedAt: string | null
 }
 
-export const classTypes = ["Solide", "Protectrice", "Brutale", "Fourbe", "Éclectique"] as const
+export const classTypes = classTypeValues
 export type ClassType = (typeof classTypes)[number]
-export const classDifficulties = ["Facile", "Intermédiaire", "Difficile", "Expert", "X"] as const
+export const classDifficulties = classDifficultyValues
 export type ClassDifficulty = (typeof classDifficulties)[number]
 
 type ClassSheetRow = [
@@ -390,8 +391,6 @@ async function classesSource() {
   return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
 }
 
-/** Les colonnes de la feuille Classes, lues par leur nom. */
-const classSheetHeaders = ["ID", "Type", "Nom de la classe", "Image", "Mots-clés 1", "Mots-clés 2", "Mots-clés 3", "Difficulté", "Finition", "Couleur d’accent sombre", "Couleur d’accent clair"]
 
 /** La feuille Classes (formules comprises : l'image est souvent une formule), colonnes par leur nom. */
 function readClassSheet(source: { spreadsheetId: string; tabName: string }) {
@@ -403,13 +402,32 @@ function classImageColumn(columns: SheetColumns) {
   return Math.max(0, columns.at("Image")) + 1
 }
 
+/**
+ * Le classeur et l'onglet d'un index d'entités, pour le moteur des index : la feuille
+ * que lit le reste d'Eraser (reliée, jamais recréée si elle existe dans Drive).
+ */
+export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes") {
+  const runtime = runtimeEnv()
+  const configured = key === "characters" ? runtime.GOOGLE_CHARACTERS_SHEET_ID : key === "classes" ? runtime.GOOGLE_CLASSES_SHEET_ID : ""
+  if (configured) {
+    const tabName = (key === "characters" ? runtime.GOOGLE_CHARACTERS_TAB || "Personnages" : runtime.GOOGLE_CLASSES_TAB || "Classes")
+    return { spreadsheetId: configured, tabName, webViewLink: `https://docs.google.com/spreadsheets/d/${configured}/edit` }
+  }
+  const sheet = await ensureJdrSheet(key)
+  if (!sheet) throw new Error("WORLD_INDEX_SHEET_UNAVAILABLE")
+  return { spreadsheetId: sheet.spreadsheetId, tabName: sheet.tabName, webViewLink: sheet.webViewLink }
+}
+
+/** Les classes ont été modifiées ailleurs que par leurs pages : la liste locale sera relue. */
+export async function forgetClassIndexSync() {
+  await getDb().delete(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global"))
+}
+
 async function campaignsSource() {
   const stored = await resolveJdrSheet("campaigns")
   return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
 }
 
-/** Les colonnes de la feuille Campagnes, lues par leur nom. */
-const campaignSheetHeaders = ["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"]
 /** La feuille « Personnages des campagnes » : un lien par ligne. */
 const campaignCharacterHeaders = ["ID campagne", "ID personnage"]
 /** Les colonnes de la feuille Magasins, lues par leur nom. */
@@ -444,6 +462,28 @@ function campaignCells(campaign: Pick<CampaignRecord, "id" | "mjUid" | "name" | 
   }
 }
 
+/**
+ * Ceux qui gardent en mémoire le contenu d'un classeur (le moteur des index) et doivent
+ * l'oublier quand Eraser y écrit ailleurs : un PNJ enregistré dans sa campagne, une
+ * classe créée, un personnage modifié dans sa fiche.
+ */
+const spreadsheetWriteListeners = new Set<(spreadsheetId: string) => void>()
+
+export function onSpreadsheetWrite(listener: (spreadsheetId: string) => void) {
+  spreadsheetWriteListeners.add(listener)
+  return () => { spreadsheetWriteListeners.delete(listener) }
+}
+
+function announceSpreadsheetWrite(path: string, method: string) {
+  // Les lectures en POST (batchGet…) n'écrivent rien.
+  if (method === "GET" || /batchGet|getByDataFilter/i.test(path)) return
+  const spreadsheetId = path.match(/^spreadsheets\/([^/:?]+)/)?.[1]
+  if (!spreadsheetId) return
+  for (const listener of spreadsheetWriteListeners) {
+    try { listener(spreadsheetId) } catch { /* un auditeur en échec n'empêche pas l'écriture */ }
+  }
+}
+
 async function googleSheetsFetch(path: string, init?: RequestInit) {
   const url = `https://sheets.googleapis.com/v4/${path}`
   let response: Response | null = null
@@ -468,6 +508,7 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
     } catch { /* réponse Google non JSON */ }
     throw new Error(`SHEETS_API_ERROR:${status}${detail ? `:${detail}` : ""}`)
   }
+  announceSpreadsheetWrite(path, (init?.method ?? "GET").toUpperCase())
   return response
 }
 
@@ -667,15 +708,18 @@ const LIGHT_CELL_FIELDS = `formattedValue,textFormatRuns(startIndex,format(${LIG
 const FULL_CELL_FIELDS = "formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)"
 
 /** `range` (sans l'onglet, ex. « A5:Z5 ») limite la lecture à une zone : une ligne se lit bien plus vite que la feuille. */
-export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; range?: string } = {}): Promise<FormattedSheet> {
+export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; range?: string; ranges?: string[] } = {}): Promise<FormattedSheet> {
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
+      const tab = `'${candidate.replaceAll("'", "''")}'`
       const parameters = new URLSearchParams({
         includeGridData: "true",
-        ranges: `'${candidate.replaceAll("'", "''")}'${options.range ? `!${options.range}` : ""}`,
         fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${options.light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
       })
+      // Plusieurs zones (« C:C », « H:H »…) : seules ces colonnes d'une feuille très large sont lues.
+      const zones = options.ranges?.length ? options.ranges : [options.range ?? ""]
+      for (const zone of zones) parameters.append("ranges", zone ? `${tab}!${zone}` : tab)
       const payload = await googleSheetsJson<{
         sheets?: Array<{
           properties?: { sheetId?: number; title?: string }
@@ -2559,17 +2603,6 @@ export type StructuredSheetDefinition = {
   columnWidths: number[]
 }
 
-const npcSheetHeaders = [
-  "ID", "Page lié", "Nom du PNJ", "Classe / métier", "Vie actuelle", "Vie totale", "Rapidité",
-  "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat",
-  "Capacité de tir", "Capacité magique", "Force mentale", "Constitution", "Peuple", "Genre", "Âge",
-  "Poids", "Taille", "Notes MJ", "Portrait", "Notes joueurs", "Inventaire JSON (archive)",
-  "Ajouté au créateur de session", "Créé le", "Modifié le", "Dossier", "Dans le groupe joueur", "PNJ important", "Créé par",
-  // Ajoutées à la fin : aucune colonne existante ne bouge.
-  "Titre", "Histoire / Lore",
-  // Sorts du PNJ, noms séparés par des virgules comme pour les créatures.
-  "Sorts actifs", "Sorts passifs",
-]
 /** Dernière colonne d'une feuille des PNJ neuve (AK) : sert seulement à la créer et aux anciennes versions. */
 const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
@@ -2679,8 +2712,9 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
   // Index du monde (Ressources) : colonnes, onglets supplémentaires et liens entre
   // index sont décrits dans lib/world-index-definitions.ts. Seul le premier onglet
   // de chaque classeur est déclaré ici ; les suivants sont ajoutés par lib/world-indexes.ts.
-  ...(Object.keys(worldIndexDefinitions) as BuiltinWorldIndexKey[]).map((key) => worldIndexDefinitions[key]).map((index): StructuredSheetDefinition => ({
-    key: index.key as BuiltinWorldIndexKey,
+  // Les index d'entités (PNJs, campagnes…) gardent ci-dessous leur propre déclaration.
+  ...(Object.keys(worldIndexDefinitions) as BuiltinWorldIndexKey[]).filter((key) => !isEntityWorldIndexKey(key)).map((key) => worldIndexDefinitions[key]).map((index): StructuredSheetDefinition => ({
+    key: index.key as Exclude<BuiltinWorldIndexKey, EntityWorldIndexKey>,
     name: index.sheetName,
     tabName: index.tabs[0].name,
     frozenColumns: 1,
@@ -3695,7 +3729,7 @@ export async function diagnoseJdrSheets(withWriteTest = false): Promise<JdrSheet
   }))
 }
 
-const worldIndexKeys = new Set<string>(Object.keys(worldIndexDefinitions))
+const worldIndexKeys = new Set<string>(Object.keys(worldIndexDefinitions).filter((key) => !isEntityWorldIndexKey(key)))
 
 export async function ensureJdrSheet(key: JdrSheetKey) {
   if (key === "tabletop") return ensureTabletopWorkbook()

@@ -248,6 +248,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const specOf = useCallback((tab: string, header: string) => data?.columns[tab]?.find((column) => foldName(column.header) === foldName(header))?.spec ?? worldColumnSpec(indexKey, tab, header), [data, indexKey])
   const links = useMemo(() => data?.links ?? [], [data])
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
+  // Un index d'entités : le nom mène à la page de la ligne, « Ajouter » à sa page de création.
+  const entity = definition.entity
 
   const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
     const { tabName: rowTab, rowNumber } = parseRowKey(rowKey)
@@ -389,6 +391,24 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [definition])
 
   const busy = Boolean(pending)
+
+  /** Le nom d'une ligne, quelle que soit sa colonne (« Nom », « Nom du PNJ »…). */
+  const nameOf = useCallback((rowKey: string) => {
+    const found = locate(rowKey)
+    const column = found ? nameColumnOf(found.table.headers) : -1
+    return found && column >= 0 ? rawOf(rowKey, found.table.headers[column]).replace(/<[^>]+>/g, "") : ""
+  }, [locate, rawOf])
+
+  /** Ouvre une ligne : sa page (personnage, campagne, classe) ou sa fiche. */
+  const openRow = useCallback((rowKey: string) => {
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    if (entity?.nameHref && id) router.push(entity.nameHref.replace("{id}", encodeURIComponent(id)))
+    else setDetails(rowKey)
+  }, [entity, rawOf, router])
+  const startAdding = useCallback(() => {
+    if (entity?.addHref) router.push(entity.addHref)
+    else setCreating(true)
+  }, [entity, router])
 
   // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
   // Les colonnes masquées restent dans la liste : la grille les cache et les montre d'un clic.
@@ -603,17 +623,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         return { href: `${pathOf(index)}${name ? `?q=${encodeURIComponent(name)}` : ""}` }
       },
       copy: copyToClipboard,
-      card: () => rowCard(rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "") || "Sans nom", sheetFields.filter((column) => !isComputedSpec(column.spec) || column.spec.kind === "formula").map((column) => {
+      card: () => rowCard(nameOf(rowKey) || "Sans nom", sheetFields.filter((column) => !isComputedSpec(column.spec) || column.spec.kind === "formula").map((column) => {
         const text = valueOf(rowKey, column.header).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
         return { label: column.header, text }
-      }).filter((field) => foldName(field.label) !== "nom")),
+      }).filter((field) => !isNameColumn(field.label))),
       chat: async (message, audience) => {
         const campaign = await chooseCampaign(ask, "chat")
         if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
         await sendToCampaignChat(campaign, message, audience)
       },
     }
-  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
@@ -629,7 +649,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         valueOf,
         commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value),
         disabled: busy,
-        openForm: setDetails,
+        openForm: openRow,
         computed,
         formula: (rowKey, columnKey, spec) => engine.formula(rowKey, columnKey, spec),
         gaugeMax: (rowKey, spec) => engine.gaugeMax(rowKey, spec),
@@ -641,7 +661,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     return list
-  }, [busy, commitCell, computed, drawCell, engine, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, computed, drawCell, engine, openRow, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -820,14 +840,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             rows={displayedRows}
             weightColumns={weightColumns}
             weightOf={(rowKey, header) => { const found = locate(rowKey); return found ? numericCellValue(valueOf(rowKey, header), specOf(found.table.tabName, header)) : null }}
-            nameOf={(rowKey) => rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "")}
-            onOpen={setDetails}
+            nameOf={nameOf}
+            onOpen={openRow}
             disabled={busy}
           />}
           <Button type="button" variant="outline" onClick={() => setViewDialog("new")} disabled={busy || !tables.length} title="Un onglet qui réaffiche les lignes répondant à des conditions, sans les copier"><Filter />Onglet-fenêtre</Button>
           <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={busy} title="Colonnes, types, réglages et onglets de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
-          <Button type="button" onClick={() => setCreating(true)} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
+          <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
       </div>
 
@@ -878,8 +898,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           disabled={busy}
           version={version}
           addRowLabel={`Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
-          rowCommands={{
-            append: () => setCreating(true),
+          // Personnages, campagnes et classes naissent de leur page et partent à la corbeille :
+          // le tableau n'en insère, n'en copie ni n'en supprime aucune ligne.
+          rowCommands={entity && !entity.rowCommands ? { append: startAdding } : {
+            append: startAdding,
             insertRows: (rowKey, count) => { const { tabName: rowTab, rowNumber } = parseRowKey(rowKey); void mutate("insert", [rowKey], "insert", { tabName: rowTab, rowNumber, count }) },
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
@@ -920,7 +942,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {!nameOpensDetails && detailsFound && <IndexRowSheet
         key={`${details}`}
         open
-        title={savedCell(detailsFound, "Nom").replace(/<[^>]+>/g, "")}
+        title={savedCell(detailsFound, detailsFound.table.headers[nameColumnOf(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
         rowFor={sheetRow}

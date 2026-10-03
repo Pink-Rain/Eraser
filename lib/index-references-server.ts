@@ -20,7 +20,7 @@ import {
   type ResolvedReference,
 } from "@/lib/index-references"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
-import { isBuiltinWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
+import { isBuiltinWorldIndexKey, isEntityWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
 
 /**
@@ -105,7 +105,8 @@ async function objectSource(): Promise<Source> {
  * campagnes, PNJs, classes, sorts) : un mot déjà pris par un index du monde le reste.
  */
 async function sourceKeys() {
-  const builtin = await Promise.all(Object.keys(worldIndexDefinitions).map(async (key) => (await resolveJdrSheet(key as JdrSheetKey).catch(() => null)) ? key : null))
+  // Les index d'entités sont aussi sur le moteur, mais se citent avec leurs règles (ce qu'un joueur voit).
+  const builtin = await Promise.all(Object.keys(worldIndexDefinitions).filter((key) => !isEntityWorldIndexKey(key)).map(async (key) => (await resolveJdrSheet(key as JdrSheetKey).catch(() => null)) ? key : null))
   const custom = (await listCustomIndexes().catch(() => [])).map((entry) => entry.key)
   const entities = await entityReferenceKeys().catch(() => [])
   return [...builtin.filter((key): key is string => Boolean(key)), OBJECT_REFERENCE_INDEX, ...custom, ...entities]
@@ -118,7 +119,7 @@ async function loadSource(key: string, options: { cited?: readonly string[] } = 
       return source ? { ...source, entity: true } : null
     }
     if (key === OBJECT_REFERENCE_INDEX) return await objectSource()
-    if (isBuiltinWorldIndexKey(key)) return (await resolveJdrSheet(key as JdrSheetKey)) ? await worldSource(key) : null
+    if (isBuiltinWorldIndexKey(key) && !isEntityWorldIndexKey(key)) return (await resolveJdrSheet(key as JdrSheetKey)) ? await worldSource(key) : null
     if ((await listCustomIndexes()).some((entry) => entry.key === key)) return await worldSource(key as WorldIndexKey)
     return null
   } catch (error) {
