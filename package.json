@@ -1,6 +1,6 @@
 {
   "name": "eraser-jdr",
-  "version": "0.1.1-alpha.127",
+  "version": "0.1.1-alpha.128",
   "eraserShell": 4,
   "private": true,
   "main": "desktop/main.cjs",
@@ -12,7 +12,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:ci": "node --test tests/ui-components.test.mjs tests/object-icons.test.mjs tests/object-index-regroup.test.mjs tests/object-index-regroup-flow.test.mjs tests/character-states.test.mjs tests/object-combat.test.mjs tests/index-references.test.mjs",
+    "test:ci": "node --test tests/ui-components.test.mjs tests/object-icons.test.mjs tests/object-index-regroup.test.mjs tests/object-index-regroup-flow.test.mjs tests/character-states.test.mjs tests/object-combat.test.mjs tests/index-references.test.mjs tests/sheet-columns.test.mjs tests/character-sheet-map.test.mjs tests/named-columns-flow.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "desktop:build": "node scripts/build-desktop.mjs",

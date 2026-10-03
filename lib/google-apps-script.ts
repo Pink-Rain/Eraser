@@ -16,9 +16,11 @@ function applyEraserClassImages(payloadJson) {
   const spreadsheet = SpreadsheetApp.openById(payload.spreadsheetId);
   const sheet = spreadsheet.getSheetByName(payload.tabName);
   if (!sheet) throw new Error("ERASER_CLASSES_TAB_NOT_FOUND");
+  // La colonne « Image », retrouvée par son nom côté Eraser (D si elle n'a pas bougé).
+  const column = Math.max(1, Number(payload.column) || 4);
 
   payload.actions.forEach(function (item) {
-    const cell = sheet.getRange(item.row, 4);
+    const cell = sheet.getRange(item.row, column);
     if (item.action === "clear") {
       cell.clearContent();
       cell.clearNote();
@@ -36,7 +38,7 @@ function applyEraserClassImages(payloadJson) {
 
   if (payload.rowCount > 0) {
     sheet.setRowHeights(2, payload.rowCount, 104);
-    sheet.getRange(2, 4, payload.rowCount, 1)
+    sheet.getRange(2, column, payload.rowCount, 1)
       .setHorizontalAlignment("center")
       .setVerticalAlignment("middle");
   }
@@ -52,9 +54,10 @@ function readEraserClassImages(payloadJson) {
 
   const startRow = Math.max(1, Number(payload.startRow) || 2);
   const rowCount = Math.max(0, Number(payload.rowCount) || 0);
+  const column = Math.max(1, Number(payload.column) || 4);
   if (rowCount === 0) return [];
 
-  return sheet.getRange(startRow, 4, rowCount, 1).getValues().map(function (row) {
+  return sheet.getRange(startRow, column, rowCount, 1).getValues().map(function (row) {
     const value = row[0];
     if (!value || value.valueType !== SpreadsheetApp.ValueType.IMAGE) return "";
     try {
@@ -63,6 +66,16 @@ function readEraserClassImages(payloadJson) {
       return "";
     }
   });
+}
+
+// Les mêmes, appelées quand la colonne « Image » n'est plus en D : un script déployé
+// avant cette version ne les connaît pas, Eraser le redéploie alors une fois.
+function readEraserClassImagesAt(payloadJson) {
+  return readEraserClassImages(payloadJson);
+}
+
+function applyEraserClassImagesAt(payloadJson) {
+  return applyEraserClassImages(payloadJson);
 }
 `.trim()
 
@@ -325,14 +338,21 @@ async function redeployScriptIntegration(
   return updated
 }
 
+/** La colonne « Image » est-elle encore en D ? Sinon, les fonctions qui acceptent une autre colonne. */
+function imageFunction(base: string, column: number | undefined) {
+  return column && column !== 4 ? `${base}At` : base
+}
+
 export async function readClassImagesWithAppsScript(input: {
   spreadsheetId: string
   tabName: string
   startRow: number
   rowCount: number
+  /** La colonne « Image » (1 = A), retrouvée par son nom. */
+  column?: number
 }) {
   let integration = await ensureScriptIntegration(input.spreadsheetId)
-  const functionName = "readEraserClassImages"
+  const functionName = imageFunction("readEraserClassImages", input.column)
   const parameters = [JSON.stringify(input)]
 
   try {
@@ -358,16 +378,19 @@ export async function applyClassImagesWithAppsScript(input: {
   spreadsheetId: string
   tabName: string
   rowCount: number
+  /** La colonne « Image » (1 = A), retrouvée par son nom. */
+  column?: number
   actions: ClassImageScriptAction[]
 }) {
-  const integration = await ensureScriptIntegration(input.spreadsheetId)
-  try {
+  let integration = await ensureScriptIntegration(input.spreadsheetId)
+  const functionName = imageFunction("applyEraserClassImages", input.column)
+  const run = async () => {
     const execution = await appsScriptJson<AppsScriptExecution>(
       `scripts/${encodeURIComponent(integration.deploymentId!)}:run`,
       {
         method: "POST",
         body: JSON.stringify({
-          function: "applyEraserClassImages",
+          function: functionName,
           parameters: [JSON.stringify(input)],
         }),
       },
@@ -378,6 +401,18 @@ export async function applyClassImagesWithAppsScript(input: {
           execution.error.message ||
           "APPS_SCRIPT_EXECUTION_FAILED",
       )
+    }
+    return execution
+  }
+  try {
+    let execution: AppsScriptExecution
+    try {
+      execution = await run()
+    } catch (error) {
+      // Un script déployé avant que la colonne puisse bouger : redéployé une fois.
+      if (functionName === "applyEraserClassImages" || !missingScriptFunction(error, functionName)) throw error
+      integration = await redeployScriptIntegration(integration)
+      execution = await run()
     }
     await saveIntegration({
       spreadsheetId: input.spreadsheetId,

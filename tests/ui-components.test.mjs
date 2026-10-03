@@ -117,7 +117,10 @@ test("shop persistence bypasses stale caches and requires a real reread", async 
     sheets.indexOf("export async function listSavedShops"),
     sheets.indexOf("function npcNumber"),
   );
-  assert.match(shopSection, /readRangeFresh/);
+  // Les magasins sont relus sans cache (readNamedSheet « fresh » passe par batchGetByDataFilter).
+  assert.match(shopSection, /readShopSheet\(/);
+  assert.match(sheets, /async function readShopSheet[\s\S]{0,200}fresh: true/);
+  assert.match(sheets, /if \(options\.fresh\) \{\s+const read = await readRangeFreshWithOffset/);
   assert.doesNotMatch(shopSection, /receipt\.updatedValues/);
   assert.match(sheets, /values:batchGetByDataFilter/);
   assert.match(sheets, /dataFilters: \[\{ a1Range: range \}\]/);

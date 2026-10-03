@@ -69,7 +69,8 @@ export function applySkillCells(values: string[], rowNumber: number, layout: Cha
     values[modifierStat] = "=0"
     values[modifierSuccess] = "=0"
     values[modifierFailure] = "=0"
-    const sum = (indexes: number[]) => indexes.filter((index) => index >= 0).map((index) => characterValueCell(index, rowNumber)).join("+")
+    const cellOf = layout.cell ?? characterValueCell
+    const sum = (indexes: number[]) => indexes.filter((index) => index >= 0).map((index) => cellOf(index, rowNumber)).join("+")
     values[totalStat] = cappedStatFormula(sum([characteristicValue, bonusStat, modifierStat]))
     values[totalSuccess] = `=${sum([globalSuccess, characteristicSuccess, bonusSuccess, modifierSuccess])}`
     values[totalFailure] = `=${sum([globalFailure, characteristicFailure, bonusFailure, modifierFailure])}`

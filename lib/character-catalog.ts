@@ -224,15 +224,25 @@ export const skillMetrics: string[] = [...characterSkillMetrics]
 export type CharacterLayout = {
   headers: string[]
   index: (key: string, metric?: string) => number
+  /**
+   * La case A1 d'une valeur de la fiche dans la feuille (pour les formules), quand les
+   * colonnes ne sont pas rangées dans l'ordre de la fiche. Absente : valeurs dès la colonne C.
+   */
+  cell?: (valueIndex: number, rowNumber: number) => string
 }
 
-export function characterLayout(headers: string[]): CharacterLayout {
+export function characterLayout(headers: string[], cell?: CharacterLayout["cell"]): CharacterLayout {
   const slots = new Map<string, number>()
   headers.forEach((header, position) => {
     const slot = slotOfHeader(String(header ?? "").trim())
     if (slot && !slots.has(slot)) slots.set(slot, position)
   })
-  return { headers, index: (key, metric = "") => slots.get(slotName(key, metric)) ?? -1 }
+  return { headers, index: (key, metric = "") => slots.get(slotName(key, metric)) ?? -1, ...(cell ? { cell } : {}) }
+}
+
+/** Une colonne ajoutée par l'Index des caractéristiques et compétences (« Pêche — Total de stats [COM-1] »). */
+export function isCatalogColumnHeader(header: string) {
+  return ID_SUFFIX.test(String(header ?? "").trim())
 }
 
 /** Chaque colonne que le catalogue demande à la feuille, avec son en-tête attendu. */

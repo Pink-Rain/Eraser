@@ -47,12 +47,14 @@ import {
 import { copyNpcPortrait } from "@/lib/npc-portraits"
 import { copyToken } from "@/lib/tokens"
 import {
+  characterClassChoicesIndex,
   characterSheetHeaders,
   characterSecondaryCalculatedFields,
   characterSecondaryCalculationValueIndex,
   characterValueHeaders,
 } from "@/lib/character-sheet-schema"
-import { builtinCharacterCatalog, characterLayout, planCatalogColumns, type CharacterCatalog, type CharacterLayout } from "@/lib/character-catalog"
+import { planCatalogColumns, type CharacterCatalog, type CharacterLayout } from "@/lib/character-catalog"
+import { characterSheetAliases, characterSheetMap, characterSheetRow, characterValuesOf, type CharacterSheetMap } from "@/lib/character-sheet-map"
 import { applyCharacteristicDefaults, applySkillCells, characterValueCell, computedCellIndexes } from "@/lib/character-sheet-cells"
 import {
   baseInventoryContainerTypes,
@@ -74,6 +76,7 @@ import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOv
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
 import { listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
@@ -368,23 +371,77 @@ async function charactersSource() {
   const runtime = runtimeEnv()
   const spreadsheetId = runtime.GOOGLE_CHARACTERS_SHEET_ID
   const tab = runtime.GOOGLE_CHARACTERS_TAB || "Personnages"
-  if (spreadsheetId) return { spreadsheetId, tabName: tab, range: `${tab}!A:E` }
+  if (spreadsheetId) return { spreadsheetId, tabName: tab }
   const stored = await resolveJdrSheet("characters")
-  return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName, range: `${stored.tabName}!A:E` } : null
+  return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
+}
+
+/** Quelques colonnes de la feuille des personnages, par leur nom (la feuille entière est très large). */
+function readCharacterColumns(source: { spreadsheetId: string; tabName: string }, wanted: readonly string[], options: { fresh?: boolean } = {}) {
+  return readNamedColumns(source.spreadsheetId, source.tabName, characterSheetHeaders, ["ID", ...wanted], { aliases: characterSheetAliases, fresh: options.fresh })
 }
 
 async function classesSource() {
   const runtime = runtimeEnv()
   const spreadsheetId = runtime.GOOGLE_CLASSES_SHEET_ID
   const tab = runtime.GOOGLE_CLASSES_TAB || "Classes"
-  if (spreadsheetId) return { spreadsheetId, range: `${tab}!A:K` }
+  if (spreadsheetId) return { spreadsheetId, tabName: tab }
   const stored = await resolveJdrSheet("classes")
-  return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:K` } : null
+  return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
+}
+
+/** Les colonnes de la feuille Classes, lues par leur nom. */
+const classSheetHeaders = ["ID", "Type", "Nom de la classe", "Image", "Mots-clés 1", "Mots-clés 2", "Mots-clés 3", "Difficulté", "Finition", "Couleur d’accent sombre", "Couleur d’accent clair"]
+
+/** La feuille Classes (formules comprises : l'image est souvent une formule), colonnes par leur nom. */
+function readClassSheet(source: { spreadsheetId: string; tabName: string }) {
+  return readNamedSheet(source.spreadsheetId, source.tabName, classSheetHeaders, { render: "FORMULA" })
+}
+
+/** La lettre de la colonne Image (les illustrations et leurs notes y sont posées). */
+function classImageColumn(columns: SheetColumns) {
+  return Math.max(0, columns.at("Image")) + 1
 }
 
 async function campaignsSource() {
   const stored = await resolveJdrSheet("campaigns")
-  return stored ? { spreadsheetId: stored.spreadsheetId, range: `${stored.tabName}!A:F` } : null
+  return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
+}
+
+/** Les colonnes de la feuille Campagnes, lues par leur nom. */
+const campaignSheetHeaders = ["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"]
+/** La feuille « Personnages des campagnes » : un lien par ligne. */
+const campaignCharacterHeaders = ["ID campagne", "ID personnage"]
+/** Les colonnes de la feuille Magasins, lues par leur nom. */
+const shopSheetHeaders = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le"]
+
+/** La to-do de l'administration. */
+const todoSheetHeaders = ["ID", "ID admin", "Admin créateur", "Nom", "Contenu", "Priorité", "Étiquette", "Couleur", "Réalisée", "Créée le", "Modifiée le", "Supprimée le"]
+/** Les relations d'un personnage (PNJ ou personnage ciblé). */
+const characterRelationHeaders = ["ID", "ID personnage", "Type de cible", "ID cible", "Nom", "Niveau", "Notes personnelles", "Créé par", "ID campagne", "Créée le", "Modifiée le"]
+
+function campaignFromRow(row: readonly (string | undefined)[], columns: SheetColumns) {
+  const id = columns.get(row, "ID")
+  if (!id) return null
+  return {
+    id,
+    mjUid: columns.get(row, "MJ"),
+    name: columns.get(row, "Nom de la campagne") || "Campagne sans nom",
+    description: columns.get(row, "Description"),
+    bannerUrl: columns.get(row, "Bannière"),
+    accentColor: columns.get(row, "Couleur d’accent") || "#927640",
+  }
+}
+
+function campaignCells(campaign: Pick<CampaignRecord, "id" | "mjUid" | "name" | "description" | "bannerUrl" | "accentColor">): Record<string, SheetCell> {
+  return {
+    "ID": campaign.id,
+    "MJ": campaign.mjUid,
+    "Nom de la campagne": campaign.name,
+    "Description": campaign.description,
+    "Bannière": campaign.bannerUrl,
+    "Couleur d’accent": campaign.accentColor,
+  }
 }
 
 async function googleSheetsFetch(path: string, init?: RequestInit) {
@@ -765,6 +822,174 @@ export async function ensureSheetColumnCount(spreadsheetId: string, tabName: str
     method: "POST",
     body: JSON.stringify({ requests: [{ appendDimension: { sheetId: sheet.sheetId, dimension: "COLUMNS", length: minimum - current } }] }),
   })
+}
+
+// ---------------------------------------------------------------------------
+// Les feuilles lues par le nom de leurs colonnes (lib/sheet-columns.ts)
+// ---------------------------------------------------------------------------
+
+/** Un onglet entier dans la notation A1 : toutes ses colonnes, en-têtes compris. */
+export function sheetTabAll(tabName: string) {
+  return `'${tabName.replaceAll("'", "''")}'`
+}
+
+export type NamedSheet = { columns: SheetColumns; rows: string[][] }
+
+/**
+ * Un onglet entier, en-têtes compris, en une seule lecture (mise en cache comme les
+ * autres), ses colonnes retrouvées par leur nom. `rows[i]` est la ligne i + 2.
+ */
+export async function readNamedSheet(spreadsheetId: string, tabName: string, expected: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean; render?: "FORMULA" } = {}): Promise<NamedSheet> {
+  let all: string[][]
+  if (options.fresh) {
+    const read = await readRangeFreshWithOffset(spreadsheetId, sheetTabAll(tabName), options.render)
+    // Google peut renvoyer la plage à partir de la première ligne remplie.
+    all = [...Array.from({ length: Math.max(0, read.startRow - 1) }, () => [] as string[]), ...read.rows]
+  } else {
+    all = await readRange(spreadsheetId, sheetTabAll(tabName), options.render)
+  }
+  const [headers = [], ...rows] = all
+  rememberSheetHeaders(spreadsheetId, tabName, headers)
+  return { columns: sheetColumns(headers, expected, options.aliases), rows }
+}
+
+/** Plusieurs plages lues sans cache, chacune avec la ligne où elle commence vraiment. */
+async function readRangesFresh(spreadsheetId: string, ranges: string[]) {
+  if (!ranges.length) return [] as Array<{ rows: string[][]; startRow: number }>
+  const payload = await googleSheetsJson<{
+    valueRanges?: Array<{ valueRange?: { range?: string; values?: GoogleSheetCellValue[][] } }>
+  }>(`spreadsheets/${spreadsheetId}/values:batchGetByDataFilter`, {
+    method: "POST",
+    cache: "no-store",
+    body: JSON.stringify({ dataFilters: ranges.map((a1Range) => ({ a1Range })), majorDimension: "ROWS", valueRenderOption: "FORMATTED_VALUE", dateTimeRenderOption: "FORMATTED_STRING" }),
+  })
+  return ranges.map((range, index) => {
+    const matched = payload.valueRanges?.[index]?.valueRange
+    return { rows: normalizeGoogleSheetRows(matched?.values), startRow: sheetRangeStartRow(matched?.range) ?? sheetRangeStartRow(range) ?? 1 }
+  })
+}
+
+/**
+ * Quelques colonnes d'un onglet, retrouvées par leur nom : la ligne 1 d'abord, puis
+ * seulement les colonnes demandées, en une lecture groupée (une feuille très large,
+ * comme celle des personnages, n'est pas lue en entier). Chaque ligne rendue garde
+ * les places de la feuille : `columns.get(row, nom)` s'y applique. `rows[i]` est la
+ * ligne i + 2.
+ */
+export async function readNamedColumns(spreadsheetId: string, tabName: string, expected: readonly string[], wanted: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean } = {}): Promise<NamedSheet> {
+  const headerRange = sheetTabRange(tabName, "1:1")
+  const [header = []] = options.fresh ? (await readRangesFresh(spreadsheetId, [headerRange]))[0]?.rows ?? [] : await readRange(spreadsheetId, headerRange)
+  const columns = sheetColumns(header, expected, options.aliases)
+  const indexes = [...new Set(wanted.map((name) => columns.at(name)).filter((index) => index >= 0))]
+  const ranges = indexes.map((index) => sheetTabRange(tabName, `${columnName(index + 1)}:${columnName(index + 1)}`))
+  const reads = options.fresh
+    ? await readRangesFresh(spreadsheetId, ranges)
+    : (await readRanges(spreadsheetId, ranges)).map((rows) => ({ rows, startRow: 1 }))
+  const rows: string[][] = []
+  reads.forEach((read, position) => {
+    const column = indexes[position]
+    read.rows.forEach((cells, offset) => {
+      const rowNumber = read.startRow + offset
+      if (rowNumber < 2) return
+      const row = rows[rowNumber - 2] ?? (rows[rowNumber - 2] = [])
+      row[column] = String(cells[0] ?? "")
+    })
+  })
+  for (let index = 0; index < rows.length; index += 1) rows[index] ??= []
+  return { columns, rows }
+}
+
+const sheetHeaderCache = new Map<string, { expiresAt: number; headers: string[] }>()
+
+function rememberSheetHeaders(spreadsheetId: string, tabName: string, headers: readonly string[]) {
+  sheetHeaderCache.set(`${spreadsheetId}\u0001${tabName}`, { expiresAt: Date.now() + 60_000, headers: [...headers] })
+}
+
+/**
+ * Les colonnes d'un onglet d'après sa seule ligne 1, gardée une minute : une écriture
+ * fréquente (le journal du tabletop) ne relit pas les en-têtes à chaque fois.
+ */
+export async function namedColumnsOf(spreadsheetId: string, tabName: string, expected: readonly string[], aliases?: Record<string, readonly string[]>) {
+  const cached = sheetHeaderCache.get(`${spreadsheetId}\u0001${tabName}`)
+  let headers = cached && cached.expiresAt > Date.now() ? cached.headers : null
+  if (!headers) {
+    headers = (await readRange(spreadsheetId, sheetTabRange(tabName, "1:1")))[0] ?? []
+    rememberSheetHeaders(spreadsheetId, tabName, headers)
+  }
+  return sheetColumns(headers, expected, aliases)
+}
+
+/** Aucune colonne prévue n'est trouvée par son nom alors que la ligne 1 est remplie : ce sont des données. */
+function headerRowHoldsData(columns: SheetColumns) {
+  const unnamed = new Set(columns.unnamed.map((item) => item.name))
+  return columns.headers.some(Boolean) && !columns.expected.some((name) => columns.at(name) >= 0 && !unnamed.has(name))
+}
+
+/**
+ * Donne à chaque colonne prévue son en-tête, sans rien déplacer ni remplacer : une case
+ * d'origine restée vide reçoit son nom, une colonne absente est ajoutée à droite.
+ */
+export async function ensureNamedColumns(spreadsheetId: string, tabName: string, columns: SheetColumns) {
+  if (!columns.missing.length && !columns.unnamed.length) return columns
+  if (headerRowHoldsData(columns)) throw new Error("SHEET_HEADER_ROW_MISSING")
+  const { cells, headers } = headerAdditions(columns)
+  await ensureSheetColumnCount(spreadsheetId, tabName, headers.length)
+  await updateRanges(spreadsheetId, cells.map((cell) => ({ range: sheetTabRange(tabName, `${columnName(cell.index + 1)}1`), values: [[cell.header]] })), { valueInputOption: "RAW" })
+  console.info("SHEET_COLUMNS_ADDED", tabName, cells.map((cell) => cell.header).join(" | "))
+  rememberSheetHeaders(spreadsheetId, tabName, headers)
+  return withSheetHeaders(columns, headers)
+}
+
+/** Les écritures d'une ligne : seulement les cases nommées, par morceaux contigus. */
+export function namedRowWrites(tabName: string, columns: SheetColumns, rowNumber: number, values: Record<string, SheetCell>) {
+  return columns.runs(values).map((run) => ({
+    range: sheetTabRange(tabName, `${columnName(run.start + 1)}${rowNumber}:${columnName(run.start + run.values.length)}${rowNumber}`),
+    values: [run.values],
+  }))
+}
+
+/**
+ * Une ligne lue, remise dans l'ordre des colonnes prévues par Eraser : le code qui lit
+ * `row[3]` lit alors la colonne prévue en 4e position, où qu'elle soit dans Sheets.
+ */
+export function canonicalRow(columns: SheetColumns, row: readonly (string | undefined)[]) {
+  return columns.expected.map((name) => columns.get(row, name))
+}
+
+/** « A » → 0, « AA » → 26. */
+function columnIndexOf(letters: string) {
+  return [...letters].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1
+}
+
+/**
+ * Une écriture décrite dans l'ordre prévu par Eraser (« I12 », « A12:Q12 ») envoyée
+ * à la vraie place de chaque colonne, retrouvée par son nom. Une seule ligne à la fois.
+ */
+export function canonicalWrites(tabName: string, columns: SheetColumns, cells: string, values: SheetCell[][]) {
+  const match = /^([A-Z]+)(\d+)(?::([A-Z]+)(\d+))?$/.exec(cells)
+  if (!match || (match[4] && match[4] !== match[2]) || values.length > 1) throw new Error(`CANONICAL_RANGE_INVALID:${cells}`)
+  const start = columnIndexOf(match[1])
+  const named: Record<string, SheetCell> = {}
+  ;(values[0] ?? []).forEach((value, offset) => {
+    const name = columns.expected[start + offset]
+    if (name) named[name] = value
+  })
+  return namedRowWrites(tabName, columns, Number(match[2]), named)
+}
+
+/** Des lignes entières décrites dans l'ordre prévu, chaque valeur rangée sous son en-tête. */
+export function canonicalRows(columns: SheetColumns, rows: SheetCell[][]) {
+  return rows.map((row) => columns.row(Object.fromEntries(columns.expected.map((name, index) => [name, row[index] ?? ""]))))
+}
+
+/** La plage d'une ligne entière (de A à la dernière colonne connue). */
+export function namedRowRange(tabName: string, columns: SheetColumns, rowNumber: number) {
+  return sheetTabRange(tabName, `A${rowNumber}:${columnName(Math.max(1, columns.width))}${rowNumber}`)
+}
+
+/** La plage où ajouter des lignes entières. */
+export function namedAppendRange(tabName: string, columns: SheetColumns) {
+  return sheetTabRange(tabName, `A:${columnName(Math.max(1, columns.width))}`)
 }
 
 export async function appendRows(
@@ -1664,15 +1889,13 @@ async function listCharactersForUserUncached(uid: string) {
   if (!sync) {
     const source = await charactersSource()
     if (source) {
-      const rows = await readRange(source.spreadsheetId, source.range)
-      for (const row of rows.slice(1).filter((item) => item[0] && identityUids.includes(item[1]))) {
-        await db.insert(characterIndex).values({
-          id: row[0], ownerUid: row[1], name: row[2] || "Personnage sans nom",
-          subtitle: row[3] || "", updatedAt: row[4] || new Date().toISOString(),
-        }).onConflictDoUpdate({
-          target: characterIndex.id,
-          set: { ownerUid: row[1], name: row[2] || "Personnage sans nom", subtitle: row[3] || "", updatedAt: row[4] || new Date().toISOString(), deletedAt: null },
-        })
+      const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"])
+      for (const row of rows) {
+        const id = columns.get(row, "ID")
+        const ownerUid = columns.get(row, "Joueur")
+        if (!id || !identityUids.includes(ownerUid)) continue
+        const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: columns.get(row, "Peuple"), updatedAt: new Date().toISOString() }
+        await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: { ...fields, deletedAt: null } })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
@@ -1737,11 +1960,13 @@ async function listCampaignsForMjUncached(uid: string) {
   if (!sync) {
     const source = await campaignsSource()
     if (source) {
-      const rows = await readRange(source.spreadsheetId, source.range)
-      for (const row of rows.slice(1).filter((item) => item[0] && identityUids.includes(item[1]))) {
-        await db.insert(campaignIndex).values({
-          id: row[0], mjUid: row[1], name: row[2] || "Campagne sans nom", description: row[3] || "", bannerUrl: row[4] || "", accentColor: row[5] || "#927640",
-        }).onConflictDoUpdate({ target: campaignIndex.id, set: { mjUid: row[1], name: row[2] || "Campagne sans nom", description: row[3] || "", bannerUrl: row[4] || "", accentColor: row[5] || "#927640", updatedAt: new Date().toISOString(), deletedAt: null } })
+      const { columns, rows } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
+      for (const campaign of rows.map((row) => campaignFromRow(row, columns))) {
+        if (!campaign || !identityUids.includes(campaign.mjUid)) continue
+        await db.insert(campaignIndex).values(campaign).onConflictDoUpdate({
+          target: campaignIndex.id,
+          set: { mjUid: campaign.mjUid, name: campaign.name, description: campaign.description, bannerUrl: campaign.bannerUrl, accentColor: campaign.accentColor, updatedAt: new Date().toISOString(), deletedAt: null },
+        })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
@@ -1808,16 +2033,17 @@ async function loadClassesFromGoogle() {
   // Returning [] here would surface as "aucune classe" instead of telling the
   // admin the sheet simply isn't reachable from this installation.
   if (!source) throw new Error("CLASSES_SHEET_NOT_LINKED")
-  const tabName = source.range.split("!")[0]
-  await ensureSheetColumnCount(source.spreadsheetId, tabName, 11)
-  const [headers = []] = await readRange(source.spreadsheetId, `${tabName}!A1:K1`, "FORMULA")
-  if (normalizedHeader(headers[9] || "") !== "couleur d accent sombre" || normalizedHeader(headers[10] || "") !== "couleur d accent clair") {
-    await updateRange(source.spreadsheetId, `${tabName}!J1:K1`, [["Couleur d’accent sombre", "Couleur d’accent clair"]])
-  }
-  const [rows, imageNotes] = await Promise.all([
-    readRange(source.spreadsheetId, source.range, "FORMULA"),
-    readCellNotes(source.spreadsheetId, `${tabName}!D2:D1000`),
-  ])
+  const { tabName } = source
+  const read = await readClassSheet(source)
+  // Les colonnes absentes (couleurs d'accent…) sont ajoutées à droite ; rien n'est déplacé.
+  // Une lecture ne dépend pas de cet ajout : en cas d'échec, les colonnes présentes suffisent.
+  const columns = await ensureNamedColumns(source.spreadsheetId, tabName, read.columns).catch((error) => {
+    console.error("CLASS_COLUMNS_CHECK_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return read.columns
+  })
+  const { rows } = read
+  const imageLetter = columnName(classImageColumn(columns))
+  const imageNotes = await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`))
   let nativeImageUrls: string[] = []
   try {
     nativeImageUrls = await Promise.race([
@@ -1825,7 +2051,8 @@ async function loadClassesFromGoogle() {
         spreadsheetId: source.spreadsheetId,
         tabName,
         startRow: 2,
-        rowCount: Math.max(0, rows.length - 1),
+        rowCount: rows.length,
+        column: classImageColumn(columns),
       }),
       new Promise<string[]>((resolve) => setTimeout(() => resolve([]), 1500)),
     ])
@@ -1836,26 +2063,26 @@ async function loadClassesFromGoogle() {
     )
   }
   return rows
-    .slice(1)
     .map((row, index) => ({
       row,
       imageNote: imageNotes[index] || "",
       nativeImageUrl: nativeImageUrls[index] || "",
     }))
-    .filter(({ row }) => row[0] && row[2])
+    .filter(({ row }) => columns.get(row, "ID") && columns.get(row, "Nom de la classe"))
     .map<ClassRecord>(({ row, imageNote, nativeImageUrl }) => {
-      const type = classTypes.includes(row[1] as ClassType) ? (row[1] as ClassType) : "Éclectique"
+      const cell = (name: string) => columns.get(row, name)
+      const type = classTypes.includes(cell("Type") as ClassType) ? (cell("Type") as ClassType) : "Éclectique"
       return {
-        id: row[0],
+        id: cell("ID"),
         type,
-        name: row[2],
-        image: imageNote || nativeImageUrl || row[3] || "",
-        keywords: [row[4] || "", row[5] || "", row[6] || ""],
-        difficulty: classDifficulties.includes(row[7] as ClassDifficulty)
-          ? (row[7] as ClassDifficulty)
+        name: cell("Nom de la classe"),
+        image: imageNote || nativeImageUrl || cell("Image"),
+        keywords: [cell("Mots-clés 1"), cell("Mots-clés 2"), cell("Mots-clés 3")],
+        difficulty: classDifficulties.includes(cell("Difficulté") as ClassDifficulty)
+          ? (cell("Difficulté") as ClassDifficulty)
           : "X",
-        completion: Math.min(100, Math.max(0, Math.round(numberFromCell(row[8], 0)))),
-        ...classAccents(type, row[9], row[10]),
+        completion: Math.min(100, Math.max(0, Math.round(numberFromCell(cell("Finition"), 0)))),
+        ...classAccents(type, cell("Couleur d’accent sombre"), cell("Couleur d’accent clair")),
       }
     })
 }
@@ -1934,12 +2161,13 @@ export async function updateClassAccentColors(updates: Array<{ id: string; dark:
   if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
   const safeUpdates = updates.filter((item) => item.id && validHexColor(item.dark) && validHexColor(item.light)).slice(0, 30)
   if (!safeUpdates.length) return
-  const tabName = source.range.split("!")[0]
-  const rows = await readRange(source.spreadsheetId, `${tabName}!A2:A1000`)
-  const rowById = new Map(rows.map((row, index) => [row[0], index + 2]))
+  const { tabName } = source
+  const read = await readClassSheet(source)
+  const columns = await ensureNamedColumns(source.spreadsheetId, tabName, read.columns)
+  const rowById = new Map(read.rows.map((row, index) => [columns.get(row, "ID"), index + 2]))
   await updateRanges(source.spreadsheetId, safeUpdates.flatMap((item) => {
     const rowNumber = rowById.get(item.id)
-    return rowNumber ? [{ range: sheetTabRange(tabName, `J${rowNumber}:K${rowNumber}`), values: [[item.dark, item.light]] }] : []
+    return rowNumber ? namedRowWrites(tabName, columns, rowNumber, { "Couleur d’accent sombre": item.dark, "Couleur d’accent clair": item.light }) : []
   }))
   const updatedAt = new Date().toISOString()
   for (const item of safeUpdates) {
@@ -2135,14 +2363,13 @@ export type ClassImageSyncResult = {
 export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boolean }) {
   const source = await classesSource()
   if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
-  const tabName = source.range.split("!")[0]
-  const [sheetRows, imageNotes] = await Promise.all([
-    readRange(source.spreadsheetId, source.range, "FORMULA"),
-    readCellNotes(source.spreadsheetId, `${tabName}!D2:D1000`),
-  ])
+  const { tabName } = source
+  const { columns, rows: sheetRows } = await readClassSheet(source)
+  const imageLetter = columnName(classImageColumn(columns))
+  const imageNotes = await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`))
+  // Chaque ligne réduite à ce que la synchronisation lit, par nom de colonne.
   const rows = sheetRows
-    .slice(1)
-    .map((row, index) => ({ row, imageNote: imageNotes[index] || "", sheetRow: index + 2 }))
+    .map((cells, index) => ({ row: [columns.get(cells, "ID"), columns.get(cells, "Type"), columns.get(cells, "Nom de la classe"), columns.get(cells, "Image")], imageNote: imageNotes[index] || "", sheetRow: index + 2 }))
     .filter(({ row }) => row[0] && row[2])
 
   if (
@@ -2251,6 +2478,7 @@ export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boole
       spreadsheetId: source.spreadsheetId,
       tabName,
       rowCount: rows.length,
+      column: classImageColumn(columns),
       actions: actions.sort((left, right) => left.row - right.row),
     })
   }
@@ -2310,8 +2538,8 @@ const npcSheetHeaders = [
   // Sorts du PNJ, noms séparés par des virgules comme pour les créatures.
   "Sorts actifs", "Sorts passifs",
 ]
-/** Dernière colonne de la feuille des PNJ (AK) : suit les en-têtes quand on en ajoute. */
-const NPC_LAST_COLUMN = "AK"
+/** Dernière colonne d'une feuille des PNJ neuve (AK) : sert seulement à la créer et aux anciennes versions. */
+const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
 export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"]
 
@@ -2349,19 +2577,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "Classes",
     tabName: "Classes",
     frozenColumns: 1,
-    headers: [
-      "ID",
-      "Type",
-      "Nom de la classe",
-      "Image",
-      "Mots-clés 1",
-      "Mots-clés 2",
-      "Mots-clés 3",
-      "Difficulté",
-      "Finition",
-      "Couleur d’accent sombre",
-      "Couleur d’accent clair",
-    ],
+    headers: classSheetHeaders,
     columnWidths: [120, 150, 220, 300, 150, 150, 150, 110, 110, 150, 150],
   },
   {
@@ -2377,7 +2593,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "Campagnes",
     tabName: "Campagnes",
     frozenColumns: 2,
-    headers: ["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"],
+    headers: campaignSheetHeaders,
     columnWidths: [160, 200, 280, 420, 340, 140],
   },
   {
@@ -2385,7 +2601,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "To-do administration",
     tabName: "To-do",
     frozenColumns: 3,
-    headers: ["ID", "ID admin", "Admin créateur", "Nom", "Contenu", "Priorité", "Étiquette", "Couleur", "Réalisée", "Créée le", "Modifiée le", "Supprimée le"],
+    headers: todoSheetHeaders,
     columnWidths: [160, 200, 180, 220, 360, 110, 150, 100, 100, 170, 170, 170],
   },
   {
@@ -2393,7 +2609,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "Personnages des campagnes",
     tabName: "Personnages par campagne",
     frozenColumns: 2,
-    headers: ["ID campagne", "ID personnage"],
+    headers: campaignCharacterHeaders,
     columnWidths: [180, 180],
   },
   {
@@ -2401,7 +2617,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "Relations des personnages",
     tabName: "Relations",
     frozenColumns: 2,
-    headers: ["ID", "ID personnage", "Type de cible", "ID cible", "Nom", "Niveau", "Notes personnelles", "Créé par", "ID campagne", "Créée le", "Modifiée le"],
+    headers: characterRelationHeaders,
     columnWidths: [170, 190, 130, 190, 220, 100, 420, 190, 190, 170, 170],
   },
   {
@@ -2417,7 +2633,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     name: "Magasins",
     tabName: "Magasins",
     frozenColumns: 2,
-    headers: ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le"],
+    headers: shopSheetHeaders,
     columnWidths: [180, 190, 170, 150, 170, 220, 150, 520, 160, 180, 170, 170],
   },
   {
@@ -2632,12 +2848,18 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
     })
   }
 
-  const [headers = []] = await readRange(spreadsheetId, `${tabName}!A1:${NPC_LAST_COLUMN}1`)
-  const alreadyCurrent = npcSheetHeaders.every((header, index) => headers[index] === header)
-  if (!alreadyCurrent) {
-    const rowOneContainsData = headers.some((value) => value.trim()) && headers[0] !== "ID"
+  clearSpreadsheetReadCache(spreadsheetId)
+  const [headers = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+  // Les deux toutes premières versions de la feuille, reconnues à leurs en-têtes : leurs
+  // lignes sont recopiées une fois dans l'ordre actuel (elles datent d'avant les noms).
+  const legacyV1 = headers[0] === "ID" && headers[1] === "ID campagne" && !headers.includes("Page lié")
+  const legacyV2 = headers[0] === "ID" && headers[1] === "Page lié" && headers[18] === "Âge" && headers[28] !== "Modifié le" && !headers.includes("Genre")
+  const columns = sheetColumns(headers, npcSheetHeaders)
+  const blank = !headers.some((value) => value.trim())
+  if (legacyV1 || legacyV2 || blank || headerRowHoldsData(columns)) {
+    const rowOneContainsData = !blank && !legacyV1 && !legacyV2
     const formattingRequests: Array<Record<string, unknown>> = [
-      ...(rowOneContainsData ? [{ insertDimension: { range: { sheetId: properties.sheetId, dimension: "ROWS", startIndex: 0, endIndex: 1 }, inheritFromBefore: false } }] : []),
+      ...(rowOneContainsData ? [{ insertDimension: { range: { sheetId: properties.sheetId, startIndex: 0, endIndex: 1, dimension: "ROWS" }, inheritFromBefore: false } }] : []),
       {
         repeatCell: {
           range: { sheetId: properties.sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: npcSheetHeaders.length },
@@ -2658,8 +2880,7 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
       method: "POST",
       body: JSON.stringify({ requests: formattingRequests }),
     })
-    const legacyV1 = headers[0] === "ID" && headers[1] === "ID campagne"
-    const legacyV2 = headers[0] === "ID" && headers[1] === "Page lié" && headers[18] === "Âge" && headers[28] !== "Modifié le"
+    clearSpreadsheetReadCache(spreadsheetId)
     const legacyRows = legacyV1
       ? await readRange(spreadsheetId, `${tabName}!A2:I`)
       : legacyV2 ? await readRange(spreadsheetId, `${tabName}!A2:AB`) : []
@@ -2684,6 +2905,10 @@ async function ensureNpcSheetSchema(spreadsheetId: string, tabName: string) {
       })
       await updateRange(spreadsheetId, `${tabName}!A2:${NPC_LAST_COLUMN}${legacyRows.length + 1}`, migratedRows)
     }
+  } else {
+    // La feuille actuelle : ses colonnes sont retrouvées par leur nom, quelle que soit
+    // leur place. Celles qui manquent sont ajoutées à droite ; rien n'est réécrit.
+    await ensureNamedColumns(spreadsheetId, tabName, columns)
   }
   npcSheetSchemaReady.add(schemaKey)
   await getDb().insert(sheetIndexSyncs).values({ key: persistentKey }).onConflictDoNothing()
@@ -2731,10 +2956,18 @@ async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
   }
 
   const newlyCreatedNames = new Set(missingTabs.map((tab) => tab.name))
+  // Les colonnes de chaque onglet, retrouvées par leur nom : les réglages visent leur vraie place.
+  const headerRows = await readRanges(spreadsheetId, inventoryWorkbookTabs.map((tab) => sheetTabRange(tab.name, "1:1")))
+  const tabColumns = new Map(inventoryWorkbookTabs.map((tab, index) => [tab.name, sheetColumns(newlyCreatedNames.has(tab.name) ? [] : headerRows[index]?.[0] ?? [], tab.headers)]))
   const requests: Array<Record<string, unknown>> = []
   for (const tab of inventoryWorkbookTabs) {
     const sheet = properties.find((candidate) => candidate.title === tab.name)
     if (sheet?.sheetId === undefined) throw new Error("INVENTORY_SHEET_TAB_UNAVAILABLE")
+    const columns = tabColumns.get(tab.name)!
+    const column = (name: string) => {
+      const index = columns.at(name)
+      return index >= 0 ? { startColumnIndex: index, endColumnIndex: index + 1 } : null
+    }
     const rowCount = Math.max(1000, sheet.gridProperties?.rowCount || 0)
     const columnCount = Math.max(tab.headers.length, sheet.gridProperties?.columnCount || 0)
     requests.push(
@@ -2775,7 +3008,8 @@ async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
         },
       },
     )
-    tab.widths.forEach((pixelSize, index) => {
+    // Les largeurs d'origine seulement pour un onglet neuf : celles choisies dans Sheets restent.
+    if (newlyCreatedNames.has(tab.name)) tab.widths.forEach((pixelSize, index) => {
       requests.push({
         updateDimensionProperties: {
           range: { sheetId: sheet.sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 },
@@ -2798,68 +3032,50 @@ async function ensureInventoryWorkbookSchema(spreadsheetId: string) {
         },
       })
     }
-    if (tab.name === "Types de contenants") {
-      requests.push(
-        {
-          setDataValidation: {
-            range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 2, endColumnIndex: 3 },
-            rule: { condition: { type: "ONE_OF_LIST", values: inventoryCategories.map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
-          },
-        },
-        {
-          setDataValidation: {
-            range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 5, endColumnIndex: 6 },
-            rule: { condition: { type: "ONE_OF_LIST", values: ["Oui", "Non"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
-          },
-        },
-      )
-    }
-    if (tab.name === "Objets") {
-      requests.push(
-        {
-          setDataValidation: {
-            range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 3, endColumnIndex: 4 },
-            rule: { condition: { type: "ONE_OF_LIST", values: ["Arme", "Armure", "Objet", "Ressource", "Monnaie"].map((value) => ({ userEnteredValue: value })) }, strict: false, showCustomUi: true },
-          },
-        },
-        {
-          setDataValidation: {
-            range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 17, endColumnIndex: 18 },
-            rule: { condition: { type: "ONE_OF_LIST", values: ["Oui", "Non"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
-          },
-        },
-      )
-    }
-    if (tab.name === inventoryContentsTab) {
-      requests.push({
+    const validation = (name: string, values: readonly string[], strict: boolean) => {
+      const span = column(name)
+      if (span) requests.push({
         setDataValidation: {
-          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 12, endColumnIndex: 13 },
-          rule: { condition: { type: "ONE_OF_LIST", values: ["Oui", "Non"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
+          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, ...span },
+          rule: { condition: { type: "ONE_OF_LIST", values: values.map((value) => ({ userEnteredValue: value })) }, strict, showCustomUi: true },
         },
       })
     }
+    if (tab.name === "Types de contenants") {
+      validation("Catégorie", inventoryCategories, true)
+      validation("Actif", ["Oui", "Non"], true)
+    }
+    if (tab.name === "Objets") {
+      validation("Type", ["Arme", "Armure", "Objet", "Ressource", "Monnaie"], false)
+      validation("Actif", ["Oui", "Non"], true)
+    }
+    if (tab.name === inventoryContentsTab) validation("Équipé", ["Oui", "Non"], true)
   }
 
   await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({ requests }),
   })
+  // Les en-têtes, par leur nom : un onglet neuf reçoit les siens, un onglet existant
+  // seulement ceux qui lui manquent, à droite. Aucun en-tête existant n'est réécrit.
   for (const tab of inventoryWorkbookTabs) {
-    await updateRange(spreadsheetId, sheetTabRange(tab.name, `A1:${columnName(tab.headers.length)}1`), [[...tab.headers]])
+    const columns = tabColumns.get(tab.name)!
+    if (!columns.headers.some(Boolean)) await updateRange(spreadsheetId, sheetTabRange(tab.name, `A1:${columnName(tab.headers.length)}1`), [[...tab.headers]])
+    else tabColumns.set(tab.name, await ensureNamedColumns(spreadsheetId, tab.name, columns))
   }
 
-  const existingTypes = await readRange(spreadsheetId, sheetTabRange("Types de contenants", "A2:F"))
-  const existingIds = new Set(existingTypes.map((row) => row[0]).filter(Boolean))
+  const types = await readNamedSheet(spreadsheetId, "Types de contenants", inventoryWorkbookTabs[0].headers)
+  const existingIds = new Set(types.rows.map((row) => types.columns.get(row, "ID")).filter(Boolean))
   const missingBaseTypes = baseInventoryContainerTypes.filter((type) => !existingIds.has(type.id))
   if (missingBaseTypes.length) {
-    await appendRows(spreadsheetId, sheetTabRange("Types de contenants", "A:F"), missingBaseTypes.map((type) => [
+    await appendRows(spreadsheetId, namedAppendRange("Types de contenants", types.columns), canonicalRows(types.columns, missingBaseTypes.map((type) => [
       type.id,
       type.name,
       type.category,
       type.capacity,
       type.columns.join(" | "),
       "Oui",
-    ]))
+    ])))
   }
   await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
 }
@@ -2889,10 +3105,19 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
   }
 
   const newlyCreatedNames = new Set(missingTabs.map((tab) => tab.name))
+  // Les colonnes de chaque onglet existant, retrouvées par leur nom : rien n'est réécrit par place.
+  const headerRows = await readRanges(spreadsheetId, tabletopWorkbookTabs.map((tab) => sheetTabRange(tab.name, "1:1")))
+  const tabColumns = new Map(tabletopWorkbookTabs.map((tab, index) => [tab.name, sheetColumns(newlyCreatedNames.has(tab.name) ? [] : headerRows[index]?.[0] ?? [], tab.headers)]))
   const requests: Array<Record<string, unknown>> = []
   for (const tab of tabletopWorkbookTabs) {
     const sheet = properties.find((candidate) => candidate.title === tab.name)
     if (sheet?.sheetId === undefined) throw new Error("TABLETOP_SHEET_TAB_UNAVAILABLE")
+    const columns = tabColumns.get(tab.name)!
+    const fresh = !columns.headers.some(Boolean)
+    const column = (name: string) => {
+      const index = columns.at(name)
+      return index >= 0 ? { startColumnIndex: index, endColumnIndex: index + 1 } : null
+    }
     const rowCount = Math.max(1000, sheet.gridProperties?.rowCount || 0)
     requests.push(
       {
@@ -2913,7 +3138,9 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
           filter: { range: { sheetId: sheet.sheetId, startRowIndex: 0, endRowIndex: rowCount, startColumnIndex: 0, endColumnIndex: tab.headers.length } },
         },
       },
-      {
+      // Les en-têtes d'origine seulement sur une ligne 1 vide (onglet neuf) ; sinon les
+      // colonnes manquantes sont ajoutées à droite après ce lot, par leur nom.
+      ...(fresh ? [{
         updateCells: {
           range: { sheetId: sheet.sheetId, startRowIndex: 0, endRowIndex: 1, startColumnIndex: 0, endColumnIndex: tab.headers.length },
           rows: [{
@@ -2921,9 +3148,9 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
           }],
           fields: "userEnteredValue",
         },
-      },
+      }] : []),
     )
-    tab.widths.forEach((pixelSize, index) => requests.push({
+    if (fresh) tab.widths.forEach((pixelSize, index) => requests.push({
       updateDimensionProperties: {
         range: { sheetId: sheet.sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 },
         properties: { pixelSize },
@@ -2944,18 +3171,20 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
         },
       })
     }
-    if (tab.name === "Tokens") {
+    const entityKind = column("Type d’entité")
+    if (tab.name === "Tokens" && entityKind) {
       requests.push({
         setDataValidation: {
-          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 2, endColumnIndex: 3 },
+          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, ...entityKind },
           rule: { condition: { type: "ONE_OF_LIST", values: ["npc", "character", "shop", "marker"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
         },
       })
     }
-    if (tab.name === "Journal") {
+    const activityKind = column("Type")
+    if (tab.name === "Journal" && activityKind) {
       requests.push({
         setDataValidation: {
-          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, startColumnIndex: 2, endColumnIndex: 3 },
+          range: { sheetId: sheet.sheetId, startRowIndex: 1, endRowIndex: rowCount, ...activityKind },
           rule: { condition: { type: "ONE_OF_LIST", values: ["chat", "dice"].map((value) => ({ userEnteredValue: value })) }, strict: true, showCustomUi: true },
         },
       })
@@ -2966,6 +3195,11 @@ async function ensureTabletopWorkbookSchema(spreadsheetId: string) {
     method: "POST",
     body: JSON.stringify({ requests }),
   })
+  clearSpreadsheetReadCache(spreadsheetId)
+  for (const tab of tabletopWorkbookTabs) {
+    const columns = tabColumns.get(tab.name)!
+    if (columns.headers.some(Boolean)) await ensureNamedColumns(spreadsheetId, tab.name, columns)
+  }
   await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
 }
 
@@ -3067,13 +3301,18 @@ export async function syncExistingIdentityIndexes() {
     resolveJdrSheet("campaign_characters"),
   ])
   let relationsRead = false
-  const [campaignRows, characterRows, relationRows] = await Promise.all([
-    campaignSource ? readRangeFresh(campaignSource.spreadsheetId, campaignSource.range).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
-    characterSource ? readRangeFresh(characterSource.spreadsheetId, characterSource.range).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
-    // Le nom de cet onglet contient des espaces ("Personnages par campagne") : il doit être
-    // entre quotes dans la notation A1, sinon l'API Sheets renvoie une erreur de parsing.
-    relationSource ? readRangeFresh(relationSource.spreadsheetId, sheetTabRange(relationSource.tabName, "A:B")).then((rows) => { relationsRead = true; return rows }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return [] }) : Promise.resolve([]),
+  const empty: NamedSheet | null = null
+  // Chaque feuille est lue par le nom de ses colonnes : les déplacer dans Sheets ne change rien.
+  const [campaignSheet, characterSheet, relationSheet] = await Promise.all([
+    campaignSource ? readNamedSheet(campaignSource.spreadsheetId, campaignSource.tabName, campaignSheetHeaders, { fresh: true }).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh: true }).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh: true }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
   ])
+  const campaignRows = campaignSheet?.rows ?? []
+  const characterRows = characterSheet?.rows ?? []
+  const relationLinks = relationSheet
+    ? relationSheet.rows.map((row) => ({ campaignId: relationSheet.columns.get(row, "ID campagne"), characterId: relationSheet.columns.get(row, "ID personnage") })).filter((link) => link.campaignId && link.characterId)
+    : []
   const now = new Date().toISOString()
   const db = getDb()
   // Only write rows that actually changed. This used to upsert every row of
@@ -3088,16 +3327,11 @@ export async function syncExistingIdentityIndexes() {
   const characterById = new Map(existingCharacters.map((row) => [row.id, row]))
   const linkKeys = new Set(existingLinks.map((row) => `${row.campaignId}::${row.characterId}`))
 
-  for (const row of campaignRows.slice(1)) {
-    if (!row[0]) continue
-    const next = {
-      mjUid: row[1] || "",
-      name: row[2] || "Campagne sans nom",
-      description: row[3] || "",
-      bannerUrl: row[4] || "",
-      accentColor: row[5] || "#927640",
-    }
-    const current = campaignById.get(row[0])
+  for (const row of campaignRows) {
+    const campaign = campaignSheet ? campaignFromRow(row, campaignSheet.columns) : null
+    if (!campaign) continue
+    const { id, ...next } = campaign
+    const current = campaignById.get(id)
     if (current
       && !current.deletedAt
       && current.mjUid === next.mjUid
@@ -3105,40 +3339,41 @@ export async function syncExistingIdentityIndexes() {
       && current.description === next.description
       && current.bannerUrl === next.bannerUrl
       && current.accentColor === next.accentColor) continue
-    await db.insert(campaignIndex).values({ id: row[0], ...next, updatedAt: now, deletedAt: null })
+    await db.insert(campaignIndex).values({ id, ...next, updatedAt: now, deletedAt: null })
       .onConflictDoUpdate({ target: campaignIndex.id, set: { ...next, updatedAt: now } })
   }
 
-  for (const row of characterRows.slice(1)) {
-    if (!row[0]) continue
+  for (const row of characterRows) {
+    const columns = characterSheet?.columns
+    const id = columns?.get(row, "ID").trim() ?? ""
+    if (!columns || !id) continue
     const next = {
-      ownerUid: row[1] || "",
-      name: row[2] || "Personnage sans nom",
-      subtitle: row[3] || "",
-      updatedAt: row[4] || now,
+      ownerUid: columns.get(row, "Joueur"),
+      name: columns.get(row, "Nom personnage") || "Personnage sans nom",
+      subtitle: columns.get(row, "Peuple"),
     }
-    const current = characterById.get(row[0])
+    const current = characterById.get(id)
     if (current
       && !current.deletedAt
       && current.ownerUid === next.ownerUid
       && current.name === next.name
-      && current.subtitle === next.subtitle
-      && current.updatedAt === next.updatedAt) continue
-    await db.insert(characterIndex).values({ id: row[0], ...next, deletedAt: null })
-      .onConflictDoUpdate({ target: characterIndex.id, set: next })
+      && current.subtitle === next.subtitle) continue
+    // La feuille n'a pas de date de modification : celle de l'index local avance seulement quand la fiche change.
+    await db.insert(characterIndex).values({ id, ...next, updatedAt: now, deletedAt: null })
+      .onConflictDoUpdate({ target: characterIndex.id, set: { ...next, updatedAt: now } })
   }
 
-  for (const row of relationRows.slice(1)) {
-    if (!row[0] || !row[1] || linkKeys.has(`${row[0]}::${row[1]}`)) continue
-    await db.insert(campaignCharacters).values({ campaignId: row[0], characterId: row[1] }).onConflictDoNothing()
+  for (const link of relationLinks) {
+    if (linkKeys.has(`${link.campaignId}::${link.characterId}`)) continue
+    await db.insert(campaignCharacters).values(link).onConflictDoNothing()
   }
 
   // La feuille « Personnages des campagnes » fait foi : un personnage qu'un MJ a
   // retiré de sa campagne depuis une autre installation disparaît aussi d'ici.
   // Seulement si la feuille a bien été lue (en-tête compris) : une lecture en
   // échec ou vide ne doit jamais vider l'index local.
-  if (relationsRead && relationRows.length > 0) {
-    const sharedKeys = new Set(relationRows.slice(1).filter((row) => row[0] && row[1]).map((row) => `${row[0]}::${row[1]}`))
+  if (relationsRead) {
+    const sharedKeys = new Set(relationLinks.map((link) => `${link.campaignId}::${link.characterId}`))
     for (const link of existingLinks) {
       if (sharedKeys.has(`${link.campaignId}::${link.characterId}`)) continue
       await db.delete(campaignCharacters).where(and(eq(campaignCharacters.campaignId, link.campaignId), eq(campaignCharacters.characterId, link.characterId)))
@@ -3146,7 +3381,7 @@ export async function syncExistingIdentityIndexes() {
   }
   // Les mises à la corbeille faites sur les autres installations.
   await applySharedTrash().catch((error) => console.error("IDENTITY_SYNC_TRASH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
-  return { campaigns: Math.max(0, campaignRows.length - 1), characters: Math.max(0, characterRows.length - 1) }
+  return { campaigns: campaignRows.length, characters: characterRows.length }
 }
 
 export async function listLegacyIdentityCandidates(localUserId: string): Promise<LegacyIdentityCandidate[]> {
@@ -3287,19 +3522,20 @@ async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSh
   }
 }
 
+/**
+ * La ligne d'en-têtes d'une feuille d'Eraser, vérifiée par le nom des colonnes : celles
+ * qui manquent sont ajoutées à droite, rien n'est déplacé ni renommé. Déplacer une
+ * colonne dans Sheets ne déclenche plus rien. Seule une ligne 1 qui porte des données
+ * (feuille sans en-têtes) reçoit une ligne d'en-têtes insérée au-dessus.
+ */
 async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
   const cacheKey = `${sheet.spreadsheetId}:${sheet.tabName}:${definition.key}`
   if (jdrSheetHeaderChecked.has(cacheKey)) return
   try {
-    const lastColumn = columnName(definition.headers.length)
-    const [firstRow = []] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${lastColumn}1`))
-    if (definition.headers.every((header, index) => firstRow[index] === header)) {
-      jdrSheetHeaderChecked.add(cacheKey)
-      return
-    }
-
-    const hasExistingValues = firstRow.some((value) => value.trim())
-    if (hasExistingValues) {
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    const [firstRow = []] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "1:1"))
+    const columns = sheetColumns(firstRow, definition.headers)
+    if (headerRowHoldsData(columns)) {
       const tabs = await spreadsheetTabs(sheet.spreadsheetId)
       const sheetId = tabs.find((tab) => tab.title === sheet.tabName)?.sheetId
       if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
@@ -3313,8 +3549,11 @@ async function ensureJdrSheetHeaderRow(sheet: JdrSheetRecord, definition: Struct
         }] }),
       })
       clearSpreadsheetReadCache(sheet.spreadsheetId)
+      await updateRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${columnName(definition.headers.length)}1`), [definition.headers])
+      console.info("JDR_SHEET_HEADER_ROW_INSERTED", definition.key)
+    } else {
+      await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, columns)
     }
-    await updateRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A1:${lastColumn}1`), [definition.headers])
     jdrSheetHeaderChecked.add(cacheKey)
   } catch (error) {
     console.error("JDR_SHEET_HEADER_CHECK_FAILED", definition.key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -3467,14 +3706,16 @@ export async function createCampaignForMj(mjUid: string, input: { name: string; 
   if (!normalizedName || normalizedName.length > 120) throw new Error("INVALID_CAMPAIGN_NAME")
   const [sheet] = await Promise.all([ensureJdrSheet("campaigns"), ensureJdrSheet("shops"), ensureJdrSheet("npcs")])
   if (!sheet) throw new Error("CAMPAIGNS_SHEET_UNAVAILABLE")
-  await updateRange(sheet.spreadsheetId, `${sheet.tabName}!A1:F1`, [["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"]])
   const campaign: CampaignRecord = {
     id: crypto.randomUUID(), mjUid, name: normalizedName,
     description: input.description?.trim() || "", bannerUrl: input.bannerUrl?.trim() || "",
     accentColor: input.accentColor && /^#[0-9a-f]{6}$/i.test(input.accentColor) ? input.accentColor : "#927640",
     updatedAt: new Date().toISOString(),
   }
-  await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:F`, [[campaign.id, campaign.mjUid, campaign.name, campaign.description, campaign.bannerUrl, campaign.accentColor]])
+  // Les en-têtes sont vérifiés par leur nom (ensureJdrSheet) ; la ligne est rangée d'après eux.
+  const { columns } = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, campaignSheetHeaders)
+  const ready = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, columns)
+  await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, ready), [ready.row(campaignCells(campaign))])
   await getDb().insert(campaignIndex).values(campaign).onConflictDoUpdate({
     target: campaignIndex.id,
     set: { name: campaign.name, updatedAt: new Date().toISOString() },
@@ -3486,7 +3727,14 @@ const shopKeys = new Set<ShopKey>(["market", "bookshop", "antique", "armory", "b
 const shopSizes = new Set<ShopSize>(["Minuscule", "Petit", "Moyen", "Grand", "Géant"])
 const cityKeys = new Set<CityKey>(["bourg", "village", "small-city", "medium-city", "large-city", "capital"])
 
-function savedShopFromRow(row: string[]): SavedShopRecord | null {
+/** La feuille Magasins relue sans cache (les écritures y sont vérifiées), colonnes par leur nom. */
+async function readShopSheet(sheet: JdrSheetRecord) {
+  return readNamedSheet(sheet.spreadsheetId, sheet.tabName, shopSheetHeaders, { fresh: true })
+}
+
+function savedShopFromRow(cells: readonly (string | undefined)[], columns: SheetColumns): SavedShopRecord | null {
+  // La ligne réduite à ce que lit un magasin, dans l'ordre d'origine des colonnes.
+  const row = shopSheetHeaders.map((name) => columns.get(cells, name))
   if (!row[0] || !row[1]) return null
   let items: GeneratedShop["items"] = []
   try {
@@ -3536,29 +3784,32 @@ function savedShopFromRow(row: string[]): SavedShopRecord | null {
   }
 }
 
-function shopRow(shop: GeneratedShop, pageLinked: string, current: SavedShopRecord | null, options: { inCampaign?: boolean; npcId?: string }) {
+function shopCells(shop: GeneratedShop, pageLinked: string, current: SavedShopRecord | null, options: { inCampaign?: boolean; npcId?: string }): Record<string, SheetCell> {
   const now = new Date().toISOString()
-  return [
-    shop.id,
-    pageLinked,
-    shop.cityName,
-    shop.cityKey,
-    shop.key,
-    shop.name,
-    shop.size,
-    JSON.stringify(shop.items),
-    (options.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non",
-    options.npcId ?? current?.npcId ?? "",
-    current?.createdAt || now,
-    now,
-  ]
+  return {
+    "ID": shop.id,
+    "Page lié": pageLinked,
+    "Ville": shop.cityName,
+    "Taille de ville": shop.cityKey,
+    "Type de magasin": shop.key,
+    "Nom du magasin": shop.name,
+    "Taille du magasin": shop.size,
+    "Objets JSON": JSON.stringify(shop.items),
+    "Ajouté à la campagne": (options.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non",
+    "ID PNJ lié": options.npcId ?? current?.npcId ?? "",
+    "Créé le": current?.createdAt || now,
+    "Modifié le": now,
+  }
 }
+
+/** Les cases d'Eraser vidées (une ligne de magasin libérée) : les autres colonnes restent. */
+const blankShopCells: Record<string, SheetCell> = Object.fromEntries(shopSheetHeaders.map((name) => [name, ""]))
 
 export async function listSavedShops(pageLinked: string, onlyInCampaign = false) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
-  const rows = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
-  return rows.map(savedShopFromRow).filter((shop): shop is SavedShopRecord => Boolean(shop && !shop.id.startsWith("latest:") && shop.pageLinked === pageLinked && (!onlyInCampaign || shop.inCampaign)))
+  const { columns, rows } = await readShopSheet(sheet)
+  return rows.map((row) => savedShopFromRow(row, columns)).filter((shop): shop is SavedShopRecord => Boolean(shop && !shop.id.startsWith("latest:") && shop.pageLinked === pageLinked && (!onlyInCampaign || shop.inCampaign)))
 }
 
 /**
@@ -3570,16 +3821,16 @@ export async function listSavedShops(pageLinked: string, onlyInCampaign = false)
 export async function listLatestShops(pageLinked: string): Promise<GeneratedShop[]> {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
-  const rows = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
-  return rows.map(savedShopFromRow).flatMap((shop) => shop && shop.pageLinked === pageLinked && shop.id.startsWith("latest:")
+  const { columns, rows } = await readShopSheet(sheet)
+  return rows.map((row) => savedShopFromRow(row, columns)).flatMap((shop) => shop && shop.pageLinked === pageLinked && shop.id.startsWith("latest:")
     ? [{ id: shop.id.slice("latest:".length), key: shop.key, name: shop.name, size: shop.size, cityKey: shop.cityKey, cityName: shop.cityName, items: shop.items }]
     : [])
 }
 
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
   const receipts = await writeShopRows(pageLinked, shops, options)
-  // La vérification relit la feuille par la plage complète « A2:L », celle que
-  // listSavedShops et listLatestShops utilisent. Relire seulement la plage
+  // La vérification relit la feuille entière, comme listSavedShops et
+  // listLatestShops. Relire seulement la plage
   // renvoyée par l'écriture laissait passer le cas qui bloquait l'application :
   // Google confirmait la ligne à l'endroit écrit, le serveur annonçait un
   // succès, et la liste que l'interface recharge juste après ne la contenait
@@ -3592,8 +3843,8 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
   for (const delay of delays) {
     if (delay) await new Promise((resolve) => setTimeout(resolve, delay))
     clearSpreadsheetReadCache(sheet.spreadsheetId)
-    const listed = await readRangeFresh(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
-    storedById = new Map(listed.map(savedShopFromRow).flatMap((shop) => shop ? [[shop.id, shop] as const] : []))
+    const listed = await readShopSheet(sheet)
+    storedById = new Map(listed.rows.map((row) => savedShopFromRow(row, listed.columns)).flatMap((shop) => shop ? [[shop.id, shop] as const] : []))
     if (shops.every((shop) => storedById.has(shop.id))) break
   }
   const invalid = shops.filter((shop) => {
@@ -3612,9 +3863,9 @@ export async function saveGeneratedShops(pageLinked: string, shops: GeneratedSho
 
 type ShopWriteReceipt = { range: string }
 
-async function appendShopRows(spreadsheetId: string, tabName: string, rows: Array<Array<string | number | boolean>>): Promise<ShopWriteReceipt[]> {
+async function appendShopRows(spreadsheetId: string, tabName: string, columns: SheetColumns, rows: Array<Record<string, SheetCell>>): Promise<ShopWriteReceipt[]> {
   if (!rows.length) return []
-  const result = await appendRows(spreadsheetId, sheetTabRange(tabName, "A:L"), rows, { valueInputOption: "RAW" })
+  const result = await appendRows(spreadsheetId, namedAppendRange(tabName, columns), rows.map((cells) => columns.row(cells)), { valueInputOption: "RAW" })
   return [{ range: result.updatedRange }]
 }
 
@@ -3641,23 +3892,23 @@ function freeShopRows(stored: Array<SavedShopRecord | null>, startRow: number, r
   })
 }
 
-async function placeShopRows(spreadsheetId: string, tabName: string, values: Array<Array<string | number | boolean>>, freeRows: number[]) {
+async function placeShopRows(spreadsheetId: string, tabName: string, columns: SheetColumns, values: Array<Record<string, SheetCell>>, freeRows: number[]) {
   if (!values.length) return []
-  const reused = values.slice(0, freeRows.length).map((row, index) => ({
-    range: sheetTabRange(tabName, `A${freeRows[index]}:L${freeRows[index]}`),
-    values: [row],
-  }))
+  const reused = values.slice(0, freeRows.length).flatMap((cells, index) => namedRowWrites(tabName, columns, freeRows[index], cells))
   return [
     ...await updateShopRows(spreadsheetId, reused),
-    ...await appendShopRows(spreadsheetId, tabName, values.slice(freeRows.length)),
+    ...await appendShopRows(spreadsheetId, tabName, columns, values.slice(freeRows.length)),
   ]
 }
 
 async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string }) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
-  const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
-  const stored = rows.map(savedShopFromRow)
+  const read = await readShopSheet(sheet)
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const { rows } = read
+  const startRow = 2
+  const stored = rows.map((row) => savedShopFromRow(row, columns))
   const existingById = new Map<string, { shop: SavedShopRecord; rowNumber: number }>()
   stored.forEach((shop, index) => {
     if (shop) existingById.set(shop.id, { shop, rowNumber: startRow + index })
@@ -3665,35 +3916,29 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
 
   if (options.replace || options.replaceLatest) {
     const targetRows = stored.flatMap((shop, index) => shop?.pageLinked === pageLinked && (!options.replaceLatest || shop.id.startsWith("latest:")) ? [startRow + index] : [])
-    const replacements = shops.slice(0, targetRows.length).map((shop, index) => ({
-      range: sheetTabRange(sheet.tabName, `A${targetRows[index]}:L${targetRows[index]}`),
-      values: [shopRow(shop, pageLinked, null, options)],
-    }))
-    const clear = targetRows.slice(shops.length).map((rowNumber) => ({
-      range: sheetTabRange(sheet.tabName, `A${rowNumber}:L${rowNumber}`),
-      values: [Array(12).fill("")],
-    }))
+    const replacements = shops.slice(0, targetRows.length).flatMap((shop, index) => namedRowWrites(sheet.tabName, columns, targetRows[index], shopCells(shop, pageLinked, null, options)))
+    const clear = targetRows.slice(shops.length).flatMap((rowNumber) => namedRowWrites(sheet.tabName, columns, rowNumber, blankShopCells))
     const receipts = await updateShopRows(sheet.spreadsheetId, replacements)
     await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
     const additions = shops.slice(targetRows.length)
     const freeRows = freeShopRows(stored, startRow, new Set(targetRows))
-    return [...receipts, ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, additions.map((shop) => shopRow(shop, pageLinked, null, options)), freeRows)]
+    return [...receipts, ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions.map((shop) => shopCells(shop, pageLinked, null, options)), freeRows)]
   }
 
-  const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-  const additions: Array<Array<string | number | boolean>> = []
+  const updates: Array<{ range: string; values: SheetCell[][] }> = []
+  const additions: Array<Record<string, SheetCell>> = []
   const reserved = new Set<number>()
   for (const shop of shops) {
     const existing = existingById.get(shop.id)
-    const values = shopRow(shop, pageLinked, existing?.shop ?? null, options)
+    const cells = shopCells(shop, pageLinked, existing?.shop ?? null, options)
     if (existing) {
       reserved.add(existing.rowNumber)
-      updates.push({ range: sheetTabRange(sheet.tabName, `A${existing.rowNumber}:L${existing.rowNumber}`), values: [values] })
-    } else additions.push(values)
+      updates.push(...namedRowWrites(sheet.tabName, columns, existing.rowNumber, cells))
+    } else additions.push(cells)
   }
   return [
     ...await updateShopRows(sheet.spreadsheetId, updates),
-    ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, additions, freeShopRows(stored, startRow, reserved)),
+    ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions, freeShopRows(stored, startRow, reserved)),
   ]
 }
 
@@ -3702,9 +3947,9 @@ export async function deleteSavedShops(pageLinked: string, shopIds: string[]) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
   const selectedIds = new Set(shopIds)
-  const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, "A2:L"))
-  const clear = rows.flatMap((row, index) => row[1] === pageLinked && selectedIds.has(row[0])
-    ? [{ range: sheetTabRange(sheet.tabName, `A${startRow + index}:L${startRow + index}`), values: [Array(12).fill("")] }]
+  const { columns, rows } = await readShopSheet(sheet)
+  const clear = rows.flatMap((row, index) => columns.get(row, "Page lié") === pageLinked && selectedIds.has(columns.get(row, "ID"))
+    ? namedRowWrites(sheet.tabName, columns, index + 2, blankShopCells)
     : [])
   await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
 }
@@ -3747,77 +3992,92 @@ function npcInventoryFromCell(value: string | undefined): LegacyNpcInventoryItem
   }
 }
 
-function npcFromRow(row: string[]): CampaignNpcRecord | null {
-  if (!row[0] || !row[1]) return null
+async function npcSheet() {
+  const sheet = await ensureJdrSheet("npcs")
+  if (!sheet) throw new Error("NPCS_SHEET_UNAVAILABLE")
+  return sheet
+}
+
+/** La feuille des PNJ, colonnes retrouvées par leur nom (ligne 1). */
+async function readNpcSheet(sheet: JdrSheetRecord) {
+  return readNamedSheet(sheet.spreadsheetId, sheet.tabName, npcSheetHeaders)
+}
+
+function npcFromRow(row: readonly (string | undefined)[], columns: SheetColumns): CampaignNpcRecord | null {
+  const cell = (name: string) => columns.get(row, name)
+  const id = cell("ID")
+  const pageLinked = cell("Page lié")
+  if (!id || !pageLinked) return null
+  const number = (name: string) => npcNumber(cell(name))
   return {
-    id: row[0], pageLinked: row[1], name: row[2] || "PNJ sans nom",
-    title: row[33] || "", occupation: row[3] || "", people: row[17] || "",
-    currentHp: npcNumber(row[4]), totalHp: npcNumber(row[5]), speed: npcNumber(row[6]),
-    strength: npcNumber(row[7]), dexterity: npcNumber(row[8]), intelligence: npcNumber(row[9]),
-    wisdom: npcNumber(row[10]), charisma: npcNumber(row[11]), constitution: npcNumber(row[16]),
-    gmNotes: row[22] || "", portrait: row[23] || "", playerNotes: row[24] || "",
-    inCampaign: sheetValueIsChecked(row[26]), inPlayerGroup: sheetValueIsChecked(row[30]), important: sheetValueIsChecked(row[31]),
-    createdAt: row[27] || "", updatedAt: row[28] || "", createdByUid: row[32] || "", lore: row[34] || "",
-    activeSpells: row[35] || "", passiveSpells: row[36] || "",
+    id, pageLinked, name: cell("Nom du PNJ") || "PNJ sans nom",
+    title: cell("Titre"), occupation: cell("Classe / métier"), people: cell("Peuple"),
+    currentHp: number("Vie actuelle"), totalHp: number("Vie totale"), speed: number("Rapidité"),
+    strength: number("Force"), dexterity: number("Dextérité"), intelligence: number("Intelligence"),
+    wisdom: number("Sagesse"), charisma: number("Charisme"), constitution: number("Constitution"),
+    gmNotes: cell("Notes MJ"), portrait: cell("Portrait"), playerNotes: cell("Notes joueurs"),
+    inCampaign: sheetValueIsChecked(cell("Ajouté au créateur de session")), inPlayerGroup: sheetValueIsChecked(cell("Dans le groupe joueur")), important: sheetValueIsChecked(cell("PNJ important")),
+    createdAt: cell("Créé le"), updatedAt: cell("Modifié le"), createdByUid: cell("Créé par"), lore: cell("Histoire / Lore"),
+    activeSpells: cell("Sorts actifs"), passiveSpells: cell("Sorts passifs"),
   }
 }
 
-function npcRow(npc: CampaignNpcRecord, pageLinked: string, original: string[] | null, options: { inCampaign?: boolean } = {}) {
+/** Les cases qu'écrit Eraser pour un PNJ, par nom de colonne : les autres colonnes ne sont jamais touchées. */
+function npcCells(npc: CampaignNpcRecord, pageLinked: string, current: CampaignNpcRecord | null, options: { inCampaign?: boolean } = {}): Record<string, SheetCell> {
   const now = new Date().toISOString()
-  const values: Array<string | number | boolean> = Array.from({ length: npcSheetHeaders.length }, (_, index) => original?.[index] || "")
-  const current = original ? npcFromRow(original) : null
-  values[0] = npc.id
-  values[1] = pageLinked
-  values[2] = npc.name
-  values[3] = npc.occupation
-  values[4] = npc.currentHp
-  values[5] = npc.totalHp
-  values[6] = npc.speed
-  values[17] = npc.people
-  values[33] = npc.title
-  values[7] = npc.strength
-  values[8] = npc.dexterity
-  values[9] = npc.intelligence
-  values[10] = npc.wisdom
-  values[11] = npc.charisma
-  values[16] = npc.constitution
-  values[22] = npc.gmNotes
-  values[23] = npc.portrait
-  values[24] = npc.playerNotes
-  values[26] = (options.inCampaign ?? npc.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non"
-  // Une ancienne version de l'application n'envoie pas ce champ : la valeur de la feuille est gardée.
-  values[31] = (npc.important ?? current?.important ?? false) ? "Oui" : "Non"
-  // « Dans le groupe joueur » : les PNJs du groupe, visibles des joueurs sur la page de campagne.
-  values[30] = (npc.inPlayerGroup ?? current?.inPlayerGroup ?? false) ? "Oui" : "Non"
-  values[34] = npc.lore ?? current?.lore ?? ""
-  // Une ancienne version de l'application n'envoie pas les sorts : ceux de la feuille restent.
-  values[35] = npc.activeSpells ?? current?.activeSpells ?? ""
-  values[36] = npc.passiveSpells ?? current?.passiveSpells ?? ""
-  values[27] = current?.createdAt || npc.createdAt || now
-  values[28] = now
-  values[32] = npc.createdByUid || current?.createdByUid || ""
-  return values
+  return {
+    "ID": npc.id,
+    "Page lié": pageLinked,
+    "Nom du PNJ": npc.name,
+    "Classe / métier": npc.occupation,
+    "Vie actuelle": npc.currentHp,
+    "Vie totale": npc.totalHp,
+    "Rapidité": npc.speed,
+    "Peuple": npc.people,
+    "Titre": npc.title,
+    "Force": npc.strength,
+    "Dextérité": npc.dexterity,
+    "Intelligence": npc.intelligence,
+    "Sagesse": npc.wisdom,
+    "Charisme": npc.charisma,
+    "Constitution": npc.constitution,
+    "Notes MJ": npc.gmNotes,
+    "Portrait": npc.portrait,
+    "Notes joueurs": npc.playerNotes,
+    "Ajouté au créateur de session": (options.inCampaign ?? npc.inCampaign ?? current?.inCampaign ?? false) ? "Oui" : "Non",
+    // Une ancienne version de l'application n'envoie pas ce champ : la valeur de la feuille est gardée.
+    "PNJ important": (npc.important ?? current?.important ?? false) ? "Oui" : "Non",
+    // « Dans le groupe joueur » : les PNJs du groupe, visibles des joueurs sur la page de campagne.
+    "Dans le groupe joueur": (npc.inPlayerGroup ?? current?.inPlayerGroup ?? false) ? "Oui" : "Non",
+    "Histoire / Lore": npc.lore ?? current?.lore ?? "",
+    // Une ancienne version de l'application n'envoie pas les sorts : ceux de la feuille restent.
+    "Sorts actifs": npc.activeSpells ?? current?.activeSpells ?? "",
+    "Sorts passifs": npc.passiveSpells ?? current?.passiveSpells ?? "",
+    "Créé le": current?.createdAt || npc.createdAt || now,
+    "Modifié le": now,
+    "Créé par": npc.createdByUid || current?.createdByUid || "",
+  }
 }
 
 export async function listNpcs(pageLinked: string, onlyInCampaign = false) {
-  const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  return rows.map(npcFromRow).filter((npc): npc is CampaignNpcRecord => Boolean(npc && npc.pageLinked === pageLinked && (!onlyInCampaign || npc.inCampaign)))
+  const sheet = await npcSheet()
+  const { columns, rows } = await readNpcSheet(sheet)
+  return rows.map((row) => npcFromRow(row, columns)).filter((npc): npc is CampaignNpcRecord => Boolean(npc && npc.pageLinked === pageLinked && (!onlyInCampaign || npc.inCampaign)))
 }
 
 /** Tous les PNJ, toutes pages confondues : l'Index des PNJs y cherche les campagnes de chacun. */
 export async function listAllNpcs() {
   const sheet = await ensureJdrSheet("npcs")
   if (!sheet) return []
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  return rows.map(npcFromRow).filter((npc): npc is CampaignNpcRecord => Boolean(npc))
+  const { columns, rows } = await readNpcSheet(sheet)
+  return rows.map((row) => npcFromRow(row, columns)).filter((npc): npc is CampaignNpcRecord => Boolean(npc))
 }
 
 export async function getNpcById(id: string) {
-  const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  const row = rows.find((candidate) => candidate[0] === id)
-  return row ? npcFromRow(row) : null
+  const sheet = await npcSheet()
+  const { columns, rows } = await readNpcSheet(sheet)
+  const row = rows.find((candidate) => columns.get(candidate, "ID") === id)
+  return row ? npcFromRow(row, columns) : null
 }
 
 export async function listCampaignNpcs(campaignId: string) {
@@ -3825,22 +4085,24 @@ export async function listCampaignNpcs(campaignId: string) {
 }
 
 export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean } = {}) {
-  const sheet = await ensureJdrSheet("npcs")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-  const additions: Array<Array<string | number | boolean>> = []
+  const sheet = await npcSheet()
+  const read = await readNpcSheet(sheet)
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const { rows } = read
+  const updates: Array<{ range: string; values: SheetCell[][] }> = []
+  const additions: SheetCell[][] = []
   const saved: CampaignNpcRecord[] = []
   for (const npc of npcs) {
-    const existingIndex = rows.findIndex((row) => row[0] === npc.id && row[1] === pageLinked)
+    const existingIndex = rows.findIndex((row) => columns.get(row, "ID") === npc.id && columns.get(row, "Page lié") === pageLinked)
     const original = existingIndex >= 0 ? rows[existingIndex] : null
-    const values = npcRow(npc, pageLinked, original, options)
-    if (existingIndex >= 0) updates.push({ range: `${sheet.tabName}!A${existingIndex + 2}:${NPC_LAST_COLUMN}${existingIndex + 2}`, values: [values] })
-    else additions.push(values)
-    const record = npcFromRow(values.map(String))
+    const cells = npcCells(npc, pageLinked, original ? npcFromRow(original, columns) : null, options)
+    if (existingIndex >= 0) updates.push(...namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
+    else additions.push(columns.row(cells))
+    const record = npcFromRow(columns.row(cells, original).map(String), columns)
     if (record) saved.push(record)
   }
   await updateRanges(sheet.spreadsheetId, updates)
-  if (additions.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${NPC_LAST_COLUMN}`, additions)
+  if (additions.length) await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), additions)
   return saved
 }
 
@@ -3851,11 +4113,11 @@ export async function saveNpc(pageLinked: string, npc: CampaignNpcRecord, option
 
 export async function deleteNpcs(pageLinked: string, npcIds: string[]) {
   if (!npcIds.length) return
-  const sheet = await ensureJdrSheet("npcs")
+  const sheet = await npcSheet()
   const selectedIds = new Set(npcIds)
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  const clear = rows.flatMap((row, index) => row[1] === pageLinked && selectedIds.has(row[0])
-    ? [{ range: `${sheet.tabName}!A${index + 2}:${NPC_LAST_COLUMN}${index + 2}`, values: [Array(npcSheetHeaders.length).fill("")] }]
+  const { columns, rows } = await readNpcSheet(sheet)
+  const clear = rows.flatMap((row, index) => columns.get(row, "Page lié") === pageLinked && selectedIds.has(columns.get(row, "ID"))
+    ? [{ range: namedRowRange(sheet.tabName, columns, index + 2), values: [columns.blank()] }]
     : [])
   await updateRanges(sheet.spreadsheetId, clear)
 }
@@ -3899,6 +4161,31 @@ function tabletopNumber(value: unknown, fallback: number, minimum: number, maxim
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback
 }
 
+type TabletopTabName = (typeof tabletopWorkbookTabs)[number]["name"]
+
+function tabletopHeaders(tab: TabletopTabName) {
+  return tabletopWorkbookTabs.find((candidate) => candidate.name === tab)?.headers ?? []
+}
+
+/**
+ * Un onglet du Tabletop : ses colonnes retrouvées par leur nom, chaque ligne remise dans
+ * l'ordre prévu (les lectures ci-dessous en dépendent). `rows[i]` est la ligne i + 2.
+ */
+async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName) {
+  const read = await readNamedSheet(spreadsheetId, tab, tabletopHeaders(tab))
+  const columns = await ensureNamedColumns(spreadsheetId, tab, read.columns).catch((error) => {
+    console.error("TABLETOP_COLUMNS_CHECK_FAILED", tab, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return read.columns
+  })
+  return { columns, rows: read.rows.map((row) => canonicalRow(columns, row)) }
+}
+
+/** Ajoute des lignes (décrites dans l'ordre prévu) à un onglet du Tabletop, chaque valeur sous son en-tête. */
+async function appendTabletopRows(spreadsheetId: string, tab: TabletopTabName, rows: SheetCell[][], known?: SheetColumns) {
+  const columns = known ?? await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, tabletopHeaders(tab)))
+  return appendRows(spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows))
+}
+
 function tabletopMapFromRow(row: string[]): TabletopMapRecord | null {
   if (!row[0] || !row[1]) return null
   return {
@@ -3925,14 +4212,14 @@ function tabletopMapRow(map: TabletopMapRecord) {
 
 export async function listTabletopMaps(pageLinked: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N"))
+  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
   return rows.map(tabletopMapFromRow).filter((map): map is TabletopMapRecord => Boolean(map && map.pageLinked === pageLinked))
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
 }
 
 export async function getTabletopMap(id: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N"))
+  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
   const row = rows.find((candidate) => candidate[0] === id)
   return row ? tabletopMapFromRow(row) : null
 }
@@ -3956,13 +4243,13 @@ export async function createTabletopMap(pageLinked: string, createdByUid: string
     updatedAt: now,
     folder: folder.trim().slice(0, 80) || "Sans dossier",
   }
-  await appendRows(sheet.spreadsheetId, sheetTabRange("Cartes", "A:N"), [tabletopMapRow(map)])
+  await appendTabletopRows(sheet.spreadsheetId, "Cartes", [tabletopMapRow(map)])
   return map
 }
 
 export async function updateTabletopMap(id: string, patch: Partial<Pick<TabletopMapRecord, "name" | "backgroundUrl" | "width" | "height" | "gridSize" | "distancePerGrid" | "distanceUnit" | "folder">>) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N"))
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
   const index = rows.findIndex((candidate) => candidate[0] === id)
   if (index < 0) return null
   const current = tabletopMapFromRow(rows[index])
@@ -3979,7 +4266,7 @@ export async function updateTabletopMap(id: string, patch: Partial<Pick<Tabletop
     folder: typeof patch.folder === "string" ? patch.folder.trim().slice(0, 80) || "Sans dossier" : current.folder,
     updatedAt: new Date().toISOString(),
   }
-  await updateRange(sheet.spreadsheetId, sheetTabRange("Cartes", `A${index + 2}:N${index + 2}`), [tabletopMapRow(next)])
+  await updateRanges(sheet.spreadsheetId, canonicalWrites("Cartes", columns, `A${index + 2}:N${index + 2}`, [tabletopMapRow(next)]))
   return next
 }
 
@@ -4001,9 +4288,9 @@ function normalizedTabletopFolder(value: string) {
 
 export async function listTabletopFolders(pageLinked: string, knownMaps?: TabletopMapRecord[]) {
   const sheet = await ensureJdrSheet("tabletop")
-  const [folderRows, mapRows] = await Promise.all([
-    readRange(sheet.spreadsheetId, sheetTabRange("Dossiers", "A2:F")),
-    knownMaps ? Promise.resolve(null) : readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N")),
+  const [{ rows: folderRows }, mapRows] = await Promise.all([
+    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
+    knownMaps ? Promise.resolve(null) : readTabletopTab(sheet.spreadsheetId, "Cartes").then((read) => read.rows),
   ])
   const stored = folderRows.map(tabletopFolderFromRow).filter((folder): folder is TabletopFolderRecord => Boolean(folder && folder.pageLinked === pageLinked))
   const known = new Set(stored.map((folder) => normalizedTabletopFolder(folder.name)))
@@ -4027,7 +4314,7 @@ export async function createTabletopFolder(pageLinked: string, name: string) {
   const sheet = await ensureJdrSheet("tabletop")
   const now = new Date().toISOString()
   const folder: TabletopFolderRecord = { id: crypto.randomUUID(), pageLinked, name: cleaned, sortOrder: Math.max(0, ...folders.map((item) => item.sortOrder)) + 1, createdAt: now, updatedAt: now }
-  await appendRows(sheet.spreadsheetId, sheetTabRange("Dossiers", "A:F"), [[folder.id, folder.pageLinked, folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]])
+  await appendTabletopRows(sheet.spreadsheetId, "Dossiers", [[folder.id, folder.pageLinked, folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]])
   return folder
 }
 
@@ -4035,9 +4322,9 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
   const cleaned = name.trim().replace(/\s+/g, " ").slice(0, 80)
   if (!cleaned || normalizedTabletopFolder(cleaned) === normalizedTabletopFolder("Sans dossier")) throw new Error("INVALID_TABLETOP_FOLDER")
   const sheet = await ensureJdrSheet("tabletop")
-  const [folderRows, mapRows] = await Promise.all([
-    readRange(sheet.spreadsheetId, sheetTabRange("Dossiers", "A2:F")),
-    readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N")),
+  const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
+    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
+    readTabletopTab(sheet.spreadsheetId, "Cartes"),
   ])
   const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
   const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
@@ -4048,18 +4335,18 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
     || mapRows.map(tabletopMapFromRow).some((map) => map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) !== normalizedOldName && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(cleaned))
   if (duplicate) throw new Error("TABLETOP_FOLDER_EXISTS")
   const now = new Date().toISOString()
-  const updates: Array<{ range: string; values: Array<Array<string | number>> }> = []
+  const updates: Array<{ range: string; values: SheetCell[][] }> = []
   let folder: TabletopFolderRecord
   if (storedFolder) {
     folder = { ...storedFolder, name: cleaned, updatedAt: now }
-    updates.push({ range: sheetTabRange("Dossiers", `C${folderIndex + 2}:F${folderIndex + 2}`), values: [[folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]] })
+    updates.push(...canonicalWrites("Dossiers", folderColumns, `C${folderIndex + 2}:F${folderIndex + 2}`, [[folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]]))
   } else {
     folder = await createTabletopFolder(pageLinked, cleaned)
   }
   mapRows.forEach((row, index) => {
     const map = tabletopMapFromRow(row)
     if (map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(oldName)) {
-      updates.push({ range: sheetTabRange("Cartes", `M${index + 2}:N${index + 2}`), values: [[now, cleaned]] })
+      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, cleaned]]))
     }
   })
   if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
@@ -4068,21 +4355,21 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
 
 export async function deleteTabletopFolder(pageLinked: string, folderId: string, currentName: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const [folderRows, mapRows] = await Promise.all([
-    readRange(sheet.spreadsheetId, sheetTabRange("Dossiers", "A2:F")),
-    readRange(sheet.spreadsheetId, sheetTabRange("Cartes", "A2:N")),
+  const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
+    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
+    readTabletopTab(sheet.spreadsheetId, "Cartes"),
   ])
   const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
   const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
   const oldName = storedFolder?.name || currentName.trim()
   if (!oldName || normalizedTabletopFolder(oldName) === normalizedTabletopFolder("Sans dossier")) return false
   const now = new Date().toISOString()
-  const updates: Array<{ range: string; values: Array<Array<string | number>> }> = []
-  if (folderIndex >= 0) updates.push({ range: sheetTabRange("Dossiers", `A${folderIndex + 2}:F${folderIndex + 2}`), values: [["", "", "", "", "", ""]] })
+  const updates: Array<{ range: string; values: SheetCell[][] }> = []
+  if (folderIndex >= 0) updates.push(...canonicalWrites("Dossiers", folderColumns, `A${folderIndex + 2}:F${folderIndex + 2}`, [["", "", "", "", "", ""]]))
   mapRows.forEach((row, index) => {
     const map = tabletopMapFromRow(row)
     if (map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(oldName)) {
-      updates.push({ range: sheetTabRange("Cartes", `M${index + 2}:N${index + 2}`), values: [[now, "Sans dossier"]] })
+      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, "Sans dossier"]]))
     }
   })
   if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
@@ -4124,13 +4411,13 @@ function tabletopTokenFromRow(row: string[]): TabletopTokenRecord | null {
 
 export async function listTabletopTokens(mapId: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
+  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
   return rows.map(tabletopTokenFromRow).filter((token): token is TabletopTokenRecord => Boolean(token && token.mapId === mapId))
 }
 
 export async function addTabletopToken(mapId: string, entityKind: TabletopTokenRecord["entityKind"], entityId: string, x: number, y: number, label = "", icon = "", scale = 1, iconScale = 1, color = "#7f3430") {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
   const existing = rows.map(tabletopTokenFromRow).find((token) => token?.mapId === mapId && token.entityKind === entityKind && token.entityId === entityId)
   if (existing) return existing
   const now = new Date().toISOString()
@@ -4141,28 +4428,28 @@ export async function addTabletopToken(mapId: string, entityKind: TabletopTokenR
     scale: tabletopNumber(scale, 1, 0.35, 3), iconScale: tabletopNumber(iconScale, 1, 0.45, 2.25),
     color: /^#[0-9a-f]{6}$/i.test(color) ? color : "#7f3430",
   }
-  await appendRows(sheet.spreadsheetId, sheetTabRange("Tokens", "A:M"), [[token.id, token.mapId, token.entityKind, token.entityId, token.x, token.y, token.createdAt, token.updatedAt, token.label, token.icon, token.scale, token.iconScale, token.color]])
+  await appendTabletopRows(sheet.spreadsheetId, "Tokens", [[token.id, token.mapId, token.entityKind, token.entityId, token.x, token.y, token.createdAt, token.updatedAt, token.label, token.icon, token.scale, token.iconScale, token.color]], columns)
   return token
 }
 
 export async function moveTabletopToken(mapId: string, tokenId: string, x: number, y: number) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return null
   const token = tabletopTokenFromRow(rows[index])
   if (!token) return null
   const next = { ...token, x: tabletopNumber(x, token.x, -12000, 24000), y: tabletopNumber(y, token.y, -12000, 24000), updatedAt: new Date().toISOString() }
   await updateRanges(sheet.spreadsheetId, [
-    { range: sheetTabRange("Tokens", `E${index + 2}:F${index + 2}`), values: [[next.x, next.y]] },
-    { range: sheetTabRange("Tokens", `H${index + 2}:H${index + 2}`), values: [[next.updatedAt]] },
+    ...canonicalWrites("Tokens", columns, `E${index + 2}:F${index + 2}`, [[next.x, next.y]]),
+    ...canonicalWrites("Tokens", columns, `H${index + 2}:H${index + 2}`, [[next.updatedAt]]),
   ])
   return next
 }
 
 export async function updateTabletopTokenAppearance(mapId: string, tokenId: string, patch: Partial<Pick<TabletopTokenRecord, "scale" | "iconScale" | "label" | "icon" | "color">>) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return null
   const token = tabletopTokenFromRow(rows[index])
@@ -4176,10 +4463,10 @@ export async function updateTabletopTokenAppearance(mapId: string, tokenId: stri
     color: typeof patch.color === "string" && /^#[0-9a-f]{6}$/i.test(patch.color) ? patch.color : token.color,
     updatedAt: new Date().toISOString(),
   }
-  const updates = [{ range: sheetTabRange("Tokens", `H${index + 2}:H${index + 2}`), values: [[next.updatedAt]] }]
-  if (patch.label !== undefined || patch.icon !== undefined) updates.push({ range: sheetTabRange("Tokens", `I${index + 2}:J${index + 2}`), values: [[next.label, next.icon]] })
-  if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push({ range: sheetTabRange("Tokens", `K${index + 2}:L${index + 2}`), values: [[next.scale, next.iconScale]] })
-  if (patch.color !== undefined) updates.push({ range: sheetTabRange("Tokens", `M${index + 2}:M${index + 2}`), values: [[next.color]] })
+  const updates = canonicalWrites("Tokens", columns, `H${index + 2}:H${index + 2}`, [[next.updatedAt]])
+  if (patch.label !== undefined || patch.icon !== undefined) updates.push(...canonicalWrites("Tokens", columns, `I${index + 2}:J${index + 2}`, [[next.label, next.icon]]))
+  if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push(...canonicalWrites("Tokens", columns, `K${index + 2}:L${index + 2}`, [[next.scale, next.iconScale]]))
+  if (patch.color !== undefined) updates.push(...canonicalWrites("Tokens", columns, `M${index + 2}:M${index + 2}`, [[next.color]]))
   await updateRanges(sheet.spreadsheetId, updates)
   return next
 }
@@ -4187,8 +4474,8 @@ export async function updateTabletopTokenAppearance(mapId: string, tokenId: stri
 export async function updateTabletopTokenStates(mapId: string, patches: Array<{ tokenId: string } & Partial<Pick<TabletopTokenRecord, "x" | "y" | "scale" | "iconScale" | "label" | "icon" | "color">>>) {
   if (!patches.length) return []
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
-  const updates: Array<{ range: string; values: Array<Array<string | number>> }> = []
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const updates: Array<{ range: string; values: SheetCell[][] }> = []
   const saved: TabletopTokenRecord[] = []
   for (const patch of patches) {
     const index = rows.findIndex((candidate) => candidate[0] === patch.tokenId && candidate[1] === mapId)
@@ -4207,11 +4494,11 @@ export async function updateTabletopTokenStates(mapId: string, patches: Array<{ 
       updatedAt: new Date().toISOString(),
     }
     const rowNumber = index + 2
-    if (patch.x !== undefined || patch.y !== undefined) updates.push({ range: sheetTabRange("Tokens", `E${rowNumber}:F${rowNumber}`), values: [[next.x, next.y]] })
-    if (patch.label !== undefined || patch.icon !== undefined) updates.push({ range: sheetTabRange("Tokens", `I${rowNumber}:J${rowNumber}`), values: [[next.label, next.icon]] })
-    if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push({ range: sheetTabRange("Tokens", `K${rowNumber}:L${rowNumber}`), values: [[next.scale, next.iconScale]] })
-    if (patch.color !== undefined) updates.push({ range: sheetTabRange("Tokens", `M${rowNumber}:M${rowNumber}`), values: [[next.color]] })
-    updates.push({ range: sheetTabRange("Tokens", `H${rowNumber}:H${rowNumber}`), values: [[next.updatedAt]] })
+    if (patch.x !== undefined || patch.y !== undefined) updates.push(...canonicalWrites("Tokens", columns, `E${rowNumber}:F${rowNumber}`, [[next.x, next.y]]))
+    if (patch.label !== undefined || patch.icon !== undefined) updates.push(...canonicalWrites("Tokens", columns, `I${rowNumber}:J${rowNumber}`, [[next.label, next.icon]]))
+    if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push(...canonicalWrites("Tokens", columns, `K${rowNumber}:L${rowNumber}`, [[next.scale, next.iconScale]]))
+    if (patch.color !== undefined) updates.push(...canonicalWrites("Tokens", columns, `M${rowNumber}:M${rowNumber}`, [[next.color]]))
+    updates.push(...canonicalWrites("Tokens", columns, `H${rowNumber}:H${rowNumber}`, [[next.updatedAt]]))
     saved.push(next)
   }
   if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
@@ -4220,10 +4507,10 @@ export async function updateTabletopTokenStates(mapId: string, patches: Array<{ 
 
 export async function removeTabletopToken(mapId: string, tokenId: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Tokens", "A2:M"))
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return false
-  await updateRange(sheet.spreadsheetId, sheetTabRange("Tokens", `A${index + 2}:M${index + 2}`), [Array(13).fill("")])
+  await updateRanges(sheet.spreadsheetId, canonicalWrites("Tokens", columns, `A${index + 2}:M${index + 2}`, [Array(13).fill("")]))
   return true
 }
 
@@ -4240,14 +4527,14 @@ function tabletopActivityFromRow(row: string[]): TabletopActivityRecord | null {
 
 export async function listTabletopActivities(mapId: string, limit = 200) {
   const sheet = await ensureJdrSheet("tabletop")
-  const rows = await readRange(sheet.spreadsheetId, sheetTabRange("Journal", "A2:L"))
+  const { rows } = await readTabletopTab(sheet.spreadsheetId, "Journal")
   return rows.map(tabletopActivityFromRow).filter((activity): activity is TabletopActivityRecord => Boolean(activity && activity.mapId === mapId))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt)).slice(-Math.max(1, Math.min(500, limit)))
 }
 
 export async function saveTabletopActivity(activity: TabletopActivityRecord) {
   const sheet = await ensureJdrSheet("tabletop")
-  await appendRows(sheet.spreadsheetId, sheetTabRange("Journal", "A:L"), [[
+  await appendTabletopRows(sheet.spreadsheetId, "Journal", [[
     activity.id, activity.mapId, activity.kind, activity.authorUid, activity.authorName,
     activity.text, activity.diceExpression, activity.diceResult, activity.createdAt,
     activity.audience, activity.recipientId, activity.recipientName,
@@ -4276,10 +4563,11 @@ export async function characterSheetSummaries() {
   const source = await charactersSource()
   const summaries = new Map<string, { classes: string; level: string; portrait: string }>()
   if (!source) return summaries
-  const rows = await readRange(source.spreadsheetId, `${source.tabName}!A2:AM`)
+  const { columns, rows } = await readCharacterColumns(source, ["Classe", "Level", "Portrait"])
   for (const row of rows) {
-    if (!row[0]) continue
-    summaries.set(String(row[0]), { classes: formatCharacterClasses(String(row[4] ?? "")), level: String(row[5] ?? "").trim(), portrait: String(row[38] ?? "").trim() })
+    const id = columns.get(row, "ID")
+    if (!id) continue
+    summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim() })
   }
   return summaries
 }
@@ -4303,19 +4591,21 @@ export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   if (!selected.size) return []
   const source = await charactersSource()
   if (!source) return []
-  const rows = await readRange(source.spreadsheetId, `${source.tabName}!A2:AM`)
+  const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"])
   return rows.flatMap<TabletopEntityRecord>((row) => {
-    if (!selected.has(row[0])) return []
+    const cell = (name: string) => columns.get(row, name)
+    const id = cell("ID")
+    if (!selected.has(id)) return []
     return [{
-      id: row[0],
+      id,
       kind: "character",
-      name: row[2] || "Personnage sans nom",
-      subtitle: [row[4], row[3]].filter(Boolean).join(" · "),
-      portrait: row[38] || `/api/characters/portrait/${encodeURIComponent(row[0])}`,
-      currentHp: tabletopNumber(row[11], 0, 0, 99999),
-      totalHp: tabletopNumber(row[12], 0, 0, 99999),
-      speed: tabletopNumber(row[23], 0, 0, 99999),
-      ownerUid: row[1] || "",
+      name: cell("Nom personnage") || "Personnage sans nom",
+      subtitle: [cell("Classe"), cell("Peuple")].filter(Boolean).join(" · "),
+      portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
+      currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
+      totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
+      speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
+      ownerUid: cell("Joueur"),
     }]
   })
 }
@@ -4351,20 +4641,26 @@ export type CharacterRelationRecord = {
   updatedAt: string
 }
 
-function characterRelationFromRow(row: string[]): CharacterRelationRecord | null {
-  if (!row[0] || !row[1] || !row[3]) return null
+function characterRelationFromRow(row: readonly (string | undefined)[], columns: SheetColumns): CharacterRelationRecord | null {
+  const cell = (name: string) => columns.get(row, name)
+  if (!cell("ID") || !cell("ID personnage") || !cell("ID cible")) return null
   return {
-    id: row[0], characterId: row[1], targetKind: row[2] === "character" ? "character" : "npc",
-    targetId: row[3], name: row[4] || "Relation sans nom", level: Math.max(-3, Math.min(3, Math.trunc(Number(row[5]) || 0))),
-    personalNotes: row[6] || "", createdByUid: row[7] || "", campaignId: row[8] || "",
-    createdAt: row[9] || "", updatedAt: row[10] || "",
+    id: cell("ID"), characterId: cell("ID personnage"), targetKind: cell("Type de cible") === "character" ? "character" : "npc",
+    targetId: cell("ID cible"), name: cell("Nom") || "Relation sans nom", level: Math.max(-3, Math.min(3, Math.trunc(Number(cell("Niveau")) || 0))),
+    personalNotes: cell("Notes personnelles"), createdByUid: cell("Créé par"), campaignId: cell("ID campagne"),
+    createdAt: cell("Créée le"), updatedAt: cell("Modifiée le"),
   }
 }
 
-export async function listCharacterRelations(characterId: string) {
+async function readRelationSheet() {
   const sheet = await ensureJdrSheet("character_relations")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:K`)
-  return rows.map(characterRelationFromRow).filter((relation): relation is CharacterRelationRecord => Boolean(relation && relation.characterId === characterId))
+  if (!sheet) throw new Error("CHARACTER_RELATIONS_SHEET_UNAVAILABLE")
+  return { sheet, ...await readNamedSheet(sheet.spreadsheetId, sheet.tabName, characterRelationHeaders) }
+}
+
+export async function listCharacterRelations(characterId: string) {
+  const { columns, rows } = await readRelationSheet()
+  return rows.map((row) => characterRelationFromRow(row, columns)).filter((relation): relation is CharacterRelationRecord => Boolean(relation && relation.characterId === characterId))
 }
 
 export async function getCharacterRelationById(characterId: string, relationId: string) {
@@ -4372,22 +4668,26 @@ export async function getCharacterRelationById(characterId: string, relationId: 
 }
 
 export async function saveCharacterRelation(input: Omit<CharacterRelationRecord, "createdAt" | "updatedAt"> & Partial<Pick<CharacterRelationRecord, "createdAt" | "updatedAt">>) {
-  const sheet = await ensureJdrSheet("character_relations")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:K`)
-  const existingIndex = rows.findIndex((row) => row[0] === input.id && row[1] === input.characterId)
-  const current = existingIndex >= 0 ? characterRelationFromRow(rows[existingIndex]) : null
+  const read = await readRelationSheet()
+  const { sheet, rows } = read
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const existingIndex = rows.findIndex((row) => columns.get(row, "ID") === input.id && columns.get(row, "ID personnage") === input.characterId)
+  const current = existingIndex >= 0 ? characterRelationFromRow(rows[existingIndex], columns) : null
   const now = new Date().toISOString()
-  const values = [input.id, input.characterId, input.targetKind, input.targetId, input.name, Math.max(-3, Math.min(3, Math.trunc(input.level))), input.personalNotes, input.createdByUid, input.campaignId, current?.createdAt || input.createdAt || now, now]
-  if (existingIndex >= 0) await updateRange(sheet.spreadsheetId, `${sheet.tabName}!A${existingIndex + 2}:K${existingIndex + 2}`, [values])
-  else await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:K`, [values])
-  return characterRelationFromRow(values.map(String))
+  const cells: Record<string, SheetCell> = {
+    "ID": input.id, "ID personnage": input.characterId, "Type de cible": input.targetKind, "ID cible": input.targetId, "Nom": input.name,
+    "Niveau": Math.max(-3, Math.min(3, Math.trunc(input.level))), "Notes personnelles": input.personalNotes, "Créé par": input.createdByUid,
+    "ID campagne": input.campaignId, "Créée le": current?.createdAt || input.createdAt || now, "Modifiée le": now,
+  }
+  if (existingIndex >= 0) await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
+  else await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row(cells)])
+  return characterRelationFromRow(columns.row(cells).map(String), columns)
 }
 
 export async function deleteCharacterRelation(characterId: string, relationId: string) {
-  const sheet = await ensureJdrSheet("character_relations")
-  const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:K`)
-  const index = rows.findIndex((row) => row[0] === relationId && row[1] === characterId)
-  if (index >= 0) await updateRange(sheet.spreadsheetId, `${sheet.tabName}!A${index + 2}:K${index + 2}`, [Array(11).fill("")])
+  const { sheet, columns, rows } = await readRelationSheet()
+  const index = rows.findIndex((row) => columns.get(row, "ID") === relationId && columns.get(row, "ID personnage") === characterId)
+  if (index >= 0) await updateRange(sheet.spreadsheetId, namedRowRange(sheet.tabName, columns, index + 2), [columns.blank()])
 }
 
 async function getCampaignDashboardUncached(mjUid: string | null, id: string) {
@@ -4478,7 +4778,8 @@ export async function updateAdminItemOwner(
     if (!source) throw new Error("CHARACTERS_SHEET_NOT_FOUND")
     const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
     if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    await updateRange(source.spreadsheetId, `${source.tabName}!B${rowNumber}`, [[normalizedOwnerUid]])
+    const { columns } = await readCharacterColumns(source, [])
+    await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "Joueur": normalizedOwnerUid }))
     await db.update(characterIndex).set({ ownerUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
       .where(eq(characterIndex.id, id))
     return
@@ -4489,10 +4790,10 @@ export async function updateAdminItemOwner(
   if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
   const source = await campaignsSource()
   if (!source) throw new Error("CAMPAIGNS_SHEET_NOT_FOUND")
-  const tabName = source.range.split("!")[0]
-  const rowNumber = await findSheetRowById(source.spreadsheetId, tabName, id)
+  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) throw new Error("CAMPAIGN_SHEET_ROW_NOT_FOUND")
-  await updateRange(source.spreadsheetId, `${tabName}!B${rowNumber}`, [[normalizedOwnerUid]])
+  const { columns } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
+  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "MJ": normalizedOwnerUid }))
   await db.update(campaignIndex).set({ mjUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
     .where(eq(campaignIndex.id, id))
 }
@@ -4513,9 +4814,12 @@ export async function updateCampaignForMj(mjUid: string | null, id: string, patc
   await getDb().update(campaignIndex).set({ name: next.name, description: next.description, bannerUrl: next.bannerUrl, accentColor: next.accentColor, updatedAt }).where(eq(campaignIndex.id, id))
   const source = await campaignsSource()
   if (source) {
-    const tabName = source.range.split("!")[0]
-    const rowNumber = await findSheetRowById(source.spreadsheetId, tabName, id)
-    if (rowNumber) await updateRange(source.spreadsheetId, `${tabName}!A${rowNumber}:F${rowNumber}`, [[id, next.mjUid, next.name, next.description, next.bannerUrl, next.accentColor]])
+    const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
+    if (rowNumber) {
+      const read = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
+      const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, read.columns)
+      await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, campaignCells({ ...next, id })))
+    }
   }
   return next
 }
@@ -4531,11 +4835,8 @@ export async function listCharacterPlayRows(): Promise<CharacterPlayRow[]> {
   await refreshIdentityIndexes()
   const source = await charactersSource()
   if (!source) return []
-  const choicesColumn = columnName(characterSheetHeaders.length)
-  const [identityRows, choiceRows] = await readRanges(source.spreadsheetId, [
-    sheetTabRange(source.tabName, "A:F"),
-    sheetTabRange(source.tabName, `${choicesColumn}:${choicesColumn}`),
-  ])
+  const choicesHeader = characterValueHeaders[characterClassChoicesIndex]
+  const { columns, rows: characterRows } = await readCharacterColumns(source, ["Nom personnage", "Classe", "Level", choicesHeader])
   const db = getDb()
   const [active, links] = await Promise.all([
     db.select({ id: characterIndex.id }).from(characterIndex).where(isNull(characterIndex.deletedAt)),
@@ -4543,15 +4844,15 @@ export async function listCharacterPlayRows(): Promise<CharacterPlayRow[]> {
       .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id)).where(isNull(campaignIndex.deletedAt)),
   ])
   const activeIds = new Set(active.map((row) => row.id))
-  return identityRows.slice(1).flatMap((row, index): CharacterPlayRow[] => {
-    const id = String(row[0] ?? "").trim()
+  return characterRows.flatMap((row): CharacterPlayRow[] => {
+    const id = columns.get(row, "ID").trim()
     if (!id || !activeIds.has(id)) return []
     return [{
       id,
-      name: String(row[2] ?? "") || "Personnage sans nom",
-      classes: String(row[4] ?? ""),
-      level: Math.max(0, Math.min(20, Math.trunc(Number(row[5]) || 0))),
-      choices: String(choiceRows[index + 1]?.[0] ?? ""),
+      name: columns.get(row, "Nom personnage") || "Personnage sans nom",
+      classes: columns.get(row, "Classe"),
+      level: Math.max(0, Math.min(20, Math.trunc(Number(columns.get(row, "Level")) || 0))),
+      choices: columns.get(row, choicesHeader),
       campaignIds: links.filter((link) => link.characterId === id).map((link) => link.campaignId),
     }]
   })
@@ -4578,29 +4879,24 @@ export async function listCampaignMembers(campaignId: string) {
   // must not fail. A transient Sheets read failure here used to throw and
   // make the whole operation look like it failed (e.g. addCharacterToCampaign
   // reporting an error even though the character had already been added).
-  let identityRows: string[][]
-  let titleRows: string[][]
+  let sheet: NamedSheet
   try {
-    [identityRows, titleRows] = await readRanges(source.spreadsheetId, [
-      `${source.tabName}!A:F`,
-      `${source.tabName}!AL:AL`,
-    ])
+    sheet = await readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Level", "Titre honorifique"])
   } catch (error) {
     console.error("CAMPAIGN_MEMBERS_ENRICHMENT_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return fallback()
   }
-  const valuesById = new Map(identityRows.slice(1).flatMap((row, index) => row[0]
-    ? [[row[0], { identity: row, honoraryTitle: titleRows[index + 1]?.[0] || "" }] as const]
-    : []))
+  const { columns } = sheet
+  const rowsById = new Map(sheet.rows.flatMap((row) => columns.get(row, "ID") ? [[columns.get(row, "ID"), row] as const] : []))
   return characters.map<CampaignMemberRecord>((character) => {
-    const values = valuesById.get(character.id)
+    const row = rowsById.get(character.id)
     return {
       ...character,
-      name: values?.identity[2] || character.name,
-      people: values?.identity[3] || character.subtitle,
-      classes: values?.identity[4] || "",
-      level: values?.identity[5] || "",
-      honoraryTitle: values?.honoraryTitle || "",
+      name: (row && columns.get(row, "Nom personnage")) || character.name,
+      people: (row && columns.get(row, "Peuple")) || character.subtitle,
+      classes: row ? columns.get(row, "Classe") : "",
+      level: row ? columns.get(row, "Level") : "",
+      honoraryTitle: row ? columns.get(row, "Titre honorifique") : "",
     }
   })
 }
@@ -4653,14 +4949,14 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     const sheet = await ensureJdrSheet("characters")
     if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
     await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-    const width = (await characterColumns(sheet.spreadsheetId, sheet.tabName)).layout.headers.length + 2
-    const rows = await readRange(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width)}`)
-    const sourceRow = rows.slice(1).find((row) => row[0] === characterId)
+    const { map } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
+    const sourceRowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, characterId)
+    if (!sourceRowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+    const [sourceRow] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A${sourceRowNumber}:${columnName(map.width)}${sourceRowNumber}`))
     if (!sourceRow) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const copiedRow = [...sourceRow]
-    copiedRow[0] = targetId
-    while (copiedRow.length < width) copiedRow.push("")
-    await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width)}`, [copiedRow])
+    const copiedRow: SheetCell[] = Array.from({ length: map.width }, (_, index) => sourceRow[index] ?? "")
+    copiedRow[map.columns.at("ID")] = targetId
+    await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${columnName(map.width)}`), [copiedRow])
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
   // On tente d'abord la feuille partagée, mais son échec ne doit plus bloquer
@@ -4697,10 +4993,10 @@ async function writeCampaignRelation(campaignId: string, characterId: string) {
   try {
     const relationSheet = await ensureJdrSheet("campaign_characters")
     if (!relationSheet) return "CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE"
-    const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
-    const existing = await readRange(relationSheet.spreadsheetId, relationRange)
-    if (existing.some((row) => row[0] === campaignId && row[1] === characterId)) return null
-    await appendRows(relationSheet.spreadsheetId, relationRange, [[campaignId, characterId]])
+    const read = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders)
+    if (read.rows.some((row) => read.columns.get(row, "ID campagne") === campaignId && read.columns.get(row, "ID personnage") === characterId)) return null
+    const columns = await ensureNamedColumns(relationSheet.spreadsheetId, relationSheet.tabName, read.columns)
+    await appendRows(relationSheet.spreadsheetId, namedAppendRange(relationSheet.tabName, columns), [columns.row({ "ID campagne": campaignId, "ID personnage": characterId })])
     return null
   } catch (error) {
     const code = error instanceof Error ? error.message : "UNKNOWN_ERROR"
@@ -4719,10 +5015,9 @@ export async function removeCharacterFromCampaign(mjUid: string | null, campaign
   try {
     const relationSheet = await ensureJdrSheet("campaign_characters")
     if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
-    const relationRange = sheetTabRange(relationSheet.tabName, "A:B")
-    const rows = await readRange(relationSheet.spreadsheetId, relationRange)
-    const cleared = rows.flatMap((row, index) => row[0] === campaignId && row[1] === characterId
-      ? [{ range: sheetTabRange(relationSheet.tabName, `A${index + 1}:B${index + 1}`), values: [["", ""]] }]
+    const { columns, rows } = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders)
+    const cleared = rows.flatMap((row, index) => columns.get(row, "ID campagne") === campaignId && columns.get(row, "ID personnage") === characterId
+      ? namedRowWrites(relationSheet.tabName, columns, index + 2, { "ID campagne": "", "ID personnage": "" })
       : [])
     await updateRanges(relationSheet.spreadsheetId, cleared)
   } catch (error) {
@@ -4740,18 +5035,17 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
   const sheet = await ensureJdrSheet("characters")
   if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-  const { layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
+  const { map, layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
   const width = layout.headers.length
   const values = Array.from({ length: width }, (_, index) => String(input[index] ?? ""))
   // Les valeurs de départ viennent de l'Index des caractéristiques et compétences
   // (seuils critiques 96 et 5, compteurs à 0… dans la liste d'origine).
   applyCharacteristicDefaults(values, layout, catalog)
-  const cells = [id, uid, ...values]
-  await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:${columnName(width + 2)}`, [cells])
+  await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${columnName(map.width)}`), [characterSheetRow(map, id, uid, values)])
   const rowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, id)
   if (rowNumber) {
     const prepared = applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog)
-    await updateRange(sheet.spreadsheetId, `${sheet.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`, [prepared])
+    await writeCharacterValues(sheet, map, rowNumber, prepared, catalog)
   }
   await getDb().insert(characterIndex).values({
     id, ownerUid: uid, name, subtitle: values[1] || "", updatedAt: new Date().toISOString(),
@@ -4762,59 +5056,109 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
   return { id, name }
 }
 
-async function ensureCharacterSheetSchema(spreadsheetId: string, tabName: string) {
-  const syncKey = `character-schema:v4:${characterSheetHeaders.length}`
-  const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
-  if (alreadySynced) return
-  const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }> }>(
-    `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`,
-  )
-  const properties = metadata.sheets?.find((sheet) => sheet.properties?.title === tabName)?.properties
-  if (properties?.sheetId === undefined) throw new Error("SHEETS_METADATA_UNAVAILABLE")
-  if ((properties.gridProperties?.columnCount || 0) < characterSheetHeaders.length) {
-    await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: properties.sheetId, gridProperties: { columnCount: characterSheetHeaders.length } }, fields: "gridProperties.columnCount" } }] }),
-    })
-  }
-  const currentColumnCount = properties.gridProperties?.columnCount || 0
-  const [oldHeaders = []] = await readRange(spreadsheetId, `${tabName}!A1:${columnName(Math.max(1, currentColumnCount))}1`, "FORMULA")
-  const oldRows = oldHeaders.length ? await readRange(spreadsheetId, `${tabName}!A2:${columnName(Math.max(1, oldHeaders.length))}`, "FORMULA") : []
-  const aliases: Record<string, string> = {
-    "Maîtrise des armes d’assaut": "Maîtrise des armes d’aste",
-    "Volonté physique": "Volonté psychique",
-    "Résistance au traumatisme": "Résistance aux traumatismes",
-    "Dépeçage": "Dépistage",
-    "Conduite / Monture": "Conduite monture",
-    "Navigation": "Navigation / Canotage",
-    "Connaissances historiques / géographiques": "Connaissance historique / géographique",
-    "Connaissances des sciences": "Connaissance des sciences",
-    "Arts du spectacle": "Art du spectacle",
-    "Marchandage": "Marchandage / Persuasion",
-    "Persuasion": "Marchandage / Persuasion",
-  }
-  const oldHeaderIndex = new Map(oldHeaders.map((header, index) => [header, index]))
-  const migratedRows = oldRows.filter((row) => row[0]).map((row, rowOffset) => {
-    const migrated = characterSheetHeaders.map((header) => {
-      const directIndex = oldHeaderIndex.get(header)
-      if (directIndex !== undefined) return row[directIndex] || ""
-      const separator = header.indexOf(" — ")
-      const skillName = separator > 0 ? header.slice(0, separator) : header
-      const aliasedSkill = aliases[skillName]
-      if (!aliasedSkill) return ""
-      const aliasedHeader = separator > 0 ? `${aliasedSkill}${header.slice(separator)}` : aliasedSkill
-      const aliasIndex = oldHeaderIndex.get(aliasedHeader)
-      return aliasIndex === undefined ? "" : row[aliasIndex] || ""
-    })
-    const prepared = applyCharacterDefaultsAndFormulas(migrated.slice(2), rowOffset + 2, characterLayout(characterValueHeaders), builtinCharacterCatalog)
-    return [migrated[0], migrated[1], ...prepared]
-  })
-  await updateRange(spreadsheetId, `${tabName}!A1:${columnName(characterSheetHeaders.length)}${Math.max(1, migratedRows.length + 1)}`, [characterSheetHeaders, ...migratedRows])
-  await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
+/** Anciens noms de compétences d'origine : leur en-tête est réécrit sur place sous le nom actuel. */
+const characterSkillAliases: Record<string, string> = {
+  "Maîtrise des armes d’assaut": "Maîtrise des armes d’aste",
+  "Volonté physique": "Volonté psychique",
+  "Résistance au traumatisme": "Résistance aux traumatismes",
+  "Dépeçage": "Dépistage",
+  "Conduite / Monture": "Conduite monture",
+  "Navigation": "Navigation / Canotage",
+  "Connaissances historiques / géographiques": "Connaissance historique / géographique",
+  "Connaissances des sciences": "Connaissance des sciences",
+  "Arts du spectacle": "Art du spectacle",
+  "Marchandage": "Marchandage / Persuasion",
+  "Persuasion": "Marchandage / Persuasion",
 }
 
-function characterCell(valueIndex: number, rowNumber: number) {
-  return characterValueCell(valueIndex, rowNumber)
+const characterSchemaReady = new Set<string>()
+
+/**
+ * Les en-têtes de la feuille des personnages, vérifiés par leur nom : une compétence
+ * renommée par Eraser voit son ancien en-tête réécrit sur place (ses valeurs ne bougent
+ * pas), les colonnes absentes sont ajoutées à droite. Aucune ligne n'est déplacée ni
+ * réécrite : les colonnes peuvent être rangées dans Sheets dans n'importe quel ordre.
+ */
+async function ensureCharacterSheetSchema(spreadsheetId: string, tabName: string) {
+  const syncKey = `character-schema:v5:${characterSheetHeaders.length}`
+  if (characterSchemaReady.has(`${spreadsheetId}:${syncKey}`)) return
+  const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
+  if (!alreadySynced) {
+    clearSpreadsheetReadCache(spreadsheetId)
+    const [headerRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+    const headers = headerRow.map((header) => String(header ?? "").trim())
+    const present = new Set(headers.map(foldSheetHeader))
+    const renames: Array<{ index: number; header: string }> = []
+    for (const header of characterSheetHeaders) {
+      if (present.has(foldSheetHeader(header))) continue
+      const separator = header.indexOf(" — ")
+      const skillName = separator > 0 ? header.slice(0, separator) : header
+      const aliased = characterSkillAliases[skillName]
+      if (!aliased) continue
+      const legacy = foldSheetHeader(separator > 0 ? `${aliased}${header.slice(separator)}` : aliased)
+      const index = headers.findIndex((candidate) => foldSheetHeader(candidate) === legacy)
+      if (index < 0) continue
+      renames.push({ index, header })
+      headers[index] = header
+      present.add(foldSheetHeader(header))
+    }
+    if (renames.length) {
+      await updateRanges(spreadsheetId, renames.map((item) => ({ range: sheetTabRange(tabName, `${columnName(item.index + 1)}1`), values: [[item.header]] })), { valueInputOption: "RAW" })
+      console.info("CHARACTER_HEADERS_RENAMED", renames.map((item) => item.header).join(" | "))
+    }
+    await ensureNamedColumns(spreadsheetId, tabName, sheetColumns(headers, characterSheetHeaders, characterSheetAliases))
+    await getDb().insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
+  }
+  characterSchemaReady.add(`${spreadsheetId}:${syncKey}`)
+}
+
+/** Les écritures de cases d'une ligne, par morceaux contigus. */
+function cellRuns(tabName: string, rowNumber: number, cells: Map<number, SheetCell>) {
+  const runs: Array<{ start: number; values: SheetCell[] }> = []
+  for (const [index, value] of [...cells.entries()].sort((left, right) => left[0] - right[0])) {
+    const last = runs[runs.length - 1]
+    if (last && last.start + last.values.length === index) last.values.push(value)
+    else runs.push({ start: index, values: [value] })
+  }
+  return runs.map((run) => ({ range: sheetTabRange(tabName, `${columnName(run.start + 1)}${rowNumber}:${columnName(run.start + run.values.length)}${rowNumber}`), values: [run.values] }))
+}
+
+/** Les valeurs d'une fiche, lues dans la feuille et rangées dans l'ordre de la fiche. */
+async function readCharacterValues(source: { spreadsheetId: string; tabName: string }, map: CharacterSheetMap, rowNumber: number) {
+  const [row = []] = await readRange(source.spreadsheetId, sheetTabRange(source.tabName, `A${rowNumber}:${columnName(map.width)}${rowNumber}`))
+  return characterValuesOf(map, row)
+}
+
+/**
+ * Écrit les valeurs d'une fiche, chacune dans sa colonne. Index des caractéristiques
+ * injoignable : les colonnes ajoutées par l'index ne sont pas réécrites (leurs formules
+ * ne sont pas connues sans lui). `returnValues` : rend les valeurs recalculées par Sheets.
+ */
+async function writeCharacterValues(source: { spreadsheetId: string; tabName: string }, map: CharacterSheetMap, rowNumber: number, values: readonly string[], catalog: CharacterCatalog, options: { returnValues?: boolean } = {}) {
+  const width = Math.min(values.length, map.valueColumns.length)
+  const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
+  if (map.contiguous && map.writable.slice(0, writeWidth).every(Boolean)) {
+    const range = sheetTabRange(source.tabName, `C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`)
+    if (!options.returnValues) {
+      await updateRange(source.spreadsheetId, range, [values.slice(0, writeWidth)])
+      return null
+    }
+    const [calculated = []] = await updateRangeAndReturnValues(source.spreadsheetId, range, [values.slice(0, writeWidth)])
+    if (calculated.length && writeWidth >= map.valueColumns.length) {
+      const output = calculated.slice(0, map.valueColumns.length).map(String)
+      while (output.length < map.valueColumns.length) output.push("")
+      return output
+    }
+    return readCharacterValues(source, map, rowNumber)
+  }
+  const cells = new Map<number, SheetCell>()
+  for (let index = 0; index < writeWidth; index += 1) {
+    const column = map.valueColumns[index] ?? -1
+    if (column >= 0 && map.writable[index]) cells.set(column, values[index] ?? "")
+  }
+  const data = cellRuns(source.tabName, rowNumber, cells)
+  for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
+  return options.returnValues ? readCharacterValues(source, map, rowNumber) : null
 }
 
 function isGoogleSheetsCalculationError(value: GoogleSheetCellValue) {
@@ -4825,12 +5169,13 @@ function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number, l
   const width = Math.max(layout.headers.length, characterValueHeaders.length)
   const values = input.slice(0, width)
   while (values.length < width) values.push("")
+  const cellOf = layout.cell ?? characterValueCell
   characterSecondaryCalculatedFields.forEach((field, fieldIndex) => {
     const bonusIndex = characterSecondaryCalculationValueIndex(fieldIndex, "bonus")
     const modifierIndex = characterSecondaryCalculationValueIndex(fieldIndex, "modifier")
     if (!values[bonusIndex] || isGoogleSheetsCalculationError(values[bonusIndex])) values[bonusIndex] = isGoogleSheetsCalculationError(values[field.valueIndex]) ? "0" : values[field.valueIndex] || "0"
     values[modifierIndex] = "=0"
-    values[field.valueIndex] = `=${characterCell(bonusIndex, rowNumber)}+${characterCell(modifierIndex, rowNumber)}`
+    values[field.valueIndex] = `=${cellOf(bonusIndex, rowNumber)}+${cellOf(modifierIndex, rowNumber)}`
   })
   return applySkillCells(values, rowNumber, layout, catalog)
 }
@@ -4843,21 +5188,25 @@ function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number, l
  * l'en-tête de ses colonnes.
  */
 const CHARACTER_COLUMNS_CACHE_MS = 5 * 60_000
-let characterColumnsCache: { signature: string; expiresAt: number; headers: string[] } | null = null
-let characterColumnsTask: Promise<{ layout: CharacterLayout; catalog: CharacterCatalog }> | null = null
+type CharacterColumns = { map: CharacterSheetMap; layout: CharacterLayout; catalog: CharacterCatalog }
+let characterColumnsCache: { signature: string; expiresAt: number; map: CharacterSheetMap } | null = null
+let characterColumnsTask: Promise<CharacterColumns> | null = null
 
 async function loadCharacterCatalog(): Promise<CharacterCatalog> {
   const { getCharacterCatalog } = await import("@/lib/character-catalog-server")
   return getCharacterCatalog()
 }
 
-async function characterColumns(spreadsheetId: string, tabName: string): Promise<{ layout: CharacterLayout; catalog: CharacterCatalog }> {
+async function characterColumns(spreadsheetId: string, tabName: string): Promise<CharacterColumns> {
   const catalog = await loadCharacterCatalog()
   const signature = `${spreadsheetId}:${tabName}:${JSON.stringify([catalog.characteristics.map((item) => [item.key, item.name, item.kind]), catalog.skills.map((skill) => [skill.key, skill.name, skill.characteristicKey])])}`
-  if (characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now()) return { layout: characterLayout(characterColumnsCache.headers), catalog }
+  const cached = () => characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now() ? characterColumnsCache.map : null
+  const known = cached()
+  if (known) return { map: known, layout: known.layout, catalog }
   // Une seule mise à jour à la fois : deux fiches ouvertes ensemble n'ajoutent pas deux fois les mêmes colonnes.
   while (characterColumnsTask) await characterColumnsTask.catch(() => undefined)
-  if (characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now()) return { layout: characterLayout(characterColumnsCache.headers), catalog }
+  const settled = cached()
+  if (settled) return { map: settled, layout: settled.layout, catalog }
   const task = syncCharacterColumns(spreadsheetId, tabName, catalog, signature)
   characterColumnsTask = task
   try {
@@ -4867,41 +5216,48 @@ async function characterColumns(spreadsheetId: string, tabName: string): Promise
   }
 }
 
-async function syncCharacterColumns(spreadsheetId: string, tabName: string, catalog: CharacterCatalog, signature: string) {
+async function syncCharacterColumns(spreadsheetId: string, tabName: string, catalog: CharacterCatalog, signature: string): Promise<CharacterColumns> {
   clearSpreadsheetReadCache(spreadsheetId)
   const [headerRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
-  let used = headerRow.length
-  while (used > 0 && !String(headerRow[used - 1] ?? "").trim()) used -= 1
-  const headers = Array.from({ length: Math.max(used, characterSheetHeaders.length) }, (_, index) => String(headerRow[index] ?? "").trim() || characterSheetHeaders[index] || "")
-  const valueHeaders = headers.slice(2)
-  const plan = planCatalogColumns(valueHeaders, catalog)
+  // Les colonnes d'origine manquantes d'abord (à droite), pour que chaque valeur ait sa colonne.
+  let headers = (await ensureNamedColumns(spreadsheetId, tabName, sheetColumns(headerRow, characterSheetHeaders, characterSheetAliases))).headers
+  let map = characterSheetMap(headers)
+  const plan = planCatalogColumns(map.layout.headers, catalog)
   if (plan.rename.length) {
-    await updateRanges(spreadsheetId, plan.rename.map((item) => ({ range: sheetTabRange(tabName, `${columnName(item.index + 3)}1`), values: [[item.header]] })), { valueInputOption: "RAW" })
-    for (const item of plan.rename) valueHeaders[item.index] = item.header
+    const renames = plan.rename.flatMap((item) => (map.valueColumns[item.index] ?? -1) >= 0 ? [{ column: map.valueColumns[item.index], header: item.header }] : [])
+    await updateRanges(spreadsheetId, renames.map((item) => ({ range: sheetTabRange(tabName, `${columnName(item.column + 1)}1`), values: [[item.header]] })), { valueInputOption: "RAW" })
+    headers = [...headers]
+    for (const item of renames) headers[item.column] = item.header
+    map = characterSheetMap(headers)
   }
   if (plan.append.length) {
-    const start = valueHeaders.length
-    const width = start + plan.append.length
-    await ensureSheetColumnCount(spreadsheetId, tabName, width + 2)
-    await updateRange(spreadsheetId, sheetTabRange(tabName, `${columnName(start + 3)}1:${columnName(width + 2)}1`), [plan.append.map((column) => column.header)], { valueInputOption: "RAW" })
-    valueHeaders.push(...plan.append.map((column) => column.header))
-    const layout = characterLayout(valueHeaders)
+    let used = headers.length
+    while (used > 0 && !headers[used - 1]) used -= 1
+    const end = used + plan.append.length
+    await ensureSheetColumnCount(spreadsheetId, tabName, end)
+    await updateRange(spreadsheetId, sheetTabRange(tabName, `${columnName(used + 1)}1:${columnName(end)}1`), [plan.append.map((column) => column.header)], { valueInputOption: "RAW" })
+    headers = [...headers.slice(0, used), ...plan.append.map((column) => column.header)]
+    map = characterSheetMap(headers)
+    const { layout } = map
     const added = new Set(plan.append.map((column) => column.key))
     // Les fiches existantes : valeur de départ et formules dans les nouvelles colonnes seulement.
-    const ids = await readRange(spreadsheetId, sheetTabRange(tabName, "A:A"))
+    const idLetter = columnName(Math.max(0, map.columns.at("ID")) + 1)
+    const ids = await readRange(spreadsheetId, sheetTabRange(tabName, `${idLetter}:${idLetter}`))
     const data = ids.flatMap((row, offset) => {
       if (offset === 0 || !String(row[0] ?? "").trim()) return []
       const rowNumber = offset + 1
-      const values = Array<string>(width).fill("")
+      const values = Array<string>(layout.headers.length).fill("")
       applyCharacteristicDefaults(values, layout, catalog, added)
       applySkillCells(values, rowNumber, layout, catalog, added)
-      return [{ range: sheetTabRange(tabName, `${columnName(start + 3)}${rowNumber}:${columnName(width + 2)}${rowNumber}`), values: [values.slice(start)] }]
+      const cells = new Map<number, SheetCell>()
+      map.valueColumns.forEach((column, index) => { if (column >= used) cells.set(column, values[index] ?? "") })
+      return cellRuns(tabName, rowNumber, cells)
     })
     for (let index = 0; index < data.length; index += 200) await updateRanges(spreadsheetId, data.slice(index, index + 200))
-    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", data.length)
+    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", ids.length)
   }
-  characterColumnsCache = { signature, expiresAt: Date.now() + CHARACTER_COLUMNS_CACHE_MS, headers: valueHeaders }
-  return { layout: characterLayout(valueHeaders), catalog }
+  characterColumnsCache = { signature, expiresAt: Date.now() + CHARACTER_COLUMNS_CACHE_MS, map }
+  return { map, layout: map.layout, catalog }
 }
 
 export async function getCharacterSheet(accountUid: string | null, id: string) {
@@ -4914,21 +5270,12 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   const cached = characterSheetCache.get(id)
   if (cached && cached.expiresAt > Date.now()) return { ...cached.character, ...indexed, name: cached.character.name, subtitle: cached.character.subtitle }
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
-  const width = layout.headers.length
+  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) return null
-  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
-  let [row = []] = await readRange(source.spreadsheetId, range)
-  let values = row.slice(0, width)
-  while (values.length < width) values.push("")
+  let values = await readCharacterValues(source, map, rowNumber)
   if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
-    const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
-    await updateRange(source.spreadsheetId, `${source.tabName}!C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`, [applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog).slice(0, writeWidth)])
-    const [repairedRow = []] = await readRange(source.spreadsheetId, range)
-    row = repairedRow
-    values = row.slice(0, width)
-    while (values.length < width) values.push("")
+    values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
   }
   const character = { ...indexed, name: values[0] || indexed.name, subtitle: values[1] || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
@@ -4943,26 +5290,19 @@ export async function updateCharacterSheet(accountUid: string | null, id: string
   const source = await charactersSource()
   if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
+  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
   const width = layout.headers.length
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
   const nextValues = values.slice(0, width)
   // Une fiche ouverte avant l'ajout d'une compétence ne connaît pas ses colonnes : elles
-  // gardent ce que la feuille contient (les colonnes s'ajoutent toujours à la fin).
+  // gardent ce que la feuille contient.
   if (nextValues.length < width) {
-    const [current = []] = await readRange(source.spreadsheetId, range)
-    for (let index = nextValues.length; index < width; index += 1) nextValues.push(String(current[index] ?? ""))
+    const current = await readCharacterValues(source, map, rowNumber)
+    for (let index = nextValues.length; index < width; index += 1) nextValues.push(current[index] ?? "")
   }
   const preparedValues = applyCharacterDefaultsAndFormulas(nextValues, rowNumber, layout, catalog)
-  // Index des caractéristiques injoignable : les colonnes ajoutées par l'index ne sont pas
-  // réécrites (leurs formules ne sont pas connues sans lui), seules celles d'origine le sont.
-  const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
-  const writeRange = `${source.tabName}!C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`
-  let [calculatedValues = []] = await updateRangeAndReturnValues(source.spreadsheetId, writeRange, [preparedValues.slice(0, writeWidth)])
-  if (!calculatedValues.length || writeWidth < width) [calculatedValues = []] = await readRange(source.spreadsheetId, range)
-  calculatedValues = calculatedValues.slice(0, width)
+  const calculatedValues = (await writeCharacterValues(source, map, rowNumber, preparedValues, catalog, { returnValues: true }))?.slice(0, width) ?? []
   while (calculatedValues.length < width) calculatedValues.push("")
   const updatedAt = new Date().toISOString()
   await getDb().update(characterIndex).set({ name, subtitle: nextValues[1] || "", updatedAt }).where(eq(characterIndex.id, id))
@@ -4983,7 +5323,7 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   const source = await charactersSource()
   if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
+  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
   const width = layout.headers.length
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
@@ -4991,23 +5331,19 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   const entries = Object.entries(changes).flatMap(([key, raw]) => {
     const index = Number(key)
     if (!Number.isInteger(index) || index < 0 || index >= width || computed.has(index)) return []
+    // Chaque valeur va dans sa colonne, retrouvée par son nom ; une colonne ajoutée à la main n'est pas écrite.
+    if ((map.valueColumns[index] ?? -1) < 0 || !map.writable[index]) return []
     return [[index, String(raw ?? "").slice(0, 50_000)] as const]
   })
   const name = entries.find(([index]) => index === 0)?.[1]
   if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
   // Une saisie qui commence par « = » reste du texte : seule Eraser écrit des formules.
-  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(index + 3)}${rowNumber}`), values: [[value.startsWith("=") ? `'${value}` : value]] }))
+  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(map.valueColumns[index] + 1)}${rowNumber}`), values: [[value.startsWith("=") ? `'${value}` : value]] }))
   for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
-  const range = `${source.tabName}!C${rowNumber}:${columnName(width + 2)}${rowNumber}`
-  let [row = []] = await readRange(source.spreadsheetId, range)
-  let values = row.slice(0, width)
-  while (values.length < width) values.push("")
+  let values = await readCharacterValues(source, map, rowNumber)
   // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
   if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
-    await updateRange(source.spreadsheetId, range, [applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog)])
-    ;[row = []] = await readRange(source.spreadsheetId, range)
-    values = row.slice(0, width)
-    while (values.length < width) values.push("")
+    values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
   }
   const updatedAt = new Date().toISOString()
   const nextName = values[0]?.trim() || existing.name
@@ -5058,6 +5394,8 @@ type StoredInventoryContent = {
 
 type InventoryWorkbook = {
   spreadsheetId: string
+  /** Les colonnes de chaque onglet, retrouvées par leur nom : les écritures visent leur vraie place. */
+  columns: Record<string, SheetColumns>
   containerTypes: InventoryContainerTypeRecord[]
   containers: StoredInventoryContainer[]
   items: InventoryItemRecord[]
@@ -5255,12 +5593,10 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
   const sheet = await ensureJdrSheet("inventory")
   if (!sheet) throw new Error("INVENTORY_SHEET_UNAVAILABLE")
   let catalogFailed = false
-  const ranges = [
-    sheetTabRange("Types de contenants", "A2:F"),
-    sheetTabRange(inventoryContainerTab, "A2:I"),
-    sheetTabRange(inventoryItemsTab, "A2:S"),
-    sheetTabRange(inventoryContentsTab, "A2:Q"),
-  ]
+  // Chaque onglet entier, en-têtes compris : ses colonnes sont retrouvées par leur nom,
+  // puis chaque ligne est remise dans l'ordre prévu (la lecture ci-dessous en dépend).
+  const tabs = ["Types de contenants", inventoryContainerTab, inventoryItemsTab, inventoryContentsTab]
+  const ranges = tabs.map(sheetTabAll)
   const parameters = new URLSearchParams()
   ranges.forEach((range) => parameters.append("ranges", range))
   const [payload, objectIndexTables] = await Promise.all([
@@ -5271,13 +5607,28 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
     includeCatalog ? listObjectIndexTables().catch(() => { catalogFailed = true; return [] }) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : lastGoodObjectIndexTables ?? []),
   ])
-  const [typeRows, containerRows, itemRows, contentRows] = ranges.map((_, index) => normalizeGoogleSheetRows(payload.valueRanges?.[index]?.values))
+  const columns: Record<string, SheetColumns> = {}
+  const [typeRows, containerRows, itemRows, contentRows] = tabs.map((tab, index) => {
+    const [headers = [], ...rows] = normalizeGoogleSheetRows(payload.valueRanges?.[index]?.values)
+    const expected = inventoryWorkbookTabs.find((candidate) => candidate.name === tab)?.headers ?? []
+    columns[tab] = sheetColumns(headers, expected)
+    return rows.map((row) => canonicalRow(columns[tab], row))
+  })
+  // Une colonne prévue absente est ajoutée à droite (rien ne bouge) ; la lecture n'en dépend pas.
+  for (const tab of tabs) {
+    if (!columns[tab].missing.length && !columns[tab].unnamed.length) continue
+    columns[tab] = await ensureNamedColumns(sheet.spreadsheetId, tab, columns[tab]).catch((error) => {
+      console.error("INVENTORY_COLUMNS_CHECK_FAILED", tab, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return columns[tab]
+    })
+  }
   const mergedItems = [...parseInventoryItemRows(itemRows), ...parseObjectIndexItems(objectIndexTables)]
   const items = [...new Map(mergedItems.map((item) => [item.id, item])).values()]
   const configuredTypes = parseContainerTypeRows(typeRows)
   const containerTypes = [...new Map([...baseInventoryContainerTypes, ...configuredTypes].map((type) => [type.id, type])).values()]
   const workbook: InventoryWorkbook = {
     spreadsheetId: sheet.spreadsheetId,
+    columns,
     containerTypes,
     containers: containerRows.flatMap((row, index) => row[0] ? [{
       id: row[0],
@@ -5318,6 +5669,20 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
   if (includeCatalog && catalogFailed) workbook.catalogMissing = true
   cacheInventoryWorkbook(workbook, includeCatalog && !catalogFailed)
   return workbook
+}
+
+/** Ajoute des lignes (décrites dans l'ordre prévu) à un onglet de l'inventaire, chaque valeur sous son en-tête. */
+function appendInventoryRows(workbook: InventoryWorkbook, tab: string, rows: SheetCell[][]) {
+  const columns = workbook.columns[tab]
+  if (!columns) throw new Error(`INVENTORY_TAB_COLUMNS_UNKNOWN:${tab}`)
+  return appendRows(workbook.spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows))
+}
+
+/** Les écritures d'une plage de l'inventaire décrite dans l'ordre prévu (« I12 », « A12:Q12 »). */
+function inventoryWrites(workbook: InventoryWorkbook, tab: string, cells: string, values: SheetCell[][]) {
+  const columns = workbook.columns[tab]
+  if (!columns) throw new Error(`INVENTORY_TAB_COLUMNS_UNKNOWN:${tab}`)
+  return canonicalWrites(tab, columns, cells, values)
 }
 
 function inventoryContentRow(content: StoredInventoryContent) {
@@ -5409,7 +5774,7 @@ async function appendInventorySlots(
     }
   }
   if (rows.length) {
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), rows.map(inventoryContentRow))
+    await appendInventoryRows(workbook, inventoryContentsTab, rows.map(inventoryContentRow))
     clearInventoryWorkbookCache()
   }
 }
@@ -5439,7 +5804,7 @@ async function ensureCampaignInventoryStorage(ownerId: string, includeCatalog = 
       deletedAt: "",
       rowNumber: 0,
     }
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), [[
+    await appendInventoryRows(workbook, inventoryContainerTab, [[
       container.id, container.characterId, "", container.customName, container.category,
       container.capacity, container.order, container.createdAt, "",
     ]])
@@ -5479,7 +5844,7 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
         rowNumber: 0,
       }
     })
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), newContainers.map((container) => [
+    await appendInventoryRows(workbook, inventoryContainerTab, newContainers.map((container) => [
       container.id,
       container.characterId,
       container.typeId,
@@ -5506,10 +5871,7 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
     !workbook.contents.some((content) => content.containerId === container.id && Boolean(content.itemId || (content.customName && content.quantity > 0))),
   )
   if (emptyAestheticDuplicates.length) {
-    await updateRanges(workbook.spreadsheetId, emptyAestheticDuplicates.map((container) => ({
-      range: sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`),
-      values: [[now]],
-    })))
+    await updateRanges(workbook.spreadsheetId, emptyAestheticDuplicates.flatMap((container) => inventoryWrites(workbook, inventoryContainerTab, `I${container.rowNumber}`, [[now]])))
     clearInventoryWorkbookCache()
     workbook = await readInventoryWorkbook(includeCatalog)
   }
@@ -5538,9 +5900,9 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     return readInventoryWorkbook(includeCatalog)
   }
 
-  const npcSheet = await ensureJdrSheet("npcs")
-  const npcRows = await readRange(npcSheet.spreadsheetId, `${npcSheet.tabName}!A2:${NPC_LAST_COLUMN}`)
-  const legacyItems = npcInventoryFromCell(npcRows.find((row) => row[0] === npcId)?.[25])
+  const { columns: npcColumns, rows: npcRows } = await readNpcSheet(await npcSheet())
+  const legacyRow = npcRows.find((row) => npcColumns.get(row, "ID") === npcId)
+  const legacyItems = npcInventoryFromCell(legacyRow ? npcColumns.get(legacyRow, "Inventaire JSON (archive)") : undefined)
   const activeIds = new Set(active.map((container) => container.id))
   const occupied = workbook.contents
     .filter((content) => content.characterId === npcId && activeIds.has(content.containerId))
@@ -5553,7 +5915,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
       id: crypto.randomUUID(), characterId: npcId, typeId: "TYPE-SAC-BASE", customName: "Sac à dos",
       category: "Inventaire", capacity, order: 0, createdAt: now, deletedAt: "", rowNumber: 0,
     }
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), [[
+    await appendInventoryRows(workbook, inventoryContainerTab, [[
       backpack.id, npcId, backpack.typeId, backpack.customName, backpack.category, backpack.capacity, 0, now, "",
     ]])
     clearInventoryWorkbookCache()
@@ -5565,23 +5927,17 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
   const normalizedBackpack: StoredInventoryContainer = {
     ...backpack, typeId: "TYPE-SAC-BASE", customName: "Sac à dos", category: "Inventaire", capacity, order: 0, deletedAt: "",
   }
-  const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = [{
-    range: sheetTabRange(inventoryContainerTab, `A${backpack.rowNumber}:I${backpack.rowNumber}`),
-    values: [[normalizedBackpack.id, npcId, normalizedBackpack.typeId, normalizedBackpack.customName, normalizedBackpack.category, capacity, 0, normalizedBackpack.createdAt || now, ""]],
-  }]
-  active.filter((container) => container.id !== backpack.id).forEach((container) => updates.push({
-    range: sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`), values: [[now]],
-  }))
-  occupied.forEach((content, index) => updates.push({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
-    values: [inventoryContentRow({ ...content, containerId: backpack!.id, index: index + 1, equipped: false, updatedAt: now })],
-  }))
+  const updates: Array<{ range: string; values: SheetCell[][] }> = inventoryWrites(workbook, inventoryContainerTab, `A${backpack.rowNumber}:I${backpack.rowNumber}`,
+    [[normalizedBackpack.id, npcId, normalizedBackpack.typeId, normalizedBackpack.customName, normalizedBackpack.category, capacity, 0, normalizedBackpack.createdAt || now, ""]])
+  active.filter((container) => container.id !== backpack.id).forEach((container) => updates.push(...inventoryWrites(workbook, inventoryContainerTab, `I${container.rowNumber}`, [[now]])))
+  occupied.forEach((content, index) => updates.push(...inventoryWrites(workbook, inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`,
+    [inventoryContentRow({ ...content, containerId: backpack!.id, index: index + 1, equipped: false, updatedAt: now })])))
   const legacyRows: StoredInventoryContent[] = legacyItems.map((item, index) => ({
     ...makeEmptyInventorySlot(npcId, backpack!.id, occupied.length + index + 1),
     id: `NPC-LEGACY-${npcId}-${item.id || index}`,
     quantity: item.quantity, customName: item.name, customDescription: item.notes, type: "Objet", updatedAt: now,
   })).filter((item) => !workbook.contents.some((content) => content.id === item.id))
-  if (legacyRows.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), legacyRows.map(inventoryContentRow))
+  if (legacyRows.length) await appendInventoryRows(workbook, inventoryContentsTab, legacyRows.map(inventoryContentRow))
   if (updates.length) await updateRanges(workbook.spreadsheetId, updates)
   clearInventoryWorkbookCache()
   workbook = await readInventoryWorkbook(includeCatalog)
@@ -5740,7 +6096,7 @@ export async function copyCharacterInventory(sourceCharacterId: string, targetCh
     deletedAt: "",
     rowNumber: 0,
   }))
-  await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), clonedContainers.map((container) => [
+  await appendInventoryRows(workbook, inventoryContainerTab, clonedContainers.map((container) => [
     container.id, container.characterId, container.typeId, container.customName, container.category,
     container.capacity, container.order, container.createdAt, "",
   ]))
@@ -5754,7 +6110,7 @@ export async function copyCharacterInventory(sourceCharacterId: string, targetCh
       updatedAt: now,
       rowNumber: 0,
     }))
-  if (clonedContents.length) await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), clonedContents.map(inventoryContentRow))
+  if (clonedContents.length) await appendInventoryRows(workbook, inventoryContentsTab, clonedContents.map(inventoryContentRow))
   clearInventoryWorkbookCache()
 }
 
@@ -5777,7 +6133,7 @@ export async function addCharacterInventoryContainer(characterId: string, typeId
     deletedAt: "",
     rowNumber: 0,
   }
-  await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), [[
+  await appendInventoryRows(workbook, inventoryContainerTab, [[
     container.id,
     container.characterId,
     container.typeId,
@@ -5816,7 +6172,7 @@ export async function createCharacterInventoryContainer(characterId: string, inp
     deletedAt: "",
     rowNumber: 0,
   }
-  await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, "A:I"), [[
+  await appendInventoryRows(workbook, inventoryContainerTab, [[
     container.id,
     container.characterId,
     "",
@@ -5841,7 +6197,7 @@ export async function updateCharacterInventoryContainer(characterId: string, con
     throw new Error("INVALID_INVENTORY_CONTAINER")
   }
   const updated: StoredInventoryContainer = { ...container, customName: name, capacity }
-  await updateRange(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, `A${container.rowNumber}:I${container.rowNumber}`), [[
+  await updateRanges(workbook.spreadsheetId, inventoryWrites(workbook, inventoryContainerTab, `A${container.rowNumber}:I${container.rowNumber}`, [[
     updated.id,
     updated.characterId,
     updated.typeId,
@@ -5851,7 +6207,7 @@ export async function updateCharacterInventoryContainer(characterId: string, con
     updated.order,
     updated.createdAt,
     "",
-  ]])
+  ]]))
   clearInventoryWorkbookCache()
   await appendInventorySlots(workbook, updated, workbook.containerTypes.find((type) => type.id === updated.typeId))
   return getCharacterInventory(characterId)
@@ -5866,17 +6222,13 @@ export async function deleteCharacterInventoryContainer(characterId: string, con
     .filter((content) => content.containerId === container.id)
     .some((content) => category === "Bourse" ? content.quantity > 0 : Boolean(content.itemId || (content.customName && content.quantity > 0)))
   if (hasContent) throw new Error("INVENTORY_CONTAINER_NOT_EMPTY")
-  await updateRange(workbook.spreadsheetId, sheetTabRange(inventoryContainerTab, `I${container.rowNumber}`), [[new Date().toISOString()]])
+  await updateRanges(workbook.spreadsheetId, inventoryWrites(workbook, inventoryContainerTab, `I${container.rowNumber}`, [[new Date().toISOString()]]))
   clearInventoryWorkbookCache()
   return getCharacterInventory(characterId)
 }
 
 async function updateStoredInventoryContent(workbook: InventoryWorkbook, content: StoredInventoryContent) {
-  await updateRange(
-    workbook.spreadsheetId,
-    sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
-    [inventoryContentRow(content)],
-  )
+  await updateRanges(workbook.spreadsheetId, inventoryWrites(workbook, inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`, [inventoryContentRow(content)]))
   workbook.contents = workbook.contents.map((candidate) => candidate.id === content.id ? content : candidate)
   cacheInventoryWorkbook(workbook)
 }
@@ -5920,7 +6272,7 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
     if (!unlimitedContainer) throw new Error("INVENTORY_FULL")
     const nextIndex = workbook.contents.filter((content) => content.containerId === unlimitedContainer.id).reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, unlimitedContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), [inventoryContentRow(addedSlot)])
+    await appendInventoryRows(workbook, inventoryContentsTab, [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     target = refreshed.contents.find((content) => content.id === addedSlot.id)
@@ -6072,7 +6424,7 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
   if (!target && targetCategory === "Esthétique") {
     const nextIndex = targets.reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
     const addedSlot = makeEmptyInventorySlot(characterId, targetContainer.id, nextIndex)
-    await appendRows(workbook.spreadsheetId, sheetTabRange(inventoryContentsTab, "A:Q"), [inventoryContentRow(addedSlot)])
+    await appendInventoryRows(workbook, inventoryContentsTab, [inventoryContentRow(addedSlot)])
     clearInventoryWorkbookCache()
     const refreshed = await readInventoryWorkbook()
     targets = refreshed.contents.filter((content) => content.containerId === targetContainer.id).sort((left, right) => left.index - right.index)
@@ -6182,10 +6534,7 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
     effectHtml: "",
     updatedAt: now,
   }
-  await updateRanges(workbook.spreadsheetId, [updatedTarget, updatedSource].map((content) => ({
-    range: sheetTabRange(inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`),
-    values: [inventoryContentRow(content)],
-  })))
+  await updateRanges(workbook.spreadsheetId, [updatedTarget, updatedSource].flatMap((content) => inventoryWrites(workbook, inventoryContentsTab, `A${content.rowNumber}:Q${content.rowNumber}`, [inventoryContentRow(content)])))
   workbook.contents = workbook.contents.map((content) => content.id === updatedTarget.id ? updatedTarget : content.id === updatedSource.id ? updatedSource : content)
   cacheInventoryWorkbook(workbook)
   onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode, slotId: updatedTarget.id })
@@ -6212,31 +6561,39 @@ function todoRow(todo: AdminTodoRecord) {
 
 const sheetRowCache = new Map<string, { rowNumber: number; expiresAt: number }>()
 
+/** La ligne d'un identifiant, cherché dans la colonne « ID » (retrouvée par son nom). */
 async function findSheetRowById(spreadsheetId: string, tabName: string, id: string) {
   const cacheKey = `${spreadsheetId}:${tabName}:${id}`
   const cached = sheetRowCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.rowNumber
-  const rows = await readRange(spreadsheetId, `${tabName}!A:A`)
-  const rowIndex = rows.findIndex((row, index) => index > 0 && row[0] === id)
+  const { columns, rows } = await readNamedColumns(spreadsheetId, tabName, ["ID"], ["ID"])
+  const rowIndex = rows.findIndex((row) => columns.get(row, "ID") === id)
   if (rowIndex < 0) return null
-  const rowNumber = rowIndex + 1
+  const rowNumber = rowIndex + 2
   sheetRowCache.set(cacheKey, { rowNumber, expiresAt: Date.now() + 10 * 60_000 })
   return rowNumber
 }
 
+async function todoColumns(source: JdrSheetRecord) {
+  return ensureNamedColumns(source.spreadsheetId, source.tabName, await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders))
+}
+
 async function updateTodoSheetRow(todo: AdminTodoRecord) {
   const source = await ensureJdrSheet("admin_todos")
+  if (!source) throw new Error("TODOS_SHEET_UNAVAILABLE")
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, todo.id)
   if (!rowNumber) throw new Error("TODO_NOT_FOUND")
-  await updateRange(source.spreadsheetId, `${source.tabName}!A${rowNumber}:L${rowNumber}`, [todoRow(todo)])
+  await updateRanges(source.spreadsheetId, canonicalWrites(source.tabName, await todoColumns(source), `A${rowNumber}:L${rowNumber}`, [todoRow(todo)]))
 }
 
 async function findAdminTodoInGoogleSheet(id: string) {
   const source = await ensureJdrSheet("admin_todos")
+  if (!source) throw new Error("TODOS_SHEET_UNAVAILABLE")
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) return null
-  const [row] = await readRange(source.spreadsheetId, `${source.tabName}!A${rowNumber}:L${rowNumber}`)
-  return adminTodoFromSheetRow(row || [])
+  const columns = await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders)
+  const [row] = await readRange(source.spreadsheetId, namedRowRange(source.tabName, columns, rowNumber))
+  return adminTodoFromSheetRow(canonicalRow(columns, row || []))
 }
 
 const requestedAdminTodoSeed = [
@@ -6298,7 +6655,8 @@ function adminTodoFromSheetRow(row: string[]): AdminTodoRecord | null {
 async function adminTodosFromGoogleSheet(owner?: { creatorUid: string; creatorName: string }) {
   const sheet = await ensureJdrSheet("admin_todos")
   if (!sheet) throw new Error("TODOS_SHEET_UNAVAILABLE")
-  const existingRecords = (await readRange(sheet.spreadsheetId, `${sheet.tabName}!A2:L`)).map(adminTodoFromSheetRow).filter((todo): todo is AdminTodoRecord => Boolean(todo))
+  const read = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, todoSheetHeaders)
+  const existingRecords = read.rows.map((row) => adminTodoFromSheetRow(canonicalRow(read.columns, row))).filter((todo): todo is AdminTodoRecord => Boolean(todo))
   if (!owner) return existingRecords
 
   const existingSheetIds = new Set(existingRecords.map((todo) => todo.id))
@@ -6307,7 +6665,10 @@ async function adminTodosFromGoogleSheet(owner?: { creatorUid: string; creatorNa
     const createdAt = new Date(baseTime + index).toISOString()
     return { ...todo, creatorUid: owner.creatorUid, creatorName: owner.creatorName, completed: "non", createdAt, updatedAt: createdAt, deletedAt: null }
   })
-  if (missingRecords.length) await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:L`, missingRecords.map(todoRow))
+  if (missingRecords.length) {
+    const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+    await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, missingRecords.map(todoRow)))
+  }
   let records = [...existingRecords, ...missingRecords]
   const db = getDb()
   const [roadmapSynced] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, DELIVERED_ROADMAP_SYNC_KEY)).limit(1)
@@ -6346,7 +6707,9 @@ export async function createAdminTodo(input: {
     completed: "non", createdAt: now, updatedAt: now, deletedAt: null,
   }
   const sheet = await ensureJdrSheet("admin_todos")
-  await appendRows(sheet.spreadsheetId, `${sheet.tabName}!A:L`, [todoRow(todo)])
+  if (!sheet) throw new Error("TODOS_SHEET_UNAVAILABLE")
+  const columns = await todoColumns(sheet)
+  await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, [todoRow(todo)]))
   return todo
 }
 
@@ -6462,31 +6825,39 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
     await deleteSheetRow(source.spreadsheetId, source.tabName, id)
   } else if (kind === "character") {
     const source = await charactersSource()
-    if (source) await deleteSheetRow(source.spreadsheetId, source.range.split("!")[0], id)
+    if (source) await deleteSheetRow(source.spreadsheetId, source.tabName, id)
     await shareTrashState("character", id, "purged")
     await getDb().delete(characterIndex).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
   } else {
     const source = await campaignsSource()
-    if (source) await deleteSheetRow(source.spreadsheetId, source.range.split("!")[0], id)
+    if (source) await deleteSheetRow(source.spreadsheetId, source.tabName, id)
     await shareTrashState("campaign", id, "purged")
     await getDb().delete(campaignIndex).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
   }
 }
 
-async function configureExistingClassesSheet(spreadsheetId: string) {
+async function configureExistingClassesSheet(spreadsheetId: string, tabName: string, columns: SheetColumns) {
   const metadata = await googleSheetsJson<{
-    sheets?: Array<{ properties?: { sheetId?: number } }>
-  }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties.sheetId`)
-  const sheetId = metadata.sheets?.[0]?.properties?.sheetId
+    sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>
+  }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`)
+  const sheetId = (metadata.sheets?.find((sheet) => sheet.properties?.title === tabName) ?? metadata.sheets?.[0])?.properties?.sheetId
   if (sheetId === undefined) throw new Error("SHEETS_METADATA_UNAVAILABLE")
+  // Chaque réglage vise sa colonne retrouvée par son nom, où qu'elle soit.
+  const span = (name: string) => {
+    const index = columns.at(name)
+    return index >= 0 ? { startColumnIndex: index, endColumnIndex: index + 1 } : null
+  }
+  const difficulty = span("Difficulté")
+  const completion = span("Finition")
+  const keywords = ["Mots-clés 1", "Mots-clés 2", "Mots-clés 3"].map(span).filter((item): item is NonNullable<typeof item> => Boolean(item))
 
   await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({
       requests: [
-        {
+        ...(difficulty ? [{
           setDataValidation: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: 7, endColumnIndex: 8 },
+            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...difficulty },
             rule: {
               condition: {
                 type: "ONE_OF_LIST",
@@ -6496,10 +6867,10 @@ async function configureExistingClassesSheet(spreadsheetId: string) {
               showCustomUi: true,
             },
           },
-        },
-        {
+        }] : []),
+        ...(completion ? [{
           setDataValidation: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: 8, endColumnIndex: 9 },
+            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...completion },
             rule: {
               condition: {
                 type: "NUMBER_BETWEEN",
@@ -6508,21 +6879,20 @@ async function configureExistingClassesSheet(spreadsheetId: string) {
               strict: true,
             },
           },
-        },
-        {
+        }, {
           repeatCell: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, startColumnIndex: 8, endColumnIndex: 9 },
+            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...completion },
             cell: { userEnteredFormat: { numberFormat: { type: "NUMBER", pattern: '0"%"' } } },
             fields: "userEnteredFormat.numberFormat",
           },
-        },
-        {
+        }] : []),
+        ...keywords.map((keyword) => ({
           repeatCell: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 26, startColumnIndex: 4, endColumnIndex: 7 },
+            range: { sheetId, startRowIndex: 1, endRowIndex: 26, ...keyword },
             cell: { userEnteredFormat: { wrapStrategy: "WRAP", verticalAlignment: "MIDDLE" } },
             fields: "userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment",
           },
-        },
+        })),
         {
           updateDimensionProperties: {
             range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 26 },
@@ -6538,31 +6908,27 @@ async function configureExistingClassesSheet(spreadsheetId: string) {
 export async function seedDefaultClasses() {
   const source = await resolveJdrSheet("classes")
   if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
-  await configureExistingClassesSheet(source.spreadsheetId)
+  const read = await readClassSheet(source)
+  const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, read.columns)
+  await configureExistingClassesSheet(source.spreadsheetId, source.tabName, columns)
 
-  const existingRows = await readRange(
-    source.spreadsheetId,
-    `${source.tabName}!A2:I1000`,
-    "FORMULA",
-  )
-  const imagesById = new Map(
-    existingRows.filter((row) => row[0] && row[3]).map((row) => [row[0], row[3]]),
-  )
-  const rows = defaultClassRows.map((row) => {
-    const output = [...row] as ClassSheetRow
-    output[3] = imagesById.get(row[0]) || ""
-    return output
-  })
-  await updateRange(source.spreadsheetId, `${source.tabName}!A2:I26`, rows)
+  // Les classes d'origine aux lignes 2 à 26, chaque valeur sous son en-tête ; l'image
+  // déjà posée pour une classe est gardée, les autres colonnes ne sont pas touchées.
+  const imagesById = new Map(read.rows.flatMap((row) => columns.get(row, "ID") && columns.get(row, "Image") ? [[columns.get(row, "ID"), columns.get(row, "Image")] as const] : []))
+  const writes = defaultClassRows.flatMap(([id, type, name, , keyword1, keyword2, keyword3, difficulty, completion], index) => namedRowWrites(source.tabName, columns, index + 2, {
+    "ID": id, "Type": type, "Nom de la classe": name, "Image": imagesById.get(id) || "",
+    "Mots-clés 1": keyword1, "Mots-clés 2": keyword2, "Mots-clés 3": keyword3, "Difficulté": difficulty, "Finition": completion,
+  }))
+  await updateRanges(source.spreadsheetId, writes)
   await getDb().delete(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global"))
-  return { count: rows.length, sheet: source }
+  return { count: defaultClassRows.length, sheet: source }
 }
 
 export async function ensureDefaultClassesIfEmpty() {
   const source = await resolveJdrSheet("classes")
   if (!source) return { seeded: false, count: 0 }
-  const current = await readRange(source.spreadsheetId, `${source.tabName}!A2:C26`)
-  const count = current.filter((row) => row[0] && row[2]).length
+  const { columns, rows } = await readClassSheet(source)
+  const count = rows.filter((row) => columns.get(row, "ID") && columns.get(row, "Nom de la classe")).length
   if (count > 0) return { seeded: false, count }
   const result = await seedDefaultClasses()
   return { seeded: true, count: result.count }

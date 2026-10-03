@@ -8,7 +8,7 @@
  * le Drive. Il est relié, et ses onglets sont gardés.
  */
 import { createGoogleSpreadsheet, findGoogleSpreadsheetByName, trashDriveFile } from "@/lib/google-drive"
-import { appendRows, clearSpreadsheetReadCache, columnName, googleSheetsJson, readRange, sheetTabRange, spreadsheetTabs, updateRange } from "@/lib/google-sheets"
+import { appendRows, canonicalRow, canonicalRows, canonicalWrites, clearSpreadsheetReadCache, columnName, ensureNamedColumns, googleSheetsJson, namedAppendRange, readNamedSheet, sheetTabRange, spreadsheetTabs, updateRange, updateRanges } from "@/lib/google-sheets"
 import { foldName, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
 import { SCHEMA_TAB, type SchemaEntry } from "@/lib/index-schema-shared"
 import { readSchema, writeSchema } from "@/lib/index-schema"
@@ -61,10 +61,16 @@ export function isCustomIndexKey(value: unknown): value is CustomIndexEntry["key
   return typeof value === "string" && value.startsWith(CUSTOM_INDEX_PREFIX) && /^[a-z0-9-]{3,80}$/.test(value)
 }
 
+/** Le registre, colonnes retrouvées par leur nom ; chaque ligne remise dans l'ordre prévu. */
+async function readRegistry(spreadsheetId: string) {
+  const read = await readNamedSheet(spreadsheetId, REGISTRY_TAB, REGISTRY_HEADERS)
+  return { columns: read.columns, rows: read.rows.map((row) => canonicalRow(read.columns, row)) }
+}
+
 async function loadRegistry() {
   const file = await findGoogleSpreadsheetByName(REGISTRY_NAME)
   if (!file) return { spreadsheetId: null, entries: [] }
-  const rows = await readRange(file.id, sheetTabRange(REGISTRY_TAB, "A2:G")).catch(() => [] as string[][])
+  const rows = await readRegistry(file.id).then((read) => read.rows).catch(() => [] as string[][])
   const entries = rows.flatMap((row, index): CustomIndexEntry[] => isCustomIndexKey(row[0]?.trim()) && row[3]?.trim()
     ? [{ key: row[0].trim() as CustomIndexEntry["key"], title: row[1]?.trim() || row[0].trim(), sheetName: row[2]?.trim() || "", spreadsheetId: row[3].trim(), description: row[4]?.trim() || "", createdAt: row[5]?.trim() || "", deletedAt: row[6]?.trim() || "", row: index + 2 }]
     : [])
@@ -87,8 +93,9 @@ async function markRegistryRow(key: string, values: (entry: CustomIndexEntry) =>
   if (!registry.spreadsheetId || !entry) throw new Error("CUSTOM_INDEX_NOT_FOUND")
   const row = values(entry)
   if (row) {
-    await updateRange(registry.spreadsheetId, sheetTabRange(REGISTRY_TAB, "G1:G1"), [[REGISTRY_HEADERS[6]]], { valueInputOption: "RAW" })
-    await updateRange(registry.spreadsheetId, sheetTabRange(REGISTRY_TAB, `A${entry.row}:G${entry.row}`), [row], { valueInputOption: "RAW" })
+    // « Supprimé le » manquant (registre d'une version précédente) : ajouté à droite, par son nom.
+    const columns = await ensureNamedColumns(registry.spreadsheetId, REGISTRY_TAB, (await readRegistry(registry.spreadsheetId)).columns)
+    await updateRanges(registry.spreadsheetId, canonicalWrites(REGISTRY_TAB, columns, `A${entry.row}:G${entry.row}`, [row]), { valueInputOption: "RAW" })
   }
   registryCache = null
   return entry
@@ -189,7 +196,8 @@ export async function createCustomIndex(input: { title: string; description: str
 
   const registryId = await registrySpreadsheet()
   const entry: CustomIndexEntry = { key, title, sheetName, spreadsheetId: file.id, description: input.description.trim().slice(0, 200), createdAt: new Date().toISOString(), deletedAt: "", row: 0 }
-  await appendRows(registryId, sheetTabRange(REGISTRY_TAB, "A:G"), [rowOf(entry, "")], { valueInputOption: "RAW" })
+  const columns = await ensureNamedColumns(registryId, REGISTRY_TAB, (await readRegistry(registryId)).columns)
+  await appendRows(registryId, namedAppendRange(REGISTRY_TAB, columns), canonicalRows(columns, [rowOf(entry, "")]), { valueInputOption: "RAW" })
   registryCache = null
   return { entry, linked: Boolean(linked) }
 }

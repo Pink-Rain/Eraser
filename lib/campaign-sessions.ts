@@ -1,15 +1,20 @@
 import {
   appendRows,
+  canonicalRow,
+  canonicalRows,
+  canonicalWrites,
   clearSpreadsheetReadCache,
   ensureJdrSheet,
+  ensureNamedColumns,
   listCampaignMembers,
   listNpcs,
   listSavedShops,
-  readRangeFreshWithOffset,
+  namedAppendRange,
+  readNamedSheet,
   repairJdrSheet,
   saveGeneratedShops,
   saveNpcs,
-  sheetTabRange,
+  sessionSheetHeaders,
   updateRanges,
 } from "@/lib/google-sheets"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
@@ -34,7 +39,8 @@ export type CampaignSessionRecord = {
 
 export type SessionMembership = { characterIds?: string[]; npcIds?: string[]; shopIds?: string[] }
 
-const COLUMNS = 10
+/** Les sessions décrites dans l'ordre prévu par Eraser : dix colonnes, de A à J. */
+const COLUMNS = sessionSheetHeaders.length
 const LAST_COLUMN = "J"
 
 function idList(value: string | undefined) {
@@ -76,11 +82,16 @@ async function sessionsSheet() {
   return sheet
 }
 
+/**
+ * Les sessions, colonnes retrouvées par leur nom : chaque ligne est remise dans l'ordre
+ * prévu (`sessionSheetHeaders`), les écritures visent la vraie place de chaque colonne.
+ */
 async function readSessionRows() {
   const read = async () => {
     const sheet = await sessionsSheet()
-    const { rows, startRow } = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A2:${LAST_COLUMN}`))
-    return { sheet, rows, startRow }
+    const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, sessionSheetHeaders, { fresh: true })
+    const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, named.columns)
+    return { sheet, columns, rows: named.rows.map((row) => canonicalRow(columns, row)), startRow: 2 }
   }
   try {
     return await read()
@@ -111,11 +122,11 @@ export async function getCampaignSession(campaignId: string, sessionId: string) 
 }
 
 async function writeSession(session: CampaignSessionRecord) {
-  const { sheet, rows, startRow } = await readSessionRows()
+  const { sheet, columns, rows, startRow } = await readSessionRows()
   const index = rows.findIndex((row) => row[0] === session.id && row[1] === session.campaignId)
   if (index < 0) throw new Error("SESSION_NOT_FOUND")
   const rowNumber = startRow + index
-  await updateRanges(sheet.spreadsheetId, [{ range: sheetTabRange(sheet.tabName, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`), values: [sessionRow(session)] }], { valueInputOption: "RAW" })
+  await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   return session
 }
@@ -145,13 +156,13 @@ export async function createCampaignSession(campaignId: string, name: string, cr
   }
   const sheet = await sessionsSheet()
   // Les lignes blanchies par une suppression sont réutilisées avant d'ajouter à la fin.
-  const { rows, startRow } = await readSessionRows()
+  const { columns, rows, startRow } = await readSessionRows()
   const free = rows.findIndex((row) => !row.slice(0, COLUMNS).some((cell) => cell?.trim()))
   if (free >= 0) {
     const rowNumber = startRow + free
-    await updateRanges(sheet.spreadsheetId, [{ range: sheetTabRange(sheet.tabName, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`), values: [sessionRow(session)] }], { valueInputOption: "RAW" })
+    await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
   } else {
-    await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${LAST_COLUMN}`), [sessionRow(session)], { valueInputOption: "RAW" })
+    await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, [sessionRow(session)]), { valueInputOption: "RAW" })
   }
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   return session
@@ -217,11 +228,11 @@ export async function deleteCampaignSession(campaignId: string, sessionId: strin
   const sessions = await listCampaignSessions(campaignId)
   const session = sessions.find((candidate) => candidate.id === sessionId)
   if (!session) throw new Error("SESSION_NOT_FOUND")
-  const { sheet, rows, startRow } = await readSessionRows()
+  const { sheet, columns, rows, startRow } = await readSessionRows()
   const index = rows.findIndex((row) => row[0] === sessionId && row[1] === campaignId)
   if (index < 0) throw new Error("SESSION_NOT_FOUND")
   const rowNumber = startRow + index
-  await updateRanges(sheet.spreadsheetId, [{ range: sheetTabRange(sheet.tabName, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`), values: [Array(COLUMNS).fill("")] }], { valueInputOption: "RAW" })
+  await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [Array(COLUMNS).fill("")]), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   const emptied = { ...session, npcIds: [], shopIds: [], characterIds: [] }
   await syncCampaignFlags(campaignId, emptied, sessions.filter((candidate) => candidate.id !== sessionId), {}, { npcIds: session.npcIds, shopIds: session.shopIds })
