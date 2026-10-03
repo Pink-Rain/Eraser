@@ -348,3 +348,52 @@ test("Relations, sessions, vocabulaire et to-do : lus et écrits par nom de colo
   assert.equal(todoRow["Contenu"], "Ranger la cave");
   assert.equal(todoRow["Réalisée"], "oui");
 });
+
+test("Références {} : PNJs, campagnes et personnages citables, colonnes privées cachées aux joueurs", async () => {
+  const refs = await vite.ssrLoadModule("/lib/index-references-server.ts");
+  const headers = [...npcHeaders].reverse();
+  const npc = (values) => headers.map((header) => values[header] ?? "");
+  await linkNpcs([headers, npc({ "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor", "Notes MJ": "Traître", "Notes joueurs": "Un vieux sage", "Classe / métier": "Mage", "Portrait": "/api/npcs/portrait/PNJ-1" }), npc({ "ID": "PNJ-2", "Page lié": "CAMP-OLD", "Nom du PNJ": "Oublié" })]);
+  const camps = fresh("camps");
+  google.addSpreadsheet(camps, [{ title: "Campagnes", grid: [["Couleur d’accent", "Nom de la campagne", "ID", "MJ", "Description", "Bannière"], ["#334455", "Les Brumes", "CAMP-1", "mj-1", "Brouillard éternel", ""]] }]);
+  await link("campaigns", camps, "Campagnes");
+  await getDb().insert(schema.campaignIndex).values({ id: "CAMP-1", mjUid: "mj-1", name: "Les Brumes", description: "", bannerUrl: "", accentColor: "#334455", updatedAt: new Date().toISOString() });
+  const characterHeaders = [...characterSchema.characterSheetHeaders];
+  characterHeaders.push(characterHeaders.splice(characterHeaders.indexOf("Peuple"), 1)[0]);
+  const characters = fresh("chars");
+  google.addSpreadsheet(characters, [{ title: "Personnages", grid: [characterHeaders, characterHeaders.map((header) => ({ "ID": "PERSO-1", "Joueur": "uid-1", "Nom personnage": "Brin", "Peuple": "Humain", "Classe": "[\"Mage\",\"Prêtre\"]", "Force": "40" })[header] ?? "")] }]);
+  await link("characters", characters, "Personnages");
+
+  const catalog = await refs.referenceCatalog({ fresh: true });
+  const labels = catalog.entries.map((entry) => entry.label);
+  for (const label of ["PNJ", "Campagne", "Personnage"]) assert.ok(labels.includes(label), labels.join(", "));
+  const npcIndex = catalog.indexes.find((index) => index.key === "npcs");
+  // Le PNJ d'une campagne fermée n'est pas proposé ; celui des Brumes l'est, avec sa campagne.
+  assert.deepEqual(npcIndex.rows.map((row) => [row.name, row.tab]), [["Aldor", "Les Brumes"]]);
+  assert.ok(npcIndex.tabs[0].columns.includes("Notes joueurs"));
+  assert.ok(!npcIndex.tabs[0].columns.includes("Page lié"));
+
+  const requests = [
+    { index: "npcs", id: "PNJ-1" },
+    { index: "npcs", id: "PNJ-1", column: "Notes MJ" },
+    { index: "campaigns", id: "CAMP-1" },
+    { index: "characters", id: "PERSO-1" },
+    { index: "characters", id: "PERSO-1", column: "Force" },
+  ];
+  const keyOf = (request) => `${request.index}\u0001${request.id}\u0001${(request.column ?? "").toLocaleLowerCase("fr")}`;
+  const mj = await refs.resolveReferences(requests, { byName: true });
+  assert.equal(mj[keyOf(requests[0])].name, "Aldor");
+  assert.equal(mj[keyOf(requests[0])].type, "Mage");
+  assert.equal(mj[keyOf(requests[0])].descriptionHtml, "Un vieux sage");
+  assert.equal(mj[keyOf(requests[0])].image, "/api/npcs/portrait/PNJ-1");
+  assert.equal(mj[keyOf(requests[1])].value, "Traître");
+  assert.equal(mj[keyOf(requests[2])].color, "#334455");
+  assert.equal(mj[keyOf(requests[2])].descriptionHtml, "Brouillard éternel");
+  assert.equal(mj[keyOf(requests[3])].type, "Mage · Prêtre");
+  assert.equal(mj[keyOf(requests[4])].value, "40");
+  const player = await refs.resolveReferences(requests, { byName: false, player: true });
+  assert.equal(player[keyOf(requests[0])].name, "Aldor");
+  assert.equal(player[keyOf(requests[1])], null);
+  assert.equal(player[keyOf(requests[4])], null);
+  assert.equal(player[keyOf(requests[3])].name, "Brin");
+});

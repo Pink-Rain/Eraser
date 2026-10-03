@@ -97,6 +97,7 @@ function SettingsSection() {
       <li><b>Le nom</b> s’affiche hors du tableau avec sa mise en forme et son détail au survol.</li>
       <li><b>Une case</b> s’affiche avec sa valeur, dans le style de sa colonne, sans survol.</li>
       <li><b>{"{Prix}"}</b>, sans index devant, affiche la case de la ligne même (les colonnes de la ligne sont proposées en premier).</li>
+      <li><b>Personnages, campagnes, PNJs, classes et sorts</b> (des classes et des créatures) se citent de la même façon : <code className={code}>{"{Personnage:Brin}"}</code>, <code className={code}>{"{PNJ:Aldor:Notes joueurs}"}</code>, <code className={code}>{"{Campagne:Les Brumes}"}</code>. Un joueur n’y lit jamais les notes MJ ni l’histoire d’un PNJ, ni d’un personnage autre chose que son nom, son peuple, sa classe, son rang, son titre et son portrait.</li>
     </ul>
     <p className={p}>La référence retrouve sa ligne par son identifiant : renommer la ligne renomme toutes ses citations. Une ligne supprimée s’affiche barrée.</p>
   </>

@@ -1,32 +1,28 @@
-# Eraser 0.1.1-alpha.128 — Les colonnes lues par leur nom, partout
+# Eraser 0.1.1-alpha.129 — Citer personnages, campagnes, PNJs, classes et sorts
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Ranger ses colonnes dans Sheets ne casse plus rien
+## Les références « {} » s'ouvrent à tous les index
 
-Toutes les feuilles d'Eraser sont désormais lues et écrites **par le nom de leurs
-colonnes** (la ligne 1), jamais par leur position : PNJs, Campagnes, Personnages par
-campagne, Relations, Feuille de personnage, Classes, Magasins, Sessions, Inventaire
-(types, contenants, contenu), Tabletop (cartes, pions, dossiers, journal), To-do,
-Vocabulaire, réglages des index et registre des index personnalisés. Les sorts et les
-index du monde l'étaient déjà.
+Dans n'importe quel texte, `{` propose désormais aussi :
 
-- Déplacer, intervertir ou insérer une colonne dans Google Sheets ne change plus ce que
-  lit ou écrit l'application.
-- Une colonne ajoutée à la main est **laissée intacte** : Eraser n'écrit que ses propres
-  colonnes (une formule personnelle n'est plus écrasée à l'enregistrement d'un PNJ, d'une
-  fiche ou d'un magasin).
-- Une colonne prévue par Eraser qui manque est **ajoutée à droite**, sans rien déplacer.
-- Fiche de personnage : chaque valeur est retrouvée sous son en-tête, et les formules
-  qu'Eraser écrit (totaux des compétences, bonus) visent la vraie case, où qu'elle soit.
+- **Personnage** : `{Personnage:Brin}`, ou une case de sa fiche (`{Personnage:Brin:Force}`).
+  Au survol : sa classe, son titre honorifique, son portrait.
+- **Campagne** : `{Campagne:Les Brumes}`, avec sa description, sa bannière et sa couleur.
+- **PNJ** : `{PNJ:Aldor}`, avec son métier, ses notes joueurs et son portrait. Le menu
+  indique la campagne de chaque PNJ (plusieurs PNJs peuvent porter le même nom). Les PNJs
+  d'une campagne fermée ne sont plus proposés.
+- **Classe**, **Sort** (sorts des classes) et **Sort de créature**.
 
-## Corrigé au passage
+Comme pour les autres index, une référence suit sa ligne par son identifiant : renommer
+un PNJ ou une campagne renomme toutes ses citations. Suivre le lien mène à la fiche du
+personnage, à la campagne, à la classe ou à la page de l'index.
 
-- Quand l'ordre des en-têtes ne correspondait plus exactement, plusieurs feuilles
-  (Campagnes, PNJs, Classes…) **réécrivaient leur ligne d'en-têtes**, voire inséraient une
-  nouvelle ligne au-dessus : c'est fini. Seule une feuille qui n'a vraiment aucun en-tête
-  reçoit encore une ligne d'en-têtes, comme avant.
-- La création d'une campagne réécrivait les en-têtes A1:F1 à chaque fois : supprimé.
-- Les illustrations de classes suivent la colonne « Image » même si elle a bougé.
+## Ce qu'un joueur voit
 
-Aucune donnée n'est déplacée ni réécrite par cette version.
+Un joueur ne lit jamais par une référence ce qu'il ne voit pas ailleurs : ni les notes MJ
+ni l'histoire d'un PNJ, et d'un personnage seulement son nom, son peuple, sa classe, son
+rang, son titre et son portrait. Une case privée citée reste introuvable pour lui.
+
+Rappel de la version précédente : toutes les feuilles sont lues par le nom de leurs
+colonnes ; les ranger autrement dans Sheets ne casse plus rien.

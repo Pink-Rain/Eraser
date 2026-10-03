@@ -2176,6 +2176,38 @@ export async function updateClassAccentColors(updates: Array<{ id: string; dark:
   }
 }
 
+/** Les classes connues de l'index local, sans rien relire ni synchroniser (références « {} »). */
+export async function listIndexedClasses() {
+  return classRecordsFromIndex(await getDb().select().from(classIndex).orderBy(classIndex.name))
+}
+
+/**
+ * Les feuilles des PNJ, des campagnes et des personnages telles qu'elles sont rangées
+ * (en-têtes réels, lignes brutes), pour les références « {PNJ:Aldor} ». Lecture seule :
+ * une feuille absente du Drive n'est jamais créée ici.
+ */
+export async function npcReferenceTable() {
+  const sheet = await resolveJdrSheet("npcs")
+  if (!sheet) return null
+  const { columns, rows } = await readNpcSheet(sheet)
+  return { headers: columns.headers, columns, rows }
+}
+
+export async function campaignReferenceTable() {
+  const source = await campaignsSource()
+  if (!source) return null
+  const { columns, rows } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
+  return { headers: columns.headers, columns, rows }
+}
+
+/** Quelques colonnes de la feuille des personnages (elle est trop large pour être lue en entier). */
+export async function characterReferenceTable(wanted: readonly string[]) {
+  const source = await charactersSource()
+  if (!source) return null
+  const { columns, rows } = await readCharacterColumns(source, wanted)
+  return { headers: columns.headers, columns, rows }
+}
+
 export async function listClasses() {
   const db = getDb()
   // Warmed here, in the foreground, so the background work below (which may run

@@ -6,8 +6,15 @@ import { foldName, type IndexColumnSpec } from "@/lib/index-columns"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
 
 export type SourceRow = { id: string; name: string; values: string[]; html: string[] }
+/**
+ * Ce que montre le survol d'une ligne, quand ses colonnes ne portent pas les noms
+ * habituels (Description, Image, Couleur…) : « Portrait » d'un PNJ, « Bannière » d'une
+ * campagne. Chaque liste est essayée dans l'ordre, la première case remplie l'emporte.
+ */
+export type SourceHints = { type?: string[]; description?: string[]; image?: string[]; color?: string[] }
+
 /** `columns` : les colonnes proposées par le menu (hors corbeille) ; `name` : la colonne du nom. */
-export type SourceTable = { tab: string; headers: string[]; columns: string[]; name: number; specs: Map<string, IndexColumnSpec>; rows: SourceRow[] }
+export type SourceTable = { tab: string; headers: string[]; columns: string[]; name: number; specs: Map<string, IndexColumnSpec>; rows: SourceRow[]; hints?: SourceHints }
 
 export const objectNameHeaders = ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]
 
@@ -66,11 +73,15 @@ export function citedCell(table: SourceTable, row: SourceRow, column: string) {
  */
 export function rowDetails(table: SourceTable, row: SourceRow, options: { object?: boolean } = {}) {
   const at = (names: string[]) => columnAt(table.headers, names)
-  const description = [at(["Description", "Déscription"]), at(["Effet", "Effets"])].find((index) => index >= 0 && (row.values[index] ?? "").trim())
-  const type = at(["Type", "Catégorie"])
-  const color = table.headers.findIndex((header) => table.specs.get(foldName(header))?.kind === "color" || foldName(header) === "couleur")
+  const filled = (index: number) => index >= 0 && Boolean((row.values[index] ?? "").trim())
+  // La première colonne remplie parmi celles qu'indique la source, sinon -1.
+  const hinted = (names: string[] | undefined) => names ? names.map((name) => at([name])).find(filled) ?? -1 : undefined
+  const hints = table.hints ?? {}
+  const description = hints.description ? (() => { const index = hinted(hints.description)!; return index >= 0 ? index : undefined })() : [at(["Description", "Déscription"]), at(["Effet", "Effets"])].find(filled)
+  const type = hinted(hints.type) ?? at(["Type", "Catégorie"])
+  const color = hinted(hints.color) ?? table.headers.findIndex((header) => table.specs.get(foldName(header))?.kind === "color" || foldName(header) === "couleur")
   const icon = table.headers.findIndex((header) => table.specs.get(foldName(header))?.kind === "glyph")
-  const image = at(["Image", "Portrait", "Illustration"])
+  const image = hinted(hints.image) ?? at(["Image", "Portrait", "Illustration"])
   const nameHtml = table.name >= 0 && /<[a-z]/i.test(row.html[table.name] ?? "") ? row.html[table.name] : undefined
   const colorValue = color >= 0 ? (row.values[color] ?? "").trim() : ""
   // Le style imposé à la colonne du nom : le nom cité le garde.

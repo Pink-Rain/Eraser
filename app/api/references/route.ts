@@ -37,8 +37,9 @@ export async function POST(request: Request) {
         ...(typeof name === "string" && name.trim() ? { name: name.trim().slice(0, 200) } : {}),
       }]
     })
-    // Un joueur ne retrouve une ligne que par l'identifiant écrit dans le texte qu'il lit.
-    const results = await resolveReferences(references, { byName: account.role !== "joueur" })
+    // Un joueur ne retrouve une ligne que par l'identifiant écrit dans le texte qu'il lit,
+    // et ne lit pas les colonnes privées d'un PNJ ou d'un personnage.
+    const results = await resolveReferences(references, { byName: account.role !== "joueur", player: account.role === "joueur" })
     return NextResponse.json({ results }, { headers: { "cache-control": "no-store" } })
   } catch (error) {
     console.error("INDEX_REFERENCE_RESOLVE_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
