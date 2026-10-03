@@ -3,7 +3,8 @@
  * où les lire, quels en-têtes ajouter ou renommer, et comment remplacer « {Valeur} » dans
  * une description ou un effet affiché hors du tableau. Sans dépendance au serveur.
  */
-import { legacyObjectValueHeaders, objectCombatColumns, objectPriceHeaders, objectPrimaryRarityHeaders, objectSecondaryRarityHeaders, type ObjectCombatFields } from "@/lib/inventory-schema"
+import { normalizeSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { legacyObjectValueHeaders, objectCombatColumns, objectPriceHeaders, objectPrimaryRarityHeaders, objectSecondaryRarityHeaders, type ObjectCombatFields, type ObjectTraitLook, type ObjectTraitLookKey } from "@/lib/inventory-schema"
 
 function normalized(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/[^a-z0-9]+/gi, " ").trim().toLowerCase()
@@ -99,19 +100,30 @@ export function objectDistanceText(value: string) {
   return /^\d+(?:[.,]\d+)?$/.test(clean) ? `${clean} m` : clean
 }
 
-/** Le texte de chaque donnée de combat, tel qu'il s'affiche (« {Distance} » → « 12 m »). */
-function displayedField(item: ObjectCombatFields, key: (typeof objectCombatColumns)[number]["key"]) {
-  const value = item[key]?.trim() ?? ""
+/** Les valeurs d'une case, une par mode d'une arme : « 20+ Flèche | 1d30+20 ». */
+export function objectModes(value: string | undefined) {
+  return (value ?? "").split("|").map((part) => part.trim())
+}
+
+/**
+ * Le texte d'une donnée de combat, tel qu'il s'affiche (« {Distance} » → « 12 m »).
+ * `mode` : 1 pour la première valeur d'une case « a | b », 2 pour la deuxième…
+ */
+function displayedField(item: ObjectCombatFields, key: (typeof objectCombatColumns)[number]["key"], mode: number) {
+  const value = objectModes(item[key])[mode - 1] ?? ""
   return key === "distance" ? objectDistanceText(value) : value
 }
 
 const placeholder = /\{\s*([^{}<>\n]{1,40}?)\s*\}/g
 
 function placeholderValue(name: string, item: ObjectCombatFields) {
-  const key = normalized(name)
+  // « {Valeur 2} » : la deuxième valeur de la case ; « {Valeur} » : la première.
+  const numbered = name.trim().match(/^(.*\S)\s+(\d{1,2})$/)
+  const mode = numbered ? Number(numbered[2]) : 1
+  const key = normalized(numbered ? numbered[1] : name)
   const column = objectCombatColumns.find((candidate) => normalized(candidate.header) === key || candidate.aliases.some((alias) => normalized(alias) === key) || (candidate.key === "value" && legacyObjectValueHeaders.some((alias) => normalized(alias) === key)))
   if (!column) return null
-  const value = displayedField(item, column.key)
+  const value = mode >= 1 ? displayedField(item, column.key, mode) : ""
   return value || null
 }
 
@@ -134,4 +146,26 @@ export function fillObjectTemplateHtml(html: string, item: ObjectCombatFields) {
     const value = placeholderValue(name, item)
     return value === null ? match : value.replace(/[&<>"']/g, (character) => htmlEscapes[character])
   })
+}
+
+/**
+ * Le rendu des colonnes Compétence, Distance, Action et Attributs d'un tableau d'objets,
+ * tel que l'index les montre : type par défaut, complété par les réglages de « Modifier »
+ * (style imposé, couleurs des options, unité). Une colonne absente n'a pas d'entrée.
+ */
+export function objectTraitLooks(headers: string[], columnSpecs: Record<string, IndexColumnSpec> = {}) {
+  const looks: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>> = {}
+  for (const key of ["skill", "distance", "action", "attributes"] as const) {
+    const index = objectCombatColumn(headers, key)
+    if (index < 0) continue
+    const header = headers[index]
+    const saved = columnSpecs[normalized(header)] ?? Object.entries(columnSpecs).find(([folded]) => normalized(folded) === normalized(header))?.[1]
+    const spec = normalizeSpec(saved ? { ...objectColumnSpec(header, headers), ...saved } : objectColumnSpec(header, headers))
+    const look: ObjectTraitLook = {}
+    if (spec.style && !spec.style.keepCellFormatting) look.style = spec.style
+    if (spec.kind === "choice" && spec.options?.length) look.options = spec.options.map((option) => ({ value: option.value, ...(option.color ? { color: option.color } : {}) }))
+    if (spec.kind === "number" && spec.number?.defaultUnit) look.unit = spec.number.defaultUnit
+    looks[key] = look
+  }
+  return looks
 }

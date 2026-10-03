@@ -27,8 +27,9 @@ import {
   type ClassImageScriptAction,
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
-import { objectCombatColumn, objectPriceColumn, planObjectCombatHeaders } from "@/lib/object-combat"
+import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
+import { foldName, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { traced } from "@/lib/perf-trace"
@@ -877,6 +878,8 @@ export type ObjectIndexTable = {
   rows: ObjectIndexRow[]
   /** En-têtes absents de la feuille (case vide en ligne 1), repris des autres index. */
   borrowedHeaders?: number[]
+  /** Réglages enregistrés dans « Modifier », par en-tête replié (`foldName`). */
+  columnSpecs?: Record<string, IndexColumnSpec>
 }
 
 let objectIndexTableCache: { expiresAt: number; tables: ObjectIndexTable[] } | null = null
@@ -922,9 +925,20 @@ export async function readObjectIndexSpreadsheet(file: { id: string; name: strin
   // Un tableau mis à la corbeille depuis « Modifier » n'est plus lu : ni l'index, ni
   // l'inventaire, ni les boutiques ne le voient, mais ses lignes restent dans Sheets.
   const hasSchema = (metadata.sheets ?? []).some((sheet) => sheet.properties?.title === "Eraser · colonnes")
-  const trashedTabs = new Set(hasSchema
-    ? (await readRange(file.id, sheetTabRange("Eraser · colonnes", "A2:F")).catch(() => [] as string[][])).filter((row) => row[0]?.trim() && !row[1]?.trim() && (row[5]?.trim() || /supprim/i.test(row[4] ?? ""))).map((row) => row[0].trim())
-    : [])
+  const schemaRows = hasSchema ? await readRange(file.id, sheetTabRange("Eraser · colonnes", "A2:F")).catch(() => [] as string[][]) : []
+  const trashedTabs = new Set(schemaRows.filter((row) => row[0]?.trim() && !row[1]?.trim() && (row[5]?.trim() || /supprim/i.test(row[4] ?? ""))).map((row) => row[0].trim()))
+  // Les réglages de colonnes choisis dans « Modifier » (style imposé, options…), par onglet
+  // puis par en-tête : l'inventaire et les magasins affichent les objets dans ce style.
+  const columnSpecs = new Map<string, Record<string, IndexColumnSpec>>()
+  for (const row of schemaRows) {
+    const tab = row[0]?.trim()
+    const column = row[1]?.trim()
+    if (!tab || !column || !row[3]?.trim() || row[5]?.trim() || /supprim/i.test(row[4] ?? "")) continue
+    try {
+      const spec = JSON.parse(row[3]) as IndexColumnSpec
+      if (spec && typeof spec === "object" && typeof spec.kind === "string") columnSpecs.set(tab, { ...(columnSpecs.get(tab) ?? {}), [foldName(column)]: spec })
+    } catch { /* un réglage illisible : la colonne garde son type par défaut */ }
+  }
   sheets.splice(0, sheets.length, ...sheets.filter((sheet) => !trashedTabs.has(sheet.tabName)))
   // Les cellules sont lues avec leur mise en forme (couleurs, gras, liens) afin que
   // l’Index des objets l’affiche et la conserve, comme l’Index des classes.
@@ -964,6 +978,7 @@ export async function readObjectIndexSpreadsheet(file: { id: string; name: strin
       sheetId: sheet.sheetId,
       tabName: sheet.tabName,
       headers,
+      columnSpecs: columnSpecs.get(sheet.tabName),
       // Les lignes vides entre deux lignes remplies restent affichées, comme dans
       // Sheets : ce sont celles qu'on vient d'insérer.
       rows: cells.slice(1).flatMap((row, index) => row.some((cell) => cell?.value.trim()) || index < lastFilled
@@ -5167,6 +5182,9 @@ export function objectCombatFields(table: ObjectIndexTable, row: ObjectIndexRow)
     const value = index >= 0 ? (row.values[index] || "").trim() : ""
     if (value && !isSheetErrorValue(value)) fields[column.key] = value
   }
+  // Le rendu de leurs colonnes (style imposé, couleurs des options), pour l'inventaire et les magasins.
+  const looks = objectTraitLooks(table.headers, table.columnSpecs)
+  if (Object.keys(looks).length) fields.looks = looks
   return fields
 }
 

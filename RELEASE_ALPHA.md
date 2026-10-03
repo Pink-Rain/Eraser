@@ -1,38 +1,25 @@
-# Eraser 0.1.1-alpha.118 — Objets : affichage revu, Matériaux et Runes
+# Eraser 0.1.1-alpha.119 — Armes à plusieurs modes, rendu des colonnes
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Un objet dans un inventaire ou un magasin
+## Plusieurs valeurs dans une case, séparées par « | »
 
-Sous la description, dans cet ordre :
+Pour une arme à plusieurs modes, écris une valeur par mode dans la même case, séparées
+par « | » : Valeur « 20+ Flèche | 1d30+20 », Distance « 60 | 1 », Action « Actif -Action
+mineur | Actif -Action majeur ».
 
-1. **Effet : …** (c'est là que s'écrit la valeur, avec {Valeur}) ;
-2. les **attributs, matériaux et runes** de l'objet, en pastilles à leur couleur, sans
-   titre. Au survol : leur nom et leur description ;
-3. l'**action**, la **distance** et la **compétence**, en pastilles comme dans leurs
-   colonnes, sans titre.
+Dans la description ou l'effet, **{Valeur}** donne la première valeur, **{Valeur 2}** la
+deuxième, **{Valeur 3}** la troisième… Pareil pour {Distance 2}, {Action 2}, etc. Sans
+« | », {Valeur} est toute la case. Un mode qui n'existe pas reste écrit tel quel.
 
-La ligne « Valeur » ne s'affiche plus. C'est pareil dans la fouille et la fenêtre de
-magasin sur la table.
+Dans le tableau, la colonne Distance écrit « 60 m | 1 m », et une liste comme Action
+montre une pastille par mode. Sous l'effet d'un objet, chaque mode a sa propre valeur.
 
-## Index des objets : colonnes Matériaux et Runes
+## Sous l'effet : le rendu des colonnes
 
-Deux nouvelles colonnes, ajoutées à droite de chaque tableau : **Matériaux** et **Runes**.
-Elles proposent les matériaux et les runes d'« Armes - Modificateurs » et acceptent
-plusieurs choix. Elles sont masquées dans le tableau (le bouton « Colonnes masquées » les
-montre) mais présentes dans la fiche et le formulaire d'ajout.
-
-## Rareté principale et rareté secondaire
-
-Les onglets qui avaient deux colonnes « Rareté » les voient renommées « Rareté
-principale » (celle de l'emplacement principal) et « Rareté secondaire ». Seuls les
-en-têtes changent : aucune case n'est modifiée. L'onglet Armes, qui les nommait déjà,
-ne change pas.
-
-## Les magasins lisent les colonnes par leur nom
-
-Les magasins et la fouille lisaient l'emplacement et la rareté par la position des
-colonnes, ce qui était dangereux. Dans l'onglet Parchemins, dont l'ordre diffère, la
-rareté était même associée au mauvais emplacement. Ils les lisent maintenant par le nom
-des colonnes (« Emplacement principal » avec « Rareté principale », « Emplacement
-secondaire » avec « Rareté secondaire »), quel que soit leur ordre.
+Les **attributs**, l'**action**, la **distance** et la **compétence** s'affichent comme
+dans leurs colonnes de l'Index des objets, avec le style imposé choisi dans « Modifier »
+(couleur, gras, italique…), les couleurs des options et la pastille d'unité de la
+distance. Plusieurs valeurs dans une liste s'affichent en pastilles, comme dans le
+tableau. Les **matériaux** et les **runes** gardent la couleur de leur ligne
+d'« Armes - Modificateurs ». Pour un attribut, sa couleur sert à son survol.

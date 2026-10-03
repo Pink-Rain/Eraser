@@ -1,3 +1,5 @@
+import type { ColumnStyle } from "@/lib/index-columns"
+
 export const inventoryCategories = ["Armes", "Équipement", "Esthétique", "Inventaire", "Bourse"] as const
 
 export type InventoryCategory = (typeof inventoryCategories)[number]
@@ -67,7 +69,15 @@ export const objectSecondaryRarityHeaders = ["Rareté secondaire", "Rarete secon
 /** Le nom qu'avait la colonne Valeur dans la version précédente. */
 export const legacyObjectValueHeaders = ["Dégâts", "Dégât", "Degats", "Degat", "Dommages"]
 
-export type ObjectCombatFields = Partial<Record<(typeof objectCombatColumns)[number]["key"], string>>
+/** Le rendu d'une colonne d'objets : son style imposé, ses options (couleurs), son unité. */
+export type ObjectTraitLook = { style?: ColumnStyle; options?: Array<{ value: string; color?: string }>; unit?: string }
+
+/** Les colonnes affichées sous l'effet dans le rendu de leur colonne (Matériaux et Runes : à leur couleur). */
+export type ObjectTraitLookKey = "skill" | "distance" | "action" | "attributes"
+
+export type ObjectCombatFields = Partial<Record<(typeof objectCombatColumns)[number]["key"], string>> & {
+  looks?: Partial<Record<ObjectTraitLookKey, ObjectTraitLook>>
+}
 
 export type InventorySlotRecord = {
   id: string

@@ -244,20 +244,25 @@ export function IndexRichText({ html, fill, className = "", as = "div", style }:
 }
 
 /**
- * Des attributs, matériaux ou runes (« Lourde, Acier trempé ») en pastilles, comme dans
- * leur colonne : à la couleur de leur ligne d'« Armes - Modificateurs », avec leur nom et
- * leur description au survol. Un nom absent de l'index reste une pastille simple.
+ * Des attributs, matériaux ou runes (« Lourde, Acier trempé »), avec leur nom et leur
+ * description au survol (aux couleurs de leur ligne d'« Armes - Modificateurs »).
+ * `look` absent : une pastille à la couleur de la ligne (matériaux, runes). `look`
+ * donné : le rendu de la colonne de l'objet (attributs), en pastille neutre s'il y en a
+ * plusieurs, comme dans le tableau. Un nom absent de l'index s'affiche sans survol.
  */
-export function ModifierPills({ names }: { names: string[] }) {
+export function ModifierPills({ names, look }: { names: string[]; look?: { className: string; style: CSSProperties } }) {
   const modifiers = useWeaponModifiers(names.length > 0)
   const byName = useMemo(() => new Map((modifiers ?? []).map((modifier) => [foldName(modifier.name), modifier])), [modifiers])
+  const boxed = Boolean(look) && names.length > 1
   return <>{names.map((name, index) => {
     const modifier = byName.get(foldName(name))
-    if (!modifier) return <span key={`${name}:${index}`} className={pillClass}>{name}</span>
+    const shape = look ? cn(boxed ? pillClass : "inline-block max-w-full whitespace-normal break-words text-xs [overflow-wrap:anywhere]", look.className) : pillClass
+    const style = look ? look.style : pillStyle(modifier?.color) ?? undefined
+    if (!modifier) return <span key={`${name}:${index}`} className={shape} style={style}>{name}</span>
     const color = modifier.color || "#7f5a3a"
     return <HoverCard key={`${name}:${index}`} openDelay={180} closeDelay={80}>
       <HoverCardTrigger asChild>
-        <span tabIndex={0} className={cn(pillClass, "cursor-help font-medium outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={pillStyle(modifier.color) ?? undefined}>{modifier.name}</span>
+        <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}>{modifier.name}</span>
       </HoverCardTrigger>
       <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
         <ModifierDetails modifier={modifier} color={color} />

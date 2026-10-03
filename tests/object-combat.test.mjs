@@ -133,3 +133,29 @@ test("Matériaux et Runes : listes multiples masquées du tableau", () => {
   assert.deepEqual(columns.objectColumnSpec("Runes", headers).source.include, { column: "Type", value: "Rune" });
   assert.equal(columns.isSheetSpec(materials), true);
 });
+
+test("une valeur par mode : {Valeur}, {Valeur 2}, {Valeur 3}, {Distance 2}", () => {
+  const item = { value: "20+ Flèche | 1d30+20 | 5", distance: "60 m | 1", action: "Actif -Action mineur | Actif -Action majeur" };
+  assert.equal(combat.fillObjectTemplate("Inflige {Valeur} à {Distance} OU {Valeur 2} à {Distance 2}", item), "Inflige 20+ Flèche à 60 m OU 1d30+20 à 1 m");
+  assert.equal(combat.fillObjectTemplate("{Valeur 3} {Action 2}", item), "5 Actif -Action majeur");
+  // Un mode qui n'existe pas reste écrit tel quel.
+  assert.equal(combat.fillObjectTemplate("{Valeur 4} {Distance 3}", item), "{Valeur 4} {Distance 3}");
+  // Sans « | », {Valeur} est toute la case.
+  assert.equal(combat.fillObjectTemplate("{Valeur}", { value: "1d30+30" }), "1d30+30");
+  assert.deepEqual(combat.objectModes("a | b"), ["a", "b"]);
+});
+
+test("le rendu des colonnes d'objets suit les réglages de « Modifier »", () => {
+  const headers = ["Nom", "Compétence", "Distance", "Action", "Valeur", "Attributs"];
+  const looks = combat.objectTraitLooks(headers, {
+    competence: { kind: "linked-choice", multiple: true, style: { color: "#b3261e" } },
+    distance: { kind: "number", number: { unit: "distance", defaultUnit: "m" }, style: { italic: true } },
+    attributs: { kind: "linked-choice", style: { color: "#b7791f" } },
+  });
+  assert.deepEqual(looks.skill, { style: { color: "#b3261e" } });
+  assert.deepEqual(looks.distance, { style: { italic: true }, unit: "m" });
+  assert.deepEqual(looks.attributes, { style: { color: "#b7791f" } });
+  // Action sans réglage : ses options par défaut, aux couleurs des types de sorts.
+  assert.ok(looks.action.options.some((option) => option.value === "Actif -Action majeur" && option.color));
+  assert.equal(looks.action.style, undefined);
+});

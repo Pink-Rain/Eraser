@@ -109,7 +109,9 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const trimmed = value.trim()
-  const values = multiple ? splitListValue(trimmed, options) : trimmed ? [trimmed] : []
+  // Une case à un seul choix peut tenir une valeur par mode d'une arme, séparées par « | ».
+  const modes = !multiple && trimmed.includes("|")
+  const values = multiple ? splitListValue(trimmed, options) : modes ? trimmed.split("|").map((part) => part.trim()).filter(Boolean) : trimmed ? [trimmed] : []
   const current = values.map((item) => ({ raw: item, option: matchChoice(item, options) }))
   const selected = new Set(current.map((item) => item.option?.value ?? item.raw).map(foldName))
   const outsideValues = current.filter((item) => !item.option).map((item) => item.raw)
@@ -148,7 +150,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   }
 
   const closed = values.length
-    ? <span className={`flex min-w-0 ${multiple ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item) => <ChoicePill key={item.raw} value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} />)}</span>
+    ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} /></span>)}</span>
     : <span className="text-muted-foreground">—</span>
 
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
@@ -624,6 +626,15 @@ export const SpellsCell = memo(function SpellsCell({ value, source, category, di
  * unité convertible, la pastille de l'unité change l'unité de cette case, et le survol
  * donne la valeur dans toutes les unités (`showConversions`).
  */
+/** « 60 | 1 » → « 60 m | 1 m » : chaque valeur lue et écrite comme une case seule. */
+function formatNumberParts(text: string, format: NumberFormat) {
+  return text.split("|").map((part) => {
+    const clean = part.trim()
+    const parsed = clean ? parseIndexNumber(clean, format) : null
+    return parsed && !parsed.unknown ? formatIndexNumber(parsed, format) : clean
+  }).join(" | ")
+}
+
 export const NumberCell = memo(function NumberCell({ label, value, format, disabled = false, compact = true, showConversions = true, onChange }: {
   label: string
   value: string
@@ -650,6 +661,8 @@ export const NumberCell = memo(function NumberCell({ label, value, format, disab
     const typed = draft.trim()
     if (typed === shown.trim()) return
     if (!typed) return change("")
+    // Plusieurs valeurs séparées par « | » (une par mode d'une arme) : chacune est relue.
+    if (typed.includes("|")) return change(formatNumberParts(typed, format))
     // Une saisie illisible reste telle quelle (en italique) plutôt que d'être perdue.
     const next = parseIndexNumber(typed, { ...format, defaultUnit: parsed?.unit ?? format.defaultUnit })
     change(next && !next.unknown ? formatIndexNumber(next, format, next.unit ?? parsed?.unit) : typed)
@@ -665,6 +678,10 @@ export const NumberCell = memo(function NumberCell({ label, value, format, disab
     placeholder={format.range ? "2–5" : units.length ? `12 ${format.defaultUnit ?? units[0].code}` : "0"}
     className={compact ? "h-8 border-transparent bg-background px-2 text-sm shadow-none" : ""}
   />
+
+  if (shown.includes("|")) return <span className={`flex min-h-8 w-full items-center px-1 ${compact ? "" : "h-9 rounded-md border bg-background/50"}`}>
+    <button type="button" disabled={disabled} onClick={() => { setDraft(shown.trim()); setEditing(true) }} className="min-w-0 flex-1 whitespace-normal break-words rounded-md px-1 py-1 text-right tabular-nums hover:bg-muted [overflow-wrap:anywhere]" aria-label={`Modifier ${label}`} title="Une valeur par mode, séparées par « | »">{formatNumberParts(shown, format)}</button>
+  </span>
 
   const amountText = parsed && units.length ? text.replace(new RegExp(`\\s${parsed.unit ?? format.defaultUnit ?? ""}$`), "") : text
   const unit = parsed?.unit ?? (parsed ? findUnit(family, format.defaultUnit ?? "")?.code : undefined)
