@@ -188,3 +188,18 @@ test("l'icône d'un modificateur d'arme est lue dans sa colonne Icône", async (
   const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
   assert.equal(definitions.worldColumnSpec("weapon-modifiers", "Tout", "Icône").kind, "glyph");
 });
+
+test("un inventaire revenu sans catalogue est redemandé", async () => {
+  const { loadFullInventory } = await vite.ssrLoadModule("/lib/inventory-fetch.ts");
+  const replies = [{ inventory: { containers: [], containerTypes: [], items: [], catalogMissing: true } }, { inventory: { containers: [], containerTypes: [], items: [{ id: "A" }] } }];
+  const original = globalThis.fetch;
+  let calls = 0;
+  globalThis.fetch = async () => ({ ok: true, json: async () => replies[calls++] });
+  const received = [];
+  try {
+    await loadFullInventory("/api/x", (inventory) => received.push(inventory), () => true, [0, 1, 1]);
+  } finally { globalThis.fetch = original; }
+  assert.equal(calls, 2);
+  assert.equal(received.length, 2);
+  assert.equal(received[1].items[0].id, "A");
+});

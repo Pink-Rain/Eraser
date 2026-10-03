@@ -52,6 +52,7 @@ import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
 import { keepCatalogFields, type CharacterInventoryRecord } from "@/lib/inventory-schema"
+import { loadFullInventory } from "@/lib/inventory-fetch"
 import {
   buildItemModifierTargets,
   cappedSkillTotal,
@@ -836,10 +837,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       .finally(() => { if (active) setInventoryLoading(false) })
     // Puis le catalogue complet, en tâche de fond : il porte la mise en forme et les
     // icônes des objets rangés avant qu'elles ne soient recopiées dans l'inventaire.
-    fetch(inventoryEndpoint)
-      .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
-      .then(({ ok, payload }) => { if (active && ok && payload.inventory) setInventory(payload.inventory) })
-      .catch(() => { /* le résumé suffit à jouer */ })
+    // Revenu sans le catalogue (Google occupé), il est redemandé quelques secondes plus tard.
+    void loadFullInventory(inventoryEndpoint, (loaded) => setInventory((current) => keepCatalogFields(loaded, current)), () => active)
     return () => { active = false }
   }, [initialInventory, inventoryEndpoint])
 

@@ -399,7 +399,8 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
       response = await traced("sheets", label, () => googleServiceAuthorizedFetch(url, init), (reply) => String(reply.status))
     }
     if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
-    await new Promise((resolve) => setTimeout(resolve, 250 * (attempt + 1)))
+    // Trop de requêtes (429) : Google compte par minute, on attend plus longtemps.
+    await new Promise((resolve) => setTimeout(resolve, response?.status === 429 ? 2_000 * (attempt + 1) : 250 * (attempt + 1)))
   }
   if (!response?.ok) {
     const status = response?.status ?? 0
@@ -992,21 +993,57 @@ export async function readObjectIndexSpreadsheet(file: { id: string; name: strin
   })
 }
 
-export async function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
-  if (objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now()) return objectIndexTableCache.tables
-  const files = await objectIndexSpreadsheetFiles()
-  const results = await Promise.all(files.map(async (file) => {
-    try {
-      return { tables: await readObjectIndexSpreadsheet(file), error: null }
-    } catch (error) {
-      return { tables: [] as ObjectIndexTable[], error }
-    }
-  }))
-  const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
+/** Le dernier catalogue lu en entier : rendu si une relecture échoue (Google indisponible un instant). */
+let lastGoodObjectIndexTables: ObjectIndexTable[] | null = null
+/** Une seule lecture à la fois : l'inventaire, les magasins et l'index la partagent. */
+let objectIndexTablesRequest: Promise<ObjectIndexTable[]> | null = null
+
+export function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
+  if (objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now()) return Promise.resolve(objectIndexTableCache.tables)
+  if (!objectIndexTablesRequest) {
+    objectIndexTablesRequest = loadObjectIndexTables().finally(() => { objectIndexTablesRequest = null })
+  }
+  return objectIndexTablesRequest
+}
+
+async function readObjectIndexSpreadsheetWithRetry(file: { id: string; name: string; webViewLink?: string }) {
+  try {
+    return await readObjectIndexSpreadsheet(file)
+  } catch (error) {
+    console.error("OBJECT_INDEX_READ_FAILED", file.name, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    // Une seconde tentative : la lecture (toutes les cellules, mise en forme comprise) est lourde.
+    await new Promise((resolve) => setTimeout(resolve, 1_500))
+    return readObjectIndexSpreadsheet(file)
+  }
+}
+
+async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
+  let results: Array<{ tables: ObjectIndexTable[]; error: unknown }>
+  try {
+    const files = await objectIndexSpreadsheetFiles()
+    results = await Promise.all(files.map(async (file) => {
+      try {
+        return { tables: await readObjectIndexSpreadsheetWithRetry(file), error: null }
+      } catch (error) {
+        console.error("OBJECT_INDEX_READ_FAILED", file.name, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+        return { tables: [] as ObjectIndexTable[], error }
+      }
+    }))
+  } catch (error) {
+    results = [{ tables: [], error }]
+  }
   const firstError = results.find((result) => result.error)?.error
+  // Un classeur illisible à l'instant : le dernier catalogue complet plutôt qu'un catalogue
+  // vide (les objets des inventaires perdraient leurs colonnes). Relu dans une minute.
+  if (firstError && lastGoodObjectIndexTables) {
+    objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }
+    return lastGoodObjectIndexTables
+  }
+  const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
+  if (!firstError) lastGoodObjectIndexTables = tables
   // Les icônes s'écrivent par numéro de colonne : jamais pendant une réparation des en-têtes.
   if (tables.some(needsObjectIndexHeaderRepair)) scheduleObjectIndexHeaderRepair(tables)
   else {
@@ -1195,6 +1232,8 @@ function lastFilledRow(rows: Array<Array<{ value: string } | undefined> | undefi
 
 export function clearObjectIndexTableCache() {
   objectIndexTableCache = null
+  // Une lecture lancée avant une écriture ne doit pas servir après elle.
+  objectIndexTablesRequest = null
   clearInventoryWorkbookCache()
 }
 
@@ -5023,6 +5062,8 @@ type InventoryWorkbook = {
   containers: StoredInventoryContainer[]
   items: InventoryItemRecord[]
   contents: StoredInventoryContent[]
+  /** Le catalogue des objets n'a pas pu être lu : les objets n'ont pas leurs colonnes. */
+  catalogMissing?: boolean
 }
 
 let inventoryWorkbookCache: { expiresAt: number; workbook: InventoryWorkbook; includesCatalog: boolean } | null = null
@@ -5182,11 +5223,24 @@ export function objectCombatFields(table: ObjectIndexTable, row: ObjectIndexRow)
     const value = index >= 0 ? (row.values[index] || "").trim() : ""
     if (value && !isSheetErrorValue(value)) fields[column.key] = value
   }
-  // Le rendu de leurs colonnes (style imposé, couleurs des options), pour l'inventaire et les magasins.
-  const looks = objectTraitLooks(table.headers, table.columnSpecs)
+  // Le rendu de leurs colonnes (style imposé, couleur des options choisies), pour l'inventaire
+  // et les magasins : seulement pour les cases remplies, et seulement les options utilisées.
+  let tableLooks = objectTraitLooksCache.get(table)
+  if (!tableLooks) { tableLooks = objectTraitLooks(table.headers, table.columnSpecs); objectTraitLooksCache.set(table, tableLooks) }
+  const looks: NonNullable<ObjectCombatFields["looks"]> = {}
+  for (const [key, look] of Object.entries(tableLooks) as Array<[keyof typeof tableLooks, NonNullable<(typeof tableLooks)[keyof typeof tableLooks]>]>) {
+    const value = fields[key]
+    if (!value) continue
+    const used = new Set(value.split(/\s*[|,;\n]\s*/).map((part) => foldName(part)).filter(Boolean))
+    const options = look.options?.filter((option) => used.has(foldName(option.value)))
+    const slim = { ...(look.style ? { style: look.style } : {}), ...(options?.length ? { options } : {}), ...(look.unit ? { unit: look.unit } : {}) }
+    if (Object.keys(slim).length) looks[key] = slim
+  }
   if (Object.keys(looks).length) fields.looks = looks
   return fields
 }
+
+const objectTraitLooksCache = new WeakMap<ObjectIndexTable, ReturnType<typeof objectTraitLooks>>()
 
 /** Le prix d'un objet (« Prix », « Coût », ou l'ancienne « Valeur » d'un tableau sans prix). */
 export function objectIndexPrice(table: ObjectIndexTable, row: ObjectIndexRow) {
@@ -5200,6 +5254,7 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
   }
   const sheet = await ensureJdrSheet("inventory")
   if (!sheet) throw new Error("INVENTORY_SHEET_UNAVAILABLE")
+  let catalogFailed = false
   const ranges = [
     sheetTabRange("Types de contenants", "A2:F"),
     sheetTabRange(inventoryContainerTab, "A2:I"),
@@ -5214,14 +5269,14 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     ),
     // Sans le catalogue (lecture rapide), les objets prennent quand même ses colonnes
     // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
-    includeCatalog ? listObjectIndexTables().catch(() => []) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : []),
+    includeCatalog ? listObjectIndexTables().catch(() => { catalogFailed = true; return [] }) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : lastGoodObjectIndexTables ?? []),
   ])
   const [typeRows, containerRows, itemRows, contentRows] = ranges.map((_, index) => normalizeGoogleSheetRows(payload.valueRanges?.[index]?.values))
   const mergedItems = [...parseInventoryItemRows(itemRows), ...parseObjectIndexItems(objectIndexTables)]
   const items = [...new Map(mergedItems.map((item) => [item.id, item])).values()]
   const configuredTypes = parseContainerTypeRows(typeRows)
   const containerTypes = [...new Map([...baseInventoryContainerTypes, ...configuredTypes].map((type) => [type.id, type])).values()]
-  const workbook = {
+  const workbook: InventoryWorkbook = {
     spreadsheetId: sheet.spreadsheetId,
     containerTypes,
     containers: containerRows.flatMap((row, index) => row[0] ? [{
@@ -5258,7 +5313,10 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
       rowNumber: index + 2,
     }] : []),
   }
-  cacheInventoryWorkbook(workbook, includeCatalog)
+  // Un catalogue qui n'a pas pu être lu n'est pas gardé comme complet : la prochaine
+  // lecture complète le redemande (et la page la relance d'elle-même).
+  if (includeCatalog && catalogFailed) workbook.catalogMissing = true
+  cacheInventoryWorkbook(workbook, includeCatalog && !catalogFailed)
   return workbook
 }
 
@@ -5629,6 +5687,7 @@ function buildCharacterInventory(characterId: string, workbook: InventoryWorkboo
     containerTypes: workbook.containerTypes.filter((type) => type.active),
     containers,
     items: workbook.items.filter((item) => item.active),
+    ...(workbook.catalogMissing ? { catalogMissing: true } : {}),
   }
 }
 

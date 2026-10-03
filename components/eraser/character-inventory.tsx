@@ -23,6 +23,7 @@ import { canItemGoInInventoryCategory, emptyCharacterInventory, type CharacterIn
 import { parseItemAttachments, parseItemModifiers } from "@/lib/item-modifiers"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
+import { loadFullInventory } from "@/lib/inventory-fetch"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
   Armes: { icon: Sword, color: "#b9504e", singular: "un rangement d’armes" },
@@ -273,7 +274,8 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory((current) => keepCatalogFields(payload.inventory!, current)); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
     // Le résumé arrive sans le catalogue : on le complète ensuite en tâche de fond,
     // pour les objets rangés avant que leur mise en forme ne soit conservée.
-    fetch(inventoryEndpoint).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } })).then(({ response, payload }) => { if (active && response.ok && payload.inventory) { setOwnInventory(payload.inventory); setCatalogLoaded(true) } }).catch(() => { /* le résumé suffit à travailler */ })
+    // Revenu sans le catalogue (Google occupé), il est redemandé quelques secondes plus tard.
+    void loadFullInventory(inventoryEndpoint, (loaded) => { setOwnInventory((current) => keepCatalogFields(loaded, current)); if (!loaded.catalogMissing) setCatalogLoaded(true) }, () => active)
     return () => { active = false }
   }, [controlled, initialInventory, inventoryEndpoint, reloads])
 

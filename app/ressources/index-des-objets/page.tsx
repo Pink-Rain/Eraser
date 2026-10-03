@@ -20,7 +20,8 @@ async function ObjectIndexesData() {
   } catch (error) {
     initialError = error instanceof Error && error.message === "OBJECT_INDEX_FOLDER_NOT_FOUND"
       ? "Le dossier « Objets » est introuvable dans le Drive connecté."
-      : "Les tableaux du dossier « Objets » n’ont pas pu être chargés."
+      // Le code de Google (quota, délai…) aide à comprendre un échec qui se répète.
+      : `Les tableaux du dossier « Objets » n’ont pas pu être chargés${error instanceof Error && error.message ? ` (${error.message.slice(0, 160)})` : ""}. Réessaie avec « Actualiser ».`
   }
   return <ObjectIndexManager initialTables={initialTables} initialSchemas={initialSchemas} initialError={initialError} />
 }

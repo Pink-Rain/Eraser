@@ -102,6 +102,8 @@ export type CharacterInventoryRecord = {
   containerTypes: InventoryContainerTypeRecord[]
   containers: InventoryContainerRecord[]
   items: InventoryItemRecord[]
+  /** Lu sans le catalogue des objets (Google indisponible un instant) : à redemander. */
+  catalogMissing?: boolean
 }
 
 export type InventoryTransferTarget = {

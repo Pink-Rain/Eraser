@@ -32,7 +32,7 @@ export async function GET(request: Request) {
     const code = error instanceof Error ? error.message : ""
     return NextResponse.json({ error: code === "OBJECT_INDEX_FOLDER_NOT_FOUND"
       ? "Le dossier « Objets » est introuvable dans le Drive connecté."
-      : "Les index d’objets n’ont pas pu être chargés." }, { status: 400 })
+      : `Les index d’objets n’ont pas pu être chargés${code ? ` (${code.slice(0, 160)})` : ""}.` }, { status: 400 })
   }
 }
 
