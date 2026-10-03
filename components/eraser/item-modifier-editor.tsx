@@ -1,10 +1,11 @@
 "use client"
 
 import { useMemo, useState, type ReactNode } from "react"
-import { Anvil, Check, ChevronsUpDown, Dices, Flame, Gem, Link2, LoaderCircle, Plus, RotateCcw, Search, Sparkles, X } from "lucide-react"
+import { Anvil, Check, ChevronsUpDown, CircleHelp, Dices, Flame, Gem, Link2, LoaderCircle, Plus, RotateCcw, Search, Sparkles, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { ChoicePicker, LinkedChoicePicker } from "@/components/eraser/index-cells"
@@ -13,7 +14,7 @@ import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexRichText, useWeaponModifiers } from "@/components/eraser/index-references"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { drawWeaponModifier, modifierChance, type WeaponModifierRef } from "@/lib/weapon-modifiers"
-import { objectColumnSpec, parseGlyphValue } from "@/lib/index-columns"
+import { OBJECT_DISTANCE_HELP, OBJECT_VALUE_HELP, objectColumnSpec, parseGlyphValue } from "@/lib/index-columns"
 import {
   buildItemModifierTargets,
   isFromSource,
@@ -146,11 +147,34 @@ const modifierFamilies: Array<{ kind: ItemAttachmentKind; key: "attributes" | "m
   { kind: "rune", key: "runes", label: "Runes", singular: "une rune", tone: "#6b4c9a", icon: Flame, dice: false },
 ]
 
+/** Comment remplir chaque partie de la fenêtre, au survol du petit « ? ». */
+const forgeHelp: Partial<Record<ItemOverrideKey, string>> & Record<"effect" | "links" | "rune" | "draw", string> = {
+  skill: "Les compétences (ou caractéristiques) avec lesquelles l’objet s’utilise, une ou plusieurs. La fiche de personnage le montre sous chacune, avec sa case pour l’équiper.",
+  action: "Le type d’action pour utiliser l’objet. Plusieurs modes : sépare par « | », par exemple « Action mineur | Action majeur ».",
+  reload: "L’action pour recharger, affichée après l’action, précédée de « Rechargement : ». Vide : rien ne s’affiche. Plusieurs modes : sépare par « | ».",
+  value: OBJECT_VALUE_HELP,
+  distance: OBJECT_DISTANCE_HELP,
+  effect: "Le texte de l’effet. {Valeur}, {Distance}, {Prix}… y affichent les cases de l’objet ; {Valeur 2} la deuxième valeur d’une case « a | b ». Tape « { » pour citer un état, un attribut, un lieu…",
+  links: "Un nombre (+2, -10) et la caractéristique ou la compétence qu’il change. Il ne compte que lorsque l’objet est équipé. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.",
+  draw: "« Tirer » en ajoute un au hasard parmi ceux qui ne sont pas encore posés : le Nombre de sa ligne est son % de chance, vide c’est la chance normale. La recherche porte sur le nom ; Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",
+  rune: "Cherche par sous-type et nombre, par exemple « Feu 2 » ; le nom s’affiche à côté. Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",
+}
+
+/** Le petit « ? » d'un champ : son mode d'emploi au survol (ou au toucher). */
+function FieldHelp({ text }: { text: string }) {
+  return <HoverCard openDelay={120} closeDelay={60}>
+    <HoverCardTrigger asChild>
+      <button type="button" tabIndex={-1} className="inline-flex size-3.5 items-center justify-center rounded-full text-muted-foreground/60 hover:text-primary" aria-label="Comment remplir"><CircleHelp className="size-3.5" /></button>
+    </HoverCardTrigger>
+    <HoverCardContent side="top" align="start" className="w-72 rounded-xl p-3 text-xs leading-5 text-foreground">{text}</HoverCardContent>
+  </HoverCard>
+}
+
 /** Un champ : son titre coloré quand il diffère de l'Index des objets, et de quoi y revenir. */
-function ForgeField({ label, changed, base, onReset, className = "", children }: { label: string; changed: boolean; base: string; onReset: () => void; className?: string; children: ReactNode }) {
+function ForgeField({ label, changed, base, onReset, help, className = "", children }: { label: string; changed: boolean; base: string; onReset: () => void; help?: string; className?: string; children: ReactNode }) {
   return <div className={`min-w-0 ${className}`}>
     <div className="mb-1 flex min-h-4 items-center justify-between gap-2">
-      <span className={`text-[10px] font-semibold uppercase tracking-wider ${changed ? "text-primary" : "text-muted-foreground"}`}>{label}{changed && <span className="ml-1 inline-block size-1.5 rounded-full bg-primary align-middle" />}</span>
+      <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${changed ? "text-primary" : "text-muted-foreground"}`}>{label}{changed && <span className="inline-block size-1.5 rounded-full bg-primary" />}{help && <FieldHelp text={help} />}</span>
       {changed && <button type="button" onClick={onReset} className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary" title={`Dans l’Index des objets : ${base.trim() || "vide"}`}><RotateCcw className="size-3" />Index</button>}
     </div>
     {children}
@@ -228,7 +252,7 @@ function ModifierFamily({ family, names, modifiers, links, onNames, onLinks }: {
   return <section className="rounded-xl border bg-background/40 p-3" style={{ borderColor: `${family.tone}40`, backgroundImage: `linear-gradient(135deg, ${family.tone}0d, transparent 45%)` }}>
     <div className="flex flex-wrap items-center gap-2">
       <span className="flex size-6 items-center justify-center rounded-md text-white" style={{ backgroundColor: family.tone }}><Icon className="size-3.5" /></span>
-      <h3 className="font-display text-sm font-semibold" style={{ color: family.tone }}>{family.label}</h3>
+      <h3 className="inline-flex items-center gap-1 font-display text-sm font-semibold" style={{ color: family.tone }}>{family.label}<FieldHelp text={family.dice ? forgeHelp.draw : forgeHelp.rune} /></h3>
       {family.dice && <Button type="button" size="sm" variant="outline" className="h-7 gap-1 px-2 text-xs" disabled={!free.length} onClick={roll} title={`Tirer ${family.singular} au hasard : le Nombre est son % de chance, vide c’est la chance normale`} style={{ borderColor: `${family.tone}55`, color: family.tone }}><Dices className="size-3.5" />Tirer</Button>}
       <div className="relative min-w-40 flex-1">
         <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -289,7 +313,7 @@ function ItemModifierForm({ base, effective, modifiers, effectHtml, pending, onS
   const weaponModifiers = useWeaponModifiers(true)
   const setField = (key: ItemOverrideKey, value: string) => setFields((current) => ({ ...current, [key]: value }))
   const changed = (key: ItemOverrideKey) => !sameItemField(key, fields[key], base[key])
-  const field = (key: ItemOverrideKey, input: ReactNode, className = "") => <ForgeField key={key} label={fieldLabels[key]} changed={changed(key)} base={base[key] ?? ""} onReset={() => setField(key, base[key] ?? "")} className={className}>{input}</ForgeField>
+  const field = (key: ItemOverrideKey, input: ReactNode, className = "") => <ForgeField key={key} label={fieldLabels[key]} changed={changed(key)} base={base[key] ?? ""} onReset={() => setField(key, base[key] ?? "")} help={forgeHelp[key]} className={className}>{input}</ForgeField>
   // Les liens de l'objet lui-même : ceux qui ne viennent d'aucun attribut, matériau ou rune.
   const ownLinks = links.filter((link) => !link.from)
 
@@ -310,14 +334,14 @@ function ItemModifierForm({ base, effective, modifiers, effectHtml, pending, onS
         {field("reload", <div className={boxed}><ChoicePicker allowCustom label={fieldLabels.reload} options={actionOptions} value={fields.reload} onChange={(value) => setField("reload", value)} /></div>)}
       </div>
       {onSaveEffect && <div>
-        <p className={`mb-1 text-[10px] font-semibold uppercase tracking-wider ${effect !== effectHtml ? "text-primary" : "text-muted-foreground"}`}>Effet</p>
+        <p className={`mb-1 inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${effect !== effectHtml ? "text-primary" : "text-muted-foreground"}`}>Effet<FieldHelp text={forgeHelp.effect} /></p>
         <RichTextField value={effectHtml} onCommit={setEffect} ariaLabel="Effet" minHeight="min-h-12" className="bg-background/70" />
       </div>}
       <div className="grid gap-2 sm:grid-cols-[8rem_7rem_minmax(0,1fr)]">
         {field("value", <Input value={fields.value} onChange={(event) => setField("value", event.target.value)} placeholder="1d20 | 2d6" className="h-8 bg-background/70 font-semibold" />)}
         {field("distance", <div className="relative"><Input value={fields.distance} onChange={(event) => setField("distance", event.target.value)} placeholder="12" className="h-8 bg-background/70 pr-7" /><span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">m</span></div>)}
         <div className="min-w-0">
-          <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground" title="Comptent dans les totaux quand l’objet est équipé">Compétences liées à l’objet</p>
+          <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Compétences liées à l’objet<FieldHelp text={forgeHelp.links} /></p>
           <LinksEditor tone="var(--primary)" links={ownLinks} onChange={(next) => setLinks([...next, ...links.filter((link) => link.from)])} compact />
         </div>
       </div>

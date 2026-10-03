@@ -1,25 +1,14 @@
-# Eraser 0.1.1-alpha.124 — Une forge plus claire
+# Eraser 0.1.1-alpha.125 — Le mode d'emploi à portée de main
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## La fenêtre de l'enclume, refaite
+## « | » et {Valeur 2} expliqués
 
-Toujours pour cet exemplaire seulement (l'Index des objets ne bouge pas), mais plus
-compacte et en couleurs :
-
-1. **Compétence, Action, Rechargement**, sur une ligne ;
-2. **Effet**, modifiable ici comme dans l'inventaire ;
-3. **Valeur, Distance** et les **compétences liées à l'objet** ;
-4. **Attributs** : un bouton **Tirer** (le Nombre est le % de chance, vide c'est la chance
-   normale) et une recherche par nom, puis une **carte par attribut** avec sa description
-   et ses propres compétences liées ;
-5. **Matériaux** : pareil ;
-6. **Runes** : une recherche par **sous-type et nombre** (« Feu 2 »), le nom affiché à
-   côté, puis une carte par rune avec sa description et ses compétences liées.
-
-Une compétence liée à un attribut, un matériau ou une rune part avec lui quand on le
-retire. Sur la fiche de personnage, elle porte son nom à côté de celui de l'objet.
-
-## Sous l'effet
-
-L'ordre devient : compétence · distance · action · rechargement.
+- Dans l'Index des objets, le survol des en-têtes **Valeur** et **Distance** explique les
+  modes multiples : des valeurs séparées par « | » (« 20 + Flèche | 1d30+20 »,
+  « 60 | 1 »), et {Valeur}, {Valeur 2}, {Distance 2}… pour les afficher dans la
+  description ou l'effet. Si tu as déjà enregistré un réglage pour ces colonnes dans
+  « Modifier », c'est sa description à toi qui s'affiche.
+- Dans la fenêtre de l'enclume, un petit **?** à côté de chaque champ (compétence, action,
+  rechargement, effet, valeur, distance, compétences liées, attributs, matériaux, runes)
+  dit au survol comment le remplir.

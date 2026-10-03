@@ -75,7 +75,10 @@ test("types des colonnes de combat dans l'Index des objets", () => {
   const headers = [...armes.slice(0, -1), "Valeur", "Attributs"];
   const spec = (header) => columns.objectColumnSpec(header, headers);
   assert.deepEqual(spec("Compétence"), { kind: "linked-choice", multiple: true, source: { index: "skills", tab: "Caractéristiques" } });
-  assert.deepEqual(spec("Distance"), { kind: "number", number: { unit: "distance", defaultUnit: "m" } });
+  assert.deepEqual(spec("Distance"), { kind: "number", number: { unit: "distance", defaultUnit: "m" }, description: columns.OBJECT_DISTANCE_HELP });
+  // Le mode d'emploi de « | » et de {Valeur 2}, au survol de l'en-tête.
+  assert.ok(spec("Valeur").description.includes("{Valeur 2}"));
+  assert.ok(spec("Distance").description.includes("{Distance 2}"));
   assert.equal(spec("Action").kind, "choice");
   assert.ok(spec("Action").options.some((option) => option.value === "Actif -Action majeur"));
   assert.equal(spec("Attributs").kind, "linked-choice");

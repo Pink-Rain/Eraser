@@ -601,6 +601,12 @@ export function compactRichText(html: string) {
   return decodeEntities(value.replace(/<br\s*\/?>/gi, "\n").replace(/<\/(?:div|p)>/gi, "\n").replace(/<(?:div|p)>/gi, "")).replace(/\n+$/, "").trim()
 }
 
+/** Comment remplir la Valeur d'un objet : affiché au survol de l'en-tête et dans la fenêtre de l'enclume. */
+export const OBJECT_VALUE_HELP = "Plusieurs modes (une arme qui tire et frappe) : sépare les valeurs par « | », par exemple « 20 + Flèche | 1d30+20 ». Dans la description ou l’effet, {Valeur} affiche la première, {Valeur 2} la deuxième, {Valeur 3} la troisième."
+
+/** Comment remplir la Distance d'un objet. */
+export const OBJECT_DISTANCE_HELP = "En mètres : « 12 » s’affiche « 12 m ». Plusieurs modes : sépare par « | », par exemple « 60 | 1 ». Dans la description ou l’effet, {Distance} affiche la première, {Distance 2} la deuxième."
+
 /** Les en-têtes qui désignent le nom d'un objet, dans l'ordre où l'inventaire les cherche. */
 const objectNameHeaders = ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]
 
@@ -619,14 +625,14 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   if (["prix", "cout"].includes(folded)) return { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   // Une « Valeur » sans « Prix » ni « Coût » dans le tableau est encore son prix.
   if (folded === "valeur") return headers.some((candidate) => ["prix", "cout"].includes(foldName(candidate)))
-    ? { kind: "rich", description: "Écris {Valeur} dans la description ou l’effet : hors du tableau, la valeur s’y affiche." }
+    ? { kind: "rich", description: OBJECT_VALUE_HELP }
     : { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
   // Les colonnes de combat : la liste des caractéristiques et compétences de la fiche
   // (index « Caractéristiques et compétences », ses deux onglets), une distance en mètres,
   // les types d'action des sorts, les attributs d'« Armes - Modificateurs ».
   if (["competence", "competences"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "skills", tab: "Caractéristiques" } }
-  if (["distance", "portee"].includes(folded)) return { kind: "number", number: { unit: "distance", defaultUnit: "m" } }
+  if (["distance", "portee"].includes(folded)) return { kind: "number", number: { unit: "distance", defaultUnit: "m" }, description: OBJECT_DISTANCE_HELP }
   if (["action", "actions", "action de rechargement", "rechargement", "action rechargement"].includes(folded)) return { kind: "choice", allowCustom: true, options: classSpellTypeSuggestions.map((value) => ({ value, color: classSpellCategoryTones[classSpellCategory(value)].background })) }
   if (["attributs", "attribut"].includes(folded)) return { kind: "linked-choice", multiple: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Attribut" } } }
   // Matériaux et runes : masqués du tableau, remplis dans la fiche de l'objet.
