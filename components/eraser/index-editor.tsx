@@ -5,7 +5,7 @@ import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutTem
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
-import { PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
+import { LayoutPresetBar, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
@@ -25,16 +25,13 @@ import {
   indexColumnKinds,
   isColorSourceSpec,
   isComputedSpec,
-  isSheetSpec,
   kindGroups,
   normalizeSpec,
-  placementLabels,
   placementOf,
   randomSourceLabels,
   rollupLabels,
   type ActionButton,
   type ActionStep,
-  type ColumnPlacement,
   type ColumnStyle,
   type FileAccept,
   type FormulaResult,
@@ -49,9 +46,13 @@ import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaF
 import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import {
+  alignColumns,
+  canonicalObjectHeader,
   creatableKinds,
   freePolicy,
   headerProblem,
+  isDisplayOnlyChange,
+  isObjectSpellingFix,
   sameSpec,
   tabProblem,
   type ColumnPolicy,
@@ -80,7 +81,8 @@ function layoutColumnsOf(tab: DraftTab, kind: LayoutKind): LayoutColumn[] {
   const hoverHidden = ["id", "actions", "auto-links", "ranked-links", "tab", "archived", "formula", "lookup", "rollup", "name", "name-form"]
   return tab.columns.filter((item) => !item.removed && item.header.trim()).flatMap((item) => {
     const spec = normalizeSpec(item.spec)
-    if (kind === "form" ? !isSheetSpec(spec) || formHidden.includes(spec.kind) : hoverHidden.includes(spec.kind)) return []
+    // Toute colonne peut aller dans la fiche ou le survol, masquée ou non : c'est la mise en page qui décide.
+    if ((kind === "form" ? formHidden : hoverHidden).includes(spec.kind)) return []
     return [{ header: item.header.trim(), spec }]
   })
 }
@@ -530,7 +532,7 @@ function TypeSettings(props: SettingsProps) {
   const relations = siblings.filter((column) => !column.removed && (column.spec.kind === "linked" || column.spec.kind === "linked-choice"))
   switch (spec.kind) {
     case "rich": return <p className="text-xs text-muted-foreground">Chaque case garde sa mise en forme. Pour un style commun à toute la colonne (et sans mise en forme propre à chaque case), règle le « Style imposé » plus bas.</p>
-    case "name-form": return <p className="text-xs text-muted-foreground">Un clic sur le nom ouvre la fiche de la ligne, avec tous ses champs (ceux du tableau et ceux « Formulaire seulement »). Le nom se modifie dans la fiche.</p>
+    case "name-form": return <p className="text-xs text-muted-foreground">Un clic sur le nom ouvre la fiche de la ligne, avec tous ses champs (masqués compris, rangés selon sa mise en page). Le nom se modifie dans la fiche, qui s’enregistre d’elle-même.</p>
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
     case "color": return <p className="text-xs text-muted-foreground">Une pastille et un sélecteur de couleur ; la feuille garde le code (#aa3355).</p>
@@ -646,21 +648,20 @@ function StyleSettings({ spec, onChange, disabled, colorColumns = [] }: { spec: 
   </div>
 }
 
-function PlacementSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean }) {
-  const placement = placementOf(spec)
-  const texts: Record<ColumnPlacement, string> = {
-    both: "Dans le tableau, la fiche et le formulaire d’ajout.",
-    table: "Seulement dans le tableau.",
-    sheet: "Seulement dans la fiche et le formulaire d’ajout (« · Formulaire »).",
-  }
+/**
+ * L'affichage d'une colonne : « Masquée » (le tableau), « Lecture seule », sa description.
+ * Où elle apparaît dans la fiche et au survol se règle dans leur mise en page : n'importe
+ * quelle colonne, masquée ou non, peut y être placée. L'ancien réglage « Formulaire
+ * seulement » compte comme « Masquée ».
+ */
+function DisplaySettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean }) {
+  const masked = Boolean(spec.hidden) || placementOf(spec) === "sheet"
   return <div className={box}>
-    <p className="font-semibold">Où s’affiche la colonne</p>
-    <div className="grid gap-1.5 md:grid-cols-3">
-      {(Object.keys(placementLabels) as ColumnPlacement[]).map((key) => <button key={key} type="button" disabled={disabled} onClick={() => onChange({ ...spec, placement: key, form: undefined })} className={`rounded-lg border p-2 text-left text-xs ${placement === key ? "border-primary bg-primary/10" : "hover:bg-muted"}`}><b>{placementLabels[key]}</b><br /><span className="text-muted-foreground">{texts[key]}</span></button>)}
-    </div>
-    <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled || placement === "sheet"} checked={Boolean(spec.hidden)} onCheckedChange={(checked) => onChange({ ...spec, hidden: checked === true || undefined })} /><span><b>Masquée</b> : cachée du tableau ; le bouton « Colonnes masquées » la montre d’un clic.</span></label>
+    <p className="font-semibold">Affichage</p>
+    <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={masked} onCheckedChange={(checked) => onChange({ ...spec, hidden: checked === true || undefined, placement: placementOf(spec) === "sheet" ? undefined : spec.placement, form: undefined })} /><span><b>Masquée</b> : cachée du tableau ; le bouton « Colonnes masquées » la montre d’un clic.</span></label>
     {!isComputedSpec(spec) && spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> : visible, triable et dans les survols, mais ne se modifie pas d’ici (ses données viennent d’ailleurs).</span></label>}
     <label className={smallLabel}>Description (au survol de l’en-tête et dans la fiche)<Input disabled={disabled} value={spec.description ?? ""} onChange={(event) => onChange({ ...spec, description: event.target.value || undefined })} placeholder="À quoi sert cette colonne ?" /></label>
+    <p className="text-[11px] text-muted-foreground">Pour choisir les champs de la fiche et du survol (masqués compris) : « Mise en page de la fiche » et « Survol », en haut.</p>
   </div>
 }
 
@@ -796,6 +797,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   // Un nouvel onglet peut partir d'un preset : il reçoit aussitôt ses colonnes.
   const { presets } = useColumnPresets()
   const [newTabPreset, setNewTabPreset] = useState("")
+  // « Aligner les autres onglets » : ce qui vient d'être préparé, à vérifier avant « Enregistrer ».
+  const [alignNotice, setAlignNotice] = useState("")
   const [newColumn, setNewColumn] = useState("")
   const [showChanges, setShowChanges] = useState(false)
   const [guide, setGuide] = useState<GuideSection | null>(null)
@@ -880,6 +883,35 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     setNewTabPreset("")
   }
 
+  /**
+   * Index des objets : tous les onglets prennent les colonnes de `reference` — noms bien
+   * écrits (« Cout » → « Prix », « Rareté principal » → « Rareté principale »), types,
+   * styles imposés et ordre. Les colonnes absentes sont ajoutées ; celles que la référence
+   * n'a pas restent à la fin, sans rien supprimer. Rien n'est écrit avant « Enregistrer ».
+   */
+  function alignOn(reference: DraftTab) {
+    const canRename = (item: DraftColumn, header: string) => header === item.header.trim() || item.policy.rename || isObjectSpellingFix(item.header, header)
+    const canType = (item: DraftColumn, spec: IndexColumnSpec) => item.policy.type || isDisplayOnlyChange(item.spec, spec)
+    const fix = (item: DraftColumn): DraftColumn => { const header = canonicalObjectHeader(item.header); return !item.removed && canRename(item, header) ? { ...item, header } : item }
+    const source = reference.columns.filter((item) => !item.removed && item.header.trim()).map((item) => ({ header: item.header.trim(), spec: item.spec }))
+    setTabs((current) => current.map((candidate) => {
+      if (candidate.removed) return candidate
+      if (candidate.id === reference.id) return { ...candidate, columns: candidate.columns.map(fix) }
+      const live = candidate.columns.filter((item) => !item.removed)
+      const columns = alignColumns(source, live, (item) => item.header).flatMap((entry): DraftColumn[] => {
+        if (entry.item) return [{
+          ...entry.item,
+          header: canRename(entry.item, entry.header) ? entry.header : entry.item.header,
+          spec: entry.spec && canType(entry.item, entry.spec) ? entry.spec : entry.item.spec,
+        }]
+        if (!candidate.addColumns || !entry.spec) return []
+        return [{ id: nextId(), header: entry.header, spec: entry.spec, policy: freePolicy, removed: false }]
+      })
+      return { ...candidate, columns: [...columns, ...candidate.columns.filter((item) => item.removed)] }
+    }))
+    setAlignNotice(`Les autres onglets prennent les colonnes de « ${reference.name} » (noms, types, styles et ordre). Vérifie le résumé en bas, puis « ${submitLabel} ».`)
+  }
+
   /** Les colonnes d'un preset absentes de l'onglet choisi, ajoutées à la fin. */
   function applyPreset(columns: Array<{ header: string; spec: IndexColumnSpec }>) {
     if (!tab) return
@@ -957,15 +989,30 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               </NativeSelect>}
             </form>
             : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
+          {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2">
+            <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
+              <Columns3 />Aligner les autres onglets sur « {tab.name} »
+            </Button>
+            {alignNotice && <p className="text-[10px] leading-4 text-muted-foreground">{alignNotice}</p>}
+          </div>}
           {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
 
         {mode !== "columns" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
             {mode === "form"
-              ? <>Mise en page de la <b className="text-foreground">fiche</b> des lignes de « {tab.name} » (et du formulaire « Ajouter »). Elle vaut partout où la fiche s’ouvre. Les colonnes « Tableau seulement » n’y figurent pas.</>
+              ? <>Mise en page de la <b className="text-foreground">fiche</b> des lignes de « {tab.name} » (et du formulaire « Ajouter »). Elle vaut partout où la fiche s’ouvre. Toutes les colonnes peuvent y être placées, masquées comprises.</>
               : <>Ce qu’affiche le <b className="text-foreground">survol</b> d’une ligne de « {tab.name} » citée en entier avec « {"{"} » (dans une description, une note, un chat…). Pour les joueurs, les colonnes privées restent cachées.</>}
           </div>
+          <LayoutPresetBar
+            kind={mode}
+            tabName={tab.name}
+            layout={layoutOf(tab, mode)}
+            otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+            disabled={pending || layoutSaving || tab.removed}
+            onApply={(layout) => setLayoutDrafts((current) => ({ ...current, [tab.id]: { ...current[tab.id], [mode]: layout } }))}
+            onCopyTo={(ids) => { const layout = layoutOf(tab, mode); setLayoutDrafts((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, { ...current[id], [mode]: layout }])) })) }}
+          />
           <IndexLayoutEditor
             key={`${tab.id}:${mode}`}
             kind={mode}
@@ -990,9 +1037,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 <span className={`truncate text-sm font-medium ${item.removed ? "line-through" : ""}`}>{item.header || "(sans nom)"}{!item.original && <span className="ml-1 text-[10px] text-primary">nouvelle</span>}</span>
                 <span className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
                   {indexColumnKinds[spec.kind].label}
-                  {place === "sheet" && <span className="rounded bg-muted px-1">Formulaire</span>}
-                  {place === "table" && <span className="rounded bg-muted px-1">Tableau seul</span>}
-                  {spec.hidden && <span className="rounded bg-muted px-1">Masquée</span>}
+                  {(spec.hidden || place === "sheet") && <span className="rounded bg-muted px-1">Masquée</span>}
                   {spec.style && !spec.style.keepCellFormatting && <span className="rounded bg-muted px-1">Style</span>}
                   {item.lockedPolicy ? <LockOpen className="size-3 text-destructive" aria-label="Déverrouillée : voir l’avertissement" /> : item.policy.reasons.length > 0 && <Lock className="size-3 text-amber-700" aria-label={lockedTitle(item)} />}
                 </span>
@@ -1020,7 +1065,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 {column.removed
                   ? <Button type="button" variant="outline" onClick={() => updateColumn({ ...column, removed: false })}><Undo2 />Annuler la suppression</Button>
                   : <Button type="button" variant="outline" className="text-destructive" disabled={readOnly || tab.removed || !policy.remove} onClick={() => updateColumn({ ...column, removed: true })} title={policy.remove ? "Mettre la colonne à la corbeille" : lockedTitle(column)}>{policy.remove ? <Trash2 /> : <Lock />}Supprimer</Button>}
-                {column.spec.hidden ? <EyeOff className="mb-2 size-4 text-muted-foreground" aria-label="Masquée" /> : <Eye className="mb-2 size-4 text-muted-foreground" aria-label="Visible" />}
+                {column.spec.hidden || placementOf(column.spec) === "sheet" ? <EyeOff className="mb-2 size-4 text-muted-foreground" aria-label="Masquée" /> : <Eye className="mb-2 size-4 text-muted-foreground" aria-label="Visible" />}
               </div>
               <p className="text-[11px] text-muted-foreground">Au survol de l’en-tête : {columnTypeLabel(column.spec)}</p>
               <LockNote
@@ -1046,9 +1091,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 sampleRows={sampleRows[tab.original ?? tab.name] ?? []}
                 openGuide={(section) => setGuide(section)}
               />
-              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : l’emplacement, « Masquée », la description et le style imposé restent modifiables ci-dessous.</p>}
+              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description et le style imposé restent modifiables ci-dessous.</p>}
             </div>
-            <PlacementSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
+            <DisplaySettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
             <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />
           </> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Choisis une colonne à gauche, ou ajoute-en une.</p>}
         </section>

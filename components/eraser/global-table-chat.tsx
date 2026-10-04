@@ -44,6 +44,8 @@ function audienceLabel(activity: TabletopActivityRecord) {
 }
 
 const LAST_CAMPAIGN_KEY = "eraser:chat-campaign"
+/** Le canal sans campagne, ouvert à tous : celui du chat à l'ouverture d'Eraser. */
+const GENERAL_CHANNEL = "general"
 // Dernier message vu, par salon : au-delà, le bouton du chat porte une pastille.
 const SEEN_KEY = "eraser:chat-seen:"
 
@@ -85,7 +87,8 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   const pathname = usePathname()
   const [open, setOpen] = useState(false)
   const [campaigns, setCampaigns] = useState<ChatCampaign[]>([])
-  const [campaignId, setCampaignId] = useState("")
+  // « Général » d'emblée : le chat est utilisable dès l'ouverture, sans choisir de campagne.
+  const [campaignId, setCampaignId] = useState(GENERAL_CHANNEL)
   const [members, setMembers] = useState<ChatMember[]>([])
   const [accounts, setAccounts] = useState<ChatAccount[]>([])
   const [online, setOnline] = useState<ChatAccount[]>([])
@@ -137,8 +140,11 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
     noticeTimerRef.current = window.setTimeout(() => setNotice(""), 4200)
   }, [])
 
-  // Resolve the active campaign: the one in the URL wins, else the last one used.
+  // À l'ouverture d'Eraser, le chat est sur « Général ». Ensuite, aller sur la page d'une
+  // campagne (ou le bac à sable) passe sur son canal ; on revient à « Général » d'un choix.
+  const firstPath = useRef(true)
   useEffect(() => {
+    if (firstPath.current) { firstPath.current = false; return }
     const fromPath = pathname.match(/^\/campagne\/([^/]+)/)?.[1] || (pathname.startsWith("/bac-a-sable") ? "bac-a-sable" : "")
     if (!fromPath) return
     try { window.localStorage.setItem(LAST_CAMPAIGN_KEY, fromPath) } catch { /* private browsing */ }
@@ -153,13 +159,8 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       .then((payload) => {
         if (cancelled) return
         setCampaigns(payload.campaigns)
-        setCampaignId((current) => {
-          if (current) return current
-          let stored = ""
-          try { stored = window.localStorage.getItem(LAST_CAMPAIGN_KEY) || "" } catch { /* private browsing */ }
-          if (stored && payload.campaigns.some((campaign) => campaign.id === stored)) return stored
-          return payload.campaigns.length === 1 ? payload.campaigns[0].id : ""
-        })
+        // Un canal qui n'est plus proposé (campagne quittée, serveur d'avant « Général ») : retour au premier.
+        setCampaignId((current) => current && payload.campaigns.some((campaign) => campaign.id === current) ? current : payload.campaigns[0]?.id ?? "")
       })
       .catch(() => undefined)
     return () => { cancelled = true }
@@ -345,16 +346,16 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
             <MessageCircle className="size-4 text-primary" />
             <div>
               <h2 className="font-display font-semibold">Table</h2>
-              <p className="text-[10px] text-muted-foreground">{campaignId ? `Tu écris en tant que ${speakerName}` : "Choisis une campagne"}</p>
+              <p className="text-[10px] text-muted-foreground">{campaignId ? `${campaigns.find((campaign) => campaign.id === campaignId)?.name ?? (campaignId === GENERAL_CHANNEL ? "Général" : "Campagne")} · tu écris en tant que ${speakerName}` : "Choisis un canal"}</p>
             </div>
             <Badge variant={connection === "ready" ? "secondary" : "outline"} className="ml-auto">{connection === "ready" ? "En direct" : connection === "error" ? "Hors ligne" : "…"}</Badge>
             <Button variant="ghost" size="icon-sm" onClick={() => setOpen(false)}><X /></Button>
           </div>
           {campaigns.length > 1 && (
             <div className="border-b px-3 py-2">
-              <NativeSelect value={campaignId} onChange={(event) => setCampaignId(event.target.value)} aria-label="Campagne">
-                <NativeSelectOption value="">Choisir une campagne</NativeSelectOption>
-                {campaigns.map((campaign) => <NativeSelectOption key={campaign.id} value={campaign.id}>{campaign.name}</NativeSelectOption>)}
+              <NativeSelect value={campaignId} onChange={(event) => setCampaignId(event.target.value)} aria-label="Canal">
+                {!campaignId && <NativeSelectOption value="">Choisir un canal</NativeSelectOption>}
+                {campaigns.map((campaign) => <NativeSelectOption key={campaign.id} value={campaign.id}>{campaign.id === GENERAL_CHANNEL ? `${campaign.name} · sans campagne` : campaign.name}</NativeSelectOption>)}
               </NativeSelect>
             </div>
           )}
@@ -372,7 +373,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
                   : <p className="mt-1 whitespace-pre-wrap break-words text-sm">{activity.text}</p>}
               </div>
             ))}
-            {!activities.length && <p className="py-10 text-center text-xs text-muted-foreground">{campaignId ? "Le chat et les dés apparaîtront ici." : "Choisis une campagne pour discuter."}</p>}
+            {!activities.length && <p className="py-10 text-center text-xs text-muted-foreground">{campaignId ? "Le chat et les dés apparaîtront ici." : "Choisis un canal pour discuter."}</p>}
             <div ref={activityEndRef} />
           </div>
           {notice && <p className="border-t px-3 py-1.5 text-[10px] text-destructive">{notice}</p>}

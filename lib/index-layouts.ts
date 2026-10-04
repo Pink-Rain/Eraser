@@ -66,6 +66,9 @@ export type TabLayouts = { form?: IndexLayout; hover?: IndexLayout }
 
 export type LayoutKind = keyof TabLayouts
 
+/** Une mise en page (fiche ou survol) enregistrée sous un nom, pour l'appliquer à d'autres onglets. */
+export type LayoutPreset = { id: string; name: string; kind: LayoutKind; layout: IndexLayout; updatedAt: string }
+
 const MAX_SECTIONS = 30
 const MAX_ROWS = 40
 const MAX_FIELDS = 12
@@ -204,6 +207,14 @@ export function startingLayout(columns: Array<{ header: string; picture?: boolea
   }
   flush()
   return { aside, sections: [{ id: layoutId(), rows }] }
+}
+
+/** La mise en page place-t-elle cette colonne (colonne latérale, sections, image ou sous-titre du survol) ? */
+export function layoutPlaces(layout: IndexLayout | null | undefined, column: string) {
+  if (!layout) return false
+  const key = foldName(column)
+  const fields = [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))]
+  return fields.some((field) => foldName(field.column) === key) || [layout.image, layout.subtitle].some((value) => value !== undefined && foldName(value) === key)
 }
 
 /** La mise en page d'un onglet parmi celles d'un index (nom d'onglet sans accents ni casse). */

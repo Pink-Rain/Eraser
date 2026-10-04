@@ -9,10 +9,10 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
 import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
-import type { IndexLayout, TabLayouts } from "@/lib/index-layouts"
+import type { IndexLayout, LayoutKind, LayoutPreset, TabLayouts } from "@/lib/index-layouts"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts> }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[] }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -26,7 +26,7 @@ async function postSettings(body: Record<string, unknown>) {
 
 /** Les onglets-fenêtres d'un index et les presets d'onglets (partagés par tous les index). */
 export function useIndexSettings(index: string) {
-  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? { views: [], presets: [], layouts: {} })
+  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? { views: [], presets: [], layouts: {}, layoutPresets: [] })
   const [error, setError] = useState("")
   useEffect(() => {
     let active = true
@@ -35,7 +35,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {} }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [] }
         known.set(index, next)
         setSettings(next)
       })
@@ -75,7 +75,17 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-preset", id })
     if (payload.presets) update({ presets: payload.presets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts }
+  /** Les presets de mise en page (fiche ou survol), communs à tous les index. */
+  const saveLayoutPreset = useCallback(async (preset: { id?: string; name: string; kind: LayoutKind; layout: IndexLayout }) => {
+    const payload = await postSettings({ action: "save-layout-preset", ...preset })
+    if (payload.layoutPresets) update({ layoutPresets: payload.layoutPresets })
+    return payload.id ?? ""
+  }, [update])
+  const deleteLayoutPreset = useCallback(async (id: string) => {
+    const payload = await postSettings({ action: "delete-layout-preset", id })
+    if (payload.layoutPresets) update({ layoutPresets: payload.layoutPresets })
+  }, [update])
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })

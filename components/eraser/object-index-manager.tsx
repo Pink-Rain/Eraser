@@ -28,7 +28,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { foldName, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
@@ -36,7 +36,7 @@ import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
-import { tabLayout } from "@/lib/index-layouts"
+import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 
 // Les fenêtres (« Modifier », guide) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
@@ -129,9 +129,12 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     if (selected && isTrashedEntry(findEntry(schemas[selected.fileId] ?? [], selected.tabName, header))) return []
     return [index]
   }), [schemas, selected, specs])
-  // Le tableau : « Tableau et formulaire » et « Tableau seulement » ; la fiche : « … formulaire ».
-  const shownColumns = useMemo(() => liveColumns.filter((index) => isGridSpec(specs[index])), [liveColumns, specs])
-  const sheetColumns = useMemo(() => liveColumns.filter((index) => isSheetSpec(specs[index])), [liveColumns, specs])
+  // Le tableau : toutes les colonnes (les masquées et les anciennes « Formulaire seulement » se
+  // montrent d'un clic). La fiche : toutes, sauf les anciennes « Tableau seulement » que sa
+  // mise en page ne place pas.
+  const formLayout = selected ? tabLayout(settings.layouts, selected.tabName, "form") : null
+  const shownColumns = liveColumns
+  const sheetColumns = useMemo(() => liveColumns.filter((index) => isSheetSpec(specs[index]) || layoutPlaces(formLayout, selected?.headers[index] ?? "")), [formLayout, liveColumns, selected, specs])
   const columnOfHeader = useCallback((header: string) => {
     const index = (selected?.headers ?? []).findIndex((candidate) => foldName(candidate) === foldName(header))
     return index >= 0 && liveColumns.includes(index) ? index : -1
@@ -238,7 +241,6 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const { notify, view: noticesView } = useIndexNotices()
   const { ask, view: choiceView } = useChoiceDialog()
   const [details, setDetails] = useState<string | null>(null)
-  const [sheetPending, setSheetPending] = useState(false)
   const [sheetError, setSheetError] = useState("")
   const [guideOpen, setGuideOpen] = useState(false)
   const [seed, setSeed] = useState(() => `objets:${Date.now()}`)
@@ -335,7 +337,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return text
   }, [columnOfHeader, commitCell, engine, notify, rawOf, rowsOf])
 
-  const mutateRef = useRef<(body: Record<string, unknown>, label: string) => Promise<void>>(async () => undefined)
+  const mutateRef = useRef<(body: Record<string, unknown>, label: string) => Promise<unknown>>(async () => undefined)
   const runtimeFor = useCallback((rowKey: string): ActionRuntime => ({
     row: () => engine.context(rowKey),
     cell: (header) => { const index = columnOfHeader(header); return index >= 0 ? rawOf(rowKey, String(index)) : "" },
@@ -353,8 +355,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     openSheet: () => setDetails(rowKey),
     indexHref: (index) => !index ? undefined : isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].path : `/ressources/index/${index}`,
     roll: async (header) => { const index = columnOfHeader(header); return index >= 0 ? drawCell(rowKey, header, specs[index], true) : null },
-    duplicate: () => mutateRef.current({ action: "duplicate", rows: [rowRefOf(rowKey)] }, "duplicate"),
-    remove: () => mutateRef.current({ action: "delete", rows: [rowRefOf(rowKey)] }, "delete"),
+    duplicate: async () => { await mutateRef.current({ action: "duplicate", rows: [rowRefOf(rowKey)] }, "duplicate") },
+    remove: async () => { await mutateRef.current({ action: "delete", rows: [rowRefOf(rowKey)] }, "delete") },
     copy: copyToClipboard,
     card: () => {
       const nameIndex = selected?.headers.findIndex((_, index) => specs[index]?.kind === "name" || specs[index]?.kind === "name-form") ?? -1
@@ -442,14 +444,15 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ ...body, fileId: selected.fileId, tabName: selected.tabName }),
     })
-    const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
+    const payload = (await response.json().catch(() => ({}))) as { tables?: ObjectIndexTable[]; error?: string }
     setPending("")
-    if (!response.ok || !payload.tables) return setError(payload.error || "Enregistrement impossible.")
+    if (!response.ok || !payload.tables) { setError(payload.error || "Enregistrement impossible."); return false }
     localEdits.current = {}
     savedEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
     setCreating(false)
+    return true
   }
 
   /** Les prix en pièces d'argent ou de bronze (PA, PB), qui n'existent pas : ce sont des PC. */
@@ -509,7 +512,6 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   useLayoutEffect(() => { mutateRef.current = mutate })
 
   const detailsRow = details !== null ? selected?.rows.find((row) => String(row.rowNumber) === details) : undefined
-  const savedCell = (index: number) => (specs[index] && !isRichSpec(specs[index]) ? detailsRow?.values[index] : detailsRow?.html[index]) ?? ""
   const nameColumn = specs.findIndex((spec) => spec.kind === "name" || spec.kind === "name-form")
   const sheetRow = (key: string): IndexFieldProps["row"] => details === null ? undefined : {
     formula: (spec) => engine.formula(details, selected?.headers[Number(key)] ?? key, spec),
@@ -518,21 +520,24 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     buttonVisible: (button) => engine.buttonVisible(details, button),
     runButton: (button) => runButton(details, button),
   }
-  async function saveSheet(changes: Record<string, string>) {
-    if (details === null) return
-    setSheetPending(true); setSheetError("")
-    // Au premier refus, on s'arrête et on le dit : les brouillons de la fiche restent.
+  /** Les champs d'une ligne, enregistrés d'eux-mêmes par sa fiche (la ligne est donnée : on a pu passer à une autre). */
+  async function saveSheet(rowKey: string, changes: Record<string, string>) {
+    setSheetError("")
+    // Au premier refus, on s'arrête et on le dit : la saisie reste affichée dans la fiche.
+    // Comme dans le tableau, chaque case enregistrée est gardée ici (le tableau la montre sans relire la feuille).
     for (const [key, value] of Object.entries(changes)) {
-      const failure = await commitCell(details, key, value)
+      const failure = await commitCell(rowKey, key, value)
       if (failure) {
-        setSheetPending(false)
         setSheetError(failure)
         throw new Error(failure)
       }
     }
-    setSheetPending(false)
-    await refresh(true)
   }
+  // La fiche montre les cases comme le tableau : avec ce qui vient d'y être enregistré.
+  /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
+  const sheetTitle = details === null ? "" : nameColumn >= 0 ? rawOf(details, String(nameColumn)).replace(/<[^>]+>/g, "") : `Ligne ${details}`
+  const sheetFields = details === null || !selected ? [] : sheetColumns.filter((index) => !["auto-links", "ranked-links", "tab"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], value: rawOf(details, String(index)), long: isLongField(selected.headers[index]) }))
+  /* eslint-enable react-hooks/refs */
   const weightColumns = shownColumns.filter((index) => ["number", "gauge", "formula"].includes(specs[index].kind)).map((index) => selected!.headers[index])
 
   const busy = Boolean(pending)
@@ -622,6 +627,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           addRowLabel="Ajouter une ligne vide"
           rowCommands={{
             append: () => void mutate({ action: "add" }, "add"),
+            // La ligne naît dans le tableau, son nom tapé dans sa case (sans formulaire).
+            appendNamed: nameColumn >= 0 ? {
+              nameColumn: String(nameColumn),
+              placeholder: "Nom du nouvel objet…",
+              add: async (name: string) => {
+                if (!await mutate({ action: "add", values: selected.headers.map((header, index) => [header, index === nameColumn ? name : ""]) }, "add")) throw new Error("NOT_ADDED")
+              },
+            } : undefined,
             insertBefore: inSheetOrder ? (rowKey) => void mutate({ action: "insert", row: rowRefOf(rowKey), before: true }, "insert") : undefined,
             // Les lignes vides arrivent sous celle-ci dans la feuille, quel que soit le tri affiché.
             insertRows: (rowKey, count) => void mutate({ action: "insert", row: rowRefOf(rowKey), count }, "insert"),
@@ -634,18 +647,24 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Aucun Google Sheets n’a été trouvé dans le dossier « Objets ».</div> : null}
 
-      {selected && detailsRow && <IndexRowSheet
-        key={`${tableKey(selected)}:${details}`}
+      {selected && detailsRow && details !== null && <IndexRowSheet
+        key={tableKey(selected)}
         open
-        title={nameColumn >= 0 ? savedCell(nameColumn).replace(/<[^>]+>/g, "") : `Ligne ${details}`}
+        rowKey={details}
+        title={sheetTitle}
         subtitle={tableLabel(selected)}
-        fields={sheetColumns.filter((index) => !["auto-links", "ranked-links", "tab"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], value: savedCell(index), long: isLongField(selected.headers[index]) }))}
+        fields={sheetFields}
         layout={tabLayout(settings.layouts, selected.tabName, "form")}
         rowFor={sheetRow}
-        pending={sheetPending}
         error={sheetError}
+        navigation={{
+          rows: displayedRows.map((row) => row.key),
+          labelOf: (rowKey) => nameColumn >= 0 ? rawOf(rowKey, String(nameColumn)).replace(/<[^>]+>/g, "") : `Ligne ${rowKey}`,
+          onGo: (rowKey) => { setSheetError(""); setDetails(rowKey) },
+        }}
         onSave={saveSheet}
-        onClose={() => { setDetails(null); setSheetError("") }}
+        // Le tableau remonte ses cases : il montre ce qui vient d'être écrit dans la fiche.
+        onClose={() => { setDetails(null); setSheetError(""); setVersion((current) => current + 1) }}
       />}
       {viewDialog && <IndexViewDialog
         open

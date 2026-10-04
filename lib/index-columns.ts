@@ -506,10 +506,8 @@ export function columnTypeLabel(input: IndexColumnSpec) {
   // Types doubles : « Jauge (icônes) · Nombre », « Nom · Style imposé », « Liste · Formulaire ».
   for (const kind of spec.also ?? []) labels.push(indexColumnKinds[kind].label)
   if (spec.style && !spec.style.keepCellFormatting) labels.push("Style imposé")
-  const placement = placementOf(spec)
-  if (placement === "sheet") labels.push("Formulaire")
-  if (placement === "table") labels.push("Tableau seulement")
-  if (spec.hidden) labels.push("Masquée")
+  // L'ancien « Formulaire seulement » compte comme « Masquée » (la fiche se règle dans sa mise en page).
+  if (spec.hidden || placementOf(spec) === "sheet") labels.push("Masquée")
   return labels.join(" · ")
 }
 

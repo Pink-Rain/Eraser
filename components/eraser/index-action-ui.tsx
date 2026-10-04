@@ -72,11 +72,13 @@ let sessionCampaign: string | null = null
  * la dernière choisie est proposée en premier.
  */
 export async function chooseCampaign(ask: ReturnType<typeof useChoiceDialog>["ask"], purpose: "chat" | "inventory") {
-  if (sessionCampaign) return sessionCampaign
+  // Le canal « Général » et le bac à sable n'ont pas d'inventaire : ils ne servent qu'au chat.
+  const chatOnly = (id: string) => id === "bac-a-sable" || id === "general"
+  if (sessionCampaign && !(purpose === "inventory" && chatOnly(sessionCampaign))) return sessionCampaign
   const response = await fetch("/api/campaign-chat?campaigns=1", { cache: "no-store" })
   const payload = (await response.json().catch(() => ({}))) as { campaigns?: Array<{ id: string; name: string }> }
   let campaigns = payload.campaigns ?? []
-  if (purpose === "inventory") campaigns = campaigns.filter((campaign) => campaign.id !== "bac-a-sable")
+  if (purpose === "inventory") campaigns = campaigns.filter((campaign) => !chatOnly(campaign.id))
   let remembered = ""
   try { remembered = window.localStorage.getItem(campaignMemory) ?? "" } catch { /* stockage indisponible */ }
   campaigns = [...campaigns].sort((left, right) => Number(right.id === remembered) - Number(left.id === remembered))

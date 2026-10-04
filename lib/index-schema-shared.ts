@@ -103,7 +103,7 @@ export const creatableKinds: IndexColumnKind[] = ["rich", "number", "checkbox", 
 export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, place, suppression." }
 
 /** Ce qu'on peut toujours changer, même sur une colonne verrouillée : son affichage. */
-export const displayOnlyAllowed = "L’affichage seulement : description, « Masquée », style imposé, emplacement (tableau / formulaire), place dans le tableau."
+export const displayOnlyAllowed = "L’affichage seulement : description, « Masquée », style imposé, place dans le tableau."
 
 export function lockedPolicy(reasons: string[], allowed = displayOnlyAllowed, partial: Partial<Pick<ColumnPolicy, "rename" | "type" | "remove">> = {}): ColumnPolicy {
   return { rename: false, type: false, remove: false, ...partial, reasons, allowed }
@@ -221,4 +221,62 @@ export function objectColumnPolicy(header: string): ColumnPolicy {
     "Le type d’affichage (la valeur reste le même texte dans Sheets), la description et l’option « Masquée ».",
     { type: true },
   )
+}
+
+/**
+ * L'orthographe retenue des colonnes d'objets lues sous plusieurs noms : l'inventaire, les
+ * boutiques et la table lisent les deux, renommer de l'une à l'autre ne perd donc rien.
+ * Clé : le nom sans accents ni casse.
+ */
+const objectHeaderSpellings: Record<string, string> = {
+  "rarete principal": "Rareté principale",
+  "rarete principale": "Rareté principale",
+  "rarete secondaire": "Rareté secondaire",
+  "cout": "Prix",
+  "prix": "Prix",
+  "effet": "Effets",
+  "effets": "Effets",
+  "sous-type": "Sous-type",
+  "sous type": "Sous-type",
+  "description": "Description",
+  "materiau": "Matériaux",
+  "materiaux": "Matériaux",
+  "icone": "Icône",
+  "nombre max": "Nombre max",
+  "competence": "Compétence",
+  "emplacement principal": "Emplacement principal",
+  "emplacement secondaire": "Emplacement secondaire",
+}
+
+/** Le nom bien écrit d'une colonne d'objets (« Rareté principal » → « Rareté principale », « Cout » → « Prix »). */
+export function canonicalObjectHeader(header: string) {
+  return objectHeaderSpellings[foldName(header)] ?? header.replace(/\s+/g, " ").trim()
+}
+
+/** Renommer `from` en `to` ne fait que corriger l'orthographe d'une colonne d'objets lue sous les deux noms. */
+export function isObjectSpellingFix(from: string, to: string) {
+  const canonical = canonicalObjectHeader(from)
+  return foldName(canonical) === foldName(canonicalObjectHeader(to)) && canonical.toLocaleLowerCase("fr") === to.replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
+}
+
+/** `item` : la colonne de l'onglet (absente : à ajouter) ; `spec` absent : la colonne garde le sien. */
+export type AlignedColumn<T> = { item?: T; header: string; spec?: IndexColumnSpec }
+
+/**
+ * Les colonnes d'un onglet alignées sur celles d'un onglet de référence : mêmes noms (bien
+ * écrits), mêmes types et styles, même ordre. Une colonne est reconnue sous un autre nom de
+ * la même colonne (« Cout » pour « Prix »). Celles qui manquent sont ajoutées ; celles que la
+ * référence n'a pas restent, à la fin, telles quelles : rien n'est supprimé.
+ */
+export function alignColumns<T>(reference: Array<{ header: string; spec: IndexColumnSpec }>, target: T[], headerOf: (item: T) => string, canonical: (header: string) => string = canonicalObjectHeader): AlignedColumn<T>[] {
+  const used = new Set<T>()
+  const key = (header: string) => foldName(canonical(header))
+  const aligned: AlignedColumn<T>[] = reference.map((column) => {
+    const header = canonical(column.header)
+    const match = target.find((item) => !used.has(item) && foldName(headerOf(item)) === foldName(column.header))
+      ?? target.find((item) => !used.has(item) && key(headerOf(item)) === key(column.header))
+    if (match) used.add(match)
+    return { ...(match ? { item: match } : {}), header, spec: column.spec }
+  })
+  return [...aligned, ...target.filter((item) => !used.has(item)).map((item): AlignedColumn<T> => ({ item, header: headerOf(item) }))]
 }

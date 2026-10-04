@@ -14,7 +14,7 @@ import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
-import { tabLayout } from "@/lib/index-layouts"
+import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -192,7 +192,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const { ask, view: choiceView } = useChoiceDialog()
   // Le hasard des formules reste le même jusqu'à « Actualiser ».
   const [seed, setSeed] = useState(() => `${indexKey}:${Date.now()}`)
-  const [sheetPending, setSheetPending] = useState(false)
   const [sheetError, setSheetError] = useState("")
   const [guideOpen, setGuideOpen] = useState(false)
   // Un lien « ?q=… » (bouton « Ouvrir la ligne liée ») ouvre l'index filtré sur ce nom.
@@ -407,7 +406,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     return mutateRows(action, rowKeys.flatMap((key) => { const target = rowTargetOf(key); return target ? [target] : [] }), label, extra)
   }
 
-  async function addRow(targetTab: string, values: string[], headers: string[]) {
+  /** Ajoute une ligne ; `rethrow` : l'erreur est aussi renvoyée (la ligne fantôme garde alors le nom tapé). */
+  async function addRow(targetTab: string, values: string[], headers: string[], rethrow = false) {
     setPending("add"); setError("")
     try {
       // Les colonnes que suivent les valeurs : le serveur les range par nom.
@@ -416,8 +416,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       setCreating(false)
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
+      if (rethrow) throw reason
+    } finally {
+      setPending("")
     }
-    setPending("")
   }
 
   async function refresh() {
@@ -528,8 +530,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [entity, router])
 
   // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
-  // Les colonnes masquées restent dans la liste : la grille les cache et les montre d'un clic.
-  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => isGridSpec(column.spec)).map((column) => column.header) : [], [data, table])
+  // Ailleurs, toutes les colonnes sont dans la liste : la grille cache les masquées (et les
+  // anciennes « Formulaire seulement ») et les montre d'un clic.
+  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => nameOpensDetails ? isGridSpec(column.spec) : column.spec.kind !== "archived").map((column) => column.header) : [], [data, nameOpensDetails, table])
 
   // Recherche, Agrégat, formules et tirages lisent d'autres index : chargés une fois pour la page.
   const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
@@ -906,10 +909,19 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // pour les créatures, ce qui se remplit dans leur fiche.
   const formFields: IndexFormField[] = formTable ? (data?.columns[formTable.tabName] ?? [])
     .flatMap(({ header, spec }) => {
-      if (!isSheetSpec(spec) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
+      if (!(isSheetSpec(spec) || layoutPlaces(tabLayout(settings.layouts, formTable.tabName, "form"), header)) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
       if (nameOpensDetails && (!isGridSpec(spec) || foldName(header) === "extension")) return []
       return [{ key: header, label: header, spec, long: isLongColumn(header) }]
     }) : []
+
+  // « Ajouter » au bas du tableau : la ligne naît dans le tableau, son nom tapé dans sa case.
+  // Depuis un onglet de rangement, elle reçoit sa valeur (elle y apparaît aussitôt).
+  const nameHeader = table ? table.headers[nameColumnOf(table.headers)] : undefined
+  const appendNamed = formTable && nameHeader && nameColumnOf(formTable.headers) >= 0 ? {
+    nameColumn: nameHeader,
+    placeholder: `Nom (${formDefinition.itemLabel})…`,
+    add: (name: string) => addRow(formTable.tabName, formTable.headers.map((header, index) => index === nameColumnOf(formTable.headers) ? name : activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : ""), formTable.headers, true),
+  } : undefined
 
   /** Le texte enregistré d'une case (la fiche relit la ligne telle que Sheets l'a renvoyée). */
   const savedCell = (found: { table: WorldIndexTable; row: WorldIndexRow }, header: string) => {
@@ -919,9 +931,13 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }
 
   // La fiche d'une ligne (index sans fiche dédiée) : tous ses champs du formulaire.
+  // Une colonne hors fiche (ancien « Tableau seulement ») y vient quand sa mise en page la place.
+  const sheetLayout = detailsFound ? tabLayout(settings.layouts, detailsFound.table.tabName, "form") : null
+  /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
   const sheetFields = detailsFound && !nameOpensDetails ? (data?.columns[detailsFound.table.tabName] ?? [])
-    .filter((column) => isSheetSpec(column.spec) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
-    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: savedCell(detailsFound, column.header), long: isLongColumn(column.header) })) : []
+    .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
+    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) })) : []
+  /* eslint-enable react-hooks/refs */
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
     ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details, header) } : {}),
     formula: (spec) => engine.formula(details, header, spec),
@@ -933,27 +949,28 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     tabNames: sortTabs.map((entry) => entry.value),
   }
 
-  async function saveSheet(changes: Record<string, string>) {
-    if (details === null) return
-    setSheetPending(true); setSheetError("")
+  /** Les champs d'une ligne, enregistrés d'eux-mêmes par sa fiche (la ligne est donnée : on a pu passer à une autre). */
+  async function saveSheet(rowKey: string, changes: Record<string, string>) {
+    setSheetError("")
     // La ligne de la fiche, désignée par son identifiant pour chacun de ses champs.
-    const target = rowTargetOf(details)
-    const label = detailsFound ? detailsFound.table.headers[labelColumnIndex(detailsFound.table.headers)] ?? "" : ""
+    const target = rowTargetOf(rowKey)
+    const found = locate(rowKey)
+    const label = found ? found.table.headers[labelColumnIndex(found.table.headers)] ?? "" : ""
     try {
       // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs
       // effets. Le premier champ refusé (changé ailleurs entre-temps) arrête la suite.
       for (const [header, value] of Object.entries(changes)) {
-        await commitCell(details, header, value, { row: target ?? undefined, rethrow: true })
+        await commitCell(rowKey, header, value, { row: target ?? undefined, rethrow: true })
         if (target && foldName(header) === foldName(label)) target.name = value
       }
     } catch (reason) {
       setSheetError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")
       // La fiche garde ce qui a été saisi.
       throw reason
-    } finally {
-      setSheetPending(false)
     }
   }
+  // Précédente, « Aller à… », Suivante : les lignes du tableau, dans l'ordre affiché.
+  const sheetNavigation = { rows: displayedRows.map((row) => row.key), labelOf: nameOf, onGo: (rowKey: string) => { setSheetError(""); setDetails(rowKey) } }
 
   // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
   const weightColumns = table ? (data?.columns[table.tabName] ?? []).filter((column) => ["number", "gauge", "formula", "rollup"].includes(column.spec.kind)).map((column) => column.header) : []
@@ -1102,6 +1119,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
           } : entity && !entity.rowCommands ? { append: startAdding } : {
             append: startAdding,
+            appendNamed,
             insertRows: (rowKey, count) => void mutate("insert", [rowKey], "insert", { count }),
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
@@ -1143,16 +1161,16 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         }}
       />}
 
-      {!nameOpensDetails && detailsFound && <IndexRowSheet
-        key={`${details}`}
+      {!nameOpensDetails && detailsFound && details !== null && <IndexRowSheet
         open
+        rowKey={details}
         title={savedCell(detailsFound, detailsFound.table.headers[nameColumnOf(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
-        layout={tabLayout(settings.layouts, detailsFound.table.tabName, "form")}
+        layout={sheetLayout}
         rowFor={sheetRow}
-        pending={sheetPending}
         error={sheetError}
+        navigation={sheetNavigation}
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError("") }}
       />}

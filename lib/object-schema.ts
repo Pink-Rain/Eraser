@@ -18,7 +18,7 @@ import {
 } from "@/lib/google-sheets"
 import { foldName, isIdHeader, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
-import { columnMoves, headerProblem, isDisplayOnlyChange, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import type { IndexTrashItem } from "@/lib/world-indexes"
 import { worldRelationTargets } from "@/lib/world-indexes"
 
@@ -98,7 +98,8 @@ function locked(allowed: boolean, reasons: string[]) {
 }
 
 export async function applyObjectSchemaOperations(fileId: string, operations: SchemaOperation[]) {
-  const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId)
+  // Des copies : un renommage met à jour leurs en-têtes sans toucher à la liste gardée en mémoire.
+  const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId).map((table) => ({ ...table, headers: [...table.headers] }))
   if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
   const schema = [...await readSchema(fileId, { refresh: true })]
   const now = new Date().toISOString()
@@ -163,7 +164,8 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     if (column < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
     const policy = objectColumnPolicy(operation.header)
     if (operation.op === "rename") {
-      locked(policy.rename || Boolean(operation.force), policy.reasons)
+      // Corriger l'orthographe d'une colonne lue sous ses deux noms (« Cout » → « Prix ») ne perd rien.
+      locked(policy.rename || Boolean(operation.force) || isObjectSpellingFix(operation.header, operation.to), policy.reasons)
       // La colonne par son nom dans la ligne 1 relue à l'instant : l'ordre a pu changer depuis la
       // dernière lecture (ailleurs, ou par une opération précédente de cette liste).
       const firstRow = await freshFirstRow(fileId, table.tabName)
@@ -179,6 +181,8 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       await updateRange(fileId, sheetTabRange(table.tabName, `${cell}:${cell}`), [[to]], { valueInputOption: "RAW" })
       const entry = findEntry(schema, table.tabName, operation.header)
       if (entry) entry.column = to
+      // Les opérations suivantes (son type, par exemple) la désignent par son nouveau nom.
+      table.headers = table.headers.map((header, index) => index === column ? to : header)
       continue
     }
     if (operation.op === "spec") {

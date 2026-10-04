@@ -10,7 +10,7 @@ import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
 import { identityUidsForUser } from "@/lib/identity-links"
-import { chatAccountsForCampaign, chatAuthorName } from "@/lib/chat-accounts"
+import { chatAccountsForCampaign, chatAuthorName, listDirectoryAccounts } from "@/lib/chat-accounts"
 import { ownedBy } from "@/lib/ownership"
 import { sheetNumber } from "@/lib/google-sheet-values"
 
@@ -177,26 +177,40 @@ export function chatRoomId(pageLinked: string) {
   return `chat:${pageLinked}`
 }
 
+/**
+ * Le canal du chat sans campagne : ouvert à tous les comptes, choisi d'office à
+ * l'ouverture d'Eraser. Ce n'est pas une page de tabletop : il n'ouvre rien d'autre.
+ */
+export const GENERAL_CHAT_ID = "general"
+export const GENERAL_CHAT_NAME = "Général"
+
+/** Les canaux du chat d'un compte : « Général » d'abord, puis ses campagnes (et le bac à sable d'un MJ). */
 export async function listChatCampaignsForAccount(account: AuthorizedUser) {
-  if (canManageTabletop(account)) return listTabletopSourcePages(account)
+  const general = { id: GENERAL_CHAT_ID, name: GENERAL_CHAT_NAME }
+  if (canManageTabletop(account)) return [general, ...await listTabletopSourcePages(account)]
   const characters = await listCharactersForUser(account.uid)
   const seen = new Map<string, string>()
   for (const character of characters) for (const campaign of character.campaigns) seen.set(campaign.id, campaign.name)
-  return [...seen.entries()].map(([id, name]) => ({ id, name }))
+  return [general, ...[...seen.entries()].map(([id, name]) => ({ id, name }))]
 }
 
 export async function getChatBootstrapForAccount(account: AuthorizedUser, pageLinked: string) {
-  if (!await canAccessTabletopPage(account, pageLinked)) return null
+  const general = pageLinked === GENERAL_CHAT_ID
+  if (!general && !await canAccessTabletopPage(account, pageLinked)) return null
   const roomId = chatRoomId(pageLinked)
   const [allActivities, members, isManager, identities] = await Promise.all([
     listTabletopActivities(roomId),
-    pageLinked === "bac-a-sable" ? Promise.resolve([]) : listCampaignMembers(pageLinked),
-    canManageTabletopPage(account, pageLinked),
+    general || pageLinked === "bac-a-sable" ? Promise.resolve([]) : listCampaignMembers(pageLinked),
+    // Dans « Général », les messages « MJ seulement » vont aux MJ et administrateurs.
+    general ? Promise.resolve(canManageTabletop(account)) : canManageTabletopPage(account, pageLinked),
     identityUidsForUser(account.uid),
   ])
   const ownedCharacterIds = new Set(members.filter((member) => ownedBy(member.ownerUid, identities)).map((member) => member.id))
   const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
-  const accounts = await chatAccountsForCampaign(account, pageLinked).catch(() => [])
+  // « Général » : tous les comptes de l'annuaire peuvent recevoir un message (/joueur).
+  const accounts = general
+    ? await listDirectoryAccounts(account).then((directory) => [{ uid: account.uid, name: chatAuthorName(account) }, ...directory.map((entry) => ({ uid: entry.uid, name: entry.name }))]).catch(() => [])
+    : await chatAccountsForCampaign(account, pageLinked).catch(() => [])
   return {
     roomId,
     activities,

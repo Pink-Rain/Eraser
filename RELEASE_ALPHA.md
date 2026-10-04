@@ -1,79 +1,57 @@
-# Eraser 0.1.1-alpha.139 — Feuille par feuille : chaque écriture à la bonne place
+# Eraser 0.1.1-alpha.140 — Fiches enregistrées d'elles-mêmes, presets de mise en page, canal « Général »
 
-Cette version arrive par la mise à jour sans réinstallation. Elle corrige les causes des
-dégâts constatés dans les feuilles : lignes écrites dans la mauvaise colonne, lignes
-voisines modifiées ou supprimées, cases vidées par une copie dépassée. Elle ne modifie
-aucune donnée existante : ce qui est déjà abîmé se répare à la main, une fois cette
-version installée sur tous les PC.
+Cette version arrive par la mise à jour sans réinstallation.
 
-## Partout
+## La fiche d'une ligne (moteur des index)
 
-- **Les lignes ajoutées tombent toujours en colonne A**, sous la dernière ligne remplie.
-  Google devinait lui-même où commençait le « tableau » : 18 pions et 183 magasins ont été
-  écrits en colonne J ou K, invisibles pour Eraser.
-- Un ajout ou une suppression de ligne n'est plus rejoué après une erreur de Google
-  (ligne ajoutée deux fois, ligne suivante supprimée).
-- Le texte saisi reste du texte : « - se méfie de lui » ou « =A1 » ne deviennent plus des
-  formules (« #ERROR! »).
-- Les nombres d'une feuille réglée en français (« 1,25 ») sont lus correctement.
-- Les colonnes lues ensemble restent alignées : la vie, le joueur ou la classe d'un
-  personnage ne sont plus attribués à son voisin.
-- Une colonne « ID », « Joueur », « Nom personnage », « MJ » ou « Nom de la campagne »
-  renommée dans Sheets n'est plus recréée vide à droite.
-- Un onglet renommé à la main n'est plus remplacé par un onglet vide, et une feuille déjà
-  présente dans le Drive n'est jamais recréée sous le même nom.
+- **Enregistrement automatique** : chaque champ s'enregistre de lui-même, peu après la
+  frappe. Plus de boutons « Fermer » ni « Enregistrer » ; un petit indicateur en bas à droite
+  dit « Enregistrement… » puis « Enregistré ». Fermer la fiche (croix, Échap, clic à côté)
+  enregistre ce qui restait.
+- **Précédente · Aller à… · Suivante**, au milieu en bas : on passe d'une ligne à l'autre
+  sans quitter la fiche, dans l'ordre du tableau (tri et recherche compris). « Aller à… »
+  ouvre une recherche parmi les lignes. Au clavier : Alt + ← et Alt + →.
+- **La barre de mise en forme reste toujours affichée** : elle n'apparaît plus au clic, ce
+  qui décalait le champ pendant qu'on visait.
 
-## Campagnes, PNJ, magasins, sessions, tabletop
+## Ajouter une ligne depuis le bas du tableau
 
-- Modifier une campagne n'écrit que ce qui change : un MJ ajouté ailleurs n'est plus
-  effacé. Créer deux fois avec le même formulaire ne fait qu'une campagne.
-- Seule une ligne entièrement vide est réutilisée dans « Magasins » ; ajouter à la session
-  ne réécrit plus tout le magasin, et un magasin renommé depuis cette fenêtre garde son
-  nouveau nom.
-- Déplacer un PNJ ne perd plus 10 colonnes ; copier reprend toute la ligne (décimales et
-  cases à cocher comprises) ; la vie, le portrait ou l'ajout à la session n'écrivent que
-  leur case. Un PNJ supprimé ailleurs n'est plus recréé.
-- Sessions : deux ajouts simultanés restent ; une liste illisible n'est plus remplacée par
-  une liste vide.
-- Tabletop : seule la case qui change est écrite (pion, carte, vie d'un personnage ou d'un
-  PNJ).
-- To-do et vocabulaire : la bonne ligne, relue juste avant d'écrire ou de supprimer.
-- Fouilles : une lecture ratée n'efface plus les tirages enregistrés.
+- « Ajouter » en bas du tableau crée la ligne **dans le tableau même** : sa case de nom
+  s'ouvre, prête à écrire. Entrée enregistre la ligne et en ouvre une autre (pour en
+  ajouter plusieurs d'affilée) ; Échap annule. Le bouton « Ajouter » du haut garde son
+  formulaire. Les personnages et campagnes gardent leur page de création.
 
-## Fiches et index des personnages
+## Réglages des colonnes (« Modifier »)
 
-- La fiche est relue et son ID vérifié avant chaque écriture ; une colonne déplacée ou
-  insérée ailleurs fait refuser l'enregistrement au lieu d'écrire dans la voisine.
-- Les cases « Sorts de classe choisis » et « Onglets personnalisés » modifiées ailleurs ne
-  sont plus écrasées. Un tel conflit n'abandonne plus que ces cases : les autres
-  modifications en cours sont enregistrées, et l'avertissement nomme ce qui manque.
-- « Ajouter une copie séparée » copie la fiche avec ses formules, et seulement si demandé ;
-  une copie qui échoue en route ne laisse plus de fiche vide.
-- Index des personnages : importer un portrait marche de nouveau, depuis la colonne comme
-  depuis la fiche de ligne.
+- **« Où s'affiche la colonne » est retiré.** Le tableau ne connaît plus que « Masquée »
+  (montrée d'un clic par « Colonnes masquées ») ; les anciennes colonnes « Formulaire
+  seulement » comptent comme masquées. La fiche et le survol se règlent dans leur mise en
+  page, où **toutes** les colonnes, masquées comprises, peuvent être placées.
+- **Presets de mise en page** pour la fiche et pour le survol : « Enregistrer en preset »,
+  puis l'appliquer à n'importe quel onglet, de n'importe quel index. Et **« Copier vers
+  d'autres onglets… »** donne d'un coup la mise en page affichée aux onglets cochés. Rien
+  n'est écrit avant « Enregistrer ».
 
-## Classes et sorts, objets et inventaires, index
+## Index des objets : mêmes colonnes partout
 
-- Sorts : chaque modification, liaison, suppression ou fusion retrouve le sort par son ID
-  et n'écrit que ce qui a changé ; plus jamais d'ID « LIGNE-… » écrit dans la feuille. Les
-  ID automatiques ne sont donnés que dans une vraie colonne « ID ».
-- Inventaires : une modification à la fois, relue juste avant ; plus de contenants en
-  double ; un déplacement est écrit d'un seul coup.
-- Index des objets : chaque ligne par son ID, chaque colonne par son en-tête. Une ligne
-  sans ID ni nom se remplit et se supprime de nouveau ; « Modifier » peut nommer une
-  colonne sans en-tête.
-- Index du monde et index personnalisés : chaque écriture vise la ligne et la case vues,
-  relues juste avant. Mettre un index à la corbeille n'écrit plus que « Supprimé le ».
-- Le script Google des images de classes n'est plus recréé (57 projets en double).
+- Nouveau bouton, dans « Modifier », sous la liste des onglets : **« Aligner les autres
+  onglets sur « Armes » »** (ou sur l'onglet choisi). Tous les onglets prennent les colonnes
+  de la référence : mêmes noms, mêmes types, mêmes styles imposés, même ordre. Les fautes
+  sont corrigées au passage : « Rareté principal » → « Rareté principale », « Cout » →
+  « Prix », « Effet » → « Effets », « Sous-Type » → « Sous-type ».
+- Ces renommages sont permis même sur les colonnes verrouillées : l'inventaire, les
+  boutiques et la table lisent déjà les deux orthographes, rien n'est perdu. Rien n'est
+  supprimé : une colonne propre à un onglet reste, à la fin. Le résumé montre chaque
+  changement avant « Enregistrer », et tout se défait depuis « Modifier ».
 
-## Visuels
+## Campagnes
 
-- Portraits, bannières, cartes et icônes restent où ils sont (« Images classes ») : Eraser
-  les cherche aussi dans leur ancien dossier. Rien à déplacer.
+- « Ajouter un personnage » ne propose plus les lignes illisibles (un identifiant à la
+  place du nom) : d'anciennes lignes mal lues, absentes de la feuille des personnages.
+  Rien n'est effacé.
 
-## Nettoyage
+## Chat
 
-- Retirés : routes et fonctions sans appelant (réinitialisation des classes à des lignes
-  fixes, synchronisation manuelle des images, réécriture d'une ligne d'objet entière,
-  ligne témoin laissée par le diagnostic d'écriture, une trentaine de fonctions et
-  constantes que rien n'utilisait).
+- Nouveau canal **« Général »**, sans campagne, ouvert à tous les comptes. C'est le canal du
+  chat à l'ouverture d'Eraser ; aller sur la page d'une campagne passe toujours sur son
+  canal, et la liste permet de revenir à « Général ».

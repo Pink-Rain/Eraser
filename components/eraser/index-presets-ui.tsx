@@ -1,15 +1,17 @@
 "use client"
 
 import { useState } from "react"
-import { Bookmark, BookmarkPlus, Check, LoaderCircle, Pencil, Replace, Settings2, Trash2 } from "lucide-react"
+import { Bookmark, BookmarkPlus, Check, Copy, LoaderCircle, Pencil, Replace, Settings2, Trash2 } from "lucide-react"
 
 import { useIndexSettings } from "@/components/eraser/index-views"
 import { Button } from "@/components/ui/button"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { indexColumnKinds } from "@/lib/index-columns"
 import { presetColumnsOf, type ColumnPreset, type PresetColumn } from "@/lib/index-presets"
+import type { IndexLayout, LayoutKind, LayoutPreset } from "@/lib/index-layouts"
 
 /** Les presets d'onglets, communs à tous les index. */
 export function useColumnPresets() {
@@ -111,6 +113,134 @@ function ManagePresetsDialog({ tabName, columns, presets, onClose, onSave, onDel
               <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => { if (window.confirm(`Supprimer le preset « ${preset.name} » ?`)) void run(`delete:${preset.id}`, () => onDelete(preset.id)) }} title="Supprimer" aria-label={`Supprimer ${preset.name}`}>{pending === `delete:${preset.id}` ? <LoaderCircle className="animate-spin" /> : <Trash2 />}</Button>
             </div>}
           <p className="text-[11px] leading-5 text-muted-foreground">{preset.columns.length} colonne{preset.columns.length > 1 ? "s" : ""} : {columnsSummary(preset.columns)}</p>
+        </article>)}
+      </div>
+      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+      <div className="flex justify-end"><Button type="button" variant="ghost" onClick={onClose}>Fermer</Button></div>
+    </DialogContent>
+  </Dialog>
+}
+
+// ---------------------------------------------------------------------------
+// Presets de mise en page (fiche et survol)
+// ---------------------------------------------------------------------------
+
+/**
+ * La barre des presets de mise en page, au-dessus de la mise en page d'un onglet :
+ * appliquer un preset, enregistrer la mise en page en preset, la copier d'un coup vers
+ * d'autres onglets. Rien n'est écrit avant « Enregistrer » de la fenêtre.
+ */
+export function LayoutPresetBar({ kind, tabName, layout, otherTabs, disabled, onApply, onCopyTo }: {
+  kind: LayoutKind
+  tabName: string
+  layout: IndexLayout | null
+  otherTabs: Array<{ id: string; name: string }>
+  disabled: boolean
+  onApply: (layout: IndexLayout) => void
+  onCopyTo: (tabIds: string[]) => void
+}) {
+  const { layoutPresets, saveLayoutPreset, deleteLayoutPreset } = useIndexSettings("")
+  const presets = layoutPresets.filter((preset) => preset.kind === kind)
+  const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
+  const what = kind === "form" ? "la fiche" : "le survol"
+  return <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed bg-background/40 px-2 py-1.5">
+    <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground"><Bookmark className="size-3" />Presets</span>
+    <NativeSelect value="" disabled={disabled || !presets.length} onChange={(event) => { const preset = presets.find((candidate) => candidate.id === event.target.value); if (preset) onApply(preset.layout) }} className="h-7 w-auto min-w-48 py-0 text-xs" aria-label={`Appliquer un preset à ${what}`}>
+      <NativeSelectOption value="">{presets.length ? `Appliquer un preset à ${what}…` : "Aucun preset enregistré"}</NativeSelectOption>
+      {presets.map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>{preset.name}</NativeSelectOption>)}
+    </NativeSelect>
+    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" disabled={disabled || !layout} onClick={() => setDialog("save")} title={layout ? `Garder ${what} de « ${tabName} » pour l’appliquer ailleurs` : "Personnalise d’abord la mise en page"}><BookmarkPlus />Enregistrer en preset</Button>
+    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={`Donner ${what} de « ${tabName} » à d’autres onglets de cet index`}><Copy />Copier vers d’autres onglets…</Button>
+    {presets.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDialog("manage")}><Settings2 />Gérer</Button>}
+    {dialog === "save" && layout && <SaveLayoutPresetDialog kind={kind} tabName={tabName} layout={layout} presets={presets} onClose={() => setDialog(null)} onSave={saveLayoutPreset} />}
+    {dialog === "copy" && <CopyLayoutDialog what={what} tabName={tabName} empty={!layout} tabs={otherTabs} onClose={() => setDialog(null)} onCopy={(ids) => { onCopyTo(ids); setDialog(null) }} />}
+    {dialog === "manage" && <ManageLayoutPresetsDialog presets={presets} what={what} onClose={() => setDialog(null)} onSave={saveLayoutPreset} onDelete={deleteLayoutPreset} />}
+  </div>
+}
+
+type SaveLayoutPreset = (preset: { id?: string; name: string; kind: LayoutKind; layout: IndexLayout }) => Promise<string>
+
+function SaveLayoutPresetDialog({ kind, tabName, layout, presets, onClose, onSave }: { kind: LayoutKind; tabName: string; layout: IndexLayout; presets: LayoutPreset[]; onClose: () => void; onSave: SaveLayoutPreset }) {
+  const [name, setName] = useState(tabName)
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState("")
+  const same = presets.find((preset) => preset.name.toLocaleLowerCase("fr") === name.trim().toLocaleLowerCase("fr"))
+  async function save() {
+    setPending(true); setError("")
+    try { await onSave({ id: same?.id, name, kind, layout }); onClose() } catch (caught) { setError(caught instanceof Error ? caught.message : "Le preset n’a pas pu être enregistré.") }
+    setPending(false)
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose() }}>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><BookmarkPlus className="size-4 text-primary" />Enregistrer en preset</DialogTitle>
+        <DialogDescription>{kind === "form" ? "La mise en page de la fiche" : "Le survol"} de « {tabName} », pour l’appliquer à d’autres onglets, dans n’importe quel index. Les colonnes absentes d’un onglet y sont simplement ignorées.</DialogDescription>
+      </DialogHeader>
+      <label className="grid gap-1.5 text-sm font-medium">Nom du preset<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} autoFocus onKeyDown={(event) => { if (event.key === "Enter" && name.trim() && !pending) void save() }} /></label>
+      {same && <p className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">Un preset « {same.name} » existe déjà : il sera remplacé par celui-ci.</p>}
+      {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+      <div className="flex justify-end gap-2">
+        <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
+        <Button type="button" disabled={pending || !name.trim()} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}{same ? "Remplacer" : "Enregistrer"}</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+}
+
+function CopyLayoutDialog({ what, tabName, empty, tabs, onClose, onCopy }: { what: string; tabName: string; empty: boolean; tabs: Array<{ id: string; name: string }>; onClose: () => void; onCopy: (ids: string[]) => void }) {
+  const [chosen, setChosen] = useState<Set<string>>(() => new Set(tabs.map((tab) => tab.id)))
+  const toggle = (id: string) => setChosen((current) => { const next = new Set(current); if (next.has(id)) next.delete(id); else next.add(id); return next })
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><Copy className="size-4 text-primary" />Copier vers d’autres onglets</DialogTitle>
+        <DialogDescription>{empty ? `Les onglets cochés reprennent ${what} automatique, comme « ${tabName} ».` : `Les onglets cochés reçoivent ${what} de « ${tabName} ».`} Rien n’est écrit avant « Enregistrer ».</DialogDescription>
+      </DialogHeader>
+      <div className="grid max-h-72 gap-1 overflow-y-auto rounded-lg border p-2">
+        {tabs.map((tab) => <label key={tab.id} className="flex items-center gap-2 rounded-md px-2 py-1 text-sm hover:bg-muted/60"><Checkbox checked={chosen.has(tab.id)} onCheckedChange={() => toggle(tab.id)} />{tab.name}</label>)}
+      </div>
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <span className="flex gap-1">
+          <Button type="button" variant="ghost" size="sm" onClick={() => setChosen(new Set(tabs.map((tab) => tab.id)))}>Tout cocher</Button>
+          <Button type="button" variant="ghost" size="sm" onClick={() => setChosen(new Set())}>Tout décocher</Button>
+        </span>
+        <span className="flex gap-2">
+          <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
+          <Button type="button" disabled={!chosen.size} onClick={() => onCopy([...chosen])}><Copy />Copier vers {chosen.size} onglet{chosen.size > 1 ? "s" : ""}</Button>
+        </span>
+      </div>
+    </DialogContent>
+  </Dialog>
+}
+
+function ManageLayoutPresetsDialog({ presets, what, onClose, onSave, onDelete }: { presets: LayoutPreset[]; what: string; onClose: () => void; onSave: SaveLayoutPreset; onDelete: (id: string) => Promise<void> }) {
+  const [editing, setEditing] = useState<string | null>(null)
+  const [draft, setDraft] = useState("")
+  const [pending, setPending] = useState("")
+  const [error, setError] = useState("")
+  async function run(key: string, action: () => Promise<unknown>) {
+    setPending(key); setError("")
+    try { await action() } catch (caught) { setError(caught instanceof Error ? caught.message : "Le preset n’a pas pu être modifié.") }
+    setPending("")
+  }
+  return <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose() }}>
+    <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-lg">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><Bookmark className="size-4 text-primary" />Presets de mise en page</DialogTitle>
+        <DialogDescription>Les presets pour {what}, communs à tous les index. Supprimer un preset ne change aucun onglet.</DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-2">
+        {presets.map((preset) => <article key={preset.id} className="flex flex-wrap items-center gap-2 rounded-xl border bg-card/60 p-2.5">
+          {editing === preset.id
+            ? <>
+              <Input value={draft} onChange={(event) => setDraft(event.target.value)} maxLength={60} aria-label="Nom du preset" className="h-8 min-w-0 flex-1" autoFocus />
+              <Button type="button" size="sm" disabled={Boolean(pending) || !draft.trim()} onClick={() => void run(`edit:${preset.id}`, async () => { await onSave({ id: preset.id, name: draft, kind: preset.kind, layout: preset.layout }); setEditing(null) })}>{pending === `edit:${preset.id}` ? <LoaderCircle className="animate-spin" /> : <Check />}OK</Button>
+            </>
+            : <>
+              <span className="min-w-0 flex-1 truncate font-semibold">{preset.name}</span>
+              <Button type="button" variant="ghost" size="icon-sm" onClick={() => { setEditing(preset.id); setDraft(preset.name) }} title="Renommer" aria-label={`Renommer ${preset.name}`}><Pencil /></Button>
+              <Button type="button" variant="ghost" size="icon-sm" className="text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => { if (window.confirm(`Supprimer le preset « ${preset.name} » ?`)) void run(`delete:${preset.id}`, () => onDelete(preset.id)) }} title="Supprimer" aria-label={`Supprimer ${preset.name}`}>{pending === `delete:${preset.id}` ? <LoaderCircle className="animate-spin" /> : <Trash2 />}</Button>
+            </>}
         </article>)}
       </div>
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}

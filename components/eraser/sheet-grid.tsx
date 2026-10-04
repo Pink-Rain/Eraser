@@ -2,7 +2,7 @@
 
 import { createContext, memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { hasRememberedScroll, rememberScroll } from "@/lib/scroll-memory"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, LoaderCircle, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -93,6 +93,12 @@ export type SheetGridSort = { column: string; direction: "asc" | "desc" } | null
 export type SheetGridRowCommands = {
   /** La ligne fantôme au bas du tableau. */
   append?: () => void
+  /**
+   * La ligne fantôme crée la ligne dans le tableau même : sa case de nom (`nameColumn`)
+   * s'ouvre à la saisie, et Entrée enregistre la ligne avec ce nom (sans formulaire).
+   * Prend le pas sur `append`.
+   */
+  appendNamed?: { nameColumn: string; placeholder?: string; add: (name: string) => Promise<void> | void }
   /** Insertion en place, au-dessus de la ligne. */
   insertBefore?: (rowKey: string) => void
   /** « Ajouter une ligne » et « Ajouter plusieurs lignes » : les lignes vides arrivent sous celle-ci. */
@@ -309,6 +315,80 @@ const SheetGridRowView = memo(function SheetGridRowView({
   </tr>
 })
 
+/**
+ * Une nouvelle ligne, au bas du tableau, dont on tape le nom dans sa case : Entrée la crée
+ * (et en ouvre une autre, pour en ajouter plusieurs d'affilée), Échap ou un clic ailleurs
+ * sans rien taper la referme.
+ */
+function NewRowDraft({ columns, firstKey, settings, disabled, onDone }: {
+  columns: SheetGridColumn[]
+  firstKey: string | undefined
+  settings: NonNullable<SheetGridRowCommands["appendNamed"]>
+  disabled: boolean
+  onDone: () => void
+}) {
+  const [name, setName] = useState("")
+  const [pending, setPending] = useState(false)
+  // Lu par la sortie du champ, qui suit aussitôt Entrée : la ligne n'est créée qu'une fois.
+  const busy = useRef(false)
+  const input = useRef<HTMLInputElement>(null)
+  // Après une ligne créée, le curseur revient dans la case dès que le tableau est de nouveau actif.
+  const refocus = useRef(false)
+  useEffect(() => {
+    if (!refocus.current || pending || disabled) return
+    refocus.current = false
+    input.current?.focus()
+  }, [disabled, pending])
+  const at = Math.max(0, columns.findIndex((column) => column.key === settings.nameColumn))
+  const before = columns.slice(0, at).length
+  const after = columns.length - at - 1
+  useEffect(() => { input.current?.scrollIntoView({ block: "nearest" }) }, [])
+  async function submit(keepOpen: boolean) {
+    if (busy.current) return
+    const clean = name.trim()
+    if (!clean) { if (!keepOpen) onDone(); return }
+    busy.current = true
+    setPending(true)
+    try {
+      await settings.add(clean)
+      setName("")
+      if (!keepOpen) onDone()
+    } catch {
+      // Refusée : la page dit pourquoi, le nom tapé reste dans la case pour réessayer.
+    } finally {
+      busy.current = false
+      // L'enregistrement a pu désactiver le tableau un instant : le curseur revient dans la case.
+      refocus.current = keepOpen
+      setPending(false)
+    }
+  }
+  const nameCell = <td className="border-b border-r border-foreground bg-background p-1 align-top" style={columns[at]?.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, zIndex: 10 } : undefined}>
+    <Input
+      ref={input}
+      autoFocus
+      value={name}
+      disabled={pending || disabled}
+      onChange={(event) => setName(event.target.value)}
+      onKeyDown={(event) => {
+        if (event.key === "Enter") { event.preventDefault(); void submit(true) }
+        if (event.key === "Escape") { event.preventDefault(); setName(""); onDone() }
+      }}
+      onBlur={() => { if (!busy.current) void submit(false) }}
+      placeholder={settings.placeholder ?? "Nom de la nouvelle ligne…"}
+      aria-label="Nom de la nouvelle ligne"
+      className="h-8 border-primary/50 font-semibold"
+    />
+  </td>
+  return <tr>
+    <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0 text-center align-middle">{pending ? <LoaderCircle className="mx-auto size-3.5 animate-spin text-muted-foreground" /> : <Plus className="mx-auto size-3.5 text-primary" />}</td>
+    {before > 0 && <td colSpan={before} className="border-b bg-muted/20" />}
+    {nameCell}
+    <td colSpan={Math.max(1, after)} className="border-b px-3 py-2 align-middle text-[11px] text-muted-foreground">
+      {pending ? "Création de la ligne…" : "Entrée : créer la ligne (et en ajouter une autre) · Échap : annuler"}
+    </td>
+  </tr>
+}
+
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, fit = false,
@@ -369,6 +449,8 @@ export function SheetGrid({
   // « Ajouter plusieurs lignes » : la ligne visée et le nombre demandé.
   const [insertFor, setInsertFor] = useState<string | null>(null)
   const [insertCount, setInsertCount] = useState("5")
+  // La ligne fantôme ouverte à la saisie de son nom.
+  const [drafting, setDrafting] = useState(false)
 
   // Tri et filtres du menu d'en-tête. La page trie elle-même quand elle le sait
   // (onSort) ; sinon la grille trie. Les filtres sont gardés d'une visite à l'autre.
@@ -734,14 +816,16 @@ export function SheetGrid({
             striped={rowIndex % 2 === 1}
           />)}
           {shownRows.length < rows.length && <tr><td colSpan={columns.length + 1} className="px-3 py-2 text-xs text-muted-foreground">Affichage des lignes suivantes…</td></tr>}
-          {rowCommands?.append && !readOnly && Boolean(rows.length) && shownRows.length === rows.length && <tr>
-            <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
-            <td colSpan={columns.length} className="border-b p-0">
-              <button type="button" onClick={() => rowCommands.append?.()} disabled={disabled} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50">
-                <Plus className="size-3.5" />{addRowLabel}
-              </button>
-            </td>
-          </tr>}
+          {(rowCommands?.append || rowCommands?.appendNamed) && !readOnly && Boolean(rows.length) && shownRows.length === rows.length && (drafting && rowCommands.appendNamed
+            ? <NewRowDraft columns={columns} firstKey={firstKey} settings={rowCommands.appendNamed} disabled={disabled} onDone={() => setDrafting(false)} />
+            : <tr>
+              <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
+              <td colSpan={columns.length} className="border-b p-0">
+                <button type="button" onClick={() => { if (rowCommands.appendNamed) { setShownCount(Number.POSITIVE_INFINITY); setDrafting(true) } else rowCommands.append?.() }} disabled={disabled} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50">
+                  <Plus className="size-3.5" />{addRowLabel}
+                </button>
+              </td>
+            </tr>)}
         </tbody>
       </table>
       {!rows.length && <div className="px-5 py-12 text-center text-sm text-muted-foreground">{sourceRows.length ? "Aucune ligne ne correspond aux filtres." : empty}</div>}

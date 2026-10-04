@@ -545,8 +545,8 @@ test("types every index column from one registry", async () => {
   assert.equal(worldColumnSpec("places", "Villes", "Peuple").kind, "linked");
   assert.equal(worldColumnSpec("places", "Villes", "Type").kind, "rich");
   assert.equal(worldColumnSpec("places", "Villes", "ID").kind, "id");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Formulaire");
-  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste · Formulaire");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Portrait")), "Fichier (images, un seul) · Masquée");
+  assert.equal(columnTypeLabel(worldColumnSpec("creatures", "Créatures", "Organisation")), "Liste · Masquée");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Environnement").kind, "archived");
   assert.equal(worldColumnSpec("creatures", "Créatures", "Sorts actifs").kind, "spells");
   // Objets : icône et image sont des fichiers image, « Actif » vide reste actif, le prix est une somme d'argent.

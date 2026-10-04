@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { deleteColumnPreset, deleteIndexView, listColumnPresets, listIndexViews, saveColumnPreset, saveIndexView } from "@/lib/index-settings"
-import { listIndexLayouts, saveIndexLayouts } from "@/lib/index-layouts-store"
+import { deleteLayoutPreset, listIndexLayouts, listLayoutPresets, saveIndexLayouts, saveLayoutPreset } from "@/lib/index-layouts-store"
 import { parseIndexLayout } from "@/lib/index-layouts"
 import type { PresetColumn } from "@/lib/index-presets"
 import type { ViewCondition } from "@/lib/index-views"
@@ -24,8 +24,8 @@ export async function GET(request: Request) {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const index = new URL(request.url).searchParams.get("index")?.trim() ?? ""
   try {
-    const [views, presets, layouts] = await Promise.all([index ? listIndexViews(index) : Promise.resolve([]), listColumnPresets(), index ? listIndexLayouts(index).catch(() => ({})) : Promise.resolve({})])
-    return NextResponse.json({ views, presets, layouts })
+    const [views, presets, layouts, layoutPresets] = await Promise.all([index ? listIndexViews(index) : Promise.resolve([]), listColumnPresets(), index ? listIndexLayouts(index).catch(() => ({})) : Promise.resolve({}), listLayoutPresets().catch(() => [])])
+    return NextResponse.json({ views, presets, layouts, layoutPresets })
   } catch (error) {
     console.error("INDEX_SETTINGS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les onglets-fenêtres et les presets n’ont pas pu être chargés." }, { status: 503 })
@@ -46,6 +46,20 @@ export async function POST(request: Request) {
         const code = error instanceof Error ? error.message : ""
         console.error("INDEX_LAYOUTS_SAVE_FAILED", code)
         return NextResponse.json({ error: messages[code] ?? "La mise en page n’a pas pu être enregistrée sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
+    }
+    if (body.action === "save-layout-preset" || body.action === "delete-layout-preset") {
+      // Les presets de mise en page (fiche, survol) : sur le serveur partagé, comme les mises en page.
+      try {
+        const raw = body as { layout?: unknown; kind?: unknown }
+        const id = body.action === "save-layout-preset"
+          ? await saveLayoutPreset({ id: body.id, name: String(body.name ?? ""), kind: raw.kind === "hover" ? "hover" : "form", layout: parseIndexLayout(raw.layout) })
+          : (await deleteLayoutPreset(String(body.id ?? "")), "")
+        return NextResponse.json({ id, layoutPresets: await listLayoutPresets() })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_LAYOUT_PRESET_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "Le preset de mise en page n’a pas pu être enregistré sur le serveur partagé d’Eraser." }, { status: 400 })
       }
     }
     if (body.action === "save-view") {

@@ -31,6 +31,7 @@ import {
   joinListValue,
   matchChoice,
   normalizeSpec,
+  placementOf,
   rowColumnStyle,
   splitListValue,
   type ActionButton,
@@ -949,7 +950,8 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     width,
     typeLabel: columnTypeLabel(input),
     plain: !rich,
-    hidden: spec.hidden,
+    // L'ancien « Formulaire seulement » compte comme « Masquée » : la colonne se montre d'un clic.
+    hidden: spec.hidden || placementOf(spec) === "sheet",
     description: spec.description,
     cellClassName: look.className || undefined,
     cellStyle: Object.keys(look.style).length ? look.style : undefined,
@@ -1095,6 +1097,8 @@ export type IndexFieldProps = {
   linkedHint?: boolean
   /** Mise en page de la fiche : le nom de la colonne n'est pas écrit au-dessus du champ. */
   hideLabel?: boolean
+  /** La barre de mise en forme des textes enrichis : au focus (par défaut) ou toujours visible. */
+  richToolbar?: "focus" | "always"
   /** Dans une fiche : les colonnes calculées, les tirages et les boutons de la ligne. */
   row?: {
     formula?: (spec: IndexColumnSpec) => FormulaDisplay
@@ -1117,7 +1121,7 @@ export function IndexField(props: IndexFieldProps) {
   return <IndexFieldOfType {...props} disabled={props.disabled || Boolean(props.spec.readOnly)} />
 }
 
-function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false }: IndexFieldProps) {
+function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false, richToolbar = "focus" }: IndexFieldProps) {
   const spec = normalizeSpec(input)
   const look = columnStyleCss(spec.style)
   const title = hideLabel
@@ -1169,7 +1173,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     default: {
       const rich = isRichSpec(spec)
       if (!rich) return <label className={fieldLabel}>{title}<Input autoFocus={autoFocus} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} className={look.className} style={look.style} /></label>
-      return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}<RichTextField ariaLabel={label} value={value} onCommit={onChange} disabled={disabled} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} minHeight={long ? "min-h-24" : "min-h-9"} /></div>
+      return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}<RichTextField ariaLabel={label} value={value} onCommit={onChange} disabled={disabled} toolbar={richToolbar} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} minHeight={long ? "min-h-24" : "min-h-9"} /></div>
     }
   }
 }

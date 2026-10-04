@@ -2287,14 +2287,24 @@ function inSheets(kind: "characters" | "campaigns", item: { id: string; updatedA
  * la moitié ou plus, la relecture n'est pas digne de confiance et rien n'est écarté. Jamais
  * appliqué à l'ouverture d'une fiche ou d'une campagne : seulement aux listes.
  */
-function listedInSheets<T extends { id: string; updatedAt?: string | null }>(kind: "characters" | "campaigns", items: T[]) {
-  const kept = items.filter((item) => inSheets(kind, item))
-  const hidden = items.length - kept.length
-  if (hidden > 2 && hidden * 2 >= items.length) {
-    console.error("SHEET_PRESENCE_SUSPICIOUS", kind, hidden, items.length)
-    return items
+function listedInSheets<T extends { id: string; name?: string | null; updatedAt?: string | null }>(kind: "characters" | "campaigns", items: T[]) {
+  // Une ancienne ligne mal lue, absente des feuilles, qui porte un identifiant pour nom
+  // (« 94a6338a-… ») : jamais un vrai personnage ni une vraie campagne. Écartée avant le
+  // garde-fou, qui sinon prendrait leur nombre pour une relecture douteuse et les montrerait.
+  const legible = items.filter((item) => !(sheetPresence[kind] && isIdentifierName(item.name) && !inSheets(kind, item)))
+  const kept = legible.filter((item) => inSheets(kind, item))
+  const hidden = legible.length - kept.length
+  if (hidden > 2 && hidden * 2 >= legible.length) {
+    console.error("SHEET_PRESENCE_SUSPICIOUS", kind, hidden, legible.length)
+    return legible
   }
   return kept
+}
+
+/** Un nom qui n'est qu'un identifiant (UUID, ou plusieurs séparés par « · »). */
+function isIdentifierName(name: string | null | undefined) {
+  const parts = (name ?? "").split("·").map((part) => part.trim()).filter(Boolean)
+  return parts.length > 0 && parts.every((part) => /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(part))
 }
 
 async function listCharactersForUserUncached(uid: string) {
@@ -5583,7 +5593,9 @@ export async function listAvailableCampaignCharacters() {
   // si une relecture date de quelques secondes).
   await ensureIdentityIndexes({ maxAgeMs: 5_000 })
   const rows = await getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500)
-  return decorateCharacters(listedInSheets("characters", rows))
+  // Le choix d'un personnage à ajouter : jamais une ligne illisible (nom = identifiant),
+  // même quand la dernière relecture des feuilles a échoué.
+  return decorateCharacters(listedInSheets("characters", rows).filter((row) => !isIdentifierName(row.name)))
 }
 
 export async function addCharacterToCampaign(mjUid: string | null, campaignId: string, characterId: string, duplicate: boolean) {

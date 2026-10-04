@@ -7,7 +7,7 @@
  * Une entrée par onglet : portée « index-layouts », clé « index::onglet », valeur
  * `{ form, hover }` en JSON. Revenir à l'affichage automatique efface l'entrée.
  */
-import { parseIndexLayout, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
+import { parseIndexLayout, type IndexLayout, type LayoutPreset, type TabLayouts } from "@/lib/index-layouts"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 const SCOPE = "index-layouts"
@@ -70,4 +70,50 @@ export async function saveIndexLayouts(index: string, changes: Array<{ tab: stri
     await writeSharedRecord(SCOPE, key, value)
   }
   return (await all(true)).get(index.trim()) ?? {}
+}
+
+// ---------- Presets de mise en page ----------
+
+/**
+ * Les presets de mise en page : une fiche ou un survol enregistré sous un petit nom, pour
+ * l'appliquer à d'autres onglets (tous les tableaux d'objets, par exemple). Communs à tous
+ * les index, gardés sur le serveur partagé comme les mises en page : portée
+ * « index-layout-presets », une entrée par preset.
+ */
+const PRESET_SCOPE = "index-layout-presets"
+
+
+function presetOf(id: string, value: string, updatedAt: string): LayoutPreset | null {
+  let parsed: { name?: unknown; kind?: unknown; layout?: unknown } = {}
+  try { parsed = JSON.parse(value) as typeof parsed } catch { return null }
+  const name = typeof parsed.name === "string" ? parsed.name.replace(/\s+/g, " ").trim().slice(0, 60) : ""
+  const layout = parseIndexLayout(parsed.layout)
+  if (!name || !layout || (parsed.kind !== "form" && parsed.kind !== "hover")) return null
+  return { id, name, kind: parsed.kind, layout, updatedAt }
+}
+
+export async function listLayoutPresets(): Promise<LayoutPreset[]> {
+  if (!sharedStoreAvailable()) return []
+  return (await listSharedRecords(PRESET_SCOPE))
+    .flatMap((record) => { const preset = presetOf(record.key, record.value, record.updatedAt); return preset ? [preset] : [] })
+    .sort((left, right) => left.name.localeCompare(right.name, "fr"))
+}
+
+/** Enregistre un preset (nouveau, ou remplacé s'il a déjà cet `id`) ; rend son identifiant. */
+export async function saveLayoutPreset(input: { id?: string; name: string; kind: "form" | "hover"; layout: IndexLayout | null }) {
+  if (!sharedStoreAvailable()) throw new Error("INDEX_LAYOUTS_UNAVAILABLE")
+  const name = input.name.replace(/\s+/g, " ").trim()
+  if (!name || name.length > 60) throw new Error("INDEX_PRESET_NAME_INVALID")
+  const layout = input.layout ? parseIndexLayout(input.layout) : null
+  if (!layout) throw new Error("INDEX_LAYOUT_INVALID")
+  const id = input.id?.trim() && /^[A-Za-z0-9-]{4,40}$/.test(input.id.trim()) ? input.id.trim() : `MEP-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 7)}`
+  const value = JSON.stringify({ name, kind: input.kind, layout })
+  if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")
+  await writeSharedRecord(PRESET_SCOPE, id, value)
+  return id
+}
+
+export async function deleteLayoutPreset(id: string) {
+  if (!sharedStoreAvailable()) throw new Error("INDEX_LAYOUTS_UNAVAILABLE")
+  await deleteSharedRecord(PRESET_SCOPE, id)
 }
