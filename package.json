@@ -12,7 +12,7 @@
     "build": "vinext build",
     "start": "vinext start",
     "test": "npm run build && node --test tests/*.test.mjs",
-    "test:ci": "node --test tests/ui-components.test.mjs tests/object-icons.test.mjs tests/object-index-regroup.test.mjs tests/object-index-regroup-flow.test.mjs tests/character-states.test.mjs tests/object-combat.test.mjs tests/index-references.test.mjs tests/sheet-columns.test.mjs tests/character-sheet-map.test.mjs tests/named-columns-flow.test.mjs tests/entity-indexes-flow.test.mjs tests/index-sort.test.mjs tests/index-layouts.test.mjs tests/multiple-values.test.mjs tests/google-sheet-values.test.mjs",
+    "test:ci": "node --test tests/ui-components.test.mjs tests/object-icons.test.mjs tests/object-index-regroup.test.mjs tests/object-index-regroup-flow.test.mjs tests/character-states.test.mjs tests/object-combat.test.mjs tests/index-references.test.mjs tests/sheet-columns.test.mjs tests/character-sheet-map.test.mjs tests/named-columns-flow.test.mjs tests/entity-indexes-flow.test.mjs tests/index-sort.test.mjs tests/index-layouts.test.mjs tests/multiple-values.test.mjs tests/google-sheet-values.test.mjs tests/sheet-writes-flow.test.mjs",
     "lint": "eslint . --ignore-pattern dist --ignore-pattern .next",
     "db:generate": "drizzle-kit generate",
     "desktop:build": "node scripts/build-desktop.mjs",

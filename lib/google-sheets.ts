@@ -184,16 +184,9 @@ type UpdateValuesResponse = {
   updatedCells?: number
   updatedData?: { values?: GoogleSheetCellValue[][] }
 }
-type AppendValuesResponse = {
-  updates?: UpdateValuesResponse
-}
-
 export type AppendRowsResult = {
   updatedRange: string
   updatedRows: number
-  updatedColumns: number
-  updatedCells: number
-  updatedValues: string[][]
 }
 
 type WriteValuesOptions = {
@@ -1022,48 +1015,96 @@ export function namedAppendRange(tabName: string, columns: SheetColumns) {
   return sheetTabRange(tabName, `A:${columnName(Math.max(1, columns.width))}`)
 }
 
+type EnteredValue = { numberValue: number } | { boolValue: boolean } | { stringValue: string } | { formulaValue: string }
+
+/**
+ * Ce que reçoit une case, comme si on la tapait (USER_ENTERED : formule, nombre, case à cocher,
+ * apostrophe de tête retirée) ou telle quelle (RAW). Une date ou un pourcentage reste du
+ * texte ; un nombre écrit « 007 » aussi (un identifiant ne perd pas ses zéros).
+ */
+function enteredValue(value: string | number | boolean, raw: boolean): EnteredValue | null {
+  if (typeof value === "number") return Number.isFinite(value) ? { numberValue: value } : { stringValue: String(value) }
+  if (typeof value === "boolean") return { boolValue: value }
+  if (value === "") return null
+  if (raw) return { stringValue: value }
+  if (value.startsWith("=")) return { formulaValue: value }
+  if (value.startsWith("'")) return { stringValue: value.slice(1) }
+  if (/^[+-]?(?:0|[1-9]\d*)(?:\.\d+)?$/.test(value)) return { numberValue: Number(value) }
+  if (/^(?:true|false)$/i.test(value)) return { boolValue: value.toLowerCase() === "true" }
+  return { stringValue: value }
+}
+
+/** L'onglet, son numéro et la taille de sa grille, relus chez Google. */
+async function tabGrid(spreadsheetId: string, tabName: string) {
+  const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { rowCount?: number; columnCount?: number } } }> }>(
+    `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties(rowCount,columnCount))`,
+    { cache: "no-store" },
+  )
+  const properties = metadata.sheets?.find((sheet) => sheet.properties?.title === tabName)?.properties
+  if (properties?.sheetId === undefined) throw new Error(`SHEETS_TAB_NOT_FOUND:${tabName}`)
+  return { sheetId: properties.sheetId, rowCount: properties.gridProperties?.rowCount ?? 0, columnCount: properties.gridProperties?.columnCount ?? 0 }
+}
+
+const pendingAppends = new Map<string, Promise<unknown>>()
+
+/**
+ * Ajoute des lignes juste sous la dernière ligne remplie de la plage, à partir de sa première
+ * colonne. `values.append` laissait Google deviner où commence le « tableau » : il a écrit
+ * des pions en colonne J et des magasins en colonne K (invisibles pour Eraser, et pris
+ * ensuite pour des lignes libres), ou au milieu d'une feuille après une ligne vide.
+ * Les lignes sont insérées et remplies d'un seul envoi : un ajout fait au même moment par
+ * une autre installation décale les nôtres sans jamais les écraser. Dans ce processus, les
+ * ajouts à un même onglet passent l'un après l'autre.
+ */
 export async function appendRows(
   spreadsheetId: string,
   range: string,
   values: Array<Array<string | number | boolean>>,
-  options: WriteValuesOptions = {},
-) {
-  const parameters = new URLSearchParams({
-    valueInputOption: options.valueInputOption || "USER_ENTERED",
-    insertDataOption: "INSERT_ROWS",
+  options: Pick<WriteValuesOptions, "valueInputOption"> = {},
+): Promise<AppendRowsResult> {
+  const bang = range.lastIndexOf("!")
+  const quotedTab = bang >= 0 ? range.slice(0, bang) : range
+  const tabName = quotedTab.startsWith("'") && quotedTab.endsWith("'") ? quotedTab.slice(1, -1).replace(/''/g, "'") : quotedTab
+  const firstColumn = /^([A-Z]+)/i.exec(bang >= 0 ? range.slice(bang + 1) : "")?.[1]?.toUpperCase() ?? "A"
+  const key = `${spreadsheetId}:${tabName}`
+  const run = (pendingAppends.get(key) ?? Promise.resolve()).catch(() => undefined).then(async () => {
+    if (!values.length) return { updatedRange: "", updatedRows: 0 }
+    const left = [...firstColumn].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1
+    const width = Math.max(1, ...values.map((row) => row.length))
+    // La dernière ligne remplie, relue chez Google (jamais une copie gardée en mémoire).
+    const [[read], grid] = await Promise.all([readRangesFresh(spreadsheetId, [range]), tabGrid(spreadsheetId, tabName)])
+    const lastRow = read?.rows.length ? read.startRow + read.rows.length - 1 : 0
+    const raw = options.valueInputOption === "RAW"
+    const requests: unknown[] = []
+    if (lastRow >= grid.rowCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "ROWS", length: lastRow - grid.rowCount + values.length } })
+    if (left + width > grid.columnCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "COLUMNS", length: left + width - grid.columnCount } })
+    requests.push(
+      // Une ligne remplie au-dessus (pas l'en-tête) donne sa mise en forme, comme un ajout à la main.
+      { insertDimension: { range: { sheetId: grid.sheetId, dimension: "ROWS", startIndex: lastRow, endIndex: lastRow + values.length }, inheritFromBefore: lastRow > 1 } },
+      {
+        updateCells: {
+          range: { sheetId: grid.sheetId, startRowIndex: lastRow, endRowIndex: lastRow + values.length, startColumnIndex: left, endColumnIndex: left + width },
+          rows: values.map((row) => ({ values: Array.from({ length: width }, (_, column) => {
+            const entered = column < row.length ? enteredValue(row[column], raw) : null
+            return entered ? { userEnteredValue: entered } : {}
+          }) })),
+          fields: "userEnteredValue",
+        },
+      },
+    )
+    await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    clearSpreadsheetReadCache(spreadsheetId)
+    return {
+      updatedRange: sheetTabRange(tabName, `${columnName(left + 1)}${lastRow + 1}:${columnName(left + width)}${lastRow + values.length}`),
+      updatedRows: values.length,
+    }
   })
-  if (options.includeValuesInResponse) {
-    parameters.set("includeValuesInResponse", "true")
-    parameters.set("responseValueRenderOption", "FORMATTED_VALUE")
+  pendingAppends.set(key, run)
+  try {
+    return await run
+  } finally {
+    if (pendingAppends.get(key) === run) pendingAppends.delete(key)
   }
-  const response = await googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}:append?${parameters.toString()}`,
-    { method: "POST", body: JSON.stringify({ values }) },
-  )
-  clearSpreadsheetReadCache(spreadsheetId)
-  const updates = ((await response.json()) as AppendValuesResponse).updates
-  const updatedRange = updates?.updatedRange?.trim() || ""
-  if (values.length && !updatedRange) throw new Error("SHEETS_APPEND_RANGE_MISSING")
-
-  const tabFromRange = (value: string) => {
-    const raw = value.split("!", 1)[0]?.trim() || ""
-    return raw.startsWith("'") && raw.endsWith("'")
-      ? raw.slice(1, -1).replace(/''/g, "'")
-      : raw
-  }
-  if (updatedRange && tabFromRange(updatedRange) !== tabFromRange(range)) {
-    throw new Error(`SHEETS_APPEND_WRONG_RANGE:${updatedRange}`)
-  }
-  if (typeof updates?.updatedRows === "number" && updates.updatedRows !== values.length) {
-    throw new Error(`SHEETS_APPEND_ROW_COUNT_MISMATCH:${updates.updatedRows}/${values.length}:${updatedRange}`)
-  }
-  return {
-    updatedRange,
-    updatedRows: updates?.updatedRows ?? values.length,
-    updatedColumns: updates?.updatedColumns ?? 0,
-    updatedCells: updates?.updatedCells ?? 0,
-    updatedValues: normalizeGoogleSheetRows(updates?.updatedData?.values),
-  } satisfies AppendRowsResult
 }
 
 export async function updateRange(

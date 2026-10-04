@@ -8,12 +8,13 @@
 type Tab = { sheetId: number; title: string; grid: string[][]; columnCount: number; rowCount: number }
 type Spreadsheet = { tabs: Tab[] }
 
-export const world = { files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false }
+export const world = { files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false, enteredCells: [] as unknown[][] }
 
 export function reset() {
   world.files.clear()
   world.requests.length = 0
   world.reverseFilteredReads = false
+  world.enteredCells.length = 0
 }
 
 export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>) {
@@ -160,7 +161,11 @@ function handleSheets(path: string, init: RequestInit) {
       } else if (request.updateCells) {
         const { sheetId, startRowIndex, startColumnIndex } = request.updateCells.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
-        const values = (request.updateCells.rows as Array<{ values: Array<{ userEnteredValue?: { stringValue?: string } }> }>).map((row) => row.values.map((cell) => cell.userEnteredValue?.stringValue ?? ""))
+        // Comme une lecture FORMATTED_VALUE en anglais : 12 → « 12 », vrai → « TRUE » ; une formule reste écrite.
+        const shown = (value?: { stringValue?: string; numberValue?: number; boolValue?: boolean; formulaValue?: string }) => value?.stringValue ?? value?.formulaValue ?? (value?.numberValue !== undefined ? String(value.numberValue) : value?.boolValue !== undefined ? (value.boolValue ? "TRUE" : "FALSE") : "")
+        const rows = request.updateCells.rows as Array<{ values: Array<{ userEnteredValue?: Parameters<typeof shown>[0] }> }>
+        world.enteredCells.push(...rows.map((row) => row.values.map((cell) => cell.userEnteredValue)))
+        const values = rows.map((row) => row.values.map((cell) => shown(cell.userEnteredValue)))
         writeArea({ tab, top: startRowIndex, left: startColumnIndex, bottom: Infinity, right: Infinity, quoted: `'${tab.title}'` }, values)
       }
       replies.push({})
@@ -205,7 +210,11 @@ function handleSheets(path: string, init: RequestInit) {
     void rangeAction
     let last = -1
     area.tab.grid.forEach((row, index) => { if (row.slice(area.left, area.right === Infinity ? undefined : area.right + 1).some((cell) => cell !== "")) last = index })
-    const updatedRange = writeArea({ ...area, top: last + 1 }, body.values)
+    // Comme Google : le « tableau » commence à la première case remplie de sa dernière ligne.
+    // Une dernière ligne commencée en J fait écrire l'ajout en J (pions et magasins réels).
+    const lastRow = last >= 0 ? area.tab.grid[last] : []
+    const firstFilled = lastRow.findIndex((cell, column) => column >= area.left && cell !== "")
+    const updatedRange = writeArea({ ...area, top: last + 1, left: firstFilled >= 0 ? firstFilled : area.left }, body.values)
     return json({ updates: { updatedRange, updatedRows: body.values.length } })
   }
   if (method === "PUT") {
