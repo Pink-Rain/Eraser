@@ -91,7 +91,9 @@ export async function findDriveFolderByName(name: string) {
       candidateLabel === expected ||
       candidateLabel === `${expected}s` ||
       `${candidateLabel}s` === expected ||
-      (candidateLabel.includes("image") && candidateLabel.includes("classe"))
+      // « Images classes » pour « Images Classe »… seulement quand c'est ce dossier-là qu'on
+      // cherche : appliquée à tout, la règle rangeait les icônes d'objets avec les classes.
+      (expected.includes("image") && expected.includes("classe") && candidateLabel.includes("image") && candidateLabel.includes("classe"))
     )
   })
   if (!selected) return null

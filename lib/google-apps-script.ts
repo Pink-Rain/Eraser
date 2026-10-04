@@ -87,7 +87,6 @@ const SCRIPT_MANIFEST = JSON.stringify({
   executionApi: { access: "MYSELF" },
 })
 
-type AppsScriptProject = { scriptId?: string }
 type AppsScriptVersion = { versionNumber?: number }
 type AppsScriptDeployment = { deploymentId?: string }
 type AppsScriptExecution = {
@@ -146,7 +145,10 @@ type StoredIntegration = {
 // local, chaque autre installation croyait devoir en créer un second.
 async function getIntegration(): Promise<StoredIntegration | null> {
   if (sharedStoreAvailable()) {
-    const record = await readSharedRecord("apps-script", INTEGRATION_KEY).catch(() => null)
+    // Une lecture qui échoue (serveur partagé injoignable, session absente en arrière-plan)
+    // n'est pas « aucun script » : la prendre pour une absence faisait créer un nouveau
+    // projet toutes les dix minutes (des dizaines de « Eraser — images de classes » vides).
+    const record = await readSharedRecord("apps-script", INTEGRATION_KEY)
     if (!record) return null
     try {
       return JSON.parse(record.value) as StoredIntegration
@@ -208,16 +210,6 @@ async function saveIntegration(input: {
   return getIntegration()
 }
 
-async function createScriptIntegration(spreadsheetId: string) {
-  const project = await appsScriptJson<AppsScriptProject>("projects", {
-    method: "POST",
-    body: JSON.stringify({ title: "Eraser — images de classes" }),
-  })
-  if (!project.scriptId) throw new Error("APPS_SCRIPT_PROJECT_ID_MISSING")
-  await saveIntegration({ spreadsheetId, scriptId: project.scriptId })
-  return project.scriptId
-}
-
 async function installScriptContent(scriptId: string) {
   await appsScriptJson(`projects/${encodeURIComponent(scriptId)}/content`, {
     method: "PUT",
@@ -270,11 +262,17 @@ async function deployScript(scriptId: string) {
   }
 }
 
+/**
+ * Le script des images de classes, celui que retient le serveur partagé. Eraser n'en crée
+ * jamais : le reprendre à chaque échec en créait un nouveau (des dizaines de projets vides).
+ * Le script ouvre le classeur dont on lui donne l'ID ; une autre feuille Classes garde donc
+ * le même script.
+ */
 async function ensureScriptIntegration(spreadsheetId: string) {
   let integration = await getIntegration()
-  if (!integration || integration.spreadsheetId !== spreadsheetId) {
-    const scriptId = await createScriptIntegration(spreadsheetId)
-    integration = await saveIntegration({ spreadsheetId, scriptId })
+  if (!integration) throw new Error("APPS_SCRIPT_INTEGRATION_MISSING")
+  if (integration.spreadsheetId !== spreadsheetId) {
+    integration = await saveIntegration({ ...integration, spreadsheetId })
   }
   if (!integration) throw new Error("APPS_SCRIPT_INTEGRATION_MISSING")
 

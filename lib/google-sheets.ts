@@ -142,46 +142,6 @@ export type ClassType = (typeof classTypes)[number]
 export const classDifficulties = classDifficultyValues
 export type ClassDifficulty = (typeof classDifficulties)[number]
 
-type ClassSheetRow = [
-  string,
-  ClassType,
-  string,
-  string,
-  string,
-  string,
-  string,
-  ClassDifficulty,
-  number,
-]
-
-export const defaultClassRows: ClassSheetRow[] = [
-  ["CLA-0001", "Solide", "Berserker", "", "Scarification", "Régénération de points de vie", "Dommages", "Intermédiaire", 100],
-  ["CLA-0002", "Solide", "Guerrier·e", "", "Armure", "Maîtrise de la lame", "Aura de guerre", "Facile", 100],
-  ["CLA-0003", "Solide", "Paladin·e obscur·e", "", "Forme d’ombre", "Colosse", "Soin", "Facile", 100],
-  ["CLA-0004", "Solide", "Géomancien·ne", "", "Armure", "Maîtrise de la roche", "Golem", "X", 0],
-  ["CLA-0005", "Solide", "Paladin·e de la lumière", "", "Forme de lumière", "Prière", "Soin", "Facile", 0],
-  ["CLA-0006", "Protectrice", "Mage de la terre", "", "Invocation sylvestre", "Soin et bonus", "Bénédiction naturelle", "Facile", 50],
-  ["CLA-0007", "Protectrice", "Mage de l’eau", "", "Maîtrise de l’eau", "Soin et bouclier", "Contre-sort", "Intermédiaire", 95],
-  ["CLA-0008", "Protectrice", "Oracle", "", "Maîtrise du temps", "Sibylle", "Contrôle", "Facile", 100],
-  ["CLA-0009", "Protectrice", "Barde", "", "Musicien·ne", "Enchanteur·euse", "Contrôle", "Difficile", 0],
-  ["CLA-0010", "Protectrice", "Ingénieur·e", "", "X", "X", "X", "Expert", 0],
-  ["CLA-0011", "Brutale", "Mage de la mort", "", "Sibylle", "Nécromancie", "Soin", "Intermédiaire", 100],
-  ["CLA-0012", "Brutale", "Mage de sang", "", "Scarification", "Invocation sanguine", "Puits de sang", "Difficile", 95],
-  ["CLA-0013", "Brutale", "Adepte d’HEPO", "", "Transformation démoniaque", "Perte de contrôle", "Ravage", "Difficile", 100],
-  ["CLA-0014", "Brutale", "Samouraï", "", "Duelliste", "Rapide comme l’éclair", "Lame dansante", "Facile", 100],
-  ["CLA-0015", "Brutale", "Cartomancien·ne", "", "Aléatoire", "Critique", "Déplacement", "Expert", 100],
-  ["CLA-0016", "Fourbe", "Serviteuse de Kimtai", "", "Déguisement", "Assassinat", "Poison", "Facile", 100],
-  ["CLA-0017", "Fourbe", "Illusionniste", "", "Clonage", "Hypnotisme", "Mirage", "Intermédiaire", 90],
-  ["CLA-0018", "Fourbe", "Roublard·e", "", "Bombe", "Vol à la tire", "Mensonge", "Intermédiaire", 100],
-  ["CLA-0019", "Fourbe", "Sorcier·ère", "", "Mauvais œil", "Gris-gris", "Vaudou", "Intermédiaire", 0],
-  ["CLA-0020", "Fourbe", "Mage de l’air", "", "Déplacement", "Intouchable", "X", "Intermédiaire", 0],
-  ["CLA-0021", "Éclectique", "Moine élémentaire", "", "Maîtrise des sphères élémentaires", "Rapide comme l’éclair", "Poing de fer", "Difficile", 100],
-  ["CLA-0022", "Éclectique", "Druide", "", "Métamorphe animal", "Bénédiction naturelle", "Instinct animal", "Intermédiaire", 100],
-  ["CLA-0023", "Éclectique", "Rôdeur·euse", "", "Maîtrise des pièges", "Compagnon animal", "Archer·ère", "Facile", 100],
-  ["CLA-0024", "Éclectique", "Alchimiste", "", "Mutagène", "Abomination", "Expérience hasardeuse", "Expert", 0],
-  ["CLA-0025", "Éclectique", "Chamane", "", "Totem élémentaire", "Aura chamanique", "Bénédiction naturelle", "Difficile", 0],
-]
-
 export type ClassRecord = {
   id: string
   type: ClassType
@@ -2114,10 +2074,11 @@ async function loadClassesFromGoogle() {
     return read.columns
   })
   const { rows } = read
+  const hasImageColumn = columns.at("Image") >= 0
   const imageLetter = columnName(classImageColumn(columns))
-  const imageNotes = await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`))
+  const imageNotes = hasImageColumn ? await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`)) : []
   let nativeImageUrls: string[] = []
-  try {
+  if (hasImageColumn) try {
     nativeImageUrls = await Promise.race([
       readClassImagesWithAppsScript({
         spreadsheetId: source.spreadsheetId,
@@ -2451,21 +2412,14 @@ function isPlaceholderImage(file: DriveFile) {
   return ["sans", "sans illustration", "pas d", "aucune", "manquante", "placeholder", "no"].includes(label)
 }
 
-export type ClassImageSyncResult = {
-  folder: DriveFile
-  matched: Array<{ classId: string; className: string; fileName: string }>
-  placeholders: string[]
-  unmatchedClasses: string[]
-  unusedFiles: string[]
-  updated: number
-  skipped: boolean
-}
-
-export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boolean }) {
+/** Pose dans « Classes » les images trouvées dans le Drive, par le script Google déjà installé. */
+async function syncClassImagesFromDrive() {
   const source = await classesSource()
   if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
   const { tabName } = source
-  const { columns, rows: sheetRows } = await readClassSheet(source)
+  const { columns, rows: sheetRows } = await readClassSheet(source, { fresh: true })
+  // Sans colonne « Image », rien n'est posé : les images atterrissaient dans la colonne A.
+  if (columns.at("Image") < 0) throw new Error("CLASS_IMAGE_COLUMN_MISSING")
   const imageLetter = columnName(classImageColumn(columns))
   const imageNotes = await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`))
   // Chaque ligne réduite à ce que la synchronisation lit, par nom de colonne.
@@ -2473,28 +2427,7 @@ export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boole
     .map((cells, index) => ({ row: [columns.get(cells, "ID"), columns.get(cells, "Type"), columns.get(cells, "Nom de la classe"), columns.get(cells, "Image")], imageNote: imageNotes[index] || "", sheetRow: index + 2 }))
     .filter(({ row }) => row[0] && row[2])
 
-  if (
-    options?.onlyIfMissing &&
-    rows.length > 0 &&
-    rows.every(({ imageNote }) => imageNote.startsWith("ERASER_DRIVE_FILE_ID:"))
-  ) {
-    return {
-      folder: { id: "", name: CLASS_IMAGES_FOLDER, mimeType: "application/vnd.google-apps.folder" },
-      matched: [],
-      placeholders: [],
-      unmatchedClasses: [],
-      unusedFiles: [],
-      updated: 0,
-      skipped: true,
-    } satisfies ClassImageSyncResult
-  }
-
   const locatedFolder = await findDriveFolderByName(CLASS_IMAGES_FOLDER)
-  const folder = locatedFolder ?? {
-    id: "",
-    name: "Images du Drive",
-    mimeType: "application/vnd.google-apps.folder",
-  }
   // The dedicated account is entirely reserved for Eraser. If the folder was
   // renamed, pluralized, moved through a shortcut, or cannot be resolved by
   // name, matching the images from the whole Drive is the safe fallback.
@@ -2514,7 +2447,7 @@ export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boole
   // source of several incorrect pairings.
   const usedFileIds = new Set<string>()
   const fileByClassId = new Map<string, DriveFile>()
-  const matched: ClassImageSyncResult["matched"] = []
+  const matched: Array<{ classId: string; className: string; fileName: string }> = []
   const placeholders: string[] = []
   const unmatchedClasses: string[] = []
   const actions: ClassImageScriptAction[] = []
@@ -2596,16 +2529,6 @@ export async function syncClassImagesFromDrive(options?: { onlyIfMissing?: boole
   )
 
   await getDb().delete(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global"))
-
-  return {
-    folder,
-    matched,
-    placeholders,
-    unmatchedClasses,
-    unusedFiles: regularFiles.filter((file) => !usedFileIds.has(file.id)).map((file) => file.name),
-    updated: actions.length,
-    skipped: false,
-  } satisfies ClassImageSyncResult
 }
 
 async function ensureClassImagesSynced() {
@@ -7006,93 +6929,5 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
     await shareTrashState("campaign", id, "purged")
     await getDb().delete(campaignIndex).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
   }
-}
-
-async function configureExistingClassesSheet(spreadsheetId: string, tabName: string, columns: SheetColumns) {
-  const metadata = await googleSheetsJson<{
-    sheets?: Array<{ properties?: { sheetId?: number; title?: string } }>
-  }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`)
-  const sheetId = (metadata.sheets?.find((sheet) => sheet.properties?.title === tabName) ?? metadata.sheets?.[0])?.properties?.sheetId
-  if (sheetId === undefined) throw new Error("SHEETS_METADATA_UNAVAILABLE")
-  // Chaque réglage vise sa colonne retrouvée par son nom, où qu'elle soit.
-  const span = (name: string) => {
-    const index = columns.at(name)
-    return index >= 0 ? { startColumnIndex: index, endColumnIndex: index + 1 } : null
-  }
-  const difficulty = span("Difficulté")
-  const completion = span("Finition")
-  const keywords = ["Mots-clés 1", "Mots-clés 2", "Mots-clés 3"].map(span).filter((item): item is NonNullable<typeof item> => Boolean(item))
-
-  await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({
-      requests: [
-        ...(difficulty ? [{
-          setDataValidation: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...difficulty },
-            rule: {
-              condition: {
-                type: "ONE_OF_LIST",
-                values: classDifficulties.map((value) => ({ userEnteredValue: value })),
-              },
-              strict: true,
-              showCustomUi: true,
-            },
-          },
-        }] : []),
-        ...(completion ? [{
-          setDataValidation: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...completion },
-            rule: {
-              condition: {
-                type: "NUMBER_BETWEEN",
-                values: [{ userEnteredValue: "0" }, { userEnteredValue: "100" }],
-              },
-              strict: true,
-            },
-          },
-        }, {
-          repeatCell: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 1000, ...completion },
-            cell: { userEnteredFormat: { numberFormat: { type: "NUMBER", pattern: '0"%"' } } },
-            fields: "userEnteredFormat.numberFormat",
-          },
-        }] : []),
-        ...keywords.map((keyword) => ({
-          repeatCell: {
-            range: { sheetId, startRowIndex: 1, endRowIndex: 26, ...keyword },
-            cell: { userEnteredFormat: { wrapStrategy: "WRAP", verticalAlignment: "MIDDLE" } },
-            fields: "userEnteredFormat.wrapStrategy,userEnteredFormat.verticalAlignment",
-          },
-        })),
-        {
-          updateDimensionProperties: {
-            range: { sheetId, dimension: "ROWS", startIndex: 1, endIndex: 26 },
-            properties: { pixelSize: 42 },
-            fields: "pixelSize",
-          },
-        },
-      ],
-    }),
-  })
-}
-
-export async function seedDefaultClasses() {
-  const source = await resolveJdrSheet("classes")
-  if (!source) throw new Error("CLASSES_SHEET_NOT_CONFIGURED")
-  const read = await readClassSheet(source)
-  const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, read.columns)
-  await configureExistingClassesSheet(source.spreadsheetId, source.tabName, columns)
-
-  // Les classes d'origine aux lignes 2 à 26, chaque valeur sous son en-tête ; l'image
-  // déjà posée pour une classe est gardée, les autres colonnes ne sont pas touchées.
-  const imagesById = new Map(read.rows.flatMap((row) => columns.get(row, "ID") && columns.get(row, "Image") ? [[columns.get(row, "ID"), columns.get(row, "Image")] as const] : []))
-  const writes = defaultClassRows.flatMap(([id, type, name, , keyword1, keyword2, keyword3, difficulty, completion], index) => namedRowWrites(source.tabName, columns, index + 2, {
-    "ID": id, "Type": type, "Nom de la classe": name, "Image": imagesById.get(id) || "",
-    "Mots-clés 1": keyword1, "Mots-clés 2": keyword2, "Mots-clés 3": keyword3, "Difficulté": difficulty, "Finition": completion,
-  }))
-  await updateRanges(source.spreadsheetId, writes)
-  await getDb().delete(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global"))
-  return { count: defaultClassRows.length, sheet: source }
 }
 
