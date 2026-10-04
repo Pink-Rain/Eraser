@@ -211,8 +211,8 @@ async function syncCampaignFlags(campaignId: string, session: CampaignSessionRec
     const npcs = (await listNpcs(campaignId)).filter((npc) => touchedNpcIds.has(npc.id))
     const toAdd = npcs.filter((npc) => npcInASession.has(npc.id) && !npc.inCampaign)
     const toRemove = npcs.filter((npc) => !npcInASession.has(npc.id) && npc.inCampaign)
-    if (toAdd.length) await saveNpcs(campaignId, toAdd, { inCampaign: true })
-    if (toRemove.length) await saveNpcs(campaignId, toRemove, { inCampaign: false })
+    if (toAdd.length) await saveNpcs(campaignId, toAdd, { inCampaign: true, only: ["Ajouté au créateur de session"] })
+    if (toRemove.length) await saveNpcs(campaignId, toRemove, { inCampaign: false, only: ["Ajouté au créateur de session"] })
   }
   if (touchedShopIds.size) {
     const shops = (await listSavedShops(campaignId)).filter((shop) => touchedShopIds.has(shop.id))

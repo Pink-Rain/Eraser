@@ -24,7 +24,7 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     const file = form.get("portrait")
     if (!(file instanceof File)) throw new Error("INVALID_PORTRAIT")
     const portrait = await saveNpcPortrait(id, file)
-    const npc = await saveNpc(access.npc.pageLinked, { ...access.npc, portrait })
+    const npc = await saveNpc(access.npc.pageLinked, { ...access.npc, portrait }, { only: ["Portrait"] })
     return NextResponse.json({ npc })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""

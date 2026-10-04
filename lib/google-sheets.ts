@@ -3975,18 +3975,35 @@ async function updateShopRows(spreadsheetId: string, writes: Array<{ range: stri
 }
 
 /**
- * Les lignes libérées par une suppression ou un remplacement sont blanchies,
- * pas retirées : la feuille se retrouve trouée. `values.append` doit alors
- * deviner seul où s'arrête le « tableau » à l'intérieur de A:L, et il peut
- * s'arrêter au premier trou. Or writeShopRows vient justement de lire toute la
- * plage : il sait exactement quelles lignes sont libres. On les réutilise donc
- * explicitement, et on ne laisse à l'append que le surplus.
+ * Les lignes libérées par une suppression ou un remplacement sont blanchies, pas retirées :
+ * writeShopRows vient de lire toute la feuille et les réutilise. Seule une ligne entièrement
+ * vide est libre : une ligne sans ID ni page en colonnes A et B peut tenir un magasin écrit
+ * plus à droite (183 lignes l'ont été en colonne K), qu'il ne faut pas recouvrir.
  */
-function freeShopRows(stored: Array<SavedShopRecord | null>, startRow: number, reserved: Set<number>) {
-  return stored.flatMap((shop, index) => {
+function freeShopRows(rows: readonly (readonly string[])[], startRow: number, reserved: Set<number>) {
+  return rows.flatMap((row, index) => {
     const rowNumber = startRow + index
-    return shop || reserved.has(rowNumber) ? [] : [rowNumber]
+    return reserved.has(rowNumber) || row.some((cell) => cell?.trim()) ? [] : [rowNumber]
   })
+}
+
+/** Seulement les cases que change l'action (ajout à la campagne, PNJ lié). */
+function shopFlagCells(options: { inCampaign?: boolean; npcId?: string }): Record<string, SheetCell> {
+  return {
+    ...(options.inCampaign !== undefined ? { "Ajouté à la campagne": options.inCampaign ? "Oui" : "Non" } : {}),
+    ...(options.npcId !== undefined ? { "ID PNJ lié": options.npcId } : {}),
+    "Modifié le": new Date().toISOString(),
+  }
+}
+
+/** Une case « Objets JSON » remplie mais illisible : la réécrire avec la copie de la page (vide) la perdrait. */
+function unreadableShopItems(cell: string) {
+  if (!cell.trim()) return false
+  try {
+    return !Array.isArray(JSON.parse(cell))
+  } catch {
+    return true
+  }
 }
 
 async function placeShopRows(spreadsheetId: string, tabName: string, columns: SheetColumns, values: Array<Record<string, SheetCell>>, freeRows: number[]) {
@@ -4018,24 +4035,31 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
     const receipts = await updateShopRows(sheet.spreadsheetId, replacements)
     await updateRanges(sheet.spreadsheetId, clear, { valueInputOption: "RAW" })
     const additions = shops.slice(targetRows.length)
-    const freeRows = freeShopRows(stored, startRow, new Set(targetRows))
+    const freeRows = freeShopRows(rows, startRow, new Set(targetRows))
     return [...receipts, ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions.map((shop) => shopCells(shop, pageLinked, null, options)), freeRows)]
   }
 
+  // Ajouter à la campagne, retirer, lier un PNJ : seules ces cases changent. Réécrire tout le
+  // magasin avec la copie de la page effaçait ce qui avait été modifié entre-temps.
+  const flagsOnly = options.inCampaign !== undefined || options.npcId !== undefined
   const updates: Array<{ range: string; values: SheetCell[][] }> = []
   const additions: Array<Record<string, SheetCell>> = []
   const reserved = new Set<number>()
   for (const shop of shops) {
     const existing = existingById.get(shop.id)
-    const cells = shopCells(shop, pageLinked, existing?.shop ?? null, options)
-    if (existing) {
-      reserved.add(existing.rowNumber)
-      updates.push(...namedRowWrites(sheet.tabName, columns, existing.rowNumber, cells))
-    } else additions.push(cells)
+    if (!existing) {
+      additions.push(shopCells(shop, pageLinked, null, options))
+      continue
+    }
+    // Un magasin d'une autre campagne n'est jamais repris ici.
+    if (existing.shop.pageLinked !== pageLinked) throw new Error("SHOP_NOT_ON_PAGE")
+    if (!flagsOnly && unreadableShopItems(columns.get(rows[existing.rowNumber - startRow], "Objets JSON"))) throw new Error("SHOP_ITEMS_UNREADABLE")
+    reserved.add(existing.rowNumber)
+    updates.push(...namedRowWrites(sheet.tabName, columns, existing.rowNumber, flagsOnly ? shopFlagCells(options) : shopCells(shop, pageLinked, existing.shop, options)))
   }
   return [
     ...await updateShopRows(sheet.spreadsheetId, updates),
-    ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions, freeShopRows(stored, startRow, reserved)),
+    ...await placeShopRows(sheet.spreadsheetId, sheet.tabName, columns, additions, freeShopRows(rows, startRow, reserved)),
   ]
 }
 
@@ -4163,10 +4187,10 @@ export async function listNpcs(pageLinked: string, onlyInCampaign = false) {
 }
 
 /** Tous les PNJ, toutes pages confondues : l'Index des PNJs y cherche les campagnes de chacun. */
-export async function listAllNpcs() {
+export async function listAllNpcs(options: { fresh?: boolean } = {}) {
   const sheet = await ensureJdrSheet("npcs")
   if (!sheet) return []
-  const { columns, rows } = await readNpcSheet(sheet)
+  const { columns, rows } = await readNpcSheet(sheet, options)
   return rows.map((row) => npcFromRow(row, columns)).filter((npc): npc is CampaignNpcRecord => Boolean(npc))
 }
 
@@ -4181,7 +4205,15 @@ export async function listCampaignNpcs(campaignId: string) {
   return listNpcs(campaignId)
 }
 
-export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean } = {}) {
+/** Les colonnes que l'Index des PNJs modifie : notes MJ, vie actuelle, campagne et groupe restent ceux de la feuille. */
+export const npcIndexHeaders = ["Nom du PNJ", "Classe / métier", "Vie totale", "Rapidité", "Peuple", "Titre", "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Constitution", "Portrait", "Notes joueurs", "PNJ important", "Histoire / Lore", "Sorts actifs", "Sorts passifs"] as const
+
+/**
+ * Enregistre des PNJ. Pour un PNJ déjà dans la feuille, `only` limite l'écriture à ces
+ * colonnes (« Modifié le » en plus) : une action qui ne change que la vie, le portrait ou
+ * l'ajout à la campagne n'écrase plus le reste avec une copie dépassée.
+ */
+export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean; only?: readonly string[] } = {}) {
   const sheet = await npcSheet()
   const read = await readNpcSheet(sheet, { fresh: true })
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
@@ -4189,10 +4221,14 @@ export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], op
   const updates: Array<{ range: string; values: SheetCell[][] }> = []
   const additions: SheetCell[][] = []
   const saved: CampaignNpcRecord[] = []
+  const only = options.only ? new Set([...options.only, "Modifié le"]) : null
   for (const npc of npcs) {
     const existingIndex = rows.findIndex((row) => columns.get(row, "ID") === npc.id && columns.get(row, "Page lié") === pageLinked)
+    // Le même ID sur une autre page : l'ajouter ici ferait deux PNJ du même ID.
+    if (existingIndex < 0 && rows.some((row) => columns.get(row, "ID") === npc.id)) throw new Error("NPC_PAGE_MISMATCH")
     const original = existingIndex >= 0 ? rows[existingIndex] : null
-    const cells = npcCells(npc, pageLinked, original ? npcFromRow(original, columns) : null, options)
+    const all = npcCells(npc, pageLinked, original ? npcFromRow(original, columns) : null, options)
+    const cells = original && only ? Object.fromEntries(Object.entries(all).filter(([name]) => only.has(name))) : all
     if (existingIndex >= 0) updates.push(...namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
     else additions.push(columns.row(cells))
     const record = npcFromRow(columns.row(cells, original).map(String), columns)
@@ -4203,7 +4239,7 @@ export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], op
   return saved
 }
 
-export async function saveNpc(pageLinked: string, npc: CampaignNpcRecord, options: { inCampaign?: boolean } = {}) {
+export async function saveNpc(pageLinked: string, npc: CampaignNpcRecord, options: { inCampaign?: boolean; only?: readonly string[] } = {}) {
   const [saved] = await saveNpcs(pageLinked, [npc], options)
   return saved
 }
@@ -4219,11 +4255,23 @@ export async function deleteNpcs(pageLinked: string, npcIds: string[]) {
   await updateRanges(sheet.spreadsheetId, clear)
 }
 
+/**
+ * Copie des PNJ vers une page (ou la même : « Dupliquer ») : toute la ligne est reprise, y
+ * compris les colonnes qu'Eraser ne lit pas (capacités, âge, taille, dossier…), avec un
+ * nouvel ID ; portrait, sac à dos et pions suivent.
+ */
 export async function copyNpcsToPage(sourcePageLinked: string, targetPageLinked: string, npcIds: string[]) {
   const selectedIds = new Set(npcIds)
-  const source = (await listNpcs(sourcePageLinked)).filter((npc) => selectedIds.has(npc.id))
-  const copies: CampaignNpcRecord[] = []
-  for (const npc of source) {
+  const sheet = await npcSheet()
+  const read = await readNpcSheet(sheet, { fresh: true })
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const sources = read.rows.filter((row) => columns.get(row, "Page lié") === sourcePageLinked && selectedIds.has(columns.get(row, "ID")))
+  const now = new Date().toISOString()
+  const copies: SheetCell[][] = []
+  const records: CampaignNpcRecord[] = []
+  for (const row of sources) {
+    const npc = npcFromRow(row, columns)
+    if (!npc) continue
     const id = crypto.randomUUID()
     let portrait = npc.portrait
     if (npc.portrait.startsWith("/api/npcs/portrait/")) {
@@ -4232,25 +4280,32 @@ export async function copyNpcsToPage(sourcePageLinked: string, targetPageLinked:
     }
     await copyCharacterInventory(npc.id, id)
     await copyToken("npc", npc.id, id)
-    copies.push({ ...npc, id, pageLinked: targetPageLinked, portrait, inCampaign: false, inPlayerGroup: false, createdAt: "", updatedAt: "" })
+    const line = columns.row({
+      "ID": id, "Page lié": targetPageLinked, "Portrait": portrait,
+      "Ajouté au créateur de session": "Non", "Dans le groupe joueur": "Non", "Créé le": now, "Modifié le": now,
+    }, row)
+    // Les valeurs lues sont réécrites comme saisies : un texte reste du texte.
+    copies.push(line.map((cell) => typeof cell === "string" ? textCell(cell) : cell))
+    const record = npcFromRow(line.map(String), columns)
+    if (record) records.push(record)
   }
-  return copies.length ? saveNpcs(targetPageLinked, copies) : []
+  if (copies.length) await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), copies)
+  return records
 }
 
+/** Déplace des PNJ : seule leur page change (et ils quittent la session et le groupe), sur leur propre ligne. */
 export async function moveNpcsToPage(sourcePageLinked: string, targetPageLinked: string, npcIds: string[]) {
   const selectedIds = new Set(npcIds)
-  const source = (await listNpcs(sourcePageLinked)).filter((npc) => selectedIds.has(npc.id))
-  if (!source.length) return []
-  const moved = await saveNpcs(targetPageLinked, source.map((npc) => ({
-    ...npc,
-    pageLinked: targetPageLinked,
-    inCampaign: false,
-    inPlayerGroup: false,
-    createdAt: "",
-    updatedAt: "",
-  })))
-  await deleteNpcs(sourcePageLinked, source.map((npc) => npc.id))
-  return moved
+  const sheet = await npcSheet()
+  const read = await readNpcSheet(sheet, { fresh: true })
+  const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const now = new Date().toISOString()
+  const changes = { "Page lié": targetPageLinked, "Ajouté au créateur de session": "Non", "Dans le groupe joueur": "Non", "Modifié le": now }
+  const moved = read.rows.flatMap((row, index) => columns.get(row, "Page lié") === sourcePageLinked && selectedIds.has(columns.get(row, "ID"))
+    ? [{ rowNumber: index + 2, row: columns.row(changes, row).map(String) }]
+    : [])
+  await updateRanges(sheet.spreadsheetId, moved.flatMap((item) => namedRowWrites(sheet.tabName, columns, item.rowNumber, changes)))
+  return moved.flatMap((item) => npcFromRow(item.row, columns) ?? [])
 }
 
 function tabletopNumber(value: unknown, fallback: number, minimum: number, maximum: number) {

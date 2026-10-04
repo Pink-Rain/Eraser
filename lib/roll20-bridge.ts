@@ -180,7 +180,8 @@ export async function updateRoll20HitPoints(link: typeof roll20CampaignLinks.$in
     if (!patch) return []
     return [{ ...npc, currentHp: patch.currentHp, ...(patch.totalHp === undefined ? {} : { totalHp: patch.totalHp }) }]
   })
-  if (changed.length) await saveNpcs(link.campaignId, changed)
+  // Seulement la vie : le reste de la ligne n'est pas réécrit avec cette copie.
+  if (changed.length) await saveNpcs(link.campaignId, changed, { only: ["Vie actuelle", "Vie totale"] })
   const now = new Date().toISOString()
   await getDb().update(roll20CampaignLinks).set({ lastPushAt: now, updatedAt: now }).where(eq(roll20CampaignLinks.id, link.id))
   return changed.length

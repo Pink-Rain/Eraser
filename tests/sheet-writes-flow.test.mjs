@@ -103,3 +103,106 @@ test("une grille pleine est agrandie avant l'ajout", async () => {
   assert.ok(tab.rowCount >= 4);
   assert.ok(tab.columnCount >= 2);
 });
+
+const npcHeaders = [
+  "ID", "Page lié", "Nom du PNJ", "Classe / métier", "Vie actuelle", "Vie totale", "Rapidité",
+  "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat",
+  "Capacité de tir", "Capacité magique", "Force mentale", "Constitution", "Peuple", "Genre", "Âge",
+  "Poids", "Taille", "Notes MJ", "Portrait", "Notes joueurs", "Inventaire JSON (archive)",
+  "Ajouté au créateur de session", "Créé le", "Modifié le", "Dossier", "Dans le groupe joueur", "PNJ important", "Créé par",
+  "Titre", "Histoire / Lore", "Sorts actifs", "Sorts passifs",
+];
+
+async function linkNpcs(rows) {
+  const id = fresh("npcs");
+  const grid = [npcHeaders, ...rows.map((values) => npcHeaders.map((header) => values[header] ?? ""))];
+  google.addSpreadsheet(id, [{ title: "PNJs", grid }]);
+  await jdr.saveJdrSheet({ key: "npcs", spreadsheetId: id, name: "npcs", tabName: "PNJs", webViewLink: "" });
+  await getDb().insert(schema.sheetIndexSyncs).values({ key: `npc-sheet-schema:${id}:PNJs:v9` });
+  return id;
+}
+
+const cellOf = (rows, rowIndex, header) => rows[rowIndex]?.[npcHeaders.indexOf(header)] ?? "";
+
+test("PNJ déplacé : sa ligne garde toutes ses colonnes, seule la page change", async () => {
+  const id = await linkNpcs([
+    { "ID": "PNJ-1", "Page lié": "CAMP-A", "Nom du PNJ": "Maé Terval", "Capacité de combat": "7", "Âge": "41", "Dossier": "Ville", "Ajouté au créateur de session": "Oui", "Dans le groupe joueur": "Oui", "Notes MJ": "secret" },
+  ]);
+  const moved = await sheets.moveNpcsToPage("CAMP-A", "CAMP-B", ["PNJ-1"]);
+  assert.deepEqual(moved.map((npc) => [npc.id, npc.pageLinked, npc.inCampaign, npc.inPlayerGroup]), [["PNJ-1", "CAMP-B", false, false]]);
+  const rows = google.grid(id, "PNJs");
+  assert.equal(rows.filter((row) => row.some(Boolean)).length, 2);
+  for (const [header, value] of [["ID", "PNJ-1"], ["Page lié", "CAMP-B"], ["Capacité de combat", "7"], ["Âge", "41"], ["Dossier", "Ville"], ["Notes MJ", "secret"], ["Ajouté au créateur de session", "Non"]]) {
+    assert.equal(cellOf(rows, 1, header), value, header);
+  }
+});
+
+async function linkInventory() {
+  const id = fresh("inventory");
+  google.addSpreadsheet(id, [
+    { title: "Types de contenants", grid: [["Nom", "ID", "Catégorie", "Capacité", "Colonnes spéciales", "Actif"]] },
+    { title: "Contenants personnages", grid: [["ID personnage", "Nom personnalisé", "ID", "ID type", "Catégorie", "Capacité", "Ordre", "Créé le", "Supprimé le"]] },
+    { title: "Objets", grid: [["ID", "Nom", "Description", "Type", "Sous-type", "Effet", "Nombre max", "Poids", "Prix", "Encombrement", "Image", "Notes", "Lien", "Rareté", "Attributs", "Prérequis", "Édition", "Actif", "Icône"]] },
+    { title: "Contenu inventaire", grid: [["ID contenant", "ID", "ID personnage", "Emplacement", "ID objet", "Nombre", "Nom personnalisé", "Description personnalisée", "Type", "Sous-type", "Effet", "Modifié le", "Équipé", "Modificateurs", "Nom mis en forme", "Description mise en forme", "Effet mis en forme"]] },
+  ]);
+  await jdr.saveJdrSheet({ key: "inventory", spreadsheetId: id, name: "inventory", tabName: "Types de contenants", webViewLink: "" });
+}
+
+test("PNJ copié : toute la ligne est reprise avec un nouvel ID", async () => {
+  await linkInventory();
+  const id = await linkNpcs([
+    { "ID": "PNJ-1", "Page lié": "CAMP-A", "Nom du PNJ": "Maé Terval", "Capacité de tir": "5", "Taille": "1,62 m", "Notes joueurs": "- se méfie", "Ajouté au créateur de session": "Oui" },
+  ]);
+  const [copy] = await sheets.copyNpcsToPage("CAMP-A", "CAMP-B", ["PNJ-1"]);
+  assert.notEqual(copy.id, "PNJ-1");
+  assert.equal(copy.pageLinked, "CAMP-B");
+  const rows = google.grid(id, "PNJs");
+  const at = rows.findIndex((row) => row[0] === copy.id);
+  assert.ok(at > 1);
+  assert.equal(cellOf(rows, at, "Capacité de tir"), "5");
+  assert.equal(cellOf(rows, at, "Taille"), "1,62 m");
+  assert.equal(cellOf(rows, at, "Notes joueurs"), "- se méfie");
+  assert.equal(cellOf(rows, at, "Ajouté au créateur de session"), "Non");
+  assert.equal(cellOf(rows, 1, "ID"), "PNJ-1");
+});
+
+test("PNJ : une action sur une case n'écrase pas le reste avec une copie dépassée", async () => {
+  const id = await linkNpcs([{ "ID": "PNJ-1", "Page lié": "CAMP-A", "Nom du PNJ": "Aldor", "Notes MJ": "ancienne", "Vie actuelle": "10", "Vie totale": "30" }]);
+  const [stale] = await sheets.listNpcs("CAMP-A");
+  // Modifié ailleurs entre-temps.
+  google.grid(id, "PNJs")[1][npcHeaders.indexOf("Notes MJ")] = "nouvelle";
+  await sheets.saveNpcs("CAMP-A", [{ ...stale, currentHp: 4 }], { only: ["Vie actuelle"] });
+  const rows = google.grid(id, "PNJs");
+  assert.equal(cellOf(rows, 1, "Vie actuelle"), "4");
+  assert.equal(cellOf(rows, 1, "Notes MJ"), "nouvelle");
+  await assert.rejects(sheets.saveNpcs("CAMP-B", [{ ...stale, pageLinked: "CAMP-B" }]), /NPC_PAGE_MISMATCH/);
+  assert.equal(rows.filter((row) => row[0] === "PNJ-1").length, 1);
+});
+
+const shopHeaders = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le"];
+const shop = (id, name) => ({ id, key: "market", name, size: "Petit", cityKey: "village", cityName: "Brume", items: [] });
+
+test("Magasins : une ligne écrite plus à droite n'est pas prise pour une ligne libre", async () => {
+  const id = fresh("shops");
+  // Ligne 3 : un magasin écrit en colonne K par l'ancien ajout (ID en K, page en L).
+  const shifted = [...Array(10).fill(""), "SHOP-K", "CAMP-1", "Brume", "village", "market", "Ancien", "Petit", "[]", "Oui"];
+  google.addSpreadsheet(id, [{ title: "Magasins", grid: [shopHeaders, ["SHOP-1", "CAMP-1", "Brume", "village", "market", "Premier", "Petit", "[]", "Non", "", "", ""], shifted, []] }]);
+  google.world.files.get(id).tabs[0].columnCount = 26;
+  await jdr.saveJdrSheet({ key: "shops", spreadsheetId: id, name: "shops", tabName: "Magasins", webViewLink: "" });
+  await sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-2", "Nouveau")], {});
+  const rows = google.grid(id, "Magasins");
+  assert.deepEqual(rows[2].slice(10, 12), ["SHOP-K", "CAMP-1"]);
+  assert.equal(rows[2][0] ?? "", "");
+  assert.equal(rows.find((row) => row[0] === "SHOP-2")?.[5], "Nouveau");
+});
+
+test("Magasins : ajouter à la campagne ne réécrit que ses cases", async () => {
+  const id = fresh("shops");
+  google.addSpreadsheet(id, [{ title: "Magasins", grid: [shopHeaders, ["SHOP-1", "CAMP-1", "Brume", "village", "market", "Nom de la feuille", "Petit", "[]", "Non", "", "2026-09-01", "2026-09-01"]] }]);
+  await jdr.saveJdrSheet({ key: "shops", spreadsheetId: id, name: "shops", tabName: "Magasins", webViewLink: "" });
+  await sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-1", "Copie dépassée")], { inCampaign: true, npcId: "" });
+  const row = google.grid(id, "Magasins")[1];
+  assert.equal(row[5], "Nom de la feuille");
+  assert.equal(row[8], "Oui");
+  await assert.rejects(sheets.saveGeneratedShops("CAMP-2", [shop("SHOP-1", "Volé")], {}), /SHOP_NOT_ON_PAGE/);
+});

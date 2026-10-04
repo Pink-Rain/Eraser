@@ -1,6 +1,6 @@
 import { NextResponse } from "next/server"
 
-import { copyNpcsToPage, deleteNpcs, getCampaignDashboard, listAllNpcs, listNpcs, moveNpcsToPage, saveNpcs } from "@/lib/google-sheets"
+import { copyNpcsToPage, deleteNpcs, getCampaignDashboard, listAllNpcs, listNpcs, moveNpcsToPage, npcIndexHeaders, saveNpcs } from "@/lib/google-sheets"
 import { isNpcLibraryPage } from "@/lib/npc-pages"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -91,26 +91,27 @@ export async function POST(request: Request) {
       return NextResponse.json({ ok: true })
     }
     if (body.action === "save-index") {
-      // L'Index des PNJs ne connaît ni les notes MJ, ni la vie actuelle, ni le groupe :
-      // ils sont repris de la feuille pour ne jamais être effacés depuis l'index.
-      const existing = new Map((await listAllNpcs()).map((npc) => [npc.id, npc]))
+      // L'Index des PNJs ne connaît ni les notes MJ, ni la vie actuelle, ni le groupe : pour un
+      // PNJ existant, seules ses colonnes à lui sont écrites.
+      const existing = new Map((await listAllNpcs({ fresh: true })).map((npc) => [npc.id, npc]))
       const merged = records.map((npc) => {
         const current = existing.get(npc.id)
         if (current && current.pageLinked !== pageLinked) throw new Error("NPC_PAGE_MISMATCH")
         if (!current && !isNpcLibraryPage(pageLinked)) throw new Error("NPC_NOT_FOUND")
-        return current
-          ? { ...npc, gmNotes: current.gmNotes, currentHp: current.currentHp, inCampaign: current.inCampaign, inPlayerGroup: current.inPlayerGroup, createdByUid: current.createdByUid || npc.createdByUid }
-          : { ...npc, gmNotes: "", currentHp: npc.totalHp, inCampaign: false, inPlayerGroup: false }
+        return current ? npc : { ...npc, gmNotes: "", currentHp: npc.totalHp, inCampaign: false, inPlayerGroup: false }
       })
-      return NextResponse.json({ npcs: await saveNpcs(pageLinked, merged) })
+      return NextResponse.json({ npcs: await saveNpcs(pageLinked, merged, { only: npcIndexHeaders }) })
     }
+    // Ajouter à la session ou au groupe ne touche que cette case.
     const options = body.action === "add-to-campaign"
-      ? { inCampaign: true }
+      ? { inCampaign: true, only: ["Ajouté au créateur de session"] }
       : body.action === "remove-from-campaign"
-        ? { inCampaign: false }
-        : body.action === "save" || body.action === "add-to-group" || body.action === "remove-from-group"
-          ? {}
-          : null
+        ? { inCampaign: false, only: ["Ajouté au créateur de session"] }
+        : body.action === "add-to-group" || body.action === "remove-from-group"
+          ? { only: ["Dans le groupe joueur"] }
+          : body.action === "save"
+            ? {}
+            : null
     if (!options || (body.action !== "save" && isNpcLibraryPage(pageLinked))) throw new Error("INVALID_NPC_ACTION")
     const grouped = body.action === "add-to-group" ? records.map((npc) => ({ ...npc, inPlayerGroup: true }))
       : body.action === "remove-from-group" ? records.map((npc) => ({ ...npc, inPlayerGroup: false }))

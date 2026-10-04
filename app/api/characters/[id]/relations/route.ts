@@ -159,7 +159,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       if (!mayEdit) throw new Error("FORBIDDEN_RELATION_TARGET")
       const name = shortText(body.name, 200)
       if (!name) throw new Error("INVALID_RELATION")
-      await saveNpc(npc.pageLinked, { ...npc, name, playerNotes: shortText(body.description, 3000), portrait: shortText(body.portrait, 1500) })
+      await saveNpc(npc.pageLinked, { ...npc, name, playerNotes: shortText(body.description, 3000), portrait: shortText(body.portrait, 1500) }, { only: ["Nom du PNJ", "Notes joueurs", "Portrait"] })
       await saveCharacterRelation({ ...relation, name })
     } else if (body.action === "delete") {
       const relationId = shortText(body.relationId, 200)

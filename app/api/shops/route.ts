@@ -11,6 +11,8 @@ function shopErrorMessage(error: unknown, isAdmin = false) {
   // cellule trop longue…). Un administrateur voit le code brut de Google.
   const detail = isAdmin ? ` (${code})` : ""
   if (code === "NPC_NOT_FOUND") return "Ce PNJ n’existe pas dans cette campagne."
+  if (code === "SHOP_NOT_ON_PAGE") return "Ce magasin appartient à une autre campagne."
+  if (code === "SHOP_ITEMS_UNREADABLE") return "La liste d’objets de ce magasin est illisible dans la feuille « Magasins » : corrige sa case « Objets JSON » dans Google Sheets avant de l’enregistrer ici."
   if (code === "SHOPS_SHEET_UNAVAILABLE") return "La feuille Google Sheets des magasins n’est pas reliée."
   if (code.startsWith("SHOPS_WRITE_NOT_PERSISTED")) {
     return `Google a accepté l’enregistrement mais les magasins ne sont pas dans la feuille après relecture. Ouvre Administration › Google Drive et Sheets pour voir l’état de la feuille « Magasins ».${detail}`
