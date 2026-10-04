@@ -197,7 +197,7 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
  * l'objet sont tirés sur place, sans attendre le réseau ; les 20 derniers tirages (et
  * ceux qu'on épingle) sont enregistrés en arrière-plan.
  */
-export function SearchGenerator({ campaignId, items, initialDraws, loadError }: { campaignId: string; items: ShopGeneratorItem[]; initialDraws: SearchDraw[] | null; loadError: string }) {
+export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavailable = false, loadError }: { campaignId: string; items: ShopGeneratorItem[]; initialDraws: SearchDraw[] | null; drawsUnavailable?: boolean; loadError: string }) {
   const catalog = useMemo(() => buildCatalog(items), [items])
   const shared = initialDraws !== null
   const localKey = `eraser:fouilles:${campaignId}`
@@ -230,7 +230,8 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
   }, [campaignId])
 
   useEffect(() => {
-    if (!dirty.current) return
+    // Les tirages gardés n'ont pas pu être lus : en enregistrer de nouveaux les remplacerait.
+    if (!dirty.current || drawsUnavailable) return
     if (!shared) {
       try { window.localStorage.setItem(localKey, JSON.stringify(draws)) } catch { /* stockage indisponible */ }
       return
@@ -240,7 +241,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
       send().then((response) => setSaveState(response.ok ? "saved" : "error")).catch(() => setSaveState("error"))
     }, 700)
     return () => window.clearTimeout(timer)
-  }, [draws, localKey, send, shared])
+  }, [draws, drawsUnavailable, localKey, send, shared])
 
   useEffect(() => {
     const flush = () => { if (pendingSave.current) void send().catch(() => undefined) }
@@ -250,9 +251,9 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
 
   const change = useCallback((update: (current: SearchDraw[]) => SearchDraw[]) => {
     dirty.current = true
-    if (shared) setSaveState("saving")
+    if (shared && !drawsUnavailable) setSaveState("saving")
     setDraws((current) => keepSearchDraws(update(current)))
-  }, [shared])
+  }, [drawsUnavailable, shared])
 
   const search = useCallback((result: SearchResult) => {
     const roll = d100()
@@ -329,6 +330,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
 
   return <div className="mt-7 space-y-6">
     {loadError && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{loadError}</p>}
+    {drawsUnavailable && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">Les tirages enregistrés n’ont pas pu être lus. Les nouveaux ne sont pas enregistrés, pour ne pas les effacer : recharge la page dans un instant.</p>}
     <section className="rounded-2xl border bg-card/70 p-4 shadow-sm sm:p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Lieu de fouille</p>
       <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Lieu de fouille">
@@ -352,7 +354,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, loadError }: 
     <section>
       <div className="mb-3 flex flex-wrap items-end justify-between gap-2">
         <div><p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Tirages</p><p className="text-sm text-muted-foreground">Les {Math.min(unpinned, 20)} derniers sur 20{draws.length - unpinned ? ` · ${draws.length - unpinned} épinglé${draws.length - unpinned > 1 ? "s" : ""}` : ""}</p></div>
-        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{!shared ? <><CloudOff className="size-3" />Gardés dans ce navigateur</> : saveState === "saving" ? <><LoaderCircle className="size-3 animate-spin" />Enregistrement…</> : saveState === "error" ? <span className="text-destructive">Non enregistré</span> : saveState === "saved" ? <><Check className="size-3" />Enregistré</> : null}</span>
+        <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground">{!shared ? <><CloudOff className="size-3" />Gardés dans ce navigateur</> : drawsUnavailable ? <span className="text-destructive">Non enregistrés</span> : saveState === "saving" ? <><LoaderCircle className="size-3 animate-spin" />Enregistrement…</> : saveState === "error" ? <span className="text-destructive">Non enregistré</span> : saveState === "saved" ? <><Check className="size-3" />Enregistré</> : null}</span>
       </div>
       {draws.length
         ? <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">{draws.map((draw) => <DrawCard key={draw.id} draw={draw} item={draw.itemId ? catalog.byId.get(draw.itemId) : undefined} fresh={draw.id === freshId} targets={targets} targetsLoading={targetsLoading} giving={giving === draw.id} onPin={onPin} onRemove={onRemove} onReroll={onReroll} onElsewhere={onElsewhere} onOpenTargets={onOpenTargets} onGive={onGive} />)}</div>

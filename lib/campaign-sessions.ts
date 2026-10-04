@@ -10,6 +10,7 @@ import {
   listNpcs,
   listSavedShops,
   namedAppendRange,
+  namedRowWrites,
   readNamedSheet,
   repairJdrSheet,
   saveGeneratedShops,
@@ -43,29 +44,48 @@ export type SessionMembership = { characterIds?: string[]; npcIds?: string[]; sh
 const COLUMNS = sessionSheetHeaders.length
 const LAST_COLUMN = "J"
 
-function idList(value: string | undefined) {
+/**
+ * Une liste d'identifiants (JSON). `strict` pour une écriture : une case remplie mais
+ * illisible n'est pas une liste vide, sinon l'enregistrement suivant l'écrasait par « [] ».
+ */
+function idList(value: string | undefined, strict = false) {
   try {
     const parsed = JSON.parse(value || "[]") as unknown
-    return Array.isArray(parsed) ? [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))] : []
+    if (!Array.isArray(parsed)) throw new Error("NOT_A_LIST")
+    return [...new Set(parsed.filter((item): item is string => typeof item === "string" && item.length > 0))]
   } catch {
+    if (strict) throw new Error("SESSION_LISTS_UNREADABLE")
     return []
   }
 }
 
-function sessionFromRow(row: string[]): CampaignSessionRecord | null {
+function sessionFromRow(row: string[], strict = false): CampaignSessionRecord | null {
   if (!row[0] || !row[1]) return null
   return {
     id: row[0],
     campaignId: row[1],
     name: row[2] || "Session sans titre",
     bannerUrl: row[3] || "",
-    characterIds: idList(row[4]),
-    npcIds: idList(row[5]),
-    shopIds: idList(row[6]),
+    characterIds: idList(row[4], strict),
+    npcIds: idList(row[5], strict),
+    shopIds: idList(row[6], strict),
     createdByUid: row[7] || "",
     createdAt: row[8] || "",
     updatedAt: row[9] || "",
   }
+}
+
+/** Les cases d'une session sous leur en-tête : seules celles qui changent sont écrites. */
+function sessionCells(change: Partial<CampaignSessionRecord>) {
+  const cells: Record<string, string> = {}
+  // Écrites en RAW : un titre qui commence par « - » ou « = » reste du texte tel quel.
+  if (change.name !== undefined) cells["Titre"] = change.name
+  if (change.bannerUrl !== undefined) cells["Bannière"] = change.bannerUrl
+  if (change.characterIds !== undefined) cells["Personnages (JSON)"] = JSON.stringify(change.characterIds)
+  if (change.npcIds !== undefined) cells["PNJs (JSON)"] = JSON.stringify(change.npcIds)
+  if (change.shopIds !== undefined) cells["Magasins (JSON)"] = JSON.stringify(change.shopIds)
+  if (change.updatedAt !== undefined) cells["Modifiée le"] = change.updatedAt
+  return cells
 }
 
 function sessionRow(session: CampaignSessionRecord) {
@@ -91,7 +111,7 @@ async function readSessionRows() {
     const sheet = await sessionsSheet()
     const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, sessionSheetHeaders, { fresh: true })
     const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, named.columns)
-    return { sheet, columns, rows: named.rows.map((row) => canonicalRow(columns, row)), startRow: 2 }
+    return { sheet, columns, rows: named.rows.map((row) => canonicalRow(columns, row)), raw: named.rows, startRow: 2 }
   }
   try {
     return await read()
@@ -112,23 +132,30 @@ function byCreation(left: CampaignSessionRecord, right: CampaignSessionRecord) {
 
 export async function listCampaignSessions(campaignId: string) {
   const { rows } = await readSessionRows()
-  return rows.map(sessionFromRow)
+  return rows.map((row) => sessionFromRow(row))
     .filter((session): session is CampaignSessionRecord => Boolean(session && session.campaignId === campaignId))
     .sort(byCreation)
 }
 
-export async function getCampaignSession(campaignId: string, sessionId: string) {
+async function getCampaignSession(campaignId: string, sessionId: string) {
   return (await listCampaignSessions(campaignId)).find((session) => session.id === sessionId) ?? null
 }
 
-async function writeSession(session: CampaignSessionRecord) {
+/**
+ * Change une session sur sa ligne relue : `change` reçoit la session telle qu'elle est dans la
+ * feuille maintenant, et seules les cases qu'il rend sont écrites. Réécrire toute la ligne
+ * depuis une lecture plus ancienne perdait un ajout fait entre-temps (deux ajouts
+ * simultanés : un seul restait).
+ */
+async function updateSession(campaignId: string, sessionId: string, change: (current: CampaignSessionRecord) => Partial<CampaignSessionRecord>) {
   const { sheet, columns, rows, startRow } = await readSessionRows()
-  const index = rows.findIndex((row) => row[0] === session.id && row[1] === session.campaignId)
-  if (index < 0) throw new Error("SESSION_NOT_FOUND")
-  const rowNumber = startRow + index
-  await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
+  const index = rows.findIndex((row) => row[0] === sessionId && row[1] === campaignId)
+  const current = index >= 0 ? sessionFromRow(rows[index], true) : null
+  if (!current) throw new Error("SESSION_NOT_FOUND")
+  const patch = { ...change(current), updatedAt: new Date().toISOString() }
+  await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, sessionCells(patch)), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(sheet.spreadsheetId)
-  return session
+  return { ...current, ...patch }
 }
 
 /**
@@ -156,8 +183,9 @@ export async function createCampaignSession(campaignId: string, name: string, cr
   }
   const sheet = await sessionsSheet()
   // Les lignes blanchies par une suppression sont réutilisées avant d'ajouter à la fin.
-  const { columns, rows, startRow } = await readSessionRows()
-  const free = rows.findIndex((row) => !row.slice(0, COLUMNS).some((cell) => cell?.trim()))
+  const { columns, raw, startRow } = await readSessionRows()
+  // Seule une ligne entièrement vide est libre (rien d'écrit plus à droite non plus).
+  const free = raw.findIndex((row) => !row.some((cell) => cell?.trim()))
   if (free >= 0) {
     const rowNumber = startRow + free
     await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
@@ -169,9 +197,7 @@ export async function createCampaignSession(campaignId: string, name: string, cr
 }
 
 export async function renameCampaignSession(campaignId: string, sessionId: string, name: string) {
-  const session = await getCampaignSession(campaignId, sessionId)
-  if (!session) throw new Error("SESSION_NOT_FOUND")
-  return writeSession({ ...session, name, updatedAt: new Date().toISOString() })
+  return updateSession(campaignId, sessionId, () => ({ name }))
 }
 
 function merged(current: string[], add: string[] = [], remove: string[] = []) {
@@ -186,18 +212,13 @@ function merged(current: string[], add: string[] = [], remove: string[] = []) {
  * joueurs s'appuient encore dessus).
  */
 export async function updateSessionMembership(campaignId: string, sessionId: string, add: SessionMembership, remove: SessionMembership) {
-  const sessions = await listCampaignSessions(campaignId)
-  const session = sessions.find((candidate) => candidate.id === sessionId)
-  if (!session) throw new Error("SESSION_NOT_FOUND")
-  const next: CampaignSessionRecord = {
-    ...session,
+  // Ajouts et retraits appliqués aux listes relues juste avant d'écrire.
+  const next = await updateSession(campaignId, sessionId, (session) => ({
     characterIds: merged(session.characterIds, add.characterIds, remove.characterIds),
     npcIds: merged(session.npcIds, add.npcIds, remove.npcIds),
     shopIds: merged(session.shopIds, add.shopIds, remove.shopIds),
-    updatedAt: new Date().toISOString(),
-  }
-  await writeSession(next)
-  const others = sessions.filter((candidate) => candidate.id !== sessionId)
+  }))
+  const others = (await listCampaignSessions(campaignId)).filter((candidate) => candidate.id !== sessionId)
   await syncCampaignFlags(campaignId, next, others, add, remove)
   return next
 }
@@ -242,7 +263,7 @@ function bannerKey(campaignId: string, sessionId: string) {
   return `campaigns/${campaignId}/sessions/${sessionId}/banner`
 }
 
-export function sessionBannerUrl(campaignId: string, sessionId: string, version = Date.now()) {
+function sessionBannerUrl(campaignId: string, sessionId: string, version = Date.now()) {
   return `/api/campaigns/${encodeURIComponent(campaignId)}/sessions/${encodeURIComponent(sessionId)}/banner?v=${version}`
 }
 
@@ -251,7 +272,7 @@ export async function saveSessionBanner(campaignId: string, sessionId: string, f
   const session = await getCampaignSession(campaignId, sessionId)
   if (!session) throw new Error("SESSION_NOT_FOUND")
   await putSharedMedia(bannerKey(campaignId, sessionId), await file.arrayBuffer(), file.type)
-  return writeSession({ ...session, bannerUrl: sessionBannerUrl(campaignId, sessionId), updatedAt: new Date().toISOString() })
+  return updateSession(campaignId, sessionId, () => ({ bannerUrl: sessionBannerUrl(campaignId, sessionId) }))
 }
 
 export async function readSessionBanner(campaignId: string, sessionId: string) {

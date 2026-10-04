@@ -17,6 +17,7 @@ function errorMessage(error: unknown) {
   const code = error instanceof Error ? error.message : ""
   if (code === "INVALID_BANNER") return "Choisis une image de moins de 10 Mo."
   if (code === "SESSION_NOT_FOUND") return "Cette session n’existe plus."
+  if (code === "SESSION_LISTS_UNREADABLE") return "Les listes de cette session sont illisibles dans la feuille « Sessions » : corrige ses cases JSON dans Google Sheets avant de la modifier ici."
   return "La session n’a pas pu être modifiée."
 }
 

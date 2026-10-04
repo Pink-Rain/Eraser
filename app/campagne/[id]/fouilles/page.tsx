@@ -14,12 +14,13 @@ export const dynamic = "force-dynamic"
 async function CampaignSearchData({ campaignId }: { campaignId: string }) {
   const [items, draws] = await Promise.all([
     loadShopGeneratorItems().catch(() => null),
-    readSearchDraws(campaignId).catch(() => []),
+    readSearchDraws(campaignId).catch(() => "error" as const),
   ])
   return <SearchGenerator
     campaignId={campaignId}
     items={items ?? []}
-    initialDraws={draws}
+    initialDraws={draws === "error" ? [] : draws}
+    drawsUnavailable={draws === "error"}
     loadError={items ? "" : "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."}
   />
 }

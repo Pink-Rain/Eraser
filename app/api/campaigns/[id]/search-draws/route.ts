@@ -15,7 +15,11 @@ async function authorizedCampaign(id: string) {
 export async function GET(_request: Request, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params
   if (!await authorizedCampaign(id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  return NextResponse.json({ draws: await readSearchDraws(id), shared: searchDrawsShared() })
+  try {
+    return NextResponse.json({ draws: await readSearchDraws(id), shared: searchDrawsShared() })
+  } catch {
+    return NextResponse.json({ error: "Les tirages enregistrés n’ont pas pu être lus." }, { status: 502 })
+  }
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {

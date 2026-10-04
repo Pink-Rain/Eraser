@@ -12,15 +12,19 @@ export function searchDrawsShared() {
   return sharedStoreAvailable()
 }
 
-/** `null` : pas de serveur partagé, le navigateur prend le relais. */
+/**
+ * `null` : pas de serveur partagé, le navigateur prend le relais. Une lecture qui échoue
+ * n'est pas « aucun tirage » : la page l'aurait crue vide, et son premier enregistrement
+ * aurait remplacé tous les tirages gardés.
+ */
 export async function readSearchDraws(campaignId: string): Promise<SearchDraw[] | null> {
   if (!sharedStoreAvailable()) return null
-  const record = await readSharedRecord(scope, campaignId).catch(() => null)
+  const record = await readSharedRecord(scope, campaignId)
   if (!record) return []
   try {
     return parseSearchDraws(JSON.parse(record.value))
   } catch {
-    return []
+    throw new Error("SEARCH_DRAWS_UNREADABLE")
   }
 }
 
@@ -28,10 +32,11 @@ export async function writeSearchDraws(campaignId: string, value: unknown) {
   if (!sharedStoreAvailable()) return null
   const draws = parseSearchDraws(value)
   // Le serveur partagé refuse plus de 20 000 caractères : on retire d'abord les plus
-  // anciens, épinglés compris, plutôt que de tout perdre.
+  // anciens tirages non épinglés, puis seulement les épinglés, plutôt que de tout perdre.
   let serialized = JSON.stringify(draws)
   while (serialized.length > 19_000 && draws.length) {
-    draws.pop()
+    const oldest = draws.findLastIndex((draw) => !draw.pinned)
+    draws.splice(oldest >= 0 ? oldest : draws.length - 1, 1)
     serialized = JSON.stringify(draws)
   }
   await writeSharedRecord(scope, campaignId, serialized)

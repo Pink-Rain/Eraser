@@ -287,3 +287,26 @@ test("Campagne : un second essai avec le même ID ne la crée pas deux fois", as
   assert.equal(rows[0][3], "- au nord");
   await assert.rejects(sheets.createCampaignForMj("mj-9", { id, name: "Volée" }), /CAMPAIGN_ID_TAKEN/);
 });
+
+const sessionHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"];
+
+test("Session : une liste illisible n'est jamais remplacée par une liste vide, un renommage ne touche qu'au titre", async () => {
+  const id = fresh("sessions");
+  google.addSpreadsheet(id, [{ title: "Sessions", grid: [sessionHeaders,
+    ["S-1", "CAMP-1", "Ouverture", "", "[\"PJ-1\"]", "[\"PNJ-1\"]", "[]", "mj-1", "2026-09-01", "2026-09-01"],
+    ["S-2", "CAMP-1", "Abîmée", "", "[\"PJ-1\", oups", "[]", "[]", "mj-1", "2026-09-02", "2026-09-02"],
+  ] }]);
+  await jdr.saveJdrSheet({ key: "sessions", spreadsheetId: id, name: "Sessions", tabName: "Sessions", webViewLink: "" });
+  const sessions = await vite.ssrLoadModule("/lib/campaign-sessions.ts");
+  await assert.rejects(sessions.updateSessionMembership("CAMP-1", "S-2", { characterIds: ["PJ-2"] }, {}), /SESSION_LISTS_UNREADABLE/);
+  assert.equal(google.grid(id, "Sessions")[2][4], "[\"PJ-1\", oups");
+  // Ailleurs, un PNJ est ajouté à S-1 ; le renommage ici ne réécrit que le titre.
+  google.grid(id, "Sessions")[1][5] = "[\"PNJ-1\",\"PNJ-2\"]";
+  await sessions.renameCampaignSession("CAMP-1", "S-1", "- Prologue");
+  const row = google.grid(id, "Sessions")[1];
+  assert.equal(row[2], "- Prologue");
+  assert.equal(row[5], "[\"PNJ-1\",\"PNJ-2\"]");
+  const updated = await sessions.updateSessionMembership("CAMP-1", "S-1", { characterIds: ["PJ-2"] }, {});
+  assert.deepEqual(updated.characterIds, ["PJ-1", "PJ-2"]);
+  assert.deepEqual(updated.npcIds, ["PNJ-1", "PNJ-2"]);
+});
