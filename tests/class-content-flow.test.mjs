@@ -345,6 +345,31 @@ test("Présentation : la colonne est retrouvée par son en-tête après une colo
   assert.equal(record(google.grid("presentation", "Présentation"), 2)["Texte de la spécialité 1"], "Brûle tout, vraiment");
 });
 
+test("Classes : une classe retirée de la feuille disparaît des listes, jamais sur une lecture vide", async () => {
+  assert.deepEqual((await sheets.listClasses()).map((item) => item.id).sort(), ["CLA-0001", "CLA-0002"]);
+  const classes = google.grid("classes", "Classes");
+  classes.splice(2, 1);
+  sheets.clearSpreadsheetReadCache("classes");
+  await sheets.forgetClassIndexSync();
+  const listed = async () => (await sheets.listClasses()).map((item) => item.id).sort();
+  let ids = await listed();
+  for (let attempt = 0; attempt < 40 && ids.includes("CLA-0002"); attempt += 1) {
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    ids = await listed();
+  }
+  assert.deepEqual(ids, ["CLA-0001"]);
+  // Une feuille vide (ou illisible) ne vide pas la liste locale.
+  classes.splice(1);
+  sheets.clearSpreadsheetReadCache("classes");
+  await sheets.forgetClassIndexSync();
+  const reads = () => google.world.calls.filter((call) => call.url.includes("batchGetByDataFilter") && JSON.stringify(call.body).includes("Classes")).length;
+  const before = reads();
+  await sheets.listClasses();
+  for (let attempt = 0; attempt < 40 && reads() === before; attempt += 1) await new Promise((resolve) => setTimeout(resolve, 25));
+  await new Promise((resolve) => setTimeout(resolve, 150));
+  assert.deepEqual((await getDb().select().from(schema.classIndex)).map((row) => row.id), ["CLA-0001"]);
+});
+
 test("Bonus de rang : la ligne 1 est lue en entier, une colonne au-delà de Z est retrouvée", async () => {
   const headers = ["Rang", ...Array.from({ length: 27 }, (_, index) => `Bonus ${index + 1}`)];
   spellSheet([fireball], { tabs: [{ title: "Bonus de rang", grid: [headers, ...Array.from({ length: 20 }, (_, index) => [`Rang ${index + 1}`])] }] });

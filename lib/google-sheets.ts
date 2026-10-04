@@ -2076,13 +2076,41 @@ function numberFromCell(value: unknown, fallback = 0) {
   return Number.isFinite(parsed) ? parsed : fallback
 }
 
+/**
+ * Les notes de la colonne Image, chacune rattachée à l'ID de sa ligne lu dans le même
+ * appel : une classe ne reprend jamais la note d'une autre, même après un tri.
+ */
+async function readClassImageNotes(spreadsheetId: string, tabName: string, columns: SheetColumns) {
+  const idColumn = columns.at("ID")
+  const imageColumn = columns.at("Image")
+  const notes = new Map<string, string>()
+  if (idColumn < 0 || imageColumn < 0) return notes
+  const parameters = new URLSearchParams({ includeGridData: "true", fields: "sheets.data(startRow,startColumn,rowData.values(formattedValue,note))" })
+  for (const column of [idColumn, imageColumn]) parameters.append("ranges", sheetTabRange(tabName, `${columnName(column + 1)}2:${columnName(column + 1)}1000`))
+  const payload = await googleSheetsJson<{ sheets?: Array<{ data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: Array<{ formattedValue?: string; note?: string }> }> }> }> }>(
+    `spreadsheets/${spreadsheetId}?${parameters.toString()}`,
+  )
+  const blocks = payload.sheets?.[0]?.data ?? []
+  const block = (column: number) => blocks.find((item) => (item.startColumn ?? 0) === column)
+  const ids = block(idColumn)
+  const images = block(imageColumn)
+  ;(ids?.rowData ?? []).forEach((row, offset) => {
+    const id = String(row.values?.[0]?.formattedValue ?? "").trim()
+    const note = images?.rowData?.[(ids?.startRow ?? 0) + offset - (images.startRow ?? 0)]?.values?.[0]?.note ?? ""
+    if (id && note && !notes.has(id)) notes.set(id, note)
+  })
+  return notes
+}
+
 async function loadClassesFromGoogle() {
   const source = await classesSource()
   // Returning [] here would surface as "aucune classe" instead of telling the
   // admin the sheet simply isn't reachable from this installation.
   if (!source) throw new Error("CLASSES_SHEET_NOT_LINKED")
   const { tabName } = source
-  const read = await readClassSheet(source)
+  // Relue (lecture POST), pas servie par le cache : les images lues ensuite, elles, sont
+  // fraîches, et une ligne gardée en mémoire depuis un tri recevait l'image d'une autre.
+  const read = await readClassSheet(source, { fresh: true })
   // Les colonnes absentes (couleurs d'accent…) sont ajoutées à droite ; rien n'est déplacé.
   // Une lecture ne dépend pas de cet ajout : en cas d'échec, les colonnes présentes suffisent.
   const columns = await ensureNamedColumns(source.spreadsheetId, tabName, read.columns).catch((error) => {
@@ -2091,8 +2119,8 @@ async function loadClassesFromGoogle() {
   })
   const { rows } = read
   const hasImageColumn = columns.at("Image") >= 0
-  const imageLetter = columnName(classImageColumn(columns))
-  const imageNotes = hasImageColumn ? await readCellNotes(source.spreadsheetId, sheetTabRange(tabName, `${imageLetter}2:${imageLetter}1000`)) : []
+  const imageNotes = hasImageColumn ? await readClassImageNotes(source.spreadsheetId, tabName, columns) : new Map<string, string>()
+  // Les images posées dans les cases sont lues par position, juste après la feuille.
   let nativeImageUrls: string[] = []
   if (hasImageColumn) try {
     nativeImageUrls = await Promise.race([
@@ -2114,7 +2142,7 @@ async function loadClassesFromGoogle() {
   return rows
     .map((row, index) => ({
       row,
-      imageNote: imageNotes[index] || "",
+      imageNote: imageNotes.get(columns.get(row, "ID")) || "",
       nativeImageUrl: nativeImageUrls[index] || "",
     }))
     .filter(({ row }) => columns.get(row, "ID") && columns.get(row, "Nom de la classe"))
@@ -2177,6 +2205,14 @@ function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[]) {
           accentLight: item.accentReady ? item.accentLight : "",
           updatedAt,
         } })
+      }
+      // Une classe retirée de la feuille (ou dont l'ID a changé) disparaît des listes. Seule la
+      // copie locale est oubliée, et seulement après une lecture réussie et non vide de la feuille.
+      const listed = new Set(classes.map((item) => item.id))
+      const stale = (await db.select({ id: classIndex.id }).from(classIndex)).map((row) => row.id).filter((id) => !listed.has(id))
+      if (stale.length) {
+        changed = true
+        await db.delete(classIndex).where(inArray(classIndex.id, stale))
       }
       await db.insert(sheetIndexSyncs).values({ key: "classes:global", syncedAt: updatedAt }).onConflictDoUpdate({
         target: sheetIndexSyncs.key,
@@ -2547,10 +2583,17 @@ async function syncClassImagesFromDrive() {
   await getDb().delete(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global"))
 }
 
+/** Dernière tentative : un échec relisait tout le Drive à chaque liste des classes. */
+let classImageSyncAttemptAt = 0
+const CLASS_IMAGE_SYNC_RETRY_MS = 30 * 60_000
+
 async function ensureClassImagesSynced() {
   const db = getDb()
   const [completed] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, CLASS_IMAGE_SYNC_REVISION)).limit(1)
   if (completed) return
+  // Au plus une tentative par demi-heure dans ce processus, réussie ou non.
+  if (Date.now() - classImageSyncAttemptAt < CLASS_IMAGE_SYNC_RETRY_MS) return
+  classImageSyncAttemptAt = Date.now()
   await syncClassImagesFromDrive()
   await db.insert(sheetIndexSyncs).values({
     key: CLASS_IMAGE_SYNC_REVISION,
