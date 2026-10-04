@@ -1,4 +1,4 @@
-import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { describeOwners, listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
 import { ownersOf } from "@/lib/ownership"
 import { classImageUrl } from "@/lib/class-images"
 import { isImageSource } from "@/lib/index-columns"
@@ -109,49 +109,46 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
   const isAdmin = account.role === "admin"
   try {
     const [trashed, accounts] = await Promise.all([trashedItemIds(kind), isAdmin ? listAccounts(token).catch(() => []) : Promise.resolve([])])
-    const rows: EntityIndexExtras["rows"] = {}
+    // Les liens (campagnes d'un personnage, personnages d'une campagne) viennent de l'index local.
+    const links = new Map<string, EntityIndexExtras["rows"][string]["links"]>()
     if (kind === "character") {
-      for (const character of await listAllCharactersForAdmin(token)) rows[character.id] = {
-        ownerUid: character.ownerUid,
-        ownerUids: character.ownerUids,
-        ownerName: character.ownerName,
-        ownerDetail: character.ownerEmail || character.ownerUid || "Aucun compte",
-        links: character.campaigns.map((campaign) => ({ label: campaign.name, href: `/campagne/${encodeURIComponent(campaign.id)}`, color: campaign.accentColor, title: "Ouvrir la campagne" })),
-      }
+      for (const character of await listAllCharactersForAdmin(token)) links.set(character.id, character.campaigns.map((campaign) => ({ label: campaign.name, href: `/campagne/${encodeURIComponent(campaign.id)}`, color: campaign.accentColor, title: "Ouvrir la campagne" })))
     } else {
-      for (const campaign of await listAllCampaignsForAdmin(token)) rows[campaign.id] = {
-        ownerUid: campaign.mjUid,
-        ownerUids: campaign.ownerUids,
-        ownerName: campaign.ownerName,
-        ownerDetail: campaign.ownerEmail || campaign.mjUid || "Aucun compte",
-        links: campaign.characters.map((character) => ({ label: character.name, href: `/personnage/${encodeURIComponent(character.id)}`, title: "Ouvrir la fiche" })),
-      }
+      for (const campaign of await listAllCampaignsForAdmin(token)) links.set(campaign.id, campaign.characters.map((character) => ({ label: character.name, href: `/personnage/${encodeURIComponent(character.id)}`, title: "Ouvrir la fiche" })))
     }
-    // Un administrateur voit aussi les lignes à la corbeille, pour faire le tri : il les
-    // restaure ou les supprime d'ici. Les autres ne les voient pas.
+    // Le propriétaire de chaque ligne est lu dans la feuille elle-même (colonne « Joueur » ou
+    // « MJ ») : une ligne que l'index local ne connaît pas (ou plus) s'attribue, se met à la
+    // corbeille et se restaure comme les autres. Un administrateur voit aussi les lignes à la
+    // corbeille, pour faire le tri ; les autres ne les voient pas.
     const ownerHeader = kind === "character" ? "joueur" : "mj"
-    const names = new Map(accounts.map((item) => [item.uid, item.displayName || item.email]))
+    const rows: EntityIndexExtras["rows"] = {}
     const tables = data.tables.map((table) => {
       const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
       if (idColumn < 0) return table
-      if (!isAdmin) return { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
+      return isAdmin ? table : { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
+    })
+    const cells: Array<{ id: string; cell: string }> = []
+    for (const table of tables) {
+      const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
       const ownerColumn = table.headers.findIndex((header) => foldName(header) === ownerHeader)
+      if (idColumn < 0) continue
       for (const row of table.rows) {
         const id = (row.values[idColumn] ?? "").trim()
-        if (!id || !trashed.has(id)) continue
-        const cell = ownerColumn >= 0 ? (row.values[ownerColumn] ?? "").trim() : ""
-        const ownerUids = ownersOf(cell)
-        rows[id] = {
-          ownerUid: cell,
-          ownerUids,
-          ownerName: ownerUids.map((uid) => names.get(uid) || "Identifiant historique").join(" & ") || "Sans propriétaire",
-          ownerDetail: cell || "Aucun compte",
-          links: [],
-          trashed: true,
-        }
+        if (id) cells.push({ id, cell: ownerColumn >= 0 ? (row.values[ownerColumn] ?? "").trim() : "" })
       }
-      return table
-    })
+    }
+    const owners = await describeOwners(cells.map((item) => item.cell), token)
+    for (const { id, cell } of cells) {
+      const owner = owners.get(cell)
+      rows[id] = {
+        ownerUid: cell,
+        ownerUids: owner?.ownerUids ?? ownersOf(cell),
+        ownerName: owner?.ownerName ?? "Sans propriétaire",
+        ownerDetail: owner?.ownerEmail || cell || "Aucun compte",
+        links: links.get(id) ?? [],
+        ...(trashed.has(id) ? { trashed: true } : {}),
+      }
+    }
     return {
       ...data,
       tables,

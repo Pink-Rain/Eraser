@@ -8,11 +8,12 @@
 type Tab = { sheetId: number; title: string; grid: string[][]; columnCount: number; rowCount: number }
 type Spreadsheet = { tabs: Tab[] }
 
-export const world = { files: new Map<string, Spreadsheet>(), requests: [] as string[] }
+export const world = { files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false }
 
 export function reset() {
   world.files.clear()
   world.requests.length = 0
+  world.reverseFilteredReads = false
 }
 
 export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>) {
@@ -188,7 +189,10 @@ function handleSheets(path: string, init: RequestInit) {
     return json({ valueRanges: url.searchParams.getAll("ranges").map((range) => { const area = parseRange(file, range); return { range: areaName(area), values: readArea(area) } }) })
   }
   if (action === "batchGetByDataFilter") {
-    return json({ valueRanges: (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area) } } }) })
+    // Comme Google : chaque réponse rappelle le filtre qui l'a trouvée, et l'ordre des
+    // réponses n'est pas garanti (`reverseFilteredReads` les rend à l'envers).
+    const valueRanges = (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area) }, dataFilters: [filter] } })
+    return json({ valueRanges: world.reverseFilteredReads ? valueRanges.reverse() : valueRanges })
   }
   if (action === "batchUpdate") {
     const responses = (body.data as Array<{ range: string; values: unknown[][] }>).map((item) => ({ updatedRange: writeArea(parseRange(file, item.range), item.values) }))

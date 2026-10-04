@@ -4,7 +4,7 @@ import {
   listAllCampaignsForAdmin, listAvailableCampaignCharacters, listCampaignMembers, listCampaignNpcs,
   listCampaignsForMj, listCharactersForUser, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopActivities,
   listTabletopCharacterEntitiesByIds, listTabletopMaps, listTabletopNpcEntitiesByIds, listTabletopTokens,
-  saveNpc, updateCharacterSheet,
+  saveNpc, patchCharacterSheet,
 } from "@/lib/google-sheets"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
@@ -217,10 +217,12 @@ export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked
   if (!allowedIds.includes(id)) return null
   const character = await getCharacterSheet(account.role === "joueur" ? account.uid : null, id)
   if (!character) return null
-  const values = [...character.values]
-  values[9] = String(hpValue(patch.currentHp, Number(values[9]) || 0))
-  values[10] = String(hpValue(patch.totalHp, Number(values[10]) || 0))
-  await updateCharacterSheet(account.role === "joueur" ? account.uid : null, id, values)
+  // Seulement les deux cases de vie : réécrire toute la fiche avec cette copie (qui peut
+  // dater de quelques minutes) effaçait ce qui avait été modifié sur la fiche entre-temps.
+  await patchCharacterSheet(account.role === "joueur" ? account.uid : null, id, {
+    "9": String(hpValue(patch.currentHp, Number(character.values[9]) || 0)),
+    "10": String(hpValue(patch.totalHp, Number(character.values[10]) || 0)),
+  })
   const [entity] = await listTabletopCharacterEntitiesByIds([id])
   return entity ? { ...entity, controllable: true } : null
 }

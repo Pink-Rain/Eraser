@@ -207,16 +207,12 @@ test("Fiche de personnage : colonnes déplacées, valeurs et formules à leur vr
   assert.equal(written["Force"], "55");
   assert.equal(written["Mes notes"], "=1+1");
 
-  const values = [...sheet.values];
-  values[at("Nom personnage")] = "Aldor le Gris";
-  await sheets.updateCharacterSheet(null, "PERSO-1", values);
+  await sheets.patchCharacterSheet(null, "PERSO-1", { [at("Nom personnage")]: "Aldor le Gris" });
   written = record(google.grid(characters, "Personnages"), 1);
   assert.equal(written["Nom personnage"], "Aldor le Gris");
   assert.equal(written["Peuple"], "Elfe");
+  assert.equal(written["Force"], "55");
   assert.equal(written["Mes notes"], "=1+1");
-  // Le total de « Parade » (compétence de Force) vise la vraie colonne de Force.
-  const letter = (index) => { let current = index + 1; let result = ""; while (current > 0) { const remainder = (current - 1) % 26; result = String.fromCharCode(65 + remainder) + result; current = Math.floor((current - 1) / 26); } return result; };
-  assert.match(written["Parade — Total de stats"], new RegExp(`${letter(forceColumn)}2`));
   assert.deepEqual(google.grid(characters, "Personnages")[0], headers);
 
   const created = await sheets.createCharacterForUser("uid-2", ["Vesna", "Naine"]);
@@ -226,6 +222,9 @@ test("Fiche de personnage : colonnes déplacées, valeurs et formules à leur vr
   assert.equal(added["Nom personnage"], "Vesna");
   assert.equal(added["Peuple"], "Naine");
   assert.equal(added["Mes notes"], undefined);
+  // Le total de « Parade » (compétence de Force) vise la vraie colonne de Force, sur sa ligne.
+  const letter = (index) => { let current = index + 1; let result = ""; while (current > 0) { const remainder = (current - 1) % 26; result = String.fromCharCode(65 + remainder) + result; current = Math.floor((current - 1) / 26); } return result; };
+  assert.match(added["Parade — Total de stats"], new RegExp(`${letter(forceColumn)}3`));
 });
 
 test("Inventaire : contenants et emplacements créés sous leurs en-têtes", async () => {
@@ -295,14 +294,64 @@ test("Fiche rangée comme Eraser : une seule plage écrite dès la colonne C, co
   await getDb().insert(schema.sheetIndexSyncs).values({ key: `character-schema:v5:${characterSchema.characterSheetHeaders.length}` });
   const sheet = await sheets.getCharacterSheet(null, "PERSO-2");
   assert.equal(sheet.values[1], "Humain");
+  // Une fiche créée s'écrit d'un bloc, dès la colonne C de sa ligne.
   const before = google.world.requests.length;
-  const values = [...sheet.values];
-  values[0] = "Brin le Bref";
-  const saved = await sheets.updateCharacterSheet(null, "PERSO-2", values);
-  assert.equal(saved.values[0], "Brin le Bref");
+  const created = await sheets.createCharacterForUser("uid-1", ["Brin le Bref", "Humain"]);
   const writes = google.world.requests.slice(before).filter((request) => request.startsWith("PUT") || request.includes("batchUpdate"));
-  assert.ok(writes.some((request) => request.startsWith("PUT /values/'Personnages'!C2:")), writes.join("\n"));
-  assert.equal(record(google.grid(characters, "Personnages"), 1)["Nom personnage"], "Brin le Bref");
+  assert.ok(writes.some((request) => request.startsWith("PUT /values/'Personnages'!C3:")), writes.join("\n"));
+  assert.equal(record(google.grid(characters, "Personnages"), 2)["ID"], created.id);
+  assert.equal(record(google.grid(characters, "Personnages"), 2)["Nom personnage"], "Brin le Bref");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Nom personnage"], "Brin");
+});
+
+/** Une feuille de personnages rangée comme Eraser, avec ces fiches (ID, joueur, nom, peuple). */
+async function linkCharacters(people) {
+  const headers = [...characterSchema.characterSheetHeaders];
+  const characters = fresh("chars");
+  const rows = people.map(([id, owner, name, folk]) => headers.map((header) => ({ "ID": id, "Joueur": owner, "Nom personnage": name, "Peuple": folk })[header] ?? ""));
+  google.addSpreadsheet(characters, [{ title: "Personnages", grid: [headers, ...rows] }]);
+  await link("characters", characters, "Personnages");
+  await getDb().insert(schema.sheetIndexSyncs).values({ key: `character-schema:v5:${characterSchema.characterSheetHeaders.length}` });
+  return characters;
+}
+
+test("Lecture groupée rendue dans le désordre par Google : chaque colonne reste à sa place", async () => {
+  await linkCharacters([["PERSO-A", "uid-1", "Aldor", "Elfe"], ["PERSO-B", "uid-2", "Brin", "Humain"]]);
+  google.world.reverseFilteredReads = true;
+  await sheets.syncExistingIdentityIndexes();
+  const indexed = (await getDb().select().from(schema.characterIndex)).map((row) => [row.id, row.ownerUid, row.name, row.subtitle]).sort();
+  assert.deepEqual(indexed, [["PERSO-A", "uid-1", "Aldor", "Elfe"], ["PERSO-B", "uid-2", "Brin", "Humain"]]);
+});
+
+test("Deux suppressions définitives de suite suppriment chacune la bonne ligne", async () => {
+  const characters = await linkCharacters([["PERSO-A", "uid-1", "Aldor", "Elfe"], ["PERSO-B", "uid-1", "Brin", "Humain"], ["PERSO-C", "uid-1", "Cael", "Nain"]]);
+  await sheets.syncExistingIdentityIndexes();
+  // Les lignes sont lues (et gardées en mémoire) avant les suppressions, comme dans l'application.
+  for (const id of ["PERSO-A", "PERSO-B", "PERSO-C"]) await sheets.getCharacterSheet(null, id);
+  // Une fiche en service ne se supprime pas définitivement.
+  await assert.rejects(sheets.permanentlyDeleteItem("character", "PERSO-A"), /ITEM_NOT_IN_TRASH/);
+  await sheets.softDeleteItem("character", "PERSO-A");
+  await sheets.softDeleteItem("character", "PERSO-B");
+  await sheets.permanentlyDeleteItem("character", "PERSO-A");
+  await sheets.permanentlyDeleteItem("character", "PERSO-B");
+  const rows = google.grid(characters, "Personnages").slice(1).map((row, index) => record(google.grid(characters, "Personnages"), index + 1)["Nom personnage"]);
+  assert.deepEqual(rows, ["Cael"]);
+});
+
+test("Une ligne supprimée ailleurs ne fait pas écrire dans la fiche voisine", async () => {
+  const characters = await linkCharacters([["PERSO-A", "uid-1", "Aldor", "Elfe"], ["PERSO-B", "uid-1", "Brin", "Humain"], ["PERSO-C", "uid-1", "Cael", "Nain"]]);
+  await sheets.syncExistingIdentityIndexes();
+  const sheet = await sheets.getCharacterSheet(null, "PERSO-C");
+  const at = (header) => sheet.headers.indexOf(header);
+  await sheets.patchCharacterSheet(null, "PERSO-C", { [at("Note")]: "première" });
+  // Une autre installation supprime la ligne d'Aldor : Brin et Cael remontent d'une ligne.
+  google.grid(characters, "Personnages").splice(1, 1);
+  await sheets.patchCharacterSheet(null, "PERSO-C", { [at("Note")]: "seconde" });
+  const grid = google.grid(characters, "Personnages");
+  const byName = Object.fromEntries(grid.slice(1).map((_, index) => record(grid, index + 1)).map((row) => [row["Nom personnage"], row]));
+  assert.equal(byName["Cael"]["Note"], "seconde");
+  assert.equal(byName["Brin"]["Note"], undefined);
+  assert.equal(grid.length, 3);
 });
 
 test("Relations, sessions, vocabulaire et to-do : lus et écrits par nom de colonne", async () => {

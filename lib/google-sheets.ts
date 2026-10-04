@@ -513,20 +513,28 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
     } catch { /* réponse Google non JSON */ }
     throw new Error(`SHEETS_API_ERROR:${status}${detail ? `:${detail}` : ""}`)
   }
+  forgetAfterStructureChange(path, init)
   announceSpreadsheetWrite(path, (init?.method ?? "GET").toUpperCase())
   return response
 }
 
+/**
+ * Des lignes ou colonnes ajoutées, supprimées ou déplacées (par n'importe quel chemin
+ * d'Eraser, ajout de lignes compris) décalent toutes les suivantes : ce qui était gardé en
+ * mémoire pour ce classeur (plages lues, en-têtes, colonnes de la feuille des personnages)
+ * ne vaut plus rien. Le garder faisait écrire ou supprimer à côté de la bonne case.
+ */
+function forgetAfterStructureChange(path: string, init?: RequestInit) {
+  const structural = /:append\b/.test(path)
+    || (typeof init?.body === "string" && /"(deleteDimension|insertDimension|moveDimension|appendDimension|deleteRange|insertRange|addSheet|deleteSheet|updateSheetProperties)"/.test(init.body))
+  if (!structural) return
+  const spreadsheetId = /^spreadsheets\/([^/:?]+)/.exec(path)?.[1]
+  if (spreadsheetId) clearSpreadsheetReadCache(spreadsheetId)
+  characterColumnsCache = null
+}
+
 export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
   const response = await googleSheetsFetch(path, init)
-  // Des lignes ou colonnes ajoutées, supprimées ou déplacées décalent toutes les suivantes :
-  // les numéros de ligne et les plages gardées en mémoire pour ce classeur ne valent plus
-  // rien. Les garder faisait supprimer ou modifier la ligne voisine.
-  if (typeof init?.body === "string" && /"(deleteDimension|insertDimension|moveDimension|deleteRange|insertRange)"/.test(init.body)) {
-    const spreadsheetId = /^spreadsheets\/([^/:?]+)/.exec(path)?.[1]
-    if (spreadsheetId) clearSpreadsheetReadCache(spreadsheetId)
-    forgetSheetRows()
-  }
   return response.json() as Promise<T>
 }
 
@@ -592,6 +600,11 @@ export function clearSpreadsheetReadCache(spreadsheetId: string) {
   const prefix = `${spreadsheetId}:`
   for (const key of rangeReadCache.keys()) {
     if (key.startsWith(prefix)) rangeReadCache.delete(key)
+  }
+  // Les en-têtes gardés une minute (namedColumnsOf) sont relus eux aussi.
+  const headers = `${spreadsheetId}\u0001`
+  for (const key of sheetHeaderCache.keys()) {
+    if (key.startsWith(headers)) sheetHeaderCache.delete(key)
   }
 }
 
@@ -4931,8 +4944,10 @@ export async function listAllCampaignsForAdmin(sessionToken?: string) {
 
 /**
  * Les propriétaires d'un personnage (« Joueur ») ou d'une campagne (« MJ ») : un ou
- * plusieurs comptes, écrits « uid1 · uid2 » dans la feuille. Un identifiant historique déjà
- * présent peut rester ; tout nouveau propriétaire doit être un compte existant.
+ * plusieurs comptes, écrits « uid1 · uid2 » dans la feuille. La ligne et ses propriétaires
+ * actuels sont lus dans la feuille elle-même, d'une seule lecture : l'index local peut ne
+ * pas la connaître. Un identifiant historique déjà présent peut rester ; tout nouveau
+ * propriétaire doit être un compte existant.
  */
 export async function updateAdminItemOwner(
   kind: "character" | "campaign",
@@ -4941,42 +4956,26 @@ export async function updateAdminItemOwner(
   sessionToken?: string,
 ) {
   const wanted = [...new Set(ownerUids.map((uid) => uid.trim()).filter(Boolean))]
-  const db = getDb()
-  await ensureIdentityIndexes()
-  const [current] = kind === "character"
-    ? await db.select({ id: characterIndex.id, owners: characterIndex.ownerUid }).from(characterIndex)
-      .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
-    : await db.select({ id: campaignIndex.id, owners: campaignIndex.mjUid }).from(campaignIndex)
-      .where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
-  if (!current) throw new Error(kind === "character" ? "CHARACTER_NOT_FOUND" : "CAMPAIGN_NOT_FOUND")
-  const kept = new Set(ownersOf(current.owners))
+  const source = kind === "character" ? await charactersSource() : await campaignsSource()
+  if (!source) throw new Error(kind === "character" ? "CHARACTERS_SHEET_NOT_FOUND" : "CAMPAIGNS_SHEET_NOT_FOUND")
+  const header = kind === "character" ? "Joueur" : "MJ"
+  const sheet = kind === "character"
+    ? await readCharacterColumns(source, [header], { fresh: true })
+    : await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders, { fresh: true })
+  const index = sheet.rows.findIndex((row) => sheet.columns.get(row, "ID").trim() === id)
+  if (index < 0) throw new Error(kind === "character" ? "CHARACTER_SHEET_ROW_NOT_FOUND" : "CAMPAIGN_SHEET_ROW_NOT_FOUND")
+  const kept = new Set(ownersOf(sheet.columns.get(sheet.rows[index], header)))
   const added = wanted.filter((uid) => !kept.has(uid))
   if (added.length) {
     const accounts = await accountLookup(sessionToken)
     if (added.some((uid) => !accounts.has(uid))) throw new Error("OWNER_NOT_FOUND")
   }
   const cell = ownersCell(wanted)
-
-  if (kind === "character") {
-    const source = await charactersSource()
-    if (!source) throw new Error("CHARACTERS_SHEET_NOT_FOUND")
-    const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-    if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const { columns } = await readCharacterColumns(source, [])
-    await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "Joueur": cell }))
-    await db.update(characterIndex).set({ ownerUid: cell, updatedAt: new Date().toISOString() })
-      .where(eq(characterIndex.id, id))
-    return
-  }
-
-  const source = await campaignsSource()
-  if (!source) throw new Error("CAMPAIGNS_SHEET_NOT_FOUND")
-  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-  if (!rowNumber) throw new Error("CAMPAIGN_SHEET_ROW_NOT_FOUND")
-  const { columns } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
-  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "MJ": cell }))
-  await db.update(campaignIndex).set({ mjUid: cell, updatedAt: new Date().toISOString() })
-    .where(eq(campaignIndex.id, id))
+  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, sheet.columns, index + 2, { [header]: cell }))
+  await ensureIndexedFromSheet(kind, id)
+  const db = getDb()
+  if (kind === "character") await db.update(characterIndex).set({ ownerUid: cell, updatedAt: new Date().toISOString() }).where(eq(characterIndex.id, id))
+  else await db.update(campaignIndex).set({ mjUid: cell, updatedAt: new Date().toISOString() }).where(eq(campaignIndex.id, id))
 }
 
 export async function updateCampaignForMj(mjUid: string | null, id: string, patch: Partial<Pick<CampaignRecord, "name" | "description" | "bannerUrl" | "accentColor">>) {
@@ -5368,7 +5367,9 @@ function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number, l
  * sa valeur de départ et ses formules. Une ligne d'index renommée renomme seulement
  * l'en-tête de ses colonnes.
  */
-const CHARACTER_COLUMNS_CACHE_MS = 5 * 60_000
+// Une minute : une colonne déplacée à la main dans Sheets n'est pas suivie plus longtemps
+// en écriture (un changement fait par Eraser l'oublie aussitôt, voir forgetAfterStructureChange).
+const CHARACTER_COLUMNS_CACHE_MS = 60_000
 type CharacterColumns = { map: CharacterSheetMap; layout: CharacterLayout; catalog: CharacterCatalog }
 let characterColumnsCache: { signature: string; expiresAt: number; map: CharacterSheetMap } | null = null
 let characterColumnsTask: Promise<CharacterColumns> | null = null
@@ -5424,10 +5425,10 @@ async function syncCharacterColumns(spreadsheetId: string, tabName: string, cata
     const added = new Set(plan.append.map((column) => column.key))
     // Les fiches existantes : valeur de départ et formules dans les nouvelles colonnes seulement.
     const idLetter = columnName(Math.max(0, map.columns.at("ID")) + 1)
-    const ids = await readRange(spreadsheetId, sheetTabRange(tabName, `${idLetter}:${idLetter}`))
-    const data = ids.flatMap((row, offset) => {
-      if (offset === 0 || !String(row[0] ?? "").trim()) return []
-      const rowNumber = offset + 1
+    const idRead = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, `${idLetter}:${idLetter}`))
+    const data = idRead.rows.flatMap((row, offset) => {
+      const rowNumber = idRead.startRow + offset
+      if (rowNumber < 2 || !String(row[0] ?? "").trim()) return []
       const values = Array<string>(layout.headers.length).fill("")
       applyCharacteristicDefaults(values, layout, catalog, added)
       applySkillCells(values, rowNumber, layout, catalog, added)
@@ -5436,7 +5437,7 @@ async function syncCharacterColumns(spreadsheetId: string, tabName: string, cata
       return cellRuns(tabName, rowNumber, cells)
     })
     for (let index = 0; index < data.length; index += 200) await updateRanges(spreadsheetId, data.slice(index, index + 200))
-    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", ids.length)
+    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", idRead.rows.length)
   }
   characterColumnsCache = { signature, expiresAt: Date.now() + CHARACTER_COLUMNS_CACHE_MS, map }
   return { map, layout: map.layout, catalog }
@@ -5460,35 +5461,6 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
     values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
   }
   const character = { ...indexed, name: values[0] || indexed.name, subtitle: displayedMultipleValue(values[1] || "", "all") || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
-  characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
-  return character
-}
-
-export async function updateCharacterSheet(accountUid: string | null, id: string, values: string[]) {
-  const existing = accountUid ? await getCharacterForUser(accountUid, id) : await getCharacterById(id)
-  if (!existing) throw new Error("CHARACTER_NOT_FOUND")
-  const name = values[0]?.trim()
-  if (!name || name.length > 120) throw new Error("INVALID_CHARACTER_NAME")
-  const source = await charactersSource()
-  if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
-  await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
-  const width = layout.headers.length
-  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-  if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-  const nextValues = values.slice(0, width)
-  // Une fiche ouverte avant l'ajout d'une compétence ne connaît pas ses colonnes : elles
-  // gardent ce que la feuille contient.
-  if (nextValues.length < width) {
-    const current = await readCharacterValues(source, map, rowNumber)
-    for (let index = nextValues.length; index < width; index += 1) nextValues.push(current[index] ?? "")
-  }
-  const preparedValues = applyCharacterDefaultsAndFormulas(nextValues, rowNumber, layout, catalog)
-  const calculatedValues = (await writeCharacterValues(source, map, rowNumber, preparedValues, catalog, { returnValues: true }))?.slice(0, width) ?? []
-  while (calculatedValues.length < width) calculatedValues.push("")
-  const updatedAt = new Date().toISOString()
-  await getDb().update(characterIndex).set({ name, subtitle: displayedMultipleValue(nextValues[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
-  const character = { ...existing, name, subtitle: displayedMultipleValue(nextValues[1] || "", "all"), updatedAt, values: calculatedValues, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }
@@ -6741,28 +6713,27 @@ function todoRow(todo: AdminTodoRecord) {
   return [todo.id, todo.creatorUid, todo.creatorName, todo.name, todo.content, todo.priority, todo.label, todo.labelColor, todo.completed, todo.createdAt, todo.updatedAt, todo.deletedAt || ""]
 }
 
-const sheetRowCache = new Map<string, { rowNumber: number; expiresAt: number }>()
-
-/** La ligne d'un identifiant, cherché dans la colonne « ID » (retrouvée par son nom). */
-/** Oublie les numéros de ligne retenus : une ligne a été ajoutée, supprimée ou déplacée. */
-function forgetSheetRows() {
-  sheetRowCache.clear()
-}
-
 /**
- * La ligne d'un ID, lue dans la feuille elle-même (jamais dans une copie en mémoire, qui
- * peut dater d'avant une suppression) et retenue une minute.
+ * La ligne d'un ID, toujours lue dans la feuille elle-même au moment de s'en servir (une
+ * copie en mémoire peut dater d'avant une ligne ajoutée, supprimée ou déplacée, ici ou sur
+ * une autre installation : écrire à ce numéro touchait alors la fiche voisine). La colonne
+ * ID est retrouvée par son en-tête ; si l'en-tête gardé ne la trouve pas, il est relu.
  */
 async function findSheetRowById(spreadsheetId: string, tabName: string, id: string) {
-  const cacheKey = `${spreadsheetId}:${tabName}:${id}`
-  const cached = sheetRowCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) return cached.rowNumber
-  const { columns, rows } = await readNamedColumns(spreadsheetId, tabName, ["ID"], ["ID"], { fresh: true })
-  const rowIndex = rows.findIndex((row) => columns.get(row, "ID") === id)
-  if (rowIndex < 0) return null
-  const rowNumber = rowIndex + 2
-  sheetRowCache.set(cacheKey, { rowNumber, expiresAt: Date.now() + 60_000 })
-  return rowNumber
+  const wanted = id.trim()
+  if (!wanted) return null
+  for (const fresh of [false, true]) {
+    const columns = fresh
+      ? sheetColumns((await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1")]))[0]?.rows[0] ?? [], ["ID"])
+      : await namedColumnsOf(spreadsheetId, tabName, ["ID"])
+    const at = columns.at("ID")
+    if (at < 0) continue
+    const letter = columnName(at + 1)
+    const [read] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, `${letter}:${letter}`)])
+    const offset = (read?.rows ?? []).findIndex((row, index) => read!.startRow + index >= 2 && String(row[0] ?? "").trim() === wanted)
+    if (read && offset >= 0) return read.startRow + offset
+  }
+  return null
 }
 
 async function todoColumns(source: JdrSheetRecord) {
@@ -6960,6 +6931,48 @@ async function applySharedTrash() {
   }
 }
 
+/**
+ * L'entrée locale d'une fiche ou d'une campagne, recréée d'après sa ligne de la feuille si
+ * elle manque : l'index local n'est qu'une copie, une ligne présente dans la feuille doit
+ * toujours pouvoir être attribuée, mise à la corbeille ou restaurée. Faux si la feuille
+ * n'a pas cette ligne.
+ */
+async function ensureIndexedFromSheet(kind: "character" | "campaign", id: string) {
+  const db = getDb()
+  if (kind === "character") {
+    const [known] = await db.select({ id: characterIndex.id }).from(characterIndex).where(eq(characterIndex.id, id)).limit(1)
+    if (known) return true
+    const source = await charactersSource()
+    if (!source) return false
+    const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"], { fresh: true })
+    const row = rows.find((candidate) => columns.get(candidate, "ID").trim() === id)
+    if (!row) return false
+    await db.insert(characterIndex).values({
+      id,
+      ownerUid: columns.get(row, "Joueur"),
+      name: columns.get(row, "Nom personnage") || "Personnage sans nom",
+      subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"),
+      updatedAt: new Date().toISOString(),
+    }).onConflictDoNothing()
+    return true
+  }
+  const [known] = await db.select({ id: campaignIndex.id }).from(campaignIndex).where(eq(campaignIndex.id, id)).limit(1)
+  if (known) return true
+  const source = await campaignsSource()
+  if (!source) return false
+  const { columns, rows } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders, { fresh: true })
+  const campaign = rows.map((row) => campaignFromRow(row, columns)).find((candidate) => candidate?.id.trim() === id)
+  if (!campaign) return false
+  await db.insert(campaignIndex).values(campaign).onConflictDoNothing()
+  return true
+}
+
+/** Les noms et adresses des propriétaires de chaque case « Joueur » ou « MJ » (une ou plusieurs personnes). */
+export async function describeOwners(cells: readonly string[], sessionToken?: string) {
+  const accounts = await accountLookup(sessionToken).catch(() => new Map<string, { displayName: string; email: string }>())
+  return new Map([...new Set(cells)].map((cell) => [cell, ownerLabels(cell, accounts)] as const))
+}
+
 export async function softDeleteItem(kind: "todo" | "character" | "campaign", id: string) {
   const deletedAt = new Date().toISOString()
   if (kind === "todo") {
@@ -6968,6 +6981,9 @@ export async function softDeleteItem(kind: "todo" | "character" | "campaign", id
     await updateTodoSheetRow({ ...todo, deletedAt, updatedAt: deletedAt })
     return
   }
+  // Une ligne de la feuille absente de l'index local y est d'abord recopiée : sinon la mise
+  // à la corbeille ne se verrait pas.
+  if (!await ensureIndexedFromSheet(kind, id)) throw new Error(kind === "character" ? "CHARACTER_NOT_FOUND" : "CAMPAIGN_NOT_FOUND")
   // Annoncé d'abord aux autres installations : un échec du Worker n'est pas masqué.
   await shareTrashState(kind, id, "deleted", deletedAt)
   if (kind === "character") await getDb().update(characterIndex).set({ deletedAt }).where(eq(characterIndex.id, id))
@@ -7002,9 +7018,11 @@ export async function restoreItem(kind: "todo" | "character" | "campaign", id: s
     await updateTodoSheetRow({ ...todo, deletedAt: null, updatedAt })
   } else if (kind === "character") {
     await shareTrashState(kind, id, "restored")
+    await ensureIndexedFromSheet(kind, id)
     await getDb().update(characterIndex).set({ deletedAt: null }).where(eq(characterIndex.id, id))
   } else {
     await shareTrashState(kind, id, "restored")
+    await ensureIndexedFromSheet(kind, id)
     await getDb().update(campaignIndex).set({ deletedAt: null }).where(eq(campaignIndex.id, id))
   }
 }
@@ -7014,10 +7032,9 @@ export async function restoreItem(kind: "todo" | "character" | "campaign", id: s
  * ID est vérifiée : si elle ne porte pas cet ID, rien n'est supprimé.
  */
 async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string) {
-  forgetSheetRows()
   const rowNumber = await findSheetRowById(spreadsheetId, tabName, id)
   if (!rowNumber) return
-  const columns = await namedColumnsOf(spreadsheetId, tabName, ["ID"])
+  const columns = sheetColumns((await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1")]))[0]?.rows[0] ?? [], ["ID"])
   const idColumn = columns.at("ID")
   if (idColumn < 0) throw new Error("SHEET_ROW_CHECK_FAILED")
   const [check] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, `${columnName(idColumn + 1)}${rowNumber}`)])
@@ -7038,11 +7055,17 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
     const source = await ensureJdrSheet("admin_todos")
     await deleteSheetRow(source.spreadsheetId, source.tabName, id)
   } else if (kind === "character") {
+    // Seulement ce qui est à la corbeille : une suppression définitive ne touche jamais une
+    // fiche en service, même si on la demande par erreur.
+    const [trashed] = await getDb().select({ id: characterIndex.id }).from(characterIndex).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt))).limit(1)
+    if (!trashed) throw new Error("ITEM_NOT_IN_TRASH")
     const source = await charactersSource()
     if (source) await deleteSheetRow(source.spreadsheetId, source.tabName, id)
     await shareTrashState("character", id, "purged")
     await getDb().delete(characterIndex).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
   } else {
+    const [trashed] = await getDb().select({ id: campaignIndex.id }).from(campaignIndex).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt))).limit(1)
+    if (!trashed) throw new Error("ITEM_NOT_IN_TRASH")
     const source = await campaignsSource()
     if (source) await deleteSheetRow(source.spreadsheetId, source.tabName, id)
     await shareTrashState("campaign", id, "purged")

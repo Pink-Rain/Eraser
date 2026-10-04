@@ -188,3 +188,37 @@ test("PNJs : un PNJ enregistré dans sa campagne est relu par l'index sans « Ac
   const after = await engine.getWorldIndex("npcs");
   assert.equal(after.tables[0].rows[0].values[name], "Aldor le Gris");
 });
+
+test("Index des personnages : chaque ligne de la feuille s'attribue et se met à la corbeille, même inconnue de l'index local", async () => {
+  const extrasModule = await vite.ssrLoadModule("/lib/entity-index-extras.ts");
+  const headers = [...characterSheetHeaders];
+  const line = (values) => headers.map((header) => values[header] ?? "");
+  const id = fresh("characters");
+  google.addSpreadsheet(id, [{ title: "Personnages", grid: [headers, line({ "ID": "PER-A", "Joueur": "uid-1", "Nom personnage": "Aldor" }), line({ "ID": "PER-B", "Joueur": "uid-2 · uid-3", "Nom personnage": "Brin" })] }]);
+  await link("characters", id, "Personnages");
+  const db = getDb();
+  await db.delete(schema.characterIndex);
+
+  // L'index local ne connaît aucune de ces fiches : le propriétaire vient de la feuille.
+  let data = await extrasModule.withEntityExtras(await engine.getWorldIndex("characters", { refresh: true }), { role: "admin" });
+  assert.deepEqual(data.extras.rows["PER-A"].ownerUids, ["uid-1"]);
+  assert.deepEqual(data.extras.rows["PER-B"].ownerUids, ["uid-2", "uid-3"]);
+  assert.equal(data.extras.rows["PER-B"].trashed, undefined);
+
+  // Retirer un des deux propriétaires : écrit dans la feuille, sans l'index local.
+  await sheets.updateAdminItemOwner("character", "PER-B", ["uid-2"]);
+  assert.equal(record(google.grid(id, "Personnages"), 2)["Joueur"], "uid-2");
+
+  // Corbeille puis restauration d'une fiche que l'index local ne connaissait pas.
+  await sheets.softDeleteItem("character", "PER-A");
+  data = await extrasModule.withEntityExtras(await engine.getWorldIndex("characters", { refresh: true }), { role: "admin" });
+  assert.equal(data.extras.rows["PER-A"].trashed, true);
+  // Un MJ ne voit pas les lignes à la corbeille.
+  const forMj = await extrasModule.withEntityExtras(await engine.getWorldIndex("characters", { refresh: true }), { role: "mj" });
+  assert.deepEqual(forMj.tables[0].rows.map((row) => row.values[forMj.tables[0].headers.indexOf("ID")]), ["PER-B"]);
+  await sheets.restoreItem("character", "PER-A");
+  data = await extrasModule.withEntityExtras(await engine.getWorldIndex("characters", { refresh: true }), { role: "admin" });
+  assert.equal(data.extras.rows["PER-A"].trashed, undefined);
+  // Rien n'a été effacé de la feuille.
+  assert.equal(google.grid(id, "Personnages").length, 3);
+});
