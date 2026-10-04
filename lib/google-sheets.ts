@@ -864,7 +864,7 @@ export type NamedSheet = { columns: SheetColumns; rows: string[][] }
  * Un onglet entier, en-têtes compris, en une seule lecture (mise en cache comme les
  * autres), ses colonnes retrouvées par leur nom. `rows[i]` est la ligne i + 2.
  */
-export async function readNamedSheet(spreadsheetId: string, tabName: string, expected: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean; render?: "FORMULA" } = {}): Promise<NamedSheet> {
+export async function readNamedSheet(spreadsheetId: string, tabName: string, expected: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean; render?: "FORMULA" | "UNFORMATTED_VALUE" } = {}): Promise<NamedSheet> {
   let all: string[][]
   if (options.fresh) {
     const read = await readRangeFreshWithOffset(spreadsheetId, sheetTabAll(tabName), options.render)
@@ -4227,6 +4227,12 @@ export async function createCampaignForMj(mjUid: string, input: { id?: string; n
   const written = read.rows.find((row) => ready.get(row, "ID") === campaign.id)
   if (written) {
     if (!ownedBy(ready.get(written, "MJ"), [mjUid])) throw new Error("CAMPAIGN_ID_TAKEN")
+    // Déjà écrite par un premier essai : c'est elle qui fait foi, telle qu'elle est dans la feuille.
+    Object.assign(campaign, {
+      mjUid: ready.get(written, "MJ"), name: ready.get(written, "Nom de la campagne") || campaign.name,
+      description: ready.get(written, "Description"), bannerUrl: ready.get(written, "Bannière"),
+      accentColor: /^#[0-9a-f]{6}$/i.test(ready.get(written, "Couleur d’accent")) ? ready.get(written, "Couleur d’accent") : campaign.accentColor,
+    })
   } else {
     await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, ready), [ready.row({ ...campaignCells(campaign), "Nom de la campagne": textCell(campaign.name), "Description": textCell(campaign.description), "Bannière": textCell(campaign.bannerUrl) })])
   }
@@ -4472,7 +4478,9 @@ async function writeShopRows(pageLinked: string, shops: GeneratedShop[], options
     if (existing.shop.pageLinked !== pageLinked) throw new Error("SHOP_NOT_ON_PAGE")
     if (!flagsOnly && unreadableShopItems(columns.get(rows[existing.rowNumber - startRow], "Objets JSON"))) throw new Error("SHOP_ITEMS_UNREADABLE")
     reserved.add(existing.rowNumber)
-    updates.push(...namedRowWrites(sheet.tabName, columns, existing.rowNumber, flagsOnly ? shopFlagCells(options) : shopCells(shop, pageLinked, existing.shop, options)))
+    // La fenêtre « Ajouter à la session » permet aussi de renommer : le nouveau nom est écrit avec.
+    const renamed: Record<string, SheetCell> = flagsOnly && shop.name.trim() && shop.name !== existing.shop.name ? { "Nom du magasin": shop.name } : {}
+    updates.push(...namedRowWrites(sheet.tabName, columns, existing.rowNumber, flagsOnly ? { ...shopFlagCells(options), ...renamed } : shopCells(shop, pageLinked, existing.shop, options)))
   }
   return [
     ...await updateShopRows(sheet.spreadsheetId, updates),
@@ -4633,7 +4641,7 @@ export const npcIndexHeaders = ["Nom du PNJ", "Classe / métier", "Vie totale", 
  * colonnes (« Modifié le » en plus) : une action qui ne change que la vie, le portrait ou
  * l'ajout à la campagne n'écrase plus le reste avec une copie dépassée.
  */
-export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean; only?: readonly string[] } = {}) {
+export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean; only?: readonly string[]; create?: boolean } = {}) {
   const sheet = await npcSheet()
   const read = await readNpcSheet(sheet, { fresh: true })
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
@@ -4647,10 +4655,15 @@ export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], op
     // Le même ID sur une autre page : l'ajouter ici ferait deux PNJ du même ID.
     if (existingIndex < 0 && rows.some((row) => columns.get(row, "ID") === npc.id)) throw new Error("NPC_PAGE_MISMATCH")
     const original = existingIndex >= 0 ? rows[existingIndex] : null
+    // Une action sur quelques cases (vie, portrait, session…) ne recrée jamais un PNJ supprimé
+    // entre-temps à partir de sa copie : seul `create` (un nouveau PNJ) ajoute une ligne.
+    if (!original && only && !options.create) throw new Error("NPC_NOT_FOUND")
     const all = npcCells(npc, pageLinked, original ? npcFromRow(original, columns) : null, options)
     const cells = original && only ? Object.fromEntries(Object.entries(all).filter(([name]) => only.has(name))) : all
-    if (existingIndex >= 0) updates.push(...namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
-    else additions.push(columns.row(cells))
+    // Le texte saisi reste du texte (« - se méfie de lui » n'est pas une formule).
+    const written = Object.fromEntries(Object.entries(cells).map(([name, value]) => [name, typeof value === "string" ? textCell(value) : value]))
+    if (existingIndex >= 0) updates.push(...namedRowWrites(sheet.tabName, columns, existingIndex + 2, written))
+    else additions.push(columns.row(written))
     const record = npcFromRow(columns.row(cells, original).map(String), columns)
     if (record) saved.push(record)
   }
@@ -4683,7 +4696,8 @@ export async function deleteNpcs(pageLinked: string, npcIds: string[]) {
 export async function copyNpcsToPage(sourcePageLinked: string, targetPageLinked: string, npcIds: string[]) {
   const selectedIds = new Set(npcIds)
   const sheet = await npcSheet()
-  const read = await readNpcSheet(sheet, { fresh: true })
+  // Valeurs brutes : « 1,5 » reste un nombre et une case cochée reste cochée dans la copie.
+  const read = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, npcSheetHeaders, { fresh: true, render: "UNFORMATTED_VALUE" })
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
   const sources = read.rows.filter((row) => columns.get(row, "Page lié") === sourcePageLinked && selectedIds.has(columns.get(row, "ID")))
   const now = new Date().toISOString()

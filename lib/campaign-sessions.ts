@@ -148,15 +148,20 @@ async function getCampaignSession(campaignId: string, sessionId: string) {
  * depuis une lecture plus ancienne perdait un ajout fait entre-temps (deux ajouts
  * simultanés : un seul restait).
  */
-async function updateSession(campaignId: string, sessionId: string, change: (current: CampaignSessionRecord) => Partial<CampaignSessionRecord>) {
-  const { sheet, columns, rows, startRow } = await readSessionRows()
-  const index = rows.findIndex((row) => row[0] === sessionId && row[1] === campaignId)
-  const current = index >= 0 ? sessionFromRow(rows[index], true) : null
-  if (!current) throw new Error("SESSION_NOT_FOUND")
-  const patch = { ...change(current), updatedAt: new Date().toISOString() }
-  await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, sessionCells(patch)), { valueInputOption: "RAW" })
-  clearSpreadsheetReadCache(sheet.spreadsheetId)
-  return { ...current, ...patch }
+async function updateSession(campaignId: string, sessionId: string, change: (current: CampaignSessionRecord) => Partial<CampaignSessionRecord>, options: { lists?: boolean } = {}) {
+  // Dans ce processus, une modification de session à la fois : deux ajouts simultanés
+  // partaient de la même lecture et le second effaçait le premier.
+  return withAsyncLock("sessions", async () => {
+    const { sheet, columns, rows, startRow } = await readSessionRows()
+    const index = rows.findIndex((row) => row[0] === sessionId && row[1] === campaignId)
+    // Des listes illisibles n'empêchent que ce qui les réécrit (pas un titre ni une bannière).
+    const current = index >= 0 ? sessionFromRow(rows[index], options.lists) : null
+    if (!current) throw new Error("SESSION_NOT_FOUND")
+    const patch = { ...change(current), updatedAt: new Date().toISOString() }
+    await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, sessionCells(patch)), { valueInputOption: "RAW" })
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    return { ...current, ...patch }
+  })
 }
 
 /**
@@ -217,11 +222,13 @@ function merged(current: string[], add: string[] = [], remove: string[] = []) {
  */
 export async function updateSessionMembership(campaignId: string, sessionId: string, add: SessionMembership, remove: SessionMembership) {
   // Ajouts et retraits appliqués aux listes relues juste avant d'écrire.
+  // Seules les listes touchées sont réécrites.
+  const touched = (key: keyof SessionMembership) => Boolean(add[key]?.length || remove[key]?.length)
   const next = await updateSession(campaignId, sessionId, (session) => ({
-    characterIds: merged(session.characterIds, add.characterIds, remove.characterIds),
-    npcIds: merged(session.npcIds, add.npcIds, remove.npcIds),
-    shopIds: merged(session.shopIds, add.shopIds, remove.shopIds),
-  }))
+    ...(touched("characterIds") ? { characterIds: merged(session.characterIds, add.characterIds, remove.characterIds) } : {}),
+    ...(touched("npcIds") ? { npcIds: merged(session.npcIds, add.npcIds, remove.npcIds) } : {}),
+    ...(touched("shopIds") ? { shopIds: merged(session.shopIds, add.shopIds, remove.shopIds) } : {}),
+  }), { lists: true })
   const others = (await listCampaignSessions(campaignId)).filter((candidate) => candidate.id !== sessionId)
   await syncCampaignFlags(campaignId, next, others, add, remove)
   return next

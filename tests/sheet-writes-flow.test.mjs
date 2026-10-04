@@ -151,7 +151,7 @@ async function linkInventory() {
 test("PNJ copié : toute la ligne est reprise avec un nouvel ID", async () => {
   await linkInventory();
   const id = await linkNpcs([
-    { "ID": "PNJ-1", "Page lié": "CAMP-A", "Nom du PNJ": "Maé Terval", "Capacité de tir": "5", "Taille": "1,62 m", "Notes joueurs": "- se méfie", "Ajouté au créateur de session": "Oui" },
+    { "ID": "PNJ-1", "Page lié": "CAMP-A", "Nom du PNJ": "Maé Terval", "Capacité de tir": "5", "Taille": "1,62 m", "Notes joueurs": "- se méfie", "Ajouté au créateur de session": "Oui", "Poids": "61.5" },
   ]);
   const [copy] = await sheets.copyNpcsToPage("CAMP-A", "CAMP-B", ["PNJ-1"]);
   assert.notEqual(copy.id, "PNJ-1");
@@ -164,6 +164,9 @@ test("PNJ copié : toute la ligne est reprise avec un nouvel ID", async () => {
   assert.equal(cellOf(rows, at, "Notes joueurs"), "- se méfie");
   assert.equal(cellOf(rows, at, "Ajouté au créateur de session"), "Non");
   assert.equal(cellOf(rows, 1, "ID"), "PNJ-1");
+  // Un nombre reste un nombre dans la copie.
+  const poids = google.world.enteredCells.find((row) => row.some((cell) => cell?.stringValue === copy.id))?.[npcHeaders.indexOf("Poids")];
+  assert.deepEqual(poids, { numberValue: 61.5 });
 });
 
 test("PNJ : une action sur une case n'écrase pas le reste avec une copie dépassée", async () => {
@@ -177,6 +180,14 @@ test("PNJ : une action sur une case n'écrase pas le reste avec une copie dépas
   assert.equal(cellOf(rows, 1, "Notes MJ"), "nouvelle");
   await assert.rejects(sheets.saveNpcs("CAMP-B", [{ ...stale, pageLinked: "CAMP-B" }]), /NPC_PAGE_MISMATCH/);
   assert.equal(rows.filter((row) => row[0] === "PNJ-1").length, 1);
+  // Une note qui commence par « - » reste du texte, et le PNJ rendu ne porte pas d'apostrophe.
+  const [saved] = await sheets.saveNpcs("CAMP-A", [{ ...stale, playerNotes: "- se méfie de lui" }]);
+  assert.equal(saved.playerNotes, "- se méfie de lui");
+  assert.equal(cellOf(google.grid(id, "PNJs"), 1, "Notes joueurs"), "- se méfie de lui");
+  // Supprimé ailleurs (ligne vidée) : une action sur une case ne le recrée pas depuis sa copie.
+  google.grid(id, "PNJs")[1] = [];
+  await assert.rejects(sheets.saveNpcs("CAMP-A", [{ ...stale, currentHp: 1 }], { only: ["Vie actuelle"] }), /NPC_NOT_FOUND/);
+  assert.equal(google.grid(id, "PNJs").filter((row) => row[0] === "PNJ-1").length, 0);
 });
 
 const shopHeaders = ["ID", "Page lié", "Ville", "Taille de ville", "Type de magasin", "Nom du magasin", "Taille du magasin", "Objets JSON", "Ajouté à la campagne", "ID PNJ lié", "Créé le", "Modifié le"];
@@ -200,10 +211,18 @@ test("Magasins : ajouter à la campagne ne réécrit que ses cases", async () =>
   const id = fresh("shops");
   google.addSpreadsheet(id, [{ title: "Magasins", grid: [shopHeaders, ["SHOP-1", "CAMP-1", "Brume", "village", "market", "Nom de la feuille", "Petit", "[]", "Non", "", "2026-09-01", "2026-09-01"]] }]);
   await jdr.saveJdrSheet({ key: "shops", spreadsheetId: id, name: "shops", tabName: "Magasins", webViewLink: "" });
-  await sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-1", "Copie dépassée")], { inCampaign: true, npcId: "" });
-  const row = google.grid(id, "Magasins")[1];
+  google.grid(id, "Magasins")[1][7] = "[{\"id\":\"o1\",\"name\":\"Épée\",\"price\":\"5 po\",\"rarity\":\"common\"}]";
+  await sheets.saveGeneratedShops("CAMP-1", [{ ...shop("SHOP-1", "Nom de la feuille"), items: [] }], { inCampaign: true, npcId: "" });
+  let row = google.grid(id, "Magasins")[1];
   assert.equal(row[5], "Nom de la feuille");
   assert.equal(row[8], "Oui");
+  // Les objets ajoutés ailleurs entre-temps ne sont pas effacés par la copie de la page.
+  assert.match(row[7], /Épée/);
+  // Renommé dans la fenêtre « Ajouter à la session » : le nom suit.
+  await sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-1", "La Lanterne")], { inCampaign: true, npcId: "" });
+  row = google.grid(id, "Magasins")[1];
+  assert.equal(row[5], "La Lanterne");
+  assert.match(row[7], /Épée/);
   await assert.rejects(sheets.saveGeneratedShops("CAMP-2", [shop("SHOP-1", "Volé")], {}), /SHOP_NOT_ON_PAGE/);
 });
 
@@ -279,7 +298,8 @@ test("Campagne : un second essai avec le même ID ne la crée pas deux fois", as
   const camps = await linkCampaigns([]);
   const id = "0f8b5c1e-3f2a-4c6d-9e7b-1a2b3c4d5e6f";
   const first = await sheets.createCampaignForMj("mj-1", { id, name: "Agiastiada", description: "- au nord" });
-  const again = await sheets.createCampaignForMj("mj-1", { id, name: "Agiastiada" });
+  const again = await sheets.createCampaignForMj("mj-1", { id, name: "Agiastiada bis" });
+  assert.equal(again.name, "Agiastiada");
   assert.equal(first.id, id);
   assert.equal(again.id, id);
   const rows = google.grid(camps, "Campagnes").filter((row) => row[0] === id);
@@ -309,6 +329,16 @@ test("Session : une liste illisible n'est jamais remplacée par une liste vide, 
   const updated = await sessions.updateSessionMembership("CAMP-1", "S-1", { characterIds: ["PJ-2"] }, {});
   assert.deepEqual(updated.characterIds, ["PJ-1", "PJ-2"]);
   assert.deepEqual(updated.npcIds, ["PNJ-1", "PNJ-2"]);
+  // Deux ajouts lancés ensemble restent tous les deux.
+  await Promise.all([
+    sessions.updateSessionMembership("CAMP-1", "S-1", { characterIds: ["PJ-3"] }, {}),
+    sessions.updateSessionMembership("CAMP-1", "S-1", { characterIds: ["PJ-4"] }, {}),
+  ]);
+  assert.deepEqual(JSON.parse(google.grid(id, "Sessions")[1][4]), ["PJ-1", "PJ-2", "PJ-3", "PJ-4"]);
+  // Renommer la session abîmée reste possible : ses listes ne sont pas réécrites.
+  await sessions.renameCampaignSession("CAMP-1", "S-2", "Réparée");
+  assert.equal(google.grid(id, "Sessions")[2][2], "Réparée");
+  assert.equal(google.grid(id, "Sessions")[2][4], "[\"PJ-1\", oups");
 });
 
 test("Tabletop : une feuille réglée en français garde ses décimales, un changement n'écrit que sa case", async () => {

@@ -100,7 +100,7 @@ export async function POST(request: Request) {
         if (!current && !isNpcLibraryPage(pageLinked)) throw new Error("NPC_NOT_FOUND")
         return current ? npc : { ...npc, gmNotes: "", currentHp: npc.totalHp, inCampaign: false, inPlayerGroup: false }
       })
-      return NextResponse.json({ npcs: await saveNpcs(pageLinked, merged, { only: npcIndexHeaders }) })
+      return NextResponse.json({ npcs: await saveNpcs(pageLinked, merged, { only: npcIndexHeaders, create: true }) })
     }
     // Ajouter à la session ou au groupe ne touche que cette case.
     const options = body.action === "add-to-campaign"
