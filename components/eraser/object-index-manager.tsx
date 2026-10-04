@@ -13,6 +13,7 @@ import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 import { shownReferenceText } from "@/components/eraser/reference-store"
+import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
@@ -113,6 +114,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Les cellules en cours d’enregistrement gardent la valeur saisie : le tableau
   // n’attend jamais Google Sheets pour afficher ce qui vient d’être tapé.
   const localEdits = useRef<Record<string, string>>({})
+  /** Les cases enregistrées depuis le dernier chargement (la feuille les porte déjà). */
+  const savedEdits = useRef<Record<string, string>>({})
 
   // Le type de chaque colonne : celui du schéma du classeur, sinon reconnu par son nom.
   const specs = useMemo(() => (selected?.headers ?? []).map((header, _index, headers) => {
@@ -153,7 +156,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
    */
   const rowRefOf = useCallback((rowKey: string) => {
     const row = selected?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
-    return selected && row ? objectIndexRowRef(selected.headers, row) : { id: "", rowNumber: Number(rowKey), name: "" }
+    if (!selected || !row) return { id: "", rowNumber: Number(rowKey), name: "" }
+    // Les cases déjà enregistrées depuis le chargement (un nom changé) : la feuille les porte,
+    // le serveur doit retrouver la ligne avec elles et non avec l'instantané.
+    const values = row.values.map((value, column) => {
+      const saved = savedEdits.current[`${tableKey(selected)}:${rowKey}:${column}`]
+      return saved === undefined ? value : htmlToRichText(saved).text
+    })
+    return objectIndexRowRef(selected.headers, { rowNumber: row.rowNumber, values })
   }, [selected])
 
   /** Import d'une icône : l'image va dans le dossier « icone objet » du Drive et le serveur la pose dans la case. */
@@ -171,6 +181,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
     if (!response.ok || !payload.tables) throw new Error(payload.error || "L’icône n’a pas pu être importée.")
     localEdits.current = {}
+    savedEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
     const table = payload.tables.find((candidate) => tableKey(candidate) === tableKey(selected))
@@ -192,26 +203,35 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return (spec && !isRichSpec(spec) ? row?.values[Number(columnKey)] : row?.html[Number(columnKey)]) ?? ""
   }, [selected, specs])
 
+  /** Enregistre une case ; rend le message d'erreur, ou "" si elle est enregistrée. */
   const commitCell = useCallback(async (rowKey: string, columnKey: string, html: string) => {
-    if (!selected) return
-    localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] = html
+    if (!selected) return ""
+    const key = `${tableKey(selected)}:${rowKey}:${columnKey}`
+    // La ligne telle que la feuille la porte avant cette écriture.
+    const row = rowRefOf(rowKey)
+    localEdits.current[key] = html
     setSaving((current) => current + 1)
+    let failure = ""
     try {
       // La ligne par son ID, la colonne par son en-tête : le serveur les retrouve dans la feuille.
       const column = Number(columnKey)
       const response = await fetch("/api/resources/object-indexes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update-cell", fileId: selected.fileId, tabName: selected.tabName, row: rowRefOf(rowKey), header: selected.headers[column] ?? "", occurrence: headerOccurrence(selected.headers, column), html }),
+        body: JSON.stringify({ action: "update-cell", fileId: selected.fileId, tabName: selected.tabName, row, header: selected.headers[column] ?? "", occurrence: headerOccurrence(selected.headers, column), html }),
       })
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string }
-        setError(payload.error || "Cette cellule n’a pas pu être enregistrée.")
-      } else setError("")
+        failure = payload.error || "Cette cellule n’a pas pu être enregistrée."
+      } else savedEdits.current[key] = html
     } catch {
-      setError("Cette cellule n’a pas pu être enregistrée.")
+      failure = "Cette cellule n’a pas pu être enregistrée."
     }
+    // Refusée : la case reprend ce que porte la feuille, au lieu d'afficher ce qui n'est pas enregistré.
+    if (failure) delete localEdits.current[key]
+    setError(failure)
     setSaving((current) => current - 1)
+    return failure
   }, [rowRefOf, selected])
 
   const router = useRouter()
@@ -389,6 +409,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Actualisation impossible.")
     localEdits.current = {}
+    savedEdits.current = {}
     setTables(payload.tables)
     if (payload.schemas) setSchemas(payload.schemas)
     setVersion((current) => current + 1)
@@ -406,6 +427,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Les icônes n’ont pas pu être mises à jour.")
     localEdits.current = {}
+    savedEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
     const count = payload.result?.iconsUpdated ?? 0
@@ -424,6 +446,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setPending("")
     if (!response.ok || !payload.tables) return setError(payload.error || "Enregistrement impossible.")
     localEdits.current = {}
+    savedEdits.current = {}
     setTables(payload.tables)
     setVersion((current) => current + 1)
     setCreating(false)
@@ -472,6 +495,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       const payload = (await response.json().catch(() => ({}))) as { tables?: ObjectIndexTable[]; schemas?: Schemas; error?: string }
       if (!response.ok || !payload.tables) throw new Error(payload.error || "Les changements n’ont pas pu être écrits.")
       localEdits.current = {}
+      savedEdits.current = {}
       setTables(payload.tables)
       if (payload.schemas) setSchemas((current) => ({ ...current, ...payload.schemas }))
       setVersion((current) => current + 1)
@@ -497,7 +521,15 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   async function saveSheet(changes: Record<string, string>) {
     if (details === null) return
     setSheetPending(true); setSheetError("")
-    for (const [key, value] of Object.entries(changes)) await commitCell(details, key, value)
+    // Au premier refus, on s'arrête et on le dit : les brouillons de la fiche restent.
+    for (const [key, value] of Object.entries(changes)) {
+      const failure = await commitCell(details, key, value)
+      if (failure) {
+        setSheetPending(false)
+        setSheetError(failure)
+        throw new Error(failure)
+      }
+    }
     setSheetPending(false)
     await refresh(true)
   }

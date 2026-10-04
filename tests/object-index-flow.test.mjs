@@ -211,3 +211,32 @@ test("L'inventaire recopie le texte du catalogue à jour, pas celui gardé pour 
     Date.now = realNow;
   }
 });
+
+test("Ligne sans ID ni nom (insérée, ou brouillon) : elle se remplit et se supprime depuis Eraser", async () => {
+  const refs = await vite.ssrLoadModule("/lib/object-index-refs.ts");
+  const id = fresh("objets");
+  google.addSpreadsheet(id, [{ title: "Objets", grid: [["Nom", "Description", "Type"], ["Corde", "Chanvre", "Objet"], ["Torche", "Bois", "Objet"]] }]);
+  drive.drive.objects.push({ id, name: "Index des objets" });
+  const [table] = await sheets.listObjectIndexTables();
+  const corde = table.rows.find((candidate) => candidate.values[0] === "Corde");
+  await sheets.insertObjectIndexRow(id, "Objets", refs.objectIndexRowRef(table.headers, corde), 1, false);
+  sheets.clearObjectIndexTableCache();
+  const [reread] = await sheets.listObjectIndexTables();
+  const blank = reread.rows.find((candidate) => candidate.rowNumber === 3);
+  // Remplie à sa place…
+  await sheets.updateObjectIndexCell(id, "Objets", refs.objectIndexCellRef(reread.headers, blank, 1), "Brouillon");
+  assert.equal(google.grid(id, "Objets")[2][1], "Brouillon");
+  // …puis supprimée : la ligne n'a toujours ni ID ni nom.
+  await sheets.deleteObjectIndexRows(id, "Objets", [refs.objectIndexRowRef(reread.headers, blank)]);
+  assert.deepEqual(google.grid(id, "Objets").map((row) => row[0]), ["Nom", "Corde", "Torche"]);
+});
+
+test("« Modifier » : une colonne sans en-tête (« Colonne 3 ») reçoit le nom donné", async () => {
+  const id = fresh("objets");
+  google.addSpreadsheet(id, [{ title: "Objets", grid: [["ID", "Nom", ""], ["O-1", "Corde", "note"], ["O-2", "Torche", "autre"]] }]);
+  drive.drive.objects.push({ id, name: "Index des objets" });
+  const [table] = await sheets.listObjectIndexTables();
+  assert.equal(table.headers[2], "Colonne 3");
+  await objectSchema.applyObjectSchemaOperations(id, [{ op: "rename", tab: "Objets", header: "Colonne 3", to: "Notes" }]);
+  assert.equal(google.grid(id, "Objets")[0][2], "Notes");
+});

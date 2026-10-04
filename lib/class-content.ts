@@ -539,7 +539,9 @@ async function loadClassSpells(refresh = false, kind: SpellIndexKind = "classes"
   const workbook = await spellWorkbook(refresh, kind)
   // Aucune page ne reçoit la désignation par position d'un sort sans ID : une fiche la
   // retiendrait, et elle glisse dès qu'une ligne est ajoutée ou supprimée au-dessus.
-  if (workbook.rows.some((row) => needsSpellId(workbook, row))) await giveSpellIds(workbook, kind)
+  // Seulement dans une vraie colonne « ID » : trouvée par approximation (« Druide » contient
+  // « id »), elle recevrait des ID par-dessus ses rangs.
+  if (exactSpellIdColumn(workbook) && workbook.rows.some((row) => needsSpellId(workbook, row))) await giveSpellIds(workbook, kind)
   return {
     file: workbook.file,
     headers: workbook.headers,
@@ -593,8 +595,15 @@ function spellsWithoutId(workbook: SpellWorkbook) {
  * relue juste avant ; seules ces cases ID sont écrites, puis relues : l'ID retenu est
  * celui qui y reste. Renvoie l'ID que porte désormais chaque sort (par contenu et rang).
  */
+/** La colonne ID trouvée par son nom exact (« ID », « ID sort »…), pas par approximation. */
+function exactSpellIdColumn(workbook: SpellWorkbook) {
+  const header = normalize(workbook.headers[workbook.columns.id] ?? "")
+  return workbook.columns.id >= 0 && ["ID", "ID sort", "ID du sort"].map(normalize).includes(header)
+}
+
 async function assignMissingSpellIds(kind: SpellIndexKind) {
   const workbook = await freshSpellWorkbook(kind)
+  if (!exactSpellIdColumn(workbook)) return new Map<string, string>()
   const taken = new Set(workbook.rows.map((row) => realSpellId(cell(row, workbook.columns.id))).filter(Boolean))
   const missing = spellsWithoutId(workbook).map((item) => {
     const id = contentSpellId(item.content, item.occurrence, taken)

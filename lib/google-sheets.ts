@@ -1757,10 +1757,12 @@ async function freshObjectIndexLayout(table: ObjectIndexTable, wanted: ReadonlyA
         const rows = ids.get(id) ?? []
         return rows.length === 1 ? rows[0] : -1
       }
-      // Sans ID : à sa place, si elle y porte toujours ce nom et toujours pas d'ID.
-      const name = ref.name?.trim()
-      if (!name || at.name < 0 || !Number.isInteger(ref.rowNumber) || ref.rowNumber < 2) return -1
+      // Sans ID : à sa place, si elle y porte toujours ce nom (ou toujours aucun : une ligne
+      // vide ou un brouillon sans nom reste modifiable et supprimable) et toujours pas d'ID.
+      const name = ref.name?.trim() ?? ""
+      if (!Number.isInteger(ref.rowNumber) || ref.rowNumber < 2) return -1
       if (at.id >= 0 && cell(ref.rowNumber, at.id).trim()) return -1
+      if (at.name < 0) return name ? -1 : ref.rowNumber
       return cell(ref.rowNumber, at.name).trim() === name ? ref.rowNumber : -1
     },
   }

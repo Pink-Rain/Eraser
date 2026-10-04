@@ -167,7 +167,10 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       // La colonne par son nom dans la ligne 1 relue à l'instant : l'ordre a pu changer depuis la
       // dernière lecture (ailleurs, ou par une opération précédente de cette liste).
       const firstRow = await freshFirstRow(fileId, table.tabName)
-      const at = firstRow.findIndex((header) => foldName(header) === foldName(operation.header))
+      let at = firstRow.findIndex((header) => foldName(header) === foldName(operation.header))
+      // « Colonne N » (case d'en-tête vide) ou un en-tête repris d'un autre tableau : sa place,
+      // tant que la case de la ligne 1 y est encore vide (on lui donne alors un nom).
+      if (at < 0 && !(firstRow[column] ?? "").trim()) at = column
       if (at < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
       const problem = headerProblem(operation.to, firstRow.map((header) => header.trim()).filter(Boolean), operation.header)
       if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
