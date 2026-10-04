@@ -347,3 +347,16 @@ test("Feuille reliée : un onglet renommé à la main n'est jamais remplacé par
   await sheets.ensureJdrSheet("vocabulary");
   assert.deepEqual(google.world.files.get(blank).tabs.map((tab) => tab.title), ["Vocabulaire"]);
 });
+
+test("Colonnes lues ensemble : jamais la vie d'un personnage attribuée à son voisin", async () => {
+  const id = fresh("chars");
+  const headers = ["ID", "Nom personnage", "Vie totale"];
+  google.addSpreadsheet(id, [{ title: "Personnages", grid: [headers, ["P1", "Aldor", "10"], ["P2", "Brune", "20"]] }]);
+  await sheets.readNamedColumns(id, "Personnages", headers, ["ID", "Nom personnage"]);
+  // Ailleurs, la ligne de P1 est supprimée : P2 remonte en ligne 2.
+  google.grid(id, "Personnages").splice(1, 1);
+  const { columns, rows } = await sheets.readNamedColumns(id, "Personnages", headers, ["ID", "Nom personnage", "Vie totale"]);
+  const life = Object.fromEntries(rows.map((row) => [columns.get(row, "ID"), columns.get(row, "Vie totale")]));
+  assert.notEqual(life.P1, "20");
+  assert.ok(!("P2" in life) || life.P2 === "20");
+});

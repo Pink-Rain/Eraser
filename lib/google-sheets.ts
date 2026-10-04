@@ -573,6 +573,9 @@ export function clearSpreadsheetReadCache(spreadsheetId: string) {
   for (const key of sheetHeaderCache.keys()) {
     if (key.startsWith(headers)) sheetHeaderCache.delete(key)
   }
+  for (const [key, cached] of namedColumnsCache) {
+    if (cached.spreadsheetId === spreadsheetId) namedColumnsCache.delete(key)
+  }
 }
 
 /** Une plage lue dans Google Sheets, sans passer par le cache. */
@@ -900,14 +903,20 @@ async function readRangesFresh(spreadsheetId: string, ranges: string[]) {
  * ligne i + 2.
  */
 export async function readNamedColumns(spreadsheetId: string, tabName: string, expected: readonly string[], wanted: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean } = {}): Promise<NamedSheet> {
+  if (!options.fresh) {
+    const key = `${spreadsheetId}\u0001${tabName}\u0001${[...wanted].sort().join("\u0002")}`
+    return cachedNamedColumns(spreadsheetId, key, () => readNamedColumnsTogether(spreadsheetId, tabName, expected, wanted, options.aliases))
+  }
   const headerRange = sheetTabRange(tabName, "1:1")
-  const [header = []] = options.fresh ? (await readRangesFresh(spreadsheetId, [headerRange]))[0]?.rows ?? [] : await readRange(spreadsheetId, headerRange)
+  const [header = []] = (await readRangesFresh(spreadsheetId, [headerRange]))[0]?.rows ?? []
   const columns = sheetColumns(header, expected, options.aliases)
   const indexes = [...new Set(wanted.map((name) => columns.at(name)).filter((index) => index >= 0))]
-  const ranges = indexes.map((index) => sheetTabRange(tabName, `${columnName(index + 1)}:${columnName(index + 1)}`))
-  const reads = options.fresh
-    ? await readRangesFresh(spreadsheetId, ranges)
-    : (await readRanges(spreadsheetId, ranges)).map((rows) => ({ rows, startRow: 1 }))
+  const reads = await readRangesFresh(spreadsheetId, indexes.map((index) => sheetTabRange(tabName, `${columnName(index + 1)}:${columnName(index + 1)}`)))
+  return { columns, rows: rowsFromColumns(indexes, reads) }
+}
+
+/** Les lignes d'un onglet rebâties à partir de colonnes lues séparément ; `rows[i]` est la ligne i + 2. */
+function rowsFromColumns(indexes: readonly number[], reads: ReadonlyArray<{ rows: string[][]; startRow: number }>) {
   const rows: string[][] = []
   reads.forEach((read, position) => {
     const column = indexes[position]
@@ -919,7 +928,61 @@ export async function readNamedColumns(spreadsheetId: string, tabName: string, e
     })
   })
   for (let index = 0; index < rows.length; index += 1) rows[index] ??= []
-  return { columns, rows }
+  return rows
+}
+
+/**
+ * La ligne 1 et les colonnes voulues, lues ensemble en une seule requête (un même état de
+ * la feuille). Lues et gardées chacune de son côté, une colonne d'avant une suppression
+ * faite ailleurs et une autre d'après décalaient les lignes : la vie d'un personnage était
+ * attribuée à son voisin. Si la ligne 1 a changé depuis celle qu'on connaissait, on relit.
+ */
+async function readNamedColumnsTogether(spreadsheetId: string, tabName: string, expected: readonly string[], wanted: readonly string[], aliases?: Record<string, readonly string[]>) {
+  const headerRange = sheetTabRange(tabName, "1:1")
+  let known = sheetHeaderCache.get(`${spreadsheetId}\u0001${tabName}`)?.headers ?? null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const guess = sheetColumns(known ?? [], expected, aliases)
+    const indexes = known ? [...new Set(wanted.map((name) => guess.at(name)).filter((index) => index >= 0))] : []
+    const ranges = [headerRange, ...indexes.map((index) => sheetTabRange(tabName, `${columnName(index + 1)}:${columnName(index + 1)}`))]
+    const parameters = new URLSearchParams()
+    ranges.forEach((range) => parameters.append("ranges", range))
+    // values:batchGet rend ses plages dans l'ordre demandé.
+    const payload = await googleSheetsJson<{ valueRanges?: Array<{ range?: string; values?: GoogleSheetCellValue[][] }> }>(`spreadsheets/${spreadsheetId}/values:batchGet?${parameters.toString()}`)
+    const [headerRead, ...columnReads] = payload.valueRanges ?? []
+    const header = normalizeGoogleSheetRows(headerRead?.values)[0] ?? []
+    rememberSheetHeaders(spreadsheetId, tabName, header)
+    if (known && header.length === known.length && header.every((name, index) => name === known![index])) {
+      const reads = columnReads.map((read, index) => ({ rows: normalizeGoogleSheetRows(read.values), startRow: sheetRangeStartRow(read.range) ?? sheetRangeStartRow(ranges[index + 1]) ?? 1 }))
+      return { columns: sheetColumns(header, expected, aliases), rows: rowsFromColumns(indexes, reads) }
+    }
+    known = header
+  }
+  throw new Error("SHEET_HEADERS_UNSTABLE")
+}
+
+type NamedColumnsEntry = { loadedAt: number; promise: Promise<NamedSheet>; value?: NamedSheet; refreshing?: boolean }
+const namedColumnsCache = new Map<string, { spreadsheetId: string; entry: NamedColumnsEntry }>()
+
+/** Comme les plages : gardé RANGE_CACHE_MS, puis rendu aussitôt et relu en arrière-plan jusqu'à RANGE_STALE_MS. */
+function cachedNamedColumns(spreadsheetId: string, key: string, load: () => Promise<NamedSheet>) {
+  const now = Date.now()
+  const entry = namedColumnsCache.get(key)?.entry
+  if (entry && now - entry.loadedAt < RANGE_CACHE_MS) return entry.promise
+  if (entry?.value && now - entry.loadedAt < RANGE_STALE_MS) {
+    if (!entry.refreshing) {
+      entry.refreshing = true
+      load().then((value) => {
+        if (namedColumnsCache.get(key)?.entry === entry) namedColumnsCache.set(key, { spreadsheetId, entry: { loadedAt: Date.now(), promise: Promise.resolve(value), value } })
+      }).catch(() => { entry.refreshing = false })
+    }
+    return Promise.resolve(entry.value)
+  }
+  const created: NamedColumnsEntry = { loadedAt: now, promise: load() }
+  namedColumnsCache.set(key, { spreadsheetId, entry: created })
+  created.promise.then((value) => { created.value = value }).catch(() => {
+    if (namedColumnsCache.get(key)?.entry === created) namedColumnsCache.delete(key)
+  })
+  return created.promise
 }
 
 const sheetHeaderCache = new Map<string, { expiresAt: number; headers: string[] }>()
@@ -930,16 +993,19 @@ function rememberSheetHeaders(spreadsheetId: string, tabName: string, headers: r
 
 /**
  * Les colonnes d'un onglet d'après sa seule ligne 1, gardée une minute : une écriture
- * fréquente (le journal du tabletop) ne relit pas les en-têtes à chaque fois.
+ * fréquente (le journal du tabletop) ne relit pas les en-têtes à chaque fois. `fresh` pour
+ * placer des valeurs : une colonne déplacée dans Sheets depuis la dernière lecture est vue.
  */
-export async function namedColumnsOf(spreadsheetId: string, tabName: string, expected: readonly string[], aliases?: Record<string, readonly string[]>) {
-  const cached = sheetHeaderCache.get(`${spreadsheetId}\u0001${tabName}`)
+async function namedColumnsOf(spreadsheetId: string, tabName: string, expected: readonly string[], options: { aliases?: Record<string, readonly string[]>; fresh?: boolean } = {}) {
+  const cached = options.fresh ? null : sheetHeaderCache.get(`${spreadsheetId}\u0001${tabName}`)
   let headers = cached && cached.expiresAt > Date.now() ? cached.headers : null
   if (!headers) {
-    headers = (await readRange(spreadsheetId, sheetTabRange(tabName, "1:1")))[0] ?? []
+    headers = options.fresh
+      ? (await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1")]))[0]?.rows[0] ?? []
+      : (await readRange(spreadsheetId, sheetTabRange(tabName, "1:1")))[0] ?? []
     rememberSheetHeaders(spreadsheetId, tabName, headers)
   }
-  return sheetColumns(headers, expected, aliases)
+  return sheetColumns(headers, expected, options.aliases)
 }
 
 /** Aucune colonne prévue n'est trouvée par son nom alors que la ligne 1 est remplie : ce sont des données. */
@@ -3721,11 +3787,18 @@ async function testJdrSheetWrite(spreadsheetId: string, definition: StructuredSh
   } catch (error) {
     return error instanceof Error ? error.message : "UNKNOWN_ERROR"
   } finally {
-    if (writtenRange) {
-      await updateRanges(spreadsheetId, [{
-        range: writtenRange,
-        values: [[""]],
-      }], { valueInputOption: "RAW" }).catch(() => undefined)
+    // La ligne témoin est retirée (pas seulement vidée), après avoir revérifié qu'elle porte
+    // bien le témoin. Un échec est signalé : deux témoins étaient restés dans « Magasins ».
+    const row = writtenRange ? sheetRangeStartRow(writtenRange) : null
+    if (row) {
+      await (async () => {
+        const [{ sheetId }, [check]] = await Promise.all([tabGrid(spreadsheetId, definition.tabName), readRangesFresh(spreadsheetId, [sheetTabRange(definition.tabName, `A${row}`)])])
+        if (check?.startRow !== row || check.rows[0]?.[0] !== marker) throw new Error("DIAGNOSTIC_PROBE_MOVED")
+        await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
+          method: "POST",
+          body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: row - 1, endIndex: row } } }] }),
+        })
+      })().catch((error) => console.error("DIAGNOSTIC_PROBE_NOT_REMOVED", definition.key, writtenRange, marker, error instanceof Error ? error.message : "UNKNOWN_ERROR"))
     }
   }
 }
@@ -4370,7 +4443,7 @@ async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName, opti
  * par « = » ou « - » reste du texte.
  */
 async function appendTabletopRows(spreadsheetId: string, tab: TabletopTabName, rows: SheetCell[][], known?: SheetColumns) {
-  const columns = known ?? await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, tabletopHeaders(tab)))
+  const columns = known ?? await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, tabletopHeaders(tab), { fresh: true }))
   return appendRows(spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows.map((row) => row.map((cell) => typeof cell === "string" ? textCell(cell) : cell))))
 }
 
@@ -6770,7 +6843,7 @@ async function findSheetRowById(spreadsheetId: string, tabName: string, id: stri
 }
 
 async function todoColumns(source: JdrSheetRecord) {
-  return ensureNamedColumns(source.spreadsheetId, source.tabName, await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders))
+  return ensureNamedColumns(source.spreadsheetId, source.tabName, await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders, { fresh: true }))
 }
 
 /** Les cases d'une to-do, sous leur en-tête : seules celles qui changent sont écrites. */
