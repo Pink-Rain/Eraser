@@ -538,6 +538,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const pendingChanges = useRef(new Map<number, PendingChange>())
   const persistQueue = useRef(Promise.resolve())
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict">("idle")
+  // Les cases abandonnées au dernier conflit, nommées dans l'avertissement.
+  const [conflictHeaders, setConflictHeaders] = useState<string[]>([])
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
   // Les états posés (Index des états) changent les valeurs comme des objets équipés.
   const statesCatalog = useStatesCatalog()
@@ -626,12 +628,22 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           }
           const payload = (await response.json().catch(() => ({}))) as { character?: CharacterSheetRecord; error?: string }
           if (response.status === 409) {
-            // La fiche a changé ailleurs entre-temps (colonnes déplacées, case JSON modifiée par
-            // un autre) : rien n'a été écrit. Les cases en attente partaient de l'ancienne fiche,
-            // elles sont abandonnées ; la fiche relue s'affiche.
-            pendingChanges.current.clear()
-            if (payload.character) applyServer(payload.character)
+            // La fiche a changé ailleurs entre-temps (colonne déplacée, case JSON réécrite par un
+            // autre) : rien n'a été écrit. Seules les cases touchées par ce changement sont
+            // abandonnées, la fiche relue s'affiche ; les autres cases repartent dessus.
+            const reread = payload.character
+            const dropped = portrait ? ["Portrait"] : []
+            for (const [index, pending] of pendingChanges.current) {
+              const moved = !reread || (reread.headers[index] ?? "") !== pending.header
+              const overwritten = pending.before !== undefined && (reread?.values[index] ?? "") !== pending.before
+              if (!moved && !overwritten) continue
+              dropped.push(pending.header.replace(/ JSON$/, ""))
+              pendingChanges.current.delete(index)
+            }
+            if (reread) applyServer(reread)
+            setConflictHeaders([...new Set(dropped)])
             setSaveState("conflict")
+            if (pendingChanges.current.size) void flush()
             return
           }
           if (!response.ok || !payload.character) throw new Error(payload.error || "SAVE_FAILED")
@@ -642,7 +654,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             else if (pending?.before !== undefined) pending.before = change.value
           }
           applyServer(payload.character)
-          setSaveState(pendingChanges.current.size ? "saving" : "saved")
+          // L'avertissement d'un conflit reste affiché tant que rien de nouveau n'est saisi.
+          const stillPending = pendingChanges.current.size > 0
+          setSaveState((state) => stillPending ? "saving" : state === "conflict" ? state : "saved")
           return
         } catch {
           if (attempt >= delays.length) { setSaveState("error"); return }
@@ -1176,7 +1190,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
-      {saveState === "conflict" && <><X className="size-3.5" />La fiche a changé entre-temps : actualise puis recommence.</>}
+      {saveState === "conflict" && <><X className="size-3.5" />{conflictHeaders.length ? `La fiche a changé ailleurs entre-temps. Pas enregistré : ${conflictHeaders.join(", ")}. Recommence sur la fiche à jour.` : "La fiche a changé entre-temps : actualise puis recommence."}</>}
     </div>}
 
     {shownChoice && <SpellChoiceDialog

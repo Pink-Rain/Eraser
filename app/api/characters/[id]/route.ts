@@ -10,6 +10,8 @@ import { authorizedAccount } from "@/lib/server-auth"
  * sa valeur (et, pour une case JSON réécrite en entier, la valeur d'où elle est partie).
  */
 function sheetChanges(raw: unknown): CharacterSheetChange[] {
+  // `{}` : aucune case (un portrait seul, envoyé par une page de la version précédente).
+  if (raw && typeof raw === "object" && !Array.isArray(raw) && !Object.keys(raw).length) return []
   if (!Array.isArray(raw)) throw new Error("INVALID_VALUES")
   return raw.map((item) => {
     const { index, header, value, before } = (item ?? {}) as Record<string, unknown>

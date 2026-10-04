@@ -469,16 +469,21 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const characters = indexKey === "characters"
     return {
       header: characters ? "portrait" : "banniere",
-      upload: async (file: File, rowKey: string) => {
+      upload: async (file: File, rowKey: string, columnKey: string) => {
         const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
         if (!id) throw new Error("Cette ligne n’a pas encore d’identifiant.")
         const form = new FormData()
-        if (characters) { form.append("portrait", file); form.append("changes", "{}") } else form.append("banner", file)
+        if (characters) { form.append("portrait", file); form.append("changes", "[]") } else form.append("banner", file)
         const response = await fetch(`/api/${characters ? "characters" : "campaigns"}/${encodeURIComponent(id)}`, { method: "PATCH", body: form })
         const payload = await response.json().catch(() => ({})) as { error?: string }
         if (!response.ok) throw new Error(payload.error || "L’image n’a pas pu être importée.")
+        // La fiche (ou la campagne) vient d'écrire cette adresse dans la case : la page la tient
+        // pour la valeur vue, sinon l'écriture suivante de la case serait refusée (« modifiée
+        // entre-temps »).
+        const written = `/api/${characters ? "characters/portrait" : "campaigns/banner"}/${encodeURIComponent(id)}`
+        localEdits.current[`${rowKey}:${columnKey}`] = written
         // La même adresse qu'avant : `?v=` fait voir la nouvelle image tout de suite.
-        return `/api/${characters ? "characters/portrait" : "campaigns/banner"}/${encodeURIComponent(id)}?v=${Date.now()}`
+        return `${written}?v=${Date.now()}`
       },
     }
   }, [indexKey, rawOf])
@@ -536,13 +541,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
    */
   const savingRef = useRef(0)
   useEffect(() => { savingRef.current = saving }, [saving])
+  // Une fiche ouverte vise sa ligne par sa place : relire pendant ce temps (une ligne supprimée
+  // au-dessus, ailleurs) lui ferait montrer, puis viser, la ligne voisine. On relit à sa fermeture.
+  const detailsRef = useRef<string | null>(null)
+  useEffect(() => { detailsRef.current = details }, [details])
   useEffect(() => {
     let timer = 0
     let alive = true
     const reload = () => {
       window.clearTimeout(timer)
       timer = window.setTimeout(async () => {
-        if (savingRef.current > 0) return reload()
+        if (savingRef.current > 0 || detailsRef.current !== null) return reload()
         const seq = ++requestSeq.current
         const response = await fetch(`/api/resources/world-indexes?key=${indexKey}`, { cache: "no-store" }).catch(() => null)
         const payload = (await response?.json().catch(() => ({})) ?? {}) as { data?: WorldIndexData }
@@ -805,7 +814,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         tabNames: sortTabs.map((entry) => entry.value),
         rowValue: valueOf,
       },
-      entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey) } : {},
+      entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey, header) } : {},
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     if (extras) {
@@ -914,7 +923,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     .filter((column) => isSheetSpec(column.spec) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
     .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: savedCell(detailsFound, column.header), long: isLongColumn(column.header) })) : []
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
-    ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details) } : {}),
+    ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details, header) } : {}),
     formula: (spec) => engine.formula(details, header, spec),
     computed: (spec) => computed(details, header, spec),
     gaugeMax: (spec) => engine.gaugeMax(details, spec),

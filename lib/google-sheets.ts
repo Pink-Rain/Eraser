@@ -5909,33 +5909,40 @@ async function copyCharacterRow(source: { spreadsheetId: string; tabName: string
   if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
   // La nouvelle ligne porte déjà son ID, son joueur et son nom : un échec plus loin laisse une fiche nommée, jamais une ligne anonyme.
   await appendRows(source.spreadsheetId, sheetTabRange(source.tabName, `A:${columnName(original.map.width)}`), [columns.row({ "ID": targetId, "Joueur": columns.get(original.row, "Joueur"), "Nom personnage": textCell(columns.get(original.row, "Nom personnage")) })])
-  // Les deux lignes retrouvées dans une même lecture de la colonne ID, juste avant de copier.
-  const idColumn = columns.at("ID")
-  const letter = columnName(idColumn + 1)
-  const [ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, `${letter}:${letter}`)])
-  const rowOf = (wanted: string) => {
-    const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
-    return ids && offset >= 0 ? ids.startRow + offset : 0
-  }
-  const from = rowOf(sourceId)
-  const to = rowOf(targetId)
-  if (!from || !to) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-  // Toutes les colonnes sauf celle de l'ID, qui garde le nouveau.
-  const spans = [[0, idColumn], [idColumn + 1, original.map.width]].filter(([start, end]) => end > start)
-  await googleSheetsJson(`spreadsheets/${source.spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({ requests: spans.map(([start, end]) => ({ copyPaste: {
-      source: { sheetId, startRowIndex: from - 1, endRowIndex: from, startColumnIndex: start, endColumnIndex: end },
-      destination: { sheetId, startRowIndex: to - 1, endRowIndex: to, startColumnIndex: start, endColumnIndex: end },
-      pasteType: "PASTE_NORMAL",
-    } })) }),
-  })
-  clearSpreadsheetReadCache(source.spreadsheetId)
-  const copy = await readCharacterRow(source, targetId)
-  // La copie relue doit être ce personnage : même joueur, même nom.
-  if (!copy || ["Joueur", "Nom personnage"].some((name) => copy.map.columns.get(copy.row, name) !== columns.get(original.row, name))) {
-    console.error("CHARACTER_COPY_CHECK_FAILED", sourceId, targetId)
-    throw new Error("CHARACTER_COPY_CHECK_FAILED")
+  try {
+    // Les deux lignes retrouvées dans une même lecture de la colonne ID, juste avant de copier.
+    const idColumn = columns.at("ID")
+    const letter = columnName(idColumn + 1)
+    const [ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, `${letter}:${letter}`)])
+    const rowOf = (wanted: string) => {
+      const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
+      return ids && offset >= 0 ? ids.startRow + offset : 0
+    }
+    const from = rowOf(sourceId)
+    const to = rowOf(targetId)
+    if (!from || !to) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+    // Toutes les colonnes sauf celle de l'ID, qui garde le nouveau.
+    const spans = [[0, idColumn], [idColumn + 1, original.map.width]].filter(([start, end]) => end > start)
+    await googleSheetsJson(`spreadsheets/${source.spreadsheetId}:batchUpdate`, {
+      method: "POST",
+      body: JSON.stringify({ requests: spans.map(([start, end]) => ({ copyPaste: {
+        source: { sheetId, startRowIndex: from - 1, endRowIndex: from, startColumnIndex: start, endColumnIndex: end },
+        destination: { sheetId, startRowIndex: to - 1, endRowIndex: to, startColumnIndex: start, endColumnIndex: end },
+        pasteType: "PASTE_NORMAL",
+      } })) }),
+    })
+    clearSpreadsheetReadCache(source.spreadsheetId)
+    const copy = await readCharacterRow(source, targetId)
+    // La copie relue doit être ce personnage : même joueur, même nom.
+    if (!copy || ["Joueur", "Nom personnage"].some((name) => copy.map.columns.get(copy.row, name) !== columns.get(original.row, name))) {
+      console.error("CHARACTER_COPY_CHECK_FAILED", sourceId, targetId)
+      throw new Error("CHARACTER_COPY_CHECK_FAILED")
+    }
+  } catch (error) {
+    // La ligne ajoutée plus haut n'est jamais laissée à moitié faite (une fiche vide, visible
+    // du joueur, et une de plus à chaque nouvel essai) : elle est retirée, ID revérifié.
+    await deleteSheetRow(source.spreadsheetId, source.tabName, targetId).catch((cleanup) => console.error("CHARACTER_COPY_CLEANUP_FAILED", targetId, cleanup instanceof Error ? cleanup.message : "UNKNOWN_ERROR"))
+    throw error
   }
 }
 

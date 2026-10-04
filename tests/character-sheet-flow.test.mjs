@@ -192,6 +192,26 @@ test("Copie séparée dans une campagne : formules gardées, et c'est bien ce pe
   assert.deepEqual((await getDb().select().from(schema.characterIndex)).map((row) => row.id).sort(), [aldor.id, brin.id, member.id].sort());
 });
 
+test("Copie séparée qui échoue en route : la ligne ajoutée est retirée, aucune fiche vide ne reste", async () => {
+  const characters = await linkCharacters([]);
+  const camps = fresh("camps");
+  google.addSpreadsheet(camps, [{ title: "Campagnes", grid: [["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"]] }]);
+  await link("campaigns", camps, "Campagnes");
+  const campaignId = fresh("CAMP");
+  await getDb().insert(schema.campaignIndex).values({ id: campaignId, mjUid: "mj-1", name: "Les Brumes", description: "", bannerUrl: "", accentColor: "#334455", updatedAt: new Date().toISOString() });
+  const brin = await sheets.createCharacterForUser("uid-1", ["Brin", "Humain"]);
+  await sheets.syncExistingIdentityIndexes();
+  const before = copyOf(google.grid(characters, "Personnages"));
+  // Google ne répond pas au moment de recopier la ligne.
+  google.world.beforeRequest = (url, init) => {
+    if (String(init.body ?? "").includes("copyPaste")) throw new Error("socket hang up");
+  };
+  await assert.rejects(sheets.addCharacterToCampaign(null, campaignId, brin.id, true));
+  google.world.beforeRequest = null;
+  assert.deepEqual(google.grid(characters, "Personnages"), before);
+  assert.deepEqual((await getDb().select().from(schema.characterIndex)).map((row) => row.id), [brin.id]);
+});
+
 test("Case JSON modifiée ailleurs entre-temps : refusée, rien n'est écrit", async () => {
   const id = fresh("PERSO");
   const header = "Sorts de classe choisis JSON";
