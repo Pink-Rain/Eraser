@@ -1012,7 +1012,9 @@ async function addSpellRow(base: SpellWorkbook, draft: ClassSpellDraft, kind: Sp
   for (const [field] of richSpellFields) put(workbook.columns[field], draft[field])
   for (const { classId, rank } of ranks) put(workbook.classColumns.find((item) => item.classId === classId)?.column ?? -1, rank)
   const appended = await appendRows(workbook.file.id, `${quoteTab(workbook.tabName)}!A:${columnName(workbook.headers.length)}`, [values], { valueInputOption: "RAW" })
-  const rowNumber = Number.parseInt(appended.updatedRange.match(/![A-Z]+(\d+)/)?.[1] || "", 10) || workbook.rows.length + 2
+  // La ligne du nouveau sort, retrouvée par appendRows ; à défaut par son ID dans la feuille
+  // relue (jamais devinée : la mise en forme irait sur le sort d'un autre).
+  const rowNumber = Number.parseInt(appended.updatedRange.match(/![A-Z]+(\d+)/)?.[1] || "", 10) || locateSpell(await freshSpellWorkbook(kind), id) + 2
   const tone = await toneForType(workbook, draft.type)
   const formatting: RowCellWrite[] = [
     ...richSpellFields.flatMap(([field, htmlKey]) => {
