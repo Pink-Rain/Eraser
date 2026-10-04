@@ -1117,22 +1117,6 @@ async function tabGrid(spreadsheetId: string, tabName: string) {
   return { sheetId: properties.sheetId, rowCount: properties.gridProperties?.rowCount ?? 0, columnCount: properties.gridProperties?.columnCount ?? 0 }
 }
 
-const sheetWriteQueues = new Map<string, Promise<unknown>>()
-
-/**
- * Dans ce processus, les tâches d'une même clé passent l'une après l'autre : deux
- * enregistrements simultanés ne choisissent plus la même ligne libre (ni la même fin de feuille).
- * Non réentrant : une tâche n'attend jamais sa propre clé.
- */
-export async function oneAtATime<T>(key: string, task: () => Promise<T>): Promise<T> {
-  const run = (sheetWriteQueues.get(key) ?? Promise.resolve()).catch(() => undefined).then(task)
-  sheetWriteQueues.set(key, run)
-  try {
-    return await run
-  } finally {
-    if (sheetWriteQueues.get(key) === run) sheetWriteQueues.delete(key)
-  }
-}
 
 /**
  * Ajoute des lignes juste sous la dernière ligne remplie de la plage, à partir de sa première
@@ -1153,7 +1137,7 @@ export async function appendRows(
   const quotedTab = bang >= 0 ? range.slice(0, bang) : range
   const tabName = quotedTab.startsWith("'") && quotedTab.endsWith("'") ? quotedTab.slice(1, -1).replace(/''/g, "'") : quotedTab
   const firstColumn = /^([A-Z]+)/i.exec(bang >= 0 ? range.slice(bang + 1) : "")?.[1]?.toUpperCase() ?? "A"
-  return oneAtATime(`append:${spreadsheetId}:${tabName}`, async () => {
+  return withAsyncLock(`append:${spreadsheetId}:${tabName}`, async () => {
     if (!values.length) return { updatedRange: "", updatedRows: 0 }
     const left = [...firstColumn].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1
     const width = Math.max(1, ...values.map((row) => row.length))
@@ -4348,7 +4332,7 @@ export async function listLatestShops(pageLinked: string): Promise<GeneratedShop
 }
 
 export async function saveGeneratedShops(pageLinked: string, shops: GeneratedShop[], options: { replace?: boolean; replaceLatest?: boolean; inCampaign?: boolean; npcId?: string } = {}) {
-  const receipts = await oneAtATime("shops", () => writeShopRows(pageLinked, shops, options))
+  const receipts = await withAsyncLock("shops", () => writeShopRows(pageLinked, shops, options))
   // La vérification relit la feuille entière, comme listSavedShops et
   // listLatestShops. Relire seulement la plage
   // renvoyée par l'écriture laissait passer le cas qui bloquait l'application :
@@ -4491,7 +4475,7 @@ export async function deleteSavedShops(pageLinked: string, shopIds: string[]) {
   const sheet = await ensureJdrSheet("shops")
   if (!sheet) throw new Error("SHOPS_SHEET_UNAVAILABLE")
   const selectedIds = new Set(shopIds)
-  await oneAtATime("shops", async () => {
+  await withAsyncLock("shops", async () => {
     const { columns, rows } = await readShopSheet(sheet)
     const clear = rows.flatMap((row, index) => columns.get(row, "Page lié") === pageLinked && selectedIds.has(columns.get(row, "ID"))
       ? namedRowWrites(sheet.tabName, columns, index + 2, blankShopCells)

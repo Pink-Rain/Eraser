@@ -11,7 +11,6 @@ import {
   listSavedShops,
   namedAppendRange,
   namedRowWrites,
-  oneAtATime,
   readNamedSheet,
   repairJdrSheet,
   saveGeneratedShops,
@@ -19,6 +18,7 @@ import {
   sessionSheetHeaders,
   updateRanges,
 } from "@/lib/google-sheets"
+import { withAsyncLock } from "@/lib/async-lock"
 import { getSharedMedia, putSharedMedia } from "@/lib/shared-media"
 
 /**
@@ -184,7 +184,7 @@ export async function createCampaignSession(campaignId: string, name: string, cr
   }
   const sheet = await sessionsSheet()
   // Deux créations simultanées ne prennent pas la même ligne libre.
-  await oneAtATime("sessions", async () => {
+  await withAsyncLock("sessions", async () => {
     // Les lignes blanchies par une suppression sont réutilisées avant d'ajouter à la fin.
     const { columns, raw, startRow } = await readSessionRows()
     // Seule une ligne entièrement vide est libre (rien d'écrit plus à droite non plus).
