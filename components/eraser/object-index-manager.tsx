@@ -175,7 +175,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setVersion((current) => current + 1)
     const table = payload.tables.find((candidate) => tableKey(candidate) === tableKey(selected))
     const iconIndex = table?.headers.findIndex(isIconHeader) ?? -1
-    return table?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)?.values[iconIndex] ?? ""
+    // La ligne relue a pu changer de place : retrouvée par son ID.
+    const updated = table?.rows.find((candidate) => target.id ? objectIndexRowRef(table.headers, candidate).id === target.id : String(candidate.rowNumber) === rowKey)
+    return updated?.values[iconIndex] ?? ""
   }, [rowRefOf, selected])
 
 

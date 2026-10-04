@@ -6340,6 +6340,15 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     const read = () => readInventoryWorkbook(includeCatalog, { ...options, fresh: true })
     let workbook = await read()
     let state = npcBackpackOf(npcId, workbook)
+    let legacyItems: LegacyNpcInventoryItem[] = []
+    if (!state.migrated) {
+      // L'ancien inventaire JSON d'abord : l'inventaire est relu juste avant d'y écrire.
+      const { columns: npcColumns, rows: npcRows } = await readNpcSheet(await npcSheet(), { fresh: true })
+      const legacyRow = npcRows.find((row) => npcColumns.get(row, "ID") === npcId)
+      legacyItems = npcInventoryFromCell(legacyRow ? npcColumns.get(legacyRow, "Inventaire JSON (archive)") : undefined)
+      workbook = await read()
+      state = npcBackpackOf(npcId, workbook)
+    }
     if (state.migrated && state.backpack) {
       if (await appendMissingInventorySlots(workbook, [state.backpack])) workbook = await read()
       return workbook
@@ -6357,9 +6366,7 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
     }
     const backpack = state.backpack
     if (!backpack) throw new Error("INVENTORY_CONTAINER_NOT_FOUND")
-    const { columns: npcColumns, rows: npcRows } = await readNpcSheet(await npcSheet(), { fresh: true })
-    const legacyRow = npcRows.find((row) => npcColumns.get(row, "ID") === npcId)
-    const legacy = npcInventoryFromCell(legacyRow ? npcColumns.get(legacyRow, "Inventaire JSON (archive)") : undefined)
+    const legacy = legacyItems
       .map((item, index) => ({ item, id: `NPC-LEGACY-${npcId}-${item.id || index}` }))
       .filter(({ id }) => !workbook.contents.some((content) => content.id === id))
     const order = new Map(state.active.map((container) => [container.id, container.order]))
