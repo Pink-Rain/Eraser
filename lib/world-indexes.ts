@@ -358,7 +358,7 @@ async function readPartialTable(spreadsheetId: string, key: WorldIndexKey, tab: 
 async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: string): Promise<WorldIndexTable> {
   const tab = tabDefinition(key, tabName)
   const entity = isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].entity : undefined
-  if (entity?.readHeaders) return readPartialTable(spreadsheetId, key, tab, entity.readHeaders)
+  if (entity?.readHeaders) return withHtmlTextColumns(key, await readPartialTable(spreadsheetId, key, tab, entity.readHeaders))
   const sheet = await readFormattedSheet(spreadsheetId, [tab.name], { light: true })
   const width = Math.max(0, ...sheet.rows.map((row) => row?.length ?? 0))
   const headers = headersOf((sheet.rows[0] ?? []).map((cell) => cell?.value ?? ""), tab, width, Boolean(entity))
@@ -375,7 +375,7 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
       }]
     : [])
   rememberSheetId(spreadsheetId, sheet.tabName, sheet.sheetId)
-  return { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows }
+  return withHtmlTextColumns(key, { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows })
 }
 
 /**
@@ -710,6 +710,33 @@ async function patchCachedRow(key: WorldIndexKey, tabName: string, expected: Cac
 
 function columnOf(headers: string[], name: string) {
   return headers.findIndex((header) => foldName(header) === foldName(name))
+}
+
+/** Une colonne dont la case garde son HTML en texte (le « Contenu » du vocabulaire) : écrite telle quelle. */
+function isHtmlTextColumn(key: WorldIndexKey, header: string) {
+  return (entityOf(key)?.htmlTextHeaders ?? []).some((name) => foldName(name) === foldName(header))
+}
+
+/**
+ * Les cases HTML-en-texte d'un tableau lu : leur texte est le HTML à afficher (la page et la
+ * fiche le mettent en forme), et leur valeur simple le texte sans balises (recherche, tri).
+ */
+function withHtmlTextColumns(key: WorldIndexKey, table: WorldIndexTable): WorldIndexTable {
+  const columns = table.headers.flatMap((header, index) => isHtmlTextColumn(key, header) ? [index] : [])
+  if (!columns.length) return table
+  return {
+    ...table,
+    rows: table.rows.map((row) => {
+      const values = [...row.values]
+      const html = [...row.html]
+      for (const column of columns) {
+        const raw = row.values[column] ?? ""
+        html[column] = raw
+        values[column] = /<[a-z]/i.test(raw) ? htmlToRichText(raw).text : raw
+      }
+      return { ...row, values, html }
+    }),
+  }
 }
 
 /**
@@ -1111,7 +1138,9 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
     await options.guard?.({ id: rowId(before, rowIndex), headers: [target] })
     const current = before.rows[rowIndex]?.[column] ?? ""
     if (options.previous !== undefined && !sameCellText(options.previous, current)) throw new Error("WORLD_INDEX_CELL_CHANGED")
-    await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
+    // Une case HTML-en-texte (le vocabulaire) garde son HTML tel quel, comme l'écrit sa page.
+    if (isHtmlTextColumn(key, target)) await writeCell(before, tabName, rowIndex, column, html)
+    else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
     await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
     const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
     const previousName = isNameColumn(target) ? current.replace(/\s+/g, " ").trim() : ""
@@ -1168,7 +1197,9 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
       placed.add(name)
       return given.get(name) ?? ""
     })
-    const plain = html.map((value) => htmlToRichText(value).text)
+    // Une case HTML-en-texte (le vocabulaire) est écrite avec son HTML, comme sa page l'écrit.
+    const htmlText = current.headers.map((header) => isHtmlTextColumn(key, header))
+    const plain = html.map((value, column) => htmlText[column] ? value : htmlToRichText(value).text)
     const nameColumn = nameColumnIndex(current.headers)
     if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
     // Une entité du même nom existe déjà (créée par un lien, par exemple) : on la
@@ -1199,7 +1230,7 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
       plain.forEach((_, column) => filled.add(column))
       row = { ...created, name: plain[labelColumnIndex(current.headers)] ?? "" }
     }
-    const rich = html.flatMap((value, column) => /<[a-z]/i.test(value) && filled.has(column) ? [{ header: current.headers[column], html: value }] : [])
+    const rich = html.flatMap((value, column) => /<[a-z]/i.test(value) && filled.has(column) && !htmlText[column] ? [{ header: current.headers[column], html: value }] : [])
     if (rich.length) {
       // Relue avant la mise en forme : la ligne a pu descendre (une autre insérée au-dessus entre-temps).
       const after = await plainTable(key, tabName, [])
@@ -1366,7 +1397,8 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
       if ((current[target.column] ?? "") === target.value) continue
       written.push({ header: table.headers[target.column], html: target.value })
       // Texte enrichi : écrit avec sa mise en forme plutôt qu'avec ses balises.
-      if (/<[a-z]/i.test(target.value)) { formatted.push({ column: target.column, html: target.value }); continue }
+      // (Sauf une case HTML-en-texte, le vocabulaire : son HTML est écrit tel quel.)
+      if (/<[a-z]/i.test(target.value) && !isHtmlTextColumn(key, table.headers[target.column])) { formatted.push({ column: target.column, html: target.value }); continue }
       const cell = `${columnName(target.column + 1)}${rowNumber}`
       data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[target.value]] })
     }

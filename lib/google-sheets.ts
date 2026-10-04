@@ -365,7 +365,7 @@ function classImageColumn(columns: SheetColumns) {
  * Le classeur et l'onglet d'un index d'entités, pour le moteur des index : la feuille
  * que lit le reste d'Eraser (reliée, jamais recréée si elle existe dans Drive).
  */
-export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes") {
+export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes" | "vocabulary") {
   const runtime = runtimeEnv()
   const configured = key === "characters" ? runtime.GOOGLE_CHARACTERS_SHEET_ID : key === "classes" ? runtime.GOOGLE_CLASSES_SHEET_ID : ""
   if (configured) {

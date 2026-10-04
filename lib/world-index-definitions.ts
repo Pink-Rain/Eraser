@@ -87,7 +87,7 @@ export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
  * lues et écrites ailleurs par le code d'Eraser (par le nom de leurs colonnes) ; le moteur
  * leur donne tout le reste : tableau, fiche, « Modifier », onglets-fenêtres, formules…
  */
-export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells"
+export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells" | "vocabulary"
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | EntityWorldIndexKey
 
@@ -138,6 +138,12 @@ export type EntityIndexOptions = {
   trashKind?: "character" | "campaign"
   /** Seules ces colonnes (et celles ajoutées dans « Modifier ») sont lues : la feuille est immense. */
   readHeaders?: string[]
+  /**
+   * Colonnes dont la case garde du HTML écrit tel quel (le « Contenu » du vocabulaire, que
+   * sa page affiche avec ses listes et paragraphes) : lues et réécrites comme ce texte, jamais
+   * converties en mise en forme de Sheets.
+   */
+  htmlTextHeaders?: string[]
 }
 
 export type WorldIndexDefinition = {
@@ -422,6 +428,16 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     tabs: [{ name: "Sorts", itemLabel: "un sort", headers: spellSheetHeaders, widths: [130, 240, 380, 320, 190, 200, 160, 120], idPrefix: "SOR" }],
     entity: { nameHeader: "Nom", rowCommands: true },
   },
+  vocabulary: {
+    key: "vocabulary",
+    sheetName: "Vocabulaire",
+    title: "Vocabulaire",
+    path: "/ressources/index-du-vocabulaire",
+    itemLabel: "un mot",
+    tabs: [{ name: "Vocabulaire", itemLabel: "un mot", headers: ["Titre", "Contenu"], widths: [260, 640], idPrefix: "VOC" }],
+    // Les mêmes lignes que la page Vocabulaire (Règles), qui les lit par « Titre » et « Contenu ».
+    entity: { nameHeader: "Titre", rowCommands: true, htmlTextHeaders: ["Contenu"] },
+  },
   "creature-spells": {
     key: "creature-spells",
     sheetName: "Index des créatures",
@@ -554,6 +570,7 @@ function entityReaders(index: EntityWorldIndexKey, header: string, context: Worl
   if (index === "campaigns" && among(campaignSheetHeaders)) return ["Les campagnes (tableau de bord, accès des joueurs, couleur, bannière) lisent cette colonne par son nom."]
   if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le tabletop lisent cette colonne par son nom."]
   if (index === "classes" && among(classSheetHeaders)) return ["Les pages de classes, la création de personnage et les statistiques lisent cette colonne par son nom."]
+  if (index === "vocabulary" && among(["Titre", "Contenu"])) return ["La page Vocabulaire (Règles) lit cette colonne par son nom : le mot et sa définition."]
   // Une colonne de rang porte l'ID ou le nom de sa classe ; « Compétence » est lue sous plusieurs noms.
   if ((index === "class-spells" || index === "creature-spells") && (among(spellSheetHeaders) || among(spellReaderHeaders) || foldName(header).includes("competence") || isClassRankHeader(header, context.classNames))) return ["Les fiches de classe, les créatures, les PNJ et les personnages retrouvent les sorts par cette colonne (rangs des classes compris)."]
   return []
@@ -601,10 +618,15 @@ export function isNameColumn(header: string) {
   return folded === "nom" || entityNameHeaders.has(folded)
 }
 
-/** La colonne du nom parmi des en-têtes : « Nom » d'abord, sinon celle d'un index d'entités. */
+/**
+ * La colonne du nom parmi des en-têtes : « Nom » d'abord, sinon celle d'un index d'entités,
+ * sinon « Titre » (le vocabulaire) quand l'onglet n'a aucune colonne de nom.
+ */
 export function nameColumnIndex(headers: readonly string[]) {
   const exact = headers.findIndex((header) => foldName(header) === "nom")
-  return exact >= 0 ? exact : headers.findIndex((header) => isNameColumn(header))
+  if (exact >= 0) return exact
+  const entity = headers.findIndex((header) => isNameColumn(header))
+  return entity >= 0 ? entity : headers.findIndex((header) => foldName(header) === "titre")
 }
 
 /**
@@ -746,6 +768,11 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
     if (is("Couleur d’accent sombre", "Couleur d’accent clair")) return { kind: "color" }
     return { kind: "rich" }
   }
+  if (index === "vocabulary") {
+    // Le mot ouvre sa fiche ; sa définition garde sa mise en forme (listes, paragraphes).
+    if (is("Titre")) return { kind: "name-form", also: ["fixed"] }
+    return { kind: "rich" }
+  }
   // Sorts des classes et des créatures : une colonne par classe donne le rang du sort.
   if (/^CLA-/i.test(header.trim())) return { kind: "number", hidden: true, description: "Le rang du sort dans cette classe (vide : pas dans la classe)." }
   if (is("Type", "Type de sort")) return { kind: "choice", allowCustom: true, options: index === "creature-spells" ? spellTypeOptions.filter((option) => classSpellCategory(option.value) !== "bonus") : spellTypeOptions }
@@ -754,6 +781,6 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
 
 /** Les colonnes longues (récits) prennent plus de place dans le tableau et le formulaire. */
 export function isLongColumn(header: string) {
-  return /description|note|histoire|autre|organisation|rencontre/.test(foldName(header))
+  return /description|note|histoire|autre|organisation|rencontre|contenu/.test(foldName(header))
 }
 

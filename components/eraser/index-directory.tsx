@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react"
 import Link from "next/link"
-import { LibraryBig, Activity, Gauge, Church, CircleUserRound, Drama, Flame, Hexagon, Languages, Map, MapPin, Package, PawPrint, Sparkles, Star, Swords, Trophy, Users, type LucideIcon } from "lucide-react"
+import { LibraryBig, Activity, BookText, Gauge, Church, CircleUserRound, Drama, Flame, Hexagon, Languages, Map, MapPin, Package, PawPrint, Sparkles, Star, Swords, Trophy, Users, type LucideIcon } from "lucide-react"
 
 import { useIndexFavorites } from "@/components/eraser/index-favorites"
 import { indexPages, type IndexPage, type IndexPageKey } from "@/lib/index-pages"
@@ -24,6 +24,7 @@ export const indexPageIcons: Record<IndexPageKey, LucideIcon> = {
   "armes-modificateurs": Hexagon,
   caracteristiques: Gauge,
   succes: Trophy,
+  vocabulaire: BookText,
 }
 
 function IndexCard({ page, favorite, onToggle }: { page: IndexPage; favorite: boolean; onToggle: () => void }) {

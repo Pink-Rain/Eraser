@@ -1,4 +1,5 @@
-import { BookText, ExternalLink } from "lucide-react"
+import { BookText, ExternalLink, Table2 } from "lucide-react"
+import Link from "next/link"
 import { Suspense } from "react"
 import { redirect } from "next/navigation"
 
@@ -51,6 +52,14 @@ export default async function VocabularyPage() {
               <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
                 Le dictionnaire des mots qu’on utilise sans arrêt autour de la table, rangés par ordre alphabétique.
               </p>
+              {canEdit && (
+                <Button asChild variant="link" className="mt-2 mr-4 h-auto px-0">
+                  <Link href="/ressources/index-du-vocabulaire">
+                    <Table2 className="size-3.5" />
+                    Ouvrir l’index du vocabulaire
+                  </Link>
+                </Button>
+              )}
               {sheet && (
                 <Button asChild variant="link" className="admin-view-only mt-2 hidden h-auto px-0">
                   <a href={sheet.webViewLink} target="_blank" rel="noreferrer">

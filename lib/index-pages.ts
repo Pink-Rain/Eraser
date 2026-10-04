@@ -2,7 +2,7 @@
  * Les pages de la section « Index » (anciennement « Ressources »). Les adresses
  * restent sous /ressources pour que les liens existants continuent de fonctionner.
  */
-export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-classes" | "sorts-creatures" | "etats" | "armes-modificateurs" | "caracteristiques" | "succes"
+export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-classes" | "sorts-creatures" | "etats" | "armes-modificateurs" | "caracteristiques" | "succes" | "vocabulaire"
 
 export type IndexPage = { key: IndexPageKey; href: string; label: string; description: string }
 
@@ -25,4 +25,5 @@ export const indexPages: IndexPage[] = ([
   { key: "personnages", href: "/ressources/index-des-personnages", label: "Personnages", description: "Toutes les fiches de personnages joueurs." },
   { key: "pnjs", href: "/ressources/index-des-pnjs", label: "PNJs", description: "Tous les PNJ, ceux de la bibliothèque et ceux des campagnes." },
   { key: "religions", href: "/ressources/index-des-religions", label: "Religions", description: "Cultes, divinités et croyances." },
+  { key: "vocabulaire", href: "/ressources/index-du-vocabulaire", label: "Vocabulaire", description: "Les mots de la table et leur définition, les mêmes que la page Vocabulaire." },
 ] satisfies IndexPage[]).sort((left, right) => left.label.localeCompare(right.label, "fr", { sensitivity: "base" }))

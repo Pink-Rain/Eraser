@@ -37,6 +37,7 @@ import {
   isLongColumn,
   isNameColumn,
   labelColumnIndex,
+  nameColumnIndex,
   linkEndCovers,
   splitNames,
   worldColumnSpec,
@@ -90,10 +91,9 @@ function countCorrections(tables: WorldIndexTable[], specOf: (tab: string, heade
   }, 0), 0)
 }
 
-/** La colonne « Nom » d'un tableau : c'est par elle que les relations retrouvent une ligne. */
+/** La colonne « Nom » d'un tableau (« Titre » pour le vocabulaire) : c'est par elle que les relations retrouvent une ligne. */
 function nameColumnOf(headers: string[]) {
-  const exact = headers.findIndex((header) => foldName(header) === "nom")
-  return exact >= 0 ? exact : headers.findIndex((header) => isNameColumn(header))
+  return nameColumnIndex(headers)
 }
 
 function isValidSort(value: unknown): value is SheetGridSort {
@@ -783,7 +783,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       card: () => rowCard(nameOf(rowKey) || "Sans nom", sheetFields.filter((column) => !isComputedSpec(column.spec) || column.spec.kind === "formula").map((column) => {
         const text = valueOf(rowKey, column.header).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
         return { label: column.header, text }
-      }).filter((field) => !isNameColumn(field.label))),
+      }).filter((field) => { const found = locate(rowKey); return found ? foldName(field.label) !== foldName(found.table.headers[nameColumnOf(found.table.headers)] ?? "") : !isNameColumn(field.label) })),
       chat: async (message, audience) => {
         const campaign = await chooseCampaign(ask, "chat")
         if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
