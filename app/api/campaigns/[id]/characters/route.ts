@@ -51,7 +51,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   try {
     const body = (await request.json()) as { characterId?: string; duplicate?: boolean }
     if (!body.characterId) throw new Error("CHARACTER_NOT_FOUND")
-    const { member, sharedError } = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate !== false)
+    // Une copie seulement quand elle est demandée : un champ absent ajoute le personnage lui-même.
+    const { member, sharedError } = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate === true)
     const players = await playerNamesFor(account, [member.ownerUid]).catch(() => new Map<string, string>())
     return NextResponse.json({ character: { ...member, playerName: players.get(member.ownerUid) ?? "" }, warning: sharedWarning(sharedError, account.role === "admin") })
   } catch (error) {

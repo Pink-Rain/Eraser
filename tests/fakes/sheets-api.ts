@@ -20,6 +20,8 @@ export const world = {
   drive: [] as DriveEntry[],
   /** Onglets dont la lecture des valeurs échoue (Google refuse). */
   failTabs: [] as string[],
+  /** Si un test le donne : le résultat affiché d'une formule, rendu par les lectures de valeurs sauf en `FORMULA` (comme Google). */
+  formulaResults: null as ((formula: string) => string) | null,
 }
 
 export function reset() {
@@ -30,6 +32,7 @@ export function reset() {
   world.calls.length = 0
   world.drive.length = 0
   world.failTabs.length = 0
+  world.formulaResults = null
 }
 
 export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>) {
@@ -85,15 +88,16 @@ function parseRange(file: Spreadsheet, raw: string): Area {
   return { tab, top: from.row, left: from.column, bottom: to.row, right: to.column, quoted }
 }
 
-function readArea(area: Area) {
+function readArea(area: Area, render?: string | null) {
   const { tab } = area
   const bottom = Math.min(area.bottom, tab.grid.length - 1)
   const values: string[][] = []
+  const shown = (cell: string) => world.formulaResults && render !== "FORMULA" && cell.startsWith("=") ? world.formulaResults(cell) : cell
   for (let row = area.top; row <= bottom; row += 1) {
     const source = tab.grid[row] ?? []
     const right = Math.min(area.right, source.length - 1)
     const line: string[] = []
-    for (let column = area.left; column <= right; column += 1) line.push(source[column] ?? "")
+    for (let column = area.left; column <= right; column += 1) line.push(shown(source[column] ?? ""))
     while (line.length && line[line.length - 1] === "") line.pop()
     values.push(line)
   }
@@ -231,13 +235,13 @@ function handleSheets(path: string, init: RequestInit) {
   if (kind !== "values" && !kind.startsWith("values:")) return json({ error: { message: `FAKE_UNSUPPORTED:${path}` } }, 400)
   const action = kind.includes(":") ? kind.split(":")[1] : ""
   if (action === "batchGet") {
-    return json({ valueRanges: url.searchParams.getAll("ranges").map((range) => { const area = parseRange(file, range); return { range: areaName(area), values: readArea(area) } }) })
+    return json({ valueRanges: url.searchParams.getAll("ranges").map((range) => { const area = parseRange(file, range); return { range: areaName(area), values: readArea(area, url.searchParams.get("valueRenderOption")) } }) })
   }
   if (action === "batchGetByDataFilter") {
     if ((body.dataFilters as Array<{ a1Range: string }>).some((filter) => world.failTabs.includes(parseRange(file, filter.a1Range).tab.title))) return json({ error: { message: "The caller does not have permission" } }, 403)
     // Comme Google : chaque réponse rappelle le filtre qui l'a trouvée, et l'ordre des
     // réponses n'est pas garanti (`reverseFilteredReads` les rend à l'envers).
-    const valueRanges = (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area) }, dataFilters: [filter] } })
+    const valueRanges = (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area, body.valueRenderOption) }, dataFilters: [filter] } })
     return json({ valueRanges: world.reverseFilteredReads ? valueRanges.reverse() : valueRanges })
   }
   // Comme Google en USER_ENTERED : l'apostrophe de tête force le texte et n'est pas gardée.
@@ -266,7 +270,7 @@ function handleSheets(path: string, init: RequestInit) {
     return json({ updatedRange, updatedData: { range: updatedRange, values: readArea({ ...area, bottom: area.top + body.values.length - 1 }) } })
   }
   if (world.failTabs.includes(area.tab.title)) return json({ error: { message: "The caller does not have permission" } }, 403)
-  return json({ range: areaName(area), values: readArea(area) })
+  return json({ range: areaName(area), values: readArea(area, url.searchParams.get("valueRenderOption")) })
 }
 
 /** Les fichiers du Drive qui répondent à une recherche : nom exact, types, dossier parent. */

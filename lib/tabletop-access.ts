@@ -1,11 +1,12 @@
 import { characteristicOrder, characteristicShort, npcCharacteristics } from "@/lib/characteristics"
 import {
-  getCampaignDashboard, getCampaignForMj, getCampaignForPlayer, getCharacterSheet, getTabletopMap,
+  getCampaignDashboard, getCampaignForMj, getCampaignForPlayer, getTabletopMap,
   listAllCampaignsForAdmin, listAvailableCampaignCharacters, listCampaignMembers, listCampaignNpcs,
   listCampaignsForMj, listCharactersForUser, listNpcBackpackSummaries, listNpcs, listSavedShops, listTabletopActivities,
   listTabletopCharacterEntitiesByIds, listTabletopMaps, listTabletopNpcEntitiesByIds, listTabletopTokens,
-  saveNpc, patchCharacterSheet,
+  saveNpc, patchCharacterSheet, tabletopCharacterEntity,
 } from "@/lib/google-sheets"
+import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
 import { identityUidsForUser } from "@/lib/identity-links"
@@ -215,14 +216,24 @@ export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked
   }
   const allowedIds = await accessibleCharacterIds(account, pageLinked)
   if (!allowedIds.includes(id)) return null
-  const character = await getCharacterSheet(account.role === "joueur" ? account.uid : null, id)
-  if (!character) return null
-  // Seulement les deux cases de vie : réécrire toute la fiche avec cette copie (qui peut
-  // dater de quelques minutes) effaçait ce qui avait été modifié sur la fiche entre-temps.
-  await patchCharacterSheet(account.role === "joueur" ? account.uid : null, id, {
-    "9": String(hpValue(patch.currentHp, Number(character.values[9]) || 0)),
-    "10": String(hpValue(patch.totalHp, Number(character.values[10]) || 0)),
+  // Seulement la case envoyée (vie actuelle ou totale) : l'autre n'est jamais réécrite avec la
+  // copie du tabletop, qui pouvait dater, venir d'une ligne voisine ou valoir « 0 » pour « 12,5 ».
+  const changes = ([[9, patch.currentHp], [10, patch.totalHp]] as const).flatMap(([index, value]) => {
+    const hp = characterHp(value)
+    return hp === null ? [] : [{ index, header: characterValueHeaders[index], value: hp }]
   })
-  const [entity] = await listTabletopCharacterEntitiesByIds([id])
-  return entity ? { ...entity, controllable: true } : null
+  if (!changes.length) return null
+  const character = await patchCharacterSheet(account.role === "joueur" ? account.uid : null, id, changes).catch((error) => {
+    if (error instanceof Error && ["CHARACTER_NOT_FOUND", "CHARACTER_SHEET_ROW_NOT_FOUND"].includes(error.message)) return null
+    throw error
+  })
+  // Le pion rendu vient de la fiche relue fraîche après l'écriture.
+  return character ? { ...tabletopCharacterEntity(character), controllable: true } : null
+}
+
+/** Des points de vie envoyés pour une fiche : « 12,5 » se lit 12,5 ; une valeur illisible ou absente n'écrit rien. */
+function characterHp(value: unknown) {
+  const text = String(value ?? "").trim().replace(",", ".")
+  const parsed = Number(text)
+  return text && Number.isFinite(parsed) ? String(Math.max(0, Math.min(99999, Math.trunc(parsed)))) : null
 }

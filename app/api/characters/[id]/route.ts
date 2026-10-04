@@ -1,8 +1,22 @@
 import { NextResponse } from "next/server"
 
 import { saveCharacterPortrait } from "@/lib/character-portraits"
-import { getCharacterForMj, patchCharacterSheet } from "@/lib/google-sheets"
+import { characterNarrativeStart, characterValueHeaders } from "@/lib/character-sheet-schema"
+import { CharacterSheetChangedError, getCharacterForMj, patchCharacterSheet, type CharacterSheetChange } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+
+/**
+ * Les cases envoyées par la fiche : chacune avec sa place, l'en-tête que la fiche y voyait et
+ * sa valeur (et, pour une case JSON réécrite en entier, la valeur d'où elle est partie).
+ */
+function sheetChanges(raw: unknown): CharacterSheetChange[] {
+  if (!Array.isArray(raw)) throw new Error("INVALID_VALUES")
+  return raw.map((item) => {
+    const { index, header, value, before } = (item ?? {}) as Record<string, unknown>
+    if (typeof index !== "number" || !Number.isInteger(index) || typeof header !== "string" || typeof value !== "string" || (before !== undefined && typeof before !== "string")) throw new Error("INVALID_VALUES")
+    return { index, header, value, ...(typeof before === "string" ? { before } : {}) }
+  })
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
@@ -19,18 +33,18 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const file = form.get("portrait")
       const serializedChanges = form.get("changes")
       if (!(file instanceof File) || typeof serializedChanges !== "string") throw new Error("INVALID_PORTRAIT")
-      const parsed = JSON.parse(serializedChanges) as unknown
-      const changes = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? Object.fromEntries(Object.entries(parsed as Record<string, unknown>).filter(([, value]) => typeof value === "string")) as Record<string, string> : {}
-      changes["36"] = await saveCharacterPortrait(id, file)
+      const portraitIndex = characterNarrativeStart + 1
+      const changes = sheetChanges(JSON.parse(serializedChanges)).filter((change) => change.index !== portraitIndex)
+      changes.push({ index: portraitIndex, header: characterValueHeaders[portraitIndex], value: await saveCharacterPortrait(id, file) })
       const character = await patchCharacterSheet(accountUid, id, changes)
       return NextResponse.json({ character })
     }
     const body = (await request.json()) as { changes?: unknown }
-    if (!body.changes || typeof body.changes !== "object" || Array.isArray(body.changes)) throw new Error("INVALID_VALUES")
-    const changes = Object.fromEntries(Object.entries(body.changes as Record<string, unknown>).filter(([, value]) => typeof value === "string")) as Record<string, string>
-    const character = await patchCharacterSheet(accountUid, id, changes)
+    const character = await patchCharacterSheet(accountUid, id, sheetChanges(body.changes))
     return NextResponse.json({ character })
   } catch (error) {
+    // Rien n'a été écrit : la fiche relue part avec la réponse, la page l'affiche.
+    if (error instanceof CharacterSheetChangedError) return NextResponse.json({ error: "La fiche a changé entre-temps : actualise puis recommence.", character: error.character }, { status: 409 })
     const code = error instanceof Error ? error.message : ""
     const message = code === "INVALID_CHARACTER_NAME" ? "Le nom du personnage est obligatoire."
       : code === "INVALID_PORTRAIT" ? "Choisis une image de moins de 10 Mo."

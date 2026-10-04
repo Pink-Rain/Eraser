@@ -1194,24 +1194,6 @@ export async function updateRange(
   clearSpreadsheetReadCache(spreadsheetId)
 }
 
-async function updateRangeAndReturnValues(
-  spreadsheetId: string,
-  range: string,
-  values: Array<Array<string | number | boolean>>,
-) {
-  const parameters = new URLSearchParams({
-    valueInputOption: "USER_ENTERED",
-    includeValuesInResponse: "true",
-    responseValueRenderOption: "FORMATTED_VALUE",
-  })
-  const response = await googleSheetsFetch(
-    `spreadsheets/${spreadsheetId}/values/${encodeURIComponent(range)}?${parameters.toString()}`,
-    { method: "PUT", body: JSON.stringify({ values }) },
-  )
-  clearSpreadsheetReadCache(spreadsheetId)
-  return normalizeGoogleSheetRows(((await response.json()) as UpdateValuesResponse).updatedData?.values)
-}
-
 export async function updateRanges(
   spreadsheetId: string,
   data: Array<{ range: string; values: Array<Array<string | number | boolean>> }>,
@@ -2316,13 +2298,15 @@ async function listCharactersForUserUncached(uid: string) {
   if (!sync) {
     const source = await charactersSource()
     if (source) {
-      const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"])
+      // Lu frais : le joueur de chaque ligne décide de ce que ce compte voit.
+      const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"], { fresh: true })
       for (const row of rows) {
         const id = columns.get(row, "ID")
         const ownerUid = columns.get(row, "Joueur")
         if (!id || !ownedBy(ownerUid, identityUids)) continue
         const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"), updatedAt: new Date().toISOString() }
-        await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: { ...fields, deletedAt: null } })
+        // Une fiche mise à la corbeille y reste : elle ne réapparaît pas dans la liste.
+        await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: fields })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
@@ -3742,6 +3726,20 @@ export type LegacyIdentityCandidate = {
 }
 
 /**
+ * Une colonne qui dit à qui est une entrée ou comment elle s'appelle (« Joueur », « Nom
+ * personnage », « MJ », « Nom de la campagne ») ne sert à la resynchronisation que si la
+ * feuille l'a (un en-tête renommé dans Sheets la fait disparaître) et qu'au moins une ligne
+ * la remplit (une colonne recréée vide). Sinon l'index local garde ses valeurs : la relire
+ * retirait le joueur ou le nom de tout le monde.
+ */
+function identityColumnUsable(kind: string, sheet: NamedSheet, rows: readonly string[][], name: string) {
+  const identified = rows.filter((row) => sheet.columns.get(row, "ID").trim())
+  if (!identified.length || (sheet.columns.at(name) >= 0 && identified.some((row) => sheet.columns.get(row, name).trim()))) return true
+  console.error("IDENTITY_SYNC_COLUMN_UNUSABLE", kind, name)
+  return false
+}
+
+/**
  * Imports only the lightweight ownership indexes from the already linked sheets.
  * This never writes to Google Sheets; it lets the desktop account recognize data
  * created by the live site without changing that site's identifiers.
@@ -3779,11 +3777,14 @@ export async function syncExistingIdentityIndexes() {
   const characterById = new Map(existingCharacters.map((row) => [row.id, row]))
   const linkKeys = new Set(existingLinks.map((row) => `${row.campaignId}::${row.characterId}`))
 
+  const mjUsable = campaignSheet ? identityColumnUsable("campaigns", campaignSheet, campaignRows, "MJ") : false
+  const campaignNameUsable = campaignSheet ? identityColumnUsable("campaigns", campaignSheet, campaignRows, "Nom de la campagne") : false
   for (const row of campaignRows) {
     const campaign = campaignSheet ? campaignFromRow(row, campaignSheet.columns) : null
     if (!campaign) continue
-    const { id, ...next } = campaign
+    const { id, ...read } = campaign
     const current = campaignById.get(id)
+    const next = { ...read, mjUid: mjUsable ? read.mjUid : current?.mjUid ?? "", name: campaignNameUsable ? read.name : current?.name ?? read.name }
     if (current
       && !current.deletedAt
       && current.mjUid === next.mjUid
@@ -3795,16 +3796,19 @@ export async function syncExistingIdentityIndexes() {
       .onConflictDoUpdate({ target: campaignIndex.id, set: { ...next, updatedAt: now } })
   }
 
+  const ownersUsable = characterSheet ? identityColumnUsable("characters", characterSheet, characterRows, "Joueur") : false
+  const namesUsable = characterSheet ? identityColumnUsable("characters", characterSheet, characterRows, "Nom personnage") : false
   for (const row of characterRows) {
     const columns = characterSheet?.columns
     const id = columns?.get(row, "ID").trim() ?? ""
     if (!columns || !id) continue
-    const next = {
-      ownerUid: columns.get(row, "Joueur"),
-      name: columns.get(row, "Nom personnage") || "Personnage sans nom",
-      subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"),
-    }
     const current = characterById.get(id)
+    const next = {
+      ownerUid: ownersUsable ? columns.get(row, "Joueur") : current?.ownerUid ?? "",
+      name: namesUsable ? columns.get(row, "Nom personnage") || "Personnage sans nom" : current?.name ?? "Personnage sans nom",
+      // Sans colonne « Peuple », le sous-titre connu reste.
+      subtitle: columns.at("Peuple") >= 0 ? displayedMultipleValue(columns.get(row, "Peuple"), "all") : current?.subtitle ?? "",
+    }
     if (current
       && !current.deletedAt
       && current.ownerUid === next.ownerUid
@@ -5197,29 +5201,44 @@ export async function withCharacterClasses<T extends CharacterRecord>(characters
   })
 }
 
+/** Le pion d'une fiche, d'après ses cases lues par leur en-tête. */
+function tabletopCharacterEntityOf(id: string, cell: (name: string) => string, ownerUid: string): TabletopEntityRecord {
+  return {
+    id,
+    kind: "character",
+    name: cell("Nom personnage") || "Personnage sans nom",
+    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
+    subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
+    portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
+    currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
+    totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
+    speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
+    ownerUid,
+  }
+}
+
 export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   const selected = new Set(ids)
   if (!selected.size) return []
   const source = await charactersSource()
   if (!source) return []
-  const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"])
+  const [{ columns, rows }, owners] = await Promise.all([
+    readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"]),
+    // Le joueur de chaque pion (qui peut le contrôler) vient de l'index local, relu frais dans
+    // la feuille : une colonne « Joueur » gardée en mémoire à part de la colonne ID pouvait
+    // dater d'avant une ligne supprimée ailleurs, et donner le pion d'un voisin.
+    getDb().select({ id: characterIndex.id, ownerUid: characterIndex.ownerUid }).from(characterIndex).where(inArray(characterIndex.id, [...selected])),
+  ])
+  const ownerOf = new Map(owners.map((owner) => [owner.id, owner.ownerUid]))
   return rows.flatMap<TabletopEntityRecord>((row) => {
-    const cell = (name: string) => columns.get(row, name)
-    const id = cell("ID")
-    if (!selected.has(id)) return []
-    return [{
-      id,
-      kind: "character",
-      name: cell("Nom personnage") || "Personnage sans nom",
-      // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
-      subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
-      portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
-      currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
-      totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
-      speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
-      ownerUid: cell("Joueur"),
-    }]
+    const id = columns.get(row, "ID")
+    return selected.has(id) ? [tabletopCharacterEntityOf(id, (name) => columns.get(row, name), ownerOf.get(id) ?? "")] : []
   })
+}
+
+/** Le pion d'une fiche relue fraîche (après une écriture) : rien n'y vient d'une colonne gardée en mémoire. */
+export function tabletopCharacterEntity(character: CharacterSheetRecord) {
+  return tabletopCharacterEntityOf(character.id, (name) => character.values[character.headers.indexOf(name)] ?? "", character.ownerUid)
 }
 
 export async function listTabletopNpcEntitiesByIds(ids: string[], pageLinked = "bac-a-sable") {
@@ -5291,8 +5310,10 @@ export async function saveCharacterRelation(input: Omit<CharacterRelationRecord,
     "Niveau": Math.max(-3, Math.min(3, Math.trunc(input.level))), "Notes personnelles": input.personalNotes, "Créé par": input.createdByUid,
     "ID campagne": input.campaignId, "Créée le": current?.createdAt || input.createdAt || now, "Modifiée le": now,
   }
-  if (existingIndex >= 0) await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
-  else await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row(cells)])
+  // Le nom et les notes saisis restent du texte : « - se méfie de lui » n'est pas une formule.
+  const written = { ...cells, "Nom": textCell(input.name), "Notes personnelles": textCell(input.personalNotes) }
+  if (existingIndex >= 0) await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, existingIndex + 2, written))
+  else await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row(written)])
   return characterRelationFromRow(columns.row(cells).map(String), columns)
 }
 
@@ -5571,14 +5592,7 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     const sheet = await ensureJdrSheet("characters")
     if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
     await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-    const { map } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
-    const sourceRowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, characterId)
-    if (!sourceRowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const [sourceRow] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A${sourceRowNumber}:${columnName(map.width)}${sourceRowNumber}`))
-    if (!sourceRow) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const copiedRow: SheetCell[] = Array.from({ length: map.width }, (_, index) => sourceRow[index] ?? "")
-    copiedRow[map.columns.at("ID")] = targetId
-    await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${columnName(map.width)}`), [copiedRow])
+    await copyCharacterRow(sheet, characterId, targetId)
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
   // On tente d'abord la feuille partagée, mais son échec ne doit plus bloquer
@@ -5657,23 +5671,28 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
   const sheet = await ensureJdrSheet("characters")
   if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-  const { map, layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
+  // Les colonnes relues fraîches juste avant d'écrire : une colonne insérée ou déplacée
+  // ailleurs depuis le dernier passage décalerait toute la nouvelle ligne.
+  const { map, layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName, { fresh: true })
   const width = layout.headers.length
-  const values = Array.from({ length: width }, (_, index) => String(input[index] ?? ""))
+  // Le texte saisi reste du texte (un nom qui commence par « = » n'est pas une formule) :
+  // seules les formules écrites par Eraser en sont.
+  const values = Array.from({ length: width }, (_, index) => textCell(String(input[index] ?? "")))
   // Les valeurs de départ viennent de l'Index des caractéristiques et compétences
   // (seuils critiques 96 et 5, compteurs à 0… dans la liste d'origine).
   applyCharacteristicDefaults(values, layout, catalog)
   await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${columnName(map.width)}`), [characterSheetRow(map, id, uid, values)])
-  const rowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, id)
-  if (rowNumber) {
-    const prepared = applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog)
-    await writeCharacterValues(sheet, map, rowNumber, prepared, catalog)
-  }
+  const created = await readCharacterRow(sheet, id)
+  // Les formules visent la ligne retrouvée par son ID, avec les colonnes d'où viennent les valeurs.
+  if (!created) console.error("CHARACTER_ROW_NOT_FOUND_AFTER_CREATION", id)
+  else if (!sameHeaderRow(created.map.columns.headers, map)) console.error("CHARACTER_COLUMNS_MOVED_DURING_CREATION", id)
+  else await writeCharacterValues(sheet, created.map, created.rowNumber, applyCharacterDefaultsAndFormulas(values, created.rowNumber, created.layout, catalog), catalog)
+  const subtitle = displayedMultipleValue(String(input[1] ?? ""), "all")
   await getDb().insert(characterIndex).values({
-    id, ownerUid: uid, name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString(),
+    id, ownerUid: uid, name, subtitle, updatedAt: new Date().toISOString(),
   }).onConflictDoUpdate({
     target: characterIndex.id,
-    set: { name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString() },
+    set: { name, subtitle, updatedAt: new Date().toISOString() },
   })
   return { id, name }
 }
@@ -5706,8 +5725,8 @@ async function ensureCharacterSheetSchema(spreadsheetId: string, tabName: string
   if (characterSchemaReady.has(`${spreadsheetId}:${syncKey}`)) return
   const [alreadySynced] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!alreadySynced) {
-    clearSpreadsheetReadCache(spreadsheetId)
-    const [headerRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+    // Relue fraîche : les en-têtes renommés sont réécrits à la place lue.
+    const [headerRow = []] = (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, "1:1"))).rows
     const headers = headerRow.map((header) => String(header ?? "").trim())
     const present = new Set(headers.map(foldSheetHeader))
     const renames: Array<{ index: number; header: string }> = []
@@ -5745,33 +5764,17 @@ function cellRuns(tabName: string, rowNumber: number, cells: Map<number, SheetCe
   return runs.map((run) => ({ range: sheetTabRange(tabName, `${columnName(run.start + 1)}${rowNumber}:${columnName(run.start + run.values.length)}${rowNumber}`), values: [run.values] }))
 }
 
-/** Les valeurs d'une fiche, lues dans la feuille et rangées dans l'ordre de la fiche. */
-async function readCharacterValues(source: { spreadsheetId: string; tabName: string }, map: CharacterSheetMap, rowNumber: number) {
-  const [row = []] = await readRange(source.spreadsheetId, sheetTabRange(source.tabName, `A${rowNumber}:${columnName(map.width)}${rowNumber}`))
-  return characterValuesOf(map, row)
-}
-
 /**
- * Écrit les valeurs d'une fiche, chacune dans sa colonne. Index des caractéristiques
- * injoignable : les colonnes ajoutées par l'index ne sont pas réécrites (leurs formules
- * ne sont pas connues sans lui). `returnValues` : rend les valeurs recalculées par Sheets.
+ * Écrit les valeurs d'une fiche qui vient d'être ajoutée, chacune dans sa colonne. Index des
+ * caractéristiques injoignable : les colonnes ajoutées par l'index ne sont pas réécrites
+ * (leurs formules ne sont pas connues sans lui).
  */
-async function writeCharacterValues(source: { spreadsheetId: string; tabName: string }, map: CharacterSheetMap, rowNumber: number, values: readonly string[], catalog: CharacterCatalog, options: { returnValues?: boolean } = {}) {
+async function writeCharacterValues(source: { spreadsheetId: string; tabName: string }, map: CharacterSheetMap, rowNumber: number, values: readonly string[], catalog: CharacterCatalog) {
   const width = Math.min(values.length, map.valueColumns.length)
   const writeWidth = catalog.source === "index" ? width : Math.min(width, characterValueHeaders.length)
   if (map.contiguous && map.writable.slice(0, writeWidth).every(Boolean)) {
-    const range = sheetTabRange(source.tabName, `C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`)
-    if (!options.returnValues) {
-      await updateRange(source.spreadsheetId, range, [values.slice(0, writeWidth)])
-      return null
-    }
-    const [calculated = []] = await updateRangeAndReturnValues(source.spreadsheetId, range, [values.slice(0, writeWidth)])
-    if (calculated.length && writeWidth >= map.valueColumns.length) {
-      const output = calculated.slice(0, map.valueColumns.length).map(String)
-      while (output.length < map.valueColumns.length) output.push("")
-      return output
-    }
-    return readCharacterValues(source, map, rowNumber)
+    await updateRange(source.spreadsheetId, sheetTabRange(source.tabName, `C${rowNumber}:${columnName(writeWidth + 2)}${rowNumber}`), [values.slice(0, writeWidth)])
+    return
   }
   const cells = new Map<number, SheetCell>()
   for (let index = 0; index < writeWidth; index += 1) {
@@ -5780,26 +5783,149 @@ async function writeCharacterValues(source: { spreadsheetId: string; tabName: st
   }
   const data = cellRuns(source.tabName, rowNumber, cells)
   for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
-  return options.returnValues ? readCharacterValues(source, map, rowNumber) : null
 }
 
 function isGoogleSheetsCalculationError(value: GoogleSheetCellValue) {
   return /^#(?:REF|VALUE|N\/A|NAME|DIV\/0|NUM|ERROR|NULL)/i.test(String(value ?? "").trim())
 }
 
+/**
+ * Les cases des sept totaux calculés (Rapidité, Armures…) : le bonus s'il est vide ou en
+ * erreur, le modificateur et le total, en formules qui visent leur propre ligne.
+ */
+function secondaryFormulaCells(values: readonly string[], rowNumber: number, layout: CharacterLayout) {
+  const cellOf = layout.cell ?? characterValueCell
+  const cells = new Map<number, string>()
+  characterSecondaryCalculatedFields.forEach((field, fieldIndex) => {
+    const bonusIndex = characterSecondaryCalculationValueIndex(fieldIndex, "bonus")
+    const modifierIndex = characterSecondaryCalculationValueIndex(fieldIndex, "modifier")
+    if (!values[bonusIndex] || isGoogleSheetsCalculationError(values[bonusIndex])) cells.set(bonusIndex, isGoogleSheetsCalculationError(values[field.valueIndex]) ? "0" : values[field.valueIndex] || "0")
+    cells.set(modifierIndex, "=0")
+    cells.set(field.valueIndex, `=${cellOf(bonusIndex, rowNumber)}+${cellOf(modifierIndex, rowNumber)}`)
+  })
+  return cells
+}
+
 function applyCharacterDefaultsAndFormulas(input: string[], rowNumber: number, layout: CharacterLayout, catalog: CharacterCatalog) {
   const width = Math.max(layout.headers.length, characterValueHeaders.length)
   const values = input.slice(0, width)
   while (values.length < width) values.push("")
-  const cellOf = layout.cell ?? characterValueCell
-  characterSecondaryCalculatedFields.forEach((field, fieldIndex) => {
-    const bonusIndex = characterSecondaryCalculationValueIndex(fieldIndex, "bonus")
-    const modifierIndex = characterSecondaryCalculationValueIndex(fieldIndex, "modifier")
-    if (!values[bonusIndex] || isGoogleSheetsCalculationError(values[bonusIndex])) values[bonusIndex] = isGoogleSheetsCalculationError(values[field.valueIndex]) ? "0" : values[field.valueIndex] || "0"
-    values[modifierIndex] = "=0"
-    values[field.valueIndex] = `=${cellOf(bonusIndex, rowNumber)}+${cellOf(modifierIndex, rowNumber)}`
-  })
+  for (const [index, value] of secondaryFormulaCells(values, rowNumber, layout)) values[index] = value
   return applySkillCells(values, rowNumber, layout, catalog)
+}
+
+/** Une fiche lue dans sa ligne : les colonnes vérifiées, le numéro de la ligne, la ligne et ses valeurs. */
+type CharacterRow = CharacterColumns & { rowNumber: number; row: string[]; values: string[] }
+
+/** La ligne 1 relue est-elle celle d'où vient la carte des colonnes ? */
+function sameHeaderRow(headers: readonly string[], map: CharacterSheetMap) {
+  const named = (row: readonly string[]) => {
+    const list = row.map((header) => String(header ?? "").trim())
+    while (list.length && !list[list.length - 1]) list.pop()
+    return list
+  }
+  const [read, known] = [named(headers), named(map.columns.headers)]
+  return read.length === known.length && read.every((header, index) => header === known[index])
+}
+
+/**
+ * La ligne d'une fiche, lue fraîche dans la feuille : jamais une plage gardée en mémoire (la
+ * ligne 5 d'il y a dix minutes peut être aujourd'hui celle d'un autre personnage). La ligne 1
+ * et la colonne ID sont relues ensemble : une colonne insérée, déplacée ou supprimée dans
+ * Sheets ou sur une autre installation refait d'abord la carte des colonnes. La ligne est
+ * retrouvée par son ID, puis relue, et sa case ID vérifiée. Null si la feuille n'a pas cette fiche.
+ */
+async function readCharacterRow(source: { spreadsheetId: string; tabName: string }, id: string): Promise<CharacterRow | null> {
+  const wanted = id.trim()
+  let columns = await characterColumns(source.spreadsheetId, source.tabName)
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const idColumn = columns.map.columns.at("ID")
+    // Sans colonne ID, aucune ligne ne peut être retrouvée : rien n'est lu ni écrit au hasard.
+    if (idColumn < 0) throw new Error("SHEET_COLUMN_MISSING:ID")
+    const letter = columnName(idColumn + 1)
+    const [header, ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, "1:1"), sheetTabRange(source.tabName, `${letter}:${letter}`)])
+    if (!sameHeaderRow(header?.rows[0] ?? [], columns.map)) {
+      columns = await characterColumns(source.spreadsheetId, source.tabName, { fresh: true })
+      continue
+    }
+    const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
+    if (!ids || offset < 0) return null
+    const rowNumber = ids.startRow + offset
+    const read = await readRangeFreshWithOffset(source.spreadsheetId, sheetTabRange(source.tabName, `A${rowNumber}:${columnName(columns.map.width)}${rowNumber}`))
+    const row = read.rows[0] ?? []
+    if (read.startRow === rowNumber && columns.map.columns.get(row, "ID").trim() === wanted) return { ...columns, rowNumber, row, values: characterValuesOf(columns.map, row) }
+    // La ligne a bougé entre les deux lectures (ajout ou suppression ailleurs) : on la cherche de nouveau.
+  }
+  throw new Error("CHARACTER_SHEET_ROW_MOVED")
+}
+
+/** La ligne d'une fiche relue fraîche après une écriture, sa case ID vérifiée ; retrouvée par son ID si elle a bougé. */
+async function rereadCharacterRow(source: { spreadsheetId: string; tabName: string }, current: CharacterRow, id: string) {
+  const read = await readRangeFreshWithOffset(source.spreadsheetId, sheetTabRange(source.tabName, `A${current.rowNumber}:${columnName(current.map.width)}${current.rowNumber}`))
+  const row = read.rows[0] ?? []
+  if (read.startRow === current.rowNumber && current.map.columns.get(row, "ID").trim() === id.trim()) return { ...current, row, values: characterValuesOf(current.map, row) }
+  return readCharacterRow(source, id)
+}
+
+/**
+ * Une fiche dont un total calculé est en erreur (jamais passée par l'enregistrement complet,
+ * ou abîmée dans Sheets) retrouve ses formules. Seules les cases de ces totaux sont écrites :
+ * réécrire toute la ligne avec des valeurs relues effaçait ce qui avait changé entre-temps.
+ */
+async function repairCharacterFormulas(source: { spreadsheetId: string; tabName: string }, current: CharacterRow, id: string) {
+  const cells = new Map<number, SheetCell>()
+  for (const [index, value] of secondaryFormulaCells(current.values, current.rowNumber, current.layout)) {
+    const column = current.map.valueColumns[index] ?? -1
+    if (column >= 0) cells.set(column, value)
+  }
+  if (!cells.size) return current
+  await updateRanges(source.spreadsheetId, cellRuns(source.tabName, current.rowNumber, cells))
+  return await rereadCharacterRow(source, current, id) ?? current
+}
+
+/**
+ * Une copie séparée d'une fiche, faite par Google comme un copier-coller dans Sheets :
+ * valeurs, formules recalées sur la nouvelle ligne et mises en forme. Relire la ligne puis
+ * la réécrire figeait les totaux (valeurs calculées à la place des formules) et pouvait
+ * copier l'ancien occupant de la ligne. La copie arrive sur une ligne ajoutée à la suite,
+ * jamais par-dessus une autre ; la source est retrouvée par son ID, la copie relue.
+ */
+async function copyCharacterRow(source: { spreadsheetId: string; tabName: string }, sourceId: string, targetId: string) {
+  const original = await readCharacterRow(source, sourceId)
+  if (!original) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  const { columns } = original.map
+  const sheetId = (await spreadsheetTabs(source.spreadsheetId)).find((tab) => tab.title === source.tabName)?.sheetId
+  if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
+  // La nouvelle ligne porte déjà son ID, son joueur et son nom : un échec plus loin laisse une fiche nommée, jamais une ligne anonyme.
+  await appendRows(source.spreadsheetId, sheetTabRange(source.tabName, `A:${columnName(original.map.width)}`), [columns.row({ "ID": targetId, "Joueur": columns.get(original.row, "Joueur"), "Nom personnage": textCell(columns.get(original.row, "Nom personnage")) })])
+  // Les deux lignes retrouvées dans une même lecture de la colonne ID, juste avant de copier.
+  const idColumn = columns.at("ID")
+  const letter = columnName(idColumn + 1)
+  const [ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, `${letter}:${letter}`)])
+  const rowOf = (wanted: string) => {
+    const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
+    return ids && offset >= 0 ? ids.startRow + offset : 0
+  }
+  const from = rowOf(sourceId)
+  const to = rowOf(targetId)
+  if (!from || !to) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  // Toutes les colonnes sauf celle de l'ID, qui garde le nouveau.
+  const spans = [[0, idColumn], [idColumn + 1, original.map.width]].filter(([start, end]) => end > start)
+  await googleSheetsJson(`spreadsheets/${source.spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: spans.map(([start, end]) => ({ copyPaste: {
+      source: { sheetId, startRowIndex: from - 1, endRowIndex: from, startColumnIndex: start, endColumnIndex: end },
+      destination: { sheetId, startRowIndex: to - 1, endRowIndex: to, startColumnIndex: start, endColumnIndex: end },
+      pasteType: "PASTE_NORMAL",
+    } })) }),
+  })
+  clearSpreadsheetReadCache(source.spreadsheetId)
+  const copy = await readCharacterRow(source, targetId)
+  // La copie relue doit être ce personnage : même joueur, même nom.
+  if (!copy || ["Joueur", "Nom personnage"].some((name) => copy.map.columns.get(copy.row, name) !== columns.get(original.row, name))) {
+    console.error("CHARACTER_COPY_CHECK_FAILED", sourceId, targetId)
+    throw new Error("CHARACTER_COPY_CHECK_FAILED")
+  }
 }
 
 /**
@@ -5821,10 +5947,11 @@ async function loadCharacterCatalog(): Promise<CharacterCatalog> {
   return getCharacterCatalog()
 }
 
-async function characterColumns(spreadsheetId: string, tabName: string): Promise<CharacterColumns> {
+/** `fresh` : la ligne 1 est relue dans Sheets (avant d'écrire), jamais reprise de la mémoire. */
+async function characterColumns(spreadsheetId: string, tabName: string, options: { fresh?: boolean } = {}): Promise<CharacterColumns> {
   const catalog = await loadCharacterCatalog()
   const signature = `${spreadsheetId}:${tabName}:${JSON.stringify([catalog.characteristics.map((item) => [item.key, item.name, item.kind]), catalog.skills.map((skill) => [skill.key, skill.name, skill.characteristicKey])])}`
-  const cached = () => characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now() ? characterColumnsCache.map : null
+  const cached = () => !options.fresh && characterColumnsCache?.signature === signature && characterColumnsCache.expiresAt > Date.now() ? characterColumnsCache.map : null
   const known = cached()
   if (known) return { map: known, layout: known.layout, catalog }
   // Une seule mise à jour à la fois : deux fiches ouvertes ensemble n'ajoutent pas deux fois les mêmes colonnes.
@@ -5866,20 +5993,35 @@ async function syncCharacterColumns(spreadsheetId: string, tabName: string, cata
     const { layout } = map
     const added = new Set(plan.append.map((column) => column.key))
     // Les fiches existantes : valeur de départ et formules dans les nouvelles colonnes seulement.
+    // Chaque lot part de la colonne ID relue juste avant lui : une ligne ajoutée ou supprimée
+    // ailleurs pendant les lots ne fait pas poser les formules d'une fiche sur sa voisine.
     const idLetter = columnName(Math.max(0, map.columns.at("ID")) + 1)
-    const idRead = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, `${idLetter}:${idLetter}`))
-    const data = idRead.rows.flatMap((row, offset) => {
-      const rowNumber = idRead.startRow + offset
-      if (rowNumber < 2 || !String(row[0] ?? "").trim()) return []
-      const values = Array<string>(layout.headers.length).fill("")
-      applyCharacteristicDefaults(values, layout, catalog, added)
-      applySkillCells(values, rowNumber, layout, catalog, added)
-      const cells = new Map<number, SheetCell>()
-      map.valueColumns.forEach((column, index) => { if (column >= used) cells.set(column, values[index] ?? "") })
-      return cellRuns(tabName, rowNumber, cells)
-    })
-    for (let index = 0; index < data.length; index += 200) await updateRanges(spreadsheetId, data.slice(index, index + 200))
-    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", idRead.rows.length)
+    const done = new Set<string>()
+    for (;;) {
+      const idRead = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, `${idLetter}:${idLetter}`))
+      const pending = idRead.rows.flatMap((row, offset) => {
+        const id = String(row[0] ?? "").trim()
+        const rowNumber = idRead.startRow + offset
+        return rowNumber >= 2 && id && !done.has(id) ? [{ id, rowNumber }] : []
+      })
+      const data: Array<{ range: string; values: SheetCell[][] }> = []
+      let taken = 0
+      for (const { id, rowNumber } of pending) {
+        const values = Array<string>(layout.headers.length).fill("")
+        applyCharacteristicDefaults(values, layout, catalog, added)
+        applySkillCells(values, rowNumber, layout, catalog, added)
+        const cells = new Map<number, SheetCell>()
+        map.valueColumns.forEach((column, index) => { if (column >= used) cells.set(column, values[index] ?? "") })
+        const runs = cellRuns(tabName, rowNumber, cells)
+        if (data.length && data.length + runs.length > 200) break
+        data.push(...runs)
+        done.add(id)
+        taken += 1
+      }
+      if (data.length) await updateRanges(spreadsheetId, data)
+      if (taken >= pending.length) break
+    }
+    console.info("CHARACTER_COLUMNS_ADDED", plan.append.length, "rows", done.size)
   }
   characterColumnsCache = { signature, expiresAt: Date.now() + CHARACTER_COLUMNS_CACHE_MS, map }
   return { map, layout: map.layout, catalog }
@@ -5895,16 +6037,34 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   const cached = characterSheetCache.get(id)
   if (cached && cached.expiresAt > Date.now()) return { ...cached.character, ...indexed, name: cached.character.name, subtitle: cached.character.subtitle }
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
-  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-  if (!rowNumber) return null
-  let values = await readCharacterValues(source, map, rowNumber)
-  if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
-    values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
-  }
-  const character = { ...indexed, name: values[0] || indexed.name, subtitle: displayedMultipleValue(values[1] || "", "all") || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
+  let current = await readCharacterRow(source, id)
+  if (!current) return null
+  if (hasBrokenTotals(current.values)) current = await repairCharacterFormulas(source, current, id)
+  const character = characterSheetRecord(indexed, current)
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
+}
+
+function hasBrokenTotals(values: readonly string[]) {
+  return characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))
+}
+
+function characterSheetRecord(indexed: CharacterRecord, current: CharacterRow): CharacterSheetRecord {
+  const { values } = current
+  return { ...indexed, name: values[0] || indexed.name, subtitle: displayedMultipleValue(values[1] || "", "all") || indexed.subtitle, values, headers: current.layout.headers }
+}
+
+/**
+ * Une case modifiée par la fiche : sa place, l'en-tête que la fiche voyait à cette place, et
+ * la valeur. `before` : pour une case réécrite en entier (JSON), la valeur d'où elle est partie.
+ */
+export type CharacterSheetChange = { index: number; header: string; value: string; before?: string }
+
+/** La fiche a changé dans Sheets depuis que la page l'a lue : rien n'est écrit, la fiche relue part avec l'erreur. */
+export class CharacterSheetChangedError extends Error {
+  constructor(readonly character: CharacterSheetRecord) {
+    super("CHARACTER_SHEET_CHANGED")
+  }
 }
 
 /**
@@ -5913,38 +6073,49 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
  * que ce qu'elle a modifié. Les colonnes calculées par la feuille ne sont jamais
  * remplacées ; la fiche relue après l'écriture porte les totaux recalculés.
  */
-export async function patchCharacterSheet(accountUid: string | null, id: string, changes: Record<string, string>) {
+export async function patchCharacterSheet(accountUid: string | null, id: string, changes: readonly CharacterSheetChange[]) {
   const existing = accountUid ? await getCharacterForUser(accountUid, id) : await getCharacterById(id)
   if (!existing) throw new Error("CHARACTER_NOT_FOUND")
   const source = await charactersSource()
   if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
-  const { map, layout, catalog } = await characterColumns(source.spreadsheetId, source.tabName)
-  const width = layout.headers.length
-  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-  if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  const current = await readCharacterRow(source, id)
+  if (!current) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  const { map, layout, catalog, rowNumber } = current
   const computed = computedCellIndexes(layout, catalog, [...characterSecondaryCalculatedFields], (fieldIndex) => characterSecondaryCalculationValueIndex(fieldIndex, "modifier"))
-  const entries = Object.entries(changes).flatMap(([key, raw]) => {
-    const index = Number(key)
-    if (!Number.isInteger(index) || index < 0 || index >= width || computed.has(index)) return []
-    // Chaque valeur va dans sa colonne, retrouvée par son nom ; une colonne ajoutée à la main n'est pas écrite.
-    if ((map.valueColumns[index] ?? -1) < 0 || !map.writable[index]) return []
-    return [[index, String(raw ?? "").slice(0, 50_000)] as const]
-  })
-  const name = entries.find(([index]) => index === 0)?.[1]
-  if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
-  // Une saisie reste du texte (« - se méfie de lui » n'est pas une formule) : seule Eraser écrit des formules.
-  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(map.valueColumns[index] + 1)}${rowNumber}`), values: [[textCell(value)]] }))
-  for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
-  let values = await readCharacterValues(source, map, rowNumber)
-  // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
-  if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
-    values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
+  const cells = new Map<number, SheetCell>()
+  let name: string | undefined
+  for (const change of changes) {
+    // La fiche envoie l'en-tête qu'elle voyait à cette place : une colonne insérée, déplacée ou
+    // supprimée depuis décale les places, et la valeur partirait dans la colonne voisine.
+    // Une case JSON réécrite en entier est refusée si elle a changé depuis (le MJ et le joueur
+    // sur la même fiche) : l'enregistrer effacerait ce que l'autre vient d'y mettre.
+    if (layout.headers[change.index] !== change.header || (change.before !== undefined && (current.values[change.index] ?? "") !== change.before)) {
+      const character = characterSheetRecord(existing, current)
+      characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
+      throw new CharacterSheetChangedError(character)
+    }
+    // Chaque valeur va dans sa colonne, retrouvée par son nom ; une colonne calculée par la
+    // feuille ou ajoutée à la main n'est pas écrite.
+    const column = map.valueColumns[change.index] ?? -1
+    if (computed.has(change.index) || column < 0 || !map.writable[change.index]) continue
+    const value = String(change.value ?? "").slice(0, 50_000)
+    if (change.index === 0) name = value
+    // Une saisie reste du texte (« - se méfie de lui » n'est pas une formule) : seule Eraser écrit des formules.
+    cells.set(column, textCell(value))
   }
+  if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
+  const data = cellRuns(source.tabName, rowNumber, cells)
+  for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
+  let written = data.length ? await rereadCharacterRow(source, current, id) : current
+  if (!written) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
+  if (hasBrokenTotals(written.values)) written = await repairCharacterFormulas(source, written, id)
+  const { values } = written
   const updatedAt = new Date().toISOString()
   const nextName = values[0]?.trim() || existing.name
   await getDb().update(characterIndex).set({ name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
-  const character = { ...existing, name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt, values, headers: layout.headers } satisfies CharacterSheetRecord
+  const character = { ...existing, name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt, values, headers: written.layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }

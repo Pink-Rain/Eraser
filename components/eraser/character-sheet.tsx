@@ -51,7 +51,7 @@ import {
 } from "@/lib/character-catalog"
 import { useCatalogDescriptions, useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import { HelpMark } from "@/components/eraser/help-mark"
-import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
+import type { CharacterSheetChange, CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
 import { keepCatalogFields, type CharacterInventoryRecord } from "@/lib/inventory-schema"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -488,6 +488,16 @@ function LifePool({ label = "Points de vie", help = "", color = "#6e9ee8", curre
   return <div className="group/help flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title={currentChanged ? `Base ${current || "0"} ${modifierText(currentModifier, currentRule)} — valeur, +10, -10%, *2 ou /3` : "Valeur, +10, -10%, *2 ou /3"}>{shownCurrent}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={totalChanged ? `Base ${total || "0"} ${modifierText(modifier, rule)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{shownTotal}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
 }
 
+/**
+ * Une case pas encore confirmée par le serveur : sa valeur, l'en-tête que la fiche voyait à
+ * sa place (refusée si les colonnes de la feuille ont bougé entre-temps) et, pour une case
+ * JSON réécrite en entier, la valeur d'où elle est partie.
+ */
+type PendingChange = Omit<CharacterSheetChange, "index">
+
+/** Les cases JSON que la fiche réécrit en entier : sorts choisis (états, charges, choix) et onglets ajoutés. */
+const wholeJsonCells = new Set([characterClassChoicesIndex, characterCustomTabsIndex])
+
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
   const [character, setCharacter] = useState(initialCharacter)
   const [values, setValues] = useState(initialCharacter.values)
@@ -525,9 +535,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
    * échec (Google lent ou injoignable) est réessayé, signalé, et la case repart avec le
    * prochain enregistrement. Le joueur et le MJ sur la même fiche ne s'écrasent plus.
    */
-  const pendingChanges = useRef(new Map<number, string>())
+  const pendingChanges = useRef(new Map<number, PendingChange>())
   const persistQueue = useRef(Promise.resolve())
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict">("idle")
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
   // Les états posés (Index des états) changent les valeurs comme des objets équipés.
   const statesCatalog = useStatesCatalog()
@@ -586,10 +596,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // (clic ailleurs, survol refermé) partent chacun de la précédente, sans l'effacer.
   const latestValues = useRef(values)
   useEffect(() => { latestValues.current = values }, [values])
+  // La dernière fiche confirmée par le serveur : chaque case part avec l'en-tête vu à sa place,
+  // et une case JSON avec la valeur d'où elle est partie.
+  const serverSheet = useRef({ headers: initialCharacter.headers, values: initialCharacter.values })
 
   /** La fiche du serveur, avec par-dessus les cases pas encore confirmées. */
   function applyServer(next: CharacterSheetRecord) {
-    const merged = next.values.map((cell, index) => pendingChanges.current.has(index) ? pendingChanges.current.get(index)! : cell)
+    serverSheet.current = { headers: next.headers, values: next.values }
+    const merged = next.values.map((cell, index) => pendingChanges.current.get(index)?.value ?? cell)
     latestValues.current = merged
     setCharacter(next)
     setValues(merged)
@@ -599,20 +613,34 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const run = persistQueue.current.then(async () => {
       if (!pendingChanges.current.size && !portrait) return
       const batch = new Map(pendingChanges.current)
+      const changes = [...batch].map(([index, change]) => ({ index, ...change }))
       const delays = [800, 2500, 6000]
       for (let attempt = 0; ; attempt += 1) {
         try {
-          const changes = JSON.stringify(Object.fromEntries(batch))
           let response: Response
           if (portrait) {
-            const form = new FormData(); form.append("portrait", portrait); form.append("changes", changes)
+            const form = new FormData(); form.append("portrait", portrait); form.append("changes", JSON.stringify(changes))
             response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", body: form })
           } else {
-            response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes: Object.fromEntries(batch) }) })
+            response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes }) })
           }
           const payload = (await response.json().catch(() => ({}))) as { character?: CharacterSheetRecord; error?: string }
+          if (response.status === 409) {
+            // La fiche a changé ailleurs entre-temps (colonnes déplacées, case JSON modifiée par
+            // un autre) : rien n'a été écrit. Les cases en attente partaient de l'ancienne fiche,
+            // elles sont abandonnées ; la fiche relue s'affiche.
+            pendingChanges.current.clear()
+            if (payload.character) applyServer(payload.character)
+            setSaveState("conflict")
+            return
+          }
           if (!response.ok || !payload.character) throw new Error(payload.error || "SAVE_FAILED")
-          for (const [index, value] of batch) if (pendingChanges.current.get(index) === value) pendingChanges.current.delete(index)
+          for (const [index, change] of batch) {
+            const pending = pendingChanges.current.get(index)
+            if (pending?.value === change.value) pendingChanges.current.delete(index)
+            // Une case JSON changée de nouveau pendant l'envoi part maintenant de ce qui vient d'être écrit.
+            else if (pending?.before !== undefined) pending.before = change.value
+          }
           applyServer(payload.character)
           setSaveState(pendingChanges.current.size ? "saving" : "saved")
           return
@@ -636,7 +664,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const next = latestValues.current.map((cell, cellIndex) => cellIndex === index ? value : cell)
     latestValues.current = next
     setValues(next)
-    pendingChanges.current.set(index, value)
+    const previous = pendingChanges.current.get(index)
+    const server = serverSheet.current
+    pendingChanges.current.set(index, {
+      value,
+      header: (server.headers.length ? server.headers : characterValueHeaders)[index] ?? "",
+      // Une case JSON part de la valeur confirmée (ou de celle d'où partait sa modification encore en attente).
+      ...(wholeJsonCells.has(index) ? { before: previous?.before ?? server.values[index] ?? "" } : {}),
+    })
     setSaveState("saving")
     await flush()
   }
@@ -1137,10 +1172,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       <TabsContent value={activeCharacterTab.id} forceMount className="mt-2 rounded-xl p-2 sm:p-3">{renderTabContent(activeCharacterTab)}</TabsContent>
     </Tabs>
 
-    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
+    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" || saveState === "conflict" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
       {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
+      {saveState === "conflict" && <><X className="size-3.5" />La fiche a changé entre-temps : actualise puis recommence.</>}
     </div>}
 
     {shownChoice && <SpellChoiceDialog

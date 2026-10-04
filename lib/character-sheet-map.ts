@@ -51,8 +51,13 @@ export function characterSheetMap(headerRow: readonly (string | undefined)[]): C
   return { columns, valueColumns, layout, writable, contiguous, width: Math.max(columns.width, ...valueColumns.map((column) => column + 1)) }
 }
 
-/** Une ligne entière de la feuille (pour l'ajouter) : l'identifiant, le joueur et chaque valeur à sa place. */
+/**
+ * Une ligne entière de la feuille (pour l'ajouter) : l'identifiant, le joueur et chaque valeur
+ * à sa place. Sans colonne ID ou Joueur, la ligne est refusée : écrite quand même, elle
+ * donnait une fiche que rien ne retrouve, ou sans joueur.
+ */
 export function characterSheetRow(map: CharacterSheetMap, id: string, ownerUid: string, values: readonly string[]) {
+  for (const name of ["ID", "Joueur"]) if (map.columns.at(name) < 0) throw new Error(`SHEET_COLUMN_MISSING:${name}`)
   const row: SheetCell[] = Array.from({ length: map.width }, () => "")
   values.forEach((value, index) => {
     const column = map.valueColumns[index] ?? -1
