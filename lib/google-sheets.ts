@@ -4940,29 +4940,44 @@ export async function withCharacterClasses<T extends CharacterRecord>(characters
   })
 }
 
+/** Le pion d'une fiche, d'après ses cases lues par leur en-tête. */
+function tabletopCharacterEntityOf(id: string, cell: (name: string) => string, ownerUid: string): TabletopEntityRecord {
+  return {
+    id,
+    kind: "character",
+    name: cell("Nom personnage") || "Personnage sans nom",
+    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
+    subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
+    portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
+    currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
+    totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
+    speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
+    ownerUid,
+  }
+}
+
 export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   const selected = new Set(ids)
   if (!selected.size) return []
   const source = await charactersSource()
   if (!source) return []
-  const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"])
+  const [{ columns, rows }, owners] = await Promise.all([
+    readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"]),
+    // Le joueur de chaque pion (qui peut le contrôler) vient de l'index local, relu frais dans
+    // la feuille : une colonne « Joueur » gardée en mémoire à part de la colonne ID pouvait
+    // dater d'avant une ligne supprimée ailleurs, et donner le pion d'un voisin.
+    getDb().select({ id: characterIndex.id, ownerUid: characterIndex.ownerUid }).from(characterIndex).where(inArray(characterIndex.id, [...selected])),
+  ])
+  const ownerOf = new Map(owners.map((owner) => [owner.id, owner.ownerUid]))
   return rows.flatMap<TabletopEntityRecord>((row) => {
-    const cell = (name: string) => columns.get(row, name)
-    const id = cell("ID")
-    if (!selected.has(id)) return []
-    return [{
-      id,
-      kind: "character",
-      name: cell("Nom personnage") || "Personnage sans nom",
-      // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
-      subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
-      portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
-      currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
-      totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
-      speed: tabletopNumber(cell("Rapidité"), 0, 0, 99999),
-      ownerUid: cell("Joueur"),
-    }]
+    const id = columns.get(row, "ID")
+    return selected.has(id) ? [tabletopCharacterEntityOf(id, (name) => columns.get(row, name), ownerOf.get(id) ?? "")] : []
   })
+}
+
+/** Le pion d'une fiche relue fraîche (après une écriture) : rien n'y vient d'une colonne gardée en mémoire. */
+export function tabletopCharacterEntity(character: CharacterSheetRecord) {
+  return tabletopCharacterEntityOf(character.id, (name) => character.values[character.headers.indexOf(name)] ?? "", character.ownerUid)
 }
 
 export async function listTabletopNpcEntitiesByIds(ids: string[], pageLinked = "bac-a-sable") {

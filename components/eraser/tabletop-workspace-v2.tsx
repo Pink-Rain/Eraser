@@ -723,10 +723,11 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
     setEntities((current) => current.map((candidate) => entityKey(candidate) === key ? { ...candidate, currentHp } : candidate))
     realtimeRef.current?.hp({ kind: entity.kind, id: entity.id, currentHp, totalHp: entity.totalHp })
     try {
+      // Seule la vie actuelle part : la vie totale affichée ici peut dater, la renvoyer l'écrasait.
       const payload = await responseJson<{ entity: TabletopEntityRecord }>(await fetch("/api/tabletop", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update-hp", mapId: map.id, roomKey: roomKeyRef.current, entityKind: entity.kind, entityId: entity.id, currentHp, totalHp: entity.totalHp }),
+        body: JSON.stringify({ action: "update-hp", mapId: map.id, roomKey: roomKeyRef.current, entityKind: entity.kind, entityId: entity.id, currentHp }),
       }))
       if (hpVersionsRef.current.get(key) === version) setEntities((current) => current.map((candidate) => entityKey(candidate) === key ? { ...candidate, currentHp: payload.entity.currentHp, totalHp: payload.entity.totalHp } : candidate))
     } catch (error) {

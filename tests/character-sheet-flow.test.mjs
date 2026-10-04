@@ -26,6 +26,7 @@ const vite = await createServer({
 after(async () => { await vite.close(); rmSync(dataDir, { recursive: true, force: true }); });
 const google = await vite.ssrLoadModule(fake);
 const sheets = await vite.ssrLoadModule("/lib/google-sheets.ts");
+const tabletop = await vite.ssrLoadModule("/lib/tabletop-access.ts");
 const { getDb } = await vite.ssrLoadModule("/db/index.ts");
 const schema = await vite.ssrLoadModule("/db/schema.ts");
 const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
@@ -35,6 +36,7 @@ const { characterSheetHeaders } = await vite.ssrLoadModule("/lib/character-sheet
 let serial = 0;
 const fresh = (name) => `${name}-${++serial}`;
 const headers = [...characterSheetHeaders];
+const admin = { uid: "admin-1", role: "admin", accountRole: "admin", email: "", displayName: "Admin" };
 
 async function link(key, spreadsheetId, tabName) {
   await jdr.saveJdrSheet({ key, spreadsheetId, name: key, tabName, webViewLink: "" });
@@ -49,6 +51,25 @@ async function linkCharacters(rows, sheetHeaders = headers) {
   return id;
 }
 
+/** La ligne d'une feuille sous forme { en-tête: valeur } (les cases vides omises). */
+function record(gridRows, rowIndex) {
+  const names = gridRows[0];
+  return Object.fromEntries((gridRows[rowIndex] ?? []).flatMap((value, column) => value !== "" ? [[names[column] || `#${column}`, value]] : []));
+}
+
+/** Les en-têtes des cases qui diffèrent entre deux copies d'une feuille. */
+function changedCells(before, after) {
+  const changed = [];
+  for (let row = 0; row < Math.max(before.length, after.length); row += 1) {
+    for (let column = 0; column < Math.max(before[row]?.length ?? 0, after[row]?.length ?? 0); column += 1) {
+      if ((before[row]?.[column] ?? "") !== (after[row]?.[column] ?? "")) changed.push(`${row}:${after[0][column]}`);
+    }
+  }
+  return changed;
+}
+
+const copyOf = (gridRows) => gridRows.map((row) => [...row]);
+
 beforeEach(async () => {
   google.reset();
   const db = getDb();
@@ -57,6 +78,26 @@ beforeEach(async () => {
   await db.delete(schema.campaignIndex);
   await db.delete(schema.characterIndex);
   await db.delete(schema.campaignCharacters);
+});
+
+test("Tabletop : seule la vie changée est écrite, « 12,5 » reste « 12,5 »", async () => {
+  const id = fresh("PERSO");
+  const characters = await linkCharacters([{ "ID": id, "Joueur": "uid-1", "Nom personnage": "Aldor", "Vie actuelle": "10", "Vie totale": "12,5" }]);
+  await sheets.syncExistingIdentityIndexes();
+  const before = copyOf(google.grid(characters, "Personnages"));
+  const entity = await tabletop.updateTabletopEntityHp(admin, "bac-a-sable", "character", id, { currentHp: 9 });
+  assert.deepEqual(changedCells(before, google.grid(characters, "Personnages")), ["1:Vie actuelle"]);
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "9");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie totale"], "12,5");
+  assert.equal(entity.currentHp, 9);
+  assert.equal(entity.totalHp, 12.5);
+  assert.equal(entity.ownerUid, "uid-1");
+  // Une valeur illisible n'écrit rien.
+  assert.equal(await tabletop.updateTabletopEntityHp(admin, "bac-a-sable", "character", id, { currentHp: "beaucoup" }), null);
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "9");
+  // Le joueur d'un pion (qui peut le contrôler) vient de l'index local, pas d'une colonne lue à part.
+  google.grid(characters, "Personnages")[1][headers.indexOf("Joueur")] = "uid-2";
+  assert.equal((await sheets.listTabletopCharacterEntitiesByIds([id]))[0].ownerUid, "uid-1");
 });
 
 test("En-têtes « Joueur », « Nom personnage » ou « MJ » renommés : les joueurs et noms connus restent", async () => {
