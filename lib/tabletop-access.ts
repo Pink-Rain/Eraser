@@ -6,6 +6,7 @@ import {
   listTabletopCharacterEntitiesByIds, listTabletopMaps, listTabletopNpcEntitiesByIds, listTabletopTokens,
   saveNpc, patchCharacterSheet, tabletopCharacterEntity,
 } from "@/lib/google-sheets"
+import { characterValueHeaders } from "@/lib/character-sheet-schema"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
 import { identityUidsForUser } from "@/lib/identity-links"
@@ -217,11 +218,11 @@ export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked
   if (!allowedIds.includes(id)) return null
   // Seulement la case envoyée (vie actuelle ou totale) : l'autre n'est jamais réécrite avec la
   // copie du tabletop, qui pouvait dater, venir d'une ligne voisine ou valoir « 0 » pour « 12,5 ».
-  const changes = Object.fromEntries(([[9, patch.currentHp], [10, patch.totalHp]] as const).flatMap(([index, value]) => {
+  const changes = ([[9, patch.currentHp], [10, patch.totalHp]] as const).flatMap(([index, value]) => {
     const hp = characterHp(value)
-    return hp === null ? [] : [[String(index), hp]]
-  }))
-  if (!Object.keys(changes).length) return null
+    return hp === null ? [] : [{ index, header: characterValueHeaders[index], value: hp }]
+  })
+  if (!changes.length) return null
   const character = await patchCharacterSheet(account.role === "joueur" ? account.uid : null, id, changes).catch((error) => {
     if (error instanceof Error && ["CHARACTER_NOT_FOUND", "CHARACTER_SHEET_ROW_NOT_FOUND"].includes(error.message)) return null
     throw error

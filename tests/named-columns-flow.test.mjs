@@ -202,12 +202,12 @@ test("Fiche de personnage : colonnes déplacées, valeurs et formules à leur vr
   assert.equal(sheet.values[at("Level")], "3");
 
   const forceColumn = headers.indexOf("Force");
-  await sheets.patchCharacterSheet(null, "PERSO-1", { [at("Force")]: "55", [at("Mes notes")]: "écrasé ?" });
+  await sheets.patchCharacterSheet(null, "PERSO-1", [{ index: at("Force"), header: "Force", value: "55" }, { index: at("Mes notes"), header: "Mes notes", value: "écrasé ?" }]);
   let written = record(google.grid(characters, "Personnages"), 1);
   assert.equal(written["Force"], "55");
   assert.equal(written["Mes notes"], "=1+1");
 
-  await sheets.patchCharacterSheet(null, "PERSO-1", { [at("Nom personnage")]: "Aldor le Gris" });
+  await sheets.patchCharacterSheet(null, "PERSO-1", [{ index: at("Nom personnage"), header: "Nom personnage", value: "Aldor le Gris" }]);
   written = record(google.grid(characters, "Personnages"), 1);
   assert.equal(written["Nom personnage"], "Aldor le Gris");
   assert.equal(written["Peuple"], "Elfe");
@@ -343,10 +343,10 @@ test("Une ligne supprimée ailleurs ne fait pas écrire dans la fiche voisine", 
   await sheets.syncExistingIdentityIndexes();
   const sheet = await sheets.getCharacterSheet(null, "PERSO-C");
   const at = (header) => sheet.headers.indexOf(header);
-  await sheets.patchCharacterSheet(null, "PERSO-C", { [at("Note")]: "première" });
+  await sheets.patchCharacterSheet(null, "PERSO-C", [{ index: at("Note"), header: "Note", value: "première" }]);
   // Une autre installation supprime la ligne d'Aldor : Brin et Cael remontent d'une ligne.
   google.grid(characters, "Personnages").splice(1, 1);
-  await sheets.patchCharacterSheet(null, "PERSO-C", { [at("Note")]: "seconde" });
+  await sheets.patchCharacterSheet(null, "PERSO-C", [{ index: at("Note"), header: "Note", value: "seconde" }]);
   const grid = google.grid(characters, "Personnages");
   const byName = Object.fromEntries(grid.slice(1).map((_, index) => record(grid, index + 1)).map((row) => [row["Nom personnage"], row]));
   assert.equal(byName["Cael"]["Note"], "seconde");

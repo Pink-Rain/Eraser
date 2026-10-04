@@ -30,7 +30,7 @@ const tabletop = await vite.ssrLoadModule("/lib/tabletop-access.ts");
 const { getDb } = await vite.ssrLoadModule("/db/index.ts");
 const schema = await vite.ssrLoadModule("/db/schema.ts");
 const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
-const { characterSheetHeaders } = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
+const { characterSheetHeaders, characterSecondaryCalculationHeaders, characterSecondaryCalculatedFields, characterValueHeaders } = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
 
 // Les caches du module vivent le temps du processus : classeurs et fiches ont des identifiants jamais réutilisés.
 let serial = 0;
@@ -98,6 +98,85 @@ test("Tabletop : seule la vie changée est écrite, « 12,5 » reste « 12,5 »"
   // Le joueur d'un pion (qui peut le contrôler) vient de l'index local, pas d'une colonne lue à part.
   google.grid(characters, "Personnages")[1][headers.indexOf("Joueur")] = "uid-2";
   assert.equal((await sheets.listTabletopCharacterEntitiesByIds([id]))[0].ownerUid, "uid-1");
+});
+
+test("Fiche ouverte après une ligne supprimée ailleurs : le bon personnage, seules ses formules réparées", async () => {
+  const [a, b, c] = ["A", "B", "C"].map((letter) => fresh(`PERSO-${letter}`));
+  const characters = await linkCharacters([
+    { "ID": a, "Joueur": "uid-1", "Nom personnage": "Aldor", "Peuple": "Elfe" },
+    { "ID": b, "Joueur": "uid-1", "Nom personnage": "Brin", "Peuple": "Humain" },
+    // Un total en erreur : la fiche répare ses formules à l'ouverture.
+    { "ID": c, "Joueur": "uid-1", "Nom personnage": "Cael", "Peuple": "Nain", "Rapidité": "#REF!", "Note": "Notes de Cael" },
+  ]);
+  await sheets.syncExistingIdentityIndexes();
+  // Brin (ligne 3) est lu par cette installation…
+  assert.equal((await sheets.getCharacterSheet(null, b)).values[0], "Brin");
+  // …puis la ligne d'Aldor est supprimée ailleurs : Cael arrive en ligne 3.
+  google.grid(characters, "Personnages").splice(1, 1);
+  const before = copyOf(google.grid(characters, "Personnages"));
+  const sheet = await sheets.getCharacterSheet(null, c);
+  assert.equal(sheet.name, "Cael");
+  assert.equal(sheet.values[sheet.headers.indexOf("Peuple")], "Nain");
+  // Seules les cases des totaux calculés de Cael sont écrites : jamais sa ligne entière.
+  const secondary = new Set([...characterSecondaryCalculationHeaders, ...characterSecondaryCalculatedFields.map((field) => characterValueHeaders[field.valueIndex])]);
+  const changed = changedCells(before, google.grid(characters, "Personnages"));
+  assert.ok(changed.length > 0);
+  assert.deepEqual(changed.filter((cell) => !cell.startsWith("2:") || !secondary.has(cell.slice(2))), []);
+  const repaired = record(google.grid(characters, "Personnages"), 2);
+  assert.equal(repaired["Nom personnage"], "Cael");
+  assert.equal(repaired["Note"], "Notes de Cael");
+  assert.match(repaired["Rapidité"], /^=.*3\+.*3$/);
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Nom personnage"], "Brin");
+});
+
+test("Colonne insérée ailleurs avant les colonnes de l'index : refus, ou écriture à la vraie place", async () => {
+  const id = fresh("PERSO");
+  const sheetHeaders = [...headers, "Pêche [COM-1]", "Chasse [COM-2]"];
+  const characters = await linkCharacters([{ "ID": id, "Joueur": "uid-1", "Nom personnage": "Aldor" }], sheetHeaders);
+  await sheets.syncExistingIdentityIndexes();
+  const sheet = await sheets.getCharacterSheet(null, id);
+  const fishing = sheet.headers.indexOf("Pêche [COM-1]");
+  assert.ok(fishing >= characterValueHeaders.length);
+  // Ailleurs, une colonne « Mes notes » est insérée en 6e position : tout ce qui suit glisse d'une colonne.
+  const tab = google.world.files.get(characters).tabs[0];
+  for (const [index, row] of tab.grid.entries()) row.splice(5, 0, index === 0 ? "Mes notes" : "");
+  tab.columnCount += 1;
+  const before = copyOf(tab.grid);
+  // La fiche ouverte avant l'insertion envoie la place qu'elle connaissait : refusée, rien n'est écrit.
+  await assert.rejects(sheets.patchCharacterSheet(null, id, [{ index: fishing, header: "Pêche [COM-1]", value: "7" }]), (error) => error.message === "CHARACTER_SHEET_CHANGED" && error.character.headers.includes("Mes notes"));
+  assert.deepEqual(changedCells(before, tab.grid), []);
+  // Une case d'origine va dans sa colonne retrouvée par son nom, jamais dans sa voisine.
+  const note = sheet.headers.indexOf("Note");
+  await sheets.patchCharacterSheet(null, id, [{ index: note, header: "Note", value: "noté" }]);
+  assert.deepEqual(changedCells(before, tab.grid), ["1:Note"]);
+  // Avec la place relue, la case de l'index s'écrit sous son en-tête.
+  const reread = await sheets.patchCharacterSheet(null, id, []);
+  await sheets.patchCharacterSheet(null, id, [{ index: reread.headers.indexOf("Pêche [COM-1]"), header: "Pêche [COM-1]", value: "7" }]);
+  assert.equal(record(tab.grid, 1)["Pêche [COM-1]"], "7");
+  assert.equal(record(tab.grid, 1)["Mes notes"], undefined);
+});
+
+test("Case JSON modifiée ailleurs entre-temps : refusée, rien n'est écrit", async () => {
+  const id = fresh("PERSO");
+  const header = "Sorts de classe choisis JSON";
+  const characters = await linkCharacters([{ "ID": id, "Joueur": "uid-1", "Nom personnage": "Aldor", [header]: "{\"charges\":{\"s1\":2}}" }]);
+  await sheets.syncExistingIdentityIndexes();
+  const sheet = await sheets.getCharacterSheet(null, id);
+  const index = sheet.headers.indexOf(header);
+  // Le MJ, sur une autre installation, pose un état sur la fiche.
+  const row = google.grid(characters, "Personnages")[1];
+  const column = headers.indexOf(header);
+  row[column] = "{\"charges\":{\"s1\":2},\"states\":[{\"id\":\"st-1\",\"name\":\"Étourdi\",\"level\":1}]}";
+  // Le joueur, parti de l'ancienne case, dépense une charge : refusé, l'état du MJ reste.
+  await assert.rejects(
+    sheets.patchCharacterSheet(null, id, [{ index, header, value: "{\"charges\":{\"s1\":1}}", before: sheet.values[index] }]),
+    (error) => error.message === "CHARACTER_SHEET_CHANGED" && error.character.values[index] === row[column],
+  );
+  assert.match(row[column], /Étourdi/);
+  // Partie de la case actuelle, la même dépense passe.
+  const next = "{\"charges\":{\"s1\":1},\"states\":[{\"id\":\"st-1\",\"name\":\"Étourdi\",\"level\":1}]}";
+  await sheets.patchCharacterSheet(null, id, [{ index, header, value: next, before: row[column] }]);
+  assert.equal(google.grid(characters, "Personnages")[1][column], next);
 });
 
 test("En-têtes « Joueur », « Nom personnage » ou « MJ » renommés : les joueurs et noms connus restent", async () => {
