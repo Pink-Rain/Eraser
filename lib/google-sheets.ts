@@ -28,6 +28,7 @@ import {
 } from "@/lib/google-apps-script"
 import { runInBackground } from "@/lib/background-work"
 import { withAsyncLock } from "@/lib/async-lock"
+import type { ObjectIndexCellRef, ObjectIndexRowRef } from "@/lib/object-index-refs"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
 import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
@@ -1298,7 +1299,13 @@ async function readObjectIndexSpreadsheetWithRetry(file: { id: string; name: str
   }
 }
 
+/** Les tableaux servis de secours après une lecture en échec : affichés, jamais pris pour écrire. */
+const fallbackObjectIndexTables = new WeakSet<ObjectIndexTable[]>()
+/** Change à chaque écriture : une lecture partie avant elle ne remplit pas le cache après. */
+let objectIndexTablesVersion = 0
+
 async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
+  const version = objectIndexTablesVersion
   let results: Array<{ tables: ObjectIndexTable[]; error: unknown }>
   try {
     const files = await objectIndexSpreadsheetFiles()
@@ -1317,21 +1324,22 @@ async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
   // Un classeur illisible à l'instant : le dernier catalogue complet plutôt qu'un catalogue
   // vide (les objets des inventaires perdraient leurs colonnes). Relu dans une minute.
   if (firstError && lastGoodObjectIndexTables) {
-    objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }
+    fallbackObjectIndexTables.add(lastGoodObjectIndexTables)
+    if (version === objectIndexTablesVersion) objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }
     return lastGoodObjectIndexTables
   }
   const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
-  objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
+  // Avant d'être servi, chaque objet nommé a un vrai ID dans sa colonne ID.
+  await freezeObjectIndexRowIds(tables)
+  if (version === objectIndexTablesVersion) objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
   if (!firstError) { lastGoodObjectIndexTables = tables; objectIndexLoadedAt = Date.now() }
-  // Les icônes s'écrivent par numéro de colonne : jamais pendant une réparation des en-têtes.
-  if (tables.some(needsObjectIndexHeaderRepair)) scheduleObjectIndexHeaderRepair(tables)
-  else {
-    scheduleObjectIndexIconSync(tables)
-    // Des en-têtes ajoutés après la dernière colonne ne déplacent pas la colonne Icône.
-    if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
-  }
+  scheduleObjectIndexHeaderRepair(tables)
+  // Les icônes et les colonnes de combat se placent d'après la ligne 1 relue au moment
+  // d'écrire, et la réparation des en-têtes ne déplace plus aucune colonne.
+  scheduleObjectIndexIconSync(tables)
+  if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
   return tables
 }
 
@@ -1359,8 +1367,8 @@ function scheduleObjectCombatColumns(tables: ObjectIndexTable[]) {
 async function updateObjectCombatHeaders(tables: ObjectIndexTable[]) {
   for (const table of tables) {
     if (!needsObjectCombatHeaders(table) || needsObjectIndexHeaderRepair(table)) continue
-    // On relit la ligne 1 : un en-tête changé entre-temps (à la main, dans Sheets) est respecté.
-    const [firstRow = []] = await readRange(table.fileId, sheetTabRange(table.tabName, "A1:AZ1")).catch(() => [[] as string[]])
+    // On relit la ligne 1 sans cache : un en-tête changé entre-temps (à la main, dans Sheets) est respecté.
+    const firstRow = await freshObjectIndexHeaderRow(table).catch(() => [] as string[])
     if (!firstRow.some((header) => header?.trim())) continue
     const plan = planObjectCombatHeaders(firstRow.map((header) => header ?? ""))
     // Après la dernière colonne qui contient quelque chose, en-tête ou valeur.
@@ -1400,45 +1408,54 @@ export function emptyDuplicateObjectColumns(table: Pick<ObjectIndexTable, "heade
 
 const ERASER_APPENDED_OBJECT_HEADERS = new Set(["description", "icone", "icon", "nombre max"])
 
+/** Les en-têtes repris des autres index à écrire dans les cases vides de la ligne 1 (hors colonnes en double). */
+function borrowedHeadersToWrite(table: ObjectIndexTable) {
+  const duplicates = emptyDuplicateObjectColumns(table)
+  return (table.borrowedHeaders ?? []).filter((index) => !duplicates.includes(index))
+}
+
 function needsObjectIndexHeaderRepair(table: ObjectIndexTable) {
-  return Boolean(table.borrowedHeaders?.length) || emptyDuplicateObjectColumns(table).length > 0
+  return borrowedHeadersToWrite(table).length > 0
 }
 
 let objectHeaderRepairAttemptAt = 0
 
 function scheduleObjectIndexHeaderRepair(tables: ObjectIndexTable[]) {
   if (Date.now() - objectHeaderRepairAttemptAt < 10 * 60_000) return
+  const concerned = tables.filter((table) => needsObjectIndexHeaderRepair(table) || emptyDuplicateObjectColumns(table).length)
+  if (!concerned.length) return
   objectHeaderRepairAttemptAt = Date.now()
-  runInBackground(repairObjectIndexHeaders(tables.filter(needsObjectIndexHeaderRepair)), "OBJECT_HEADER_REPAIR_FAILED")
+  runInBackground(repairObjectIndexHeaders(concerned), "OBJECT_HEADER_REPAIR_FAILED")
 }
 
 /**
- * Répare la ligne d'en-têtes des tableaux d'objets, sans toucher à une seule valeur :
- * les en-têtes repris des autres index sont écrits dans les cases vides de la ligne 1
- * (la feuille devient lisible et modifiable dans Sheets comme dans Eraser), puis les
- * colonnes en double entièrement vides sont supprimées.
+ * Répare la ligne d'en-têtes des tableaux d'objets, sans toucher à une seule valeur : les
+ * en-têtes repris des autres index sont écrits dans les cases encore vides de la ligne 1
+ * (la feuille devient lisible et modifiable dans Sheets comme dans Eraser). Une colonne en
+ * double, même vide, n'est jamais supprimée d'ici : supprimer une colonne d'après un
+ * instantané décalait toutes les suivantes, pour toutes les installations. Elle est
+ * seulement signalée, à retirer à la main dans Sheets.
  */
 async function repairObjectIndexHeaders(tables: ObjectIndexTable[]) {
+  let repaired = false
   for (const table of tables) {
     const duplicates = emptyDuplicateObjectColumns(table)
-    // On relit la ligne 1 : on n'écrit que dans des cases réellement vides.
-    const [firstRow = []] = await readRange(table.fileId, sheetTabRange(table.tabName, "A1:AZ1")).catch(() => [[] as string[]])
-    const writes = (table.borrowedHeaders ?? [])
-      .filter((index) => !duplicates.includes(index) && !(firstRow[index] ?? "").trim())
+    if (duplicates.length) console.warn("OBJECT_HEADER_DUPLICATES_KEPT", table.fileName, table.tabName, duplicates.map((index) => `${columnName(index + 1)} « ${table.headers[index]} »`).join(", "))
+    const borrowed = borrowedHeadersToWrite(table)
+    if (!borrowed.length) continue
+    // On relit la ligne 1 sans cache : on n'écrit que dans des cases réellement vides.
+    const firstRow = await freshObjectIndexHeaderRow(table).catch(() => null)
+    if (!firstRow) continue
+    const writes = borrowed
+      .filter((index) => !(firstRow[index] ?? "").trim())
       .map((index) => ({ range: sheetTabRange(table.tabName, `${columnName(index + 1)}1`), values: [[table.headers[index]]] }))
-    if (writes.length) await updateRanges(table.fileId, writes)
-    if (duplicates.length) {
-      await googleSheetsJson(`spreadsheets/${table.fileId}:batchUpdate`, {
-        method: "POST",
-        body: JSON.stringify({ requests: [...duplicates].sort((left, right) => right - left).map((index) => ({ deleteDimension: { range: { sheetId: table.sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 } } })) }),
-      })
-    }
-    if (writes.length || duplicates.length) {
-      console.info("OBJECT_HEADER_REPAIRED", table.fileName, table.tabName, { headersWritten: writes.length, emptyDuplicatesRemoved: duplicates.map((index) => table.headers[index]) })
-      clearSpreadsheetReadCache(table.fileId)
-    }
+    if (!writes.length) continue
+    await updateRanges(table.fileId, writes)
+    console.info("OBJECT_HEADER_REPAIRED", table.fileName, table.tabName, { headersWritten: writes.length })
+    clearSpreadsheetReadCache(table.fileId)
+    repaired = true
   }
-  clearObjectIndexTableCache()
+  if (repaired) clearObjectIndexTableCache()
 }
 
 const blankObjectIndexHeader = /^Colonne \d+$/
@@ -1486,11 +1503,11 @@ function isSheetErrorValue(value: string) {
 export async function objectIndexTablesForRegroup() {
   clearObjectIndexTableCache()
   objectHeaderRepairAttemptAt = Date.now()
-  let tables = await listObjectIndexTables()
+  let tables = await objectIndexTablesForWrite()
   const broken = tables.filter(needsObjectIndexHeaderRepair)
   if (broken.length) {
     await repairObjectIndexHeaders(broken)
-    tables = await listObjectIndexTables()
+    tables = await objectIndexTablesForWrite()
   }
   return tables
 }
@@ -1515,34 +1532,257 @@ export function clearObjectIndexTableCache() {
   objectIndexTableCache = null
   // Une lecture lancée avant une écriture ne doit pas servir après elle.
   objectIndexTablesRequest = null
+  objectIndexTablesVersion += 1
   clearInventoryWorkbookCache()
+}
+
+/** Le catalogue pour écrire : jamais celui de secours gardé après une lecture en échec (relu une fois). */
+async function objectIndexTablesForWrite() {
+  let tables = await listObjectIndexTables()
+  if (fallbackObjectIndexTables.has(tables)) {
+    clearObjectIndexTableCache()
+    tables = await listObjectIndexTables()
+  }
+  if (fallbackObjectIndexTables.has(tables)) throw new Error("OBJECT_INDEX_UNAVAILABLE")
+  return tables
 }
 
 async function validatedObjectIndexTable(fileId: string, tabName: string) {
   if (!/^[A-Za-z0-9_-]+$/.test(fileId) || !tabName.trim()) throw new Error("INVALID_OBJECT_INDEX")
-  const table = (await listObjectIndexTables()).find((candidate) => candidate.fileId === fileId && candidate.tabName === tabName)
+  const table = (await objectIndexTablesForWrite()).find((candidate) => candidate.fileId === fileId && candidate.tabName === tabName)
   if (!table) throw new Error("OBJECT_INDEX_NOT_FOUND")
   return table
 }
 
+const objectIndexIdHeaders = ["ID", "Identifiant"]
+
+/** La ligne 1 d'un tableau d'objets, relue sans cache. */
+async function freshObjectIndexHeaderRow(table: Pick<ObjectIndexTable, "fileId" | "tabName">) {
+  const [read] = await readRangesFresh(table.fileId, [sheetTabRange(table.tabName, "1:1")])
+  return read?.startRow === 1 ? (read.rows[0] ?? []).map((value) => String(value ?? "")) : []
+}
+
+/** La colonne d'un de ces en-têtes dans une ligne 1 relue, ou celle d'un en-tête repris resté vide à sa place. */
+function freshAliasColumn(table: ObjectIndexTable, fresh: readonly string[], aliases: readonly string[]) {
+  const expected = new Set(aliases.map(normalizedHeader))
+  const found = fresh.findIndex((header) => expected.has(normalizedHeader(header)))
+  if (found >= 0) return found
+  const borrowed = (table.borrowedHeaders ?? []).find((index) => expected.has(normalizedHeader(table.headers[index] ?? "")))
+  return borrowed !== undefined && !(fresh[borrowed] ?? "").trim() ? borrowed : -1
+}
+
+/**
+ * La colonne d'un en-tête dans une ligne 1 relue : la `occurrence`-ième de ce nom. Un
+ * en-tête repris d'un autre index (ou « Colonne N ») n'est pas dans la ligne 1 : il garde
+ * sa place tant que cette case y est encore vide.
+ */
+function freshHeaderColumn(table: ObjectIndexTable, fresh: readonly string[], header: string, occurrence = 0) {
+  const wanted = header.trim()
+  if (!wanted) return -1
+  const named = fresh.flatMap((value, index) => value.trim() === wanted ? [index] : [])
+  if (named.length) return named[occurrence] ?? -1
+  const blank = /^Colonne (\d+)$/.exec(wanted)
+  const places = blank ? [Number(blank[1]) - 1] : (table.borrowedHeaders ?? []).filter((index) => table.headers[index] === wanted)
+  const place = places[blank ? 0 : occurrence] ?? -1
+  return place >= 0 && !(fresh[place] ?? "").trim() ? place : -1
+}
+
+type ObjectIndexLayout = {
+  headers: string[]
+  idColumn: number
+  nameColumn: number
+  /** Les colonnes demandées, d'après la ligne 1 relue (-1 : introuvable). */
+  wanted: number[]
+  /** Une case relue (colonnes ID, nom et demandées seulement). */
+  cell(rowNumber: number, column: number): string
+  /** Les lignes qui portent chaque ID. */
+  ids: Map<string, number[]>
+  /** La ligne que désigne la page, ou -1 si elle n'y est plus (ou plus seule). */
+  locate(ref: ObjectIndexRowRef): number
+}
+
+/**
+ * De quoi écrire dans un tableau d'objets sans se tromper de case, relu sans cache au
+ * moment même : la ligne 1 (les colonnes par leur en-tête), la colonne ID (les lignes par
+ * leur ID), celle du nom (une ligne sans ID, par son nom à sa place) et les colonnes
+ * demandées. Une ligne insérée, supprimée ou triée ailleurs (dans Sheets, sur une autre
+ * installation), ou une colonne déplacée, ne fait plus écrire ni supprimer chez le voisin.
+ */
+async function freshObjectIndexLayout(table: ObjectIndexTable, wanted: ReadonlyArray<{ header: string; occurrence?: number }> = []): Promise<ObjectIndexLayout> {
+  const resolve = (headers: readonly string[]) => ({
+    id: freshAliasColumn(table, headers, objectIndexIdHeaders),
+    name: freshAliasColumn(table, headers, OBJECT_INDEX_NAME_ALIASES),
+    wanted: wanted.map((item) => freshHeaderColumn(table, headers, item.header, item.occurrence)),
+  })
+  const read = async (columns: number[]) => {
+    const unique = [...new Set(columns.filter((column) => column >= 0))]
+    const [header, ...reads] = await readRangesFresh(table.fileId, [
+      sheetTabRange(table.tabName, "1:1"),
+      ...unique.map((column) => sheetTabRange(table.tabName, `${columnName(column + 1)}:${columnName(column + 1)}`)),
+    ])
+    return {
+      headers: header?.startRow === 1 ? (header.rows[0] ?? []).map((value) => String(value ?? "").trim()) : [],
+      columns: new Map(unique.map((column, position) => [column, reads[position]])),
+    }
+  }
+  // Les colonnes de la dernière lecture d'abord ; relues si la ligne 1 dit qu'elles ont bougé.
+  const hinted = resolve(table.headers)
+  let result = await read([hinted.id, hinted.name, ...hinted.wanted])
+  let at = resolve(result.headers)
+  if ([at.id, at.name, ...at.wanted].some((column) => column >= 0 && !result.columns.has(column))) {
+    result = await read([at.id, at.name, ...at.wanted])
+    at = resolve(result.headers)
+  }
+  const cell = (rowNumber: number, column: number) => {
+    const columnRead = result.columns.get(column)
+    return columnRead ? String(columnRead.rows[rowNumber - columnRead.startRow]?.[0] ?? "") : ""
+  }
+  const ids = new Map<string, number[]>()
+  const idRead = result.columns.get(at.id)
+  idRead?.rows.forEach((line, offset) => {
+    const rowNumber = idRead.startRow + offset
+    const id = String(line[0] ?? "").trim()
+    if (rowNumber >= 2 && id) ids.set(id, [...(ids.get(id) ?? []), rowNumber])
+  })
+  return {
+    headers: result.headers,
+    idColumn: at.id,
+    nameColumn: at.name,
+    wanted: at.wanted,
+    cell,
+    ids,
+    locate(ref) {
+      const id = ref.id.trim()
+      if (id) {
+        const rows = ids.get(id) ?? []
+        return rows.length === 1 ? rows[0] : -1
+      }
+      // Sans ID : à sa place, si elle y porte toujours ce nom et toujours pas d'ID.
+      const name = ref.name?.trim()
+      if (!name || at.name < 0 || !Number.isInteger(ref.rowNumber) || ref.rowNumber < 2) return -1
+      if (at.id >= 0 && cell(ref.rowNumber, at.id).trim()) return -1
+      return cell(ref.rowNumber, at.name).trim() === name ? ref.rowNumber : -1
+    },
+  }
+}
+
+/** Une ligne d'un instantané, désignée comme le fait la page : son ID, sinon son nom à sa place. */
+function snapshotRowRef(table: ObjectIndexTable, row: ObjectIndexRow): ObjectIndexRowRef {
+  return { id: objectIndexCell(table, row, objectIndexIdHeaders).trim(), rowNumber: row.rowNumber, name: objectIndexRowName(table, row).trim() }
+}
+
+function isSameObjectIndexRow(table: ObjectIndexTable, row: ObjectIndexRow, ref: ObjectIndexRowRef) {
+  const known = snapshotRowRef(table, row)
+  return ref.id.trim() ? known.id === ref.id.trim() : !known.id && row.rowNumber === ref.rowNumber && known.name === (ref.name ?? "").trim()
+}
+
+let objectIdFreezeFailedAt = 0
+
+/**
+ * Un objet nommé sans ID (une ligne tapée dans Sheets) était désigné par sa place
+ * (« DRIVE-…-12 ») : une ligne insérée ou supprimée au-dessus faisait alors pointer les
+ * inventaires et les boutiques vers un autre objet. Avant d'être servi, il reçoit un ID
+ * dans sa colonne ID : celui qu'il avait (sa place d'aujourd'hui, que des inventaires ont
+ * peut-être gardé), ou un nouvel identifiant si celui-ci est déjà pris. La case est relue
+ * juste avant : écrite seulement si elle est toujours vide et que la ligne porte ce nom.
+ */
+async function freezeObjectIndexRowIds(tables: ObjectIndexTable[]) {
+  if (Date.now() - objectIdFreezeFailedAt < 10 * 60_000) return
+  for (const table of tables) {
+    const idColumn = objectIndexColumn(table, objectIndexIdHeaders)
+    const missing = idColumn < 0 ? [] : table.rows.filter((row) => !(row.values[idColumn] ?? "").trim() && objectIndexRowName(table, row).trim())
+    if (!missing.length) continue
+    try {
+      const layout = await freshObjectIndexLayout(table)
+      if (layout.idColumn !== idColumn) continue
+      const taken = new Set(layout.ids.keys())
+      const written: Array<{ row: ObjectIndexRow; id: string }> = []
+      for (const row of missing) {
+        if (layout.locate(snapshotRowRef(table, row)) !== row.rowNumber) continue
+        const positional = `DRIVE-${table.fileId}-${table.sheetId}-${row.rowNumber}`
+        const id = taken.has(positional) ? crypto.randomUUID() : positional
+        taken.add(id)
+        written.push({ row, id })
+      }
+      if (!written.length) continue
+      const letter = columnName(idColumn + 1)
+      await updateRanges(table.fileId, written.map(({ row, id }) => ({ range: sheetTabRange(table.tabName, `${letter}${row.rowNumber}`), values: [[id]] })), { valueInputOption: "RAW" })
+      for (const { row, id } of written) { row.values[idColumn] = id; row.html[idColumn] = id }
+      console.info("OBJECT_INDEX_IDS_WRITTEN", table.fileName, table.tabName, written.length)
+    } catch (error) {
+      objectIdFreezeFailedAt = Date.now()
+      console.error("OBJECT_INDEX_IDS_FAILED", table.fileName, table.tabName, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    }
+  }
+}
+
+/**
+ * Remplit des cases d'un tableau d'objets prévues d'après un instantané. Juste avant, la
+ * ligne 1, les ID et la colonne visée sont relus sans cache : chaque case n'est écrite qu'à
+ * la ligne qui porte encore cet ID (faute d'ID, ce nom à cette place), et seulement si
+ * `free` la trouve encore libre. Une icône choisie à la main, un « Nombre max » ou une
+ * description écrits entre-temps, ici ou ailleurs, ne sont jamais écrasés.
+ */
+async function fillObjectIndexCells(table: ObjectIndexTable, header: string, cells: Array<{ row: ObjectIndexRow; value: SheetCell }>, free: (current: string) => boolean) {
+  if (!cells.length) return 0
+  const layout = await freshObjectIndexLayout(table, [{ header }])
+  const column = layout.wanted[0]
+  if (column < 0) return 0
+  const letter = columnName(column + 1)
+  // La colonne visée telle qu'elle est écrite : une icône =IMAGE n'a pas de texte affiché.
+  const target = await readRangeFreshWithOffset(table.fileId, sheetTabRange(table.tabName, `${letter}:${letter}`), "FORMULA")
+  const writes = cells.flatMap(({ row, value }) => {
+    const rowNumber = layout.locate(snapshotRowRef(table, row))
+    if (rowNumber < 2 || !free(String(target.rows[rowNumber - target.startRow]?.[0] ?? ""))) return []
+    return [{ range: sheetTabRange(table.tabName, `${letter}${rowNumber}`), values: [[value]] }]
+  })
+  if (writes.length) await updateRanges(table.fileId, writes)
+  return writes.length
+}
+
+/**
+ * L'en-tête d'une colonne à remplir : celui qui y est déjà (ce nom ou un autre de `aliases`,
+ * dans la ligne 1 relue à l'instant), sinon ajouté à droite de la dernière colonne qui
+ * contient quelque chose. Null si le tableau n'a plus de place.
+ */
+async function objectIndexHeaderFor(table: ObjectIndexTable, header: string, aliases: readonly string[]) {
+  const fresh = (await freshObjectIndexHeaderRow(table)).map((value) => value.trim())
+  const existing = freshAliasColumn(table, fresh, aliases)
+  if (existing >= 0) return fresh[existing] || table.headers[existing] || null
+  let used = fresh.length
+  while (used > 0 && !fresh[used - 1]) used -= 1
+  const start = Math.max(used, table.headers.length)
+  if (start >= 52) return null
+  await ensureSheetColumnCount(table.fileId, table.tabName, start + 1)
+  await updateRanges(table.fileId, [{ range: sheetTabRange(table.tabName, `${columnName(start + 1)}1`), values: [[header]] }], { valueInputOption: "RAW" })
+  return header
+}
+
 export async function addObjectIndexRow(fileId: string, tabName: string) {
   const table = await validatedObjectIndexTable(fileId, tabName)
-  const values = table.headers.map((header) => normalizedHeader(header) === "id" ? crypto.randomUUID() : "")
-  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values])
+  // L'ID va dans sa colonne d'après la ligne 1 relue à l'instant.
+  const layout = await freshObjectIndexLayout(table)
+  const width = Math.max(1, layout.headers.length, table.headers.length)
+  const values = Array.from({ length: width }, (_, index) => index === layout.idColumn ? crypto.randomUUID() : "")
+  await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(width)}`), [values])
   clearObjectIndexTableCache()
 }
 
 /**
  * Enregistre une seule cellule avec sa mise en forme. L’éditeur de l’Index des objets
  * sauvegarde cellule par cellule : deux colonnes modifiées coup sur coup ne s’écrasent
- * plus l’une l’autre, et la mise en forme des autres cellules reste intacte.
+ * plus l’une l’autre, et la mise en forme des autres cellules reste intacte. La ligne est
+ * retrouvée par son ID et la colonne par son en-tête, dans la feuille relue à l'instant :
+ * sinon, rien n'est écrit (OBJECT_INDEX_CHANGED).
  */
-export async function updateObjectIndexCell(fileId: string, tabName: string, rowNumber: number, column: number, html: string) {
+export async function updateObjectIndexCell(fileId: string, tabName: string, target: ObjectIndexCellRef, html: string) {
   const table = await validatedObjectIndexTable(fileId, tabName)
-  const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
-  if (!row || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
+  const layout = await freshObjectIndexLayout(table, [{ header: target.header, occurrence: target.occurrence }])
+  const rowNumber = layout.locate(target)
+  const column = layout.wanted[0]
+  if (rowNumber < 2 || column < 0) throw new Error("OBJECT_INDEX_CHANGED")
   // Une vraie case à cocher de Sheets (TRUE/FALSE) reste une case : la valeur est écrite en booléen.
-  if (/^(true|false)$/i.test((row.values[column] ?? "").trim()) && /^(true|false)$/i.test(html.trim())) {
+  if (/^(true|false)$/i.test(layout.cell(rowNumber, column).trim()) && /^(true|false)$/i.test(html.trim())) {
     await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
       method: "POST",
       body: JSON.stringify({ requests: [{ updateCells: {
@@ -1553,74 +1793,88 @@ export async function updateObjectIndexCell(fileId: string, tabName: string, row
     })
     clearSpreadsheetReadCache(fileId)
   } else await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column, html })
+  // Le catalogue gardé en mémoire suit (la frappe ne fait pas tout relire) : la ligne par son ID.
   const plain = htmlToRichText(html.slice(0, 50_000)).text
-  if (objectIndexTableCache) {
+  const cached = objectIndexTableCache
+  const cachedTable = cached?.tables.find((candidate) => candidate.fileId === fileId && candidate.tabName === tabName)
+  const cachedRow = cachedTable?.rows.find((row) => isSameObjectIndexRow(cachedTable, row, target))
+  const cachedColumn = cachedTable?.headers.flatMap((header, index) => header.trim() === target.header.trim() ? [index] : [])[target.occurrence ?? 0] ?? -1
+  if (cached && !fallbackObjectIndexTables.has(cached.tables) && cachedTable && cachedRow && cachedColumn >= 0) {
     objectIndexTableCache = {
-      expiresAt: objectIndexTableCache.expiresAt,
-      tables: objectIndexTableCache.tables.map((candidate) => candidate.fileId === fileId && candidate.tabName === tabName
-        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber
+      expiresAt: cached.expiresAt,
+      tables: cached.tables.map((candidate) => candidate === cachedTable
+        ? { ...candidate, rows: candidate.rows.map((row) => row === cachedRow
             ? {
-                ...candidateRow,
-                values: candidateRow.values.map((value, index) => index === column ? plain : value),
-                html: candidateRow.html.map((value, index) => index === column ? html : value),
+                ...row,
+                values: row.values.map((value, index) => index === cachedColumn ? plain : value),
+                html: row.html.map((value, index) => index === cachedColumn ? html : value),
               }
-            : candidateRow) }
+            : row) }
         : candidate),
     }
-  }
-  clearInventoryWorkbookCache()
+    clearInventoryWorkbookCache()
+  } else clearObjectIndexTableCache()
 }
 
-export async function updateObjectIndexRow(fileId: string, tabName: string, rowNumber: number, values: string[]) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
-  if (!row || !Number.isInteger(rowNumber) || rowNumber < 2 || values.length > table.headers.length) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  const normalizedValues = table.headers.map((_, index) => String(values[index] ?? ""))
-  await updateRange(fileId, sheetTabRange(tabName, `A${rowNumber}:${columnName(table.headers.length)}${rowNumber}`), [normalizedValues])
-  if (objectIndexTableCache) {
-    objectIndexTableCache = {
-      expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS,
-      tables: objectIndexTableCache.tables.map((candidate) => candidate.fileId === fileId && candidate.tabName === tabName
-        ? { ...candidate, rows: candidate.rows.map((candidateRow) => candidateRow.rowNumber === rowNumber ? { ...candidateRow, values: normalizedValues, html: normalizedValues } : candidateRow) }
-        : candidate),
-    }
-  }
-  clearInventoryWorkbookCache()
+/** De nouveaux identifiants dans la colonne ID de `count` lignes, à partir de la ligne `start` + 1. */
+function objectIndexIdCells(sheetId: number, start: number, count: number, idColumn: number) {
+  return { updateCells: {
+    range: { sheetId, startRowIndex: start, endRowIndex: start + count, startColumnIndex: idColumn, endColumnIndex: idColumn + 1 },
+    rows: Array.from({ length: count }, () => ({ values: [{ userEnteredValue: { stringValue: crypto.randomUUID() } }] })),
+    fields: "userEnteredValue",
+  } }
 }
 
 /**
- * Insère une ligne vide et la remplit, juste sous `afterRowNumber`. Contrairement à
- * `addObjectIndexRow` qui ajoute à la fin, la ligne apparaît là où on l’a demandée —
- * c’est ce qu’attend quelqu’un qui vient de Google Sheets.
+ * Des lignes vides au-dessus ou au-dessous d'une ligne retrouvée par son ID. Contrairement
+ * à `addObjectIndexRow` qui ajoute à la fin, elles apparaissent là où on les a demandées —
+ * c’est ce qu’attend quelqu’un qui vient de Google Sheets. Insérées et dotées de leur ID en
+ * une seule requête : rien ne peut se glisser entre les deux.
  */
-async function insertObjectIndexRowAfter(fileId: string, table: { sheetId: number; headers: string[] }, tabName: string, afterRowNumber: number, values: string[][]) {
-  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + values.length }, inheritFromBefore: afterRowNumber > 1 } }] }),
-  })
-  const target = afterRowNumber + 1
-  // Des lignes entièrement vides n'ont rien à écrire (et une plage vide serait refusée).
-  if (values.some((row) => row.some(Boolean))) await updateRange(fileId, sheetTabRange(tabName, `A${target}:${columnName(table.headers.length)}${target + values.length - 1}`), values)
+export async function insertObjectIndexRow(fileId: string, tabName: string, anchor: ObjectIndexRowRef, count = 1, before = false) {
+  const table = await validatedObjectIndexTable(fileId, tabName)
+  const layout = await freshObjectIndexLayout(table)
+  const row = layout.locate(anchor)
+  if (row < 2) throw new Error("OBJECT_INDEX_CHANGED")
+  const after = before ? row - 1 : row
+  const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
+  const requests: unknown[] = [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: after, endIndex: after + rows }, inheritFromBefore: after > 1 } }]
+  if (layout.idColumn >= 0) requests.push(objectIndexIdCells(table.sheetId, after, rows, layout.idColumn))
+  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
   clearObjectIndexTableCache()
 }
 
-/** Des lignes vides sous `afterRowNumber` ; chacune reçoit un identifiant s'il y a une colonne ID. */
-export async function insertObjectIndexRow(fileId: string, tabName: string, afterRowNumber: number, count = 1) {
-  const table = await validatedObjectIndexTable(fileId, tabName)
-  if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
-  const values = Array.from({ length: rows }, () => table.headers.map((header) => normalizedHeader(header) === "id" ? crypto.randomUUID() : ""))
-  await insertObjectIndexRowAfter(fileId, table, tabName, afterRowNumber, values)
-}
+/** Ce qu'envoie le formulaire « Ajouter un objet » : chaque valeur avec son en-tête, dans l'ordre des colonnes. */
+export type ObjectIndexValues = ReadonlyArray<readonly [string, string]> | Record<string, string>
 
-/** Ajoute une ligne à la fin, déjà remplie : c’est le formulaire « Ajouter un objet ». */
-export async function addObjectIndexRowWithValues(fileId: string, tabName: string, provided: string[]) {
+/**
+ * Ajoute une ligne à la fin, déjà remplie : c’est le formulaire « Ajouter un objet ». Chaque
+ * valeur va sous son en-tête, retrouvé dans la ligne 1 relue à l'instant (la n-ième valeur
+ * d'un en-tête répété, dans sa n-ième colonne) : l'ordre des colonnes a pu changer.
+ */
+export async function addObjectIndexRowWithValues(fileId: string, tabName: string, provided: ObjectIndexValues) {
   const table = await validatedObjectIndexTable(fileId, tabName)
-  const values = table.headers.map((header, index) => normalizedHeader(header) === "id" && !String(provided[index] ?? "").trim() ? crypto.randomUUID() : String(provided[index] ?? ""))
+  const layout = await freshObjectIndexLayout(table)
+  const width = Math.max(1, layout.headers.length, table.headers.length)
+  const values = Array.from({ length: width }, () => "")
+  const seen = new Map<string, number>()
+  for (const [header, raw] of Array.isArray(provided) ? provided : Object.entries(provided)) {
+    const value = String(raw ?? "")
+    const occurrence = seen.get(header.trim()) ?? 0
+    seen.set(header.trim(), occurrence + 1)
+    const column = freshHeaderColumn(table, layout.headers, header, occurrence)
+    // Une colonne renommée ou supprimée entre-temps : une valeur saisie n'est jamais perdue en silence.
+    if (column < 0) {
+      if (value.trim()) throw new Error("OBJECT_INDEX_CHANGED")
+      continue
+    }
+    values[column] = value
+  }
+  if (layout.idColumn >= 0 && !values[layout.idColumn]?.trim()) values[layout.idColumn] = crypto.randomUUID()
   // Le formulaire envoie du texte enrichi : la ligne est écrite en texte, puis chaque
   // cellule mise en forme reçoit sa mise en forme (et non ses balises).
   const formatted = values.flatMap((value, column) => /<[a-z]/i.test(value) ? [{ column, html: value.slice(0, 50_000) }] : [])
-  const appended = await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(table.headers.length)}`), [values.map((value) => /<[a-z]/i.test(value) ? htmlToRichText(value).text : value)])
+  const appended = await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(width)}`), [values.map((value) => /<[a-z]/i.test(value) ? htmlToRichText(value).text : value)])
   const rowNumber = Number.parseInt(appended.updatedRange?.match(/![A-Z]+(\d+)/)?.[1] || "", 10)
   if (Number.isInteger(rowNumber) && rowNumber > 1) {
     for (const cell of formatted) await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column: cell.column, html: cell.html })
@@ -1628,19 +1882,40 @@ export async function addObjectIndexRowWithValues(fileId: string, tabName: strin
   clearObjectIndexTableCache()
 }
 
-export async function duplicateObjectIndexRow(fileId: string, tabName: string, rowNumber: number) {
+/**
+ * Copie des lignes retrouvées par leur ID, chacune juste sous l’originale, comme dans
+ * Google Sheets. Du bas vers le haut et en une requête : une copie insérée ne décale
+ * aucune ligne encore à copier. Sheets recopie lui-même la ligne (valeurs, formules, mise
+ * en forme), rien ne vient d'une lecture gardée en mémoire ; la copie reçoit son propre ID.
+ */
+export async function duplicateObjectIndexRows(fileId: string, tabName: string, refs: ObjectIndexRowRef[]) {
   const table = await validatedObjectIndexTable(fileId, tabName)
-  const row = table.rows.find((candidate) => candidate.rowNumber === rowNumber)
-  if (!row) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  const values = table.headers.map((header, index) => normalizedHeader(header) === "id" ? crypto.randomUUID() : row.values[index] ?? "")
-  // La copie apparaît juste sous l’originale, comme dans Google Sheets.
-  await insertObjectIndexRowAfter(fileId, table, tabName, rowNumber, [values])
+  const layout = await freshObjectIndexLayout(table)
+  const rows = refs.map((ref) => layout.locate(ref))
+  if (!rows.length || rows.some((row) => row < 2)) throw new Error("OBJECT_INDEX_CHANGED")
+  const requests = [...new Set(rows)].sort((left, right) => right - left).flatMap((row) => [
+    { insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: row, endIndex: row + 1 }, inheritFromBefore: true } },
+    { copyPaste: { source: { sheetId: table.sheetId, startRowIndex: row - 1, endRowIndex: row }, destination: { sheetId: table.sheetId, startRowIndex: row, endRowIndex: row + 1 }, pasteType: "PASTE_NORMAL" } },
+    ...(layout.idColumn >= 0 ? [objectIndexIdCells(table.sheetId, row, 1, layout.idColumn)] : []),
+  ])
+  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+  clearObjectIndexTableCache()
 }
 
-export async function deleteObjectIndexRow(fileId: string, tabName: string, rowNumber: number) {
+/**
+ * Supprime des lignes retrouvées par leur ID dans la feuille relue à l'instant (jamais
+ * d'après un numéro de ligne envoyé par la page). Si l'une n'y est plus, aucune ne part.
+ */
+export async function deleteObjectIndexRows(fileId: string, tabName: string, refs: ObjectIndexRowRef[]) {
   const table = await validatedObjectIndexTable(fileId, tabName)
-  if (!table.rows.some((candidate) => candidate.rowNumber === rowNumber) || !Number.isInteger(rowNumber) || rowNumber < 2) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  await deleteGoogleSheetRow(fileId, tabName, rowNumber, table.sheetId)
+  const layout = await freshObjectIndexLayout(table)
+  const rows = refs.map((ref) => layout.locate(ref))
+  if (!rows.length || rows.some((row) => row < 2)) throw new Error("OBJECT_INDEX_CHANGED")
+  // Toutes en une requête, du bas vers le haut : retirer une ligne ne décale pas celles du dessus.
+  await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: [...new Set(rows)].sort((left, right) => right - left).map((row) => ({ deleteDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: row - 1, endIndex: row } } })) }),
+  })
   clearObjectIndexTableCache()
 }
 
@@ -1735,41 +2010,33 @@ function suggestedObjectDescription(name: string, type: string, subtype: string,
   return `Assemblage de ${metal} et de ${wood}, teinté de ${color}. Surface ${surface}. ${finishSentence}`
 }
 
+/**
+ * Donne une description à chaque objet qui n'en a pas (ou qui a encore une ancienne
+ * description générée) et une colonne « Icône » aux tableaux qui n'en ont pas. Les en-têtes
+ * sont ajoutés d'après la ligne 1 relue, les cases ne sont écrites que si elles sont
+ * toujours libres (`fillObjectIndexCells`).
+ */
 export async function enrichObjectIndexTables() {
-  const tables = await listObjectIndexTables()
+  const tables = await objectIndexTablesForWrite()
   let descriptionsAdded = 0
-  let iconsAdded = 0
   for (const table of tables) {
-    const headers = [...table.headers]
-    const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-    let descriptionColumn = headers.findIndex((header) => normalizedHeader(header) === "description")
-    if (descriptionColumn < 0) {
-      descriptionColumn = headers.length
-      headers.push("Description")
-      updates.push({ range: sheetTabRange(table.tabName, `${columnName(descriptionColumn + 1)}1`), values: [["Description"]] })
-    }
-    let iconColumn = headers.findIndex((header) => ["icone", "icon"].includes(normalizedHeader(header)))
-    if (iconColumn < 0) {
-      iconColumn = headers.length
-      headers.push("Icône")
-      updates.push({ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}1`), values: [["Icône"]] })
-    }
-    for (const row of table.rows) {
-      const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
-      if (!name) continue
+    const descriptionColumn = table.headers.findIndex((header) => normalizedHeader(header) === "description")
+    const descriptionHeader = descriptionColumn >= 0 ? table.headers[descriptionColumn] : await objectIndexHeaderFor(table, "Description", ["Description"])
+    if (objectIndexIconColumn(table) < 0) await objectIndexHeaderFor(table, "Icône", ["Icône", "Icone", "Icon"])
+    if (!descriptionHeader) continue
+    const cells = table.rows.flatMap((row) => {
+      const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
+      const currentDescription = descriptionColumn >= 0 ? (row.values[descriptionColumn] || "").trim() : ""
+      if (!name || (currentDescription && !oldGeneratedDescriptions.has(currentDescription))) return []
       const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
       const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
       const effect = objectIndexCell(table, row, ["Effet", "Effets", "Propriété", "Proprieté", "Propriétés", "Proprietes"])
-      const currentDescription = (row.values[descriptionColumn] || "").trim()
-      if (!currentDescription || oldGeneratedDescriptions.has(currentDescription)) {
-        updates.push({ range: sheetTabRange(table.tabName, `${columnName(descriptionColumn + 1)}${row.rowNumber}`), values: [[suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}`)]] })
-        descriptionsAdded += 1
-      }
-    }
-    await updateRanges(table.fileId, updates)
+      return [{ row, value: suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}`) }]
+    })
+    descriptionsAdded += await fillObjectIndexCells(table, descriptionHeader, cells, (current) => !current.trim() || oldGeneratedDescriptions.has(current.trim()))
   }
   clearObjectIndexTableCache()
-  iconsAdded = (await syncObjectIndexIcons()).iconsUpdated
+  const iconsAdded = (await syncObjectIndexIcons()).iconsUpdated
   return { descriptionsAdded, iconsAdded }
 }
 
@@ -1795,21 +2062,21 @@ function objectIndexRowsNeedingIcon(table: ObjectIndexTable) {
 /**
  * Remplit la colonne « Icône » des index avec les images du dossier « icone objet »
  * du Drive (envoyées au premier passage). Seules les cases vides ou tenant une
- * ancienne icône générée changent : une icône choisie à la main n'est jamais touchée.
+ * ancienne icône générée changent : une icône choisie à la main n'est jamais touchée,
+ * même posée entre-temps (chaque case est relue juste avant, ligne retrouvée par son ID).
  */
 export async function syncObjectIndexIcons() {
-  const tables = await listObjectIndexTables()
+  const tables = await objectIndexTablesForWrite()
   const pending = tables.map((table) => ({ table, rows: objectIndexRowsNeedingIcon(table) })).filter(({ rows }) => rows.length)
   if (!pending.length) return { iconsUpdated: 0 }
   const fileIds = await ensureObjectIconsOnDrive(pending.flatMap(({ rows }) => rows.map(({ key }) => key)))
   let iconsUpdated = 0
   for (const { table, rows } of pending) {
-    const updates = rows.flatMap(({ row, iconColumn, key }) => {
+    const cells = rows.flatMap(({ row, key }) => {
       const fileId = fileIds.get(key)
-      return fileId ? [{ range: sheetTabRange(table.tabName, `${columnName(iconColumn + 1)}${row.rowNumber}`), values: [[driveImageFormula(fileId)]] }] : []
+      return fileId ? [{ row, value: driveImageFormula(fileId) }] : []
     })
-    await updateRanges(table.fileId, updates)
-    iconsUpdated += updates.length
+    iconsUpdated += await fillObjectIndexCells(table, table.headers[objectIndexIconColumn(table)], cells, isGeneratedObjectIcon)
   }
   clearObjectIndexTableCache()
   return { iconsUpdated }
@@ -1827,13 +2094,16 @@ function scheduleObjectIndexIconSync(tables: ObjectIndexTable[]) {
   runInBackground(syncObjectIndexIcons().finally(() => { objectIconSyncRunning = false }), "OBJECT_ICON_SYNC_FAILED")
 }
 
-/** Pose une image importée à la main dans la case « Icône » d'une ligne. */
-export async function setObjectIndexIcon(fileId: string, tabName: string, rowNumber: number, driveFileId: string) {
+/** Pose une image importée à la main dans la case « Icône » d'une ligne retrouvée par son ID. */
+export async function setObjectIndexIcon(fileId: string, tabName: string, target: ObjectIndexRowRef, driveFileId: string) {
   const table = await validatedObjectIndexTable(fileId, tabName)
   const iconColumn = objectIndexIconColumn(table)
   if (iconColumn < 0) throw new Error("OBJECT_INDEX_ICON_COLUMN_MISSING")
-  if (!table.rows.some((row) => row.rowNumber === rowNumber)) throw new Error("OBJECT_INDEX_ROW_NOT_FOUND")
-  await updateRanges(fileId, [{ range: sheetTabRange(tabName, `${columnName(iconColumn + 1)}${rowNumber}`), values: [[driveImageFormula(driveFileId)]] }])
+  const layout = await freshObjectIndexLayout(table, [{ header: table.headers[iconColumn] }])
+  const rowNumber = layout.locate(target)
+  const column = layout.wanted[0]
+  if (rowNumber < 2 || column < 0) throw new Error("OBJECT_INDEX_CHANGED")
+  await updateRanges(fileId, [{ range: sheetTabRange(tabName, `${columnName(column + 1)}${rowNumber}`), values: [[driveImageFormula(driveFileId)]] }])
   clearObjectIndexTableCache()
 }
 
@@ -1862,30 +2132,25 @@ function suggestedObjectStackLimit(name: string, type: string, subtype: string) 
   return 1
 }
 
+/** Un « Nombre max » pour chaque objet qui n'en a pas : écrit seulement dans une case toujours vide. */
 export async function ensureObjectIndexStackLimits() {
-  const tables = await listObjectIndexTables()
+  const tables = await objectIndexTablesForWrite()
+  const aliases = ["Nombre max", "Quantité max", "Maximum", "Max"]
   let stackLimitsAdded = 0
   let columnsAdded = 0
   for (const table of tables) {
-    const headers = [...table.headers]
-    const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-    let maximumColumn = headers.findIndex((header) => ["nombre max", "quantite max", "maximum", "max"].includes(normalizedHeader(header)))
-    if (maximumColumn < 0) {
-      maximumColumn = headers.length
-      headers.push("Nombre max")
-      updates.push({ range: sheetTabRange(table.tabName, `${columnName(maximumColumn + 1)}1`), values: [["Nombre max"]] })
-      columnsAdded += 1
-    }
-    for (const row of table.rows) {
-      if ((row.values[maximumColumn] || "").trim()) continue
-      const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
-      if (!name) continue
+    const maximumColumn = objectIndexColumn(table, aliases)
+    const header = maximumColumn >= 0 ? table.headers[maximumColumn] : await objectIndexHeaderFor(table, "Nombre max", aliases)
+    if (!header) continue
+    if (maximumColumn < 0 && header === "Nombre max") columnsAdded += 1
+    const cells = table.rows.flatMap((row) => {
+      const name = objectIndexCell(table, row, OBJECT_INDEX_NAME_ALIASES).trim()
+      if (!name || (maximumColumn >= 0 && (row.values[maximumColumn] || "").trim())) return []
       const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
       const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
-      updates.push({ range: sheetTabRange(table.tabName, `${columnName(maximumColumn + 1)}${row.rowNumber}`), values: [[suggestedObjectStackLimit(name, type, subtype)]] })
-      stackLimitsAdded += 1
-    }
-    await updateRanges(table.fileId, updates)
+      return [{ row, value: suggestedObjectStackLimit(name, type, subtype) }]
+    })
+    stackLimitsAdded += await fillObjectIndexCells(table, header, cells, (current) => !current.trim())
   }
   clearObjectIndexTableCache()
   return { stackLimitsAdded, columnsAdded }

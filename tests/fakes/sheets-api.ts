@@ -135,6 +135,11 @@ function handleSheets(path: string, init: RequestInit) {
         const { sheetId, startIndex, endIndex } = request.deleteDimension.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
         tab.grid.splice(startIndex, endIndex - startIndex)
+      } else if (request.deleteDimension?.range?.dimension === "COLUMNS") {
+        const { sheetId, startIndex, endIndex } = request.deleteDimension.range
+        const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
+        for (const row of tab.grid) row.splice(startIndex, endIndex - startIndex)
+        tab.columnCount -= endIndex - startIndex
       } else if (request.copyPaste) {
         const { source, destination } = request.copyPaste
         const tab = file.tabs.find((candidate) => candidate.sheetId === source.sheetId)!

@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { listObjectIndexTables, setObjectIndexIcon } from "@/lib/google-sheets"
 import { forgetObjectIconFolderFiles, uploadObjectIcon } from "@/lib/object-icon-drive"
+import { OBJECT_INDEX_CHANGED_MESSAGE, parseObjectIndexRowRef } from "@/lib/object-index-refs"
 import { authorizedAccount } from "@/lib/server-auth"
 
 const MAX_ICON_BYTES = 5 * 1024 * 1024
@@ -14,9 +15,10 @@ export async function POST(request: Request) {
     const form = await request.formData()
     const fileId = String(form.get("fileId") || "")
     const tabName = String(form.get("tabName") || "")
-    const rowNumber = Number(form.get("rowNumber"))
+    // La ligne par son ID (son numéro n'est qu'un indice), retrouvée dans la feuille au moment d'écrire.
+    const row = parseObjectIndexRowRef({ id: String(form.get("id") ?? ""), rowNumber: Number(form.get("rowNumber")), name: String(form.get("name") ?? "") })
     const file = form.get("file")
-    if (!fileId || !tabName || !Number.isInteger(rowNumber) || rowNumber < 2 || !(file instanceof File)) {
+    if (!fileId || !tabName || !row || !(file instanceof File)) {
       return NextResponse.json({ error: "Import incomplet." }, { status: 400 })
     }
     if (!IMAGE_TYPES.has(file.type)) return NextResponse.json({ error: "Choisis une image (PNG, JPEG, WebP, GIF, SVG ou AVIF)." }, { status: 400 })
@@ -24,9 +26,10 @@ export async function POST(request: Request) {
     const name = (file.name || "icone").replace(/[\\/:*?"<>|]+/g, " ").trim().slice(0, 120) || "icone"
     const driveFileId = await uploadObjectIcon(name, file.type, await file.arrayBuffer())
     forgetObjectIconFolderFiles()
-    await setObjectIndexIcon(fileId, tabName, rowNumber, driveFileId)
+    await setObjectIndexIcon(fileId, tabName, row, driveFileId)
     return NextResponse.json({ ok: true, tables: await listObjectIndexTables() })
-  } catch {
+  } catch (error) {
+    if (error instanceof Error && error.message === "OBJECT_INDEX_CHANGED") return NextResponse.json({ error: OBJECT_INDEX_CHANGED_MESSAGE }, { status: 409 })
     return NextResponse.json({ error: "L’icône n’a pas pu être importée dans le Drive." }, { status: 400 })
   }
 }
