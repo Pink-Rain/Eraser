@@ -6943,14 +6943,19 @@ async function applySharedTrash() {
     try { parsed = JSON.parse(record.value) as typeof parsed } catch { continue }
     const at = typeof parsed.at === "string" ? parsed.at : record.updatedAt
     if (!id || (kind !== "character" && kind !== "campaign")) continue
+    // La feuille fait foi : une ligne « supprimée définitivement » qui y est encore (ou y est
+    // revenue, par l'historique des versions de Google Sheets) n'est pas effacée de l'index
+    // local ; elle reste à la corbeille, d'où un administrateur la restaure ou la supprime.
+    const stillInSheet = sheetPresence[kind === "character" ? "characters" : "campaigns"]?.ids.has(id) ?? false
+    const state = parsed.state === "purged" && stillInSheet ? "deleted" : parsed.state
     if (kind === "character") {
-      if (parsed.state === "deleted") await db.update(characterIndex).set({ deletedAt: at }).where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt)))
-      else if (parsed.state === "restored") await db.update(characterIndex).set({ deletedAt: null }).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
-      else if (parsed.state === "purged") await db.delete(characterIndex).where(eq(characterIndex.id, id))
+      if (state === "deleted") await db.update(characterIndex).set({ deletedAt: at }).where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt)))
+      else if (state === "restored") await db.update(characterIndex).set({ deletedAt: null }).where(and(eq(characterIndex.id, id), isNotNull(characterIndex.deletedAt)))
+      else if (state === "purged") await db.delete(characterIndex).where(eq(characterIndex.id, id))
     } else {
-      if (parsed.state === "deleted") await db.update(campaignIndex).set({ deletedAt: at }).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt)))
-      else if (parsed.state === "restored") await db.update(campaignIndex).set({ deletedAt: null }).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
-      else if (parsed.state === "purged") await db.delete(campaignIndex).where(eq(campaignIndex.id, id))
+      if (state === "deleted") await db.update(campaignIndex).set({ deletedAt: at }).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt)))
+      else if (state === "restored") await db.update(campaignIndex).set({ deletedAt: null }).where(and(eq(campaignIndex.id, id), isNotNull(campaignIndex.deletedAt)))
+      else if (state === "purged") await db.delete(campaignIndex).where(eq(campaignIndex.id, id))
     }
   }
 }
