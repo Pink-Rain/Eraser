@@ -37,6 +37,17 @@ test("les mots du menu viennent des noms d'éléments", () => {
   assert.equal(refs.entryLabelFromItemLabel("une ligne"), "");
 });
 
+test("tout index se cite par le mot de ses lignes et par son propre nom", () => {
+  const vocabulary = refs.indexEntries({ key: "vocabulary", title: "Vocabulaire", itemLabel: "un mot", tabs: [{ name: "Vocabulaire", itemLabel: "un mot" }] });
+  assert.deepEqual(vocabulary.map((entry) => entry.label), ["Mot", "Vocabulaire"]);
+  const catalog = { indexes: [{ key: "vocabulary", title: "Vocabulaire", tabs: [], rows: [] }], entries: vocabulary };
+  assert.equal(refs.findEntry(catalog, "vocabulaire")?.index, "vocabulary");
+  assert.equal(refs.findEntry(catalog, "vocab")?.index, "vocabulary");
+  // Un index créé dans « Nouvel index », sans rien déclarer : son nom et ceux de ses onglets.
+  const custom = refs.indexEntries({ key: "perso-bestiaire", title: "Bestiaire", tabs: [{ name: "Dragons" }, { name: "Gobelins", itemLabel: "un gobelin" }] });
+  assert.deepEqual(custom.map((entry) => [entry.label, entry.tab ?? ""]), [["Bestiaire", ""], ["Dragons", "Dragons"], ["Gobelin", "Gobelins"], ["Gobelins", "Gobelins"]]);
+});
+
 test("ce qui commence comme la frappe passe devant", () => {
   const ranked = refs.rankByQuery(["Effets", "États", "État", "Lieu"], (value) => value, "ét");
   assert.deepEqual(ranked, ["États", "État", "Effets"]);

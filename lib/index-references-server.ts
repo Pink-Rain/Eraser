@@ -10,7 +10,7 @@ import { foldName, isIdHeader, normalizeSpec, objectColumnSpec } from "@/lib/ind
 import { citedCell, columnAt, objectNameHeaders, rowDetails, type SourceRow, type SourceTable } from "@/lib/index-references-cells"
 import { entityReferenceKeys, isEntityReferenceKey, loadEntitySource } from "@/lib/index-references-entities"
 import {
-  entryLabelFromItemLabel,
+  indexEntries,
   OBJECT_REFERENCE_INDEX,
   referenceKey,
   type ReferenceCatalog,
@@ -138,12 +138,8 @@ async function loadSource(key: string, options: { cited?: readonly string[] } = 
 
 /** Les mots du menu : l'index, chacun de ses onglets s'il en a plusieurs, les types de modificateurs. */
 function entriesOf(source: Source, rows: ReferenceIndex["rows"]): ReferenceEntry[] {
-  const entries: ReferenceEntry[] = []
-  const base = entryLabelFromItemLabel(source.itemLabel) || entryLabelFromItemLabel(source.tabs.length === 1 ? source.tabs[0]?.itemLabel : "") || source.title
-  entries.push({ index: source.key, label: base, hint: source.title })
-  if (source.tabs.length > 1 && !source.entity) {
-    for (const tab of source.tabs) entries.push({ index: source.key, label: entryLabelFromItemLabel(tab.itemLabel) || tab.name, hint: `${source.title} · ${tab.name}`, tab: tab.name })
-  }
+  // Le mot de ses lignes, le nom de l'index, et ceux de ses onglets : le même pour tout index du moteur.
+  const entries: ReferenceEntry[] = indexEntries(source)
   // « Attribut », « Matériau », « Rune » : les lignes d'« Armes - Modificateurs » de ce type.
   if (source.key === "weapon-modifiers") {
     const types = new Map<string, string>()

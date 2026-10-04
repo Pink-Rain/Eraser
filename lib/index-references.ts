@@ -91,6 +91,32 @@ export function entryLabelFromItemLabel(itemLabel: string | undefined) {
   return bare.charAt(0).toLocaleUpperCase("fr") + bare.slice(1)
 }
 
+/**
+ * Les mots du menu « { » d'un index : celui de ses lignes (« un mot » → « Mot »), puis le nom
+ * de l'index lui-même (« Vocabulaire »), et pour chaque onglet son mot et son nom. Valable pour
+ * tout index du moteur, prévu par Eraser ou créé dans « Nouvel index » : rien à déclarer.
+ */
+export function indexEntries(source: { key: string; title: string; itemLabel?: string; tabs: Array<{ name: string; itemLabel?: string }>; entity?: boolean }): ReferenceEntry[] {
+  const entries: ReferenceEntry[] = []
+  const seen = new Set<string>()
+  const add = (entry: ReferenceEntry) => {
+    const key = fold(entry.label)
+    if (!key || seen.has(key)) return
+    seen.add(key)
+    entries.push(entry)
+  }
+  const base = entryLabelFromItemLabel(source.itemLabel) || entryLabelFromItemLabel(source.tabs.length === 1 ? source.tabs[0]?.itemLabel : "") || source.title
+  add({ index: source.key, label: base, hint: source.title })
+  add({ index: source.key, label: source.title, hint: source.title })
+  if (source.tabs.length > 1 && !source.entity) {
+    for (const tab of source.tabs) {
+      add({ index: source.key, label: entryLabelFromItemLabel(tab.itemLabel) || tab.name, hint: `${source.title} · ${tab.name}`, tab: tab.name })
+      add({ index: source.key, label: tab.name, hint: `${source.title} · ${tab.name}`, tab: tab.name })
+    }
+  }
+  return entries
+}
+
 export function entryRows(catalog: ReferenceCatalog, entry: ReferenceEntry) {
   const index = catalog.indexes.find((candidate) => candidate.key === entry.index)
   if (!index) return []
