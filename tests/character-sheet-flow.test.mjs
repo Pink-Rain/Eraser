@@ -156,6 +156,42 @@ test("Colonne insérée ailleurs avant les colonnes de l'index : refus, ou écri
   assert.equal(record(tab.grid, 1)["Mes notes"], undefined);
 });
 
+test("Copie séparée dans une campagne : formules gardées, et c'est bien ce personnage", async () => {
+  const characters = await linkCharacters([]);
+  const camps = fresh("camps");
+  google.addSpreadsheet(camps, [{ title: "Campagnes", grid: [["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"]] }]);
+  await link("campaigns", camps, "Campagnes");
+  const links = fresh("links");
+  google.addSpreadsheet(links, [{ title: "Personnages par campagne", grid: [["ID campagne", "ID personnage"]] }]);
+  await link("campaign_characters", links, "Personnages par campagne");
+  const campaignId = fresh("CAMP");
+  await getDb().insert(schema.campaignIndex).values({ id: campaignId, mjUid: "mj-1", name: "Les Brumes", description: "", bannerUrl: "", accentColor: "#334455", updatedAt: new Date().toISOString() });
+  // Comme Google : une lecture de valeurs rend le résultat d'une formule, pas la formule.
+  google.world.formulaResults = () => "0";
+  const aldor = await sheets.createCharacterForUser("uid-1", ["Aldor", "Elfe"]);
+  const brin = await sheets.createCharacterForUser("uid-1", ["Brin", "Humain"]);
+  await sheets.syncExistingIdentityIndexes();
+  for (const id of [aldor.id, brin.id]) await sheets.getCharacterSheet(null, id);
+  // La ligne d'Aldor est supprimée ailleurs : Brin remonte d'une ligne.
+  google.grid(characters, "Personnages").splice(1, 1);
+  const source = copyOf(google.grid(characters, "Personnages"))[1];
+  const { member } = await sheets.addCharacterToCampaign(null, campaignId, brin.id, true);
+  const grid = google.grid(characters, "Personnages");
+  assert.equal(grid.length, 3);
+  const copy = record(grid, 2);
+  assert.equal(copy["ID"], member.id);
+  assert.notEqual(member.id, brin.id);
+  assert.equal(copy["Nom personnage"], "Brin");
+  assert.equal(copy["Joueur"], "uid-1");
+  assert.equal(copy["Peuple"], "Humain");
+  // Chaque formule de la source est encore une formule dans la copie (les totaux ne sont pas figés).
+  const formulas = source.flatMap((cell, column) => String(cell).startsWith("=") ? [grid[0][column]] : []);
+  assert.ok(formulas.includes("Rapidité") && formulas.includes("Parade — Total de stats"), formulas.join(", "));
+  assert.deepEqual(formulas.filter((header) => !String(copy[header] ?? "").startsWith("=")), []);
+  assert.deepEqual(grid[1], source);
+  assert.deepEqual((await getDb().select().from(schema.characterIndex)).map((row) => row.id).sort(), [aldor.id, brin.id, member.id].sort());
+});
+
 test("Case JSON modifiée ailleurs entre-temps : refusée, rien n'est écrit", async () => {
   const id = fresh("PERSO");
   const header = "Sorts de classe choisis JSON";

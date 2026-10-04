@@ -5311,14 +5311,7 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     const sheet = await ensureJdrSheet("characters")
     if (!sheet) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
     await ensureCharacterSheetSchema(sheet.spreadsheetId, sheet.tabName)
-    const { map } = await characterColumns(sheet.spreadsheetId, sheet.tabName)
-    const sourceRowNumber = await findSheetRowById(sheet.spreadsheetId, sheet.tabName, characterId)
-    if (!sourceRowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const [sourceRow] = await readRange(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A${sourceRowNumber}:${columnName(map.width)}${sourceRowNumber}`))
-    if (!sourceRow) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
-    const copiedRow: SheetCell[] = Array.from({ length: map.width }, (_, index) => sourceRow[index] ?? "")
-    copiedRow[map.columns.at("ID")] = targetId
-    await appendRows(sheet.spreadsheetId, sheetTabRange(sheet.tabName, `A:${columnName(map.width)}`), [copiedRow])
+    await copyCharacterRow(sheet, characterId, targetId)
     await getDb().insert(characterIndex).values({ ...sourceCharacter, id: targetId, updatedAt: new Date().toISOString(), deletedAt: null })
   }
   // On tente d'abord la feuille partagée, mais son échec ne doit plus bloquer
@@ -5604,6 +5597,51 @@ async function repairCharacterFormulas(source: { spreadsheetId: string; tabName:
   if (!cells.size) return current
   await updateRanges(source.spreadsheetId, cellRuns(source.tabName, current.rowNumber, cells))
   return await rereadCharacterRow(source, current, id) ?? current
+}
+
+/**
+ * Une copie séparée d'une fiche, faite par Google comme un copier-coller dans Sheets :
+ * valeurs, formules recalées sur la nouvelle ligne et mises en forme. Relire la ligne puis
+ * la réécrire figeait les totaux (valeurs calculées à la place des formules) et pouvait
+ * copier l'ancien occupant de la ligne. La copie arrive sur une ligne ajoutée à la suite,
+ * jamais par-dessus une autre ; la source est retrouvée par son ID, la copie relue.
+ */
+async function copyCharacterRow(source: { spreadsheetId: string; tabName: string }, sourceId: string, targetId: string) {
+  const original = await readCharacterRow(source, sourceId)
+  if (!original) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  const { columns } = original.map
+  const sheetId = (await spreadsheetTabs(source.spreadsheetId)).find((tab) => tab.title === source.tabName)?.sheetId
+  if (sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
+  // La nouvelle ligne porte déjà son ID, son joueur et son nom : un échec plus loin laisse une fiche nommée, jamais une ligne anonyme.
+  await appendRows(source.spreadsheetId, sheetTabRange(source.tabName, `A:${columnName(original.map.width)}`), [columns.row({ "ID": targetId, "Joueur": columns.get(original.row, "Joueur"), "Nom personnage": textCell(columns.get(original.row, "Nom personnage")) })])
+  // Les deux lignes retrouvées dans une même lecture de la colonne ID, juste avant de copier.
+  const idColumn = columns.at("ID")
+  const letter = columnName(idColumn + 1)
+  const [ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, `${letter}:${letter}`)])
+  const rowOf = (wanted: string) => {
+    const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
+    return ids && offset >= 0 ? ids.startRow + offset : 0
+  }
+  const from = rowOf(sourceId)
+  const to = rowOf(targetId)
+  if (!from || !to) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
+  // Toutes les colonnes sauf celle de l'ID, qui garde le nouveau.
+  const spans = [[0, idColumn], [idColumn + 1, original.map.width]].filter(([start, end]) => end > start)
+  await googleSheetsJson(`spreadsheets/${source.spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: spans.map(([start, end]) => ({ copyPaste: {
+      source: { sheetId, startRowIndex: from - 1, endRowIndex: from, startColumnIndex: start, endColumnIndex: end },
+      destination: { sheetId, startRowIndex: to - 1, endRowIndex: to, startColumnIndex: start, endColumnIndex: end },
+      pasteType: "PASTE_NORMAL",
+    } })) }),
+  })
+  clearSpreadsheetReadCache(source.spreadsheetId)
+  const copy = await readCharacterRow(source, targetId)
+  // La copie relue doit être ce personnage : même joueur, même nom.
+  if (!copy || ["Joueur", "Nom personnage"].some((name) => copy.map.columns.get(copy.row, name) !== columns.get(original.row, name))) {
+    console.error("CHARACTER_COPY_CHECK_FAILED", sourceId, targetId)
+    throw new Error("CHARACTER_COPY_CHECK_FAILED")
+  }
 }
 
 /**
