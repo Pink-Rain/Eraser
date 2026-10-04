@@ -15,6 +15,7 @@ import {
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
+import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -68,20 +69,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await createCharacterInventoryItem(ownerId, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
     } else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) {
-      inventory = await setCharacterInventoryItemQuantity(ownerId, body.slotId, body.quantity)
+      inventory = await setCharacterInventoryItemQuantity(ownerId, body.slotId, body.quantity, "character", inventorySlotExpectation(body))
     } else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await updateCharacterInventoryItem(ownerId, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
     } else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") {
-      inventory = await moveCharacterInventoryItem(ownerId, body.slotId, body.containerId)
+      inventory = await moveCharacterInventoryItem(ownerId, body.slotId, body.containerId, inventorySlotExpectation(body))
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
       const targets = await campaignTransferTargets(authorization, id)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      const slotId = body.slotId, targetId = body.targetId
-      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(ownerId, slotId, targetId, "character", onMoved))
+      const slotId = body.slotId, targetId = body.targetId, expected = inventorySlotExpectation(body)
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(ownerId, slotId, targetId, "character", onMoved, expected))
     } else throw new Error("INVALID_INVENTORY_ACTION")
     return NextResponse.json({ inventory: { ...inventory, items: [] } })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
+    if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
     const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible dans cet inventaire."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Le destinataire n’a pas de contenant compatible disponible."
         : code === "INVALID_INVENTORY_CONTAINER" ? "Donne un nom et une limite comprise entre 1 et 10 000."
