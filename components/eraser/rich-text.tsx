@@ -1,6 +1,6 @@
 "use client"
 
-import { memo, useCallback, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react"
+import { createContext, memo, useCallback, useContext, useEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent, type MutableRefObject, type ReactNode } from "react"
 import { Bold, Braces, Check, Eraser, ExternalLink, FileText, Heading2, Italic, Link2, List, ListChecks, ListOrdered, LoaderCircle, Minus, Palette, Search, Strikethrough, Underline, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -92,6 +92,13 @@ export type RichTextCommand =
 export const richTextRendering = "[&_a]:underline [&_h2]:font-display [&_h2]:text-xl [&_h2]:font-semibold [&_h3]:font-display [&_h3]:text-lg [&_h3]:font-semibold [&_hr]:my-3 [&_hr]:border-border [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc [&_input]:mr-2 [&_input]:accent-primary"
 
 export type RichTextTarget = { node: HTMLElement; flush: () => void }
+
+/**
+ * Une barre de mise en forme commune à plusieurs champs (la fiche d'une ligne, comme le
+ * tableau) : les champs enrichis posés dessous n'ont plus la leur, ils lui signalent
+ * seulement qu'ils prennent le curseur.
+ */
+export const RichTextToolbarHost = createContext<{ activate: (target: RichTextTarget) => void } | null>(null)
 
 function selectionInside(node: HTMLElement) {
   const selection = window.getSelection()
@@ -465,7 +472,9 @@ export function RichTextField({ value, onCommit, plain = false, disabled = false
   const [active, setActive] = useState(false)
   // La zone signale une seule fois qu'elle est prête : la barre s'active alors.
   const [ready, setReady] = useState(false)
-  const showToolbar = !disabled && (toolbar === "always" || active)
+  // Sous une barre commune (la fiche d'une ligne), le champ n'a pas la sienne.
+  const host = useContext(RichTextToolbarHost)
+  const showToolbar = !disabled && !(host && toolbar !== "always") && (toolbar === "always" || active)
 
   return <div
     // Graisse normale : posé sous un titre en demi-gras, le texte en héritait, et le
@@ -491,7 +500,7 @@ export function RichTextField({ value, onCommit, plain = false, disabled = false
       disabled={disabled}
       placeholder={placeholder}
       onCommit={onCommit}
-      onActivate={(target) => { targetRef.current = target; setActive(true); setReady(true) }}
+      onActivate={(target) => { targetRef.current = target; setActive(true); setReady(true); host?.activate(target) }}
       ariaLabel={ariaLabel || label}
       className={`${minHeight} px-3 py-2 text-sm leading-6`}
     />

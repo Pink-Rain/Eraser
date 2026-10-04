@@ -1,19 +1,20 @@
-# Eraser 0.1.1-alpha.141 — Colonnes d'objets alignées : tout continue de les retrouver
+# Eraser 0.1.1-alpha.142 — Fiche d'une ligne : une seule barre de mise en forme, noms et styles bien affichés
 
-Cette version arrive par la mise à jour sans réinstallation. Elle complète la 140.
+Cette version arrive par la mise à jour sans réinstallation.
 
-## Index des objets, après « Aligner les autres onglets »
+## La fiche d'une ligne (moteur des index)
 
-- Vérifié : les magasins, les fouilles, les inventaires, la table, les survols « { » et le
-  pont Roll20 lisent chaque colonne d'objets par son nom, sous toutes ses orthographes
-  (« Prix », « Coût » ou « Cout » ; « Effets » ou « Effet » ; « Rareté principale » ou
-  « Rareté principal » ; « Sous-type » ou « Sous-Type »). Les renommages et le nouvel ordre
-  des colonnes ne changent rien pour eux : les objets sont toujours retrouvés par leur ID.
-- **Onglets-fenêtres et formules** écrits avant l'alignement : une condition, un tri ou une
-  formule qui nomme encore « Cout » ou « Rareté principal » retrouvent maintenant « Prix »
-  ou « Rareté principale », au lieu de ne plus rien trouver.
+- **Une seule barre de mise en forme, en haut de la fiche**, toujours visible, comme
+  au-dessus du tableau. Elle agit sur le champ où se trouve le curseur ; les champs n'ont
+  plus chacun la leur.
+- **Le nom s'affiche proprement** : « Sceptre de canaliseur » au lieu de
+  `<span style="color:#000000">Sceptre de canaliseur</span>`. Le nom des objets garde sa
+  mise en forme (texte enrichi) à chaque lecture.
+- **Le style imposé d'une colonne habille aussi son champ dans la fiche** (couleur, gras,
+  italique, police, taille, fond), comme sa case dans le tableau : listes, nombres,
+  compétences, formules, tirages et textes compris.
 
-Rappel de la 140 : fiches enregistrées d'elles-mêmes (Précédente / Aller à… / Suivante),
-ligne ajoutée directement dans le tableau, presets de mise en page, « Masquée » à la place
-de « Où s'affiche la colonne », personnages illisibles retirés du choix, canal « Général »
-dans le chat.
+Rappel : la 141 rend les onglets-fenêtres et les formules insensibles à l'orthographe des
+colonnes d'objets alignées ; la 140 apporte l'enregistrement automatique de la fiche,
+Précédente / Aller à… / Suivante, l'ajout de ligne dans le tableau, les presets de mise en
+page et le canal « Général » du chat.

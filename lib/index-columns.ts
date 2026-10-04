@@ -451,7 +451,9 @@ export function normalizeSpec(input: IndexColumnSpec): IndexColumnSpec {
   if (spec.gauge?.mode === "count" && !spec.gauge.scale) spec.gauge = { ...spec.gauge, scale: "cell" }
   delete spec.display
   delete spec.form
-  const rest = also.filter((kind) => kind !== "fixed" && kind !== "rich" && kind !== spec.kind)
+  // Un nom « Texte riche » (les objets) le reste : sans cette marque, une seconde lecture le
+  // prendrait pour un nom ordinaire, en gras et en texte simple (son HTML s'affichait en clair).
+  const rest = also.filter((kind) => kind !== "fixed" && (kind !== "rich" || isName) && kind !== spec.kind)
   if (rest.length) spec.also = rest
   else delete spec.also
   return spec
@@ -504,7 +506,7 @@ export function columnTypeLabel(input: IndexColumnSpec) {
   if (spec.kind === "actions") details.push(`${spec.actions?.length ?? 0} bouton${(spec.actions?.length ?? 0) > 1 ? "s" : ""}`)
   const labels = [`${indexColumnKinds[spec.kind].label}${details.length ? ` (${details.join(", ")})` : ""}`]
   // Types doubles : « Jauge (icônes) · Nombre », « Nom · Style imposé », « Liste · Formulaire ».
-  for (const kind of spec.also ?? []) labels.push(indexColumnKinds[kind].label)
+  for (const kind of spec.also ?? []) if (kind !== "rich") labels.push(indexColumnKinds[kind].label)
   if (spec.style && !spec.style.keepCellFormatting) labels.push("Style imposé")
   // L'ancien « Formulaire seulement » compte comme « Masquée » (la fiche se règle dans sa mise en page).
   if (spec.hidden || placementOf(spec) === "sheet") labels.push("Masquée")

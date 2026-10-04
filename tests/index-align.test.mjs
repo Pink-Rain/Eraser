@@ -70,3 +70,13 @@ test("un nom écrit avant l'alignement retrouve sa colonne", () => {
   // Le nom exact passe d'abord.
   assert.equal(objectHeaderIndex(["Cout", "Prix"], "Prix"), 1);
 });
+
+test("le nom enrichi des objets le reste à chaque lecture", async () => {
+  const { normalizeSpec, isRichSpec } = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const once = normalizeSpec({ kind: "name-form", also: ["rich"] });
+  assert.deepEqual(normalizeSpec(once), once);
+  assert.equal(isRichSpec(once), true);
+  assert.equal(isRichSpec({ kind: "name", also: ["rich"] }), true);
+  // Un nom ordinaire reste en gras, en texte simple.
+  assert.equal(isRichSpec(normalizeSpec({ kind: "name" })), false);
+});

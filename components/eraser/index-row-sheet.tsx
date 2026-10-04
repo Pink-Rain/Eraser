@@ -4,6 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } fro
 import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Search } from "lucide-react"
 
 import { IndexField, type IndexFieldProps } from "@/components/eraser/index-cells"
+import { RichTextToolbar, RichTextToolbarHost, type RichTextTarget } from "@/components/eraser/rich-text"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -40,7 +41,7 @@ function releaseFocus() {
  * qui n'a pas de fiche dédiée (les créatures gardent la leur).
  *
  * Chaque champ s'enregistre de lui-même, peu après la frappe : il n'y a ni « Enregistrer »
- * ni « Fermer ». En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
+ * ni « Fermer ». Une seule barre de mise en forme, en haut, sert à tous les champs. En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
  * à l'autre sans quitter la fiche.
  */
 export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, error = "", footer, navigation, onSave, onClose }: {
@@ -62,6 +63,11 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   onClose: () => void
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
+  // Une seule barre de mise en forme, en haut, pour tous les champs (comme le tableau) :
+  // elle agit sur le champ où se trouve le curseur.
+  const targetRef = useRef<RichTextTarget | null>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
+  const toolbarHost = useMemo(() => ({ activate: (target: RichTextTarget) => { targetRef.current = target; setToolbarReady(true) } }), [])
   const id = fields.find((field) => normalizeSpec(field.spec).kind === "id")
   const position = navigation ? navigation.rows.indexOf(rowKey) : -1
   const previous = navigation && position > 0 ? navigation.rows[position - 1] : null
@@ -76,6 +82,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   function go(target: string | null) {
     if (!target || !navigation) return
     releaseFocus()
+    targetRef.current = null
+    setToolbarReady(false)
     navigation.onGo(target)
   }
 
@@ -93,8 +101,14 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
         <DialogTitle className="font-display text-3xl">{title || "Sans nom"}</DialogTitle>
         {subtitle && <DialogDescription>{subtitle}</DialogDescription>}
       </DialogHeader>
+      <div className="-mx-1 flex flex-wrap items-center gap-1 rounded-xl border bg-card/80 px-2 py-1">
+        <RichTextToolbar targetRef={targetRef} ready={toolbarReady} />
+        {!toolbarReady && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans un champ pour le mettre en forme.</span>}
+      </div>
       {/* Une ligne, un corps : passer à une autre ligne enregistre ce qui restait et repart de ses valeurs. */}
-      <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} onSave={onSave} onStatus={setStatus} />
+      <RichTextToolbarHost.Provider value={toolbarHost}>
+        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} onSave={onSave} onStatus={setStatus} />
+      </RichTextToolbarHost.Provider>
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
         <span className="flex min-w-0 items-center gap-3 font-mono text-[11px] text-muted-foreground">
@@ -244,8 +258,6 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, onSave, onStatus }: {
     value={valueOf(item)}
     long={item.long}
     hideLabel={hideLabel}
-    // La barre de mise en forme reste en place : elle n'apparaît plus au clic, ce qui décalait le champ.
-    richToolbar="always"
     row={rowFor?.(item.key)}
     onChange={(value) => change(item, value)}
   />

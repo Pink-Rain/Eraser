@@ -5,7 +5,7 @@ import Link from "next/link"
 import { Check, ChevronDown, File as FileIcon, FileText, Film, ImagePlus, Music, Paperclip, Upload, Link2, LoaderCircle, Plus, Search, Sparkles, Trash2, X, Zap } from "lucide-react"
 
 import { IndexImage } from "@/components/eraser/index-image"
-import { RichTextField, sanitizeRichText } from "@/components/eraser/rich-text"
+import { RichTextField, richTextPlainText, sanitizeRichText } from "@/components/eraser/rich-text"
 import { SpellPicker, useSpellOptions, type SpellOption } from "@/components/eraser/spell-picker"
 import type { SheetGridColumn } from "@/components/eraser/sheet-grid"
 import { Button } from "@/components/ui/button"
@@ -1124,16 +1124,20 @@ export function IndexField(props: IndexFieldProps) {
 function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false, richToolbar = "focus" }: IndexFieldProps) {
   const spec = normalizeSpec(input)
   const look = columnStyleCss(spec.style)
+  // Le style imposé à la colonne (couleur, gras, police…) habille aussi son champ dans la fiche, comme sa case dans le tableau.
+  const styled = (node: ReactNode) => look.className || Object.keys(look.style).length
+    ? <div className={`min-w-0 rounded-lg [&_.border]:border-border ${look.className}`} style={look.style}>{node}</div>
+    : node
   const title = hideLabel
     ? <span className="sr-only">{label}</span>
     : <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   switch (spec.kind) {
     case "choice":
-      return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} /></div>
+      return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} />)}</div>
     case "tab-sort":
-      return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={(row?.tabNames ?? []).map((name) => ({ value: name }))} allowCustom disabled={disabled} onChange={onChange} /></div>
+      return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={(row?.tabNames ?? []).map((name) => ({ value: name }))} allowCustom disabled={disabled} onChange={onChange} />)}</div>
     case "linked-choice":
-      return spec.source ? <div className={fieldLabel}>{title}<LinkedChoicePicker compact={false} label={label} source={spec.source} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} /></div> : null
+      return spec.source ? <div className={fieldLabel}>{title}{styled(<LinkedChoicePicker compact={false} label={label} source={spec.source} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} />)}</div> : null
     case "checkbox":
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
     case "file":
@@ -1152,17 +1156,17 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     }
     case "number":
       return spec.number
-        ? <div className={fieldLabel}>{title}<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} /></div>
-        : <label className={fieldLabel}>{title}<Input type="number" min={spec.min} max={spec.max} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} /></label>
+        ? <div className={fieldLabel}>{title}{styled(<NumberCell compact={false} label={label} value={value} format={spec.number} disabled={disabled} onChange={onChange} />)}</div>
+        : <label className={fieldLabel}>{title}<Input type="number" min={spec.min} max={spec.max} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} className={look.className} style={look.style} /></label>
     case "id":
       return <label className={fieldLabel}>{title}<Input value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder="Généré si vide" className="font-mono text-xs" /></label>
     case "formula":
-      return row?.formula ? <div className={fieldLabel}>{title}<span className="rounded-lg border border-dashed bg-muted/20"><FormulaCell display={row.formula(spec)} /></span></div> : null
+      return row?.formula ? <div className={fieldLabel}>{title}<span className={`rounded-lg border border-dashed bg-muted/20 ${look.className}`} style={look.style}><FormulaCell display={row.formula(spec)} /></span></div> : null
     case "lookup":
     case "rollup":
-      return row?.computed ? <div className={fieldLabel}>{title}<span className="rounded-lg border border-dashed bg-muted/20"><ComputedCell values={row.computed(spec)} pills={spec.kind === "lookup"} /></span></div> : null
+      return row?.computed ? <div className={fieldLabel}>{title}<span className={`rounded-lg border border-dashed bg-muted/20 ${look.className}`} style={look.style}><ComputedCell values={row.computed(spec)} pills={spec.kind === "lookup"} /></span></div> : null
     case "random":
-      return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><RandomCell label={label} value={value} settings={spec.random ?? { source: "number" }} disabled={disabled || !row?.draw} onDraw={() => row?.draw ? row.draw(spec) : Promise.resolve()} /></span></div>
+      return <div className={fieldLabel}>{title}<span className={`rounded-lg border bg-background/50 ${look.className}`} style={look.style}><RandomCell label={label} value={value} settings={spec.random ?? { source: "number" }} disabled={disabled || !row?.draw} onDraw={() => row?.draw ? row.draw(spec) : Promise.resolve()} /></span></div>
     case "actions":
       return row?.runButton ? <div className={`${fieldLabel} md:col-span-2`}>{title}<ActionsCell buttons={spec.actions ?? []} disabled={disabled} visible={(button) => row.buttonVisible ? row.buttonVisible(button) : true} onRun={(button) => row.runButton!(button)} /></div> : null
     case "auto-links":
@@ -1172,8 +1176,10 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
       return null
     default: {
       const rich = isRichSpec(spec)
-      if (!rich) return <label className={fieldLabel}>{title}<Input autoFocus={autoFocus} value={value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} className={look.className} style={look.style} /></label>
-      return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}<RichTextField ariaLabel={label} value={value} onCommit={onChange} disabled={disabled} toolbar={richToolbar} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} minHeight={long ? "min-h-24" : "min-h-9"} /></div>
+      // Texte simple (style imposé à toute la colonne) : une case encore mise en forme dans Sheets
+      // montre son texte, pas son HTML.
+      if (!rich) return <label className={fieldLabel}>{title}<Input autoFocus={autoFocus} value={/<[a-z][^>]*>/i.test(value) ? richTextPlainText(value) : value} disabled={disabled} onChange={(event) => onChange(event.target.value)} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} className={look.className} style={look.style} /></label>
+      return <div className={`${fieldLabel} ${long ? "md:col-span-2" : ""}`}>{title}{styled(<RichTextField ariaLabel={label} value={value} onCommit={onChange} disabled={disabled} toolbar={richToolbar} placeholder={placeholder ?? (spec.kind === "linked" ? "Noms séparés par des virgules" : undefined)} minHeight={long ? "min-h-24" : "min-h-9"} />)}</div>
     }
   }
 }
