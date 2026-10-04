@@ -28,6 +28,7 @@ const google = await vite.ssrLoadModule(fake);
 const sheets = await vite.ssrLoadModule("/lib/google-sheets.ts");
 const engine = await vite.ssrLoadModule("/lib/world-indexes.ts");
 const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+const customIndexes = await vite.ssrLoadModule("/lib/custom-indexes.ts");
 const { characterSheetHeaders } = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
 const { getDb } = await vite.ssrLoadModule("/db/index.ts");
 const schema = await vite.ssrLoadModule("/db/schema.ts");
@@ -366,6 +367,31 @@ test("Sorts des classes : colonnes de classe et « Compétence » verrouillées,
   assert.equal(copy["Guerrier·e"], "");
   assert.equal(copy["CLA-0002"], "");
   assert.equal(grid[1][headers.indexOf("Guerrier·e")], "2");
+});
+
+test("Index personnalisés : la corbeille relit le registre, n'écrit que sa case et vérifie le classeur", async () => {
+  // Les classeurs nommés sont aussi dans le Drive : retrouvés par leur nom, mis à la corbeille.
+  const inDrive = (id) => google.world.drive.find((file) => file.id === id);
+  const registry = fresh("registry");
+  const headers = ["Clé", "Titre", "Classeur", "ID du classeur", "Description", "Créé le", "Supprimé le"];
+  google.addSpreadsheet(registry, [{ title: "Index", grid: [headers, ["perso-reliques", "Reliques", "Index · Reliques", "reliques-1", "", "2026-01-01", "2026-02-01"], ["perso-autre", "Autre", "Index · Autre", "notes-1", "", "2026-01-01", "2026-02-01"]] }], { name: "Eraser · Index personnalisés" });
+  google.addSpreadsheet("reliques-1", [{ title: "Reliques", grid: [["Nom", "ID"]] }], { name: "Index · Reliques" });
+  google.addSpreadsheet("notes-1", [{ title: "Notes", grid: [["Nom"]] }], { name: "Notes de la MJ" });
+  // Le registre est lu (et gardé en mémoire)…
+  assert.equal((await customIndexes.listTrashedCustomIndexes()).length, 2);
+  // …puis une autre installation renomme un index : la restauration ne remet pas l'ancien titre.
+  google.grid(registry, "Index")[1][1] = "Reliques sacrées";
+  await customIndexes.restoreCustomIndex("perso-reliques");
+  assert.deepEqual(google.grid(registry, "Index")[1], ["perso-reliques", "Reliques sacrées", "Index · Reliques", "reliques-1", "", "2026-01-01", ""]);
+  // Un classeur qui n'est pas un « Index · … » ne part jamais à la corbeille.
+  await assert.rejects(() => customIndexes.purgeCustomIndex("perso-autre"), /CUSTOM_INDEX_FILE_MISMATCH/);
+  assert.equal(inDrive("notes-1").trashed, undefined);
+  assert.equal(google.grid(registry, "Index")[2][0], "perso-autre");
+  // Le bon classeur : à la corbeille du Drive, et sa ligne du registre vidée.
+  await customIndexes.trashCustomIndex("perso-reliques");
+  await customIndexes.purgeCustomIndex("perso-reliques");
+  assert.equal(inDrive("reliques-1").trashed, true);
+  assert.deepEqual(google.grid(registry, "Index")[1].filter(Boolean), []);
 });
 
 test("Une écriture d'un autre module pendant une tâche du moteur fait relire l'index", async () => {

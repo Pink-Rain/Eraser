@@ -7,11 +7,12 @@
  * Règle du projet : un classeur n'est jamais recréé s'il existe déjà sous ce nom dans
  * le Drive. Il est relié, et ses onglets sont gardés.
  */
-import { createGoogleSpreadsheet, findGoogleSpreadsheetByName, trashDriveFile } from "@/lib/google-drive"
-import { appendRows, canonicalRow, canonicalRows, canonicalWrites, clearSpreadsheetReadCache, columnName, ensureNamedColumns, googleSheetsJson, namedAppendRange, readNamedSheet, sheetTabRange, spreadsheetTabs, updateRange, updateRanges } from "@/lib/google-sheets"
+import { createGoogleSpreadsheet, driveFileMetadata, findGoogleSpreadsheetByName, trashDriveFile } from "@/lib/google-drive"
+import { appendRows, canonicalRow, canonicalRows, clearSpreadsheetReadCache, columnName, ensureNamedColumns, googleSheetsJson, namedAppendRange, namedRowWrites, readNamedSheet, sheetTabRange, spreadsheetTabs, updateRange, updateRanges } from "@/lib/google-sheets"
 import { foldName, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
 import { SCHEMA_TAB, type SchemaEntry } from "@/lib/index-schema-shared"
 import { readSchema, writeSchema } from "@/lib/index-schema"
+import type { SheetColumns } from "@/lib/sheet-columns"
 
 export const CUSTOM_INDEX_PREFIX = "perso-"
 const REGISTRY_NAME = "Eraser · Index personnalisés"
@@ -31,14 +32,15 @@ export type CustomIndexEntry = {
   row: number
 }
 
-type Registry = { spreadsheetId: string | null; entries: CustomIndexEntry[] }
+type Registry = { spreadsheetId: string | null; entries: CustomIndexEntry[]; columns?: SheetColumns }
 let registryCache: { expiresAt: number; promise: Promise<Registry>; loaded?: boolean; refreshing?: boolean } | null = null
 const REGISTRY_CACHE_MS = 5 * 60_000
 
 /**
  * Le registre des index créés dans Eraser. Passé quelques minutes, il est rendu aussitôt
  * et relu en arrière-plan (chercher le classeur dans Drive prend du temps) ; créer,
- * renommer ou supprimer un index relit le registre tout de suite.
+ * renommer ou supprimer un index relit le registre tout de suite (`refresh` : lu à
+ * l'instant dans Sheets, jamais servi par un cache).
  */
 function loadedRegistry(options: { refresh?: boolean } = {}) {
   const cached = registryCache
@@ -50,7 +52,7 @@ function loadedRegistry(options: { refresh?: boolean } = {}) {
     }
     return cached.promise
   }
-  const promise = loadRegistry()
+  const promise = loadRegistry({ fresh: options.refresh })
   const entry: { expiresAt: number; promise: Promise<Registry>; loaded?: boolean } = { expiresAt: Date.now() + REGISTRY_CACHE_MS, promise }
   registryCache = entry
   promise.then(() => { entry.loaded = true }, () => { if (registryCache === entry) registryCache = null })
@@ -61,20 +63,24 @@ export function isCustomIndexKey(value: unknown): value is CustomIndexEntry["key
   return typeof value === "string" && value.startsWith(CUSTOM_INDEX_PREFIX) && /^[a-z0-9-]{3,80}$/.test(value)
 }
 
-/** Le registre, colonnes retrouvées par leur nom ; chaque ligne remise dans l'ordre prévu. */
-async function readRegistry(spreadsheetId: string) {
-  const read = await readNamedSheet(spreadsheetId, REGISTRY_TAB, REGISTRY_HEADERS)
+/**
+ * Le registre, colonnes retrouvées par leur nom ; chaque ligne remise dans l'ordre prévu.
+ * `fresh` : relu à l'instant dans Sheets, avant une écriture.
+ */
+async function readRegistry(spreadsheetId: string, options: { fresh?: boolean } = {}) {
+  const read = await readNamedSheet(spreadsheetId, REGISTRY_TAB, REGISTRY_HEADERS, { fresh: options.fresh })
   return { columns: read.columns, rows: read.rows.map((row) => canonicalRow(read.columns, row)) }
 }
 
-async function loadRegistry() {
+async function loadRegistry(options: { fresh?: boolean } = {}): Promise<Registry> {
   const file = await findGoogleSpreadsheetByName(REGISTRY_NAME)
   if (!file) return { spreadsheetId: null, entries: [] }
-  const rows = await readRegistry(file.id).then((read) => read.rows).catch(() => [] as string[][])
+  // Une lecture ratée n'est pas un registre vide : créer un index y aurait ajouté une clé déjà prise.
+  const { columns, rows } = await readRegistry(file.id, options)
   const entries = rows.flatMap((row, index): CustomIndexEntry[] => isCustomIndexKey(row[0]?.trim()) && row[3]?.trim()
     ? [{ key: row[0].trim() as CustomIndexEntry["key"], title: row[1]?.trim() || row[0].trim(), sheetName: row[2]?.trim() || "", spreadsheetId: row[3].trim(), description: row[4]?.trim() || "", createdAt: row[5]?.trim() || "", deletedAt: row[6]?.trim() || "", row: index + 2 }]
     : [])
-  return { spreadsheetId: file.id, entries }
+  return { spreadsheetId: file.id, entries, columns }
 }
 
 /** Les index personnalisés (hors corbeille), gardés une minute en mémoire. */
@@ -87,40 +93,59 @@ export function listTrashedCustomIndexes() {
   return loadedRegistry({ refresh: true }).then((registry) => registry.entries.filter((entry) => entry.deletedAt))
 }
 
-async function markRegistryRow(key: string, values: (entry: CustomIndexEntry) => string[] | null) {
+/**
+ * Un index du registre, relu à l'instant (jamais pris dans une copie gardée) : sa ligne, et
+ * les colonnes du registre. Une clé absente, ou portée par deux lignes, ne désigne rien de sûr.
+ */
+async function registryEntry(key: string) {
   const registry = await loadedRegistry({ refresh: true })
-  const entry = registry.entries.find((candidate) => candidate.key === key)
-  if (!registry.spreadsheetId || !entry) throw new Error("CUSTOM_INDEX_NOT_FOUND")
-  const row = values(entry)
-  if (row) {
-    // « Supprimé le » manquant (registre d'une version précédente) : ajouté à droite, par son nom.
-    const columns = await ensureNamedColumns(registry.spreadsheetId, REGISTRY_TAB, (await readRegistry(registry.spreadsheetId)).columns)
-    await updateRanges(registry.spreadsheetId, canonicalWrites(REGISTRY_TAB, columns, `A${entry.row}:G${entry.row}`, [row]), { valueInputOption: "RAW" })
-  }
+  const found = registry.entries.filter((candidate) => candidate.key === key)
+  if (!registry.spreadsheetId || !registry.columns || found.length !== 1) throw new Error("CUSTOM_INDEX_NOT_FOUND")
+  return { spreadsheetId: registry.spreadsheetId, columns: registry.columns, entry: found[0] }
+}
+
+/**
+ * Écrit les seules cases nommées de la ligne d'un index : le reste de la ligne (modifié
+ * ailleurs entre-temps, peut-être) n'est jamais réécrit avec des valeurs d'avant.
+ * « Supprimé le » manquant (registre d'une version précédente) : ajouté à droite, par son nom.
+ */
+async function writeRegistryCells(spreadsheetId: string, known: SheetColumns, row: number, values: Record<string, string>) {
+  const columns = await ensureNamedColumns(spreadsheetId, REGISTRY_TAB, known)
+  await updateRanges(spreadsheetId, namedRowWrites(REGISTRY_TAB, columns, row, values), { valueInputOption: "RAW" })
   registryCache = null
-  return entry
 }
 
 const rowOf = (entry: CustomIndexEntry, deletedAt: string) => [entry.key, entry.title, entry.sheetName, entry.spreadsheetId, entry.description, entry.createdAt, deletedAt]
 
 /** Met un index créé dans Eraser à la corbeille : caché partout, son classeur reste intact. */
-export function trashCustomIndex(key: string) {
-  return markRegistryRow(key, (entry) => rowOf(entry, new Date().toISOString()))
+export async function trashCustomIndex(key: string) {
+  const { spreadsheetId, columns, entry } = await registryEntry(key)
+  if (!entry.deletedAt) await writeRegistryCells(spreadsheetId, columns, entry.row, { "Supprimé le": new Date().toISOString() })
+  return entry
 }
 
-export function restoreCustomIndex(key: string) {
-  return markRegistryRow(key, (entry) => entry.deletedAt ? rowOf(entry, "") : null)
+export async function restoreCustomIndex(key: string) {
+  const { spreadsheetId, columns, entry } = await registryEntry(key)
+  if (entry.deletedAt) await writeRegistryCells(spreadsheetId, columns, entry.row, { "Supprimé le": "" })
+  return entry
 }
 
 /**
  * Suppression définitive d'un index à la corbeille : son classeur part dans la corbeille
- * du Drive (récupérable encore 30 jours par Google), sa ligne du registre est effacée.
+ * du Drive (récupérable encore 30 jours par Google), sa ligne du registre est vidée. Tout
+ * est vérifié juste avant : l'index est encore à la corbeille, son classeur est bien un
+ * classeur « Index · … » (un identifiant mal recopié ne vise jamais une autre feuille), et
+ * sa ligne est relue avant d'être vidée.
  */
 export async function purgeCustomIndex(key: string) {
-  const entry = (await loadedRegistry({ refresh: true })).entries.find((candidate) => candidate.key === key)
-  if (!entry?.deletedAt) throw new Error("CUSTOM_INDEX_NOT_FOUND")
-  await trashDriveFile(entry.spreadsheetId)
-  await markRegistryRow(key, () => ["", "", "", "", "", "", ""])
+  const { entry } = await registryEntry(key)
+  if (!entry.deletedAt) throw new Error("CUSTOM_INDEX_NOT_FOUND")
+  const file = await driveFileMetadata(entry.spreadsheetId)
+  if (file && (file.mimeType !== "application/vnd.google-apps.spreadsheet" || !file.name.startsWith("Index · "))) throw new Error("CUSTOM_INDEX_FILE_MISMATCH")
+  if (file && !file.trashed) await trashDriveFile(entry.spreadsheetId)
+  const again = await registryEntry(key)
+  if (!again.entry.deletedAt || again.entry.spreadsheetId !== entry.spreadsheetId) throw new Error("CUSTOM_INDEX_NOT_FOUND")
+  await writeRegistryCells(again.spreadsheetId, again.columns, again.entry.row, Object.fromEntries(REGISTRY_HEADERS.map((header) => [header, ""])))
 }
 
 export async function customIndexEntry(key: string) {
@@ -137,7 +162,7 @@ async function registrySpreadsheet() {
   if (first?.sheetId !== undefined && first.title !== REGISTRY_TAB) {
     await googleSheetsJson(`spreadsheets/${created.id}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId: first.sheetId, title: REGISTRY_TAB }, fields: "title" } }] }) })
   }
-  await updateRange(created.id, sheetTabRange(REGISTRY_TAB, "A1:F1"), [REGISTRY_HEADERS], { valueInputOption: "RAW" })
+  await updateRange(created.id, sheetTabRange(REGISTRY_TAB, `A1:${columnName(REGISTRY_HEADERS.length)}1`), [REGISTRY_HEADERS], { valueInputOption: "RAW" })
   return created.id
 }
 
@@ -196,7 +221,7 @@ export async function createCustomIndex(input: { title: string; description: str
 
   const registryId = await registrySpreadsheet()
   const entry: CustomIndexEntry = { key, title, sheetName, spreadsheetId: file.id, description: input.description.trim().slice(0, 200), createdAt: new Date().toISOString(), deletedAt: "", row: 0 }
-  const columns = await ensureNamedColumns(registryId, REGISTRY_TAB, (await readRegistry(registryId)).columns)
+  const columns = await ensureNamedColumns(registryId, REGISTRY_TAB, (await readRegistry(registryId, { fresh: true })).columns)
   await appendRows(registryId, namedAppendRange(REGISTRY_TAB, columns), canonicalRows(columns, [rowOf(entry, "")]), { valueInputOption: "RAW" })
   registryCache = null
   return { entry, linked: Boolean(linked) }

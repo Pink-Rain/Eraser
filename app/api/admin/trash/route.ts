@@ -29,6 +29,7 @@ function indexTrashMessage(error: unknown, fallback: string) {
   const code = error instanceof Error ? error.message : ""
   if (code === "INDEX_TRASH_ENTITY_LOCKED") return "Cette colonne appartient à une feuille que d’autres pages d’Eraser lisent (personnages, campagnes, PNJ, classes, sorts) : elle ne s’efface pas d’ici. Restaure-la, ou laisse-la à la corbeille : elle reste masquée dans l’index."
   if (code === "INDEX_TRASH_AMBIGUOUS") return "Plusieurs colonnes portent ce nom dans Google Sheets : rien n’a été effacé. Supprime à la main celle qui est en trop, puis recommence."
+  if (code === "CUSTOM_INDEX_FILE_MISMATCH") return "Le classeur relié à cet index n’est pas un classeur « Index · … » : il n’a pas été mis à la corbeille. Vérifie-le dans Google Drive."
   if (code === "INDEX_TRASH_NOT_FOUND" || code === "CUSTOM_INDEX_NOT_FOUND") return "Élément introuvable : il a peut-être déjà été restauré ou supprimé. Actualise la page."
   return fallback
 }

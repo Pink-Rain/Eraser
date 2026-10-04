@@ -51,18 +51,23 @@ async function ensureTabs(id: string) {
   clearSpreadsheetReadCache(id)
 }
 
-/** Les lignes d'un onglet, chacune remise dans l'ordre prévu (`headers`), et ses colonnes. */
-async function rowsOf(tab: string, headers: readonly string[], create = false): Promise<{ id: string | null; columns: SheetColumns; rows: string[][] }> {
-  const id = await settingsWorkbook(create)
+/**
+ * Les lignes d'un onglet, chacune remise dans l'ordre prévu (`headers`), et ses colonnes.
+ * Pour une écriture (`write`), l'onglet est relu à l'instant et une lecture ratée arrête tout :
+ * prise pour un onglet vide, elle faisait ajouter en double un réglage qu'on enregistrait, ou
+ * écrire à une ligne d'avant.
+ */
+async function rowsOf(tab: string, headers: readonly string[], options: { create?: boolean; write?: boolean } = {}): Promise<{ id: string | null; columns: SheetColumns; rows: string[][] }> {
+  const id = await settingsWorkbook(Boolean(options.create))
   const none = { columns: sheetColumns([], headers), rows: [] as string[][] }
   if (!id) return { id: null, ...none }
-  const read = await readNamedSheet(id, tab, headers).catch(() => null)
+  const read = options.write ? await readNamedSheet(id, tab, headers, { fresh: true }) : await readNamedSheet(id, tab, headers).catch(() => null)
   if (!read) return { id, ...none }
-  const columns = create ? await ensureNamedColumns(id, tab, read.columns) : read.columns
+  const columns = options.create ? await ensureNamedColumns(id, tab, read.columns) : read.columns
   return { id, columns, rows: read.rows.map((row) => canonicalRow(columns, row)) }
 }
 
-/** Une ligne décrite dans l'ordre prévu, écrite à sa place ou ajoutée à la fin. */
+/** Une ligne décrite dans l'ordre prévu, écrite à sa place (relue juste avant) ou ajoutée à la fin. */
 async function writeRow(id: string, tab: string, columns: SheetColumns, existing: number, values: SheetCell[]) {
   if (existing >= 0) await updateRanges(id, canonicalWrites(tab, columns, `A${existing + 2}:${columnName(columns.expected.length)}${existing + 2}`, [values]), { valueInputOption: "RAW" })
   else await appendRows(id, namedAppendRange(tab, columns), canonicalRows(columns, [values]), { valueInputOption: "RAW" })
@@ -94,10 +99,12 @@ export async function saveIndexView(input: { id?: string; index: string; name: s
   if (!name || name.length > 60) throw new Error("INDEX_VIEW_NAME_INVALID")
   if (!input.index.trim()) throw new Error("INDEX_VIEW_INVALID")
   const conditions = parseViewConditions(JSON.stringify(input.conditions))
-  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS, true)
+  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS, { create: true, write: true })
   if (!id) throw new Error("INDEX_SETTINGS_UNAVAILABLE")
   const now = new Date().toISOString()
   const existing = input.id ? rows.findIndex((row) => row[0]?.trim() === input.id && !row[8]?.trim()) : -1
+  // Un onglet-fenêtre supprimé ailleurs entre-temps n'est pas recréé sous un autre identifiant.
+  if (input.id && existing < 0) throw new Error("INDEX_VIEW_NOT_FOUND")
   const position = existing >= 0 ? rows[existing][6] ?? "0" : String(rows.filter((row) => row[1]?.trim() === input.index && !row[8]?.trim()).length)
   const viewId = existing >= 0 ? input.id! : newIndexId("VUE")
   const values = [viewId, input.index.trim(), name, input.source.trim() || "*", JSON.stringify(conditions), input.match === "une" ? "une" : "toutes", position, now, ""]
@@ -107,7 +114,7 @@ export async function saveIndexView(input: { id?: string; index: string; name: s
 }
 
 export async function deleteIndexView(viewId: string) {
-  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS)
+  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS, { write: true })
   const index = rows.findIndex((row) => row[0]?.trim() === viewId && !row[8]?.trim())
   if (!id || index < 0) throw new Error("INDEX_VIEW_NOT_FOUND")
   await updateRanges(id, canonicalWrites(VIEWS_TAB, columns, `I${index + 2}:I${index + 2}`, [[new Date().toISOString()]]), { valueInputOption: "RAW" })
@@ -120,7 +127,7 @@ export async function deleteIndexView(viewId: string) {
  * Rien n'est créé s'il n'y a pas encore de classeur de réglages.
  */
 export async function remapIndexViewSources(index: string, mapping: Map<string, string>) {
-  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS)
+  const { id, columns, rows } = await rowsOf(VIEWS_TAB, VIEW_HEADERS, { write: true })
   if (!id) return 0
   const writes = rows.flatMap((row, position) => row[1]?.trim() === index && mapping.has(row[3]?.trim() ?? "")
     ? [{ position, source: mapping.get(row[3].trim()) as string }]
@@ -147,9 +154,11 @@ export async function saveColumnPreset(input: { id?: string; name: string; descr
   if (!name || name.length > 60) throw new Error("INDEX_PRESET_NAME_INVALID")
   const columns = presetColumnsOf(input.columns)
   if (!columns.length) throw new Error("INDEX_PRESET_EMPTY")
-  const { id, columns: tabColumns, rows } = await rowsOf(PRESETS_TAB, PRESET_HEADERS, true)
+  const { id, columns: tabColumns, rows } = await rowsOf(PRESETS_TAB, PRESET_HEADERS, { create: true, write: true })
   if (!id) throw new Error("INDEX_SETTINGS_UNAVAILABLE")
   const existing = input.id ? rows.findIndex((row) => row[0]?.trim() === input.id && !row[5]?.trim()) : -1
+  // Un preset supprimé ailleurs entre-temps n'est pas recréé sous un autre identifiant.
+  if (input.id && existing < 0) throw new Error("INDEX_PRESET_NOT_FOUND")
   const presetId = existing >= 0 ? input.id! : newIndexId("PRE")
   const values = [presetId, name, (input.description ?? "").trim().slice(0, 200), JSON.stringify(columns), new Date().toISOString(), ""]
   await writeRow(id, PRESETS_TAB, tabColumns, existing, values)
@@ -158,7 +167,7 @@ export async function saveColumnPreset(input: { id?: string; name: string; descr
 }
 
 export async function deleteColumnPreset(presetId: string) {
-  const { id, columns, rows } = await rowsOf(PRESETS_TAB, PRESET_HEADERS)
+  const { id, columns, rows } = await rowsOf(PRESETS_TAB, PRESET_HEADERS, { write: true })
   const index = rows.findIndex((row) => row[0]?.trim() === presetId && !row[5]?.trim())
   if (!id || index < 0) throw new Error("INDEX_PRESET_NOT_FOUND")
   await updateRanges(id, canonicalWrites(PRESETS_TAB, columns, `F${index + 2}:F${index + 2}`, [[new Date().toISOString()]]), { valueInputOption: "RAW" })

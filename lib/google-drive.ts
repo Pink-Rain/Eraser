@@ -261,6 +261,16 @@ export async function findGoogleSpreadsheetByName(name: string) {
   return files.sort((left, right) => (right.modifiedTime || "").localeCompare(left.modifiedTime || ""))[0] ?? null
 }
 
+/** Le nom, le type et l'état d'un fichier du Drive (avant de le mettre à la corbeille) ; null s'il n'existe plus. */
+export async function driveFileMetadata(fileId: string) {
+  if (!/^[A-Za-z0-9_-]+$/.test(fileId)) throw new Error("INVALID_DRIVE_FILE_ID")
+  const response = await traced("drive", "GET files/:id", () => googleOAuthAuthorizedFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,trashed`), (reply) => String(reply.status))
+  if (response.status === 404) return null
+  const payload = (await response.json()) as DriveFile & { trashed?: boolean; error?: { message?: string } }
+  if (!response.ok) throw new Error(payload.error?.message || `DRIVE_API_ERROR:${response.status}`)
+  return payload
+}
+
 export async function trashDriveFile(fileId: string) {
   if (!/^[A-Za-z0-9_-]+$/.test(fileId)) throw new Error("INVALID_DRIVE_FILE_ID")
   return driveJson<DriveFile>(`files/${encodeURIComponent(fileId)}?fields=id,name,mimeType,modifiedTime,webViewLink`, {
