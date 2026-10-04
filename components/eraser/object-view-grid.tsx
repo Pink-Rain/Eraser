@@ -10,7 +10,7 @@ import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { foldName, isComputedSpec, isGridSpec, isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { shownReferenceText } from "@/components/eraser/reference-store"
-import { findEntry, isTrashedEntry, type SchemaEntry } from "@/lib/index-schema-shared"
+import { findEntry, isTrashedEntry, objectHeaderIndex, type SchemaEntry } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, matchesView, type IndexView } from "@/lib/index-views"
 import { objectIndexCellRef } from "@/lib/object-index-refs"
 
@@ -67,14 +67,14 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
     const found = locate(rowKey)
     if (!found) return ""
     if (header === ORIGIN) return originOf(found.table)
-    const column = found.table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
+    const column = objectHeaderIndex(found.table.headers, header)
     if (column < 0) return ""
     return (isRichSpec(specIn(found.table, header, schemas)) ? found.row.html[column] : found.row.values[column]) ?? ""
   }, [locate, originOf, schemas])
 
   const commit = useCallback(async (rowKey: string, header: string, html: string) => {
     const found = locate(rowKey)
-    const column = found ? found.table.headers.findIndex((candidate) => foldName(candidate) === foldName(header)) : -1
+    const column = found ? objectHeaderIndex(found.table.headers, header) : -1
     if (!found || column < 0) return
     localEdits.current[`${rowKey}:${header}`] = html
     setSaving((current) => current + 1)
@@ -98,13 +98,13 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
   const rows = useMemo(() => {
     const folded = foldName(query)
     const matched = sources.flatMap((table) => table.rows
-      .filter((row) => matchesView(view, (header) => { const column = table.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return column >= 0 ? row.values[column] ?? "" : "" }))
+      .filter((row) => matchesView(view, (header) => { const column = objectHeaderIndex(table.headers, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
       .map((row) => ({ key: `${objectTableKey(table)}|${row.rowNumber}`, rowNumber: row.rowNumber, table, row })))
     if (!sort) return matched.map(({ key, rowNumber }) => ({ key, rowNumber }))
     // Ce que montre la case (prix sur sa valeur, texte sans mise en forme), vides en bas.
     const keyOf = (entry: (typeof matched)[number]) => {
-      const column = entry.table.headers.findIndex((candidate) => foldName(candidate) === foldName(sort.column))
+      const column = objectHeaderIndex(entry.table.headers, sort.column)
       if (sort.column === ORIGIN) return indexSortKey(originOf(entry.table))
       const spec = specIn(entry.table, sort.column, schemas)
       const value = column < 0 ? "" : spec && isRichSpec(spec) ? entry.row.html[column] ?? "" : entry.row.values[column] ?? ""

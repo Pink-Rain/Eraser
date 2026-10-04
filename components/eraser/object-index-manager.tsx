@@ -28,13 +28,13 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { foldName, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
 import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
-import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
+import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
@@ -136,7 +136,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const shownColumns = liveColumns
   const sheetColumns = useMemo(() => liveColumns.filter((index) => isSheetSpec(specs[index]) || layoutPlaces(formLayout, selected?.headers[index] ?? "")), [formLayout, liveColumns, selected, specs])
   const columnOfHeader = useCallback((header: string) => {
-    const index = (selected?.headers ?? []).findIndex((candidate) => foldName(candidate) === foldName(header))
+    // Un nom écrit avant un alignement (« Cout ») retrouve sa colonne (« Prix »).
+    const index = objectHeaderIndex(selected?.headers ?? [], header)
     return index >= 0 && liveColumns.includes(index) ? index : -1
   }, [liveColumns, selected])
   const hasIdColumn = specs.some((spec) => spec.kind === "id")

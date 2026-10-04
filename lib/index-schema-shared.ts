@@ -280,3 +280,15 @@ export function alignColumns<T>(reference: Array<{ header: string; spec: IndexCo
   })
   return [...aligned, ...target.filter((item) => !used.has(item)).map((item): AlignedColumn<T> => ({ item, header: headerOf(item) }))]
 }
+
+/**
+ * La colonne `header` d'un tableau d'objets : par son nom, sinon sous une autre orthographe
+ * de la même colonne. Un onglet-fenêtre ou une formule écrits avant un alignement
+ * (« Cout », « Rareté principal ») retrouvent ainsi « Prix » ou « Rareté principale ».
+ */
+export function objectHeaderIndex(headers: string[], header: string) {
+  const exact = headers.findIndex((candidate) => foldName(candidate) === foldName(header))
+  if (exact >= 0) return exact
+  const wanted = foldName(canonicalObjectHeader(header))
+  return headers.findIndex((candidate) => foldName(canonicalObjectHeader(candidate)) === wanted)
+}

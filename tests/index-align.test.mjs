@@ -7,7 +7,7 @@ import { createServer } from "vite";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(async () => { await vite.close(); });
-const { alignColumns, canonicalObjectHeader, isObjectSpellingFix } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+const { alignColumns, canonicalObjectHeader, isObjectSpellingFix, objectHeaderIndex } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
 const { layoutPlaces } = await vite.ssrLoadModule("/lib/index-layouts.ts");
 
 // Les en-têtes réels de l'index des objets (onglets Armes et Ressources).
@@ -57,4 +57,16 @@ test("une mise en page dit quelles colonnes elle place", () => {
   assert.equal(layoutPlaces(layout, "Type"), true);
   assert.equal(layoutPlaces(layout, "Effets"), false);
   assert.equal(layoutPlaces(null, "Prix"), false);
+});
+
+test("un nom écrit avant l'alignement retrouve sa colonne", () => {
+  const aligned = ["Nom", "Prix", "Effets", "Rareté principale", "Rareté secondaire", "Sous-type"];
+  assert.equal(objectHeaderIndex(aligned, "Cout"), 1);
+  assert.equal(objectHeaderIndex(aligned, "Effet"), 2);
+  assert.equal(objectHeaderIndex(aligned, "Rareté principal"), 3);
+  assert.equal(objectHeaderIndex(aligned, "Rareté secondaire"), 4);
+  assert.equal(objectHeaderIndex(aligned, "Sous-Type"), 5);
+  assert.equal(objectHeaderIndex(aligned, "Poids"), -1);
+  // Le nom exact passe d'abord.
+  assert.equal(objectHeaderIndex(["Cout", "Prix"], "Prix"), 1);
 });
