@@ -12,6 +12,7 @@ import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { shownReferenceText } from "@/components/eraser/reference-store"
 import { findEntry, isTrashedEntry, type SchemaEntry } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, matchesView, type IndexView } from "@/lib/index-views"
+import { objectIndexCellRef } from "@/lib/object-index-refs"
 
 export function objectTableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -78,10 +79,12 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
     localEdits.current[`${rowKey}:${header}`] = html
     setSaving((current) => current + 1)
     try {
+      // La ligne par son ID, la colonne par son en-tête : le serveur les retrouve dans la feuille.
+      const { header: cellHeader, occurrence, ...row } = objectIndexCellRef(found.table.headers, found.row, column)
       const response = await fetch("/api/resources/object-indexes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update-cell", fileId: found.table.fileId, tabName: found.table.tabName, rowNumber: found.row.rowNumber, column, html }),
+        body: JSON.stringify({ action: "update-cell", fileId: found.table.fileId, tabName: found.table.tabName, row, header: cellHeader, occurrence, html }),
       })
       const payload = (await response.json().catch(() => ({}))) as { error?: string }
       setError(response.ok ? "" : payload.error || "Cette cellule n’a pas pu être enregistrée.")

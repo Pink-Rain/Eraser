@@ -8,7 +8,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { MERGED_OBJECT_INDEX_NAME, OBJECT_INDEX_BACKUP_FOLDER, regroupedTabNames } from "@/lib/object-index-regroup"
 
 type Status = { state: "séparé" | "regroupé"; files: string[]; merged: { id: string; url: string; regroupedAt: string } | null }
-type RegroupResult = { url: string; tabs: Array<{ name: string; from: string; rows: number; idsWritten: number }>; views: number }
+type RegroupResult = { url: string; tabs: Array<{ name: string; from: string; rows: number; idsWritten: number }>; views: number; warnings?: string[] }
 
 async function post(action: string) {
   const response = await fetch("/api/resources/object-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action }) })
@@ -28,6 +28,8 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
   const [pending, setPending] = useState(false)
   const [error, setError] = useState<{ message: string; details: string[] } | null>(null)
   const [done, setDone] = useState<RegroupResult | null>(null)
+  // Ce qui n'a pas suivi l'annulation (onglets-fenêtres, nom du classeur) : dit avant de recharger la page.
+  const [revertWarnings, setRevertWarnings] = useState<string[]>([])
 
   useEffect(() => {
     let active = true
@@ -41,6 +43,7 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
       const payload = await post(action)
       if (payload.status) setStatus(payload.status)
       if (action === "regroup" && payload.result) { setDone(payload.result); onChanged() }
+      else if (payload.result?.warnings?.length) setRevertWarnings(payload.result.warnings)
       else window.location.reload()
     } catch (caught) {
       setError({ message: caught instanceof Error ? caught.message : "L’opération n’a pas pu se faire.", details: (caught as { details?: string[] }).details ?? [] })
@@ -78,6 +81,7 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
               {done.tabs.map((tab) => <li key={tab.name}><span className="font-semibold">{tab.name}</span> ← {tab.from} · {tab.rows} ligne{tab.rows > 1 ? "s" : ""}{tab.idsWritten ? ` · ${tab.idsWritten} ID gardé${tab.idsWritten > 1 ? "s" : ""}` : ""}</li>)}
             </ul>
             {done.views > 0 && <p className="text-xs text-muted-foreground">{done.views} onglet{done.views > 1 ? "s" : ""}-fenêtre{done.views > 1 ? "s" : ""} renvoyé{done.views > 1 ? "s" : ""} vers les nouveaux onglets.</p>}
+            {done.warnings?.map((warning) => <p key={warning} className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">{warning}</p>)}
             <div className="flex justify-end gap-2">
               <Button type="button" variant="outline" asChild><a href={done.url} target="_blank" rel="noreferrer"><ExternalLink />Ouvrir dans Sheets</a></Button>
               {/* Les onglets-fenêtres ont été renvoyés côté serveur : la page est relue en entier. */}
@@ -110,18 +114,27 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
       </DialogContent>
     </Dialog>
 
-    <Dialog open={dialog === "revert"} onOpenChange={(open) => { if (!open && !pending) setDialog(null) }}>
+    <Dialog open={dialog === "revert"} onOpenChange={(open) => { if (!open && !pending) { if (revertWarnings.length) window.location.reload(); else setDialog(null) } }}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2"><Undo2 className="size-4 text-primary" />Annuler le regroupement</DialogTitle>
           <DialogDescription>Les anciens classeurs reviennent dans « Objets », tels qu’ils étaient avant le regroupement. « {MERGED_OBJECT_INDEX_NAME} » est rangé dans la sauvegarde (renommé, pas supprimé).</DialogDescription>
         </DialogHeader>
         <p className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">Ce qui a été ajouté ou modifié dans « {MERGED_OBJECT_INDEX_NAME} » depuis le regroupement n’est pas recopié dans les anciens classeurs : il reste dans le classeur regroupé.</p>
-        {error && <p className="text-sm text-destructive" role="alert">{error.message}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="ghost" onClick={() => setDialog(null)} disabled={pending}>Garder le regroupement</Button>
-          <Button type="button" variant="destructive" onClick={() => void run("regroup-revert")} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <Undo2 />}Annuler le regroupement</Button>
-        </div>
+        {error && <div className="text-sm text-destructive" role="alert">
+          {error.message}
+          {error.details.length > 0 && <ul className="mt-1 list-disc pl-5 text-xs">{error.details.map((detail) => <li key={detail}>{detail}</li>)}</ul>}
+        </div>}
+        {revertWarnings.length > 0
+          ? <div className="grid gap-2">
+            <p className="rounded-lg border border-emerald-600/25 bg-emerald-50 px-3 py-2 text-sm text-emerald-950">Les anciens classeurs sont revenus dans « Objets ».</p>
+            {revertWarnings.map((warning) => <p key={warning} className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">{warning}</p>)}
+            <div className="flex justify-end"><Button type="button" onClick={() => window.location.reload()}>Fermer</Button></div>
+          </div>
+          : <div className="flex justify-end gap-2">
+            <Button type="button" variant="ghost" onClick={() => setDialog(null)} disabled={pending}>Garder le regroupement</Button>
+            <Button type="button" variant="destructive" onClick={() => void run("regroup-revert")} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <Undo2 />}Annuler le regroupement</Button>
+          </div>}
       </DialogContent>
     </Dialog>
   </>

@@ -23,6 +23,7 @@ import {
   updateCharacterInventoryContainer,
   updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
+import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -89,7 +90,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "create-item" && typeof body.containerId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await createCharacterInventoryItem(id, body.containerId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect })
     } else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) {
-      inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity)
+      inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "character", inventorySlotExpectation(body))
     } else if (body.action === "set-equipped" && typeof body.slotId === "string" && typeof body.equipped === "boolean") {
       inventory = await setCharacterInventoryItemEquipped(id, body.slotId, body.equipped)
     } else if (body.action === "set-modifiers" && typeof body.slotId === "string" && typeof body.modifiers === "string") {
@@ -97,19 +98,21 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") {
       inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, nameHtml: typeof body.nameHtml === "string" ? body.nameHtml : undefined, descriptionHtml: typeof body.descriptionHtml === "string" ? body.descriptionHtml : undefined, effectHtml: typeof body.effectHtml === "string" ? body.effectHtml : undefined })
     } else if (body.action === "move-item" && typeof body.slotId === "string" && typeof body.containerId === "string") {
-      inventory = await moveCharacterInventoryItem(id, body.slotId, body.containerId)
+      inventory = await moveCharacterInventoryItem(id, body.slotId, body.containerId, inventorySlotExpectation(body))
     } else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string") {
       if (!(await transferTargets(authorization)).some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      const slotId = body.slotId, targetId = body.targetId
-      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "character", onMoved))
+      const slotId = body.slotId, targetId = body.targetId, expected = inventorySlotExpectation(body)
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "character", onMoved, expected))
     } else if (body.action === "set-currency" && typeof body.containerId === "string" && typeof body.currency === "string" && typeof body.amount === "number" && Number.isFinite(body.amount)) {
-      inventory = await setCharacterInventoryCurrency(id, body.containerId, body.currency, body.amount)
+      inventory = await setCharacterInventoryCurrency(id, body.containerId, body.currency, body.amount, typeof body.expectedAmount === "number" ? body.expectedAmount : undefined)
     } else {
       throw new Error("INVALID_INVENTORY_ACTION")
     }
     return NextResponse.json({ inventory: { ...inventory, items: [] } })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
+    // La case n'est plus celle que la page montrait : rien n'a été écrit, la page se relit.
+    if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
     const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet objet."
         : code === "INVALID_INVENTORY_MODIFIERS" ? "Ces liens vers des caractéristiques sont trop nombreux."

@@ -7,7 +7,7 @@ import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, Gra
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { InlineEdit } from "@/components/eraser/inline-edit"
-import { showItemNotifications, useInventoryReceived } from "@/components/eraser/item-notifications"
+import { showItemNotifications, unseenItemNotifications, useInventoryReceived } from "@/components/eraser/item-notifications"
 import type { ItemNotification } from "@/lib/item-notifications"
 import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
@@ -812,9 +812,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       try {
         const response = await fetch(`/api/notifications?target=${encodeURIComponent(character.id)}`, { cache: "no-store" })
         const payload = (await response.json().catch(() => ({}))) as { notifications?: ItemNotification[] }
-        const fresh = response.ok ? payload.notifications ?? [] : []
-        if (!alive || !fresh.length) return
-        showItemNotifications(fresh)
+        const received = response.ok ? payload.notifications ?? [] : []
+        if (!alive || !received.length) return
+        // Montrées (puis effacées) par la carte des notifications ; déjà montrées, rien à relire.
+        const fresh = unseenItemNotifications(received)
+        showItemNotifications(received)
+        if (!fresh.length) return
         const loaded = await fetch(`${inventoryEndpoint}?summary=1`).then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null).catch(() => null)
         if (!alive || !loaded) return
         const slots = loaded.containers.flatMap((container) => container.slots)

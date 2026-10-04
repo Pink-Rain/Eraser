@@ -10,7 +10,7 @@ import {
   ensureSheetColumnCount,
   googleSheetsJson,
   listObjectIndexTables,
-  readRange,
+  readRangeFreshWithOffset,
   sheetTabRange,
   spreadsheetTabs,
   updateRange,
@@ -67,9 +67,18 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
   }
 }
 
+/**
+ * La ligne 1 d'un onglet, relue sans cache (POST) : c'est elle qui dit où écrire. Une
+ * lecture gardée en mémoire, ou servie deux fois pendant la même requête, faisait renommer,
+ * déplacer ou supprimer une autre colonne quand l'ordre avait changé entre-temps.
+ */
+async function freshFirstRow(fileId: string, tabName: string) {
+  const read = await readRangeFreshWithOffset(fileId, sheetTabRange(tabName, "A1:AZ1"))
+  return read.startRow === 1 ? (read.rows[0] ?? []).map((value) => String(value ?? "")) : []
+}
+
 async function appendHeader(fileId: string, tabName: string, header: string) {
-  clearSpreadsheetReadCache(fileId)
-  const [firstRow = []] = await readRange(fileId, sheetTabRange(tabName, "A1:AZ1"))
+  const firstRow = await freshFirstRow(fileId, tabName)
   let used = firstRow.length
   while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
   if (firstRow.slice(0, used).some((existing) => foldName(existing) === foldName(header))) return
@@ -128,8 +137,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       continue
     }
     if (operation.op === "order-columns") {
-      clearSpreadsheetReadCache(fileId)
-      const [firstRow = []] = await readRange(fileId, sheetTabRange(table.tabName, "A1:AZ1"))
+      const firstRow = await freshFirstRow(fileId, table.tabName)
       const moves = columnMoves(firstRow, operation.headers)
       if (moves.length) {
         await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId: table.sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
@@ -156,10 +164,15 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     const policy = objectColumnPolicy(operation.header)
     if (operation.op === "rename") {
       locked(policy.rename || Boolean(operation.force), policy.reasons)
-      const problem = headerProblem(operation.to, table.headers, operation.header)
+      // La colonne par son nom dans la ligne 1 relue à l'instant : l'ordre a pu changer depuis la
+      // dernière lecture (ailleurs, ou par une opération précédente de cette liste).
+      const firstRow = await freshFirstRow(fileId, table.tabName)
+      const at = firstRow.findIndex((header) => foldName(header) === foldName(operation.header))
+      if (at < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
+      const problem = headerProblem(operation.to, firstRow.map((header) => header.trim()).filter(Boolean), operation.header)
       if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
       const to = operation.to.replace(/\s+/g, " ").trim()
-      const cell = `${columnName(column + 1)}1`
+      const cell = `${columnName(at + 1)}1`
       await updateRange(fileId, sheetTabRange(table.tabName, `${cell}:${cell}`), [[to]], { valueInputOption: "RAW" })
       const entry = findEntry(schema, table.tabName, operation.header)
       if (entry) entry.column = to
@@ -209,8 +222,7 @@ export async function purgeObjectIndexTrash(fileId: string, tab: string, column:
   if (sheetId !== undefined) {
     if (!column) await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteSheet: { sheetId } }] }) })
     else {
-      clearSpreadsheetReadCache(fileId)
-      const [firstRow = []] = await readRange(fileId, sheetTabRange(tab, "A1:AZ1"))
+      const firstRow = await freshFirstRow(fileId, tab)
       const index = firstRow.findIndex((header) => foldName(header) === foldName(column))
       if (index >= 0) await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 } } }] }) })
     }

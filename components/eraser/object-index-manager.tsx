@@ -36,6 +36,7 @@ import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { tabLayout } from "@/lib/index-layouts"
+import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 
 // Les fenêtres (« Modifier », guide) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
 const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
@@ -146,13 +147,25 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return name.trim() ? <ObjectIcon icon={value} name={name} type={cell(["type", "categorie"])} subtype={cell(["sous type", "subtype"])} className="size-full p-0.5" emojiClassName="text-lg" /> : null
   }, [selected])
 
+  /**
+   * Une ligne telle que le serveur la retrouve dans la feuille relue : son ID (sa place n'est
+   * qu'un indice) et, faute d'ID, son nom à sa place.
+   */
+  const rowRefOf = useCallback((rowKey: string) => {
+    const row = selected?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
+    return selected && row ? objectIndexRowRef(selected.headers, row) : { id: "", rowNumber: Number(rowKey), name: "" }
+  }, [selected])
+
   /** Import d'une icône : l'image va dans le dossier « icone objet » du Drive et le serveur la pose dans la case. */
   const uploadIcon = useCallback(async (file: File, _previous: string, rowKey: string) => {
     if (!selected) throw new Error("Aucun tableau choisi.")
+    const target = rowRefOf(rowKey)
     const form = new FormData()
     form.set("fileId", selected.fileId)
     form.set("tabName", selected.tabName)
-    form.set("rowNumber", rowKey)
+    form.set("rowNumber", String(target.rowNumber))
+    form.set("id", target.id)
+    form.set("name", target.name ?? "")
     form.set("file", file)
     const response = await fetch("/api/resources/object-indexes/icon", { method: "POST", body: form })
     const payload = (await response.json()) as { tables?: ObjectIndexTable[]; error?: string }
@@ -162,8 +175,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     setVersion((current) => current + 1)
     const table = payload.tables.find((candidate) => tableKey(candidate) === tableKey(selected))
     const iconIndex = table?.headers.findIndex(isIconHeader) ?? -1
-    return table?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)?.values[iconIndex] ?? ""
-  }, [selected])
+    // La ligne relue a pu changer de place : retrouvée par son ID.
+    const updated = table?.rows.find((candidate) => target.id ? objectIndexRowRef(table.headers, candidate).id === target.id : String(candidate.rowNumber) === rowKey)
+    return updated?.values[iconIndex] ?? ""
+  }, [rowRefOf, selected])
 
 
   const rawOf = useCallback((rowKey: string, columnKey: string) => {
@@ -182,10 +197,12 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] = html
     setSaving((current) => current + 1)
     try {
+      // La ligne par son ID, la colonne par son en-tête : le serveur les retrouve dans la feuille.
+      const column = Number(columnKey)
       const response = await fetch("/api/resources/object-indexes", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ action: "update-cell", fileId: selected.fileId, tabName: selected.tabName, rowNumber: Number(rowKey), column: Number(columnKey), html }),
+        body: JSON.stringify({ action: "update-cell", fileId: selected.fileId, tabName: selected.tabName, row: rowRefOf(rowKey), header: selected.headers[column] ?? "", occurrence: headerOccurrence(selected.headers, column), html }),
       })
       if (!response.ok) {
         const payload = (await response.json()) as { error?: string }
@@ -195,7 +212,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       setError("Cette cellule n’a pas pu être enregistrée.")
     }
     setSaving((current) => current - 1)
-  }, [selected])
+  }, [rowRefOf, selected])
 
   const router = useRouter()
   const { notify, view: noticesView } = useIndexNotices()
@@ -316,8 +333,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     openSheet: () => setDetails(rowKey),
     indexHref: (index) => !index ? undefined : isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].path : `/ressources/index/${index}`,
     roll: async (header) => { const index = columnOfHeader(header); return index >= 0 ? drawCell(rowKey, header, specs[index], true) : null },
-    duplicate: () => mutateRef.current({ action: "duplicate", rowNumbers: [Number(rowKey)] }, "duplicate"),
-    remove: () => mutateRef.current({ action: "delete", rowNumbers: [Number(rowKey)] }, "delete"),
+    duplicate: () => mutateRef.current({ action: "duplicate", rows: [rowRefOf(rowKey)] }, "duplicate"),
+    remove: () => mutateRef.current({ action: "delete", rows: [rowRefOf(rowKey)] }, "delete"),
     copy: copyToClipboard,
     card: () => {
       const nameIndex = selected?.headers.findIndex((_, index) => specs[index]?.kind === "name" || specs[index]?.kind === "name-form") ?? -1
@@ -334,7 +351,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       const target = await addToInventory(ask, itemId)
       if (target) notify(`Objet ajouté : ${target}.`)
     },
-  }), [ask, columnOfHeader, commitCell, drawCell, engine, notify, rawOf, router, selected, sheetColumns, specs, valueOf])
+  }), [ask, columnOfHeader, commitCell, drawCell, engine, notify, rawOf, rowRefOf, router, selected, sheetColumns, specs, valueOf])
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
   // Chaque colonne passe par le moteur des index : son type décide de sa cellule.
@@ -556,7 +573,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         pending={pending === "add"}
         layout={tabLayout(settings.layouts, selected.tabName, "form")}
         onCancel={() => setCreating(false)}
-        onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}
+        onSave={(values) => void mutate({ action: "add", values: selected.headers.map((header, index) => [header, values[String(index)] ?? ""]) }, "add")}
       />}
 
       {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected ? (
@@ -573,11 +590,11 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           addRowLabel="Ajouter une ligne vide"
           rowCommands={{
             append: () => void mutate({ action: "add" }, "add"),
-            insertBefore: inSheetOrder ? (rowKey) => void mutate({ action: "insert", rowNumber: Number(rowKey) - 1 }, "insert") : undefined,
+            insertBefore: inSheetOrder ? (rowKey) => void mutate({ action: "insert", row: rowRefOf(rowKey), before: true }, "insert") : undefined,
             // Les lignes vides arrivent sous celle-ci dans la feuille, quel que soit le tri affiché.
-            insertRows: (rowKey, count) => void mutate({ action: "insert", rowNumber: Number(rowKey), count }, "insert"),
-            duplicate: (rowKeys) => void mutate({ action: "duplicate", rowNumbers: rowKeys.map(Number) }, "duplicate"),
-            remove: (rowKeys) => void mutate({ action: "delete", rowNumbers: rowKeys.map(Number) }, "delete"),
+            insertRows: (rowKey, count) => void mutate({ action: "insert", row: rowRefOf(rowKey), count }, "insert"),
+            duplicate: (rowKeys) => void mutate({ action: "duplicate", rows: rowKeys.map(rowRefOf) }, "duplicate"),
+            remove: (rowKeys) => void mutate({ action: "delete", rows: rowKeys.map(rowRefOf) }, "delete"),
           }}
           rowMenuExtras={(rowKey) => <><ContextMenuSeparator /><ContextMenuItem onSelect={() => setDetails(rowKey)}><FileText className="size-3.5" />Ouvrir la fiche</ContextMenuItem></>}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}

@@ -114,6 +114,22 @@ export type InventoryTransferTarget = {
   campaignName: string
 }
 
+/**
+ * Ce que la page montrait dans la case qu'elle modifie (objet, nombre). Le serveur relit la
+ * feuille et refuse si elle a changé depuis, ici ou sur une autre installation.
+ */
+export type InventorySlotExpectation = { itemId?: string; quantity?: number }
+
+/** Réponse (HTTP 409) quand la case n'est plus celle que la page montrait. */
+export const INVENTORY_CHANGED_MESSAGE = "L’inventaire a changé entre-temps : actualise puis recommence."
+
+/** `expectedItemId` et `expectedQuantity` d'une requête, s'ils sont donnés. */
+export function inventorySlotExpectation(body: Record<string, unknown>): InventorySlotExpectation | undefined {
+  const itemId = typeof body.expectedItemId === "string" ? body.expectedItemId : undefined
+  const quantity = typeof body.expectedQuantity === "number" && Number.isFinite(body.expectedQuantity) ? body.expectedQuantity : undefined
+  return itemId === undefined && quantity === undefined ? undefined : { itemId, quantity }
+}
+
 export const baseInventoryContainerTypes: InventoryContainerTypeRecord[] = [
   { id: "TYPE-ARMES-BASE", name: "Armes de base", category: "Armes", capacity: 6, columns: [], active: true },
   { id: "TYPE-EQUIPEMENT-BASE", name: "Équipement de base", category: "Équipement", capacity: 8, columns: [], active: true },

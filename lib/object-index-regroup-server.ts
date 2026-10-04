@@ -106,6 +106,22 @@ function today() {
   return new Date().toISOString().slice(0, 10)
 }
 
+/** Une erreur qui dit précisément ce qui reste à faire à la main (`details`, affichés tels quels). */
+function regroupError(code: string, details: string[]) {
+  return Object.assign(new Error(code), { details })
+}
+
+/** Les onglets-fenêtres renvoyés vers d'autres onglets ; un échec est dit, jamais tu. */
+async function remapViews(mapping: Map<string, string>, warnings: string[]) {
+  try {
+    return await remapIndexViewSources("objects", mapping)
+  } catch (error) {
+    console.error("OBJECT_REGROUP_VIEWS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    warnings.push("Les onglets-fenêtres de l’index des objets n’ont pas pu suivre : ouvre chacun d’eux et choisis de nouveau son tableau.")
+    return 0
+  }
+}
+
 export async function regroupObjectIndexes() {
   const folder = await objectsFolder()
   // Règle du projet : ne jamais recréer une feuille qui existe déjà sous ce nom.
@@ -204,11 +220,18 @@ export async function regroupObjectIndexes() {
       }
       await moveDriveFile(created.id, folder.id, backupId)
     } catch (error) {
-      // Une bascule à moitié faite est défaite : les anciens classeurs reviennent.
-      for (const entryId of moved) await moveDriveFile(entryId, folder.id, backupId).catch(() => undefined)
+      // Une bascule à moitié faite est défaite : les anciens classeurs reviennent. Un classeur
+      // qui ne peut pas revenir est nommé : il faut alors le remettre à la main.
+      const stuck: string[] = []
+      for (const entryId of moved) await moveDriveFile(entryId, folder.id, backupId).catch(() => { stuck.push(entryId) })
+      if (stuck.length) {
+        console.error("OBJECT_REGROUP_ROLLBACK_FAILED", stuck)
+        throw regroupError("OBJECT_REGROUP_ROLLBACK_FAILED", stuck.map((entryId) => `« ${entries.find((entry) => entry.entryId === entryId)?.name ?? entryId} » est resté dans « ${OBJECT_INDEX_BACKUP_FOLDER} ».`))
+      }
       throw error
     }
-    const views = await remapIndexViewSources("objects", new Map(copies.map((copy) => [objectTableSource(copy.table.fileId, copy.table.sheetId), objectTableSource(created.id, copy.sheetId)]))).catch(() => 0)
+    const warnings: string[] = []
+    const views = await remapViews(new Map(copies.map((copy) => [objectTableSource(copy.table.fileId, copy.table.sheetId), objectTableSource(created.id, copy.sheetId)])), warnings)
     clearObjectIndexTableCache()
     return {
       fileId: created.id,
@@ -216,6 +239,7 @@ export async function regroupObjectIndexes() {
       tabs: copies.map((copy) => ({ name: copy.name, from: `${copy.table.fileName} · ${copy.table.tabName}`, rows: copy.table.rows.length, idsWritten: plans.get(copy.sheetId)?.cells.length ?? 0 })),
       backupFolder: OBJECT_INDEX_BACKUP_FOLDER,
       views,
+      warnings,
     }
   } catch (error) {
     // Rien n'a basculé : la copie reste dans la sauvegarde, renommée, pour qu'on puisse
@@ -239,12 +263,31 @@ export async function revertObjectIndexRegroup() {
   if (!merged || !log?.length) throw new Error("OBJECT_REGROUP_NOT_FOUND")
   const backupId = log[0][8]?.trim()
   if (!backupId) throw new Error("OBJECT_REGROUP_NOT_FOUND")
-  for (const entryId of [...new Set(log.map((row) => row[6]?.trim()).filter(Boolean))]) {
-    await moveDriveFile(entryId, folder.id, backupId)
+  const nameOf = (entryId: string) => log.find((row) => row[6]?.trim() === entryId)?.[1] || entryId
+  const moved: string[] = []
+  try {
+    for (const entryId of [...new Set(log.map((row) => row[6]?.trim()).filter(Boolean))]) {
+      await moveDriveFile(entryId, folder.id, backupId)
+      moved.push(entryId)
+    }
+    await moveDriveFile(merged.entryId, backupId, folder.id)
+  } catch (error) {
+    // Une annulation à moitié faite est défaite (Eraser lirait sinon les deux versions des
+    // objets) ; un classeur qui ne peut pas retourner à la sauvegarde est nommé.
+    const stuck: string[] = []
+    for (const entryId of moved) await moveDriveFile(entryId, backupId, folder.id).catch(() => { stuck.push(entryId) })
+    if (stuck.length) {
+      console.error("OBJECT_REGROUP_REVERT_INCOMPLETE", stuck)
+      throw regroupError("OBJECT_REGROUP_REVERT_INCOMPLETE", stuck.map((entryId) => `« ${nameOf(entryId)} » est revenu dans « Objets » à côté de « ${MERGED_OBJECT_INDEX_NAME} » : range-le dans « ${OBJECT_INDEX_BACKUP_FOLDER} ».`))
+    }
+    throw error
   }
-  await moveDriveFile(merged.entryId, backupId, folder.id)
-  await renameDriveFile(merged.fileId, `${MERGED_OBJECT_INDEX_NAME} · annulé le ${today()}`).catch(() => undefined)
-  const views = await remapIndexViewSources("objects", new Map(log.map((row) => [objectTableSource(merged.fileId, Number(row[5])), objectTableSource(row[0], Number(row[3]))]))).catch(() => 0)
+  const warnings: string[] = []
+  await renameDriveFile(merged.fileId, `${MERGED_OBJECT_INDEX_NAME} · annulé le ${today()}`).catch((error) => {
+    console.error("OBJECT_REGROUP_RENAME_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    warnings.push(`« ${MERGED_OBJECT_INDEX_NAME} », rangé dans « ${OBJECT_INDEX_BACKUP_FOLDER} », n’a pas pu être renommé : renomme-le à la main avant de regrouper de nouveau.`)
+  })
+  const views = await remapViews(new Map(log.map((row) => [objectTableSource(merged.fileId, Number(row[5])), objectTableSource(row[0], Number(row[3]))])), warnings)
   clearObjectIndexTableCache()
-  return { restored: [...new Set(log.map((row) => row[1]))], views }
+  return { restored: [...new Set(log.map((row) => row[1]))], views, warnings }
 }

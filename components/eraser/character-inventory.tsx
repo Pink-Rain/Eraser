@@ -44,19 +44,21 @@ const categoryDefaults: Record<InventoryCategory, { name: string; capacity: numb
 }
 
 type ItemFields = { name: string; description: string; type: string; subtype: string; effect: string }
+/** Ce que la page montre de la case : le serveur refuse (409) si la feuille a changé depuis. */
+type SlotExpectation = { expectedItemId: string; expectedQuantity: number }
 type MutationBody =
   | { action: "create-container"; name: string; category: InventoryCategory; capacity: number }
   | { action: "update-container"; containerId: string; name: string; capacity: number }
   | { action: "delete-container"; containerId: string }
   | { action: "add-item"; itemId: string; containerId: string }
   | ({ action: "create-item"; containerId: string } & ItemFields)
-  | { action: "set-quantity"; slotId: string; quantity: number }
+  | ({ action: "set-quantity"; slotId: string; quantity: number } & SlotExpectation)
   | { action: "set-equipped"; slotId: string; equipped: boolean }
   | { action: "set-modifiers"; slotId: string; modifiers: string }
   | ({ action: "update-item"; slotId: string; descriptionHtml?: string; effectHtml?: string } & ItemFields)
-  | { action: "move-item"; slotId: string; containerId: string }
-  | { action: "transfer-item"; slotId: string; targetId: string }
-  | { action: "set-currency"; containerId: string; currency: string; amount: number }
+  | ({ action: "move-item"; slotId: string; containerId: string } & SlotExpectation)
+  | ({ action: "transfer-item"; slotId: string; targetId: string } & SlotExpectation)
+  | { action: "set-currency"; containerId: string; currency: string; amount: number; expectedAmount: number }
 
 type Mutate = (body: MutationBody, pendingKey: string) => Promise<boolean>
 
@@ -109,15 +111,15 @@ function InlineField({ label, value, html = "", multiline = false, className = "
 // sur l'onglet) les montre aussitôt, relues derrière.
 const knownTransferTargets = new Map<string, InventoryTransferTarget[]>()
 
-function InventoryTransferPicker({ itemName, slotId, internalTargets, transferTargets, loading, pending, mutate, onDone }: { itemName: string; slotId: string; internalTargets: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; loading: boolean; pending: boolean; mutate: Mutate; onDone: () => void }) {
+function InventoryTransferPicker({ itemName, slotId, expected, internalTargets, transferTargets, loading, pending, mutate, onDone }: { itemName: string; slotId: string; expected: SlotExpectation; internalTargets: InventoryContainerRecord[]; transferTargets: InventoryTransferTarget[]; loading: boolean; pending: boolean; mutate: Mutate; onDone: () => void }) {
   const [kind, setKind] = useState<"character" | "npc" | null>(null)
   const [search, setSearch] = useState("")
   const campaignTargets = transferTargets.filter((target) => target.kind === "campaign")
   const peopleTargets = kind ? transferTargets.filter((target) => target.kind === kind && (!normalizedSearch(search) || normalizedSearch(target.name).includes(normalizedSearch(search)))) : []
   async function moveTo(targetId: string, internal = false) {
     const saved = internal
-      ? await mutate({ action: "move-item", slotId, containerId: targetId }, `slot:${slotId}`)
-      : await mutate({ action: "transfer-item", slotId, targetId }, `slot:${slotId}`)
+      ? await mutate({ action: "move-item", slotId, containerId: targetId, ...expected }, `slot:${slotId}`)
+      : await mutate({ action: "transfer-item", slotId, targetId, ...expected }, `slot:${slotId}`)
     if (saved) onDone()
   }
   // Les contenants de cet inventaire sont connus d'emblée : seules les destinations
@@ -216,6 +218,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
     effectHtml: changes.effectHtml,
   }, `slot:${slot.id}`)
   const internalTargets = compatibleContainers.filter((candidate) => candidate.id !== container.id)
+  const expected: SlotExpectation = { expectedItemId: slot.itemId, expectedQuantity: slot.quantity }
   return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
     {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Objet reçu — disparaît au survol" aria-label="Nouvel objet reçu" />}
     <div className="flex items-start gap-3">
@@ -228,11 +231,11 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
       <div className="min-w-0 flex-1">
         <div className="flex items-start gap-2">
           <div className="min-w-0 flex-1"><div className="flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5"><InlineField readOnly={readOnly} label="le nom" value={item.name} html={item.nameHtml} className="block max-w-full text-sm font-semibold" onCommit={(name) => update({ name }).then(() => undefined)} /><ItemCharges item={shown} raw={slot.modifiers} readOnly={readOnly} onChange={(modifiers) => void mutate({ action: "set-modifiers", slotId: slot.id, modifiers }, `slot:${slot.id}`)} /></div><div className="mt-0.5 flex flex-wrap items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><InlineField readOnly={readOnly} label="le type" value={item.type} onCommit={(type) => update({ type }).then(() => undefined)} /><span>·</span><InlineField readOnly={readOnly} label="le sous-type" value={item.subtype} onCommit={(subtype) => update({ subtype }).then(() => undefined)} /></div></div>
-          {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1 }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
+          {!readOnly && <div className="inline-flex items-center gap-0.5"><button type="button" disabled={pending} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity - 1, ...expected }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer un ${item.name}`}><Minus className="size-3" /></button><span className="min-w-7 text-center text-sm font-semibold tabular-nums">{slot.quantity}<span className="text-[9px] font-normal text-muted-foreground">/{item.maxQuantity}</span></span><button type="button" disabled={pending || slot.quantity >= item.maxQuantity} onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: slot.quantity + 1, ...expected }, `slot:${slot.id}`)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted disabled:opacity-30" aria-label={`Ajouter un ${item.name}`}><Plus className="size-3" /></button></div>}
           {readOnly && <span className="shrink-0 text-sm font-semibold tabular-nums">×{slot.quantity}</span>}
           {equippable && <button type="button" disabled={pending} onClick={() => setLinking(true)} className={`flex size-7 shrink-0 items-center justify-center rounded-md hover:bg-muted ${modifiers.length || customized ? "text-primary" : "text-muted-foreground"}`} aria-label={`Modifier cet exemplaire de ${item.name} : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées`} title="Cet exemplaire : compétence, valeur, distance, actions, attributs, matériaux, runes, compétences liées"><Anvil className="size-3.5" /></button>}
-          {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
-          {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0 }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
+          {!readOnly && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) void ensureTargets() }}><PopoverTrigger asChild><button type="button" disabled={pending} className={`flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted ${moving ? "bg-muted text-foreground" : ""}`} aria-label={`Transférer ${item.name}`} title="Transférer"><MoveRight className="size-3.5" /></button></PopoverTrigger><PopoverContent align="end" side="bottom" className="w-80 p-3"><InventoryTransferPicker itemName={item.name} slotId={slot.id} expected={expected} internalTargets={internalTargets} transferTargets={transferTargets} loading={targetsLoading} pending={pending} mutate={mutate} onDone={() => setMoving(false)} /></PopoverContent></Popover>}
+          {!readOnly && <AlertDialog><AlertDialogTrigger asChild><button type="button" disabled={pending} className="flex size-7 shrink-0 items-center justify-center rounded-md text-destructive/75 hover:bg-destructive/10" aria-label={`Retirer complètement ${item.name}`}><Trash2 className="size-3.5" /></button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Retirer « {item.name} » ?</AlertDialogTitle><AlertDialogDescription>Cet objet sera retiré de cet inventaire.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => void mutate({ action: "set-quantity", slotId: slot.id, quantity: 0, ...expected }, `slot:${slot.id}`)}>Retirer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
         </div>
         <div className="mt-2 grid gap-1 text-xs leading-5 text-muted-foreground"><InlineField readOnly={readOnly} multiline label="la description" value={item.description} html={item.descriptionHtml} template={shown} className="w-full" onCommit={(description) => update({ description }).then(() => undefined)} onRichCommit={(descriptionHtml) => void update({ description: richTextPlainText(descriptionHtml), descriptionHtml })} />{(container.category !== "Esthétique" || item.effect.trim()) && <div className="flex gap-1"><span className="font-semibold text-foreground/65">Effet :</span><InlineField readOnly={readOnly} multiline label="l’effet" value={item.effect} html={item.effectHtml} template={shown} className="min-w-0 flex-1" onCommit={(effect) => update({ effect }).then(() => undefined)} onRichCommit={(effectHtml) => void update({ effect: richTextPlainText(effectHtml), effectHtml })} /></div>}<ObjectTraits item={shown} className="mt-0.5" /></div>
       </div>
@@ -248,7 +251,7 @@ function CurrencyLine({ slot, container, readOnly, mutate }: { slot: InventorySl
   const [pending, setPending] = useState(false)
   function amountFromExpression(raw: string) { try { return evaluateRelativeExpression(raw, slot.quantity) } catch { return slot.quantity } }
   // « -10 », « *2 »… s'applique aussi en cliquant ailleurs, sans Entrée.
-  const leave = useCommitOnLeave(editing, expression, String(slot.quantity), (next) => mutate({ action: "set-currency", containerId: container.id, currency, amount: Math.max(0, Math.trunc(amountFromExpression(next))) }, `currency:${slot.id}`))
+  const leave = useCommitOnLeave(editing, expression, String(slot.quantity), (next) => mutate({ action: "set-currency", containerId: container.id, currency, amount: Math.max(0, Math.trunc(amountFromExpression(next))), expectedAmount: slot.quantity }, `currency:${slot.id}`))
   async function save() { setPending(true); const done = await leave.save(); setPending(false); if (done) setEditing(false) }
   return <div className="flex min-w-0 flex-1 flex-col items-center rounded-xl border border-[#b4874540] bg-background/35 px-3 py-2 text-center"><span className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{currency}</span>{readOnly ? <span className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]">{slot.quantity}</span> : editing ? <div className="mt-1 flex items-center gap-1"><Input autoFocus onFocus={(event) => event.currentTarget.select()} value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leave.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24 border-0 bg-background/45 text-center shadow-none" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} disabled={pending} className="flex size-8 items-center justify-center rounded-md text-[#b48745] hover:bg-[#b4874515]">{pending ? <LoaderCircle className="size-3.5 animate-spin" /> : <Check className="size-3.5" />}</button></div> : <button type="button" onClick={() => { setExpression(String(slot.quantity)); setEditing(true) }} className="mt-1 text-lg font-semibold tabular-nums text-[#b48745]" title="Valeur, +10, -10%, *2 ou /3">{slot.quantity}</button>}</div>
 }
@@ -348,7 +351,15 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
     const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
     const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }
     setPendingKey("")
-    if (!response.ok || !payload.inventory) { setError(payload.error || "La modification n’a pas pu être enregistrée."); return false }
+    if (!response.ok || !payload.inventory) {
+      setError(payload.error || "La modification n’a pas pu être enregistrée.")
+      // La feuille a changé ailleurs entre-temps (409) : l'inventaire affiché est relu.
+      if (response.status === 409) void fetch(`${inventoryEndpoint}?summary=1`, { cache: "no-store" })
+        .then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null)
+        .then((loaded) => { if (loaded) applyInventory((current) => keepCatalogFields(loaded, current)) })
+        .catch(() => { /* le message suffit */ })
+      return false
+    }
     applyInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items })); return true
   }
 

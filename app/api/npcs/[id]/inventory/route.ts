@@ -5,6 +5,7 @@ import {
   listInventoryTransferTargets, listNpcs,
   setCharacterInventoryItemQuantity, transferCharacterInventoryItem, updateCharacterInventoryItem,
 } from "@/lib/google-sheets"
+import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { isNpcLibraryPage } from "@/lib/npc-pages"
 import { transferWithNotification } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -62,18 +63,19 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     let inventory
     if (body.action === "add-item" && typeof body.itemId === "string") inventory = await addCharacterInventoryItem(id, body.itemId, undefined, "npc")
     else if (body.action === "create-item" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await createCharacterInventoryItem(id, "", { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect }, "npc")
-    else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "npc")
+    else if (body.action === "set-quantity" && typeof body.slotId === "string" && typeof body.quantity === "number" && Number.isFinite(body.quantity)) inventory = await setCharacterInventoryItemQuantity(id, body.slotId, body.quantity, "npc", inventorySlotExpectation(body))
     else if (body.action === "update-item" && typeof body.slotId === "string" && typeof body.name === "string" && typeof body.description === "string" && typeof body.type === "string" && typeof body.subtype === "string" && typeof body.effect === "string") inventory = await updateCharacterInventoryItem(id, body.slotId, { name: body.name, description: body.description, type: body.type, subtype: body.subtype, effect: body.effect, nameHtml: typeof body.nameHtml === "string" ? body.nameHtml : undefined, descriptionHtml: typeof body.descriptionHtml === "string" ? body.descriptionHtml : undefined, effectHtml: typeof body.effectHtml === "string" ? body.effectHtml : undefined }, "npc")
     else if (body.action === "transfer-item" && typeof body.slotId === "string" && typeof body.targetId === "string" && authorization.npc.pageLinked !== "bac-a-sable") {
       const targets = await transferTargetsFor(authorization, id)
       if (!targets.some((target) => target.id === body.targetId)) throw new Error("INVENTORY_TRANSFER_FORBIDDEN")
-      const slotId = body.slotId, targetId = body.targetId
-      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "npc", onMoved))
+      const slotId = body.slotId, targetId = body.targetId, expected = inventorySlotExpectation(body)
+      inventory = await transferWithNotification(authorization.account, (onMoved) => transferCharacterInventoryItem(id, slotId, targetId, "npc", onMoved, expected))
     }
     else throw new Error("INVALID_INVENTORY_ACTION")
     return NextResponse.json({ inventory: { ...inventory, items: [] } })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
+    if (code === "INVENTORY_CHANGED") return NextResponse.json({ error: INVENTORY_CHANGED_MESSAGE }, { status: 409 })
     const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement compatible disponible."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ajoute d’abord un contenant compatible avec cet objet."
         : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet objet n’existe plus dans la feuille Objets."
