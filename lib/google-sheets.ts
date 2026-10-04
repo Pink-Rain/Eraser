@@ -5031,8 +5031,10 @@ export async function saveCharacterRelation(input: Omit<CharacterRelationRecord,
     "Niveau": Math.max(-3, Math.min(3, Math.trunc(input.level))), "Notes personnelles": input.personalNotes, "Créé par": input.createdByUid,
     "ID campagne": input.campaignId, "Créée le": current?.createdAt || input.createdAt || now, "Modifiée le": now,
   }
-  if (existingIndex >= 0) await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, existingIndex + 2, cells))
-  else await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row(cells)])
+  // Le nom et les notes saisis restent du texte : « - se méfie de lui » n'est pas une formule.
+  const written = { ...cells, "Nom": textCell(input.name), "Notes personnelles": textCell(input.personalNotes) }
+  if (existingIndex >= 0) await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, existingIndex + 2, written))
+  else await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row(written)])
   return characterRelationFromRow(columns.row(cells).map(String), columns)
 }
 
@@ -5394,7 +5396,9 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
   // ailleurs depuis le dernier passage décalerait toute la nouvelle ligne.
   const { map, layout, catalog } = await characterColumns(sheet.spreadsheetId, sheet.tabName, { fresh: true })
   const width = layout.headers.length
-  const values = Array.from({ length: width }, (_, index) => String(input[index] ?? ""))
+  // Le texte saisi reste du texte (un nom qui commence par « = » n'est pas une formule) :
+  // seules les formules écrites par Eraser en sont.
+  const values = Array.from({ length: width }, (_, index) => textCell(String(input[index] ?? "")))
   // Les valeurs de départ viennent de l'Index des caractéristiques et compétences
   // (seuils critiques 96 et 5, compteurs à 0… dans la liste d'origine).
   applyCharacteristicDefaults(values, layout, catalog)
@@ -5404,11 +5408,12 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
   if (!created) console.error("CHARACTER_ROW_NOT_FOUND_AFTER_CREATION", id)
   else if (!sameHeaderRow(created.map.columns.headers, map)) console.error("CHARACTER_COLUMNS_MOVED_DURING_CREATION", id)
   else await writeCharacterValues(sheet, created.map, created.rowNumber, applyCharacterDefaultsAndFormulas(values, created.rowNumber, created.layout, catalog), catalog)
+  const subtitle = displayedMultipleValue(String(input[1] ?? ""), "all")
   await getDb().insert(characterIndex).values({
-    id, ownerUid: uid, name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString(),
+    id, ownerUid: uid, name, subtitle, updatedAt: new Date().toISOString(),
   }).onConflictDoUpdate({
     target: characterIndex.id,
-    set: { name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString() },
+    set: { name, subtitle, updatedAt: new Date().toISOString() },
   })
   return { id, name }
 }

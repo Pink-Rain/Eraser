@@ -242,6 +242,38 @@ test("En-têtes « Joueur », « Nom personnage » ou « MJ » renommés : les j
   assert.deepEqual(await known(), expected);
 });
 
+test("Texte saisi gardé en texte : création de fiche, nom et notes de relation", async () => {
+  const characters = await linkCharacters([]);
+  const created = await sheets.createCharacterForUser("uid-1", ["=IMPORTRANGE(\"x\")", "- elfe des bois"]);
+  // La ligne ajoutée : le nom saisi y entre comme du texte, jamais comme une formule.
+  const entered = google.world.enteredCells.find((cells) => cells[headers.indexOf("ID")]?.stringValue === created.id);
+  assert.deepEqual(entered[headers.indexOf("Nom personnage")], { stringValue: "=IMPORTRANGE(\"x\")" });
+  const row = record(google.grid(characters, "Personnages"), 1);
+  assert.equal(row["ID"], created.id);
+  assert.equal(row["Nom personnage"], "=IMPORTRANGE(\"x\")");
+  assert.equal(row["Peuple"], "- elfe des bois");
+  // Les formules d'Eraser restent des formules.
+  assert.match(row["Rapidité"], /^=/);
+  const [indexed] = (await getDb().select().from(schema.characterIndex)).filter((entry) => entry.id === created.id);
+  assert.equal(indexed.name, "=IMPORTRANGE(\"x\")");
+  assert.equal(indexed.subtitle, "- elfe des bois");
+
+  const relations = fresh("relations");
+  google.addSpreadsheet(relations, [{ title: "Relations", grid: [["ID", "ID personnage", "Type de cible", "ID cible", "Nom", "Niveau", "Notes personnelles", "Créé par", "ID campagne", "Créée le", "Modifiée le"]] }]);
+  await link("character_relations", relations, "Relations");
+  const saved = await sheets.saveCharacterRelation({ id: fresh("REL"), characterId: created.id, targetKind: "npc", targetId: "PNJ-1", name: "=Aldor", level: -1, personalNotes: "- se méfie de lui", createdByUid: "uid-1", campaignId: "CAMP-1" });
+  const relationHeaders = google.grid(relations, "Relations")[0];
+  const enteredRelation = google.world.enteredCells.at(-1);
+  assert.deepEqual(enteredRelation[relationHeaders.indexOf("Nom")], { stringValue: "=Aldor" });
+  assert.deepEqual(enteredRelation[relationHeaders.indexOf("Notes personnelles")], { stringValue: "- se méfie de lui" });
+  const written = record(google.grid(relations, "Relations"), 1);
+  assert.equal(written["Notes personnelles"], "- se méfie de lui");
+  assert.equal(written["Nom"], "=Aldor");
+  assert.equal(written["Niveau"], "-1");
+  assert.equal(saved.personalNotes, "- se méfie de lui");
+  assert.equal(saved.name, "=Aldor");
+});
+
 test("Une fiche à la corbeille ne réapparaît pas dans la liste de son joueur", async () => {
   const id = fresh("PERSO");
   await linkCharacters([{ "ID": id, "Joueur": "uid-trash", "Nom personnage": "Oublié" }]);
