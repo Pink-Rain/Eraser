@@ -9,6 +9,17 @@ export function normalizeGoogleSheetRows(rows: GoogleSheetCellValue[][] | undefi
 }
 
 /**
+ * Un texte saisi, à écrire en USER_ENTERED, qui doit rester du texte. Sheets prend pour une
+ * formule ce qui commence par « = », « + », « - » ou « @ » (« - se méfie de lui » s'affichait
+ * « #ERROR! ») et retire une apostrophe de tête : l'apostrophe ajoutée devant ne fait pas
+ * partie de la valeur. Un nombre (« -5 », « +2,5 ») reste un nombre.
+ */
+export function textCell(value: string) {
+  if (!/^[=+\-@']/.test(value) || /^[+-]?\d+(?:[.,]\d+)?$/.test(value.trim())) return value
+  return `'${value}`
+}
+
+/**
  * Première ligne (1-indexée) d’une plage A1, ou null si elle n’en précise pas.
  *
  * Google renvoie avec chaque lecture la plage réellement lue, qui ne commence

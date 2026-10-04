@@ -29,3 +29,15 @@ test("une réponse manquante reste vide au lieu de prendre la colonne voisine", 
   const partial = [answer("Personnages!A1:A9", ranges[0], "ID"), answer("Personnages!D1:D9", ranges[2], "Peuple")];
   assert.deepEqual(values.matchValueRanges(ranges, partial).map((matched) => matched?.values?.[0]?.[0]), ["ID", undefined, "Peuple", undefined]);
 });
+
+test("un texte saisi reste du texte, un nombre reste un nombre", () => {
+  assert.equal(values.textCell("- se méfie de lui"), "'- se méfie de lui");
+  assert.equal(values.textCell("=A1"), "'=A1");
+  assert.equal(values.textCell("+ un allié"), "'+ un allié");
+  assert.equal(values.textCell("@Lina"), "'@Lina");
+  assert.equal(values.textCell("'twas"), "''twas");
+  assert.equal(values.textCell("-5"), "-5");
+  assert.equal(values.textCell("+2,5"), "+2,5");
+  assert.equal(values.textCell("Sorcier·ère"), "Sorcier·ère");
+  assert.equal(values.textCell(""), "");
+});

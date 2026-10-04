@@ -77,7 +77,7 @@ import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
-import { matchValueRanges, normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { matchValueRanges, normalizeGoogleSheetRows, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
@@ -458,7 +458,11 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
       if (!(error instanceof Error) || error.message !== "GOOGLE_DRIVE_NOT_AUTHORIZED") throw error
       response = await traced("sheets", label, () => googleServiceAuthorizedFetch(url, init), (reply) => String(reply.status))
     }
-    if (![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
+    // 429 : Google a refusé sans rien faire. Une erreur 5xx, elle, peut arriver après coup :
+    // rejouer un ajout ou une suppression de ligne l'aurait fait deux fois (ligne suivante
+    // supprimée, ligne ajoutée en double).
+    const retry = response.status === 429 || ([500, 502, 503, 504].includes(response.status) && repeatableRequest(path, init))
+    if (!retry || attempt === 2) break
     // Trop de requêtes (429) : Google compte par minute, on attend plus longtemps.
     await new Promise((resolve) => setTimeout(resolve, response?.status === 429 ? 2_000 * (attempt + 1) : 250 * (attempt + 1)))
   }
@@ -474,6 +478,18 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
   forgetAfterStructureChange(path, init)
   announceSpreadsheetWrite(path, (init?.method ?? "GET").toUpperCase())
   return response
+}
+
+/** Une requête qu'on peut renvoyer telle quelle : une lecture, ou des valeurs écrites à des cases fixes. */
+function repeatableRequest(path: string, init?: RequestInit) {
+  const method = (init?.method ?? "GET").toUpperCase()
+  if (method === "GET" || method === "PUT") return true
+  const verb = /:(\w+)(?:\?|$)/.exec(path)?.[1] ?? ""
+  if (["batchGet", "batchGetByDataFilter", "getByDataFilter", "batchClear", "batchClearByDataFilter", "clear"].includes(verb)) return true
+  if (/\/values:batchUpdate/.test(path)) return true
+  // Mise en forme, filtre, largeurs : oui. Ajouter, supprimer, insérer, coller, trier : non.
+  return verb === "batchUpdate" && typeof init?.body === "string"
+    && !/"(?:add|append|delete|insert|duplicate|copyPaste|cutPaste|pasteData|sortRange|moveDimension|autoFill|randomizeRange|textToColumns|trimWhitespace)\w*"\s*:/.test(init.body)
 }
 
 /**
@@ -5349,8 +5365,8 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   })
   const name = entries.find(([index]) => index === 0)?.[1]
   if (name !== undefined && (!name.trim() || name.trim().length > 120)) throw new Error("INVALID_CHARACTER_NAME")
-  // Une saisie qui commence par « = » reste du texte : seule Eraser écrit des formules.
-  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(map.valueColumns[index] + 1)}${rowNumber}`), values: [[value.startsWith("=") ? `'${value}` : value]] }))
+  // Une saisie reste du texte (« - se méfie de lui » n'est pas une formule) : seule Eraser écrit des formules.
+  const data = entries.map(([index, value]) => ({ range: sheetTabRange(source.tabName, `${columnName(map.valueColumns[index] + 1)}${rowNumber}`), values: [[textCell(value)]] }))
   for (let start = 0; start < data.length; start += 200) await updateRanges(source.spreadsheetId, data.slice(start, start + 200))
   let values = await readCharacterValues(source, map, rowNumber)
   // Une fiche jamais passée par l'enregistrement complet (ou abîmée dans Sheets) retrouve ses formules.
