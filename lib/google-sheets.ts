@@ -398,8 +398,8 @@ async function classesSource() {
 
 
 /** La feuille Classes (formules comprises : l'image est souvent une formule), colonnes par leur nom. */
-function readClassSheet(source: { spreadsheetId: string; tabName: string }) {
-  return readNamedSheet(source.spreadsheetId, source.tabName, classSheetHeaders, { render: "FORMULA" })
+function readClassSheet(source: { spreadsheetId: string; tabName: string }, options: { fresh?: boolean } = {}) {
+  return readNamedSheet(source.spreadsheetId, source.tabName, classSheetHeaders, { render: "FORMULA", fresh: options.fresh })
 }
 
 /** La lettre de la colonne Image (les illustrations et leurs notes y sont posées). */
@@ -2310,7 +2310,7 @@ export async function updateClassAccentColors(updates: Array<{ id: string; dark:
   const safeUpdates = updates.filter((item) => item.id && validHexColor(item.dark) && validHexColor(item.light)).slice(0, 30)
   if (!safeUpdates.length) return
   const { tabName } = source
-  const read = await readClassSheet(source)
+  const read = await readClassSheet(source, { fresh: true })
   const columns = await ensureNamedColumns(source.spreadsheetId, tabName, read.columns)
   const rowById = new Map(read.rows.map((row, index) => [columns.get(row, "ID"), index + 2]))
   await updateRanges(source.spreadsheetId, safeUpdates.flatMap((item) => {
@@ -3864,6 +3864,18 @@ export async function ensureJdrSheet(key: JdrSheetKey) {
   }
   const definition = jdrSheetDefinitions.find((item) => item.key === key)
   if (!definition) throw new Error("UNKNOWN_JDR_SHEET")
+  // Deux demandes en même temps ne cherchent (et au besoin ne créent) la feuille qu'une
+  // fois : chacune ne la trouvant pas encore, elles en créaient deux du même nom.
+  const pending = pendingJdrSheetCreations.get(key)
+  if (pending) return pending
+  const creation = linkOrCreateJdrSheet(key, definition).finally(() => pendingJdrSheetCreations.delete(key))
+  pendingJdrSheetCreations.set(key, creation)
+  return creation
+}
+
+const pendingJdrSheetCreations = new Map<JdrSheetKey, Promise<JdrSheetRecord>>()
+
+async function linkOrCreateJdrSheet(key: JdrSheetKey, definition: StructuredSheetDefinition) {
   const existingFile = await findGoogleSpreadsheetByName(definition.name)
   const file = existingFile ?? await createGoogleSpreadsheet(definition.name)
   if (!existingFile) await configureStructuredSheet(file.id, definition)
@@ -4183,8 +4195,8 @@ async function npcSheet() {
 }
 
 /** La feuille des PNJ, colonnes retrouvées par leur nom (ligne 1). */
-async function readNpcSheet(sheet: JdrSheetRecord) {
-  return readNamedSheet(sheet.spreadsheetId, sheet.tabName, npcSheetHeaders)
+async function readNpcSheet(sheet: JdrSheetRecord, options: { fresh?: boolean } = {}) {
+  return readNamedSheet(sheet.spreadsheetId, sheet.tabName, npcSheetHeaders, { fresh: options.fresh })
 }
 
 function npcFromRow(row: readonly (string | undefined)[], columns: SheetColumns): CampaignNpcRecord | null {
@@ -4270,7 +4282,7 @@ export async function listCampaignNpcs(campaignId: string) {
 
 export async function saveNpcs(pageLinked: string, npcs: CampaignNpcRecord[], options: { inCampaign?: boolean } = {}) {
   const sheet = await npcSheet()
-  const read = await readNpcSheet(sheet)
+  const read = await readNpcSheet(sheet, { fresh: true })
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
   const { rows } = read
   const updates: Array<{ range: string; values: SheetCell[][] }> = []
@@ -4299,7 +4311,7 @@ export async function deleteNpcs(pageLinked: string, npcIds: string[]) {
   if (!npcIds.length) return
   const sheet = await npcSheet()
   const selectedIds = new Set(npcIds)
-  const { columns, rows } = await readNpcSheet(sheet)
+  const { columns, rows } = await readNpcSheet(sheet, { fresh: true })
   const clear = rows.flatMap((row, index) => columns.get(row, "Page lié") === pageLinked && selectedIds.has(columns.get(row, "ID"))
     ? [{ range: namedRowRange(sheet.tabName, columns, index + 2), values: [columns.blank()] }]
     : [])
@@ -4355,8 +4367,10 @@ function tabletopHeaders(tab: TabletopTabName) {
  * Un onglet du Tabletop : ses colonnes retrouvées par leur nom, chaque ligne remise dans
  * l'ordre prévu (les lectures ci-dessous en dépendent). `rows[i]` est la ligne i + 2.
  */
-async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName) {
-  const read = await readNamedSheet(spreadsheetId, tab, tabletopHeaders(tab))
+async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName, options: { fresh?: boolean } = {}) {
+  // `fresh` pour une écriture : la ligne visée est retrouvée dans la feuille telle qu'elle
+  // est maintenant (un autre joueur a pu ajouter ou retirer un pion entre-temps).
+  const read = await readNamedSheet(spreadsheetId, tab, tabletopHeaders(tab), { fresh: options.fresh })
   const columns = await ensureNamedColumns(spreadsheetId, tab, read.columns).catch((error) => {
     console.error("TABLETOP_COLUMNS_CHECK_FAILED", tab, error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return read.columns
@@ -4433,7 +4447,7 @@ export async function createTabletopMap(pageLinked: string, createdByUid: string
 
 export async function updateTabletopMap(id: string, patch: Partial<Pick<TabletopMapRecord, "name" | "backgroundUrl" | "width" | "height" | "gridSize" | "distancePerGrid" | "distanceUnit" | "folder">>) {
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true })
   const index = rows.findIndex((candidate) => candidate[0] === id)
   if (index < 0) return null
   const current = tabletopMapFromRow(rows[index])
@@ -4507,8 +4521,8 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
   if (!cleaned || normalizedTabletopFolder(cleaned) === normalizedTabletopFolder("Sans dossier")) throw new Error("INVALID_TABLETOP_FOLDER")
   const sheet = await ensureJdrSheet("tabletop")
   const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
-    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
-    readTabletopTab(sheet.spreadsheetId, "Cartes"),
+    readTabletopTab(sheet.spreadsheetId, "Dossiers", { fresh: true }),
+    readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true }),
   ])
   const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
   const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
@@ -4540,8 +4554,8 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
 export async function deleteTabletopFolder(pageLinked: string, folderId: string, currentName: string) {
   const sheet = await ensureJdrSheet("tabletop")
   const [{ columns: folderColumns, rows: folderRows }, { columns: mapColumns, rows: mapRows }] = await Promise.all([
-    readTabletopTab(sheet.spreadsheetId, "Dossiers"),
-    readTabletopTab(sheet.spreadsheetId, "Cartes"),
+    readTabletopTab(sheet.spreadsheetId, "Dossiers", { fresh: true }),
+    readTabletopTab(sheet.spreadsheetId, "Cartes", { fresh: true }),
   ])
   const folderIndex = folderRows.findIndex((row) => row[0] === folderId && row[1] === pageLinked)
   const storedFolder = folderIndex >= 0 ? tabletopFolderFromRow(folderRows[folderIndex]) : null
@@ -4601,7 +4615,7 @@ export async function listTabletopTokens(mapId: string) {
 
 export async function addTabletopToken(mapId: string, entityKind: TabletopTokenRecord["entityKind"], entityId: string, x: number, y: number, label = "", icon = "", scale = 1, iconScale = 1, color = "#7f3430") {
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
   const existing = rows.map(tabletopTokenFromRow).find((token) => token?.mapId === mapId && token.entityKind === entityKind && token.entityId === entityId)
   if (existing) return existing
   const now = new Date().toISOString()
@@ -4618,7 +4632,7 @@ export async function addTabletopToken(mapId: string, entityKind: TabletopTokenR
 
 export async function moveTabletopToken(mapId: string, tokenId: string, x: number, y: number) {
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return null
   const token = tabletopTokenFromRow(rows[index])
@@ -4633,7 +4647,7 @@ export async function moveTabletopToken(mapId: string, tokenId: string, x: numbe
 
 export async function updateTabletopTokenAppearance(mapId: string, tokenId: string, patch: Partial<Pick<TabletopTokenRecord, "scale" | "iconScale" | "label" | "icon" | "color">>) {
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return null
   const token = tabletopTokenFromRow(rows[index])
@@ -4658,7 +4672,7 @@ export async function updateTabletopTokenAppearance(mapId: string, tokenId: stri
 export async function updateTabletopTokenStates(mapId: string, patches: Array<{ tokenId: string } & Partial<Pick<TabletopTokenRecord, "x" | "y" | "scale" | "iconScale" | "label" | "icon" | "color">>>) {
   if (!patches.length) return []
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
   const updates: Array<{ range: string; values: SheetCell[][] }> = []
   const saved: TabletopTokenRecord[] = []
   for (const patch of patches) {
@@ -4691,7 +4705,7 @@ export async function updateTabletopTokenStates(mapId: string, patches: Array<{ 
 
 export async function removeTabletopToken(mapId: string, tokenId: string) {
   const sheet = await ensureJdrSheet("tabletop")
-  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens")
+  const { columns, rows } = await readTabletopTab(sheet.spreadsheetId, "Tokens", { fresh: true })
   const index = rows.findIndex((candidate) => candidate[0] === tokenId && candidate[1] === mapId)
   if (index < 0) return false
   await updateRanges(sheet.spreadsheetId, canonicalWrites("Tokens", columns, `A${index + 2}:M${index + 2}`, [Array(13).fill("")]))
@@ -4831,10 +4845,10 @@ function characterRelationFromRow(row: readonly (string | undefined)[], columns:
   }
 }
 
-async function readRelationSheet() {
+async function readRelationSheet(options: { fresh?: boolean } = {}) {
   const sheet = await ensureJdrSheet("character_relations")
   if (!sheet) throw new Error("CHARACTER_RELATIONS_SHEET_UNAVAILABLE")
-  return { sheet, ...await readNamedSheet(sheet.spreadsheetId, sheet.tabName, characterRelationHeaders) }
+  return { sheet, ...await readNamedSheet(sheet.spreadsheetId, sheet.tabName, characterRelationHeaders, { fresh: options.fresh }) }
 }
 
 export async function listCharacterRelations(characterId: string) {
@@ -4847,7 +4861,7 @@ export async function getCharacterRelationById(characterId: string, relationId: 
 }
 
 export async function saveCharacterRelation(input: Omit<CharacterRelationRecord, "createdAt" | "updatedAt"> & Partial<Pick<CharacterRelationRecord, "createdAt" | "updatedAt">>) {
-  const read = await readRelationSheet()
+  const read = await readRelationSheet({ fresh: true })
   const { sheet, rows } = read
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
   const existingIndex = rows.findIndex((row) => columns.get(row, "ID") === input.id && columns.get(row, "ID personnage") === input.characterId)
@@ -4864,7 +4878,7 @@ export async function saveCharacterRelation(input: Omit<CharacterRelationRecord,
 }
 
 export async function deleteCharacterRelation(characterId: string, relationId: string) {
-  const { sheet, columns, rows } = await readRelationSheet()
+  const { sheet, columns, rows } = await readRelationSheet({ fresh: true })
   const index = rows.findIndex((row) => columns.get(row, "ID") === relationId && columns.get(row, "ID personnage") === characterId)
   if (index >= 0) await updateRange(sheet.spreadsheetId, namedRowRange(sheet.tabName, columns, index + 2), [columns.blank()])
 }
@@ -4996,7 +5010,7 @@ export async function updateCampaignForMj(mjUid: string | null, id: string, patc
   if (source) {
     const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
     if (rowNumber) {
-      const read = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
+      const read = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders, { fresh: true })
       const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, read.columns)
       await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, campaignCells({ ...next, id })))
     }
@@ -5173,7 +5187,7 @@ async function writeCampaignRelation(campaignId: string, characterId: string) {
   try {
     const relationSheet = await ensureJdrSheet("campaign_characters")
     if (!relationSheet) return "CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE"
-    const read = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders)
+    const read = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders, { fresh: true })
     if (read.rows.some((row) => read.columns.get(row, "ID campagne") === campaignId && read.columns.get(row, "ID personnage") === characterId)) return null
     const columns = await ensureNamedColumns(relationSheet.spreadsheetId, relationSheet.tabName, read.columns)
     await appendRows(relationSheet.spreadsheetId, namedAppendRange(relationSheet.tabName, columns), [columns.row({ "ID campagne": campaignId, "ID personnage": characterId })])
@@ -5195,7 +5209,7 @@ export async function removeCharacterFromCampaign(mjUid: string | null, campaign
   try {
     const relationSheet = await ensureJdrSheet("campaign_characters")
     if (!relationSheet) throw new Error("CAMPAIGN_CHARACTERS_SHEET_UNAVAILABLE")
-    const { columns, rows } = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders)
+    const { columns, rows } = await readNamedSheet(relationSheet.spreadsheetId, relationSheet.tabName, campaignCharacterHeaders, { fresh: true })
     const cleared = rows.flatMap((row, index) => columns.get(row, "ID campagne") === campaignId && columns.get(row, "ID personnage") === characterId
       ? namedRowWrites(relationSheet.tabName, columns, index + 2, { "ID campagne": "", "ID personnage": "" })
       : [])

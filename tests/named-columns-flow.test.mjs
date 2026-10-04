@@ -446,3 +446,28 @@ test("Références {} : PNJs, campagnes et personnages citables, colonnes privé
   assert.equal(player[keyOf(requests[4])], null);
   assert.equal(player[keyOf(requests[3])].name, "Brin");
 });
+
+test("Tabletop : un pion déplacé après un changement fait ailleurs touche le bon pion", async () => {
+  const id = fresh("tabletop");
+  google.addSpreadsheet(id, [
+    { title: "Cartes", grid: [["ID", "Page liée", "Nom", "Image", "Largeur", "Hauteur", "Taille case (px)", "Distance par case", "Unité", "Clé de salon", "Créé par", "Créée le", "Modifiée le", "Dossier"]] },
+    { title: "Tokens", grid: [["ID", "ID carte", "Type d’entité", "ID entité", "X", "Y", "Créé le", "Modifié le", "Nom", "Icône", "Échelle pion", "Échelle icône", "Couleur"]] },
+    { title: "Dossiers", grid: [["ID", "Page liée", "Nom", "Ordre", "Créé le", "Modifié le"]] },
+    { title: "Journal", grid: [["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"]] },
+  ]);
+  await link("tabletop", id, "Cartes");
+  const map = await sheets.createTabletopMap("CAMP-1", "uid-1", "Forêt");
+  const first = await sheets.addTabletopToken(map.id, "npc", "PNJ-1", 10, 10);
+  const second = await sheets.addTabletopToken(map.id, "npc", "PNJ-2", 20, 20);
+  // Lu (et gardé en mémoire) par cette installation…
+  assert.equal((await sheets.listTabletopTokens(map.id)).length, 2);
+  // …puis la ligne du premier pion est supprimée ailleurs : le second remonte d'une ligne.
+  google.grid(id, "Tokens").splice(1, 1);
+  await sheets.moveTabletopToken(map.id, second.id, 300, 400);
+  const tokens = google.grid(id, "Tokens");
+  assert.equal(tokens.length, 2);
+  assert.equal(record(tokens, 1)["ID"], second.id);
+  assert.equal(record(tokens, 1)["X"], "300");
+  assert.equal(record(tokens, 1)["Y"], "400");
+  assert.notEqual(first.id, second.id);
+});
