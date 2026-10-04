@@ -3,7 +3,7 @@ import { eq } from "drizzle-orm"
 import { getDb } from "@/db"
 import { googleAppsScriptIntegrations } from "@/db/schema"
 import { readSharedRecord, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
-import { getGoogleOAuthSettings, googleOAuthAuthorizedFetch } from "@/lib/google-oauth"
+import { googleOAuthAuthorizedFetch } from "@/lib/google-oauth"
 
 const INTEGRATION_KEY = "class_images"
 const APPS_SCRIPT_API = "https://script.googleapis.com/v1"
@@ -441,20 +441,3 @@ export async function applyClassImagesWithAppsScript(input: {
   }
 }
 
-export async function getClassImageScriptSetup() {
-  const [integration, oauthSettings] = await Promise.all([
-    getIntegration(),
-    getGoogleOAuthSettings(),
-  ])
-  const projectNumber = oauthSettings?.clientId.match(/^(\d+)-/)?.[1] ?? ""
-  if (!integration) return null
-  return {
-    scriptId: integration.scriptId,
-    deploymentId: integration.deploymentId,
-    lastError: integration.lastError,
-    lastRunAt: integration.lastRunAt,
-    projectNumber,
-    editorUrl: `https://script.google.com/home/projects/${encodeURIComponent(integration.scriptId)}/edit`,
-    settingsUrl: `https://script.google.com/home/projects/${encodeURIComponent(integration.scriptId)}/settings`,
-  }
-}

@@ -20,11 +20,6 @@ export const GOOGLE_SCOPES = [
   "https://www.googleapis.com/auth/script.deployments",
 ]
 
-const APPS_SCRIPT_SCOPES = [
-  "https://www.googleapis.com/auth/script.projects",
-  "https://www.googleapis.com/auth/script.deployments",
-]
-
 type RuntimeEnv = Record<string, string | undefined>
 type GoogleTokenResponse = {
   access_token?: string
@@ -300,14 +295,6 @@ export async function completeGoogleOAuth(input: {
     scopes: token.scope,
     connectedBy: input.connectedBy,
   })
-}
-
-export function googleAuthorizationCanManageAppsScript(
-  authorization: { scopes: string } | null,
-) {
-  if (!authorization) return false
-  const grantedScopes = new Set(authorization.scopes.split(/\s+/).filter(Boolean))
-  return APPS_SCRIPT_SCOPES.every((scope) => grantedScopes.has(scope))
 }
 
 export async function getGoogleOAuthSettings(sessionToken?: string | null) {

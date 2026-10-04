@@ -378,10 +378,6 @@ export function suggestedObjectIconKey(name: string, type: string, subtype: stri
   return objectFallback(type)
 }
 
-export function suggestedObjectIcon(name: string, type: string, subtype: string) {
-  return `${OBJECT_ICON_PREFIX}${suggestedObjectIconKey(name, type, subtype)}`
-}
-
 /** Une icône posée par Eraser (ancienne ou nouvelle), donc remplaçable sans perte. */
 export function isGeneratedObjectIcon(icon: string) {
   const value = icon.trim()

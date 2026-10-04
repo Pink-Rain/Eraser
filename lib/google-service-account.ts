@@ -12,10 +12,6 @@ export function runtimeEnv() {
   return env as unknown as Record<string, string | undefined>
 }
 
-export function googleServiceAccountEmail() {
-  return runtimeEnv().GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim() || null
-}
-
 export function googleServiceConfigured() {
   const runtime = runtimeEnv()
   return Boolean(

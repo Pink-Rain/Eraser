@@ -21,7 +21,6 @@ export const OBTAINED_NOTE_HEADER = "Note"
 export const OBTAINED_ACCOUNT_HEADER = "Compte"
 
 export type AchievementType = "Joueur" | "MJ"
-export const achievementTypes: AchievementType[] = ["Joueur", "MJ"]
 export const achievementTypeColors: Record<AchievementType, string> = { Joueur: "#397f88", MJ: "#9a4f2c" }
 
 /** Les sous-types proposés au départ ; la liste accepte toute nouvelle valeur. */

@@ -25,9 +25,6 @@ export const classSheetHeaders = ["ID", "Type", "Nom de la classe", "Image", "Mo
 /** Les colonnes que les sorts (des classes ou des créatures) ont toujours. */
 export const spellSheetHeaders = ["ID", "Nom", "Effet", "Description", "Type", "Compétences", "Distance", "Charges"]
 
-/** Ce qu'un PNJ ne montre que dans sa campagne : jamais dans l'Index des PNJs. */
-export const npcCampaignOnlyHeaders = ["Notes MJ", "Vie actuelle", "Inventaire JSON (archive)"]
-
 /** Les types et difficultés d'une classe (listes de la feuille Classes). */
 export const classTypeValues = ["Solide", "Protectrice", "Brutale", "Fourbe", "Éclectique"] as const
 export const classDifficultyValues = ["Facile", "Intermédiaire", "Difficile", "Expert", "X"] as const

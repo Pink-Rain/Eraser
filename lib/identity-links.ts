@@ -63,10 +63,6 @@ export async function identityUidsForUser(localUserId: string) {
   return legacyUid && legacyUid !== localUserId ? [localUserId, legacyUid] : [localUserId]
 }
 
-export async function identityMatches(localUserId: string, candidateUid: string) {
-  return (await identityUidsForUser(localUserId)).includes(candidateUid)
-}
-
 export async function getIdentityLink(localUserId: string) {
   if (remote()) {
     return (await remoteLinks()).find((link) => link.localUserId === localUserId) ?? null

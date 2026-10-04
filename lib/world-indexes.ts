@@ -105,10 +105,6 @@ export type EntityIndexExtras = {
   canAssign: boolean
 }
 
-export function isWorldIndexKey(value: unknown): value is WorldIndexKey {
-  return isBuiltinWorldIndexKey(value) || isCustomIndexKey(value)
-}
-
 /** Clé d'index du monde connue : prévue par Eraser, ou inscrite au registre des index personnalisés. */
 export async function knownWorldIndexKey(value: unknown): Promise<WorldIndexKey | null> {
   if (isBuiltinWorldIndexKey(value)) return value

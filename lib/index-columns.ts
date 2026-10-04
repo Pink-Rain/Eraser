@@ -417,11 +417,6 @@ export type IndexColumnSpec = {
   position?: number
 }
 
-/** Tous les types d'une colonne, principal d'abord. */
-export function kindsOf(spec: IndexColumnSpec): IndexColumnKind[] {
-  return [spec.kind, ...(spec.also ?? []).filter((kind) => kind !== spec.kind)]
-}
-
 const displayStyles: Record<NonNullable<IndexColumnSpec["display"]>, ColumnStyle> = {
   bold: { bold: true },
   skills: { bold: true, color: "#b3261e" },
@@ -464,11 +459,6 @@ export function isNameColumnSpec(spec: IndexColumnSpec) {
 
 export function placementOf(spec: IndexColumnSpec): ColumnPlacement {
   return spec.placement ?? (spec.form ? "sheet" : "both")
-}
-
-/** Un clic sur le nom ouvre la fiche de la ligne (type Nom formulaire). */
-export function opensSheet(spec: IndexColumnSpec) {
-  return spec.kind === "name-form"
 }
 
 /** Deux types qui gardent exactement la même donnée : passer de l'un à l'autre ne casse rien. */

@@ -18,10 +18,6 @@ export type JdrSheetRecord = {
 const SHEET_RECORD_CACHE_MS = 5 * 60_000
 const sheetRecordCache = new Map<JdrSheetKey, { expiresAt: number; promise: Promise<JdrSheetRecord | null> }>()
 
-export async function listJdrSheets() {
-  return getDb().select().from(jdrGoogleSheets).orderBy(jdrGoogleSheets.name)
-}
-
 export async function getJdrSheet(key: JdrSheetKey) {
   const cached = sheetRecordCache.get(key)
   if (cached && cached.expiresAt > Date.now()) return cached.promise

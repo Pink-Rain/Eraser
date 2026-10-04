@@ -135,6 +135,3 @@ export function upsertEntry(entries: SchemaEntry[], tab: string, column: string,
   return entries
 }
 
-export function forgetSchemaCache(spreadsheetId: string) {
-  cache.delete(spreadsheetId)
-}

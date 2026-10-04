@@ -110,12 +110,6 @@ export function findEntry(catalog: ReferenceCatalog, typed: string) {
     ?? null
 }
 
-export function findRow(rows: ReferenceRow[], typed: string) {
-  const wanted = fold(typed)
-  if (!wanted) return null
-  return rows.find((row) => fold(row.name) === wanted) ?? null
-}
-
 /** Recherche souple : chaque mot tapé doit se trouver quelque part, sans accents ni casse. */
 export function matchesQuery(text: string, query: string) {
   return queryScore(text, query) > 0

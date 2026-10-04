@@ -3,7 +3,7 @@
  * une ligne ». Le hasard vient de `crypto` ; un tirage est ensuite écrit dans la case
  * (il ne change plus tout seul) et se relance seulement si la colonne le permet.
  */
-import { foldName, type RandomSettings } from "@/lib/index-columns"
+import { type RandomSettings } from "@/lib/index-columns"
 import { computeFormulaDisplay, evaluateFormula, formulaDisplayText, numericCellValue, toBoolean, type FormulaContext } from "@/lib/index-formula"
 import { formatAmount } from "@/lib/index-numbers"
 
@@ -151,14 +151,3 @@ export function drawText(draw: RandomDraw) {
   return draw.values.join(", ")
 }
 
-/** Une ligne au hasard parmi celles affichées, pondérée par une colonne (table de rencontres). */
-export function pickRow<T extends { key: string }>(rows: T[], weightOf: ((row: T) => number | null) | null, random = cryptoRandom): T | null {
-  const [picked] = weightedPick(rows.map((row) => ({ value: row, weight: weightOf ? weightOf(row) ?? 0 : 1 })), random)
-  return picked ?? null
-}
-
-/** Les colonnes qui peuvent servir de poids : leur nom, pour les proposer. */
-export function isWeightHeader(header: string) {
-  // « Poids » désigne souvent la masse d’un objet : seul « Pondération » (ou « Chance ») est proposé d’office.
-  return /ponderation|chance|frequence|probabilite/.test(foldName(header))
-}

@@ -34,8 +34,6 @@ export type RowEngineSource = {
   seed: string
 }
 
-export type RowEngine = ReturnType<typeof createRowEngine>
-
 export function createRowEngine(source: RowEngineSource) {
   const cache = new Map<string, FormulaDisplay>()
 

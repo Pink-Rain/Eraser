@@ -1,6 +1,5 @@
 import {
   googleServiceAuthorizedFetch,
-  googleServiceConfigured,
   runtimeEnv,
 } from "@/lib/google-service-account"
 import { driveImageFormula, isGeneratedObjectIcon, objectIconDriveFileId, suggestedObjectIconKey } from "@/lib/object-icons"
@@ -395,7 +394,6 @@ async function classesSource() {
   const stored = await resolveJdrSheet("classes")
   return stored ? { spreadsheetId: stored.spreadsheetId, tabName: stored.tabName } : null
 }
-
 
 /** La feuille Classes (formules comprises : l'image est souvent une formule), colonnes par leur nom. */
 function readClassSheet(source: { spreadsheetId: string; tabName: string }, options: { fresh?: boolean } = {}) {
@@ -859,34 +857,6 @@ export async function updateRowCells(input: { spreadsheetId: string; sheetId: nu
   clearSpreadsheetReadCache(input.spreadsheetId)
 }
 
-export async function updateCellColors(input: {
-  spreadsheetId: string
-  sheetId: number
-  rowNumber: number
-  column: number
-  background: string
-  foreground: string
-}) {
-  const background = hexColorToRgb(input.background)
-  const foreground = hexColorToRgb(input.foreground)
-  if (!background || !foreground) return
-  await googleSheetsJson(`spreadsheets/${input.spreadsheetId}:batchUpdate`, {
-    method: "POST",
-    body: JSON.stringify({ requests: [{ repeatCell: {
-      range: {
-        sheetId: input.sheetId,
-        startRowIndex: input.rowNumber - 1,
-        endRowIndex: input.rowNumber,
-        startColumnIndex: input.column,
-        endColumnIndex: input.column + 1,
-      },
-      cell: { userEnteredFormat: { backgroundColorStyle: { rgbColor: background }, textFormat: { foregroundColorStyle: { rgbColor: foreground } } } },
-      fields: "userEnteredFormat.backgroundColorStyle,userEnteredFormat.textFormat.foregroundColorStyle",
-    } }] }),
-  })
-  clearSpreadsheetReadCache(input.spreadsheetId)
-}
-
 export async function ensureSheetColumnCount(spreadsheetId: string, tabName: string, minimum: number) {
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string; gridProperties?: { columnCount?: number } } }> }>(
     `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title,gridProperties.columnCount)`,
@@ -952,7 +922,6 @@ async function readRangesFresh(spreadsheetId: string, ranges: string[]) {
     startRow: sheetRangeStartRow(matched?.range) ?? sheetRangeStartRow(ranges[index]) ?? 1,
   }))
 }
-
 
 /**
  * Quelques colonnes d'un onglet, retrouvées par leur nom : la ligne 1 d'abord, puis
@@ -1785,49 +1754,6 @@ function suggestedObjectDescription(name: string, type: string, subtype: string,
   return `Assemblage de ${metal} et de ${wood}, teinté de ${color}. Surface ${surface}. ${finishSentence}`
 }
 
-function isGeneratedObjectDescription(description: string, name: string) {
-  return !description || oldGeneratedDescriptions.has(description) || description.includes(`« ${name} »`)
-}
-
-export async function refineGeneratedObjectDescriptions() {
-  const tables = await listObjectIndexTables()
-  let descriptionsRefined = 0
-  const used = new Set<string>()
-  for (const table of tables) {
-    const descriptionColumn = table.headers.findIndex((header) => normalizedHeader(header) === "description")
-    const iconColumn = table.headers.findIndex((header) => ["icone", "icon"].includes(normalizedHeader(header)))
-    if (descriptionColumn < 0 && iconColumn < 0) continue
-    const updates: Array<{ range: string; values: Array<Array<string | number | boolean>> }> = []
-    for (const row of table.rows) {
-      const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
-      if (!name) continue
-      const type = objectIndexCell(table, row, ["Type", "Catégorie", "Categorie"]) || inferredObjectType(table)
-      const subtype = objectIndexCell(table, row, ["Sous-type", "Sous type", "Subtype"])
-      const effect = objectIndexCell(table, row, ["Effet", "Effets", "Propriété", "Proprieté", "Propriétés", "Proprietes"])
-      if (descriptionColumn >= 0) {
-        const currentDescription = (row.values[descriptionColumn] || "").trim()
-        if (isGeneratedObjectDescription(currentDescription, name)) {
-          let description = suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}`)
-          let attempt = 1
-          while (used.has(description) && attempt <= 128) {
-            description = suggestedObjectDescription(name, type, subtype, effect, `${table.fileId}:${table.sheetId}:${row.rowNumber}:${attempt}`)
-            attempt += 1
-          }
-          if (used.has(description)) description = `${description} Un poinçon de ${row.rowNumber} points se cache sous la base.`
-          used.add(description)
-          if (description !== currentDescription) {
-            updates.push({ range: sheetTabRange(table.tabName, `${columnName(descriptionColumn + 1)}${row.rowNumber}`), values: [[description]] })
-            descriptionsRefined += 1
-          }
-        }
-      }
-    }
-    await updateRanges(table.fileId, updates)
-  }
-  clearObjectIndexTableCache()
-  return { descriptionsRefined }
-}
-
 export async function enrichObjectIndexTables() {
   const tables = await listObjectIndexTables()
   let descriptionsAdded = 0
@@ -2390,11 +2316,6 @@ export async function listClassOptions() {
   const rows = await getDb().select({ id: classIndex.id, name: classIndex.name }).from(classIndex).orderBy(classIndex.name)
   if (rows.length) return rows
   return (await listClasses()).map(({ id, name }) => ({ id, name }))
-}
-
-export async function getClassById(id: string) {
-  const classes = await listClasses()
-  return classes.find((item) => item.id === id) ?? null
 }
 
 const CLASS_IMAGES_FOLDER = "Images Classe"
@@ -7175,17 +7096,3 @@ export async function seedDefaultClasses() {
   return { count: defaultClassRows.length, sheet: source }
 }
 
-export async function ensureDefaultClassesIfEmpty() {
-  const source = await resolveJdrSheet("classes")
-  if (!source) return { seeded: false, count: 0 }
-  const { columns, rows } = await readClassSheet(source)
-  const count = rows.filter((row) => columns.get(row, "ID") && columns.get(row, "Nom de la classe")).length
-  if (count > 0) return { seeded: false, count }
-  const result = await seedDefaultClasses()
-  return { seeded: true, count: result.count }
-}
-
-export async function sheetsConfigured() {
-  if (googleServiceConfigured() && runtimeEnv().GOOGLE_CHARACTERS_SHEET_ID) return true
-  return Boolean(await resolveJdrSheet("characters"))
-}

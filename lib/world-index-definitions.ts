@@ -3,7 +3,7 @@
  * Ce fichier ne dépend de rien côté serveur : l'interface s'en sert aussi pour savoir
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
-import { foldName, isIdHeader, matchChoice, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
 import {
@@ -183,9 +183,6 @@ export const creatureSheetOnlyHeaders = [
   "Sorts actifs", "Sorts passifs", "Sagesse", creatureNoteHeader,
 ]
 
-/** Un choix d'une liste fermée (conservé sous ce nom pour la fiche des créatures). */
-export type CreatureChoice = ChoiceOption
-
 const choices = (values: string[]): ChoiceOption[] => values.map((value) => ({ value }))
 
 export const creatureLocations: ChoiceOption[] = [
@@ -219,9 +216,6 @@ export const creatureChoices: Record<string, ChoiceOption[]> = {
     { value: "Hépoien", hint: "Démoniaque" },
   ],
 }
-
-/** Le choix de la liste qui correspond à une valeur de la feuille, s'il y en a un. */
-export const matchCreatureChoice = matchChoice
 
 /** Les onglets de l'Index des lieux, du plus vaste au plus précis. */
 export const placeTabs = [
@@ -372,7 +366,6 @@ const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldInde
   },
 }
 
-
 /** Les colonnes d'un personnage que l'Index des personnages lit : la feuille en a des centaines. */
 export const characterIndexHeaders = ["ID", "Joueur", "Nom personnage", "Peuple", "Classe", "Level", "Titre honorifique", "Portrait"]
 
@@ -490,11 +483,6 @@ export function linkEndCovers(end: WorldIndexLinkEnd, index: WorldIndexKey, tab:
   return end.index === index && (end.tab === "*" || end.tab === tab)
 }
 
-/** Les onglets réellement couverts par un côté de lien. */
-export function linkEndTabs(end: WorldIndexLinkEnd) {
-  return end.tab === "*" && isBuiltinWorldIndexKey(end.index) ? worldIndexDefinitions[end.index].tabs.map((tab) => tab.name) : [end.tab]
-}
-
 export function isBuiltinWorldIndexKey(value: unknown): value is BuiltinWorldIndexKey {
   return typeof value === "string" && Object.hasOwn(worldIndexDefinitions, value)
 }
@@ -573,7 +561,6 @@ export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: str
   if (readers.length) return { rename: false, type: false, remove: false, reasons: readers, allowed: only }
   return { rename: true, type: true, remove: true, reasons: [], allowed: all }
 }
-
 
 /** « Aldor, Vesna ; Tharn » → trois noms. Doublons retirés, casse d'origine conservée. */
 export function splitNames(value: string) {
@@ -744,20 +731,3 @@ export function isLongColumn(header: string) {
   return /description|note|histoire|autre|organisation|rencontre/.test(foldName(header))
 }
 
-/**
- * Les colonnes montrées dans le tableau d'un onglet, parmi celles de la feuille. Une
- * colonne en double dans Sheets (deux « Comportement ») n'apparaît qu'une fois : c'est
- * la première qui est lue et écrite.
- */
-export function gridHeadersOf(tab: WorldIndexTabDefinition, sheetHeaders: string[]) {
-  if (!tab.gridHeaders) return sheetHeaders.map((_, index) => index)
-  const visible = new Set(tab.gridHeaders.map(foldName))
-  const hidden = new Set(tab.headers.map(foldName).filter((header) => !visible.has(header)))
-  const seen = new Set<string>()
-  return sheetHeaders.flatMap((header, index) => {
-    const folded = foldName(header)
-    if (hidden.has(folded) || seen.has(folded)) return []
-    seen.add(folded)
-    return [index]
-  })
-}

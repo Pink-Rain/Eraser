@@ -79,24 +79,4 @@ export function npcEditorModel(): IndexEditorModel {
   })
 }
 
-const database = "Cet index vient de la base d’Eraser (et, d’après la feuille de route, bientôt du serveur partagé) : ses colonnes sont calculées, elles ne sont pas stockées dans une feuille."
 
-export function entityEditorModel(kind: "campaigns" | "characters"): IndexEditorModel {
-  const campaign = kind === "campaigns"
-  return model({
-    family: kind,
-    key: kind,
-    title: campaign ? "Campagnes" : "Personnages",
-    tab: campaign ? "Campagnes" : "Personnages",
-    columns: [
-      { header: campaign ? "Campagne" : "Personnage", spec: { kind: "name-form", also: ["fixed"] }, reasons: [campaign ? "Ouvre le tableau de bord de la campagne." : "Ouvre la fiche du personnage.", database] },
-      ...(campaign ? [] : [{ header: "Classe", spec: { kind: "fixed" }, reasons: ["La classe et le rang viennent de la fiche du personnage.", database] } satisfies Column]),
-      { header: "Propriétaire", spec: { kind: "fixed", display: "muted" }, reasons: ["Le compte qui possède l’élément ; l’administrateur le réattribue avec « Attribuer à ».", database] },
-      { header: campaign ? "Personnages" : "Campagne(s)", spec: { kind: "auto-links" }, reasons: [campaign ? "Les personnages inscrits à la campagne, calculés par Eraser." : "Les campagnes du personnage, calculées par Eraser.", database] },
-      { header: "ID", spec: { kind: "id", hidden: true }, reasons: ["L’identifiant de l’élément dans la base et dans les liens.", database] },
-    ],
-    readOnlyReason: database,
-    addColumnsReason: database,
-    addTabsReason: database,
-  })
-}

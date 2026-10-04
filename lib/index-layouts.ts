@@ -137,11 +137,6 @@ export function serializeIndexLayout(layout: IndexLayout | null | undefined) {
   return clean ? JSON.stringify(clean) : ""
 }
 
-/** Toutes les colonnes nommées par une mise en page, dans l'ordre. */
-export function layoutColumns(layout: IndexLayout) {
-  return [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => field.column)
-}
-
 /** Une mise en page dont les colonnes renommées (ancien nom → nouveau) suivent leur nouveau nom. */
 export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, string>): IndexLayout {
   if (!renames.size) return layout

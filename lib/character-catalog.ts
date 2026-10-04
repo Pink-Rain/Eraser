@@ -48,7 +48,6 @@ export type CharacterCatalog = {
   source: "index" | "code"
 }
 
-export const SKILL_INDEX_TITLE = "Caractéristiques et compétences"
 export const CHARACTERISTICS_TAB = "Caractéristiques"
 export const SKILLS_TAB = "Compétences"
 export const CATALOG_TYPE_HEADER = "Type"

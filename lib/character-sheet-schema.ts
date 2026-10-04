@@ -56,4 +56,3 @@ export const characterSkillsStart = characterSecondaryCalculationStart + charact
 export function characterSkillValueIndex(skillIndex: number, metricIndex: number) { return characterSkillsStart + skillIndex * characterSkillMetrics.length + metricIndex }
 export function characterCriticalValueIndex(characteristicIndex: number, kind: "success" | "failure") { return characterCriticalStart + characteristicIndex * 2 + (kind === "failure" ? 1 : 0) }
 export function characterSecondaryCalculationValueIndex(fieldIndex: number, kind: "bonus" | "modifier") { return characterSecondaryCalculationStart + fieldIndex * 2 + (kind === "modifier" ? 1 : 0) }
-export function isEditableSkillMetric(metricIndex: number) { return metricIndex === 0 || metricIndex === 3 || metricIndex === 6 }
