@@ -1,8 +1,15 @@
 import { NextResponse } from "next/server"
 
 import { saveCampaignBanner } from "@/lib/campaign-banners"
-import { updateCampaignForMj } from "@/lib/google-sheets"
+import { getCampaignForMj, updateCampaignForMj } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+
+function campaignErrorMessage(code: string) {
+  if (code === "INVALID_BANNER") return "Choisis une image de moins de 10 Mo."
+  if (code === "CAMPAIGN_ROW_NOT_FOUND") return "Cette campagne n’est plus dans la feuille « Campagnes ». Recharge la page."
+  if (code === "CAMPAIGNS_SHEET_UNAVAILABLE") return "La feuille « Campagnes » n’est pas reliée."
+  return "La campagne n’a pas pu être modifiée."
+}
 
 export async function PATCH(request: Request, { params }: { params: Promise<{ id: string }> }) {
   const account = await authorizedAccount(["admin", "mj"])
@@ -14,6 +21,8 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
       const form = await request.formData()
       const file = form.get("banner")
       if (!(file instanceof File)) throw new Error("INVALID_BANNER")
+      // La bannière n'est enregistrée qu'après le contrôle d'accès : un autre MJ ne la remplace pas.
+      if (account.role !== "admin" && !await getCampaignForMj(account.uid, id)) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
       const bannerUrl = await saveCampaignBanner(id, file)
       const accentColor = form.get("accentColor")
       const campaign = await updateCampaignForMj(account.role === "admin" ? null : account.uid, id, {
@@ -32,6 +41,6 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
     return NextResponse.json({ campaign })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
-    return NextResponse.json({ error: code === "INVALID_BANNER" ? "Choisis une image de moins de 10 Mo." : "La campagne n’a pas pu être modifiée." }, { status: 400 })
+    return NextResponse.json({ error: campaignErrorMessage(code) }, { status: 400 })
   }
 }

@@ -23,6 +23,8 @@ export function CampaignCreationForm() {
   // Verrou immédiat : un double Entrée partait avant que le bouton ne se désactive
   // et créait deux campagnes identiques.
   const sending = useRef(false)
+  // Le même ID d'un essai à l'autre : une campagne déjà écrite (réponse perdue) n'est pas recréée.
+  const [creationId] = useState(() => crypto.randomUUID())
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -33,7 +35,7 @@ export function CampaignCreationForm() {
     const response = await fetch("/api/campaigns", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ name, description, bannerUrl, accentColor }),
+      body: JSON.stringify({ id: creationId, name, description, bannerUrl, accentColor }),
     })
     const payload = (await response.json()) as { error?: string; campaign?: CampaignRecord }
     if (!response.ok || !payload.campaign) { sending.current = false; setPending(false); return setError(payload.error || "La campagne n’a pas pu être créée.") }

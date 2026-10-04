@@ -249,3 +249,41 @@ test("Vocabulaire : supprimé après une insertion faite ailleurs, c'est bien ce
 async function vocabularyModule() {
   return vite.ssrLoadModule("/lib/vocabulary.ts");
 }
+
+async function linkCampaigns(rows) {
+  const camps = fresh("camps");
+  google.addSpreadsheet(camps, [{ title: "Campagnes", grid: [["ID", "MJ", "Nom de la campagne", "Description", "Bannière", "Couleur d’accent"], ...rows] }]);
+  await jdr.saveJdrSheet({ key: "campaigns", spreadsheetId: camps, name: "Campagnes", tabName: "Campagnes", webViewLink: "" });
+  const shops = fresh("shops");
+  google.addSpreadsheet(shops, [{ title: "Magasins", grid: [shopHeaders] }]);
+  await jdr.saveJdrSheet({ key: "shops", spreadsheetId: shops, name: "shops", tabName: "Magasins", webViewLink: "" });
+  await linkNpcs([]);
+  await getDb().delete(schema.campaignIndex);
+  await sheets.syncExistingIdentityIndexes();
+  return camps;
+}
+
+test("Campagne : changer la bannière n'efface ni le MJ ajouté ailleurs, ni le reste", async () => {
+  const camps = await linkCampaigns([["CAMP-1", "mj-1", "Les Brumes", "Une campagne", "", "#123456"]]);
+  // Un administrateur ajoute un second MJ depuis une autre installation.
+  google.grid(camps, "Campagnes")[1][1] = "mj-1 · mj-2";
+  google.grid(camps, "Campagnes")[1][3] = "Décrite ailleurs";
+  await sheets.updateCampaignForMj("mj-1", "CAMP-1", { bannerUrl: "https://exemple.fr/banniere.png" });
+  assert.deepEqual(google.grid(camps, "Campagnes")[1], ["CAMP-1", "mj-1 · mj-2", "Les Brumes", "Décrite ailleurs", "https://exemple.fr/banniere.png", "#123456"]);
+  // Ligne disparue de la feuille : erreur, plus de « OK » avec seulement l'index local modifié.
+  google.grid(camps, "Campagnes").splice(1, 1);
+  await assert.rejects(sheets.updateCampaignForMj("mj-1", "CAMP-1", { name: "Autre" }), /CAMPAIGN_ROW_NOT_FOUND/);
+});
+
+test("Campagne : un second essai avec le même ID ne la crée pas deux fois", async () => {
+  const camps = await linkCampaigns([]);
+  const id = "0f8b5c1e-3f2a-4c6d-9e7b-1a2b3c4d5e6f";
+  const first = await sheets.createCampaignForMj("mj-1", { id, name: "Agiastiada", description: "- au nord" });
+  const again = await sheets.createCampaignForMj("mj-1", { id, name: "Agiastiada" });
+  assert.equal(first.id, id);
+  assert.equal(again.id, id);
+  const rows = google.grid(camps, "Campagnes").filter((row) => row[0] === id);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0][3], "- au nord");
+  await assert.rejects(sheets.createCampaignForMj("mj-9", { id, name: "Volée" }), /CAMPAIGN_ID_TAKEN/);
+});

@@ -3798,21 +3798,32 @@ async function linkOrCreateJdrSheet(key: JdrSheetKey, definition: StructuredShee
   return verified
 }
 
-export async function createCampaignForMj(mjUid: string, input: { name: string; description?: string; bannerUrl?: string; accentColor?: string }) {
+/**
+ * Crée une campagne. `id` vient du formulaire et ne change pas d'un essai à l'autre : une
+ * campagne déjà écrite sous cet ID (réponse perdue, nouvel essai) est rendue telle quelle au
+ * lieu d'être créée une seconde fois.
+ */
+export async function createCampaignForMj(mjUid: string, input: { id?: string; name: string; description?: string; bannerUrl?: string; accentColor?: string }) {
   const normalizedName = input.name.trim()
   if (!normalizedName || normalizedName.length > 120) throw new Error("INVALID_CAMPAIGN_NAME")
   const [sheet] = await Promise.all([ensureJdrSheet("campaigns"), ensureJdrSheet("shops"), ensureJdrSheet("npcs")])
   if (!sheet) throw new Error("CAMPAIGNS_SHEET_UNAVAILABLE")
   const campaign: CampaignRecord = {
-    id: crypto.randomUUID(), mjUid, name: normalizedName,
+    id: input.id && /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(input.id) ? input.id.toLowerCase() : crypto.randomUUID(),
+    mjUid, name: normalizedName,
     description: input.description?.trim() || "", bannerUrl: input.bannerUrl?.trim() || "",
     accentColor: input.accentColor && /^#[0-9a-f]{6}$/i.test(input.accentColor) ? input.accentColor : "#927640",
     updatedAt: new Date().toISOString(),
   }
-  // Les en-têtes sont vérifiés par leur nom (ensureJdrSheet) ; la ligne est rangée d'après eux.
-  const { columns } = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, campaignSheetHeaders)
-  const ready = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, columns)
-  await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, ready), [ready.row(campaignCells(campaign))])
+  // La feuille relue : en-têtes par leur nom, et l'ID peut-être déjà écrit par un premier essai.
+  const read = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, campaignSheetHeaders, { fresh: true })
+  const ready = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
+  const written = read.rows.find((row) => ready.get(row, "ID") === campaign.id)
+  if (written) {
+    if (!ownedBy(ready.get(written, "MJ"), [mjUid])) throw new Error("CAMPAIGN_ID_TAKEN")
+  } else {
+    await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, ready), [ready.row({ ...campaignCells(campaign), "Nom de la campagne": textCell(campaign.name), "Description": textCell(campaign.description), "Bannière": textCell(campaign.bannerUrl) })])
+  }
   await getDb().insert(campaignIndex).values(campaign).onConflictDoUpdate({
     target: campaignIndex.id,
     set: { name: campaign.name, updatedAt: new Date().toISOString() },
@@ -4948,29 +4959,38 @@ export async function updateAdminItemOwner(
   else await db.update(campaignIndex).set({ mjUid: cell, updatedAt: new Date().toISOString() }).where(eq(campaignIndex.id, id))
 }
 
+/**
+ * Modifie une campagne : la feuille d'abord, seulement les cases du changement (jamais l'ID
+ * ni le MJ, recopiés depuis l'index local, qui effaçaient un MJ ajouté ailleurs), sur la
+ * ligne relue de son ID ; l'index local ensuite. Une ligne introuvable est une erreur.
+ */
 export async function updateCampaignForMj(mjUid: string | null, id: string, patch: Partial<Pick<CampaignRecord, "name" | "description" | "bannerUrl" | "accentColor">>) {
   const existing = mjUid
     ? await getCampaignForMj(mjUid, id)
     : (await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt }).from(campaignIndex).where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1))[0] ?? null
   if (!existing) throw new Error("CAMPAIGN_NOT_FOUND")
   const updatedAt = new Date().toISOString()
-  const next = {
-    ...existing,
-    ...patch,
-    name: patch.name?.trim() || existing.name,
-    accentColor: patch.accentColor && /^#[0-9a-f]{6}$/i.test(patch.accentColor) ? patch.accentColor : existing.accentColor,
-    updatedAt,
+  const changes: Partial<CampaignRecord> = {
+    ...(patch.name?.trim() ? { name: patch.name.trim() } : {}),
+    ...(patch.description !== undefined ? { description: patch.description } : {}),
+    ...(patch.bannerUrl !== undefined ? { bannerUrl: patch.bannerUrl } : {}),
+    ...(patch.accentColor && /^#[0-9a-f]{6}$/i.test(patch.accentColor) ? { accentColor: patch.accentColor } : {}),
   }
-  await getDb().update(campaignIndex).set({ name: next.name, description: next.description, bannerUrl: next.bannerUrl, accentColor: next.accentColor, updatedAt }).where(eq(campaignIndex.id, id))
+  const next = { ...existing, ...changes, updatedAt }
   const source = await campaignsSource()
-  if (source) {
-    const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
-    if (rowNumber) {
-      const read = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders, { fresh: true })
-      const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, read.columns)
-      await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, campaignCells({ ...next, id })))
-    }
+  if (!source) throw new Error("CAMPAIGNS_SHEET_UNAVAILABLE")
+  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
+  if (!rowNumber) throw new Error("CAMPAIGN_ROW_NOT_FOUND")
+  const [header] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, "1:1")])
+  const columns = await ensureNamedColumns(source.spreadsheetId, source.tabName, sheetColumns(header?.rows[0] ?? [], campaignSheetHeaders))
+  const cells: Record<string, SheetCell> = {
+    ...(changes.name !== undefined ? { "Nom de la campagne": textCell(changes.name) } : {}),
+    ...(changes.description !== undefined ? { "Description": textCell(changes.description) } : {}),
+    ...(changes.bannerUrl !== undefined ? { "Bannière": textCell(changes.bannerUrl) } : {}),
+    ...(changes.accentColor !== undefined ? { "Couleur d’accent": changes.accentColor } : {}),
   }
+  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, cells))
+  await getDb().update(campaignIndex).set({ ...changes, updatedAt }).where(eq(campaignIndex.id, id))
   return next
 }
 
