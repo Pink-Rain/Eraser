@@ -10,6 +10,17 @@ export async function objectIconFolderId() {
 }
 
 /**
+ * Jusqu'en octobre 2026, « icone objet » était confondu avec « Images classes » : les icônes
+ * d'Eraser y ont été envoyées. Elles y sont encore reconnues (par leur nom d'icône), pour ne
+ * pas les envoyer une seconde fois ; les déplacer dans « icone objet » garde leur ID.
+ */
+async function iconsLeftInClassImages() {
+  const folder = await findDriveFolderByName("Images Classe")
+  if (!folder) return []
+  return (await listDriveFolderFiles(folder.id)).filter((file) => objectIconKeyFromDriveFileName(file.name))
+}
+
+/**
  * Met les icônes d'Eraser dans le dossier « icone objet » (en le créant s'il
  * n'existe pas) et renvoie l'identifiant Drive de chacune. Une icône déjà
  * présente n'est jamais envoyée deux fois.
@@ -17,7 +28,7 @@ export async function objectIconFolderId() {
 export async function ensureObjectIconsOnDrive(keys: Iterable<string> = OBJECT_ICON_KEYS) {
   const folderId = await objectIconFolderId()
   const existing = new Map<string, DriveFile>()
-  for (const file of await listDriveFolderFiles(folderId)) {
+  for (const file of [...await listDriveFolderFiles(folderId), ...await iconsLeftInClassImages()]) {
     const key = objectIconKeyFromDriveFileName(file.name)
     if (key && !existing.has(key)) existing.set(key, file)
   }
@@ -51,7 +62,7 @@ let folderFilesRefresh: Promise<Set<string>> | null = null
 
 async function readObjectIconFolderFiles() {
   const folder = await findDriveFolderByName(OBJECT_ICON_FOLDER)
-  const ids = new Set(folder ? (await listDriveFolderFiles(folder.id)).map((file) => file.id) : [])
+  const ids = new Set([...(folder ? await listDriveFolderFiles(folder.id) : []), ...await iconsLeftInClassImages()].map((file) => file.id))
   folderFilesCache = { expiresAt: Date.now() + 60_000, ids }
   return ids
 }
