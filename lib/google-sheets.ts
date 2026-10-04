@@ -1024,9 +1024,18 @@ function headerRowHoldsData(columns: SheetColumns) {
  * Donne à chaque colonne prévue son en-tête, sans rien déplacer ni remplacer : une case
  * d'origine restée vide reçoit son nom, une colonne absente est ajoutée à droite.
  */
+/**
+ * Les colonnes qui portent l'identité des lignes. Introuvables dans une ligne 1 déjà remplie
+ * (renommées ou supprimées dans Sheets), elles ne sont pas recréées vides à droite : les
+ * anciennes lignes n'auraient plus d'ID ni de joueur, les nouvelles les écriraient ailleurs.
+ */
+const KEY_COLUMNS = new Set(["ID", "Joueur", "Nom personnage", "MJ", "Nom de la campagne"])
+
 export async function ensureNamedColumns(spreadsheetId: string, tabName: string, columns: SheetColumns) {
   if (!columns.missing.length && !columns.unnamed.length) return columns
   if (headerRowHoldsData(columns)) throw new Error("SHEET_HEADER_ROW_MISSING")
+  const missingKeys = columns.missing.filter((name) => KEY_COLUMNS.has(name))
+  if (missingKeys.length && columns.headers.some((header) => String(header ?? "").trim())) throw new Error(`SHEET_KEY_COLUMN_MISSING:${tabName}:${missingKeys.join(",")}`)
   const { cells, headers } = headerAdditions(columns)
   await ensureSheetColumnCount(spreadsheetId, tabName, headers.length)
   await updateRanges(spreadsheetId, cells.map((cell) => ({ range: sheetTabRange(tabName, `${columnName(cell.index + 1)}1`), values: [[cell.header]] })), { valueInputOption: "RAW" })

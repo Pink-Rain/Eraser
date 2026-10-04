@@ -417,3 +417,16 @@ test("Visuels et icônes : faute de dossier dédié, celui où ils sont déjà r
   google.world.drive.push({ id: "F-VIS", name: "Eraser - Visuels", mimeType: folder });
   assert.equal(await drive.driveFolderWithLegacy("Eraser - Visuels", "Images Classe"), "F-VIS");
 });
+
+test("Colonne clé renommée dans Sheets : jamais recréée vide à droite", async () => {
+  const { sheetColumns } = await vite.ssrLoadModule("/lib/sheet-columns.ts");
+  const id = fresh("chars");
+  google.addSpreadsheet(id, [{ title: "Personnages", grid: [["ID", "Joueuse", "Nom personnage"], ["P1", "uid-1", "Aldor"]] }]);
+  const expected = ["ID", "Joueur", "Nom personnage", "Peuple"];
+  await assert.rejects(sheets.ensureNamedColumns(id, "Personnages", sheetColumns(google.grid(id, "Personnages")[0], expected)), /SHEET_KEY_COLUMN_MISSING:Personnages:Joueur/);
+  assert.deepEqual(google.grid(id, "Personnages")[0], ["ID", "Joueuse", "Nom personnage"]);
+  // Une colonne ordinaire qui manque est toujours ajoutée à droite.
+  google.grid(id, "Personnages")[0][1] = "Joueur";
+  await sheets.ensureNamedColumns(id, "Personnages", sheetColumns(google.grid(id, "Personnages")[0], expected));
+  assert.deepEqual(google.grid(id, "Personnages")[0], ["ID", "Joueur", "Nom personnage", "Peuple"]);
+});

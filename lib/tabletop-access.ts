@@ -12,6 +12,7 @@ import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, Table
 import { identityUidsForUser } from "@/lib/identity-links"
 import { chatAccountsForCampaign, chatAuthorName } from "@/lib/chat-accounts"
 import { ownedBy } from "@/lib/ownership"
+import { sheetNumber } from "@/lib/google-sheet-values"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -168,7 +169,7 @@ export async function getTabletopSnapshotForAccount(account: AuthorizedUser, map
 }
 
 function hpValue(value: unknown, fallback: number) {
-  const parsed = Number(value)
+  const parsed = sheetNumber(value)
   return Number.isFinite(parsed) ? Math.max(0, Math.min(99999, Math.trunc(parsed))) : fallback
 }
 
@@ -211,7 +212,13 @@ export async function updateTabletopEntityHp(account: AuthorizedUser, pageLinked
     if (!await canManageTabletopPage(account, pageLinked)) return null
     const npc = (await listNpcs(pageLinked)).find((record) => record.id === id)
     if (!npc) return null
-    const saved = await saveNpc(pageLinked, { ...npc, currentHp: hpValue(patch.currentHp, npc.currentHp), totalHp: hpValue(patch.totalHp, npc.totalHp) })
+    // Seulement la vie envoyée : le reste du PNJ n'est jamais réécrit avec cette copie.
+    const only = [...(patch.currentHp !== undefined ? ["Vie actuelle"] : []), ...(patch.totalHp !== undefined ? ["Vie totale"] : [])]
+    if (!only.length) return null
+    const saved = await saveNpc(pageLinked, { ...npc, currentHp: hpValue(patch.currentHp, npc.currentHp), totalHp: hpValue(patch.totalHp, npc.totalHp) }, { only }).catch((error) => {
+      if (error instanceof Error && error.message === "NPC_NOT_FOUND") return null
+      throw error
+    })
     return saved ? { ...npcEntity(saved), controllable: true } : null
   }
   const allowedIds = await accessibleCharacterIds(account, pageLinked)
