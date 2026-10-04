@@ -87,6 +87,8 @@ async function pageSpells() {
 beforeEach(async () => {
   google.reset();
   const db = getDb();
+  // Les feuilles reliées sont aussi gardées en mémoire quelques minutes : oubliées une à une.
+  for (const key of ["classes", "characters"]) await jdr.forgetJdrSheet(key);
   await db.delete(schema.jdrGoogleSheets);
   await db.delete(schema.sheetIndexSyncs);
   await db.delete(schema.classIndex);
@@ -233,6 +235,22 @@ test("Fusion : les bonnes lignes partent en un seul appel, les fiches citent le 
   const ignored = google.grid(SPELLS, "Doublons ignorés");
   assert.deepEqual(ignored[1].slice(0, 2), ["SOR-SOIN", "SOR-AUTRE"]);
   assert.deepEqual(ignored[2].filter(Boolean), []);
+});
+
+test("Fusion : un champ que la fusion ne change pas n'est pas réécrit", async () => {
+  const unnamed = { "ID": "SOR-SANS-NOM", "Effet": "Rend 2d4 PV", "Type": "Actif -Action majeur", "Distance": "3 cases", "Guerrier·e": "1" };
+  const twin = { "ID": "SOR-JUMEAU", "Nom": "Soin", "Effet": "Rend 2d4 PV", "Type": "Actif -Action majeur", "Mage": "2" };
+  const grid = spellSheet([unnamed, twin]);
+  const spells = await pageSpells();
+  const keep = spells["Sort sans nom"];
+  // Le brouillon de l'écran des doublons : textes simples, nom affiché, classes réunies.
+  const draft = { id: keep.id, name: "Sort sans nom", type: keep.type, skillsRaw: keep.skillsRaw, distance: keep.distance, charges: keep.charges, effect: keep.effect, effectHtml: keep.effectHtml || keep.effect, description: keep.description, descriptionHtml: keep.descriptionHtml || keep.description, classRanks: { "CLA-0001": 1, "CLA-0002": 2 } };
+  const before = google.world.calls.length;
+  const merged = await spellAction({ action: "merge", keep: { rowNumber: keep.rowNumber, id: keep.id }, remove: [{ rowNumber: spells["Soin"].rowNumber, id: spells["Soin"].id }], original: toDraft(keep), draft, index: "classes" });
+  assert.equal(merged.status, 200, JSON.stringify(merged.body));
+  const written = google.world.calls.slice(before).flatMap((call) => (call.body?.requests ?? []).flatMap((request) => request.updateCells ? [request.updateCells.range.startColumnIndex] : []));
+  assert.deepEqual(written, [spellHeaders.indexOf("Mage")]);
+  assert.deepEqual(record(grid(), 1), { ...unnamed, "Mage": "2" });
 });
 
 test("Fusion : un sort supprimé ailleurs entre-temps fait tout refuser", async () => {

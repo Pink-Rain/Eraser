@@ -855,12 +855,19 @@ function assertRankValues(draft: ClassSpellDraft) {
 /** Les champs que la personne a changés : le brouillon comparé au sort tel qu'elle l'a vu. */
 function changedSpellFields(draft: ClassSpellDraft, original: ClassSpellDraft) {
   const fields: SpellField[] = []
-  if (draft.name.trim() !== original.name.trim()) fields.push("name")
+  if (spellName(draft) !== spellName(original)) fields.push("name")
   if (draft.type !== original.type) fields.push("type")
   if (draft.skillsRaw !== original.skillsRaw) fields.push("skillsRaw")
   if (draft.charges !== original.charges || (draft.charges === null && draft.chargesLabel !== undefined && draft.chargesLabel.trim() !== (original.chargesLabel ?? "").trim())) fields.push("charges")
-  for (const [field, html] of richSpellFields) if (draft[field] !== original[field] || (draft[html] ?? "") !== (original[html] ?? "")) fields.push(field)
+  // Un brouillon sans texte mis en forme (une fusion, une saisie simple) ne compare que le texte.
+  for (const [field, html] of richSpellFields) if (draft[field] !== original[field] || (draft[html] !== undefined && draft[html] !== (original[html] ?? ""))) fields.push(field)
   return fields
+}
+
+/** Le nom à écrire : « Sort sans nom » n'est que l'affichage d'une case vide. */
+function spellName(draft: Pick<ClassSpellDraft, "name">) {
+  const name = draft.name.trim()
+  return name === UNNAMED_CLASS_SPELL ? "" : name
 }
 
 /** Les rangs changés : chaque classe citée par l'un ou l'autre, avec son rang d'avant. */
@@ -890,8 +897,7 @@ function sameCharges(value: string, original: ClassSpellDraft) {
 function fieldUnchanged(workbook: SpellWorkbook, row: string[], field: SpellField, original: ClassSpellDraft) {
   const value = cell(row, workbook.columns[spellFieldColumns[field]])
   if (field === "charges") return sameCharges(value, original)
-  // Un sort sans titre est montré « Sort sans nom ».
-  if (field === "name") return sameCellText(value, original.name) || (original.name === UNNAMED_CLASS_SPELL && !value.trim())
+  if (field === "name") return sameCellText(value, spellName(original))
   return sameCellText(value, original[field])
 }
 
@@ -954,7 +960,7 @@ async function updateSpellRow(base: SpellWorkbook, index: number, draft: ClassSp
   if (id !== currentId) writes.push({ column: workbook.columns.id, value: id })
   for (const field of fields) {
     const column = workbook.columns[spellFieldColumns[field]]
-    if (field === "name") writes.push({ column, value: draft.name.trim() })
+    if (field === "name") writes.push({ column, value: spellName(draft) })
     else if (field === "type") writes.push(keepTone ? { column, value: draft.type } : { column, value: draft.type, colors: tone })
     else if (field === "skillsRaw") writes.push({ column, value: draft.skillsRaw })
     else if (field === "charges") writes.push({ column, value: chargesCell(draft.charges, cell(current, column), draft.chargesLabel) })
@@ -979,7 +985,7 @@ async function updateSpellRow(base: SpellWorkbook, index: number, draft: ClassSp
  */
 async function addSpellRow(base: SpellWorkbook, draft: ClassSpellDraft, kind: SpellIndexKind): Promise<SpellSaveResult> {
   assertRankValues(draft)
-  const name = draft.name.trim()
+  const name = spellName(draft)
   // Un sort peut ne pas avoir de titre, mais une ligne neuve doit contenir quelque chose.
   if (!name && !draft.effect.trim() && !draft.description.trim()) throw new Error("CLASS_SPELL_EMPTY")
   const charges = chargesCell(draft.charges, "", draft.chargesLabel)
@@ -1277,7 +1283,7 @@ export function mergeClassSpells(keep: SpellTarget, removed: SpellTarget[], draf
     }) : 0
     await remapIgnoredPairs(workbook.file.id, mapping).catch((error: unknown) => console.error("IGNORED_SPELL_PAIRS_REMAP_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
     await deleteSpellRows(workbook, removedIndexes)
-    return { ...result, removedNames, keptName: draft.name.trim(), characters }
+    return { ...result, removedNames, keptName: spellName(draft), characters }
   })
 }
 
