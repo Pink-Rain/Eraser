@@ -310,3 +310,26 @@ test("Session : une liste illisible n'est jamais remplacée par une liste vide, 
   assert.deepEqual(updated.characterIds, ["PJ-1", "PJ-2"]);
   assert.deepEqual(updated.npcIds, ["PNJ-1", "PNJ-2"]);
 });
+
+test("Tabletop : une feuille réglée en français garde ses décimales, un changement n'écrit que sa case", async () => {
+  const id = fresh("tabletop");
+  google.addSpreadsheet(id, [
+    { title: "Cartes", grid: [["ID", "Page liée", "Nom", "Image", "Largeur", "Hauteur", "Taille case (px)", "Distance par case", "Unité", "Clé de salon", "Créé par", "Créée le", "Modifiée le", "Dossier"],
+      ["MAP-1", "CAMP-1", "Forêt", "", "1600", "900", "70", "1,5", "m", "", "uid-1", "2026-09-01", "2026-09-01", "Ville"]] },
+    { title: "Tokens", grid: [tokenHeaders, ["TOK-1", "MAP-1", "npc", "PNJ-1", "1369,397166", "450,5", "2026-09-01", "2026-09-01", "Garde", "🛡", "1", "1,25", "#7f3430"]] },
+    { title: "Dossiers", grid: [["ID", "Page liée", "Nom", "Ordre", "Créé le", "Modifié le"]] },
+    { title: "Journal", grid: [["ID", "ID carte", "Type", "ID auteur", "Auteur", "Contenu", "Formule", "Résultat", "Horodatage", "Audience", "ID destinataire", "Destinataire"]] },
+  ]);
+  await jdr.saveJdrSheet({ key: "tabletop", spreadsheetId: id, name: "tabletop", tabName: "Cartes", webViewLink: "" });
+  const [token] = await sheets.listTabletopTokens("MAP-1");
+  assert.deepEqual([token.x, token.y, token.iconScale], [1369.397166, 450.5, 1.25]);
+  const [map] = await sheets.listTabletopMaps("CAMP-1");
+  assert.equal(map.distancePerGrid, 1.5);
+  await sheets.updateTabletopTokenAppearance("MAP-1", "TOK-1", { scale: 2, label: "- le garde" });
+  const row = google.grid(id, "Tokens")[1];
+  assert.equal(row[10], "2");
+  assert.equal(row[11], "1,25");
+  assert.equal(row[8], "- le garde");
+  await sheets.updateTabletopMap("MAP-1", { name: "Forêt sombre" });
+  assert.deepEqual(google.grid(id, "Cartes")[1].slice(2, 9), ["Forêt sombre", "", "1600", "900", "70", "1,5", "m"]);
+});

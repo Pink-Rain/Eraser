@@ -77,7 +77,7 @@ import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
-import { matchValueRanges, normalizeGoogleSheetRows, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { matchValueRanges, normalizeGoogleSheetRows, sheetNumber, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
@@ -4320,7 +4320,8 @@ export async function moveNpcsToPage(sourcePageLinked: string, targetPageLinked:
 }
 
 function tabletopNumber(value: unknown, fallback: number, minimum: number, maximum: number) {
-  const parsed = Number(value)
+  // « 1,25 » dans une feuille réglée en français : lu 1,25, pas la valeur par défaut.
+  const parsed = sheetNumber(value)
   return Number.isFinite(parsed) ? Math.max(minimum, Math.min(maximum, parsed)) : fallback
 }
 
@@ -4345,10 +4346,14 @@ async function readTabletopTab(spreadsheetId: string, tab: TabletopTabName, opti
   return { columns, rows: read.rows.map((row) => canonicalRow(columns, row)) }
 }
 
-/** Ajoute des lignes (décrites dans l'ordre prévu) à un onglet du Tabletop, chaque valeur sous son en-tête. */
+/**
+ * Ajoute des lignes (décrites dans l'ordre prévu) à un onglet du Tabletop, chaque valeur sous
+ * son en-tête. Le Tabletop n'a aucune formule : un message de journal ou un nom qui commence
+ * par « = » ou « - » reste du texte.
+ */
 async function appendTabletopRows(spreadsheetId: string, tab: TabletopTabName, rows: SheetCell[][], known?: SheetColumns) {
   const columns = known ?? await ensureNamedColumns(spreadsheetId, tab, await namedColumnsOf(spreadsheetId, tab, tabletopHeaders(tab)))
-  return appendRows(spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows))
+  return appendRows(spreadsheetId, namedAppendRange(tab, columns), canonicalRows(columns, rows.map((row) => row.map((cell) => typeof cell === "string" ? textCell(cell) : cell))))
 }
 
 function tabletopMapFromRow(row: string[]): TabletopMapRecord | null {
@@ -4431,7 +4436,21 @@ export async function updateTabletopMap(id: string, patch: Partial<Pick<Tabletop
     folder: typeof patch.folder === "string" ? patch.folder.trim().slice(0, 80) || "Sans dossier" : current.folder,
     updatedAt: new Date().toISOString(),
   }
-  await updateRanges(sheet.spreadsheetId, canonicalWrites("Cartes", columns, `A${index + 2}:N${index + 2}`, [tabletopMapRow(next)]))
+  // Seules les cases du changement : réécrire toute la carte remettait une distance « 1,5 »
+  // mal lue à 1, et effaçait ce qui avait changé ailleurs entre-temps.
+  const rowNumber = index + 2
+  const cell = (letter: string, value: SheetCell) => canonicalWrites("Cartes", columns, `${letter}${rowNumber}:${letter}${rowNumber}`, [[value]])
+  await updateRanges(sheet.spreadsheetId, [
+    ...(patch.name !== undefined ? cell("C", textCell(next.name)) : []),
+    ...(patch.backgroundUrl !== undefined ? cell("D", next.backgroundUrl) : []),
+    ...(patch.width !== undefined ? cell("E", next.width) : []),
+    ...(patch.height !== undefined ? cell("F", next.height) : []),
+    ...(patch.gridSize !== undefined ? cell("G", next.gridSize) : []),
+    ...(patch.distancePerGrid !== undefined ? cell("H", next.distancePerGrid) : []),
+    ...(patch.distanceUnit !== undefined ? cell("I", textCell(next.distanceUnit)) : []),
+    ...cell("M", next.updatedAt),
+    ...(patch.folder !== undefined ? cell("N", textCell(next.folder)) : []),
+  ])
   return next
 }
 
@@ -4504,14 +4523,14 @@ export async function renameTabletopFolder(pageLinked: string, folderId: string,
   let folder: TabletopFolderRecord
   if (storedFolder) {
     folder = { ...storedFolder, name: cleaned, updatedAt: now }
-    updates.push(...canonicalWrites("Dossiers", folderColumns, `C${folderIndex + 2}:F${folderIndex + 2}`, [[folder.name, folder.sortOrder, folder.createdAt, folder.updatedAt]]))
+    updates.push(...canonicalWrites("Dossiers", folderColumns, `C${folderIndex + 2}:C${folderIndex + 2}`, [[textCell(folder.name)]]), ...canonicalWrites("Dossiers", folderColumns, `F${folderIndex + 2}:F${folderIndex + 2}`, [[folder.updatedAt]]))
   } else {
     folder = await createTabletopFolder(pageLinked, cleaned)
   }
   mapRows.forEach((row, index) => {
     const map = tabletopMapFromRow(row)
     if (map?.pageLinked === pageLinked && normalizedTabletopFolder(map.folder) === normalizedTabletopFolder(oldName)) {
-      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, cleaned]]))
+      updates.push(...canonicalWrites("Cartes", mapColumns, `M${index + 2}:N${index + 2}`, [[now, textCell(cleaned)]]))
     }
   })
   if (updates.length) await updateRanges(sheet.spreadsheetId, updates)
@@ -4628,12 +4647,27 @@ export async function updateTabletopTokenAppearance(mapId: string, tokenId: stri
     color: typeof patch.color === "string" && /^#[0-9a-f]{6}$/i.test(patch.color) ? patch.color : token.color,
     updatedAt: new Date().toISOString(),
   }
-  const updates = canonicalWrites("Tokens", columns, `H${index + 2}:H${index + 2}`, [[next.updatedAt]])
-  if (patch.label !== undefined || patch.icon !== undefined) updates.push(...canonicalWrites("Tokens", columns, `I${index + 2}:J${index + 2}`, [[next.label, next.icon]]))
-  if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push(...canonicalWrites("Tokens", columns, `K${index + 2}:L${index + 2}`, [[next.scale, next.iconScale]]))
-  if (patch.color !== undefined) updates.push(...canonicalWrites("Tokens", columns, `M${index + 2}:M${index + 2}`, [[next.color]]))
-  await updateRanges(sheet.spreadsheetId, updates)
+  await updateRanges(sheet.spreadsheetId, tokenWrites(columns, index + 2, patch, next))
   return next
+}
+
+/**
+ * Les cases d'un pion que le changement touche, et elles seules : réécrire l'échelle de
+ * l'icône avec celle du pion remettait l'autre à sa valeur lue (1 quand « 1,25 » était mal
+ * lu). Le nom reste du texte.
+ */
+function tokenWrites(columns: SheetColumns, rowNumber: number, patch: Partial<TabletopTokenRecord>, next: TabletopTokenRecord) {
+  const cell = (letter: string, value: SheetCell) => canonicalWrites("Tokens", columns, `${letter}${rowNumber}:${letter}${rowNumber}`, [[value]])
+  return [
+    ...(patch.x !== undefined ? cell("E", next.x) : []),
+    ...(patch.y !== undefined ? cell("F", next.y) : []),
+    ...cell("H", next.updatedAt),
+    ...(patch.label !== undefined ? cell("I", textCell(next.label)) : []),
+    ...(patch.icon !== undefined ? cell("J", textCell(next.icon)) : []),
+    ...(patch.scale !== undefined ? cell("K", next.scale) : []),
+    ...(patch.iconScale !== undefined ? cell("L", next.iconScale) : []),
+    ...(patch.color !== undefined ? cell("M", next.color) : []),
+  ]
 }
 
 export async function updateTabletopTokenStates(mapId: string, patches: Array<{ tokenId: string } & Partial<Pick<TabletopTokenRecord, "x" | "y" | "scale" | "iconScale" | "label" | "icon" | "color">>>) {
@@ -4658,12 +4692,7 @@ export async function updateTabletopTokenStates(mapId: string, patches: Array<{ 
       color: typeof patch.color === "string" && /^#[0-9a-f]{6}$/i.test(patch.color) ? patch.color : token.color,
       updatedAt: new Date().toISOString(),
     }
-    const rowNumber = index + 2
-    if (patch.x !== undefined || patch.y !== undefined) updates.push(...canonicalWrites("Tokens", columns, `E${rowNumber}:F${rowNumber}`, [[next.x, next.y]]))
-    if (patch.label !== undefined || patch.icon !== undefined) updates.push(...canonicalWrites("Tokens", columns, `I${rowNumber}:J${rowNumber}`, [[next.label, next.icon]]))
-    if (patch.scale !== undefined || patch.iconScale !== undefined) updates.push(...canonicalWrites("Tokens", columns, `K${rowNumber}:L${rowNumber}`, [[next.scale, next.iconScale]]))
-    if (patch.color !== undefined) updates.push(...canonicalWrites("Tokens", columns, `M${rowNumber}:M${rowNumber}`, [[next.color]]))
-    updates.push(...canonicalWrites("Tokens", columns, `H${rowNumber}:H${rowNumber}`, [[next.updatedAt]]))
+    updates.push(...tokenWrites(columns, index + 2, patch, next))
     saved.push(next)
   }
   if (updates.length) await updateRanges(sheet.spreadsheetId, updates)

@@ -9,6 +9,21 @@ export function normalizeGoogleSheetRows(rows: GoogleSheetCellValue[][] | undefi
 }
 
 /**
+ * Un nombre lu dans une feuille, quel que soit son réglage régional. Une feuille réglée en
+ * français rend « 1,25 » et « 1 369,4 » : `Number()` en faisait NaN, et la valeur par défaut
+ * (échelle 1, position 0…) était ensuite réécrite à la place de la vraie.
+ */
+export function sheetNumber(value: unknown) {
+  if (typeof value === "number") return value
+  const text = String(value ?? "").trim().replace(/[\s\u00a0\u202f]/g, "")
+  if (!text) return Number.NaN
+  const comma = text.lastIndexOf(",")
+  const dot = text.lastIndexOf(".")
+  // Le dernier séparateur est la virgule décimale ; l'autre sépare les milliers.
+  return Number(comma > dot ? text.replace(/\./g, "").replace(",", ".") : text.replace(/,/g, ""))
+}
+
+/**
  * Un texte saisi, à écrire en USER_ENTERED, qui doit rester du texte. Sheets prend pour une
  * formule ce qui commence par « = », « + », « - » ou « @ » (« - se méfie de lui » s'affichait
  * « #ERROR! ») et retire une apostrophe de tête : l'apostrophe ajoutée devant ne fait pas

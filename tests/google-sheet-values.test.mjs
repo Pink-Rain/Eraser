@@ -41,3 +41,14 @@ test("un texte saisi reste du texte, un nombre reste un nombre", () => {
   assert.equal(values.textCell("Sorcier·ère"), "Sorcier·ère");
   assert.equal(values.textCell(""), "");
 });
+
+test("un nombre lu dans une feuille réglée en français ou en anglais garde sa valeur", () => {
+  assert.equal(values.sheetNumber("1,25"), 1.25);
+  assert.equal(values.sheetNumber("1369,397166"), 1369.397166);
+  assert.equal(values.sheetNumber("1\u202f369,4"), 1369.4);
+  assert.equal(values.sheetNumber("1,369.4"), 1369.4);
+  assert.equal(values.sheetNumber("-12"), -12);
+  assert.equal(values.sheetNumber(3.5), 3.5);
+  assert.ok(Number.isNaN(values.sheetNumber("")));
+  assert.ok(Number.isNaN(values.sheetNumber("abc")));
+});
