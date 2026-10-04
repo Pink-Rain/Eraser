@@ -12,6 +12,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { rollDiceExpression } from "@/lib/math-expression"
 import type { TabletopActivityRecord } from "@/lib/tabletop-schema"
 import { cn } from "@/lib/utils"
+import { ownedBy } from "@/lib/ownership"
 
 type ChatUser = { uid: string; role: "admin" | "mj" | "joueur" }
 type ChatCampaign = { id: string; name: string }
@@ -222,7 +223,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
             ? payload.recipientId.slice(ACCOUNT_PREFIX.length)
             : membersRef.current.find((member) => member.id === payload.recipientId)?.ownerUid
           const targets = payload.audience === "public" ? undefined : [...presence]
-            .filter(([, peer]) => payload.audience === "gm" ? peer.role === "admin" || peer.role === "mj" : Boolean(recipientUid && peer.uid === recipientUid))
+            .filter(([, peer]) => payload.audience === "gm" ? peer.role === "admin" || peer.role === "mj" : Boolean(recipientUid && ownedBy(recipientUid, [peer.uid])))
             .map(([peerId]) => peerId)
           if (targets && !targets.length) return
           void activityAction.send(payload as unknown as JsonValue, targets ? { target: targets } : undefined).catch(() => setConnection("error"))

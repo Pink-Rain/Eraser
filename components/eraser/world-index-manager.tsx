@@ -22,7 +22,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { IN_PLACE_ATTRIBUTE } from "@/components/eraser/app-tabs"
+import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
@@ -174,6 +174,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Gardée pour cette page : changer d'onglet d'Eraser puis revenir la retrouve.
   const [query, setQuery] = useRememberedSearch()
   const [details, setDetails] = useState<string | null>(null)
+  // Index des personnages : la dernière réécriture des anciennes cases JSON, qu'on peut annuler.
+  const [listRewrite, setListRewrite] = useState("")
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
   const engineRef = useRef<ReturnType<typeof createRowEngine> | null>(null)
@@ -415,6 +417,63 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     if (entity?.nameHref && id) router.push(entity.nameHref.replace("{id}", encodeURIComponent(id)))
     else setDetails(rowKey)
   }, [entity, rawOf, router])
+  /**
+   * Le portrait d'un personnage, la bannière d'une campagne : importés comme depuis la
+   * fiche ou le tableau de bord (même adresse, même stockage), pas comme une image d'index.
+   */
+  const entityImage = useMemo(() => {
+    if (indexKey !== "characters" && indexKey !== "campaigns") return null
+    const characters = indexKey === "characters"
+    return {
+      header: characters ? "portrait" : "banniere",
+      upload: async (file: File, rowKey: string) => {
+        const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+        if (!id) throw new Error("Cette ligne n’a pas encore d’identifiant.")
+        const form = new FormData()
+        if (characters) { form.append("portrait", file); form.append("changes", "{}") } else form.append("banner", file)
+        const response = await fetch(`/api/${characters ? "characters" : "campaigns"}/${encodeURIComponent(id)}`, { method: "PATCH", body: form })
+        const payload = await response.json().catch(() => ({})) as { error?: string }
+        if (!response.ok) throw new Error(payload.error || "L’image n’a pas pu être importée.")
+        // La même adresse qu'avant : `?v=` fait voir la nouvelle image tout de suite.
+        return `/api/${characters ? "characters/portrait" : "campaigns/banner"}/${encodeURIComponent(id)}?v=${Date.now()}`
+      },
+    }
+  }, [indexKey, rawOf])
+
+  /** L'adresse d'une ligne : sa page, ou l'index ouvert sur sa fiche (`?ligne=ID`). */
+  const rowHref = useCallback((rowKey: string) => {
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    if (!id) return undefined
+    if (entity?.nameHref) return entity.nameHref.replace("{id}", encodeURIComponent(id))
+    return `${pathname}?ligne=${encodeURIComponent(id)}`
+  }, [entity, pathname, rawOf])
+  // « ?ligne=ID » (clic droit sur un nom › nouvel onglet, fenêtre ou ici) ouvre la fiche de la ligne.
+  const [wantedRow, setWantedRow] = useState<string | null>(null)
+  useEffect(() => {
+    const read = () => setWantedRow(new URLSearchParams(window.location.search).get("ligne"))
+    const timer = window.setTimeout(read, 0)
+    window.addEventListener(URL_CHANGE_EVENT, read)
+    window.addEventListener("popstate", read)
+    return () => { window.clearTimeout(timer); window.removeEventListener(URL_CHANGE_EVENT, read); window.removeEventListener("popstate", read) }
+  }, [])
+  useEffect(() => {
+    if (!wantedRow || !tables.length) return
+    const found = tables.flatMap((candidate) => {
+      const column = candidate.headers.findIndex((header) => foldName(header) === "id")
+      const row = column < 0 ? undefined : candidate.rows.find((item) => (item.values[column] ?? "").replace(/<[^>]+>/g, "").trim() === wantedRow)
+      return row ? [rowKeyOf(candidate.tabName, row.rowNumber)] : []
+    })[0]
+    if (!found) return
+    // Lue une fois : fermer la fiche ne la rouvre pas, l'adresse redevient celle de l'index.
+    const timer = window.setTimeout(() => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("ligne")
+      replaceAppUrl(url.pathname + url.search, { record: false })
+      setWantedRow(null)
+      setDetails(found)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [tables, wantedRow])
   const startAdding = useCallback(() => {
     if (entity?.addHref) router.push(entity.addHref)
     else setCreating(true)
@@ -674,6 +733,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         commit: (rowKey, columnKey, value) => void commitCell(rowKey, columnKey, value),
         disabled: busy,
         openForm: openRow,
+        tabHrefOf: rowHref,
         computed,
         formula: (rowKey, columnKey, spec) => engine.formula(rowKey, columnKey, spec),
         gaugeMax: (rowKey, spec) => engine.gaugeMax(rowKey, spec),
@@ -683,6 +743,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         tabNames: sortTabs.map((entry) => entry.value),
         rowValue: valueOf,
       },
+      entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey) } : {},
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     if (extras) {
@@ -694,8 +755,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           const row = extrasOf(rowKey)
           const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
           if (!row) return <span className="px-2 text-xs text-muted-foreground">—</span>
+          if (row.trashed && entity?.trashKind) return <TrashedRowActions kind={entity.trashKind} id={id} ownerName={row.ownerName} ask={ask} onDone={(message) => { notify(message); void refreshRef.current() }} />
           if (!extras.canAssign || !entity?.trashKind) return <span className="px-2 text-sm text-muted-foreground">{row.ownerName}</span>
-          return <OwnerSelector kind={entity.trashKind} itemId={id} ownerUid={row.ownerUid} accounts={extras.accounts} onSaved={() => void refreshRef.current()} />
+          return <OwnerSelector key={row.ownerUid} kind={entity.trashKind} itemId={id} ownerUids={row.ownerUids} accounts={extras.accounts} onSaved={() => void refreshRef.current()} />
         },
       })
       const links = indexGridColumn(LINKS_COLUMN, extras.linksLabel, { kind: "auto-links" }, 300, context, { sortable: true })
@@ -703,7 +765,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [busy, commitCell, computed, drawCell, engine, entity, extras, extrasOf, openRow, rawOf, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [ask, busy, commitCell, computed, drawCell, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -788,6 +850,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     .filter((column) => isSheetSpec(column.spec) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
     .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: savedCell(detailsFound, column.header), long: isLongColumn(column.header) })) : []
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
+    ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details) } : {}),
     formula: (spec) => engine.formula(details, header, spec),
     computed: (spec) => computed(details, header, spec),
     gaugeMax: (spec) => engine.gaugeMax(details, spec),
@@ -896,6 +959,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
       </div>
+      {indexKey === "characters" && (extras?.legacyListCells || listRewrite) ? <LegacyListCellsNotice count={extras?.legacyListCells ?? 0} backup={listRewrite} onChange={(backup) => { setListRewrite(backup); void refreshRef.current() }} /> : null}
 
       {editor && <IndexEditor
         model={editor}
@@ -1022,4 +1086,91 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     </section>
     </ReferenceScopeProvider>
   )
+}
+
+/**
+ * Une fiche ou une campagne à la corbeille, montrée à un administrateur dans son index pour
+ * faire le tri : la restaurer, ou la supprimer pour de bon (sa ligne quitte Google Sheets).
+ */
+function TrashedRowActions({ kind, id, ownerName, ask, onDone }: {
+  kind: "character" | "campaign"
+  id: string
+  ownerName: string
+  ask: (title: string, options: Array<{ value: string; label: string }>, description?: string) => Promise<string | null>
+  onDone: (message: string) => void
+}) {
+  const [pending, setPending] = useState(false)
+  const [error, setError] = useState("")
+  async function run(method: "PATCH" | "DELETE") {
+    if (method === "DELETE") {
+      const label = kind === "character" ? "ce personnage" : "cette campagne"
+      const answer = await ask(`Supprimer ${label} définitivement ?`, [{ value: "delete", label: "Supprimer définitivement" }, { value: "", label: "Annuler" }], "Sa ligne est retirée de Google Sheets. Cette suppression ne se défait pas depuis Eraser (l’historique des versions de Google Sheets la garde).")
+      if (answer !== "delete") return
+    }
+    setPending(true)
+    setError("")
+    try {
+      const response = await fetch("/api/admin/trash", { method, headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id }) })
+      const payload = await response.json().catch(() => ({})) as { error?: string }
+      if (!response.ok) throw new Error(payload.error || "L’opération a échoué.")
+      onDone(method === "PATCH" ? "Restauré." : "Supprimé définitivement.")
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "L’opération a échoué.")
+    } finally {
+      setPending(false)
+    }
+  }
+  return <div className="flex min-w-0 flex-col gap-1 px-2 py-1.5">
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="rounded-full border border-destructive/40 bg-destructive/10 px-2 py-0.5 text-[11px] font-medium text-destructive">À la corbeille</span>
+      <span className="truncate text-xs text-muted-foreground">{ownerName}</span>
+    </div>
+    <div className="flex flex-wrap gap-1.5">
+      <Button type="button" size="xs" variant="outline" disabled={pending} onClick={() => void run("PATCH")}>Restaurer</Button>
+      <Button type="button" size="xs" variant="ghost" disabled={pending} onClick={() => void run("DELETE")} className="text-destructive hover:text-destructive">{pending ? <LoaderCircle className="animate-spin" /> : null}Supprimer définitivement</Button>
+    </div>
+    {error && <p className="text-[11px] text-destructive">{error}</p>}
+  </div>
+}
+
+/**
+ * Index des personnages, administrateur : des cases de fiches sont encore écrites en ancien
+ * JSON (`["Elfe"]`). Eraser les affiche déjà en clair partout ; ce bouton les réécrit aussi
+ * dans Google Sheets, à la demande, après avoir gardé l'ancien texte (« Annuler » le remet).
+ */
+function LegacyListCellsNotice({ count, backup, onChange }: { count: number; backup: string; onChange: (backup: string) => void }) {
+  const [pending, setPending] = useState(false)
+  const [message, setMessage] = useState("")
+  const [error, setError] = useState("")
+  async function run(body: { action: "rewrite" } | { action: "restore"; backup: string }) {
+    setPending(true)
+    setError("")
+    try {
+      const response = await fetch("/api/admin/character-list-cells", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      const payload = await response.json().catch(() => ({})) as { error?: string; backup?: string; rewritten?: number; restored?: number; skipped?: number }
+      if (!response.ok) throw new Error(payload.error || "L’opération a échoué.")
+      if (body.action === "rewrite") {
+        setMessage(`${payload.rewritten ?? 0} case${(payload.rewritten ?? 0) > 1 ? "s" : ""} réécrite${(payload.rewritten ?? 0) > 1 ? "s" : ""} en texte lisible.`)
+        onChange(payload.backup ?? "")
+      } else {
+        setMessage(`Ancien texte remis dans ${payload.restored ?? 0} case${(payload.restored ?? 0) > 1 ? "s" : ""}${payload.skipped ? ` (${payload.skipped} modifiée${payload.skipped > 1 ? "s" : ""} depuis, laissée${payload.skipped > 1 ? "s" : ""} telle${payload.skipped > 1 ? "s" : ""} quelle${payload.skipped > 1 ? "s" : ""})` : ""}.`)
+        onChange("")
+      }
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "L’opération a échoué.")
+    } finally {
+      setPending(false)
+    }
+  }
+  return <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-600/30 bg-amber-500/10 px-3 py-2 text-sm">
+    <span className="min-w-0 flex-1">
+      {count > 0
+        ? <>{count} case{count > 1 ? "s" : ""} de fiches (peuple, classe, langue, titre, religion) {count > 1 ? "sont" : "est"} encore écrite{count > 1 ? "s" : ""} à l’ancienne dans Google Sheets (<code className="text-xs">[&quot;…&quot;]</code>). Eraser les affiche déjà en clair ; tu peux aussi les réécrire dans la feuille.</>
+        : message}
+      {count > 0 && message && <span className="ml-1 text-muted-foreground">{message}</span>}
+      {error && <span className="ml-1 text-destructive">{error}</span>}
+    </span>
+    {count > 0 && <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => void run({ action: "rewrite" })}>{pending ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Réécrire en texte lisible</Button>}
+    {backup && <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => void run({ action: "restore", backup })}>Annuler</Button>}
+  </div>
 }

@@ -353,7 +353,7 @@ export function IdCell({ value, computed = false }: { value: string; computed?: 
 }
 
 /** Le nom qui ouvre la fiche (ou la page) de la ligne. */
-export function NameFormCell({ value, onOpen, href, color, styled = false }: { value: string; onOpen?: () => void; href?: string; color?: string; styled?: boolean }) {
+export function NameFormCell({ value, onOpen, href, tabHref, color, styled = false }: { value: string; onOpen?: () => void; href?: string; tabHref?: string; color?: string; styled?: boolean }) {
   const content = <>
     {color && <span className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
     {/<[a-z]/i.test(value)
@@ -364,7 +364,9 @@ export function NameFormCell({ value, onOpen, href, color, styled = false }: { v
   // Un style imposé à la colonne décide de la graisse ; sinon le nom est en gras.
   const className = `flex min-h-8 w-full items-center gap-2 rounded-md px-2 py-1.5 text-left ${styled ? "" : "font-semibold"} hover:bg-muted hover:text-primary hover:underline`
   if (href) return <Link href={href} className={className} title="Ouvrir">{content}</Link>
-  return <button type="button" onClick={onOpen} className={className} title="Ouvrir la fiche">{content}</button>
+  // Son adresse (`data-tab-href`) donne le clic droit « Ouvrir ici / dans un nouvel onglet / dans une nouvelle fenêtre ».
+  const label = value.replace(/<[^>]+>/g, "").trim()
+  return <button type="button" onClick={onOpen} className={className} title="Ouvrir la fiche" {...(tabHref ? { "data-tab-href": tabHref, "data-tab-label": label || "Fiche" } : {})}>{content}</button>
 }
 
 // ---------------------------------------------------------------------------
@@ -900,6 +902,8 @@ export type IndexColumnContext = {
   openForm?: (rowKey: string) => void
   /** …ou la page de la ligne. */
   hrefOf?: (rowKey: string) => string
+  /** L'adresse qui rouvre la ligne (sa page, ou l'index sur sa fiche) : clic droit, nouvel onglet, nouvelle fenêtre. */
+  tabHrefOf?: (rowKey: string) => string | undefined
   colorOf?: (rowKey: string) => string | undefined
   /** Liens automatiques d'une ligne. */
   autoLinks?: (rowKey: string) => AutoLink[]
@@ -962,7 +966,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     }
   }
   const { valueOf, commit } = context
-  const off = (rowKey: string) => Boolean(context.disabled || context.lockedRow?.(rowKey))
+  const off = (rowKey: string) => Boolean(context.disabled || spec.readOnly || context.lockedRow?.(rowKey))
   switch (spec.kind) {
     case "name":
     case "linked":
@@ -971,7 +975,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       column.commitDelay = Infinity
       break
     case "name-form":
-      column.control = (rowKey) => <NameFormCell value={valueOf(rowKey, key)} onOpen={context.openForm ? () => context.openForm?.(rowKey) : undefined} href={context.hrefOf?.(rowKey)} color={context.colorOf?.(rowKey)} styled={Boolean(spec.style && !spec.style.keepCellFormatting)} />
+      column.control = (rowKey) => <NameFormCell value={valueOf(rowKey, key)} onOpen={context.openForm ? () => context.openForm?.(rowKey) : undefined} href={context.hrefOf?.(rowKey)} tabHref={context.tabHrefOf?.(rowKey)} color={context.colorOf?.(rowKey)} styled={Boolean(spec.style && !spec.style.keepCellFormatting)} />
       break
     case "id":
       column.control = (rowKey) => <IdCell value={valueOf(rowKey, key)} computed={context.idComputed?.(rowKey)} />
@@ -1055,9 +1059,22 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     default:
       break
   }
+  // Lecture seule : rien ne s'y saisit, ne s'y colle ni ne s'y recopie.
+  if (spec.readOnly && !column.custom) {
+    column.control ??= (rowKey) => <ReadOnlyCell html={valueOf(rowKey, key)} rich={rich} />
+    column.computed = true
+    column.typeLabel = `${column.typeLabel} · lecture seule`
+  }
   const { renderValue, upload, ...rest } = extra
   void renderValue; void upload
   return { ...column, ...rest }
+}
+
+/** Une case en lecture seule : son contenu, sans édition. */
+function ReadOnlyCell({ html, rich }: { html: string; rich: boolean }) {
+  return rich
+    ? <div className="min-h-8 w-full cursor-default break-words px-2 py-1.5 [overflow-wrap:anywhere]" title="Lecture seule : se modifie ailleurs" dangerouslySetInnerHTML={{ __html: sanitizeRichText(html) }} />
+    : <div className="min-h-8 w-full cursor-default break-words px-2 py-1.5 [overflow-wrap:anywhere]" title="Lecture seule : se modifie ailleurs">{html}</div>
 }
 
 // ---------------------------------------------------------------------------
@@ -1088,17 +1105,24 @@ export type IndexFieldProps = {
     runButton?: (button: ActionButton) => Promise<void>
     /** Rangement en onglets : les onglets de l'index. */
     tabNames?: string[]
+    /** Colonne Image : import propre à la colonne (portrait d'un personnage…). */
+    upload?: (file: File, previous: string) => Promise<string>
   }
 }
 
 const fieldLabel = "grid content-start gap-1 text-xs font-semibold"
 
-export function IndexField({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false }: IndexFieldProps) {
+/** Un champ de la fiche ; une colonne en lecture seule s'y affiche sans se modifier. */
+export function IndexField(props: IndexFieldProps) {
+  return <IndexFieldOfType {...props} disabled={props.disabled || Boolean(props.spec.readOnly)} />
+}
+
+function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false }: IndexFieldProps) {
   const spec = normalizeSpec(input)
   const look = columnStyleCss(spec.style)
   const title = hideLabel
     ? <span className="sr-only">{label}</span>
-    : <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
+    : <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} /></div>
@@ -1110,7 +1134,7 @@ export function IndexField({ label, spec: input, value, onChange, long = false, 
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
     case "file":
       return spec.file?.accept === "image" && !spec.file.multiple
-        ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} aspect="aspect-video" disabled={disabled} /></div>
+        ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} upload={row?.upload} aspect="aspect-video" disabled={disabled} /></div>
         : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>

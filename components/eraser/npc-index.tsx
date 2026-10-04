@@ -1,6 +1,8 @@
 "use client"
 
-import { useCallback, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { usePathname } from "next/navigation"
+import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
@@ -93,6 +95,28 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
   // Dernière version connue de chaque PNJ : deux cellules enregistrées coup sur coup
   // partent chacune de la précédente, sans effacer l'autre.
   const latest = useRef(new Map(initialNpcs.map((npc) => [npc.id, npc])))
+  // « ?ligne=ID » (clic droit sur un nom › nouvel onglet, fenêtre ou ici) ouvre la fiche du PNJ.
+  const pathname = usePathname()
+  const [wantedRow, setWantedRow] = useState<string | null>(null)
+  useEffect(() => {
+    const read = () => setWantedRow(new URLSearchParams(window.location.search).get("ligne"))
+    const timer = window.setTimeout(read, 0)
+    window.addEventListener(URL_CHANGE_EVENT, read)
+    window.addEventListener("popstate", read)
+    return () => { window.clearTimeout(timer); window.removeEventListener(URL_CHANGE_EVENT, read); window.removeEventListener("popstate", read) }
+  }, [])
+  useEffect(() => {
+    const npc = wantedRow ? npcs.find((candidate) => candidate.id === wantedRow) : undefined
+    if (!npc) return
+    const timer = window.setTimeout(() => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("ligne")
+      replaceAppUrl(url.pathname + url.search, { record: false })
+      setWantedRow(null)
+      setEditing(npc)
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [npcs, wantedRow])
 
   const campaignsOf = useCallback((npc: CampaignNpcRecord | undefined) => {
     if (!npc) return []
@@ -183,10 +207,11 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
       disabled: pending,
       lockedRow: (rowKey: string) => !editable(latest.current.get(rowKey)),
       openForm: (rowKey: string) => { const npc = latest.current.get(rowKey); if (npc) setEditing(npc) },
+      tabHrefOf: (rowKey: string) => `${pathname}?ligne=${encodeURIComponent(rowKey)}`,
       autoLinks,
     }
     return fields.map((field) => indexGridColumn(field.key, field.label, field.spec, field.width, context))
-  }, [autoLinks, commit, editable, pending, valueOf])
+  }, [autoLinks, commit, editable, pathname, pending, valueOf])
   /* eslint-enable react-hooks/refs */
 
   async function run(task: () => Promise<void>) {
@@ -246,7 +271,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
   const tabSources = [...npcIndexTabs.filter((candidate) => candidate.id !== tab).map((candidate) => ({ id: candidate.id, name: `PNJs · ${candidate.label}` })), ...sourcePages]
   const count = (id: string) => npcs.filter((npc) => tabOf(npc) === id).length
 
-  return <section className="mt-4 flex flex-col gap-3">
+  return <section className="mt-4 flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
     <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
       <div role="tablist" aria-label="Onglets" className="flex gap-1 self-start rounded-xl border bg-card/70 p-1">
         {npcIndexTabs.map((candidate) => <button

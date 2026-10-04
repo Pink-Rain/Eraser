@@ -8,6 +8,7 @@ import { getCampaignDashboard, getCampaignForPlayer, listCampaignMembers, listNp
 import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { playerNamesFor } from "@/lib/chat-accounts"
+import { ownedBy } from "@/lib/ownership"
 
 export const dynamic = "force-dynamic"
 
@@ -34,7 +35,7 @@ async function CampaignDashboardData({
   const members = listed.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)} userEmail={userEmail} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

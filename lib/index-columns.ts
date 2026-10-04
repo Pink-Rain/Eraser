@@ -401,6 +401,11 @@ export type IndexColumnSpec = {
   actions?: ActionButton[]
   /** Colonne masquée : cachée du tableau, qu'on peut montrer d'un clic. */
   hidden?: boolean
+  /**
+   * Lecture seule : la colonne s'affiche (tri, recherche, survol, fiche) mais ne se modifie
+   * pas depuis l'index ; ses données viennent d'ailleurs (la fiche d'un personnage…).
+   */
+  readOnly?: boolean
   /** Explication de la colonne, montrée au survol de son en-tête. */
   description?: string
   /** Case à cocher : une cellule vide compte comme cochée (« Actif » d'un objet). */

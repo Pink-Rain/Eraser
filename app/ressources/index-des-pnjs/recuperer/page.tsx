@@ -9,6 +9,7 @@ import { listAllCampaignsForAdmin, listAllNpcs, listCampaignsForMj } from "@/lib
 import { identityUidsForUser } from "@/lib/identity-links"
 import { foldNpcName, isNpcLibraryPage } from "@/lib/npc-pages"
 import { authorizedAccount } from "@/lib/server-auth"
+import { ownedBy } from "@/lib/ownership"
 
 export const dynamic = "force-dynamic"
 
@@ -21,7 +22,7 @@ async function loadNpcIndex(accountUid: string, isAdmin: boolean) {
       identityUidsForUser(accountUid),
     ])
     const campaignById = new Map(allCampaigns.map((campaign) => [campaign.id, campaign]))
-    const owned = new Set([...ownCampaigns.map((campaign) => campaign.id), ...allCampaigns.filter((campaign) => identities.includes(campaign.mjUid)).map((campaign) => campaign.id)])
+    const owned = new Set([...ownCampaigns.map((campaign) => campaign.id), ...allCampaigns.filter((campaign) => ownedBy(campaign.mjUid, identities)).map((campaign) => campaign.id)])
     const linkTo = (campaignId: string): NpcCampaignLink | null => {
       const campaign = campaignById.get(campaignId)
       return campaign ? { id: campaign.id, name: campaign.name, manage: isAdmin || owned.has(campaign.id) } : null

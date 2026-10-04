@@ -4,6 +4,7 @@ import { currentAuthToken, type AuthorizedUser } from "@/lib/server-auth"
 import { listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 import type { SiteRole } from "@/lib/auth-types"
 import { listAccounts } from "@/lib/site-auth"
+import { ownersOf } from "@/lib/ownership"
 
 export type ChatAccount = { uid: string; name: string }
 
@@ -38,8 +39,9 @@ export async function chatAccountsForCampaign(account: AuthorizedUser, pageLinke
   const localUid = new Map(links.map((link) => [link.legacyUid, link.localUserId]))
   const accountUid = (uid: string) => localUid.get(uid) ?? uid
   const relevant = new Set<string>([account.uid])
-  if (campaign?.mjUid) relevant.add(accountUid(campaign.mjUid))
-  for (const member of members) if (member.ownerUid) relevant.add(accountUid(member.ownerUid))
+  // Une campagne peut avoir plusieurs MJ, un personnage plusieurs propriétaires.
+  for (const uid of ownersOf(campaign?.mjUid)) relevant.add(accountUid(uid))
+  for (const member of members) for (const uid of ownersOf(member.ownerUid)) relevant.add(accountUid(uid))
 
   if (sharedStoreAvailable()) {
     const missing = [...relevant].filter((uid) => names.has(uid) && publishedNames.get(uid) !== names.get(uid)).slice(0, 20)
@@ -55,14 +57,18 @@ export async function chatAccountsForCampaign(account: AuthorizedUser, pageLinke
  * l'annuaire partagé, qu'un MJ complète en passant.
  */
 export async function playerNamesFor(account: AuthorizedUser, ownerUids: string[]): Promise<Map<string, string>> {
-  const wanted = [...new Set(ownerUids.map((uid) => uid.trim()).filter(Boolean))]
+  // Une case « Joueur » peut nommer plusieurs comptes (« uid1 · uid2 ») : chaque case reçoit
+  // les noms de tous ses propriétaires (« Eliot & Nosha »).
+  const cells = [...new Set(ownerUids.map((uid) => uid.trim()).filter(Boolean))]
+  const wanted = [...new Set(cells.flatMap((cell) => ownersOf(cell)))]
   if (!wanted.length) return new Map()
   const [{ names, publishedNames }, links] = await Promise.all([knownNames(account), listIdentityLinks().catch(() => [])])
   const localUid = new Map(links.map((link) => [link.legacyUid, link.localUserId]))
+  const nameOf = (uid: string) => names.get(localUid.get(uid) ?? uid) ?? names.get(uid)
   const result = new Map<string, string>()
-  for (const uid of wanted) {
-    const name = names.get(localUid.get(uid) ?? uid) ?? names.get(uid)
-    if (name) result.set(uid, name)
+  for (const cell of cells) {
+    const shown = [...new Set(ownersOf(cell).map(nameOf).filter((name): name is string => Boolean(name)))]
+    if (shown.length) result.set(cell, shown.join(" & "))
   }
   if (sharedStoreAvailable()) {
     const missing = wanted.map((uid) => localUid.get(uid) ?? uid).filter((uid) => names.has(uid) && publishedNames.get(uid) !== names.get(uid)).slice(0, 20)

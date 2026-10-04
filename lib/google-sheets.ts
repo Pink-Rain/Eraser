@@ -6,7 +6,8 @@ import {
 import { driveImageFormula, isGeneratedObjectIcon, objectIconDriveFileId, suggestedObjectIconKey } from "@/lib/object-icons"
 import { ensureObjectIconsOnDrive } from "@/lib/object-icon-drive"
 import { cache } from "react"
-import { and, desc, eq, inArray, isNotNull, isNull } from "drizzle-orm"
+import { and, desc, eq, inArray, isNotNull, isNull, or, sql, type SQL } from "drizzle-orm"
+import type { AnySQLiteColumn } from "drizzle-orm/sqlite-core"
 import { getDb } from "@/db"
 import { campaignCharacters, campaignIndex, characterIndex, classIndex, sheetIndexSyncs, userIdentityLinks, users } from "@/db/schema"
 import {
@@ -73,6 +74,7 @@ import {
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
+import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { displayedMultipleValue, isLegacyListCell, parseListCell, serializeListCell } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
@@ -1953,12 +1955,36 @@ export async function ensureObjectIndexStackLimits() {
   return { stackLimitsAdded, columnsAdded }
 }
 
+/**
+ * Une case de propriétaires (« Joueur » d'un personnage, « MJ » d'une campagne) qui nomme
+ * l'un de ces comptes : seule (« uid ») ou parmi d'autres (« uid1 · uid2 »).
+ */
+function ownedByAny(column: AnySQLiteColumn, uids: readonly string[]): SQL {
+  return or(inArray(column, [...uids]), ...uids.map((uid) => sql`instr(' · ' || ${column} || ' · ', ${` · ${uid} · `}) > 0`)) ?? sql`0`
+}
+
+/**
+ * Les ID lus dans les feuilles des personnages et des campagnes à leur dernière relecture
+ * complète. Une entrée de l'index local absente des feuilles (ligne supprimée à la main,
+ * ancienne ligne mal lue, qui s'affichait sous son identifiant) n'est plus listée nulle
+ * part ; elle reste dans l'index local, sans être effacée. Une entrée enregistrée après
+ * la relecture (une fiche qui vient d'être créée) reste visible.
+ */
+const sheetPresence: Record<"characters" | "campaigns", { ids: Set<string>; readAt: number } | null> = { characters: null, campaigns: null }
+
+function inSheets(kind: "characters" | "campaigns", item: { id: string; updatedAt?: string | null }) {
+  const presence = sheetPresence[kind]
+  if (!presence || presence.ids.has(item.id)) return true
+  const updated = Date.parse(item.updatedAt ?? "")
+  return Number.isFinite(updated) && updated > presence.readAt - 120_000
+}
+
 async function listCharactersForUserUncached(uid: string) {
   await refreshIdentityIndexes()
   const db = getDb()
   const identityUids = await identityUidsForUser(uid)
   let characters = await db.select().from(characterIndex)
-    .where(and(inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
+    .where(and(ownedByAny(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
   if (characters.length) return decorateCharacters(characters)
   const syncKey = `characters:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
@@ -1969,14 +1995,14 @@ async function listCharactersForUserUncached(uid: string) {
       for (const row of rows) {
         const id = columns.get(row, "ID")
         const ownerUid = columns.get(row, "Joueur")
-        if (!id || !identityUids.includes(ownerUid)) continue
+        if (!id || !ownedBy(ownerUid, identityUids)) continue
         const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"), updatedAt: new Date().toISOString() }
         await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: { ...fields, deletedAt: null } })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
     characters = await db.select().from(characterIndex)
-      .where(and(inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
+      .where(and(ownedByAny(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
   }
   return decorateCharacters(characters)
 }
@@ -1988,7 +2014,7 @@ export async function getCharacterForUser(uid: string, id: string) {
   if (listed) return listed
   const identityUids = await identityUidsForUser(uid)
   const [character] = await getDb().select().from(characterIndex)
-    .where(and(inArray(characterIndex.ownerUid, identityUids), eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
+    .where(and(ownedByAny(characterIndex.ownerUid, identityUids), eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
   return character ? (await decorateCharacters([character]))[0] ?? null : null
 }
 
@@ -2007,7 +2033,8 @@ async function getCharacterByIdUncached(id: string) {
 
 export const getCharacterById = cache(getCharacterByIdUncached)
 
-async function decorateCharacters<T extends { id: string; ownerUid: string; name: string; subtitle: string; updatedAt: string }>(characters: T[]) {
+async function decorateCharacters<T extends { id: string; ownerUid: string; name: string; subtitle: string; updatedAt: string }>(listed: T[]) {
+  const characters = listed.filter((character) => inSheets("characters", character))
   if (!characters.length) return []
   const links = await getDb().select({
     characterId: campaignCharacters.characterId,
@@ -2029,8 +2056,8 @@ async function listCampaignsForMjUncached(uid: string) {
   const db = getDb()
   const identityUids = await identityUidsForUser(uid)
   let campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-    .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
-  if (campaigns.length) return campaigns
+    .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
+  if (campaigns.length) return campaigns.filter((campaign) => inSheets("campaigns", campaign))
   const syncKey = `campaigns:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!sync) {
@@ -2038,7 +2065,7 @@ async function listCampaignsForMjUncached(uid: string) {
     if (source) {
       const { columns, rows } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
       for (const campaign of rows.map((row) => campaignFromRow(row, columns))) {
-        if (!campaign || !identityUids.includes(campaign.mjUid)) continue
+        if (!campaign || !ownedBy(campaign.mjUid, identityUids)) continue
         await db.insert(campaignIndex).values(campaign).onConflictDoUpdate({
           target: campaignIndex.id,
           set: { mjUid: campaign.mjUid, name: campaign.name, description: campaign.description, bannerUrl: campaign.bannerUrl, accentColor: campaign.accentColor, updatedAt: new Date().toISOString(), deletedAt: null },
@@ -2047,9 +2074,9 @@ async function listCampaignsForMjUncached(uid: string) {
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
     campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-      .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
+      .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
   }
-  return campaigns
+  return campaigns.filter((campaign) => inSheets("campaigns", campaign))
 }
 
 export const listCampaignsForMj = cache(listCampaignsForMjUncached)
@@ -2074,11 +2101,11 @@ async function getCharacterForMjUncached(uid: string, id: string) {
   const read = async () => (await getDb().select({ character: characterIndex }).from(characterIndex)
     .innerJoin(campaignCharacters, eq(characterIndex.id, campaignCharacters.characterId))
     .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id))
-    .where(and(eq(characterIndex.id, id), inArray(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1))[0]
+    .where(and(eq(characterIndex.id, id), ownedByAny(campaignIndex.mjUid, identityUids), isNull(characterIndex.deletedAt), isNull(campaignIndex.deletedAt))).limit(1))[0]
   // Un MJ joue aussi : ses propres personnages lui restent ouverts, même hors de ses
   // campagnes (sinon la fiche qu'il vient de créer répondait « introuvable »).
   const readOwn = async () => (await getDb().select().from(characterIndex)
-    .where(and(eq(characterIndex.id, id), inArray(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).limit(1))[0]
+    .where(and(eq(characterIndex.id, id), ownedByAny(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).limit(1))[0]
   let character = (await read())?.character ?? await readOwn()
   if (!character) {
     await ensureIdentityIndexes()
@@ -2095,8 +2122,8 @@ export async function getCampaignForMj(uid: string, id: string) {
   if (listed) return listed
   const identityUids = await identityUidsForUser(uid)
   const [campaign] = await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
-    .from(campaignIndex).where(and(inArray(campaignIndex.mjUid, identityUids), eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
-  return campaign ?? null
+    .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
+  return campaign && inSheets("campaigns", campaign) ? campaign : null
 }
 
 function numberFromCell(value: unknown, fallback = 0) {
@@ -3467,6 +3494,15 @@ export async function syncExistingIdentityIndexes() {
       .onConflictDoUpdate({ target: characterIndex.id, set: { ...next, updatedAt } })
   }
 
+  // Les feuilles font foi : ce qu'elles contiennent est retenu, et une entrée de l'index
+  // local absente des feuilles n'est plus listée (voir `inSheets`).
+  if (characterSheet && characterSheet.columns.at("ID") >= 0 && characterRows.length) {
+    sheetPresence.characters = { ids: new Set(characterRows.map((row) => characterSheet.columns.get(row, "ID").trim()).filter(Boolean)), readAt: Date.now() }
+  }
+  if (campaignSheet && campaignSheet.columns.at("ID") >= 0 && campaignRows.length) {
+    sheetPresence.campaigns = { ids: new Set(campaignRows.map((row) => campaignSheet.columns.get(row, "ID").trim()).filter(Boolean)), readAt: Date.now() }
+  }
+
   for (const link of relationLinks) {
     if (linkKeys.has(`${link.campaignId}::${link.characterId}`)) continue
     await db.insert(campaignCharacters).values(link).onConflictDoNothing()
@@ -3497,17 +3533,18 @@ export async function listLegacyIdentityCandidates(localUserId: string): Promise
     getIdentityLink(localUserId),
   ])
   const candidates = new Map<string, { campaigns: string[]; characters: string[] }>()
-  for (const campaign of campaigns) {
-    if (!campaign.uid || campaign.uid === localUserId) continue
-    const entry = candidates.get(campaign.uid) ?? { campaigns: [], characters: [] }
+  // Une case peut nommer plusieurs propriétaires : chacun est un candidat.
+  for (const campaign of campaigns) for (const uid of ownersOf(campaign.uid)) {
+    if (uid === localUserId) continue
+    const entry = candidates.get(uid) ?? { campaigns: [], characters: [] }
     entry.campaigns.push(campaign.name)
-    candidates.set(campaign.uid, entry)
+    candidates.set(uid, entry)
   }
-  for (const character of characters) {
-    if (!character.uid || character.uid === localUserId) continue
-    const entry = candidates.get(character.uid) ?? { campaigns: [], characters: [] }
+  for (const character of characters) for (const uid of ownersOf(character.uid)) {
+    if (uid === localUserId) continue
+    const entry = candidates.get(uid) ?? { campaigns: [], characters: [] }
     entry.characters.push(character.name)
-    candidates.set(character.uid, entry)
+    candidates.set(uid, entry)
   }
   const claimed = new Map(links.map((link) => [link.legacyUid, link.localUserId]))
   return [...candidates.entries()].map(([uid, data]) => ({
@@ -4898,14 +4935,19 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
     accountLookup(sessionToken),
   ])
   const decorated = await withCharacterClasses(await decorateCharacters(rows.map((row) => row.character)))
-  return decorated.map((character) => {
-    const owner = owners.get(character.ownerUid)
-    return {
-      ...character,
-      ownerName: owner?.displayName || (character.ownerUid ? "Identifiant historique" : "Sans propriétaire"),
-      ownerEmail: owner?.email || "",
-    }
-  })
+  return decorated.map((character) => ({ ...character, ...ownerLabels(character.ownerUid, owners) }))
+}
+
+/** Les noms (et adresses) de tous les propriétaires d'une case « Joueur » ou « MJ ». */
+function ownerLabels(cell: string, accounts: Map<string, { displayName?: string; email?: string }>) {
+  const uids = ownersOf(cell)
+  if (!uids.length) return { ownerName: "Sans propriétaire", ownerEmail: "", ownerUids: uids }
+  const found = uids.map((uid) => accounts.get(uid))
+  return {
+    ownerName: found.map((account) => account?.displayName || account?.email || "Identifiant historique").join(" & "),
+    ownerEmail: found.map((account) => account?.email || "").filter(Boolean).join(", "),
+    ownerUids: uids,
+  }
 }
 
 export async function listAllCampaignsForAdmin(sessionToken?: string) {
@@ -4918,56 +4960,62 @@ export async function listAllCampaignsForAdmin(sessionToken?: string) {
       .from(campaignCharacters).innerJoin(characterIndex, eq(campaignCharacters.characterId, characterIndex.id))
       .where(isNull(characterIndex.deletedAt)),
   ])
-  return rows.map((row) => {
-    const owner = owners.get(row.campaign.mjUid)
+  return rows.filter((row) => inSheets("campaigns", row.campaign)).map((row) => {
     return {
       ...row.campaign,
-      ownerName: owner?.displayName || (row.campaign.mjUid ? "Identifiant historique" : "Sans propriétaire"),
-      ownerEmail: owner?.email || "",
+      ...ownerLabels(row.campaign.mjUid, owners),
       characters: links.filter((link) => link.campaignId === row.campaign.id).map((link) => ({ id: link.characterId, name: link.characterName })),
     }
   })
 }
 
+/**
+ * Les propriétaires d'un personnage (« Joueur ») ou d'une campagne (« MJ ») : un ou
+ * plusieurs comptes, écrits « uid1 · uid2 » dans la feuille. Un identifiant historique déjà
+ * présent peut rester ; tout nouveau propriétaire doit être un compte existant.
+ */
 export async function updateAdminItemOwner(
   kind: "character" | "campaign",
   id: string,
-  ownerUid: string,
+  ownerUids: readonly string[],
   sessionToken?: string,
 ) {
-  const normalizedOwnerUid = ownerUid.trim()
+  const wanted = [...new Set(ownerUids.map((uid) => uid.trim()).filter(Boolean))]
   const db = getDb()
-  if (normalizedOwnerUid) {
-    const owners = await accountLookup(sessionToken)
-    if (!owners.has(normalizedOwnerUid)) throw new Error("OWNER_NOT_FOUND")
-  }
-
   await ensureIdentityIndexes()
-  if (kind === "character") {
-    const [character] = await db.select({ id: characterIndex.id }).from(characterIndex)
+  const [current] = kind === "character"
+    ? await db.select({ id: characterIndex.id, owners: characterIndex.ownerUid }).from(characterIndex)
       .where(and(eq(characterIndex.id, id), isNull(characterIndex.deletedAt))).limit(1)
-    if (!character) throw new Error("CHARACTER_NOT_FOUND")
+    : await db.select({ id: campaignIndex.id, owners: campaignIndex.mjUid }).from(campaignIndex)
+      .where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
+  if (!current) throw new Error(kind === "character" ? "CHARACTER_NOT_FOUND" : "CAMPAIGN_NOT_FOUND")
+  const kept = new Set(ownersOf(current.owners))
+  const added = wanted.filter((uid) => !kept.has(uid))
+  if (added.length) {
+    const accounts = await accountLookup(sessionToken)
+    if (added.some((uid) => !accounts.has(uid))) throw new Error("OWNER_NOT_FOUND")
+  }
+  const cell = ownersCell(wanted)
+
+  if (kind === "character") {
     const source = await charactersSource()
     if (!source) throw new Error("CHARACTERS_SHEET_NOT_FOUND")
     const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
     if (!rowNumber) throw new Error("CHARACTER_SHEET_ROW_NOT_FOUND")
     const { columns } = await readCharacterColumns(source, [])
-    await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "Joueur": normalizedOwnerUid }))
-    await db.update(characterIndex).set({ ownerUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
+    await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "Joueur": cell }))
+    await db.update(characterIndex).set({ ownerUid: cell, updatedAt: new Date().toISOString() })
       .where(eq(characterIndex.id, id))
     return
   }
 
-  const [campaign] = await db.select({ id: campaignIndex.id }).from(campaignIndex)
-    .where(and(eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
-  if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
   const source = await campaignsSource()
   if (!source) throw new Error("CAMPAIGNS_SHEET_NOT_FOUND")
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) throw new Error("CAMPAIGN_SHEET_ROW_NOT_FOUND")
   const { columns } = await readNamedSheet(source.spreadsheetId, source.tabName, campaignSheetHeaders)
-  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "MJ": normalizedOwnerUid }))
-  await db.update(campaignIndex).set({ mjUid: normalizedOwnerUid, updatedAt: new Date().toISOString() })
+  await updateRanges(source.spreadsheetId, namedRowWrites(source.tabName, columns, rowNumber, { "MJ": cell }))
+  await db.update(campaignIndex).set({ mjUid: cell, updatedAt: new Date().toISOString() })
     .where(eq(campaignIndex.id, id))
 }
 

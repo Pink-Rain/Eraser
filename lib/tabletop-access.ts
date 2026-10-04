@@ -10,6 +10,7 @@ import type { AuthorizedUser } from "@/lib/server-auth"
 import type { TabletopEntityRecord, TabletopNpcDetail, TabletopShopDetail, TabletopSnapshot, TabletopSourcePage } from "@/lib/tabletop-schema"
 import { identityUidsForUser } from "@/lib/identity-links"
 import { chatAccountsForCampaign, chatAuthorName } from "@/lib/chat-accounts"
+import { ownedBy } from "@/lib/ownership"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -52,7 +53,7 @@ async function accessibleCharacterIds(account: AuthorizedUser, pageLinked: strin
     const members = await listCampaignMembers(pageLinked)
     if (canManageTabletop(account)) return members.map((character) => character.id)
     const identities = await identityUidsForUser(account.uid)
-    return members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)
+    return members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)
   }
   if (canManageTabletop(account)) return (await listAvailableCampaignCharacters()).map((character) => character.id)
   return (await listCharactersForUser(account.uid)).map((character) => character.id)
@@ -71,7 +72,7 @@ export async function getTabletopSpeakerName(account: AuthorizedUser, pageLinked
   if (!characterId) return "Joueur"
   const characters = pageLinked === "bac-a-sable" ? await listCharactersForUser(account.uid) : await listCampaignMembers(pageLinked)
   const identities = await identityUidsForUser(account.uid)
-  const character = characters.find((candidate) => candidate.id === characterId && identities.includes(candidate.ownerUid))
+  const character = characters.find((candidate) => candidate.id === characterId && ownedBy(candidate.ownerUid, identities))
   return character?.name || "Joueur"
 }
 
@@ -125,7 +126,7 @@ export async function listTabletopLibraryForAccount(account: AuthorizedUser, pag
   const entities: TabletopEntityRecord[] = [...characters, ...npcs.map(npcEntity), ...shops.map((shop) => shopEntity(shop, pageLinked, npcById.get(shop.npcId)))]
   const canManage = await canManageTabletopPage(account, pageLinked)
   const identities = await identityUidsForUser(account.uid)
-  return entities.map((entity) => ({ ...entity, controllable: canManage || (entity.kind === "character" && identities.includes(entity.ownerUid)) }))
+  return entities.map((entity) => ({ ...entity, controllable: canManage || (entity.kind === "character" && ownedBy(entity.ownerUid, identities)) }))
 }
 
 /**
@@ -159,8 +160,8 @@ export async function getTabletopSnapshotForAccount(account: AuthorizedUser, map
   const pageNpcById = new Map(pageNpcs.map((npc) => [npc.id, npc]))
   const shopEntities = shops.filter((shop) => missingShopIds.has(shop.id)).map((shop) => shopEntity(shop, map.pageLinked, pageNpcById.get(shop.npcId)))
   const markers: TabletopEntityRecord[] = tokens.filter((token) => token.entityKind === "marker").map((token) => ({ id: token.entityId, kind: "marker", name: token.label || "Point d’intérêt", subtitle: "Repère de carte", portrait: "", currentHp: 0, totalHp: 0, speed: 0, ownerUid: map.createdByUid, controllable: isManager }))
-  const entities = [...library, ...characters, ...npcs, ...shopEntities, ...markers].map((entity) => ({ ...entity, controllable: isManager || (entity.kind === "character" && identities.includes(entity.ownerUid)) }))
-  const ownedCharacterIds = new Set(entities.filter((entity) => entity.kind === "character" && identities.includes(entity.ownerUid)).map((entity) => entity.id))
+  const entities = [...library, ...characters, ...npcs, ...shopEntities, ...markers].map((entity) => ({ ...entity, controllable: isManager || (entity.kind === "character" && ownedBy(entity.ownerUid, identities)) }))
+  const ownedCharacterIds = new Set(entities.filter((entity) => entity.kind === "character" && ownedBy(entity.ownerUid, identities)).map((entity) => entity.id))
   const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
   return { map, tokens, activities, entities }
 }
@@ -191,7 +192,7 @@ export async function getChatBootstrapForAccount(account: AuthorizedUser, pageLi
     canManageTabletopPage(account, pageLinked),
     identityUidsForUser(account.uid),
   ])
-  const ownedCharacterIds = new Set(members.filter((member) => identities.includes(member.ownerUid)).map((member) => member.id))
+  const ownedCharacterIds = new Set(members.filter((member) => ownedBy(member.ownerUid, identities)).map((member) => member.id))
   const activities = allActivities.filter((activity) => canSeeActivity(account, identities, activity, ownedCharacterIds, isManager))
   const accounts = await chatAccountsForCampaign(account, pageLinked).catch(() => [])
   return {

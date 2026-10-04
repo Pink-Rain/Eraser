@@ -24,6 +24,7 @@ import {
   gaugeScaleOf,
   indexColumnKinds,
   isColorSourceSpec,
+  isComputedSpec,
   isSheetSpec,
   kindGroups,
   normalizeSpec,
@@ -658,6 +659,7 @@ function PlacementSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec
       {(Object.keys(placementLabels) as ColumnPlacement[]).map((key) => <button key={key} type="button" disabled={disabled} onClick={() => onChange({ ...spec, placement: key, form: undefined })} className={`rounded-lg border p-2 text-left text-xs ${placement === key ? "border-primary bg-primary/10" : "hover:bg-muted"}`}><b>{placementLabels[key]}</b><br /><span className="text-muted-foreground">{texts[key]}</span></button>)}
     </div>
     <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled || placement === "sheet"} checked={Boolean(spec.hidden)} onCheckedChange={(checked) => onChange({ ...spec, hidden: checked === true || undefined })} /><span><b>Masquée</b> : cachée du tableau ; le bouton « Colonnes masquées » la montre d’un clic.</span></label>
+    {!isComputedSpec(spec) && spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> : visible, triable et dans les survols, mais ne se modifie pas d’ici (ses données viennent d’ailleurs).</span></label>}
     <label className={smallLabel}>Description (au survol de l’en-tête et dans la fiche)<Input disabled={disabled} value={spec.description ?? ""} onChange={(event) => onChange({ ...spec, description: event.target.value || undefined })} placeholder="À quoi sert cette colonne ?" /></label>
   </div>
 }
@@ -904,7 +906,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const relations = siblings.filter((item) => !item.removed && (item.spec.kind === "linked" || item.spec.kind === "linked-choice"))
     const base = defaultSpec(kind, model.relationTargets, relations)
     // Passer de Nom à Nom formulaire garde tout le reste ; sinon, seul l'affichage suit.
-    const keep = { hidden: column.spec.hidden, description: column.spec.description, placement: column.spec.placement, style: ["name", "name-form"].includes(kind) && ["name", "name-form"].includes(column.spec.kind) ? column.spec.style : column.spec.style ?? base.style }
+    const keep = { hidden: column.spec.hidden, readOnly: column.spec.readOnly, description: column.spec.description, placement: column.spec.placement, style: ["name", "name-form"].includes(kind) && ["name", "name-form"].includes(column.spec.kind) ? column.spec.style : column.spec.style ?? base.style }
     updateColumn({ ...column, spec: { ...base, ...keep, kind } })
   }
 

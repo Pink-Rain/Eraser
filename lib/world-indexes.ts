@@ -90,10 +90,21 @@ export type EntityIndexLink = { label: string; href: string; title?: string; col
 export type EntityIndexExtras = {
   /** L'intitulé de la colonne de liens : « Campagnes » d'un personnage, « Personnages » d'une campagne. */
   linksLabel: string
-  rows: Record<string, { ownerUid: string; ownerName: string; ownerDetail: string; links: EntityIndexLink[] }>
+  rows: Record<string, {
+    /** La case « Joueur » ou « MJ » telle quelle, et ses comptes (un ou plusieurs). */
+    ownerUid: string
+    ownerUids: string[]
+    ownerName: string
+    ownerDetail: string
+    links: EntityIndexLink[]
+    /** À la corbeille (montré seulement à un administrateur, qui peut la restaurer ou la supprimer). */
+    trashed?: boolean
+  }>
   /** Comptes à qui attribuer une ligne : seulement pour un administrateur. */
   accounts: AccountRecord[]
   canAssign: boolean
+  /** Index des personnages, administrateur : cases de fiches encore écrites en ancien JSON. */
+  legacyListCells?: number
 }
 
 export function isWorldIndexKey(value: unknown): value is WorldIndexKey {

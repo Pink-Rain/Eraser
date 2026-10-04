@@ -62,6 +62,7 @@ import type {
 } from "@/lib/tabletop-schema"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { cn } from "@/lib/utils"
+import { ownedBy } from "@/lib/ownership"
 
 type TabletopUser = { uid: string; role: "admin" | "mj" | "joueur" }
 type ConnectionState = "connecting" | "ready" | "error"
@@ -360,8 +361,8 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
       .filter((entity) => entity.kind === libraryTab && (!query || `${entity.name} ${entity.subtitle}`.toLocaleLowerCase("fr").includes(query)))
       .sort((left, right) => left.name.localeCompare(right.name, "fr"))
   }, [entities, libraryTab, search])
-  const ownedSpeakers = useMemo(() => entities.filter((entity) => entity.kind === "character" && entity.ownerUid === user.uid).sort((left, right) => left.name.localeCompare(right.name, "fr")), [entities, user.uid])
-  const directTargets = useMemo(() => entities.filter((entity) => entity.kind === "character" && entity.ownerUid !== user.uid).filter((entity, index, all) => all.findIndex((candidate) => candidate.id === entity.id) === index).sort((left, right) => left.name.localeCompare(right.name, "fr")), [entities, user.uid])
+  const ownedSpeakers = useMemo(() => entities.filter((entity) => entity.kind === "character" && ownedBy(entity.ownerUid, [user.uid])).sort((left, right) => left.name.localeCompare(right.name, "fr")), [entities, user.uid])
+  const directTargets = useMemo(() => entities.filter((entity) => entity.kind === "character" && !ownedBy(entity.ownerUid, [user.uid])).filter((entity, index, all) => all.findIndex((candidate) => candidate.id === entity.id) === index).sort((left, right) => left.name.localeCompare(right.name, "fr")), [entities, user.uid])
   const speaker = ownedSpeakers.find((entity) => entity.id === speakerId) || ownedSpeakers[0]
   const speakerName = canManage ? "MJ" : speaker?.name || "Joueur"
   const directCommandMatch = chatText.match(/^\/(r?joueur)\s+(.*)$/i)
@@ -615,7 +616,7 @@ export function TabletopWorkspace({ canManage, pageLinked, pageName, roomKey, re
         activity: (payload) => {
           const recipientUid = entityOwnersRef.current.get(payload.recipientId)
           const targets = payload.audience === "public" ? undefined : [...presenceRef.current]
-            .filter(([, presence]) => payload.audience === "gm" ? presence.role === "admin" || presence.role === "mj" : Boolean(recipientUid && presence.uid === recipientUid))
+            .filter(([, presence]) => payload.audience === "gm" ? presence.role === "admin" || presence.role === "mj" : Boolean(recipientUid && ownedBy(recipientUid, [presence.uid])))
             .map(([peerId]) => peerId)
           send(activityAction, payload as unknown as JsonValue, targets)
         },

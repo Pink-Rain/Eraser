@@ -3,6 +3,7 @@ import { getCampaignDashboard, getCharacterById, getNpcById, type InventoryTrans
 import { listIdentityLinks } from "@/lib/identity-links"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { ownersOf } from "@/lib/ownership"
 
 /**
  * « X vous a envoyé Y ». Chaque installation a son propre serveur : la notification
@@ -58,22 +59,25 @@ export async function notifyItemReceived(sender: AuthorizedUser, moved: Inventor
   try {
     const recipient = await recipientOf(moved)
     if (!recipient) return
-    const uid = await accountUid(recipient.uid)
     const targetKind = moved.targetId.startsWith("CAMPAGNE:") ? "campaign" : moved.targetMode === "npc" ? "npc" : "character"
-    // Un objet envoyé à l'un de ses propres personnages est annoncé aussi, à l'ouverture de sa fiche.
-    if (!uid || (uid === sender.uid && targetKind !== "character")) return
-    const notification: ItemNotification = {
-      id: crypto.randomUUID(),
-      senderName: chatAuthorName(sender),
-      itemName: moved.name,
-      quantity: Math.max(1, moved.quantity),
-      targetId: moved.targetId,
-      targetLabel: recipient.label,
-      targetKind,
-      slotId: moved.slotId ?? "",
-      createdAt: new Date().toISOString(),
+    // Plusieurs propriétaires (ou MJ) : chacun est prévenu.
+    const uids = [...new Set(await Promise.all(ownersOf(recipient.uid).map(accountUid)))]
+    for (const uid of uids) {
+      // Un objet envoyé à l'un de ses propres personnages est annoncé aussi, à l'ouverture de sa fiche.
+      if (!uid || (uid === sender.uid && targetKind !== "character")) continue
+      const notification: ItemNotification = {
+        id: crypto.randomUUID(),
+        senderName: chatAuthorName(sender),
+        itemName: moved.name,
+        quantity: Math.max(1, moved.quantity),
+        targetId: moved.targetId,
+        targetLabel: recipient.label,
+        targetKind,
+        slotId: moved.slotId ?? "",
+        createdAt: new Date().toISOString(),
+      }
+      await writeSharedRecord(scopeFor(uid), notification.id, JSON.stringify(notification))
     }
-    await writeSharedRecord(scopeFor(uid), notification.id, JSON.stringify(notification))
   } catch {
     // Le serveur partagé est injoignable : l'objet a bien changé de sac.
   }

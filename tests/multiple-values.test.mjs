@@ -8,6 +8,7 @@ const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(async () => { await vite.close(); });
 const lists = await vite.ssrLoadModule("/lib/multiple-values.ts");
+const ownership = await vite.ssrLoadModule("/lib/ownership.ts");
 
 test("la fiche écrit ses listes en texte lisible, le titre choisi en premier", () => {
   assert.equal(lists.serializeListCell(["Orc des Terres Libres"]), "Orc des Terres Libres");
@@ -42,4 +43,16 @@ test("un « · » sans espaces fait partie du nom (Sorcier·ère)", () => {
   assert.deepEqual(lists.parseListCell("Sorcier·ère").entries, ["Sorcier·ère"]);
   assert.deepEqual(lists.parseListCell("Sorcier·ère · Guerrier·e").entries, ["Sorcier·ère", "Guerrier·e"]);
   assert.equal(lists.serializeListCell(["Sorcier·ère", "Guerrier·e"]), "Sorcier·ère · Guerrier·e");
+});
+
+test("plusieurs propriétaires dans une case « Joueur » ou « MJ »", () => {
+  assert.equal(ownership.ownersCell(["u1", "u2", "u1", " "]), "u1 · u2");
+  assert.deepEqual(ownership.ownersOf("u1 · u2"), ["u1", "u2"]);
+  assert.deepEqual(ownership.ownersOf("u1"), ["u1"]);
+  assert.deepEqual(ownership.ownersOf(""), []);
+  assert.equal(ownership.ownedBy("u1 · u2", ["u2"]), true);
+  assert.equal(ownership.ownedBy("u1", ["legacy", "u1"]), true);
+  assert.equal(ownership.ownedBy("u11", ["u1"]), false);
+  assert.equal(ownership.ownedBy("", ["u1"]), false);
+  assert.equal(ownership.ownersCell([]), "");
 });

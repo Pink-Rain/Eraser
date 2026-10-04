@@ -1,4 +1,5 @@
-import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { legacyCharacterListCells, listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { ownersOf } from "@/lib/ownership"
 import { classImageUrl } from "@/lib/class-images"
 import { isImageSource } from "@/lib/index-columns"
 import { isLegacyListCell, parseListCell, serializeListCell } from "@/lib/multiple-values"
@@ -96,6 +97,7 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
     if (kind === "character") {
       for (const character of await listAllCharactersForAdmin(token)) rows[character.id] = {
         ownerUid: character.ownerUid,
+        ownerUids: character.ownerUids,
         ownerName: character.ownerName,
         ownerDetail: character.ownerEmail || character.ownerUid || "Aucun compte",
         links: character.campaigns.map((campaign) => ({ label: campaign.name, href: `/campagne/${encodeURIComponent(campaign.id)}`, color: campaign.accentColor, title: "Ouvrir la campagne" })),
@@ -103,15 +105,38 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
     } else {
       for (const campaign of await listAllCampaignsForAdmin(token)) rows[campaign.id] = {
         ownerUid: campaign.mjUid,
+        ownerUids: campaign.ownerUids,
         ownerName: campaign.ownerName,
         ownerDetail: campaign.ownerEmail || campaign.mjUid || "Aucun compte",
         links: campaign.characters.map((character) => ({ label: character.name, href: `/personnage/${encodeURIComponent(character.id)}`, title: "Ouvrir la fiche" })),
       }
     }
+    // Un administrateur voit aussi les lignes à la corbeille, pour faire le tri : il les
+    // restaure ou les supprime d'ici. Les autres ne les voient pas.
+    const ownerHeader = kind === "character" ? "joueur" : "mj"
+    const names = new Map(accounts.map((item) => [item.uid, item.displayName || item.email]))
     const tables = data.tables.map((table) => {
       const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
-      return idColumn < 0 ? table : { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
+      if (idColumn < 0) return table
+      if (!isAdmin) return { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
+      const ownerColumn = table.headers.findIndex((header) => foldName(header) === ownerHeader)
+      for (const row of table.rows) {
+        const id = (row.values[idColumn] ?? "").trim()
+        if (!id || !trashed.has(id)) continue
+        const cell = ownerColumn >= 0 ? (row.values[ownerColumn] ?? "").trim() : ""
+        const ownerUids = ownersOf(cell)
+        rows[id] = {
+          ownerUid: cell,
+          ownerUids,
+          ownerName: ownerUids.map((uid) => names.get(uid) || "Identifiant historique").join(" & ") || "Sans propriétaire",
+          ownerDetail: cell || "Aucun compte",
+          links: [],
+          trashed: true,
+        }
+      }
+      return table
     })
+    const legacyListCells = isAdmin && kind === "character" ? (await legacyCharacterListCells().catch(() => [])).length : 0
     return {
       ...data,
       tables,
@@ -120,6 +145,7 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
         rows,
         accounts,
         canAssign: isAdmin,
+        ...(legacyListCells ? { legacyListCells } : {}),
       },
     }
   } catch (error) {

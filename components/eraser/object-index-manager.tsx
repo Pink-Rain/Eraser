@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
@@ -18,7 +18,7 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
 import { ObjectIndexRegroup } from "@/components/eraser/object-index-regroup"
 import { useShellData } from "@/components/eraser/app-shell"
-import { IN_PLACE_ATTRIBUTE } from "@/components/eraser/app-tabs"
+import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { ObjectIcon } from "@/components/eraser/object-icon"
@@ -206,6 +206,38 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [guideOpen, setGuideOpen] = useState(false)
   const [seed, setSeed] = useState(() => `objets:${Date.now()}`)
 
+  /** L'adresse d'une ligne : l'index ouvert sur son onglet et sa fiche (`?ligne=ID`, ou `#numéro` sans colonne ID). */
+  const idColumnIndex = specs.findIndex((spec) => spec.kind === "id")
+  const rowHref = useCallback((rowKey: string) => {
+    if (!selected) return undefined
+    const id = idColumnIndex >= 0 ? rawOf(rowKey, String(idColumnIndex)).replace(/<[^>]+>/g, "").trim() : `#${rowKey}`
+    return id ? `${tabHref(tableKey(selected))}&ligne=${encodeURIComponent(id)}` : undefined
+  }, [idColumnIndex, rawOf, selected, tabHref])
+  const [wantedRow, setWantedRow] = useState<string | null>(null)
+  useEffect(() => {
+    const read = () => setWantedRow(new URLSearchParams(window.location.search).get("ligne"))
+    const timer = window.setTimeout(read, 0)
+    window.addEventListener(URL_CHANGE_EVENT, read)
+    window.addEventListener("popstate", read)
+    return () => { window.clearTimeout(timer); window.removeEventListener(URL_CHANGE_EVENT, read); window.removeEventListener("popstate", read) }
+  }, [])
+  useEffect(() => {
+    if (!wantedRow || !selected) return
+    const row = wantedRow.startsWith("#")
+      ? selected.rows.find((candidate) => `#${candidate.rowNumber}` === wantedRow)
+      : idColumnIndex >= 0 ? selected.rows.find((candidate) => (candidate.values[idColumnIndex] ?? "").replace(/<[^>]+>/g, "").trim() === wantedRow) : undefined
+    if (!row) return
+    // Lue une fois : fermer la fiche ne la rouvre pas.
+    const timer = window.setTimeout(() => {
+      const url = new URL(window.location.href)
+      url.searchParams.delete("ligne")
+      replaceAppUrl(url.pathname + url.search, { record: false })
+      setWantedRow(null)
+      setDetails(String(row.rowNumber))
+    }, 0)
+    return () => window.clearTimeout(timer)
+  }, [idColumnIndex, selected, wantedRow])
+
   // Le moteur de la ligne : formules, jauges « autre colonne », conditions des boutons.
   /* eslint-disable react-hooks/refs -- les fonctions du moteur ne lisent les modifications en cours (une référence) qu'à l'appel */
   const engine = useMemo(() => createRowEngine({
@@ -313,6 +345,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       commit: (rowKey: string, columnKey: string, value: string) => void commitCell(rowKey, columnKey, value),
       idComputed: () => !hasIdColumn,
       openForm: setDetails,
+      tabHrefOf: rowHref,
       formula: (rowKey: string, _columnKey: string, spec: IndexColumnSpec) => engine.formula(rowKey, selected?.headers[Number(_columnKey)] ?? _columnKey, spec),
       gaugeMax: (rowKey: string, spec: IndexColumnSpec) => engine.gaugeMax(rowKey, spec),
       draw: async (rowKey: string, columnKey: string, spec: IndexColumnSpec) => { await drawCell(rowKey, selected?.headers[Number(columnKey)] ?? columnKey, spec) },
@@ -327,7 +360,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     // Sans colonne ID dans la feuille, l'identifiant calculé par l'inventaire est montré à part.
     if (selected && !hasIdColumn) list.push(indexGridColumn(COMPUTED_ID, "ID", idSpec, 200, context, { sortable: false }))
     return list
-  }, [columnOfHeader, commitCell, drawCell, engine, hasIdColumn, iconPreview, runButton, selected, shownColumns, specs, uploadIcon, valueOf])
+  }, [columnOfHeader, commitCell, drawCell, engine, hasIdColumn, iconPreview, rowHref, runButton, selected, shownColumns, specs, uploadIcon, valueOf])
   /* eslint-enable react-hooks/refs */
 
   async function refresh(keepSeed = false) {

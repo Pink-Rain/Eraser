@@ -93,6 +93,7 @@ export async function roll20SessionList(link: typeof roll20CampaignLinks.$inferS
  */
 export async function roll20CampaignPayload(link: typeof roll20CampaignLinks.$inferSelect, origin: string, game: { id?: string; name?: string }, sessionId = "") {
   const campaign = await getCampaignDashboard(null, link.campaignId)
+  if (!campaign) throw new Error("CAMPAIGN_NOT_FOUND")
   const session = sessionId ? (await listCampaignSessions(link.campaignId)).find((candidate) => candidate.id === sessionId) : null
   if (sessionId && !session) throw new Error("SESSION_NOT_FOUND")
   const [npcs, shops] = session
