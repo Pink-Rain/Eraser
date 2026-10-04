@@ -16,11 +16,14 @@ export function OwnerSelector({
   itemId,
   ownerUid,
   accounts,
+  onSaved,
 }: {
   kind: "character" | "campaign"
   itemId: string
   ownerUid: string
   accounts: AccountRecord[]
+  /** Après l'enregistrement (le moteur des index relit son tableau) ; sinon la page est rafraîchie. */
+  onSaved?: () => void
 }) {
   const router = useRouter()
   const ownerIsLocalAccount = accounts.some((account) => account.uid === ownerUid)
@@ -40,7 +43,8 @@ export function OwnerSelector({
       })
       const payload = await response.json() as { error?: string }
       if (!response.ok) throw new Error(payload.error || "La modification a échoué.")
-      router.refresh()
+      if (onSaved) onSaved()
+      else router.refresh()
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "La modification a échoué.")
     } finally {

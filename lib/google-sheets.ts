@@ -6844,6 +6844,15 @@ export async function softDeleteItem(kind: "todo" | "character" | "campaign", id
   else await getDb().update(campaignIndex).set({ deletedAt }).where(eq(campaignIndex.id, id))
 }
 
+/** Les personnages ou campagnes à la corbeille (identifiants) : leurs lignes restent dans Sheets. */
+export async function trashedItemIds(kind: "character" | "campaign") {
+  const db = getDb()
+  const rows = kind === "character"
+    ? await db.select({ id: characterIndex.id }).from(characterIndex).where(isNotNull(characterIndex.deletedAt))
+    : await db.select({ id: campaignIndex.id }).from(campaignIndex).where(isNotNull(campaignIndex.deletedAt))
+  return new Set(rows.map((row) => row.id))
+}
+
 export async function listTrash() {
   await refreshIdentityIndexes()
   const db = getDb()

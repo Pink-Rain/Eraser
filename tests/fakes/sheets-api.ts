@@ -134,6 +134,20 @@ function handleSheets(path: string, init: RequestInit) {
         const { sheetId, startIndex, endIndex } = request.deleteDimension.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
         tab.grid.splice(startIndex, endIndex - startIndex)
+      } else if (request.copyPaste) {
+        const { source, destination } = request.copyPaste
+        const tab = file.tabs.find((candidate) => candidate.sheetId === source.sheetId)!
+        const from = source.startColumnIndex ?? 0
+        for (let offset = 0; offset < source.endRowIndex - source.startRowIndex; offset += 1) {
+          const line = tab.grid[source.startRowIndex + offset] ?? []
+          const to = source.endColumnIndex ?? line.length
+          while (tab.grid.length <= destination.startRowIndex + offset) tab.grid.push([])
+          const target = tab.grid[destination.startRowIndex + offset]
+          for (let column = from; column < to; column += 1) {
+            while (target.length <= column) target.push("")
+            target[column] = line[column] ?? ""
+          }
+        }
       } else if (request.addSheet) {
         const sheetId = Math.max(0, ...file.tabs.map((tab) => tab.sheetId)) + 1
         file.tabs.push({ sheetId, title: request.addSheet.properties.title, grid: [], columnCount: request.addSheet.properties.gridProperties?.columnCount ?? 26, rowCount: 1000 })

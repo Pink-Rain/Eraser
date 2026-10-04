@@ -128,8 +128,13 @@ export type EntityIndexOptions = {
   addHref?: string
   /** Valeurs données d'office à une ligne ajoutée par le formulaire (la page d'un PNJ…). */
   addDefaults?: Record<string, string>
-  /** Dupliquer et supprimer des lignes depuis le tableau (les sorts, pas les personnages). */
+  /** Ajouter, insérer, dupliquer et supprimer des lignes depuis le tableau (les PNJs, les sorts). */
   rowCommands?: boolean
+  /**
+   * Personnages et campagnes : le tableau les duplique, et « Supprimer » les met à la
+   * corbeille (restaurables depuis Administration) au lieu d'effacer leur ligne.
+   */
+  trashKind?: "character" | "campaign"
   /** Seules ces colonnes (et celles ajoutées dans « Modifier ») sont lues : la feuille est immense. */
   readHeaders?: string[]
 }
@@ -394,7 +399,7 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     path: "/ressources/index-des-campagnes",
     itemLabel: "une campagne",
     tabs: [{ name: "Campagnes", itemLabel: "une campagne", headers: campaignSheetHeaders, widths: [160, 200, 280, 420, 260, 140], idPrefix: "CAM" }],
-    entity: { nameHeader: "Nom de la campagne", nameHref: "/campagne/{id}", addHref: "/creation-de-campagne" },
+    entity: { nameHeader: "Nom de la campagne", nameHref: "/campagne/{id}", addHref: "/creation-de-campagne", trashKind: "campaign" },
   },
   characters: {
     key: "characters",
@@ -403,7 +408,7 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     path: "/ressources/index-des-personnages",
     itemLabel: "un personnage",
     tabs: [{ name: "Personnages", itemLabel: "un personnage", headers: characterIndexHeaders, widths: [150, 190, 260, 180, 200, 90, 220, 200], idPrefix: "PER" }],
-    entity: { nameHeader: "Nom personnage", nameHref: "/personnage/{id}", addHref: "/creation-de-personnage", readHeaders: characterIndexHeaders },
+    entity: { nameHeader: "Nom personnage", nameHref: "/personnage/{id}", addHref: "/creation-de-personnage", readHeaders: characterIndexHeaders, trashKind: "character" },
   },
   classes: {
     key: "classes",

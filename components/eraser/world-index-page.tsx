@@ -3,6 +3,8 @@ import { Suspense, type ReactNode } from "react"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { WorldIndexManager } from "@/components/eraser/world-index-manager"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey } from "@/lib/world-index-definitions"
+import { withEntityExtras } from "@/lib/entity-index-extras"
+import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { getWorldIndex, type WorldIndexData } from "@/lib/world-indexes"
 
 async function IndexData({ indexKey }: { indexKey: BuiltinWorldIndexKey }) {
@@ -10,7 +12,9 @@ async function IndexData({ indexKey }: { indexKey: BuiltinWorldIndexKey }) {
   let data: WorldIndexData | null = null
   let error = ""
   try {
+    const account = await authorizedAccount(["admin", "mj"])
     data = await getWorldIndex(indexKey)
+    if (account) data = await withEntityExtras(data, account, await currentAuthToken())
   } catch (reason) {
     console.error("WORLD_INDEX_LOAD_FAILED", indexKey, reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
     error = `La feuille « ${definition.sheetName} » n’a pas pu être chargée depuis Google Drive.`

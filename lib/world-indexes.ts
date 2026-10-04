@@ -13,6 +13,7 @@ import {
   readRange,
   resolveJdrSheet,
   sheetTabAll,
+  softDeleteItem,
   sheetTabRange,
   spreadsheetTabs,
   updateFormattedCell,
@@ -22,6 +23,7 @@ import { CREATURE_SPELLS_TAB, invalidateClassContentCaches, spellSheetLocation }
 import { eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
+import type { AccountRecord } from "@/lib/auth-types"
 import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
@@ -79,6 +81,19 @@ export type WorldIndexData = {
   columns: Record<string, WorldIndexColumn[]>
   /** Les colonnes liées de l'index : prévues par Eraser et créées dans l'éditeur. */
   links: WorldIndexLink[]
+  /** Personnages et campagnes : propriétaire et liens de chaque ligne (par identifiant), lus à chaque requête. */
+  extras?: EntityIndexExtras
+}
+
+export type EntityIndexLink = { label: string; href: string; title?: string; color?: string }
+
+export type EntityIndexExtras = {
+  /** L'intitulé de la colonne de liens : « Campagnes » d'un personnage, « Personnages » d'une campagne. */
+  linksLabel: string
+  rows: Record<string, { ownerUid: string; ownerName: string; ownerDetail: string; links: EntityIndexLink[] }>
+  /** Comptes à qui attribuer une ligne : seulement pour un administrateur. */
+  accounts: AccountRecord[]
+  canAssign: boolean
 }
 
 export function isWorldIndexKey(value: unknown): value is WorldIndexKey {
@@ -633,9 +648,35 @@ function entityOf(key: WorldIndexKey) {
  * Personnages, campagnes et classes naissent de leurs pages (compte, dossier, liens) et
  * partent à la corbeille : le tableau n'en ajoute, n'en copie ni n'en supprime aucune ligne.
  */
-function assertRowCommands(key: WorldIndexKey) {
+function assertRowCommands(key: WorldIndexKey, action: "add" | "insert" | "duplicate" | "delete" | "move" = "add") {
   const entity = entityOf(key)
-  if (entity && !entity.rowCommands) throw new Error("WORLD_INDEX_ROWS_LOCKED")
+  if (!entity || entity.rowCommands) return
+  // Personnages et campagnes : seulement dupliquer (supprimer passe par la corbeille).
+  if (entity.trashKind && action === "duplicate") return
+  throw new Error("WORLD_INDEX_ROWS_LOCKED")
+}
+
+/** Les identifiants de lignes d'un onglet, d'après le tableau gardé en mémoire. */
+async function rowIds(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
+  const { table } = await tableFor(key, tabName)
+  const idColumn = columnOf(table.headers, ID_HEADER)
+  return rowNumbers.flatMap((rowNumber) => {
+    const id = idColumn >= 0 ? (table.rows.find((row) => row.rowNumber === rowNumber)?.values[idColumn] ?? "").trim() : ""
+    return id ? [id] : []
+  })
+}
+
+/**
+ * « Supprimer » un personnage ou une campagne : mise à la corbeille, comme depuis sa page.
+ * Rien n'est effacé de Sheets ; `allowed` dit si ce compte peut le faire pour cet élément.
+ */
+export async function trashWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[], allowed: (kind: "character" | "campaign", id: string) => Promise<boolean>) {
+  const kind = entityOf(key)?.trashKind
+  if (!kind) throw new Error("WORLD_INDEX_ROWS_LOCKED")
+  const ids = await rowIds(key, tabName, rowNumbers)
+  for (const id of ids) if (!await allowed(kind, id)) throw new Error("WORLD_INDEX_TRASH_DENIED")
+  for (const id of ids) await softDeleteItem(kind, id)
+  invalidateWorldIndexes([key])
 }
 
 /**
@@ -916,7 +957,7 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
  */
 export function insertWorldIndexRows(key: WorldIndexKey, tabName: string, afterRowNumber: number, count: number) {
   return serialized(async () => {
-    assertRowCommands(key)
+    assertRowCommands(key, "insert")
     const { sheet, table } = await tableFor(key, tabName)
     const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
     if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
@@ -935,9 +976,10 @@ export function insertWorldIndexRows(key: WorldIndexKey, tabName: string, afterR
 /** La copie apparaît juste sous l'originale, mise en forme comprise. */
 export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
   return serialized(async () => {
-  assertRowCommands(key)
+  assertRowCommands(key, "duplicate")
   const { sheet, table } = await tableFor(key, tabName)
-  const width = table.columnsAt ? Math.max(0, ...table.columnsAt) + 1 : table.headers.length
+  // Un index d'entités copie toute la ligne (un personnage a des centaines de colonnes hors du tableau).
+  const columns = entityOf(key) ? {} : { startColumnIndex: 0, endColumnIndex: table.headers.length }
   for (const rowNumber of [...rowNumbers].sort((left, right) => right - left)) {
     if (!table.rows.some((row) => row.rowNumber === rowNumber)) continue
     await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
@@ -945,8 +987,8 @@ export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, row
       body: JSON.stringify({ requests: [
         { insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: rowNumber, endIndex: rowNumber + 1 }, inheritFromBefore: true } },
         { copyPaste: {
-          source: { sheetId: table.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, startColumnIndex: 0, endColumnIndex: width },
-          destination: { sheetId: table.sheetId, startRowIndex: rowNumber, endRowIndex: rowNumber + 1, startColumnIndex: 0, endColumnIndex: width },
+          source: { sheetId: table.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, ...columns },
+          destination: { sheetId: table.sheetId, startRowIndex: rowNumber, endRowIndex: rowNumber + 1, ...columns },
           pasteType: "PASTE_NORMAL",
         } },
       ] }),
@@ -970,7 +1012,7 @@ export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, row
  */
 export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
   return serialized(async () => {
-    assertRowCommands(key)
+    assertRowCommands(key, "delete")
     const { sheet, table } = await tableFor(key, tabName)
     const before = await plainTable(key, tabName)
     const targets = [...new Set(rowNumbers)].filter((rowNumber) => table.rows.some((row) => row.rowNumber === rowNumber)).sort((left, right) => right - left)
@@ -1059,7 +1101,7 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
 export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: string, rowNumbers: number[]) {
   return serialized(async () => {
     if (fromTab === toTab) return
-    assertRowCommands(key)
+    assertRowCommands(key, "move")
     if (!(await tabsOf(key)).some((tab) => tab.name === toTab)) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
     const source = await plainTable(key, fromTab)
     const target = await plainTable(key, toTab)

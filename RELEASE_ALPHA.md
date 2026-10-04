@@ -1,41 +1,28 @@
-# Eraser 0.1.1-alpha.130 — PNJs, campagnes, personnages, classes et sorts sur le moteur des index
+# Eraser 0.1.1-alpha.131 — Personnages et campagnes : propriétaires, liens, dupliquer, corbeille
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Six index de plus sur le moteur
+## Ce qui revient dans les index des personnages et des campagnes
 
-Les index des **PNJs**, **Campagnes**, **Personnages**, **Classes**, **Sorts des classes**
-et **Sorts des créatures** passent sur le même moteur que les lieux, les créatures ou les
-états. On y retrouve tout ce que ce moteur sait faire : le tableau, la fiche d'une ligne,
-« Modifier » (colonnes, types, verrous, corbeille), les onglets-fenêtres, les presets, les
-formules, Recherche et Agrégat, l'aléatoire, « Tirer », les boutons et les relations.
+Les deux index restent sur le moteur des index. Ils retrouvent ce que l'ancienne page
+permettait, et gagnent la duplication :
 
-Chaque index lit la feuille que le reste d'Eraser utilise déjà, colonne par colonne et par
-leur nom. Rien n'est copié, et aucune ligne existante n'est réécrite.
+- **Propriétaire** : le compte de chaque personnage, ou le MJ de chaque campagne. Un
+  administrateur le change directement dans la case, comme avant avec « Attribuer à ».
+- **Liens** : les campagnes de chaque personnage, et les personnages de chaque campagne. Un
+  clic ouvre la campagne ou la fiche.
+- **Dupliquer** (clic droit sur la ligne) : la copie reprend toute la ligne de la feuille
+  avec un nouvel identifiant.
+- **Supprimer** met à la corbeille, comme depuis la page du personnage ou de la campagne.
+  Rien n'est effacé de Google Sheets, et tout se restaure depuis Administration →
+  Corbeille. Seuls le propriétaire et un administrateur peuvent le faire. Les éléments à la
+  corbeille n'apparaissent plus dans l'index.
 
-Ce qui change d'un index à l'autre :
+« Ajouter » mène toujours à la page de création. Le nom ouvre toujours la fiche ou la
+campagne.
 
-- **PNJs** : tous les PNJ de la feuille sont dans le tableau. Un PNJ ajouté depuis l'index
-  rejoint la bibliothèque. Deux PNJ peuvent porter le même nom.
-- **Personnages**, **Campagnes**, **Classes** : leur nom ouvre leur page. « Ajouter » mène à
-  leur page de création. Le tableau n'en supprime aucun : ils partent à la corbeille comme
-  avant.
-- **Classes** et **Sorts des classes** ont désormais leur page dans les index.
+Les anciennes pages « propriétaires » des personnages et des campagnes sont retirées :
+tout est désormais dans l'index lui-même.
 
-Les colonnes qu'Eraser lit lui-même sont verrouillées dans « Modifier ». On peut les
-déverrouiller, avec un avertissement. Les colonnes techniques (page d'un PNJ, compte d'un
-joueur, dates) sont masquées dans la grille et s'affichent d'un clic.
-
-## Ce qui reste à portée de main
-
-Les anciennes vues sont gardées, chacune via un lien sous le titre de l'index :
-
-- pour les personnages et les campagnes, l'attribution à un compte et la corbeille ;
-- pour les PNJs, la récupération depuis une campagne ;
-- pour les sorts des créatures, les doublons et la fusion.
-
-## Sous le capot
-
-- Une modification faite ailleurs dans Eraser est vue par l'index sans « Actualiser ». Par
-  exemple un PNJ enregistré dans sa campagne, ou une classe créée.
-- Les colonnes au-delà de AZ sont lues.
+Rappel de la version précédente : PNJs, campagnes, personnages, classes, sorts des classes
+et sorts des créatures sont sur le moteur des index.

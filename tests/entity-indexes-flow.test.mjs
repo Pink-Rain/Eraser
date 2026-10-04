@@ -149,6 +149,14 @@ test("Personnages : seules les colonnes de l'index sont lues, au-delà de AZ, et
   await assert.rejects(() => engine.addWorldIndexRow("characters", "Personnages", table.headers.map(() => "")), /WORLD_INDEX_ROWS_LOCKED/);
   await assert.rejects(() => engine.deleteWorldIndexRows("characters", "Personnages", [2]), /WORLD_INDEX_ROWS_LOCKED/);
   assert.equal(record(google.grid(id, "Personnages"), 1)["ID"], "PER-1");
+
+  // Dupliquer copie toute la ligne (colonnes hors du tableau comprises), avec un nouvel identifiant.
+  await engine.duplicateWorldIndexRows("characters", "Personnages", [2]);
+  const copy = record(google.grid(id, "Personnages"), 2);
+  assert.match(copy["ID"], /^PER-[0-9A-F]{8}$/);
+  assert.equal(copy["Nom personnage"], "Brin");
+  assert.equal(copy["Force"], "12");
+  assert.equal(record(google.grid(id, "Personnages"), 1)["ID"], "PER-1");
 });
 
 test("Sorts des créatures : leurs réglages n'effacent pas ceux de l'index des créatures", async () => {

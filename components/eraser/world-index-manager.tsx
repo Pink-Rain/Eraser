@@ -13,6 +13,7 @@ import { IndexEditor } from "@/components/eraser/index-editor"
 import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -45,6 +46,10 @@ import {
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
+
+/** Personnages et campagnes : leur propriétaire et leurs liens, calculés par Eraser. */
+const OWNER_COLUMN = "__proprietaire"
+const LINKS_COLUMN = "__liens"
 
 /** Le choix « Tout » de la liste des onglets : toutes les lignes de l'index ensemble. */
 const ALL_TABS = "*"
@@ -382,6 +387,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     announceWorldIndexChange([indexKey], origin)
   }
 
+  // Le sélecteur de propriétaire relit le tableau une fois l'attribution enregistrée.
+  const refreshRef = useRef<() => Promise<void>>(async () => undefined)
+  useLayoutEffect(() => { refreshRef.current = refresh })
+
   // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
   const moveTargetsOf = useCallback((fromTab: string) => {
     const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
@@ -535,15 +544,29 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   /* eslint-enable react-hooks/refs */
   useLayoutEffect(() => { engineRef.current = engine })
 
+  /** Propriétaire et liens d'une ligne de personnage ou de campagne (par son identifiant). */
+  const extras = data?.extras
+  const extrasOf = useCallback((rowKey: string) => {
+    const found = locate(rowKey)
+    const column = found ? columnIndexOf(found.table, "ID") : -1
+    return found && column >= 0 ? extras?.rows[(found.row.values[column] ?? "").trim()] : undefined
+  }, [extras, locate])
+  const extraText = useCallback((rowKey: string, columnKey: string) => {
+    const row = extrasOf(rowKey)
+    if (columnKey === OWNER_COLUMN) return row ? (extras?.canAssign && row.ownerDetail ? `${row.ownerName} · ${row.ownerDetail}` : row.ownerName) : ""
+    return row?.links.map((link) => link.label).join(", ") ?? ""
+  }, [extras, extrasOf])
+
   /** Ce qu'affiche une case : la valeur de Sheets, ou le résultat d'une colonne calculée (tri, recherche, copie). */
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
+    if (columnKey === OWNER_COLUMN || columnKey === LINKS_COLUMN) return extraText(rowKey, columnKey)
     const found = locate(rowKey)
     if (found && columnKey !== TAB_COLUMN) {
       const spec = specOf(found.table.tabName, columnKey)
       if (isComputedSpec(spec) && spec.kind !== "auto-links" && spec.kind !== "actions") return engine.computedText(rowKey, columnKey, spec) ?? ""
     }
     return rawOf(rowKey, columnKey)
-  }, [engine, locate, rawOf, specOf])
+  }, [engine, extraText, locate, rawOf, specOf])
 
   /** Les lignes d'un index, pour un tirage « ligne d'un index ». */
   const rowsOf = useCallback((index: string, tab: string): RandomCandidateRow[] | undefined => {
@@ -660,8 +683,25 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       },
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
+    if (extras) {
+      // Après le nom : le propriétaire (qu'un administrateur réattribue) et les liens.
+      const context = { valueOf, commit: () => undefined, autoLinks: (rowKey: string) => extrasOf(rowKey)?.links ?? [] }
+      const owner = indexGridColumn(OWNER_COLUMN, "Propriétaire", { kind: "auto-links" }, extras.canAssign ? 300 : 240, context, {
+        sortable: true,
+        control: (rowKey: string) => {
+          const row = extrasOf(rowKey)
+          const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+          if (!row) return <span className="px-2 text-xs text-muted-foreground">—</span>
+          if (!extras.canAssign || !entity?.trashKind) return <span className="px-2 text-sm text-muted-foreground">{row.ownerName}</span>
+          return <OwnerSelector kind={entity.trashKind} itemId={id} ownerUid={row.ownerUid} accounts={extras.accounts} onSaved={() => void refreshRef.current()} />
+        },
+      })
+      const links = indexGridColumn(LINKS_COLUMN, extras.linksLabel, { kind: "auto-links" }, 300, context, { sortable: true })
+      const at = Math.max(0, list.findIndex((column) => isNameColumn(column.key))) + 1
+      list.splice(at, 0, owner, links)
+    }
     return list
-  }, [busy, commitCell, computed, drawCell, engine, openRow, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [busy, commitCell, computed, drawCell, engine, entity, extras, extrasOf, openRow, rawOf, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -684,10 +724,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       .filter((row) => !activeView || matchesView(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
       .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
-      .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
+      .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
       .map((row) => {
         const column = sort ? (sort.column === TAB_COLUMN ? -1 : columnIndexOf(owner, sort.column)) : -1
-        const text = sort?.column === TAB_COLUMN ? owner.tabName : column >= 0 ? row.values[column] ?? "" : ""
+        const extra = sort?.column === OWNER_COLUMN || sort?.column === LINKS_COLUMN
+        const text = sort?.column === TAB_COLUMN ? owner.tabName : extra ? extraText(rowKeyOf(owner.tabName, row.rowNumber), sort.column) : column >= 0 ? row.values[column] ?? "" : ""
         // Un nombre se trie par sa valeur : 2 PO passe après 50 PC, 1 km après 800 m.
         const spec = sort && column >= 0 ? specOf(owner.tabName, sort.column) : null
         const sortValue: number | string = spec?.kind === "number" ? numberSortKey(text, spec.number ?? {}) : text
@@ -697,7 +738,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       ? [...rows].sort((left, right) => compareSortKeys(left.sortValue, right.sortValue) * (sort.direction === "asc" ? 1 : -1))
       : rows
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [activeSort, activeView, query, sort, specOf, viewTables])
+  }, [activeSort, activeView, extraText, extras, query, sort, specOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
@@ -900,7 +941,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           addRowLabel={`Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
           // Personnages, campagnes et classes naissent de leur page et partent à la corbeille :
           // le tableau n'en insère, n'en copie ni n'en supprime aucune ligne.
-          rowCommands={entity && !entity.rowCommands ? { append: startAdding } : {
+          rowCommands={entity?.trashKind ? {
+            // Personnages et campagnes : dupliquer, et « Supprimer » les met à la corbeille.
+            append: startAdding,
+            duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
+            remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
+          } : entity && !entity.rowCommands ? { append: startAdding } : {
             append: startAdding,
             insertRows: (rowKey, count) => { const { tabName: rowTab, rowNumber } = parseRowKey(rowKey); void mutate("insert", [rowKey], "insert", { tabName: rowTab, rowNumber, count }) },
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
