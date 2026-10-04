@@ -3,7 +3,8 @@
  * titres honorifiques. Elles s'écrivent en texte lisible dans Google Sheets :
  *
  *   « Orc des Terres Libres »
- *   « Humaine de Valhelm · Elfe »          (plusieurs valeurs, séparées par « · »)
+ *   « Humaine de Valhelm · Elfe »          (plusieurs valeurs, séparées par « · » entre espaces :
+ *                                            « Sorcier·ère » reste une seule valeur)
  *   « L'ivrogne du coin · Le barbu »       (un titre : le titre choisi vient en premier)
  *
  * Les anciennes fiches gardent du JSON (`["Chamane"]`, `{"values": […], "selected": "…"}`)
@@ -33,7 +34,7 @@ export function parseListCell(value: string | null | undefined): ListCell {
       }
     } catch { /* un texte qui commence par un crochet : une valeur comme une autre */ }
   }
-  const entries = [...new Set(raw.split(/\s*(?:·|\n)\s*/).map((item) => item.trim()).filter(Boolean))]
+  const entries = [...new Set(raw.split(/\s+·\s+|\s*\n\s*/).map((item) => item.trim()).filter(Boolean))]
   return { entries, selected: entries[0] || "" }
 }
 
@@ -45,14 +46,14 @@ export function serializeListCell(entries: string[], selected?: string) {
   return ordered.join(LIST_SEPARATOR)
 }
 
-/** Une case écrite en ancien JSON, à montrer (et réécrire) en texte lisible. */
+/** Une case écrite en ancien JSON (même vide : `[]`), à montrer (et réécrire) en texte lisible. */
 export function isLegacyListCell(value: string | null | undefined) {
   const raw = (value || "").trim()
   if (!raw.startsWith("[") && !raw.startsWith("{")) return false
   try {
     const parsed = JSON.parse(raw) as unknown
     const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" ? (parsed as { values?: unknown }).values : null
-    return Array.isArray(list) && parseListCell(raw).entries.length > 0
+    return Array.isArray(list)
   } catch { return false }
 }
 

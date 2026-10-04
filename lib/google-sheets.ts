@@ -73,7 +73,7 @@ import {
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
-import { displayedMultipleValue } from "@/lib/multiple-values"
+import { displayedMultipleValue, isLegacyListCell, parseListCell, serializeListCell } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -4646,6 +4646,77 @@ export async function saveTabletopActivity(activity: TabletopActivityRecord) {
   return activity
 }
 
+/** Les cases à plusieurs valeurs d'une fiche, que les anciennes versions écrivaient en JSON. */
+const CHARACTER_LIST_HEADERS = ["Peuple", "Classe", "Langue parlée", "Titre honorifique", "Religion"] as const
+const LIST_CELL_BACKUPS = "character-list-cells-backups"
+
+export type LegacyListCell = { characterId: string; characterName: string; header: string; rowNumber: number; column: number; before: string; after: string }
+
+/** Les cases de la feuille des personnages encore écrites en ancien JSON, et leur texte lisible. */
+export async function legacyCharacterListCells(options: { fresh?: boolean } = {}): Promise<LegacyListCell[]> {
+  const source = await charactersSource()
+  if (!source) return []
+  const { columns, rows } = await readCharacterColumns(source, ["Nom personnage", ...CHARACTER_LIST_HEADERS], options)
+  const id = columns.at("ID")
+  if (id < 0) return []
+  return rows.flatMap((row, offset) => {
+    const characterId = (row[id] ?? "").trim()
+    if (!characterId) return []
+    return CHARACTER_LIST_HEADERS.flatMap((header) => {
+      const column = columns.at(header)
+      const before = column >= 0 ? row[column] ?? "" : ""
+      if (column < 0 || !isLegacyListCell(before)) return []
+      const { entries, selected } = parseListCell(before)
+      return [{ characterId, characterName: columns.get(row, "Nom personnage") || characterId, header, rowNumber: offset + 2, column, before, after: serializeListCell(entries, selected) }]
+    })
+  })
+}
+
+/**
+ * Réécrit en texte lisible les cases encore en ancien JSON (« ["Elfe"] » → « Elfe »),
+ * à la demande d'un administrateur. Le texte d'avant est d'abord gardé sur le serveur
+ * partagé : sans cette sauvegarde, rien n'est écrit, et « Annuler » le remet en place.
+ */
+export async function rewriteLegacyCharacterListCells() {
+  const source = await charactersSource()
+  if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
+  if (!sharedStoreAvailable()) throw new Error("LIST_CELLS_BACKUP_UNAVAILABLE")
+  const cells = await legacyCharacterListCells({ fresh: true })
+  if (!cells.length) return { backup: "", cells }
+  const backup = `${new Date().toISOString()}`
+  const saved = JSON.stringify({ spreadsheetId: source.spreadsheetId, tabName: source.tabName, cells })
+  if (saved.length > 20_000) throw new Error("LIST_CELLS_BACKUP_TOO_LARGE")
+  await writeSharedRecord(LIST_CELL_BACKUPS, backup, saved)
+  await updateRanges(source.spreadsheetId, cells.map((cell) => ({ range: sheetTabRange(source.tabName, `${columnName(cell.column + 1)}${cell.rowNumber}`), values: [[cell.after]] })), { valueInputOption: "RAW" })
+  for (const cell of cells) characterSheetCache.delete(cell.characterId)
+  return { backup, cells }
+}
+
+/**
+ * Remet le texte d'avant une réécriture, seulement dans les cases que personne n'a
+ * modifiées depuis. Chaque case est retrouvée par l'ID de sa fiche et le nom de sa
+ * colonne : des lignes ou colonnes déplacées entre-temps ne changent rien.
+ */
+export async function restoreLegacyCharacterListCells(backup: string) {
+  const record = (await listSharedRecords(LIST_CELL_BACKUPS)).find((item) => item.key === backup)
+  if (!record) throw new Error("LIST_CELLS_BACKUP_NOT_FOUND")
+  const saved = JSON.parse(record.value) as { spreadsheetId: string; tabName: string; cells: LegacyListCell[] }
+  const source = await charactersSource()
+  if (!source || source.spreadsheetId !== saved.spreadsheetId) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
+  const { columns, rows } = await readCharacterColumns(source, ["Nom personnage", ...CHARACTER_LIST_HEADERS], { fresh: true })
+  const id = columns.at("ID")
+  const rowOf = new Map(rows.map((row, offset) => [(row[id] ?? "").trim(), { row, rowNumber: offset + 2 }]))
+  const writes = saved.cells.flatMap((cell) => {
+    const found = rowOf.get(cell.characterId)
+    const column = columns.at(cell.header)
+    if (!found || column < 0 || (found.row[column] ?? "") !== cell.after) return []
+    return [{ cell, range: sheetTabRange(source.tabName, `${columnName(column + 1)}${found.rowNumber}`) }]
+  })
+  await updateRanges(source.spreadsheetId, writes.map((write) => ({ range: write.range, values: [[write.cell.before]] })), { valueInputOption: "RAW" })
+  for (const write of writes) characterSheetCache.delete(write.cell.characterId)
+  return { restored: writes.length, skipped: saved.cells.length - writes.length }
+}
+
 /** Une cellule « Classe » de la fiche (« A · B », ou ancien JSON) : les classes séparées par « · ». */
 export function formatCharacterClasses(value: string) {
   return displayedMultipleValue(value, "all")
@@ -5150,10 +5221,10 @@ export async function createCharacterForUser(uid: string, input: string[], id: s
     await writeCharacterValues(sheet, map, rowNumber, prepared, catalog)
   }
   await getDb().insert(characterIndex).values({
-    id, ownerUid: uid, name, subtitle: values[1] || "", updatedAt: new Date().toISOString(),
+    id, ownerUid: uid, name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString(),
   }).onConflictDoUpdate({
     target: characterIndex.id,
-    set: { name, subtitle: values[1] || "", updatedAt: new Date().toISOString() },
+    set: { name, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt: new Date().toISOString() },
   })
   return { id, name }
 }
@@ -5380,7 +5451,7 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   if (characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))) {
     values = await writeCharacterValues(source, map, rowNumber, applyCharacterDefaultsAndFormulas(values, rowNumber, layout, catalog), catalog, { returnValues: true }) ?? values
   }
-  const character = { ...indexed, name: values[0] || indexed.name, subtitle: values[1] || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
+  const character = { ...indexed, name: values[0] || indexed.name, subtitle: displayedMultipleValue(values[1] || "", "all") || indexed.subtitle, values, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }
@@ -5408,8 +5479,8 @@ export async function updateCharacterSheet(accountUid: string | null, id: string
   const calculatedValues = (await writeCharacterValues(source, map, rowNumber, preparedValues, catalog, { returnValues: true }))?.slice(0, width) ?? []
   while (calculatedValues.length < width) calculatedValues.push("")
   const updatedAt = new Date().toISOString()
-  await getDb().update(characterIndex).set({ name, subtitle: nextValues[1] || "", updatedAt }).where(eq(characterIndex.id, id))
-  const character = { ...existing, name, subtitle: nextValues[1] || "", updatedAt, values: calculatedValues, headers: layout.headers } satisfies CharacterSheetRecord
+  await getDb().update(characterIndex).set({ name, subtitle: displayedMultipleValue(nextValues[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
+  const character = { ...existing, name, subtitle: displayedMultipleValue(nextValues[1] || "", "all"), updatedAt, values: calculatedValues, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }
@@ -5450,8 +5521,8 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   }
   const updatedAt = new Date().toISOString()
   const nextName = values[0]?.trim() || existing.name
-  await getDb().update(characterIndex).set({ name: nextName, subtitle: values[1] || "", updatedAt }).where(eq(characterIndex.id, id))
-  const character = { ...existing, name: nextName, subtitle: values[1] || "", updatedAt, values, headers: layout.headers } satisfies CharacterSheetRecord
+  await getDb().update(characterIndex).set({ name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
+  const character = { ...existing, name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt, values, headers: layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
   return character
 }

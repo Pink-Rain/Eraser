@@ -34,4 +34,12 @@ test("l'ancien JSON reste lu partout", () => {
   assert.equal(lists.displayedMultipleValue('["Elfe","Humain"]', "all"), "Elfe · Humain");
   assert.equal(lists.displayedMultipleValue("Elfe · Humain", "all"), "Elfe · Humain");
   assert.equal(lists.displayedMultipleValue("Le barbu · Le sage"), "Le barbu");
+  assert.equal(lists.isLegacyListCell("[]"), true);
+  assert.equal(lists.displayedMultipleValue("[]", "all"), "");
+});
+
+test("un « · » sans espaces fait partie du nom (Sorcier·ère)", () => {
+  assert.deepEqual(lists.parseListCell("Sorcier·ère").entries, ["Sorcier·ère"]);
+  assert.deepEqual(lists.parseListCell("Sorcier·ère · Guerrier·e").entries, ["Sorcier·ère", "Guerrier·e"]);
+  assert.equal(lists.serializeListCell(["Sorcier·ère", "Guerrier·e"]), "Sorcier·ère · Guerrier·e");
 });
