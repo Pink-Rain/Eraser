@@ -15,6 +15,23 @@ export function announceInventoryReceived(targetId: string) {
 
 const SHOW_EVENT = "eraser:item-notifications"
 
+/** Les alertes déjà montrées dans cette fenêtre : jamais deux fois, même si leur effacement tarde. */
+const shownNotificationIds = new Set<string>()
+
+/** Celles qui n'ont pas encore été montrées dans cette fenêtre. */
+export function unseenItemNotifications(notifications: ItemNotification[]) {
+  return notifications.filter((notification) => !shownNotificationIds.has(notification.id))
+}
+
+/**
+ * Montrées : le serveur peut les effacer. Tant qu'il ne l'a pas fait (réseau coupé), elles
+ * reviennent à la relève suivante, sont effacées de nouveau, mais ne sont pas remontrées.
+ */
+function acknowledgeItemNotifications(notifications: ItemNotification[]) {
+  if (!notifications.length) return
+  void fetch("/api/notifications", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ seen: notifications.map((notification) => notification.id) }) }).catch(() => undefined)
+}
+
 /** Montre des notifications relevées ailleurs (la fiche d'un personnage), avec leur petit son. */
 export function showItemNotifications(notifications: ItemNotification[]) {
   if (notifications.length) window.dispatchEvent(new CustomEvent(SHOW_EVENT, { detail: notifications }))
@@ -49,8 +66,11 @@ export function ItemNotifications() {
   // Les objets reçus par un personnage, relevés par sa fiche à son ouverture.
   useEffect(() => {
     const listener = (event: Event) => {
-      const fresh = (event as CustomEvent<ItemNotification[]>).detail ?? []
+      const received = (event as CustomEvent<ItemNotification[]>).detail ?? []
+      const fresh = unseenItemNotifications(received)
+      acknowledgeItemNotifications(received)
       if (!fresh.length) return
+      for (const notification of fresh) shownNotificationIds.add(notification.id)
       playItemReceived()
       setShown((current) => [...current, ...fresh.filter((item) => !current.some((known) => known.id === item.id))].slice(-4))
     }
@@ -68,8 +88,13 @@ export function ItemNotifications() {
       try {
         const response = await fetch("/api/notifications", { cache: "no-store" })
         const payload = (await response.json().catch(() => ({}))) as { notifications?: ItemNotification[] }
-        const fresh = response.ok ? payload.notifications ?? [] : []
-        if (alive && fresh.length) {
+        const received = response.ok ? payload.notifications ?? [] : []
+        // Plus là pour les montrer : elles restent sur le serveur pour la prochaine relève.
+        if (!alive || !received.length) return
+        const fresh = unseenItemNotifications(received)
+        acknowledgeItemNotifications(received)
+        if (fresh.length) {
+          for (const notification of fresh) shownNotificationIds.add(notification.id)
           playItemReceived()
           setShown((current) => [...current, ...fresh.filter((item) => !current.some((known) => known.id === item.id))].slice(-4))
           for (const notification of fresh) if (notification.targetId) announceInventoryReceived(notification.targetId)

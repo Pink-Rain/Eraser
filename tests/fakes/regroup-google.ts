@@ -3,10 +3,10 @@
 type Tab = { sheetId: number; title: string; hidden: boolean; grid: string[][]; columnCount: number }
 type Sheet = { id: string; name: string; parent: string; kind: "sheet" | "folder" | "shortcut"; target?: string; tabs: Tab[] }
 
-export const world = { files: new Map<string, Sheet>(), nextId: 1, nextSheet: 1000, views: [] as Array<{ index: string; source: string }>, failCopyOf: "", corruptCopyOf: "" }
+export const world = { files: new Map<string, Sheet>(), nextId: 1, nextSheet: 1000, views: [] as Array<{ index: string; source: string }>, failCopyOf: "", corruptCopyOf: "", failMove: null as ((fileId: string, toFolderId: string) => boolean) | null, failViews: false }
 
 export function reset() {
-  world.files.clear(); world.nextId = 1; world.nextSheet = 1000; world.views = []; world.failCopyOf = ""; world.corruptCopyOf = ""
+  world.files.clear(); world.nextId = 1; world.nextSheet = 1000; world.views = []; world.failCopyOf = ""; world.corruptCopyOf = ""; world.failMove = null; world.failViews = false
 }
 
 export function addSpreadsheet(id: string, name: string, parent: string, tabs: Array<{ sheetId: number; title: string; grid: string[][] }>) {
@@ -49,6 +49,7 @@ export async function listDriveFolderFiles(folderId: string) {
     : { id: file.id, name: file.name, mimeType: file.kind === "folder" ? "application/vnd.google-apps.folder" : "application/vnd.google-apps.spreadsheet", webViewLink: `https://sheets/${file.id}` })
 }
 export async function moveDriveFile(fileId: string, toFolderId: string, fromFolderId: string) {
+  if (world.failMove?.(fileId, toFolderId)) throw new Error(`MOVE_FAILED:${fileId}`)
   const file = world.files.get(fileId)
   if (!file || file.parent !== fromFolderId) throw new Error(`MOVE_FROM_WRONG_FOLDER:${fileId}`)
   file.parent = toFolderId
@@ -185,6 +186,7 @@ export async function appendRawSchemaRows(spreadsheetId: string, rows: string[][
 
 // ---------- index-settings ----------
 export async function remapIndexViewSources(index: string, mapping: Map<string, string>) {
+  if (world.failViews) throw new Error("VIEWS_FAILED")
   let count = 0
   for (const view of world.views) if (view.index === index && mapping.has(view.source)) { view.source = mapping.get(view.source) as string; count += 1 }
   return count

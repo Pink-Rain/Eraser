@@ -43,6 +43,9 @@ const regroupMessages: Record<string, string> = {
   OBJECT_REGROUP_NOTHING_TO_DO: "Il n’y a qu’un classeur dans le dossier « Objets » : rien à regrouper.",
   OBJECT_REGROUP_VERIFY_FAILED: "La copie ne correspond pas exactement aux index d’origine : rien n’a été basculé, les index restent comme avant.",
   OBJECT_REGROUP_NOT_FOUND: "Aucun regroupement à annuler dans le dossier « Objets ».",
+  OBJECT_REGROUP_ROLLBACK_FAILED: "Le regroupement n’a pas pu se faire, et des anciens classeurs n’ont pas pu revenir dans « Objets » : remets-les à la main.",
+  OBJECT_REGROUP_REVERT_INCOMPLETE: "L’annulation s’est arrêtée en chemin et n’a pas pu être défaite entièrement :",
+  OBJECT_INDEX_UNAVAILABLE: "Les index d’objets n’ont pas pu être relus dans Google Sheets : rien n’a été fait. Réessaie dans un instant.",
 }
 
 /** Regrouper les index d'objets en un classeur à onglets (ou l'annuler) : réservé à la vue administrateur. */
@@ -57,7 +60,8 @@ async function regroupAction(action: string) {
     const code = error instanceof Error ? error.message : ""
     const details = (error as { details?: string[] } | null)?.details ?? []
     console.error("OBJECT_REGROUP_FAILED", action, code, details)
-    return NextResponse.json({ error: regroupMessages[code] ?? "Le regroupement n’a pas pu se faire. Les index d’origine n’ont pas bougé.", details }, { status: 400 })
+    const fallback = action === "regroup-revert" ? "L’annulation n’a pas pu se faire : le regroupement est resté en place." : "Le regroupement n’a pas pu se faire. Les index d’origine n’ont pas bougé."
+    return NextResponse.json({ error: regroupMessages[code] ?? fallback, details }, { status: 400 })
   }
 }
 

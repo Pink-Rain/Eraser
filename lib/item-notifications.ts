@@ -8,8 +8,8 @@ import { ownersOf } from "@/lib/ownership"
 /**
  * « X vous a envoyé Y ». Chaque installation a son propre serveur : la notification
  * passe donc par le serveur partagé (une portée par compte destinataire), que l'app du
- * destinataire relève régulièrement puis efface. Sans serveur partagé, rien n'est envoyé :
- * l'objet arrive quand même, seule l'alerte manque.
+ * destinataire relève régulièrement puis efface une fois montrée. Sans serveur partagé,
+ * rien n'est envoyé : l'objet arrive quand même, seule l'alerte manque.
  */
 export type ItemNotification = {
   id: string
@@ -116,12 +116,14 @@ function parse(value: string): ItemNotification | null {
 }
 
 /**
- * Relève des notifications du compte et efface celles rendues : chacune n'est montrée
- * qu'une fois. Sans `targetId` : tout sauf les objets reçus par un personnage, qui
- * attendent l'ouverture de sa fiche (même reçus hors ligne, en vue MJ ou sur un autre
- * personnage). Avec `targetId` : celles de ce personnage seulement.
+ * Relève des notifications du compte. Elles restent sur le serveur partagé jusqu'à ce que
+ * la page dise les avoir montrées (`acknowledgeItemNotifications`) : une relève perdue en
+ * route (page fermée, réseau coupé) ne fait plus disparaître l'alerte. Sans `targetId` :
+ * tout sauf les objets reçus par un personnage, qui attendent l'ouverture de sa fiche
+ * (même reçus hors ligne, en vue MJ ou sur un autre personnage). Avec `targetId` : celles
+ * de ce personnage seulement.
  */
-export async function takeItemNotifications(uid: string, targetId = "") {
+export async function listItemNotifications(uid: string, targetId = "") {
   if (!sharedStoreAvailable()) return []
   const scope = scopeFor(uid)
   const records = await listSharedRecords(scope).catch(() => [])
@@ -131,8 +133,16 @@ export async function takeItemNotifications(uid: string, targetId = "") {
   const expired = parsed.filter(({ notification }) => !notification || now - Date.parse(notification.createdAt || "0") >= MAX_AGE_MS)
   const wanted = parsed.filter(({ notification }) => notification && now - Date.parse(notification.createdAt || "0") < MAX_AGE_MS
     && (targetId ? notification.targetKind === "character" && notification.targetId === targetId : notification.targetKind !== "character"))
-  await Promise.all([...expired, ...wanted].map(({ record }) => deleteSharedRecord(scope, record.key).catch(() => undefined)))
+  // Seules les notifications trop anciennes sont effacées ici.
+  await Promise.all(expired.map(({ record }) => deleteSharedRecord(scope, record.key).catch(() => undefined)))
   return wanted
     .map(({ notification }) => notification as ItemNotification)
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
+}
+
+/** La page a montré ces notifications : elles sont effacées du serveur partagé. */
+export async function acknowledgeItemNotifications(uid: string, ids: readonly string[]) {
+  if (!sharedStoreAvailable() || !ids.length) return
+  const scope = scopeFor(uid)
+  await Promise.all([...new Set(ids)].slice(0, 100).map((id) => deleteSharedRecord(scope, id).catch(() => undefined)))
 }

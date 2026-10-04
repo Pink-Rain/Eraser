@@ -98,3 +98,35 @@ test("une case différente dans la copie bloque la bascule et dit laquelle", asy
   assert.deepEqual(inObjects(), ["Anciens index d’objets (avant regroupement)", "Index Objet", "Index armes"]);
   assert.equal(google.world.views[0].source, "objet:0");
 });
+
+test("une bascule défaite à moitié dit quel ancien classeur est resté dans la sauvegarde", async () => {
+  // Le classeur regroupé n'entre pas dans « Objets », puis « Index armes » ne peut pas y revenir.
+  google.world.failMove = (fileId, to) => to === "objets" && fileId !== "objet";
+  const failure = await flow.regroupObjectIndexes().catch((error) => error);
+  assert.equal(failure.message, "OBJECT_REGROUP_ROLLBACK_FAILED");
+  assert.deepEqual(failure.details, ["« Index armes » est resté dans « Anciens index d’objets (avant regroupement) »."]);
+  assert.deepEqual(inObjects(), ["Anciens index d’objets (avant regroupement)", "Index Objet"]);
+});
+
+test("des onglets-fenêtres qui n'ont pas pu suivre sont signalés, pas tus", async () => {
+  google.world.failViews = true;
+  const result = await flow.regroupObjectIndexes();
+  assert.equal(result.views, 0);
+  assert.equal(result.warnings.length, 1);
+  assert.match(result.warnings[0], /onglets-fenêtres/);
+  const reverted = await flow.revertObjectIndexRegroup();
+  assert.match(reverted.warnings[0], /onglets-fenêtres/);
+});
+
+test("une annulation arrêtée en chemin est défaite, et ce qui ne peut pas l'être est nommé", async () => {
+  const result = await flow.regroupObjectIndexes();
+  // Le classeur regroupé ne peut pas aller à la sauvegarde : les anciens retournent d'où ils viennent…
+  google.world.failMove = (fileId, to) => fileId === result.fileId && to !== "objets";
+  await assert.rejects(flow.revertObjectIndexRegroup(), /MOVE_FAILED/);
+  assert.deepEqual(inObjects(), ["Anciens index d’objets (avant regroupement)", "Index des objets"]);
+  // …sauf « Index Objet », qui ne peut plus y retourner : il est nommé.
+  google.world.failMove = (fileId, to) => (fileId === result.fileId && to !== "objets") || (fileId === "objet" && to !== "objets");
+  const failure = await flow.revertObjectIndexRegroup().catch((error) => error);
+  assert.equal(failure.message, "OBJECT_REGROUP_REVERT_INCOMPLETE");
+  assert.match(failure.details[0], /^« Index Objet » est revenu dans « Objets »/);
+});
