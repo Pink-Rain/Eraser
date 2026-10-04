@@ -96,6 +96,8 @@ export async function registerAccount(input: {
   const remote = remoteAccountsConfig(env)
   if (remote) {
     const response = await remoteAccountsFetch(remote, "/register", { method: "POST", body: input })
+    // Un nouveau compte apparaît aussitôt dans les listes des MJ et administrateurs.
+    forgetCachedSessions()
     return response as { account: AccountRecord; session: { token: string; expiresAt: string } }
   }
 
@@ -154,11 +156,18 @@ export async function loginAccount(email: string, password: string) {
 // removes that latency from navigation. A role or status change takes at most
 // this long to apply, and the paths that change one clear the cache directly.
 const SESSION_CACHE_MS = 30_000
-const SESSION_STALE_MS = 90_000
+// Une session déjà vérifiée sert la page tout de suite pendant sa revérification, même
+// après une longue pause (fenêtre en arrière-plan) : une session refusée est oubliée dès
+// la réponse, et les changements de rôle vident ce cache directement.
+const SESSION_STALE_MS = 6 * 3_600_000
 const sessionAccountCache = new Map<string, { expiresAt: number; account: Promise<AccountRecord | null> }>()
+// La liste des comptes (MJ et administrateurs), gardée une minute par session.
+const ACCOUNTS_CACHE_MS = 60_000
+const accountsCache = new Map<string, { expiresAt: number; accounts: Promise<AccountRecord[]> }>()
 
 function forgetCachedSessions() {
   sessionAccountCache.clear()
+  accountsCache.clear()
 }
 
 /** Oublie le compte mis en cache pour cette session : la prochaine lecture interroge le Worker. */
@@ -179,8 +188,8 @@ export async function accountFromSession(token: string) {
       })
     if (sessionAccountCache.size >= 200) forgetCachedSessions()
     sessionAccountCache.set(token, { expiresAt: Date.now() + SESSION_CACHE_MS, account })
-    // Une session vérifiée il y a peu (moins de 2 min) sert la page tout de suite pendant
-    // la revérification : la page n'attend plus le serveur partagé toutes les 30 s.
+    // Une session déjà vérifiée sert la page tout de suite pendant la revérification :
+    // la page n'attend plus le serveur partagé toutes les 30 s.
     if (cached && cached.expiresAt + SESSION_STALE_MS > Date.now()) {
       const previous = await cached.account.catch(() => null)
       if (previous) {
@@ -216,8 +225,16 @@ export async function deleteSession(token: string) {
 export async function listAccounts(sessionToken?: string) {
   const remote = remoteAccountsConfig(env)
   if (remote) {
-    const response = await remoteAccountsFetch(remote, "/accounts", { method: "GET", token: sessionToken })
-    return (response as { accounts: AccountRecord[] }).accounts
+    // Sans session, le serveur partagé refuse toujours : inutile de l'attendre.
+    if (!sessionToken) throw new Error("ACCOUNTS_SESSION_REQUIRED")
+    const cached = accountsCache.get(sessionToken)
+    if (cached && cached.expiresAt > Date.now()) return cached.accounts
+    const accounts = remoteAccountsFetch(remote, "/accounts", { method: "GET", token: sessionToken })
+      .then((response) => (response as { accounts: AccountRecord[] }).accounts)
+    accounts.catch(() => { if (accountsCache.get(sessionToken)?.accounts === accounts) accountsCache.delete(sessionToken) })
+    if (accountsCache.size >= 50) accountsCache.clear()
+    accountsCache.set(sessionToken, { expiresAt: Date.now() + ACCOUNTS_CACHE_MS, accounts })
+    return accounts
   }
   const rows = await getDb().select().from(users).orderBy(asc(users.createdAt))
   return rows.map(accountRecord)

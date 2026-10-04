@@ -9,8 +9,10 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
 import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
+import type { IndexLayout, TabLayouts } from "@/lib/index-layouts"
+import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts> }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -24,7 +26,7 @@ async function postSettings(body: Record<string, unknown>) {
 
 /** Les onglets-fenêtres d'un index et les presets d'onglets (partagés par tous les index). */
 export function useIndexSettings(index: string) {
-  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? { views: [], presets: [] })
+  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? { views: [], presets: [], layouts: {} })
   const [error, setError] = useState("")
   useEffect(() => {
     let active = true
@@ -33,7 +35,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {} }
         known.set(index, next)
         setSettings(next)
       })
@@ -52,6 +54,14 @@ export function useIndexSettings(index: string) {
     if (payload.views) update({ views: payload.views })
     return payload.id ?? ""
   }, [update])
+  /** Les mises en page (fiche, survol) d'onglets de cet index ; `null` : l'affichage automatique. */
+  const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) => {
+    if (!changes.length) return
+    const payload = await postSettings({ action: "save-layouts", index, changes })
+    if (payload.layouts) update({ layouts: payload.layouts })
+    // Le survol a pu changer : les lignes citées déjà lues sont relues.
+    forgetResolvedReferences()
+  }, [index, update])
   const deleteView = useCallback(async (id: string) => {
     const payload = await postSettings({ action: "delete-view", id, index })
     if (payload.views) update({ views: payload.views })
@@ -65,7 +75,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-preset", id })
     if (payload.presets) update({ presets: payload.presets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset }
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })

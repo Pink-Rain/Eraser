@@ -1,5 +1,6 @@
 import {
   builtinCharacterCatalog,
+  catalogDescriptionsFromTables,
   catalogFromTables,
   CHARACTERISTICS_TAB,
   SKILLS_TAB,
@@ -25,5 +26,16 @@ export async function getCharacterCatalog(): Promise<CharacterCatalog> {
   } catch (error) {
     console.error("CHARACTER_CATALOG_UNAVAILABLE", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return builtinCharacterCatalog
+  }
+}
+
+/** Les descriptions de l'index (colonne « Description »), par clé de fiche et par nom. Vide faute d'index. */
+export async function getCharacterCatalogDescriptions(): Promise<Record<string, string>> {
+  try {
+    const data = await getWorldIndexQuick("skills")
+    return catalogDescriptionsFromTables(data.tables.filter((table) => table.tabName === CHARACTERISTICS_TAB || table.tabName === SKILLS_TAB))
+  } catch (error) {
+    console.error("CHARACTER_CATALOG_DESCRIPTIONS_UNAVAILABLE", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return {}
   }
 }

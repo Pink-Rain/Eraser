@@ -49,6 +49,28 @@ export async function chatAccountsForCampaign(account: AuthorizedUser, pageLinke
     .sort((left, right) => left.name.localeCompare(right.name, "fr"))
 }
 
+/**
+ * Le nom de joueur de chaque propriétaire de personnage (identifiants historiques compris),
+ * pour les cartes « Joueur • Campagne ». Lisible par tous les rôles : un joueur lit
+ * l'annuaire partagé, qu'un MJ complète en passant.
+ */
+export async function playerNamesFor(account: AuthorizedUser, ownerUids: string[]): Promise<Map<string, string>> {
+  const wanted = [...new Set(ownerUids.map((uid) => uid.trim()).filter(Boolean))]
+  if (!wanted.length) return new Map()
+  const [{ names, publishedNames }, links] = await Promise.all([knownNames(account), listIdentityLinks().catch(() => [])])
+  const localUid = new Map(links.map((link) => [link.legacyUid, link.localUserId]))
+  const result = new Map<string, string>()
+  for (const uid of wanted) {
+    const name = names.get(localUid.get(uid) ?? uid) ?? names.get(uid)
+    if (name) result.set(uid, name)
+  }
+  if (sharedStoreAvailable()) {
+    const missing = wanted.map((uid) => localUid.get(uid) ?? uid).filter((uid) => names.has(uid) && publishedNames.get(uid) !== names.get(uid)).slice(0, 20)
+    await Promise.all(missing.map((uid) => writeSharedRecord(NAME_SCOPE, uid, names.get(uid) || "").catch(() => undefined)))
+  }
+  return result
+}
+
 /** Le nom affiché dans le chat : celui du compte, où qu'on écrive. */
 export function chatAuthorName(account: AuthorizedUser) {
   return account.displayName.trim() || account.email.split("@")[0] || "Joueur"

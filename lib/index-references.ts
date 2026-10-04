@@ -176,6 +176,20 @@ export type ResolvedReference = {
   value?: string
   valueHtml?: string
   look?: ReferenceLook
+  /** Le survol réglé dans « Modifier » › Mise en page (sinon le survol automatique). */
+  layout?: ResolvedLayout
+}
+
+/** Une case du survol d'une ligne, dans sa mise en page. */
+export type ResolvedLayoutField = { column: string; span?: number; hideLabel?: boolean; large?: boolean; value: string; valueHtml: string; look?: ReferenceLook }
+
+/** Le survol d'une ligne selon sa mise en page : image et sous-titre en tête, puis les cases rangées. */
+export type ResolvedLayout = {
+  image?: string
+  subtitle?: string
+  asideWidth?: "sm" | "md" | "lg"
+  aside: ResolvedLayoutField[]
+  sections: Array<{ id: string; title?: string; framed?: boolean; rows: Array<{ id: string; fields: ResolvedLayoutField[] }> }>
 }
 
 /** Le plus de références qu'une demande peut résoudre d'un coup. */

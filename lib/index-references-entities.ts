@@ -25,6 +25,7 @@ import {
 import { foldName } from "@/lib/index-columns"
 import type { SourceHints, SourceRow, SourceTable } from "@/lib/index-references-cells"
 import { isNpcLibraryPage, npcIndexTabs } from "@/lib/npc-pages"
+import { displayedMultipleValue } from "@/lib/multiple-values"
 
 export const ENTITY_REFERENCE_KEYS = ["characters", "campaigns", "npcs", "classes", "class-spells", "creature-spells"] as const
 export type EntityReferenceKey = (typeof ENTITY_REFERENCE_KEYS)[number]
@@ -166,6 +167,8 @@ async function characterSource(cited: readonly string[] = []): Promise<EntitySou
   if (!sheet) return null
   const { headers, columns, rows } = sheet
   const classColumn = columns.at("Classe")
+  // Peuple et titres sont des listes (JSON) : le survol montre les peuples et le titre choisi.
+  const listColumns = [{ at: columns.at("Peuple"), mode: "all" as const }, { at: columns.at("Titre honorifique"), mode: "selected" as const }].filter((entry) => entry.at >= 0)
   const trashed = new Set((await getDb().select({ id: characterIndex.id, deletedAt: characterIndex.deletedAt }).from(characterIndex)).filter((row) => row.deletedAt).map((row) => row.id))
   const listed: SourceRow[] = []
   const hidden: SourceRow[] = []
@@ -176,6 +179,7 @@ async function characterSource(cited: readonly string[] = []): Promise<EntitySou
     const row = sheetRow(headers, values, id, name)
     // La classe est parfois une liste (JSON) : elle se lit « Mage · Prêtre ».
     if (classColumn >= 0) { row.values[classColumn] = formatCharacterClasses(row.values[classColumn]); row.html[classColumn] = escapeHtml(row.values[classColumn]) }
+    for (const { at, mode } of listColumns) { row.values[at] = displayedMultipleValue(row.values[at] ?? "", mode); row.html[at] = escapeHtml(row.values[at]) }
     ;(trashed.has(id) ? hidden : listed).push(row)
   }
   const shown = CHARACTER_MENU.filter((header) => columns.at(header) >= 0)

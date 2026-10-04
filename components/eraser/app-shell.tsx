@@ -79,6 +79,11 @@ const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-c
 const ItemNotifications = dynamic(() => import("@/components/eraser/item-notifications").then((module) => module.ItemNotifications), { ssr: false })
 
 const PageLabelContext = createContext<(label: string | null) => void>(() => undefined)
+/** Deux listes venues du serveur au contenu identique (les tableaux, eux, sont toujours neufs). */
+function sameList(left: unknown[], right: unknown[]) {
+  return left === right || (left.length === right.length && JSON.stringify(left) === JSON.stringify(right))
+}
+
 const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void } | null>(null)
 
 /**
@@ -227,6 +232,11 @@ export function AppShell({
   const [visibleCharacters, setVisibleCharacters] = useState(characters)
   const [visibleCampaigns, setVisibleCampaigns] = useState(campaigns)
   const [visibleTodos, setVisibleTodos] = useState(todos)
+  // Le compte ne change pas d'une page à l'autre : le même objet, tant que ses champs sont les mêmes.
+  const { uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole } = user
+  const shellUser = useMemo<ShellUser>(() => ({ uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole }), [userDisplayName, userEmail, userRole, userUid])
+  // Les pages qui lisent ces données ne se redessinent que si elles changent vraiment.
+  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user: shellUser, avatarVersion, openAccount }), [avatarVersion, openAccount, shellUser, viewRole, visibleCampaigns, visibleCharacters])
   // Au clic, la page de destination s'affiche aussitôt, sans ses données ; le titre d'un
   // personnage ou d'une campagne est déjà connu ici.
   const pendingPage = usePendingPage((to) => {
@@ -273,11 +283,13 @@ export function AppShell({
     return () => document.removeEventListener("click", openAppLink)
   }, [router])
 
+  // Chaque clic renvoie la liste du serveur (un nouveau tableau, souvent identique) : elle
+  // n'est reprise que si elle a changé, sinon toute l'enveloppe se redessinait à chaque page.
   useEffect(() => {
     const timer = window.setTimeout(() => {
-      setVisibleCharacters(characters)
-      setVisibleCampaigns(campaigns)
-      setVisibleTodos(todos)
+      setVisibleCharacters((current) => sameList(current, characters) ? current : characters)
+      setVisibleCampaigns((current) => sameList(current, campaigns) ? current : campaigns)
+      setVisibleTodos((current) => sameList(current, todos) ? current : todos)
     }, 0)
     return () => window.clearTimeout(timer)
   }, [campaigns, characters, todos])
@@ -752,7 +764,7 @@ export function AppShell({
         {/* `--eraser-viewport` : la hauteur visible de ce bloc (l’écran moins l’en-tête), pour
             les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
         <div ref={pageScrollerRef} className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
-          <ShellDataContext.Provider value={{ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user, avatarVersion, openAccount }}>
+          <ShellDataContext.Provider value={shellData}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>

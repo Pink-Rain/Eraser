@@ -1,11 +1,12 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
+import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -22,6 +23,8 @@ import {
   formulaResultLabels,
   gaugeScaleOf,
   indexColumnKinds,
+  isColorSourceSpec,
+  isSheetSpec,
   kindGroups,
   normalizeSpec,
   placementLabels,
@@ -42,6 +45,7 @@ import {
   type RollupFunction,
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
+import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import {
   creatableKinds,
@@ -64,6 +68,21 @@ type DraftTab = { id: string; original?: string; name: string; columns: DraftCol
 
 let draftCounter = 0
 const nextId = () => `draft-${draftCounter++}`
+
+/**
+ * Les colonnes qu'une mise en page peut placer : celles de la fiche (sauf l'identifiant et
+ * ce qu'Eraser calcule hors fiche), ou celles qu'un survol sait montrer (une valeur gardée).
+ */
+function layoutColumnsOf(tab: DraftTab, kind: LayoutKind): LayoutColumn[] {
+  const formHidden = ["id", "auto-links", "ranked-links", "tab", "archived"]
+  // Le survol a toujours le nom en titre : il n'est pas proposé comme case.
+  const hoverHidden = ["id", "actions", "auto-links", "ranked-links", "tab", "archived", "formula", "lookup", "rollup", "name", "name-form"]
+  return tab.columns.filter((item) => !item.removed && item.header.trim()).flatMap((item) => {
+    const spec = normalizeSpec(item.spec)
+    if (kind === "form" ? !isSheetSpec(spec) || formHidden.includes(spec.kind) : hoverHidden.includes(spec.kind)) return []
+    return [{ header: item.header.trim(), spec }]
+  })
+}
 
 function draftOf(model: IndexEditorModel): DraftTab[] {
   return model.tabs.map((tab) => ({
@@ -583,7 +602,19 @@ function TypeSettings(props: SettingsProps) {
 // Style imposé et emplacement
 // ---------------------------------------------------------------------------
 
-function StyleSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean }) {
+/** « ou celle de la colonne … » : une couleur prise, ligne par ligne, dans une colonne Couleur de l'onglet. */
+function ColorColumnPicker({ value, columns, disabled, label, onChange }: { value?: string; columns: string[]; disabled: boolean; label: string; onChange: (value: string | undefined) => void }) {
+  if (!columns.length && !value) return <p className="text-[10px] font-normal text-muted-foreground">Ajoute une colonne Couleur à l’onglet pour colorer chaque ligne de sa couleur.</p>
+  return <label className="flex items-center gap-1.5 text-[11px] font-normal text-muted-foreground">
+    <span className="shrink-0">ou, ligne par ligne :</span>
+    <NativeSelect disabled={disabled} value={value ?? ""} onChange={(event) => onChange(event.target.value || undefined)} className="h-7 min-w-0 flex-1 text-[11px]" aria-label={label}>
+      <NativeSelectOption value="">La couleur choisie ci-dessus</NativeSelectOption>
+      {[...new Set([...columns, ...(value ? [value] : [])])].map((header) => <NativeSelectOption key={header} value={header}>{columns.includes(header) ? `La colonne « ${header} »` : `« ${header} » (introuvable)`}</NativeSelectOption>)}
+    </NativeSelect>
+  </label>
+}
+
+function StyleSettings({ spec, onChange, disabled, colorColumns = [] }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean; /** Les colonnes Couleur de l'onglet, d'où une ligne peut prendre ses couleurs. */ colorColumns?: string[] }) {
   const style = spec.style
   const active = Boolean(style) && !style?.keepCellFormatting
   const set = (changes: Partial<ColumnStyle>) => onChange({ ...spec, style: { ...(style ?? {}), ...changes } })
@@ -601,14 +632,15 @@ function StyleSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; on
         {([["bold", Bold, "Gras"], ["italic", Italic, "Italique"], ["underline", Underline, "Souligné"], ["strike", Strikethrough, "Barré"]] as const).map(([key, Icon, label]) => <Button key={key} type="button" size="icon-sm" variant={style?.[key] ? "default" : "outline"} disabled={disabled} onClick={() => toggle(key)} title={label} aria-label={label}><Icon /></Button>)}
       </div>
       <div className="grid gap-2 sm:grid-cols-2">
-        <div className={smallLabel}>Couleur du texte<ColorSwatches disabled={disabled} value={style?.color} allowMuted onChange={(color) => set({ color })} /></div>
-        <div className={smallLabel}>Couleur de fond<ColorSwatches disabled={disabled} value={style?.background} onChange={(background) => set({ background })} /></div>
+        <div className={smallLabel}>Couleur du texte<ColorSwatches disabled={disabled} value={style?.color} allowMuted onChange={(color) => set({ color })} /><ColorColumnPicker label="Couleur du texte prise dans une colonne" value={style?.colorColumn} columns={colorColumns} disabled={disabled} onChange={(colorColumn) => set({ colorColumn })} /></div>
+        <div className={smallLabel}>Couleur de fond<ColorSwatches disabled={disabled} value={style?.background} onChange={(background) => set({ background })} /><ColorColumnPicker label="Couleur de fond prise dans une colonne" value={style?.backgroundColumn} columns={colorColumns} disabled={disabled} onChange={(backgroundColumn) => set({ backgroundColumn })} /></div>
         <label className={smallLabel}>Taille<NativeSelect disabled={disabled} value={style?.size ?? ""} onChange={(event) => set({ size: (event.target.value || undefined) as ColumnStyle["size"] })}><NativeSelectOption value="">Normale</NativeSelectOption><NativeSelectOption value="sm">Petite</NativeSelectOption><NativeSelectOption value="md">Moyenne</NativeSelectOption><NativeSelectOption value="lg">Grande</NativeSelectOption><NativeSelectOption value="xl">Très grande</NativeSelectOption></NativeSelect></label>
         <label className={smallLabel}>Police<NativeSelect disabled={disabled} value={style?.font ?? ""} onChange={(event) => set({ font: (event.target.value || undefined) as ColumnStyle["font"] })}><NativeSelectOption value="">Normale</NativeSelectOption><NativeSelectOption value="serif">Avec empattement</NativeSelectOption><NativeSelectOption value="display">Titre (police d’Eraser)</NativeSelectOption><NativeSelectOption value="mono">Machine à écrire</NativeSelectOption></NativeSelect></label>
         <label className={smallLabel}>Casse<NativeSelect disabled={disabled} value={style?.letterCase ?? ""} onChange={(event) => set({ letterCase: (event.target.value || undefined) as ColumnStyle["letterCase"] })}><NativeSelectOption value="">Telle qu’écrite</NativeSelectOption><NativeSelectOption value="upper">MAJUSCULES</NativeSelectOption><NativeSelectOption value="lower">minuscules</NativeSelectOption><NativeSelectOption value="title">Majuscule Au Début</NativeSelectOption></NativeSelect></label>
         <label className={smallLabel}>Alignement<NativeSelect disabled={disabled} value={style?.align ?? ""} onChange={(event) => set({ align: (event.target.value || undefined) as ColumnStyle["align"] })}><NativeSelectOption value="">Automatique</NativeSelectOption><NativeSelectOption value="left">À gauche</NativeSelectOption><NativeSelectOption value="center">Centré</NativeSelectOption><NativeSelectOption value="right">À droite</NativeSelectOption></NativeSelect></label>
       </div>
       <div className="rounded-lg border bg-background/60 px-3 py-2 text-sm"><span className="mr-2 text-[11px] text-muted-foreground">Aperçu :</span><span className={look.className} style={look.style}>Forêt noire, 12 PO</span></div>
+      {(style?.colorColumn || style?.backgroundColumn) && <p className="text-[11px] text-muted-foreground">Chaque ligne prend {[style.colorColumn && `la couleur de sa case « ${style.colorColumn} » pour le texte`, style.backgroundColumn && `celle de « ${style.backgroundColumn} » pour le fond`].filter(Boolean).join(", et ")} ; une case de couleur vide garde la couleur choisie ci-dessus.</p>}
     </>}
   </div>
 }
@@ -729,7 +761,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {} }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -748,6 +780,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   onApply: (operations: SchemaOperation[]) => void
   /** Supprimer tout l'index (à la corbeille). Absent : pas de bouton. */
   onDeleteIndex?: () => void
+  /** Les mises en page enregistrées (fiche et survol), par onglet. */
+  layouts?: Record<string, TabLayouts>
+  /** Enregistre les mises en page changées. Absent : pas d'onglets « Fiche » et « Survol ». */
+  onSaveLayouts?: (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) => Promise<void>
 }) {
   const [tabs, setTabs] = useState<DraftTab[]>(() => [...draftOf(model), ...startTabs.map((name): DraftTab => ({ id: nextId(), name, columns: [], removed: false, remove: true, rename: true, addColumns: true }))])
   const originalTabOrder = useMemo(() => model.tabs.map((tab) => tab.name), [model])
@@ -775,6 +811,54 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "formula" && item.spec.formula?.expression.trim() && formulaProblem(item.spec.formula.expression)).map((item) => `« ${item.header} » : ${formulaProblem(item.spec.formula!.expression)}`),
     ...candidate.columns.filter((item) => !item.removed && item.spec.kind === "gauge" && gaugeScaleOf(item.spec.gauge) === "from-column" && !item.spec.gauge?.maxColumn).map((item) => `« ${item.header} » : choisis la colonne qui donne le maximum de la jauge.`),
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)), [tabs])
+
+  // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
+  const [mode, setMode] = useState<"columns" | LayoutKind>("columns")
+  // Les mises en page touchées, par onglet (identifiant du brouillon) ; `null` : automatique.
+  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, Partial<Record<LayoutKind, IndexLayout | null>>>>({})
+  const [layoutSaving, setLayoutSaving] = useState(false)
+  const [layoutError, setLayoutError] = useState("")
+  const layoutsEnabled = Boolean(onSaveLayouts) && !readOnly
+  const layoutOf = (draft: DraftTab, kind: LayoutKind) => {
+    const touched = layoutDrafts[draft.id]
+    if (touched && kind in touched) return touched[kind] ?? null
+    return draft.original ? tabLayout(layouts, draft.original, kind) : null
+  }
+  /**
+   * Ce qu'il faut écrire : les mises en page touchées, et celles qui suivent un onglet ou
+   * des colonnes renommés (elles nomment leurs colonnes).
+   */
+  const layoutChanges = useMemo(() => tabs.flatMap((draft) => {
+    if (draft.removed) return []
+    const saved = { form: draft.original ? tabLayout(layouts, draft.original, "form") : null, hover: draft.original ? tabLayout(layouts, draft.original, "hover") : null }
+    const touched = layoutDrafts[draft.id] ?? {}
+    const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
+    const next = (kind: LayoutKind) => { const layout = kind in touched ? touched[kind] ?? null : saved[kind]; return layout ? renameLayoutColumns(layout, renames) : null }
+    const form = next("form")
+    const hover = next("hover")
+    const name = draft.name.trim()
+    const renamed = Boolean(draft.original) && name !== draft.original
+    const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover)
+    if (!changed || !name) return []
+    // Un onglet renommé : sa mise en page suit son nouveau nom, l'ancienne ligne est retirée.
+    const retired = renamed && (saved.form || saved.hover) ? [{ tab: draft.original!, form: null, hover: null }] : []
+    if (renamed && !form && !hover && !retired.length) return []
+    return [...retired, { tab: name, form, hover }]
+  }), [layoutDrafts, layouts, tabs])
+
+  async function submit() {
+    if (layoutChanges.length && onSaveLayouts) {
+      setLayoutSaving(true); setLayoutError("")
+      try { await onSaveLayouts(layoutChanges) } catch (reason) {
+        setLayoutError(reason instanceof Error ? reason.message : "La mise en page n’a pas pu être enregistrée.")
+        setLayoutSaving(false)
+        return
+      }
+      setLayoutSaving(false)
+    }
+    if (operations.length) onApply(operations)
+    else onClose()
+  }
 
   const updateTab = (next: DraftTab) => setTabs((current) => current.map((candidate) => candidate.id === next.id ? next : candidate))
   const updateColumn = (next: DraftColumn) => tab && updateTab({ ...tab, columns: tab.columns.map((candidate) => candidate.id === next.id ? next : candidate) })
@@ -839,11 +923,16 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             <DialogTitle className="font-display text-2xl">{title ?? `Modifier « ${model.title} »`}</DialogTitle>
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />Guide « ? »</Button>
+          <span className="flex flex-wrap items-center gap-2">
+            {layoutsEnabled && <span className="inline-flex rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
+              {([["columns", Columns3, "Colonnes"], ["form", LayoutTemplate, "Mise en page de la fiche"], ["hover", MessageSquareQuote, "Survol « { » d’une ligne"]] as const).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+            </span>}
+            <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />Guide « ? »</Button>
+          </span>
         </div>
       </DialogHeader>
       {leading && <div className="shrink-0">{leading}</div>}
-      <div className="grid min-h-0 flex-1 gap-3 overflow-hidden md:grid-cols-[13rem_18rem_minmax(0,1fr)]">
+      <div className={`grid min-h-0 flex-1 gap-3 overflow-hidden ${mode === "columns" ? "md:grid-cols-[13rem_18rem_minmax(0,1fr)]" : "md:grid-cols-[13rem_minmax(0,1fr)]"}`}>
         {/* Onglets */}
         <aside className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border bg-muted/20 p-2">
           <p className={`${sectionTitle} px-1`}>Onglets</p>
@@ -869,7 +958,25 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
 
+        {mode !== "columns" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            {mode === "form"
+              ? <>Mise en page de la <b className="text-foreground">fiche</b> des lignes de « {tab.name} » (et du formulaire « Ajouter »). Elle vaut partout où la fiche s’ouvre. Les colonnes « Tableau seulement » n’y figurent pas.</>
+              : <>Ce qu’affiche le <b className="text-foreground">survol</b> d’une ligne de « {tab.name} » citée en entier avec « {"{"} » (dans une description, une note, un chat…). Pour les joueurs, les colonnes privées restent cachées.</>}
+          </div>
+          <IndexLayoutEditor
+            key={`${tab.id}:${mode}`}
+            kind={mode}
+            columns={layoutColumnsOf(tab, mode)}
+            value={layoutOf(tab, mode)}
+            onChange={(layout) => setLayoutDrafts((current) => ({ ...current, [tab.id]: { ...current[tab.id], [mode]: layout } }))}
+            sample={sampleRows[tab.original ?? tab.name]?.[0]}
+            disabled={pending || layoutSaving || tab.removed}
+          />
+        </section>}
+
         {/* Colonnes */}
+        {mode === "columns" && <>
         <section className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border bg-muted/20 p-2">
           <p className={`${sectionTitle} px-1`}>Colonnes de « {tab?.name} »</p>
           {tab?.columns.map((item, index) => {
@@ -940,21 +1047,26 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : l’emplacement, « Masquée », la description et le style imposé restent modifiables ci-dessous.</p>}
             </div>
             <PlacementSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
-            <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
+            <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />
           </> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Choisis une colonne à gauche, ou ajoute-en une.</p>}
         </section>
+        </>}
       </div>
 
       {/* Résumé : toujours lisible, jamais écrasé */}
       <div className="shrink-0 rounded-xl border bg-muted/30 px-3 py-2 text-xs">
         {problems.length > 0 && <div className="mb-1 grid max-h-20 gap-0.5 overflow-y-auto">{problems.map((problem) => <p key={problem} className="text-destructive">{problem}</p>)}</div>}
         {error && <p className="mb-1 text-destructive">{error}</p>}
+        {layoutError && <p className="mb-1 text-destructive">{layoutError}</p>}
         <div className="flex items-center gap-2">
           <Settings2 className="size-3.5 shrink-0" />
-          <span className="font-semibold">{operations.length ? `${operations.length} changement${operations.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "Aucun changement pour l’instant"}</span>
-          {operations.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
+          <span className="font-semibold">{operations.length + layoutChanges.length ? `${operations.length + layoutChanges.length} changement${operations.length + layoutChanges.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "Aucun changement pour l’instant"}</span>
+          {operations.length + layoutChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
         </div>
-        {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">{operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}</ul>}
+        {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">
+          {operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}
+          {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » : {!change.form && !change.hover ? "affichage automatique" : [change.form ? "fiche personnalisée" : "fiche automatique", change.hover ? "survol personnalisé" : "survol automatique"].join(", ")}</li>)}
+        </ul>}
       </div>
       <DialogFooter className="shrink-0 sm:justify-between">
         <span>
@@ -974,7 +1086,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </span>
         <span className="flex gap-2">
         <Button type="button" variant="outline" onClick={onClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
-        {!readOnly && <Button type="button" disabled={pending || !canSubmit || !operations.length || problems.length > 0} onClick={() => onApply(operations)}>{pending ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
+        {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
         </span>
       </DialogFooter>
       {guide && <IndexGuide open section={guide} onClose={() => setGuide(null)} />}

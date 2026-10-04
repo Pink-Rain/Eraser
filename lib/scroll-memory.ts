@@ -12,6 +12,12 @@ function read(key: string): Position | null {
   } catch { return null }
 }
 
+/** Une position gardée plus bas que le haut du conteneur (le tableau doit alors être complet). */
+export function hasRememberedScroll(key: string) {
+  if (typeof window === "undefined") return false
+  return Boolean(read(key)?.top)
+}
+
 /**
  * Remet le conteneur à la position gardée, puis enregistre chaque défilement. Le contenu
  * peut arriver un peu après (lignes, filtres) : on réessaie quelques images, et on

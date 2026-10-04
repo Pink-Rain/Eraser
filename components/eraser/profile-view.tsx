@@ -65,14 +65,14 @@ export function ProfileView({ account, characters, campaigns, access }: { accoun
   const canOpenCharacter = (id: string) => !access || access.characters.includes(id)
   const canOpenCampaign = (id: string) => !access || access.campaigns.includes(id)
   // Classe et rang, lus dans les fiches après l'affichage : le profil n'attend pas Sheets.
-  const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string }>>({})
+  const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string; title?: string }>>({})
   // Tant que les fiches n'ont pas répondu, la classe reste en attente (pas « à choisir »).
   const [summariesLoaded, setSummariesLoaded] = useState(false)
   useEffect(() => {
     if (!characters.length) return
     let active = true
     fetch(self ? "/api/characters/summaries" : `/api/characters/summaries?uid=${encodeURIComponent(account.uid)}`)
-      .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string }> } : null)
+      .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string; title?: string }> } : null)
       .then((payload) => { if (active && payload?.summaries) setSummaries(payload.summaries) })
       .catch(() => { /* les cartes restent lisibles sans la classe */ })
       .finally(() => { if (active) setSummariesLoaded(true) })
@@ -140,7 +140,8 @@ export function ProfileView({ account, characters, campaigns, access }: { accoun
               <div className="p-3">
                 <h3 className="font-display truncate text-base font-semibold">{character.name}</h3>
                 <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine || (summariesLoaded ? "Classe à choisir" : "…")}</p>
-                <p className="truncate text-xs text-muted-foreground">{character.subtitle || "Peuple à choisir"}</p>
+                {/* Le titre honorifique choisi remplace le peuple (jamais la liste brute « ["…"] »). */}
+                <p className="min-h-4 truncate text-xs italic text-muted-foreground">{summary?.title || (summariesLoaded ? "" : "…")}</p>
                 <div className="mt-1.5 flex min-h-4 flex-wrap gap-x-2 gap-y-0.5">
                   {character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="truncate text-[10px] font-medium" style={{ color: campaign.accentColor }}>{campaign.name}</span>) : <span className="text-[10px] text-muted-foreground/80">Sans campagne</span>}
                 </div>

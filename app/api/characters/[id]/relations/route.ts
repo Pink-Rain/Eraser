@@ -17,6 +17,8 @@ import {
 } from "@/lib/google-sheets"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
 import { authorizedAccount } from "@/lib/server-auth"
+import { honoraryTitleText, listText } from "@/lib/character-card"
+import { playerNamesFor } from "@/lib/chat-accounts"
 
 type RelationCandidate = {
   id: string
@@ -27,6 +29,9 @@ type RelationCandidate = {
   description: string
   campaignId: string
   campaignName: string
+  /** Personnage joueur : le nom de son joueur et son titre honorifique choisi. */
+  playerName: string
+  title: string
   canEdit: boolean
 }
 
@@ -48,24 +53,29 @@ async function authorizedCharacter(id: string) {
   return { account, character, campaigns }
 }
 
-async function relationCandidates(access: NonNullable<Awaited<ReturnType<typeof authorizedCharacter>>>, relatedNpcIds = new Set<string>()) {
+async function relationCandidates(access: NonNullable<Awaited<ReturnType<typeof authorizedCharacter>>>, relatedNpcIds = new Set<string>(), withPlayers = true) {
   const groups = await Promise.all(access.campaigns.map(async (campaign) => {
     const [npcs, characters] = await Promise.all([listNpcs(campaign.id), listCampaignMembers(campaign.id)])
     const visibleNpcs = access.account.role === "joueur"
       ? npcs.filter((npc) => npc.inCampaign || npc.inPlayerGroup || npc.createdByUid === access.account.uid || relatedNpcIds.has(npc.id))
       : npcs
-    const npcCandidates: RelationCandidate[] = visibleNpcs.map((npc) => ({
+    const npcCandidates: Array<RelationCandidate & { ownerUid?: string }> = visibleNpcs.map((npc) => ({
       id: npc.id, kind: "npc", name: npc.name, portrait: npc.portrait, people: "", description: npc.playerNotes,
-      campaignId: campaign.id, campaignName: campaign.name,
+      campaignId: campaign.id, campaignName: campaign.name, playerName: "", title: "",
       canEdit: access.account.role === "admin" || access.account.role === "mj" || npc.createdByUid === access.account.uid,
     }))
-    const characterCandidates: RelationCandidate[] = characters.filter((character) => character.id !== access.character.id).map((character) => ({
+    // Peuple et titre sont enregistrés en liste (« ["Orc"] ») : lus, jamais recopiés tels quels.
+    const characterCandidates: Array<RelationCandidate & { ownerUid?: string }> = characters.filter((character) => character.id !== access.character.id).map((character) => ({
       id: character.id, kind: "character", name: character.name, portrait: `/api/characters/portrait/${encodeURIComponent(character.id)}`,
-      people: character.people || character.subtitle, description: "", campaignId: campaign.id, campaignName: campaign.name, canEdit: false,
+      people: listText(character.people || character.subtitle), description: "", campaignId: campaign.id, campaignName: campaign.name,
+      playerName: "", title: honoraryTitleText(character.honoraryTitle), ownerUid: character.ownerUid, canEdit: false,
     }))
     return [...npcCandidates, ...characterCandidates]
   }))
-  return [...new Map(groups.flat().map((candidate) => [`${candidate.kind}:${candidate.id}`, candidate])).values()]
+  const unique = [...new Map(groups.flat().map((candidate) => [`${candidate.kind}:${candidate.id}`, candidate])).values()]
+  // Le nom du joueur de chaque personnage, pour « Joueur • Campagne ».
+  const players = withPlayers ? await playerNamesFor(access.account, unique.flatMap((candidate) => candidate.ownerUid ? [candidate.ownerUid] : [])).catch(() => new Map<string, string>()) : new Map<string, string>()
+  return unique.map(({ ownerUid, ...candidate }): RelationCandidate => ({ ...candidate, playerName: ownerUid ? players.get(ownerUid) ?? "" : "" }))
 }
 
 async function enrichedRelations(
@@ -86,6 +96,8 @@ async function enrichedRelations(
       people: candidate?.people || "",
       description: candidate?.description || "",
       campaignName: candidate?.campaignName || access.campaigns.find((campaign) => campaign.id === relation.campaignId)?.name || "",
+      playerName: candidate?.playerName || "",
+      title: candidate?.title || "",
       canEditTarget: Boolean(candidate?.canEdit),
     }
   })
@@ -130,7 +142,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     } else if (body.action === "create") {
       const targetKind = body.targetKind === "character" ? "character" : body.targetKind === "npc" ? "npc" : null
       const targetId = shortText(body.targetId, 200)
-      const candidate = (await relationCandidates(access)).find((item) => item.kind === targetKind && item.id === targetId)
+      const candidate = (await relationCandidates(access, undefined, false)).find((item) => item.kind === targetKind && item.id === targetId)
       if (!candidate || existingRelations.some((relation) => relation.targetKind === candidate.kind && relation.targetId === candidate.id)) throw new Error("INVALID_RELATION")
       await saveCharacterRelation({ id: crypto.randomUUID(), characterId: id, targetKind: candidate.kind, targetId: candidate.id, name: candidate.name, level: relationLevel(body.level), personalNotes: "", createdByUid: access.account.uid, campaignId: candidate.campaignId })
     } else if (body.action === "update") {

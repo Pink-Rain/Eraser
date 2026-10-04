@@ -8,7 +8,8 @@ import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/component
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { foldName, isComputedSpec, isGridSpec, isRichSpec, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
-import { numberSortKey } from "@/lib/index-numbers"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
+import { shownReferenceText } from "@/components/eraser/reference-store"
 import { findEntry, isTrashedEntry, type SchemaEntry } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, matchesView, type IndexView } from "@/lib/index-views"
 
@@ -98,24 +99,22 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
       .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)))
       .map((row) => ({ key: `${objectTableKey(table)}|${row.rowNumber}`, rowNumber: row.rowNumber, table, row })))
     if (!sort) return matched.map(({ key, rowNumber }) => ({ key, rowNumber }))
+    // Ce que montre la case (prix sur sa valeur, texte sans mise en forme), vides en bas.
     const keyOf = (entry: (typeof matched)[number]) => {
       const column = entry.table.headers.findIndex((candidate) => foldName(candidate) === foldName(sort.column))
-      const text = sort.column === ORIGIN ? originOf(entry.table) : column >= 0 ? entry.row.values[column] ?? "" : ""
-      const spec = sort.column === ORIGIN ? null : specIn(entry.table, sort.column, schemas)
-      return spec?.kind === "number" ? numberSortKey(text, spec.number ?? {}) : text
+      if (sort.column === ORIGIN) return indexSortKey(originOf(entry.table))
+      const spec = specIn(entry.table, sort.column, schemas)
+      const value = column < 0 ? "" : spec && isRichSpec(spec) ? entry.row.html[column] ?? "" : entry.row.values[column] ?? ""
+      return indexSortKey(value, spec ?? undefined, { resolveReference: shownReferenceText })
     }
-    return [...matched].sort((left, right) => {
-      const a = keyOf(left); const b = keyOf(right)
-      const order = typeof a === "number" && typeof b === "number" ? a - b : String(a).localeCompare(String(b), "fr", { numeric: true })
-      return order * (sort.direction === "asc" ? 1 : -1)
-    }).map(({ key, rowNumber }) => ({ key, rowNumber }))
+    return sortByIndexKey(matched, keyOf, sort.direction === "asc" ? 1 : -1).map(({ key, rowNumber }) => ({ key, rowNumber }))
   }, [originOf, query, schemas, sort, sources, view])
 
   /* eslint-disable react-hooks/refs -- les cellules ne lisent les modifications en cours qu'en se dessinant, comme dans les autres index */
   const columns = useMemo<SheetGridColumn[]>(() => {
     const first = sources[0]
     if (!first) return []
-    const context = { valueOf: rawOf, commit: (rowKey: string, columnKey: string, value: string) => void commit(rowKey, columnKey, value), disabled }
+    const context = { valueOf: rawOf, commit: (rowKey: string, columnKey: string, value: string) => void commit(rowKey, columnKey, value), disabled, rowValue: rawOf }
     const list = headers.map((header) => indexGridColumn(header, header, specIn(first, header, schemas), /description|effet/i.test(header) ? 380 : 180, context))
     if (sources.length > 1) list.splice(1, 0, indexGridColumn(ORIGIN, "Tableau", originSpec, 220, { ...context, disabled: true }))
     return list

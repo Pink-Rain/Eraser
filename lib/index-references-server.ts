@@ -4,7 +4,7 @@
  * case, pour l'affichage. Une ligne est retrouvée par son identifiant : renommée, elle
  * reste la même ligne. Lire ne crée jamais de classeur.
  */
-import { listObjectIndexTables, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
+import { listObjectIndexTablesForDisplay, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { foldName, isIdHeader, normalizeSpec, objectColumnSpec } from "@/lib/index-columns"
 import { citedCell, columnAt, objectNameHeaders, rowDetails, type SourceRow, type SourceTable } from "@/lib/index-references-cells"
@@ -17,8 +17,12 @@ import {
   type ReferenceEntry,
   type ReferenceIndex,
   type ReferenceRequest,
+  type ResolvedLayout,
+  type ResolvedLayoutField,
   type ResolvedReference,
 } from "@/lib/index-references"
+import { arrangeLayout, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
+import { listIndexLayouts } from "@/lib/index-settings"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { isBuiltinWorldIndexKey, isEntityWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
@@ -75,7 +79,7 @@ export function objectReferenceId(table: Pick<ObjectIndexTable, "fileId" | "shee
 }
 
 async function objectSource(): Promise<Source> {
-  const tables = await listObjectIndexTables()
+  const tables = await listObjectIndexTablesForDisplay()
   return {
     key: OBJECT_REFERENCE_INDEX,
     title: "Objets",
@@ -197,6 +201,8 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
   // Les colonnes citées de chaque index (la feuille des personnages n'est lue que pour elles).
   const cited = (key: string) => [...new Set(requests.filter((request) => request.index === key && request.column).map((request) => request.column!))]
   const sources = new Map(await Promise.all(keys.map(async (key) => [key, await loadSource(key, { cited: cited(key) })] as const)))
+  // Les mises en page de survol, lues une fois par index.
+  const layouts = new Map<string, Promise<Record<string, TabLayouts>>>()
   for (const request of requests) {
     const source = sources.get(request.index)
     const key = referenceKey(request)
@@ -221,8 +227,55 @@ export async function resolveReferences(requests: ReferenceRequest[], options: {
       const cell = citedCell(table, row, request.column)
       results[key] = cell ? { ...base, ...cell } : null
     } else {
-      results[key] = { ...base, ...rowDetails(table, row, { object: source.key === OBJECT_REFERENCE_INDEX }) }
+      const layout = await hoverLayoutOf(source.key, table.tab, layouts)
+      const hidden = (column: string) => Boolean(options.player && source.hiddenForPlayers?.(column))
+      results[key] = { ...base, ...rowDetails(table, row, { object: source.key === OBJECT_REFERENCE_INDEX }), ...(layout ? { layout: hoverOf(layout, table, row, hidden) } : {}) }
     }
   }
   return results
+}
+
+/**
+ * La mise en page du survol d'un onglet (« Modifier » › Mise en page › Survol). Un index
+ * dont un seul onglet en a une la garde pour tous ses onglets (les index d'entités ont un
+ * onglet « Corbeille » de plus). Lue une fois par résolution.
+ */
+async function hoverLayoutOf(index: string, tab: string, cache: Map<string, Promise<Record<string, TabLayouts>>>) {
+  let pending = cache.get(index)
+  if (!pending) { pending = listIndexLayouts(index).catch(() => ({})); cache.set(index, pending) }
+  const layouts = Object.entries(await pending).filter(([, entry]) => entry.hover)
+  const exact = layouts.find(([name]) => foldName(name) === foldName(tab))
+  return (exact ?? (layouts.length === 1 ? layouts[0] : undefined))?.[1].hover ?? null
+}
+
+/** Les cases du survol, rangées : vides et colonnes privées (joueurs) laissées de côté. */
+function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden: (column: string) => boolean): ResolvedLayout {
+  const columns = table.headers.filter((header) => header.trim() && !hidden(header) && !isIdHeader(header))
+  const cells = columns.flatMap((header) => {
+    const cell = citedCell(table, row, header)
+    return cell && cell.value.trim() ? [{ column: cell.column, value: cell.value, valueHtml: cell.valueHtml, look: cell.look }] : []
+  })
+  const arranged = arrangeLayout(layout, cells, (cell) => cell.column)
+  const fieldOf = (field: { item: (typeof cells)[number]; span?: number; hideLabel?: boolean; large?: boolean }): ResolvedLayoutField => ({ ...field.item, ...(field.span ? { span: field.span } : {}), ...(field.hideLabel ? { hideLabel: true } : {}), ...(field.large ? { large: true } : {}) })
+  const sections = arranged.sections.map((section) => ({ id: section.id, ...(section.title ? { title: section.title } : {}), ...(section.framed ? { framed: true } : {}), rows: section.rows.map((line) => ({ id: line.id, fields: line.fields.map(fieldOf) })) }))
+  // « Montrer le reste » : les cases non placées, à la suite, deux par deux.
+  if (arranged.rest.length) {
+    const rows: Array<{ id: string; fields: ResolvedLayoutField[] }> = []
+    for (let start = 0; start < arranged.rest.length; start += 2) rows.push({ id: `reste-${start}`, fields: arranged.rest.slice(start, start + 2).map((item) => ({ ...item, span: 6 as const })) })
+    sections.push({ id: "reste", rows })
+  }
+  const pick = (column: string | undefined) => {
+    if (!column || hidden(column)) return ""
+    const at = columnAt(table.headers, [column])
+    return at >= 0 ? (row.values[at] ?? "").trim() : ""
+  }
+  const image = pick(layout.image)
+  const subtitle = pick(layout.subtitle)
+  return {
+    ...(image ? { image } : {}),
+    ...(subtitle ? { subtitle } : {}),
+    ...(layout.asideWidth ? { asideWidth: layout.asideWidth } : {}),
+    aside: arranged.aside.map(fieldOf),
+    sections,
+  }
 }

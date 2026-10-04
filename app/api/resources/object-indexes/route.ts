@@ -9,6 +9,7 @@ import {
   enrichObjectIndexTables,
   ensureObjectIndexStackLimits,
   listObjectIndexTables,
+  listObjectIndexTablesForDisplay,
   refreshObjectIndexTables,
   syncObjectIndexIcons,
   updateObjectIndexCell,
@@ -26,7 +27,7 @@ export async function GET(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
     const refresh = new URL(request.url).searchParams.get("refresh") === "1"
-    const tables = refresh ? await refreshObjectIndexTables() : await listObjectIndexTables()
+    const tables = refresh ? await refreshObjectIndexTables() : await listObjectIndexTablesForDisplay()
     return NextResponse.json({ tables, schemas: await objectSchemas(tables) })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""

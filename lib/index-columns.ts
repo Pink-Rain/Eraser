@@ -235,6 +235,35 @@ export type ColumnStyle = {
   align?: "left" | "center" | "right"
   /** Ancien réglage : le style s'ajoute sans retirer la mise en forme des cases. */
   keepCellFormatting?: boolean
+  /**
+   * Couleur du texte prise ligne par ligne dans une colonne Couleur du même onglet (son
+   * en-tête). Une case de couleur vide garde `color`.
+   */
+  colorColumn?: string
+  /** Couleur de fond prise ligne par ligne dans une colonne Couleur (son en-tête). */
+  backgroundColumn?: string
+}
+
+/** Une couleur écrite dans une case Couleur (« #aa3355 »). */
+export function isCssColorCode(value: string) {
+  return /^#[0-9a-f]{3,8}$/i.test(value.trim())
+}
+
+/**
+ * Le style imposé d'une ligne : ses couleurs prises dans ses colonnes Couleur, quand la
+ * colonne en désigne une. `cell` lit une case de la ligne par son en-tête.
+ */
+export function rowColumnStyle(style: ColumnStyle | undefined, cell: (header: string) => string): ColumnStyle | undefined {
+  if (!style || (!style.colorColumn && !style.backgroundColumn)) return style
+  const pick = (header: string | undefined) => { const value = header ? cell(header).trim() : ""; return isCssColorCode(value) ? value : undefined }
+  const color = pick(style.colorColumn)
+  const background = pick(style.backgroundColumn)
+  return { ...style, ...(color ? { color } : {}), ...(background ? { background } : {}) }
+}
+
+/** La colonne donne-t-elle une couleur (type Couleur, ou formule au résultat Couleur) ? */
+export function isColorSourceSpec(spec: IndexColumnSpec) {
+  return spec.kind === "color" || (spec.kind === "formula" && spec.formula?.result === "color")
 }
 
 /** Où la colonne s'affiche : dans le tableau et la fiche, le tableau seulement, la fiche seulement. */
@@ -421,6 +450,11 @@ export function normalizeSpec(input: IndexColumnSpec): IndexColumnSpec {
   if (rest.length) spec.also = rest
   else delete spec.also
   return spec
+}
+
+/** Une colonne de nom (celle qui nomme la ligne). */
+export function isNameColumnSpec(spec: IndexColumnSpec) {
+  return spec.kind === "name" || spec.kind === "name-form"
 }
 
 export function placementOf(spec: IndexColumnSpec): ColumnPlacement {

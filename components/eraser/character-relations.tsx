@@ -10,6 +10,7 @@ import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/h
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { listText, playerCampaignLine } from "@/lib/character-card"
 
 type RelationLevel = -3 | -2 | -1 | 0 | 1 | 2 | 3
 type RelationKind = "npc" | "character"
@@ -25,6 +26,9 @@ type Relation = {
   people: string
   description: string
   campaignName: string
+  /** Personnage joueur : son joueur et son titre honorifique. */
+  playerName?: string
+  title?: string
   canEditTarget: boolean
 }
 
@@ -37,6 +41,8 @@ type Candidate = {
   description: string
   campaignId: string
   campaignName: string
+  playerName?: string
+  title?: string
 }
 
 type Campaign = { id: string; name: string; accentColor: string }
@@ -64,6 +70,9 @@ function RelationLine({ relation, color, pending, onUpdate, onDelete }: { relati
   const [editingLevel, setEditingLevel] = useState(false)
   const [editingTarget, setEditingTarget] = useState(false)
   const [targetDraft, setTargetDraft] = useState({ name: relation.name, people: relation.people, description: relation.description, portrait: relation.portrait })
+  // Peuple d'un PNJ, ou « Joueur • Campagne » d'un personnage joueur : jamais la liste brute (« ["Orc"] »).
+  const people = listText(relation.people)
+  const subtitle = relation.targetKind === "npc" ? people || relation.campaignName : playerCampaignLine(relation.playerName, relation.campaignName)
   // Plus la relation est forte, plus la pastille du niveau est soutenue.
   const intensity = ["14", "22", "33", "48"][Math.min(3, Math.abs(relation.level))]
   const levelControl = editingLevel
@@ -73,10 +82,13 @@ function RelationLine({ relation, color, pending, onUpdate, onDelete }: { relati
     <HoverCard openDelay={180} closeDelay={450}>
       <HoverCardTrigger asChild><button type="button" className="flex min-w-0 flex-1 items-center gap-2.5 text-left">
         <RelationAvatar relation={relation} color={color} />
-        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium group-hover/row:text-primary">{relation.name}</span>{(relation.people || relation.campaignName) && <span className="block truncate text-[11px] text-muted-foreground">{relation.people || relation.campaignName}</span>}</span>
+        <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium group-hover/row:text-primary">{relation.name}</span>{subtitle && <span className="block truncate text-[11px] text-muted-foreground">{subtitle}</span>}</span>
       </button></HoverCardTrigger>
       <HoverCardContent align="start" className="w-80 space-y-4 rounded-2xl p-4">
-        <div className="flex gap-3"><div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted text-muted-foreground">{relation.portrait ? <img src={relation.portrait} alt={`Portrait de ${relation.name}`} loading="lazy" decoding="async" className="size-full object-cover" /> : relation.targetKind === "npc" ? <UserRound className="size-6" /> : <Users className="size-6" />}</div><div className="min-w-0"><p className="font-display text-lg font-semibold leading-tight">{relation.name}</p><p className="mt-1 text-xs text-muted-foreground">{relation.targetKind === "npc" ? "PNJ" : "Joueur·euse"}{relation.campaignName ? ` · ${relation.campaignName}` : ""}</p>{relation.people && <p className="mt-2 text-sm">{relation.people}</p>}</div></div>
+        <div className="flex gap-3"><div className="relative flex size-16 shrink-0 items-center justify-center overflow-hidden rounded-xl bg-muted text-muted-foreground">{relation.portrait ? <img src={relation.portrait} alt={`Portrait de ${relation.name}`} loading="lazy" decoding="async" className="size-full object-cover" /> : relation.targetKind === "npc" ? <UserRound className="size-6" /> : <Users className="size-6" />}</div><div className="min-w-0"><p className="font-display text-lg font-semibold leading-tight">{relation.name}</p>{relation.targetKind === "npc"
+          ? <><p className="mt-1 text-xs text-muted-foreground">PNJ{relation.campaignName ? ` · ${relation.campaignName}` : ""}</p>{people && <p className="mt-2 text-sm">{people}</p>}</>
+          // Personnage joueur : son joueur et sa campagne, puis son titre honorifique.
+          : <><p className="mt-1 text-xs text-muted-foreground">{playerCampaignLine(relation.playerName || "Joueur·euse", relation.campaignName)}</p>{relation.title && <p className="mt-2 text-sm italic">{relation.title}</p>}</>}</div></div>
         {relation.description && <RichTextView html={relation.description} className="text-sm leading-6 text-muted-foreground" />}
         {relation.canEditTarget && (editingTarget ? <div className="grid gap-2 rounded-xl border bg-background/45 p-3"><Label className="grid gap-1 text-xs">Nom<Input value={targetDraft.name} onChange={(event) => setTargetDraft((current) => ({ ...current, name: event.target.value }))} /></Label><Label className="grid gap-1 text-xs">Peuple<Input value={targetDraft.people} onChange={(event) => setTargetDraft((current) => ({ ...current, people: event.target.value }))} /></Label><Label className="grid gap-1 text-xs">Portrait (URL)<Input type="url" value={targetDraft.portrait} onChange={(event) => setTargetDraft((current) => ({ ...current, portrait: event.target.value }))} placeholder="https://…" /></Label><div className="grid gap-1 text-xs leading-none">Description<RichTextField ariaLabel="Description" value={targetDraft.description} onCommit={(html) => setTargetDraft((current) => ({ ...current, description: html }))} minHeight="min-h-20" /></div><div className="flex justify-end gap-1"><Button size="sm" variant="ghost" onClick={() => setEditingTarget(false)}><X />Annuler</Button><Button size="sm" disabled={!targetDraft.name.trim() || pending} onClick={async () => { await onUpdate({ action: "update-target", relationId: relation.id, ...targetDraft }); setEditingTarget(false) }}><Check />Enregistrer</Button></div></div> : <Button type="button" size="sm" variant="outline" onClick={() => { setTargetDraft({ name: relation.name, people: relation.people, description: relation.description, portrait: relation.portrait }); setEditingTarget(true) }}>Compléter ce PNJ</Button>)}
         <div className="grid gap-1.5 text-xs font-medium leading-none">Notes personnelles<RichTextField ariaLabel="Notes personnelles" value={notes} onCommit={setNotes} minHeight="min-h-24" placeholder="Ce que ton personnage sait, ressent ou veut retenir…" /></div>
@@ -146,7 +158,7 @@ export function CharacterRelations({ characterId, campaigns }: { characterId: st
   }
 
   const existingTargets = new Set(relations.map((relation) => `${relation.targetKind}:${relation.targetId}`))
-  const filtered = candidates.filter((candidate) => candidate.kind === mode && !existingTargets.has(`${candidate.kind}:${candidate.id}`) && (!normalized(search) || normalized(`${candidate.name} ${candidate.people}`).includes(normalized(search))))
+  const filtered = candidates.filter((candidate) => candidate.kind === mode && !existingTargets.has(`${candidate.kind}:${candidate.id}`) && (!normalized(search) || normalized(`${candidate.name} ${candidate.people} ${candidate.playerName ?? ""} ${candidate.title ?? ""}`).includes(normalized(search))))
 
   async function add() {
     if (mode === "create-npc") {
@@ -176,7 +188,7 @@ export function CharacterRelations({ characterId, campaigns }: { characterId: st
 
     <Dialog open={adding} onOpenChange={setAdding}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter une relation</DialogTitle></DialogHeader><div className="space-y-4"><div className="grid grid-cols-3 gap-2"><Button type="button" variant={mode === "npc" ? "default" : "outline"} onClick={() => { setMode("npc"); setSelectedId("") }}><UserRound />PNJ</Button><Button type="button" variant={mode === "character" ? "default" : "outline"} onClick={() => { setMode("character"); setSelectedId("") }}><Users />Joueur·euse</Button><Button type="button" variant={mode === "create-npc" ? "default" : "outline"} onClick={() => { setMode("create-npc"); setSelectedId("") }}><Sparkles />Créer un PNJ</Button></div>
       <Label className="grid gap-1.5 text-sm font-medium">Niveau de relation<NativeSelect value={String(level)} onChange={(event) => setLevel(Number(event.target.value) as RelationLevel)}>{levels.map((candidateLevel) => <NativeSelectOption key={candidateLevel} value={String(candidateLevel)}>{candidateLevel > 0 ? `+${candidateLevel} — Allié·e` : candidateLevel < 0 ? `${candidateLevel} — Ennemi·e` : "0 — Connaissance"}</NativeSelectOption>)}</NativeSelect></Label>
-      {mode === "create-npc" ? <div className="grid gap-3 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Nom du PNJ<Input value={newName} onChange={(event) => setNewName(event.target.value)} autoFocus /></Label>{campaigns.length > 1 && <Label className="grid gap-1.5 text-sm font-medium">Campagne<NativeSelect value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>{campaigns.map((campaign) => <NativeSelectOption key={campaign.id} value={campaign.id}>{campaign.name}</NativeSelectOption>)}</NativeSelect></Label>}<p className="text-xs leading-5 text-muted-foreground sm:col-span-2">Le PNJ sera créé dans la campagne avec son nom et apparaîtra dans la liste du MJ, qui pourra compléter sa fiche.</p></div> : <><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder={mode === "npc" ? "Rechercher un PNJ par nom…" : "Rechercher un·e joueur·euse par nom…"} autoFocus /></div><div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((candidate) => <button key={`${candidate.kind}:${candidate.id}`} type="button" onClick={() => setSelectedId(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left ${selectedId === candidate.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}><span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70">{candidate.portrait ? <img src={candidate.portrait} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : candidate.kind === "npc" ? <UserRound className="size-4" /> : <Users className="size-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{candidate.name}</span><span className="block truncate text-xs opacity-70">{[candidate.people, candidate.campaignName].filter(Boolean).join(" · ")}</span></span></button>) : !candidatesLoaded ? <div className="grid place-items-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label="Chargement" /></div> : <p className="px-3 py-8 text-center text-sm text-muted-foreground">Aucun résultat.</p>}</div></>}
+      {mode === "create-npc" ? <div className="grid gap-3 sm:grid-cols-2"><Label className="grid gap-1.5 text-sm font-medium">Nom du PNJ<Input value={newName} onChange={(event) => setNewName(event.target.value)} autoFocus /></Label>{campaigns.length > 1 && <Label className="grid gap-1.5 text-sm font-medium">Campagne<NativeSelect value={campaignId} onChange={(event) => setCampaignId(event.target.value)}>{campaigns.map((campaign) => <NativeSelectOption key={campaign.id} value={campaign.id}>{campaign.name}</NativeSelectOption>)}</NativeSelect></Label>}<p className="text-xs leading-5 text-muted-foreground sm:col-span-2">Le PNJ sera créé dans la campagne avec son nom et apparaîtra dans la liste du MJ, qui pourra compléter sa fiche.</p></div> : <><div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} className="pl-9" placeholder={mode === "npc" ? "Rechercher un PNJ par nom…" : "Rechercher un·e joueur·euse par nom…"} autoFocus /></div><div className="max-h-64 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((candidate) => <button key={`${candidate.kind}:${candidate.id}`} type="button" onClick={() => setSelectedId(candidate.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left ${selectedId === candidate.id ? "bg-primary text-primary-foreground" : "hover:bg-accent"}`}><span className="flex size-8 shrink-0 items-center justify-center overflow-hidden rounded-lg bg-muted/70">{candidate.portrait ? <img src={candidate.portrait} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : candidate.kind === "npc" ? <UserRound className="size-4" /> : <Users className="size-4" />}</span><span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{candidate.name}</span><span className="block truncate text-xs opacity-70">{candidate.kind === "npc" ? [listText(candidate.people), candidate.campaignName].filter(Boolean).join(" · ") : playerCampaignLine(candidate.playerName, candidate.campaignName)}</span>{candidate.kind === "character" && candidate.title && <span className="block truncate text-[11px] italic opacity-60">{candidate.title}</span>}</span></button>) : !candidatesLoaded ? <div className="grid place-items-center py-8"><LoaderCircle className="size-5 animate-spin text-muted-foreground" aria-label="Chargement" /></div> : <p className="px-3 py-8 text-center text-sm text-muted-foreground">Aucun résultat.</p>}</div></>}
       <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setAdding(false)}>Annuler</Button><Button type="button" disabled={pending || (mode === "create-npc" ? !newName.trim() || !campaignId : !selectedId)} onClick={() => void add()}>{pending ? <LoaderCircle className="animate-spin" /> : <Plus />}Ajouter</Button></div></div></DialogContent></Dialog>
   </section>
 }

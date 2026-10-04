@@ -47,12 +47,25 @@ export async function uploadObjectIcon(name: string, contentType: string, bytes:
 let folderFilesCache: { expiresAt: number; ids: Set<string> } | null = null
 
 /** Fichiers du dossier « icone objet » : ils peuvent toujours être affichés par Eraser. */
-export async function objectIconFolderFileIds() {
-  if (folderFilesCache && folderFilesCache.expiresAt > Date.now()) return folderFilesCache.ids
+let folderFilesRefresh: Promise<Set<string>> | null = null
+
+async function readObjectIconFolderFiles() {
   const folder = await findDriveFolderByName(OBJECT_ICON_FOLDER)
   const ids = new Set(folder ? (await listDriveFolderFiles(folder.id)).map((file) => file.id) : [])
   folderFilesCache = { expiresAt: Date.now() + 60_000, ids }
   return ids
+}
+
+export async function objectIconFolderFileIds() {
+  if (folderFilesCache && folderFilesCache.expiresAt > Date.now()) return folderFilesCache.ids
+  // Déjà lus une fois : servis tout de suite (une icône importée d'ici est ajoutée à part),
+  // relus en arrière-plan ; chaque icône n'attend plus la recherche dans le Drive.
+  if (folderFilesCache) {
+    folderFilesRefresh ??= readObjectIconFolderFiles().finally(() => { folderFilesRefresh = null })
+    folderFilesRefresh.catch(() => undefined)
+    return folderFilesCache.ids
+  }
+  return readObjectIconFolderFiles()
 }
 
 export function forgetObjectIconFolderFiles() {

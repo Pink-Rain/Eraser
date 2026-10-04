@@ -1,7 +1,7 @@
 "use client"
 
-import { createContext, memo, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
-import { rememberScroll } from "@/lib/scroll-memory"
+import { createContext, memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { hasRememberedScroll, rememberScroll } from "@/lib/scroll-memory"
 import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
 
 import {
@@ -37,6 +37,7 @@ import {
   type RichTextTarget,
 } from "@/components/eraser/rich-text"
 import { usePersistentState } from "@/hooks/use-persistent-state"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { clampTableColumnWidth, clampTableRowHeight } from "@/hooks/use-persistent-table-layout"
 
 export type SheetGridColumn = {
@@ -53,6 +54,8 @@ export type SheetGridColumn = {
   cellClassName?: string
   /** Style imposé de la colonne (couleur, fond) : appliqué à toute la case. */
   cellStyle?: CSSProperties
+  /** Ce qui change ligne par ligne dans ce style (couleurs prises dans une colonne Couleur). */
+  cellStyleOf?: (rowKey: string) => CSSProperties | undefined
   sortable?: boolean
   /**
    * Délai avant l'enregistrement pendant la frappe. `Infinity` n'enregistre qu'à la
@@ -100,11 +103,9 @@ export type SheetGridRowCommands = {
 
 type SheetGridLayout = { columnWidths: Record<string, number>; rowHeights: Record<string, number> }
 
-/** Deux clés de tri : les nombres entre eux, sinon en texte. */
-function compareSortKeys(left: number | string, right: number | string) {
-  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
-  return String(left).localeCompare(String(right), "fr", { numeric: true, sensitivity: "base" })
-}
+/** Lignes montrées d'emblée, puis ajoutées à chaque moment de repos. */
+const FIRST_ROWS = 120
+const MORE_ROWS = 240
 
 /** Largeur de la poignée de ligne. Fixe : la colonne n'est pas redimensionnable. */
 const HANDLE_WIDTH = 30
@@ -270,12 +271,14 @@ const SheetGridRowView = memo(function SheetGridRowView({
     </ContextMenu>
     {columns.map((column) => {
       const isActive = activeColumn === column.key
+      const own = column.cellStyleOf?.(rowKey)
+      const cellStyle = own ? { ...column.cellStyle, ...own } : column.cellStyle
       return <td
         key={column.key}
         onPointerDownCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
         onFocusCapture={column.control && !column.computed ? () => actions.focusCell(rowKey, column.key) : undefined}
         className={`${cellBase} ${column.control ? column.cellClassName ?? "" : ""} ${fillColumn === column.key ? "ring-2 ring-inset ring-primary/60" : ""} ${isActive && column.control && !readOnly ? "ring-1 ring-inset ring-primary/45" : ""} ${column.key === firstKey ? "z-10" : ""}`}
-        style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, ...column.cellStyle } : column.cellStyle}
+        style={column.key === firstKey ? { position: "sticky", left: HANDLE_WIDTH, ...cellStyle } : cellStyle}
       >
         {selected && <span className="pointer-events-none absolute inset-0 z-10 bg-primary/10" />}
         {column.custom
@@ -381,8 +384,13 @@ export function SheetGrid({
     if (onSort || !internalSort) return filtered
     const direction = internalSort.direction === "asc" ? 1 : -1
     const sortKey = columns.find((column) => column.key === internalSort.column)?.sortKey
-    if (sortKey) return [...filtered].sort((left, right) => compareSortKeys(sortKey(valueOf(left.key, internalSort.column)), sortKey(valueOf(right.key, internalSort.column))) * direction)
-    return [...filtered].sort((left, right) => sortValues(plainOf(left.key, internalSort.column), plainOf(right.key, internalSort.column)) * direction)
+    // Le texte affiché (sans mise en forme) ou la clé propre à la colonne ; vides en bas.
+    return sortByIndexKey(filtered, (row) => {
+      const text = plainOf(row.key, internalSort.column)
+      if (!sortKey || !text) return indexSortKey(text)
+      const key = sortKey(valueOf(row.key, internalSort.column))
+      return typeof key === "number" && Number.isFinite(key) ? { empty: false, number: key, text } : indexSortKey(String(key))
+    }, direction)
   }, [activeFilters, columns, internalSort, onSort, plainOf, sourceRows, valueOf])
   const setFilter = useCallback((key: string, filter: ColumnFilter | null) => {
     const next = { ...filters }
@@ -399,6 +407,24 @@ export function SheetGrid({
 
   const textColumns = useMemo(() => columns.filter((column) => !column.custom && !column.computed), [columns])
   const rowKeys = useMemo(() => rows.map((row) => row.key), [rows])
+  // Un grand tableau s'affiche par tranches : les premières lignes tout de suite, la suite
+  // quand l'application est au repos. Ouvrir un index de centaines de lignes ne gèle plus.
+  const [shownCount, setShownCount] = useState(FIRST_ROWS)
+  // Revenir là où l'on était dans le tableau : il est montré en entier tout de suite.
+  useEffect(() => {
+    if (!fit && hasRememberedScroll(`${layoutKey}:scroll`)) queueMicrotask(() => setShownCount(Number.POSITIVE_INFINITY))
+  }, [fit, layoutKey])
+  useEffect(() => {
+    if (shownCount >= rows.length) return
+    const grow = () => startTransition(() => setShownCount((current) => current + MORE_ROWS))
+    if (typeof window.requestIdleCallback === "function") {
+      const id = window.requestIdleCallback(grow, { timeout: 400 })
+      return () => window.cancelIdleCallback(id)
+    }
+    const id = window.setTimeout(grow, 30)
+    return () => window.clearTimeout(id)
+  }, [rows.length, shownCount])
+  const shownRows = rows.length > shownCount ? rows.slice(0, shownCount) : rows
   // Une ligne disparue (suppression, filtre, tri) sort de la sélection d'elle-même :
   // elle est recalculée à l'affichage plutôt que corrigée après coup.
   const selection = useMemo(() => rawSelection.filter((key) => rowKeys.includes(key)), [rawSelection, rowKeys])
@@ -687,7 +713,7 @@ export function SheetGrid({
           </tr>
         </thead>
         <tbody>
-          {rows.map((row, rowIndex) => <SheetGridRowView
+          {shownRows.map((row, rowIndex) => <SheetGridRowView
             key={row.key}
             rowKey={row.key}
             rowNumber={row.rowNumber}
@@ -707,7 +733,8 @@ export function SheetGrid({
             actions={rowActions}
             striped={rowIndex % 2 === 1}
           />)}
-          {rowCommands?.append && !readOnly && Boolean(rows.length) && <tr>
+          {shownRows.length < rows.length && <tr><td colSpan={columns.length + 1} className="px-3 py-2 text-xs text-muted-foreground">Affichage des lignes suivantes…</td></tr>}
+          {rowCommands?.append && !readOnly && Boolean(rows.length) && shownRows.length === rows.length && <tr>
             <td className="sticky left-0 z-20 border-b border-r bg-muted/40 p-0" />
             <td colSpan={columns.length} className="border-b p-0">
               <button type="button" onClick={() => rowCommands.append?.()} disabled={disabled} className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-muted-foreground transition-colors hover:bg-muted/60 hover:text-foreground disabled:opacity-50">

@@ -32,10 +32,12 @@ export async function remoteAccountsFetch(
     headers["content-type"] = "application/json"
     requestBody = JSON.stringify(init.body)
   }
+  // Un serveur partagé qui ne répond plus ne fige pas l'application : 15 s au plus.
   const response = await traced("partagé", `${init.method} ${path}`, () => fetch(`${config.baseUrl}${path}`, {
     method: init.method,
     headers,
     body: requestBody,
+    signal: AbortSignal.timeout(15_000),
   }), (reply) => String(reply.status))
   const payload = await response.json().catch(() => null)
   if (!response.ok) {

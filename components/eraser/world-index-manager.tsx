@@ -1,21 +1,20 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
 
-import { CreatureSheetDialog } from "@/components/eraser/creature-sheet"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
-import { IndexEditor } from "@/components/eraser/index-editor"
-import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
+import { tabLayout } from "@/lib/index-layouts"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -29,7 +28,8 @@ import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
-import { numberSortKey } from "@/lib/index-numbers"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
+import { shownReferenceText } from "@/components/eraser/reference-store"
 import type { IndexEditorModel, SchemaOperation } from "@/lib/index-schema-shared"
 import {
   foldName,
@@ -46,6 +46,12 @@ import {
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
+
+// Les fenêtres (« Modifier », guide, fiche d'une créature) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
+const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
+const IndexGuide = dynamic(() => import("@/components/eraser/index-guide").then((module) => module.IndexGuide), { ssr: false })
+const CreatureSheetDialog = dynamic(() => import("@/components/eraser/creature-sheet").then((module) => module.CreatureSheetDialog), { ssr: false })
+
 
 /** Personnages et campagnes : leur propriétaire et leurs liens, calculés par Eraser. */
 const OWNER_COLUMN = "__proprietaire"
@@ -81,11 +87,6 @@ function countCorrections(tables: WorldIndexTable[], specOf: (tab: string, heade
     if (spec.kind !== "choice" || !spec.options) return sum
     return sum + table.rows.filter((row) => choiceCorrection(row.values[column] ?? "", spec.options!)).length
   }, 0), 0)
-}
-
-function compareSortKeys(left: number | string, right: number | string) {
-  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
-  return String(left).localeCompare(String(right), "fr", { numeric: true, sensitivity: "base" })
 }
 
 /** La colonne « Nom » d'un tableau : c'est par elle que les relations retrouvent une ligne. */
@@ -680,6 +681,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         buttonVisible: (rowKey, button) => engine.buttonVisible(rowKey, button),
         runButton,
         tabNames: sortTabs.map((entry) => entry.value),
+        rowValue: valueOf,
       },
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
@@ -718,27 +720,30 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     setPending("")
   }
 
+  // La recherche suit la frappe sans la ralentir : le tableau se filtre juste après, et le
+  // texte cherché de chaque ligne n'est préparé qu'une fois par lecture de l'index.
+  const deferredQuery = useDeferredValue(query)
+  const haystacks = useMemo(() => new Map(viewTables.flatMap((owner) => owner.rows.map((row) => [row, row.values.map(foldName).join("\n")] as const))), [viewTables])
   const displayedRows = useMemo(() => {
-    const folded = foldName(query)
+    const folded = foldName(deferredQuery)
     const rows = viewTables.flatMap((owner) => owner.rows
       .filter((row) => !activeView || matchesView(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
       .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
-      .filter((row) => !folded || row.values.some((value) => foldName(value).includes(folded)) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
-      .map((row) => {
-        const column = sort ? (sort.column === TAB_COLUMN ? -1 : columnIndexOf(owner, sort.column)) : -1
-        const extra = sort?.column === OWNER_COLUMN || sort?.column === LINKS_COLUMN
-        const text = sort?.column === TAB_COLUMN ? owner.tabName : extra ? extraText(rowKeyOf(owner.tabName, row.rowNumber), sort.column) : column >= 0 ? row.values[column] ?? "" : ""
-        // Un nombre se trie par sa valeur : 2 PO passe après 50 PC, 1 km après 800 m.
-        const spec = sort && column >= 0 ? specOf(owner.tabName, sort.column) : null
-        const sortValue: number | string = spec?.kind === "number" ? numberSortKey(text, spec.number ?? {}) : text
-        return { key: rowKeyOf(owner.tabName, row.rowNumber), rowNumber: row.rowNumber, sortValue }
-      }))
-    const sorted = sort
-      ? [...rows].sort((left, right) => compareSortKeys(left.sortValue, right.sortValue) * (sort.direction === "asc" ? 1 : -1))
-      : rows
+      .filter((row) => !folded || (haystacks.get(row) ?? "").includes(folded) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
+      .map((row) => ({ key: rowKeyOf(owner.tabName, row.rowNumber), rowNumber: row.rowNumber, tabName: owner.tabName })))
+    if (!sort) return rows.map(({ key, rowNumber }) => ({ key, rowNumber }))
+    // Le tri lit ce que montre la case (résultat d'une formule, choix bien écrit, nom actuel
+    // d'une référence, valeur d'un nombre), pas le texte brut de Sheets. Vides en bas.
+    const extra = sort.column === OWNER_COLUMN || sort.column === LINKS_COLUMN || sort.column === TAB_COLUMN
+    // eslint-disable-next-line react-hooks/refs -- le tri lit les cases comme le tableau les montre, saisie en cours comprise
+    const sorted = sortByIndexKey(rows, (row) => indexSortKey(
+      valueOf(row.key, sort.column),
+      extra ? undefined : specOf(row.tabName, sort.column),
+      { resolveReference: shownReferenceText },
+    ), sort.direction === "asc" ? 1 : -1)
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [activeSort, activeView, extraText, extras, query, sort, specOf, viewTables])
+  }, [activeSort, activeView, deferredQuery, extraText, extras, haystacks, sort, specOf, valueOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
@@ -901,6 +906,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         onClose={() => { if (pending !== "schema") setEditor(null) }}
         onApply={(operations) => void applyEditor(operations)}
         onDeleteIndex={() => void deleteIndex()}
+        layouts={settings.layouts}
+        onSaveLayouts={settings.saveLayouts}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -914,6 +921,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         key={formTable.tabName}
         title={`Ajouter ${formDefinition.itemLabel}`}
         fields={formFields}
+        layout={tabLayout(settings.layouts, formTable.tabName, "form")}
         pending={pending === "add"}
         leading={spanning ? <label className="grid gap-1 text-xs font-semibold">
           Onglet
@@ -991,6 +999,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         title={savedCell(detailsFound, detailsFound.table.headers[nameColumnOf(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
+        layout={tabLayout(settings.layouts, detailsFound.table.tabName, "form")}
         rowFor={sheetRow}
         pending={sheetPending}
         error={sheetError}

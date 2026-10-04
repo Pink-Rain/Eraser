@@ -1,4 +1,4 @@
-import { listObjectIndexTables, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
+import { listObjectIndexTablesForDisplay, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
 import { objectLocationColumns } from "@/lib/object-combat"
 
@@ -96,7 +96,7 @@ function cell(headers: string[], values: string[], aliases: string[]) {
 }
 
 export async function loadShopGeneratorItems() {
-  const tables = await listObjectIndexTables()
+  const tables = await listObjectIndexTablesForDisplay()
   return tables.flatMap<ShopGeneratorItem>((table) => table.rows.flatMap((row) => {
     const name = cell(table.headers, row.values, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
     if (!name) return []

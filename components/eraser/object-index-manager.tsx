@@ -1,6 +1,7 @@
 "use client"
 
-import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react"
+import dynamic from "next/dynamic"
+import { useCallback, useDeferredValue, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2 } from "lucide-react"
@@ -8,11 +9,10 @@ import { CircleHelp, Coins, FileText, Filter, ImageIcon, LoaderCircle, Pencil, P
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { addToInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { indexGridColumn, IndexEntryForm, type IndexFieldProps } from "@/components/eraser/index-cells"
-import { IndexEditor } from "@/components/eraser/index-editor"
-import { IndexGuide } from "@/components/eraser/index-guide"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
+import { shownReferenceText } from "@/components/eraser/reference-store"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
@@ -31,9 +31,16 @@ import { foldName, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normaliz
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
-import { numberCorrection, numberSortKey } from "@/lib/index-numbers"
+import { numberCorrection } from "@/lib/index-numbers"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
+import { tabLayout } from "@/lib/index-layouts"
+
+// Les fenêtres (« Modifier », guide) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
+const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
+const IndexGuide = dynamic(() => import("@/components/eraser/index-guide").then((module) => module.IndexGuide), { ssr: false })
+
 
 function tableKey(table: ObjectIndexTable) {
   return `${table.fileId}:${table.sheetId}`
@@ -66,11 +73,6 @@ function isIconHeader(header: string) {
 }
 
 type Schemas = Record<string, SchemaEntry[]>
-
-function compareSortKeys(left: number | string, right: number | string) {
-  if (typeof left === "number" && typeof right === "number") return left === right ? 0 : left < right ? -1 : 1
-  return String(left).localeCompare(String(right), "fr", { numeric: true })
-}
 
 export function ObjectIndexManager({ initialTables, initialSchemas = {}, initialError }: { initialTables: ObjectIndexTable[]; initialSchemas?: Schemas; initialError: string }) {
   const [tables, setTables] = useState(initialTables)
@@ -163,18 +165,6 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return table?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)?.values[iconIndex] ?? ""
   }, [selected])
 
-  const displayedRows = useMemo(() => {
-    if (!selected) return []
-    const normalizedQuery = query.trim().toLocaleLowerCase("fr")
-    const filtered = selected.rows.filter((row) => !normalizedQuery || row.values.some((value) => value.toLocaleLowerCase("fr").includes(normalizedQuery)))
-    // Un prix se trie par sa valeur : 2 PO passe après 50 PC.
-    const spec = sort ? specs[Number(sort.column)] : undefined
-    const keyOf = (value: string): number | string => spec?.kind === "number" ? numberSortKey(value, spec.number ?? {}) : value
-    const sorted = sort
-      ? [...filtered].sort((left, right) => compareSortKeys(keyOf(left.values[Number(sort.column)] || ""), keyOf(right.values[Number(sort.column)] || "")) * (sort.direction === "asc" ? 1 : -1))
-      : filtered
-    return sorted.map((row) => ({ key: String(row.rowNumber), rowNumber: row.rowNumber }))
-  }, [query, selected, sort, specs])
 
   const rawOf = useCallback((rowKey: string, columnKey: string) => {
     // La clé vient du tableau réellement affiché, pas de la préférence enregistrée :
@@ -234,6 +224,22 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     if (spec && spec.kind === "formula" && selected) return engine.computedText(rowKey, selected.headers[Number(columnKey)], spec) ?? ""
     return rawOf(rowKey, columnKey)
   }, [engine, rawOf, selected, specs])
+
+  // La recherche suit la frappe sans la ralentir : le tableau se filtre juste après.
+  const deferredQuery = useDeferredValue(query)
+  const haystacks = useMemo(() => new Map((selected?.rows ?? []).map((row) => [row, row.values.join("\n").toLocaleLowerCase("fr")] as const)), [selected])
+  const displayedRows = useMemo(() => {
+    if (!selected) return []
+    const normalizedQuery = deferredQuery.trim().toLocaleLowerCase("fr")
+    const filtered = selected.rows.filter((row) => !normalizedQuery || (haystacks.get(row) ?? "").includes(normalizedQuery))
+    const rows = filtered.map((row) => ({ key: String(row.rowNumber), rowNumber: row.rowNumber }))
+    if (!sort) return rows
+    // Le tri lit ce que montre la case : un prix sur sa valeur (2 PO après 50 PC), une
+    // formule sur son résultat, un nom sur son texte sans mise en forme. Vides en bas.
+    const spec = specs[Number(sort.column)]
+    // eslint-disable-next-line react-hooks/refs -- le tri lit les cases comme le tableau les montre, saisie en cours comprise
+    return sortByIndexKey(rows, (row) => indexSortKey(valueOf(row.key, sort.column), spec, { resolveReference: shownReferenceText }), sort.direction === "asc" ? 1 : -1)
+  }, [deferredQuery, haystacks, selected, sort, specs, valueOf])
 
   /** Les lignes du tableau affiché, pour un tirage « ligne de cet index ». */
   const rowsOf = useCallback((): RandomCandidateRow[] | undefined => {
@@ -312,6 +318,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       draw: async (rowKey: string, columnKey: string, spec: IndexColumnSpec) => { await drawCell(rowKey, selected?.headers[Number(columnKey)] ?? columnKey, spec) },
       buttonVisible: (rowKey: string, button: ActionButton) => engine.buttonVisible(rowKey, button),
       runButton,
+      rowValue: (rowKey: string, header: string) => { const index = columnOfHeader(header); return index >= 0 ? valueOf(rowKey, String(index)) : "" },
     }
     const list = shownColumns.map((index) => [selected!.headers[index], index] as const).map(([header, index]) => isIconHeader(header)
       // L'icône garde son affichage et son import dans le dossier « icone objet ».
@@ -320,7 +327,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     // Sans colonne ID dans la feuille, l'identifiant calculé par l'inventaire est montré à part.
     if (selected && !hasIdColumn) list.push(indexGridColumn(COMPUTED_ID, "ID", idSpec, 200, context, { sortable: false }))
     return list
-  }, [commitCell, drawCell, engine, hasIdColumn, iconPreview, runButton, selected, shownColumns, specs, uploadIcon, valueOf])
+  }, [columnOfHeader, commitCell, drawCell, engine, hasIdColumn, iconPreview, runButton, selected, shownColumns, specs, uploadIcon, valueOf])
   /* eslint-enable react-hooks/refs */
 
   async function refresh(keepSeed = false) {
@@ -503,6 +510,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onClose={() => { if (pending !== "schema") setEditor(null) }}
         onApply={(operations) => void applyEditor(operations)}
         onDeleteIndex={() => undefined}
+        layouts={settings.layouts}
+        onSaveLayouts={settings.saveLayouts}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -512,6 +521,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         title="Nouvel objet"
         fields={sheetColumns.filter((index) => !isComputedSpec(specs[index]) && !["random", "id"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], long: isLongField(selected.headers[index]) }))}
         pending={pending === "add"}
+        layout={tabLayout(settings.layouts, selected.tabName, "form")}
         onCancel={() => setCreating(false)}
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((_, index) => values[String(index)] ?? "") }, "add")}
       />}
@@ -548,6 +558,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         title={nameColumn >= 0 ? savedCell(nameColumn).replace(/<[^>]+>/g, "") : `Ligne ${details}`}
         subtitle={tableLabel(selected)}
         fields={sheetColumns.filter((index) => !["auto-links", "ranked-links", "tab"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], value: savedCell(index), long: isLongField(selected.headers[index]) }))}
+        layout={tabLayout(settings.layouts, selected.tabName, "form")}
         rowFor={sheetRow}
         pending={sheetPending}
         error={sheetError}

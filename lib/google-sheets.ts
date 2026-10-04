@@ -73,6 +73,7 @@ import {
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
+import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
@@ -92,6 +93,8 @@ export type CharacterRecord = {
   classes?: string
   /** Rang du personnage, quand il est connu. */
   level?: string
+  /** Le nom de son joueur (compte propriétaire), ajouté par les pages qui l'affichent. */
+  playerName?: string
 }
 
 /**
@@ -328,7 +331,7 @@ export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord 
 // rate-limited so a genuinely missing id doesn't re-read Sheets every time.
 let identityIndexSyncPromise: Promise<unknown> | null = null
 let identityIndexSyncedAt = 0
-const IDENTITY_INDEX_SYNC_TTL_MS = 60_000
+const IDENTITY_INDEX_SYNC_TTL_MS = 120_000
 // Une page n'attend pas plus longtemps la resynchronisation : au-delà, elle
 // s'affiche avec l'index local et la synchro se termine en arrière-plan.
 const IDENTITY_INDEX_SYNC_WAIT_MS = 2_500
@@ -557,8 +560,15 @@ function rangeCacheKey(
   return `${spreadsheetId}:${range}:${valueRenderOption || "FORMATTED_VALUE"}`
 }
 
+/** Une plage relue depuis le cache passe en fin de file : ce sont les plus utilisées qui restent. */
+function touchRange(cacheKey: string, entry: RangeCacheEntry) {
+  rangeReadCache.delete(cacheKey)
+  rangeReadCache.set(cacheKey, entry)
+  return entry.promise
+}
+
 function cacheRangePromise(cacheKey: string, promise: Promise<string[][]>) {
-  if (rangeReadCache.size >= 200) {
+  if (rangeReadCache.size >= 500) {
     const oldestKey = rangeReadCache.keys().next().value
     if (oldestKey) rangeReadCache.delete(oldestKey)
   }
@@ -589,7 +599,7 @@ export async function readRange(
 ) {
   const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
   const cached = rangeReadCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) return cached.promise
+  if (cached && cached.expiresAt > Date.now()) return touchRange(cacheKey, cached)
   const load = () => fetchRange(spreadsheetId, range, valueRenderOption)
   return staleRange(cacheKey, load) ?? cacheRangePromise(cacheKey, load())
 }
@@ -650,7 +660,7 @@ async function readRanges(
     const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
     const cached = rangeReadCache.get(cacheKey)
     const stale = cached && cached.expiresAt > Date.now() ? null : staleRange(cacheKey, () => fetchRange(spreadsheetId, range, valueRenderOption))
-    if (cached && cached.expiresAt > Date.now()) results[index] = cached.promise
+    if (cached && cached.expiresAt > Date.now()) results[index] = touchRange(cacheKey, cached)
     else if (stale) results[index] = stale
     else missing.push({ range, index, cacheKey })
   })
@@ -1275,6 +1285,27 @@ export function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
   return objectIndexTablesRequest
 }
 
+/** Quand le catalogue a été lu en entier pour la dernière fois. */
+let objectIndexLoadedAt = 0
+const OBJECT_INDEX_STALE_MS = 30 * 60_000
+
+/**
+ * Le catalogue pour l'affichage (page de l'index, inventaires, magasins, références) :
+ * un catalogue expiré depuis moins de 30 minutes est rendu tout de suite et relu en
+ * arrière-plan, au lieu de faire attendre la relecture de tous les classeurs. Une écriture
+ * d'Eraser vide le catalogue : elle n'est jamais suivie d'une copie périmée. Les écritures
+ * (numéros de ligne, colonnes) passent par `listObjectIndexTables`, toujours exact.
+ */
+export function listObjectIndexTablesForDisplay(): Promise<ObjectIndexTable[]> {
+  const cache = objectIndexTableCache
+  if (cache && cache.expiresAt > Date.now()) return Promise.resolve(cache.tables)
+  if (cache && Date.now() - objectIndexLoadedAt < OBJECT_INDEX_STALE_MS) {
+    listObjectIndexTables().catch(() => undefined)
+    return Promise.resolve(cache.tables)
+  }
+  return listObjectIndexTables()
+}
+
 async function readObjectIndexSpreadsheetWithRetry(file: { id: string; name: string; webViewLink?: string }) {
   try {
     return await readObjectIndexSpreadsheet(file)
@@ -1312,7 +1343,7 @@ async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
   if (!tables.length && firstError) throw firstError
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
-  if (!firstError) lastGoodObjectIndexTables = tables
+  if (!firstError) { lastGoodObjectIndexTables = tables; objectIndexLoadedAt = Date.now() }
   // Les icônes s'écrivent par numéro de colonne : jamais pendant une réparation des en-têtes.
   if (tables.some(needsObjectIndexHeaderRepair)) scheduleObjectIndexHeaderRepair(tables)
   else {
@@ -1871,7 +1902,8 @@ export async function setObjectIndexIcon(fileId: string, tabName: string, rowNum
 /** Images du Drive citées dans une colonne « Icône » : Eraser accepte de les afficher. */
 export async function objectIndexIconDriveFileIds() {
   const ids = new Set<string>()
-  for (const table of await listObjectIndexTables()) {
+  // Chaque icône affichée passe par ici : le catalogue d'affichage, sans attendre une relecture.
+  for (const table of await listObjectIndexTablesForDisplay()) {
     const iconColumn = objectIndexIconColumn(table)
     if (iconColumn < 0) continue
     for (const row of table.rows) {
@@ -4627,13 +4659,14 @@ export function formatCharacterClasses(value: string) {
  */
 export async function characterSheetSummaries() {
   const source = await charactersSource()
-  const summaries = new Map<string, { classes: string; level: string; portrait: string }>()
+  const summaries = new Map<string, { classes: string; level: string; portrait: string; title: string }>()
   if (!source) return summaries
-  const { columns, rows } = await readCharacterColumns(source, ["Classe", "Level", "Portrait"])
+  const { columns, rows } = await readCharacterColumns(source, ["Classe", "Level", "Portrait", "Titre honorifique"])
   for (const row of rows) {
     const id = columns.get(row, "ID")
     if (!id) continue
-    summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim() })
+    // Le titre honorifique choisi, lisible (la cellule garde la liste en JSON).
+    summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim(), title: displayedMultipleValue(columns.get(row, "Titre honorifique"), "selected") })
   }
   return summaries
 }
@@ -4666,7 +4699,8 @@ export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
       id,
       kind: "character",
       name: cell("Nom personnage") || "Personnage sans nom",
-      subtitle: [cell("Classe"), cell("Peuple")].filter(Boolean).join(" · "),
+      // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
+      subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
       portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
       currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
       totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
@@ -4776,6 +4810,8 @@ export const getCampaignDashboard = cache(getCampaignDashboardUncached)
 async function accountLookup(sessionToken?: string) {
   const remote = remoteAccountsConfig(runtimeEnv())
   if (remote) {
+    // Sans session, le serveur partagé refuse la liste : rien à attendre.
+    if (!sessionToken) return new Map<string, { displayName: string; email: string }>()
     const accounts = await listAccounts(sessionToken).catch(() => [])
     return new Map(accounts.map((account) => [account.uid, { displayName: account.displayName, email: account.email }]))
   }
@@ -4784,7 +4820,8 @@ async function accountLookup(sessionToken?: string) {
 }
 
 export async function listAllCharactersForAdmin(sessionToken?: string) {
-  await ensureIdentityIndexes()
+  // Comme pour les joueurs : la liste connue s'affiche, la relecture des feuilles se fait derrière.
+  await refreshIdentityIndexes()
   const [rows, owners] = await Promise.all([
     getDb().select({ character: characterIndex }).from(characterIndex)
       .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
@@ -4802,7 +4839,7 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
 }
 
 export async function listAllCampaignsForAdmin(sessionToken?: string) {
-  await ensureIdentityIndexes()
+  await refreshIdentityIndexes()
   const [rows, owners, links] = await Promise.all([
     getDb().select({ campaign: campaignIndex }).from(campaignIndex)
       .where(isNull(campaignIndex.deletedAt)).orderBy(campaignIndex.name).limit(500),
@@ -5283,8 +5320,9 @@ async function characterColumns(spreadsheetId: string, tabName: string): Promise
 }
 
 async function syncCharacterColumns(spreadsheetId: string, tabName: string, catalog: CharacterCatalog, signature: string): Promise<CharacterColumns> {
-  clearSpreadsheetReadCache(spreadsheetId)
-  const [headerRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+  // Seule la ligne d'en-têtes est relue fraîche : vider le cache de tout le classeur faisait
+  // relire toutes les fiches (accueil, campagnes, index) toutes les 5 minutes.
+  const [headerRow = []] = (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, "1:1"))).rows
   // Les colonnes d'origine manquantes d'abord (à droite), pour que chaque valeur ait sa colonne.
   let headers = (await ensureNamedColumns(spreadsheetId, tabName, sheetColumns(headerRow, characterSheetHeaders, characterSheetAliases))).headers
   let map = characterSheetMap(headers)
@@ -5671,7 +5709,7 @@ async function readInventoryWorkbook(includeCatalog = true): Promise<InventoryWo
     ),
     // Sans le catalogue (lecture rapide), les objets prennent quand même ses colonnes
     // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
-    includeCatalog ? listObjectIndexTables().catch(() => { catalogFailed = true; return [] }) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : lastGoodObjectIndexTables ?? []),
+    includeCatalog ? listObjectIndexTablesForDisplay().catch(() => { catalogFailed = true; return [] }) : Promise.resolve(objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now() ? objectIndexTableCache.tables : lastGoodObjectIndexTables ?? []),
   ])
   const columns: Record<string, SheetColumns> = {}
   const [typeRows, containerRows, itemRows, contentRows] = tabs.map((tab, index) => {

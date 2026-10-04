@@ -19,7 +19,9 @@ import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
 import { foldName, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
-import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedReference } from "@/lib/index-references"
+import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedLayout, type ResolvedLayoutField, type ResolvedReference } from "@/lib/index-references"
+import type { LayoutSpan } from "@/lib/index-layouts"
+import { IndexLayoutView } from "@/components/eraser/index-layout-view"
 import { objectIconImage } from "@/lib/object-icons"
 import { cn } from "@/lib/utils"
 import type { WeaponModifierRef } from "@/lib/weapon-modifiers"
@@ -291,6 +293,50 @@ function RowDetails({ reference, color, depth }: { reference: ResolvedReference;
   </div>
 }
 
+/** Une case du survol réglé dans « Modifier » : une image, une couleur, une icône, ou sa valeur. */
+function LayoutValue({ reference, field, depth }: { reference: ResolvedReference; field: ResolvedLayoutField; depth: number }) {
+  const kind = field.look?.kind
+  if (kind === "file") {
+    const files = field.value.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+    return <span className="flex flex-wrap gap-1.5">{files.slice(0, 6).map((file) => <IndexImage key={file} value={file} alt={field.column} className={`${field.large ? "aspect-[4/5] w-full" : "size-14"} rounded-lg border object-cover`} fallback={<a href={file} target="_blank" rel="noreferrer" className="truncate text-xs underline">{file.split("/").pop()}</a>} />)}</span>
+  }
+  if (kind === "color") return <span className="inline-flex items-center gap-1.5 font-mono text-[11px]"><span className="size-3.5 rounded-full border" style={{ backgroundColor: field.value }} />{field.value}</span>
+  if (kind === "glyph") { const look = parseGlyphValue(field.value); return <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} /> }
+  if (kind === "checkbox") return <span>{/^(oui|vrai|true|x|1|yes)$/i.test(field.value.trim()) ? "✓ Oui" : "✗ Non"}</span>
+  return <CellValue reference={{ ...reference, column: field.column, value: field.value, valueHtml: field.valueHtml, look: field.look }} depth={depth} />
+}
+
+/**
+ * Le survol d'une ligne selon sa mise en page (« Modifier » › Mise en page › Survol) : en
+ * tête l'image et le sous-titre choisis, puis ses cases rangées en sections et en lignes.
+ */
+function LayoutDetails({ reference, layout, color, depth }: { reference: ResolvedReference; layout: ResolvedLayout; color?: string; depth: number }) {
+  const look = parseGlyphValue(reference.icon ?? "")
+  const image = layout.image || reference.image
+  const wrap = (fields: ResolvedLayoutField[]) => fields.map((field) => ({ ...field, span: field.span as LayoutSpan | undefined, item: field }))
+  const arranged = {
+    aside: wrap(layout.aside),
+    asideWidth: layout.asideWidth ?? "md",
+    sections: layout.sections.map((section) => ({ ...section, rows: section.rows.map((row) => ({ id: row.id, fields: wrap(row.fields) })) })),
+    rest: [] as ResolvedLayoutField[],
+  }
+  return <div className="grid gap-2.5">
+    <div className="flex items-start gap-3">
+      {(image || look.icon || look.emoji) && <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={color ? { color } : undefined}>
+        {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} /> : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} />}
+      </span>}
+      <div className="min-w-0">
+        <p className="font-display text-lg font-semibold leading-tight" style={color ? { color } : undefined}><FormattedName name={reference.name} html={reference.nameHtml} color={color} /></p>
+        <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{layout.subtitle || reference.type || reference.tab}</p>
+      </div>
+    </div>
+    <IndexLayoutView compact arranged={arranged} render={(field) => <div className="grid gap-0.5">
+      {!field.hideLabel && <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">{field.column}</p>}
+      <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} /></div>
+    </div>} />
+  </div>
+}
+
 /**
  * Le nom d'une ligne citée, dans le style de la colonne Nom de son index, avec son détail
  * au survol. Son icône a la couleur du mot.
@@ -310,8 +356,8 @@ function RowChip({ reference, depth }: { reference: ResolvedReference; depth: nu
         {reference.nameStyle ? <span>{reference.name}</span> : <FormattedName name={reference.name} html={reference.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
-    <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={color ? { borderColor: `${color}55` } : undefined}>
-      <RowDetails reference={reference} color={color} depth={depth} />
+    <HoverCardContent side="top" align="start" collisionPadding={12} className={`${reference.layout ? "max-h-[min(34rem,75vh)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto" : "w-80"} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
+      {reference.layout ? <LayoutDetails reference={reference} layout={reference.layout} color={color} depth={depth} /> : <RowDetails reference={reference} color={color} depth={depth} />}
     </HoverCardContent>
   </HoverCard>
 }

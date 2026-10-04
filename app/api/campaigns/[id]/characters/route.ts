@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { addCharacterToCampaign, getCampaignDashboard, listAvailableCampaignCharacters, removeCharacterFromCampaign } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+import { playerNamesFor } from "@/lib/chat-accounts"
 
 // Le lien a bien été créé localement, mais pas encore écrit dans la feuille
 // partagée : c'est un avertissement, pas un échec — les autres installations ne
@@ -37,7 +38,10 @@ export async function GET(_: Request, { params }: { params: Promise<{ id: string
   const { id } = await params
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, id).catch(() => null)
   if (!campaign) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  return NextResponse.json({ characters: await listAvailableCampaignCharacters() })
+  const characters = await listAvailableCampaignCharacters()
+  // « Nom • Joueur » dans la liste : le joueur de chaque personnage.
+  const players = await playerNamesFor(account, characters.map((character) => character.ownerUid)).catch(() => new Map<string, string>())
+  return NextResponse.json({ characters: characters.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" })) })
 }
 
 export async function POST(request: Request, { params }: { params: Promise<{ id: string }> }) {
@@ -48,7 +52,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const body = (await request.json()) as { characterId?: string; duplicate?: boolean }
     if (!body.characterId) throw new Error("CHARACTER_NOT_FOUND")
     const { member, sharedError } = await addCharacterToCampaign(account.role === "admin" ? null : account.uid, id, body.characterId, body.duplicate !== false)
-    return NextResponse.json({ character: member, warning: sharedWarning(sharedError, account.role === "admin") })
+    const players = await playerNamesFor(account, [member.ownerUid]).catch(() => new Map<string, string>())
+    return NextResponse.json({ character: { ...member, playerName: players.get(member.ownerUid) ?? "" }, warning: sharedWarning(sharedError, account.role === "admin") })
   } catch (error) {
     return NextResponse.json({ error: membershipErrorMessage(error, "Le personnage n’a pas pu être ajouté.", account.role === "admin") }, { status: 400 })
   }

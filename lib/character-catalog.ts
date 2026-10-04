@@ -57,6 +57,8 @@ export const CATALOG_DEFAULT_HEADER = "Valeur par défaut"
 /** Colonne masquée : relie une ligne d'origine à ses colonnes de la feuille de personnage. */
 export const CATALOG_KEY_HEADER = "Clé de fiche"
 export const CATALOG_COLOR_HEADER = "Couleur"
+/** Le texte du « ? » de la fiche, écrit dans l'index (mise en forme comprise). Lu s'il existe, jamais créé. */
+export const CATALOG_DESCRIPTION_HEADER = "Description"
 export const PRINCIPAL_LABEL = "Principale"
 export const SECONDARY_LABEL = "Secondaire"
 
@@ -178,6 +180,36 @@ export function catalogFromTables(characteristics: CatalogTable | null, skills: 
     skillList.push({ key, name, characteristicKey: principalByName.get(foldCatalogName(characteristicName)) ?? "", defaultValue: cellOf(skills!, row, CATALOG_DEFAULT_HEADER) })
   }
   return { source: "index", characteristics: characteristicList, skills: skillList }
+}
+
+/**
+ * La description de chaque caractéristique et compétence, par clé de fiche (et par nom) :
+ * la colonne « Description » des deux onglets de l'index, mise en forme comprise. Chargée
+ * à part du catalogue : ces textes sont longs et seul le « ? » de la fiche s'en sert.
+ */
+export function catalogDescriptionsFromTables(tables: Array<{ headers: string[]; rows: Array<{ values: string[]; html?: string[] }> }>) {
+  const descriptions: Record<string, string> = {}
+  for (const table of tables) {
+    const column = table.headers.findIndex((header) => foldCatalogName(header) === foldCatalogName(CATALOG_DESCRIPTION_HEADER))
+    if (column < 0) continue
+    const plain: CatalogTable = { headers: table.headers, rows: [] }
+    for (const row of table.rows) {
+      const text = String(row.values[column] ?? "").trim()
+      if (!text) continue
+      const html = String(row.html?.[column] ?? "").trim() || text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br />")
+      for (const header of [CATALOG_KEY_HEADER, "ID", "Nom"]) {
+        const key = cellOf(plain, row.values, header)
+        if (key && !(foldCatalogName(key) in descriptions)) descriptions[foldCatalogName(key)] = html
+      }
+    }
+  }
+  return descriptions
+}
+
+/** La description d'une caractéristique ou compétence (HTML), d'après sa clé puis son nom. */
+export function catalogDescriptionOf(descriptions: Record<string, string> | null | undefined, item: { key: string; name: string }) {
+  if (!descriptions) return ""
+  return descriptions[foldCatalogName(item.key)] ?? descriptions[foldCatalogName(item.name)] ?? ""
 }
 
 // ---------------------------------------------------------------------------

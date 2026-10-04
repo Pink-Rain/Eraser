@@ -4,18 +4,18 @@ import { redirect } from "next/navigation"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ObjectIndexManager } from "@/components/eraser/object-index-manager"
-import { listObjectIndexTables } from "@/lib/google-sheets"
+import { listObjectIndexTablesForDisplay } from "@/lib/google-sheets"
 import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
 async function ObjectIndexesData() {
-  let initialTables: Awaited<ReturnType<typeof listObjectIndexTables>> = []
+  let initialTables: Awaited<ReturnType<typeof listObjectIndexTablesForDisplay>> = []
   let initialError = ""
   let initialSchemas: Awaited<ReturnType<typeof objectSchemas>> = {}
   try {
-    initialTables = await listObjectIndexTables()
+    initialTables = await listObjectIndexTablesForDisplay()
     initialSchemas = await objectSchemas(initialTables).catch(() => ({}))
   } catch (error) {
     initialError = error instanceof Error && error.message === "OBJECT_INDEX_FOLDER_NOT_FOUND"

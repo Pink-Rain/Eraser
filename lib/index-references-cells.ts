@@ -2,7 +2,7 @@
  * Ce qu'une référence affiche d'une ligne d'index : la valeur d'une case citée (comme
  * dans le tableau) ou le détail montré au survol du nom. Sans dépendance au serveur.
  */
-import { foldName, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, rowColumnStyle, type IndexColumnSpec } from "@/lib/index-columns"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
 
 export type SourceRow = { id: string; name: string; values: string[]; html: string[] }
@@ -57,7 +57,8 @@ export function citedCell(table: SourceTable, row: SourceRow, column: string) {
   const shown = displayedValue(value, spec)
   // Un texte mis en forme garde sa mise en forme ; le reste s'affiche comme dans le tableau.
   const html = !mode && textKinds.has(spec.kind) && /<[a-z]/i.test(row.html[index] ?? "") ? row.html[index] : escapeHtml(shown)
-  const style = spec.style && !spec.style.keepCellFormatting ? spec.style : undefined
+  // Un style imposé dont la couleur vient d'une colonne Couleur prend celle de cette ligne.
+  const style = spec.style && !spec.style.keepCellFormatting ? rowColumnStyle(spec.style, (name) => { const at = columnAt(table.headers, [name]); return at >= 0 ? row.values[at] ?? "" : "" }) : undefined
   const options = spec.kind === "choice" ? spec.options?.filter((option) => option.color).map((option) => ({ value: option.value, color: option.color })) : undefined
   return {
     column: header,
@@ -86,7 +87,7 @@ export function rowDetails(table: SourceTable, row: SourceRow, options: { object
   const colorValue = color >= 0 ? (row.values[color] ?? "").trim() : ""
   // Le style imposé à la colonne du nom : le nom cité le garde.
   const nameSpec = table.name >= 0 ? table.specs.get(foldName(table.headers[table.name])) : undefined
-  const nameStyle = nameSpec?.style && !nameSpec.style.keepCellFormatting ? nameSpec.style : undefined
+  const nameStyle = nameSpec?.style && !nameSpec.style.keepCellFormatting ? rowColumnStyle(nameSpec.style, (name) => { const index = at([name]); return index >= 0 ? row.values[index] ?? "" : "" }) : undefined
   const objectIcon = options.object ? at(["Icône", "Icone", "Icon"]) : -1
   const subtype = at(["Sous-type", "Sous type"])
   return {

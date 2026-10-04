@@ -255,7 +255,8 @@ export function stateFxOf(items: Array<{ source?: string; fx?: Array<{ name: str
 /** Les calques de FX d'une case, coupés à ses bords (les survols restent libres). */
 export function FxOverlay({ fx, className = "" }: { fx: FxItem[]; className?: string }) {
   if (!fx.length) return null
-  return <span aria-hidden="true" className={`pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] ${className}`}><PortraitFx fx={fx} /></span>
+  // Confiné : ses animations ne font repeindre que lui, jamais le reste de la fiche.
+  return <span aria-hidden="true" className={`pointer-events-none absolute inset-0 overflow-hidden rounded-[inherit] [contain:strict] ${className}`}><PortraitFx fx={fx} /></span>
 }
 
 /**
@@ -265,6 +266,6 @@ export function FxOverlay({ fx, className = "" }: { fx: FxItem[]; className?: st
 export function PageFxOverlay({ fx }: { fx: FxItem[] }) {
   if (!fx.length) return null
   return <div aria-hidden="true" className="pointer-events-none sticky top-0 z-[5] h-0 w-full">
-    <div className="absolute inset-x-0 top-0 h-[var(--eraser-viewport,100svh)] overflow-hidden"><PortraitFx fx={fx} variant="page" /></div>
+    <div className="absolute inset-x-0 top-0 h-[var(--eraser-viewport,100svh)] overflow-hidden [contain:strict]"><PortraitFx fx={fx} variant="page" /></div>
   </div>
 }

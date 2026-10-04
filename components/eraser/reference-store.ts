@@ -8,7 +8,7 @@
  */
 import { useEffect, useMemo, useState } from "react"
 
-import { referenceKey, type ReferenceCatalog, type ReferenceRequest, type ResolvedReference } from "@/lib/index-references"
+import { parseReferenceHref, referenceKey, type ReferenceCatalog, type ReferenceRequest, type ResolvedReference } from "@/lib/index-references"
 import { onWorldIndexChange } from "@/lib/world-index-events"
 
 const CATALOG_MS = 60_000
@@ -78,6 +78,25 @@ function flush() {
 export function knownReference(request: ReferenceRequest): ResolvedReference | null | undefined {
   const entry = resolved.get(referenceKey(request))
   return entry && Date.now() - entry.at < RESOLVED_MS ? entry.value : undefined
+}
+
+/**
+ * Le texte qu'affiche un lien de référence déjà lu (le nom actuel de la ligne, ou la
+ * valeur de la case citée), même un peu ancien : le tri des index range sur ce texte.
+ */
+export function shownReferenceText(href: string): string | undefined {
+  const reference = parseReferenceHref(href)
+  if (!reference) return undefined
+  const value = resolved.get(referenceKey(reference))?.value
+  if (!value) return undefined
+  return reference.column ? value.value || undefined : value.name || undefined
+}
+
+/** Oublie les références lues (un survol vient d'être remis en page) : elles sont relues à l'affichage. */
+export function forgetResolvedReferences() {
+  resolved.clear()
+  version += 1
+  for (const listener of [...listeners]) listener()
 }
 
 export function referenceCatalogDenied() {

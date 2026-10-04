@@ -15,6 +15,7 @@ import {
   listClasses,
   readFormattedSheet,
   readRange,
+  readRangeFreshWithOffset,
   updateFormattedCell,
   updateRange,
   updateRowCells,
@@ -183,7 +184,9 @@ async function classWorkbookFiles(refresh = false) {
     return (label.includes("sort") || label.includes("spell")) && label.includes("classe")
   }) ?? await findGoogleSpreadsheetByName("Sorts de classe") as ClassWorkbookFile | null
     ?? await findGoogleSpreadsheetByName("Sort de classe") as ClassWorkbookFile | null
-  workbookFilesCache = { expiresAt: Date.now() + 60_000, presentation, spells }
+  // Les classeurs ne changent presque jamais d'adresse : 15 minutes une fois trouvés (une
+  // minute s'il en manque un, le temps qu'il soit créé ou relié).
+  workbookFilesCache = { expiresAt: Date.now() + (presentation && spells ? 15 * 60_000 : 60_000), presentation, spells }
   return workbookFilesCache
 }
 
@@ -888,7 +891,7 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
     listRankBonuses({ refresh: true }).catch((error) => console.error("RANK_BONUSES_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
     return stale
   }
-  const { spells: file } = await classWorkbookFiles(options.refresh)
+  const { spells: file } = await classWorkbookFiles()
   if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
   let tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)
   if (!tab && options.create) {
@@ -902,8 +905,10 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
     rankBonusCache = { expiresAt: Date.now() + 60_000, table }
     return table
   }
-  if (options.refresh) clearSpreadsheetReadCache(file.id)
-  const rows = await readRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!A1:Z60`)
+  // Une relecture lit la plage fraîche, sans vider le cache de tout le classeur des sorts
+  // (il était relu en entier à chaque rafraîchissement des bonus, toutes les minutes).
+  const range = `${quoteTab(RANK_BONUS_TAB)}!A1:Z60`
+  const rows = options.refresh ? (await readRangeFreshWithOffset(file.id, range)).rows : await readRange(file.id, range)
   const headers = (rows[0] ?? []).map((header) => String(header ?? "").trim())
   const bonuses = rows.slice(1).flatMap((row): RankBonus[] => {
     const rank = Number.parseInt(String(row[0] ?? "").match(/\d+/)?.[0] ?? "", 10)

@@ -5,27 +5,33 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CampaignDashboard } from "@/components/eraser/campaign-dashboard"
 import { DeferredPageLoading } from "@/components/eraser/deferred-content-loading"
 import { getCampaignDashboard, getCampaignForPlayer, listCampaignMembers, listNpcs, type CampaignRecord } from "@/lib/google-sheets"
-import { authorizedAccount } from "@/lib/server-auth"
+import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { identityUidsForUser } from "@/lib/identity-links"
+import { playerNamesFor } from "@/lib/chat-accounts"
 
 export const dynamic = "force-dynamic"
 
 async function CampaignDashboardData({
   campaign,
   canManage,
-  accountUid,
-  userEmail,
+  account,
 }: {
   campaign: CampaignRecord
   canManage: boolean
-  accountUid: string
-  userEmail: string
+  account: AuthorizedUser
 }) {
-  const [members, groupNpcs] = await Promise.all([
+  const accountUid = account.uid
+  const userEmail = account.email
+  const [listed, groupNpcs] = await Promise.all([
     listCampaignMembers(campaign.id),
     listNpcs(campaign.id).then((npcs) => npcs.filter((npc) => npc.inPlayerGroup)),
   ])
-  const identities = await identityUidsForUser(accountUid)
+  // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »).
+  const [identities, players] = await Promise.all([
+    identityUidsForUser(accountUid),
+    playerNamesFor(account, listed.map((character) => character.ownerUid)).catch(() => new Map<string, string>()),
+  ])
+  const members = listed.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
   return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => identities.includes(character.ownerUid)).map((character) => character.id)} userEmail={userEmail} />
@@ -51,7 +57,7 @@ export default async function CampaignDashboardPage({ params }: { params: Promis
   return (
     <AuthenticatedShell pageLabel={`Campagne - ${campaign.name}`}>
       <Suspense key={id} fallback={<DeferredPageLoading variant="dashboard" title={campaign.name} label="Chargement de la campagne…" />}>
-        <CampaignDashboardData campaign={campaign} canManage={canManage} accountUid={account.uid} userEmail={account.email} />
+        <CampaignDashboardData campaign={campaign} canManage={canManage} account={account} />
       </Suspense>
     </AuthenticatedShell>
   )

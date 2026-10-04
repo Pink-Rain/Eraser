@@ -13,27 +13,48 @@ import { currentAuthToken } from "@/lib/server-auth"
 // partagé, comme les comptes et les rôles.
 type IdentityLink = { localUserId: string; legacyUid: string; updatedAt: string }
 
-const REMOTE_LINKS_TTL_MS = 30_000
-let remoteLinksCache: { expiresAt: number; links: Promise<IdentityLink[]> } | null = null
+// Les liens changent rarement (une réattribution) : la copie lue reste fraîche 5 minutes,
+// puis elle est servie tout de suite pendant qu'une relecture se fait en arrière-plan
+// (au plus 24 heures). Chaque clic n'attend donc plus le serveur de comptes.
+const FRESH_MS = 5 * 60_000
+const STALE_MS = 24 * 3_600_000
+let remoteLinksCache: { loadedAt: number; links: Promise<IdentityLink[]> } | null = null
+let lastGood: { at: number; links: IdentityLink[] } | null = null
+let refreshing: Promise<void> | null = null
+// Change à chaque écriture : une relecture partie avant ne remplace pas ce qui vient d'être écrit.
+let generation = 0
 
 function remote() {
   return remoteAccountsConfig(env)
 }
 
+async function fetchRemoteLinks(config: NonNullable<ReturnType<typeof remote>>, token: string | undefined) {
+  const response = await remoteAccountsFetch(config, "/identity-links", { method: "GET", token })
+  return (response as { links: IdentityLink[] }).links
+}
+
 async function remoteLinks(): Promise<IdentityLink[]> {
   const config = remote()
   if (!config) return []
-  if (remoteLinksCache && remoteLinksCache.expiresAt > Date.now()) return remoteLinksCache.links
-  const links = (async () => {
-    const token = await currentAuthToken().catch(() => undefined)
-    const response = await remoteAccountsFetch(config, "/identity-links", { method: "GET", token })
-    return (response as { links: IdentityLink[] }).links
-  })().catch((error) => {
-    remoteLinksCache = null
-    console.error("IDENTITY_LINKS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return [] as IdentityLink[]
-  })
-  remoteLinksCache = { expiresAt: Date.now() + REMOTE_LINKS_TTL_MS, links }
+  if (remoteLinksCache && Date.now() - remoteLinksCache.loadedAt < FRESH_MS) return remoteLinksCache.links
+  // Le jeton est lu pendant la requête : une relecture en arrière-plan ne peut plus le lire.
+  const token = await currentAuthToken().catch(() => undefined)
+  const started = generation
+  if (lastGood && Date.now() - lastGood.at < STALE_MS) {
+    refreshing ??= fetchRemoteLinks(config, token)
+      .then((links) => { if (started !== generation) return; lastGood = { at: Date.now(), links }; remoteLinksCache = { loadedAt: Date.now(), links: Promise.resolve(links) } })
+      .catch((error) => { console.error("IDENTITY_LINKS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR") })
+      .finally(() => { refreshing = null })
+    return lastGood.links
+  }
+  const links: Promise<IdentityLink[]> = fetchRemoteLinks(config, token)
+    .then((value) => { if (started === generation) lastGood = { at: Date.now(), links: value }; return value })
+    .catch((error) => {
+      if (remoteLinksCache?.links === links) remoteLinksCache = null
+      console.error("IDENTITY_LINKS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return [] as IdentityLink[]
+    })
+  remoteLinksCache = { loadedAt: Date.now(), links }
   return links
 }
 
@@ -69,7 +90,10 @@ export async function linkLegacyIdentity(localUserId: string, legacyUid: string)
       token,
       body: { localUserId, legacyUid: normalized },
     })
+    // Le lien écrit est visible aussitôt : la prochaine lecture repart du serveur.
+    generation += 1
     remoteLinksCache = null
+    lastGood = null
     return (response as { link: IdentityLink }).link
   }
   const now = new Date().toISOString()

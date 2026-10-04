@@ -16,6 +16,7 @@ import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
 import { GaugeCell, GlyphCell } from "@/components/eraser/index-gauge"
+import { IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import {
   checkboxValue,
@@ -30,6 +31,7 @@ import {
   joinListValue,
   matchChoice,
   normalizeSpec,
+  rowColumnStyle,
   splitListValue,
   type ActionButton,
   type ChoiceOption,
@@ -38,6 +40,7 @@ import {
   type SpellSource,
 } from "@/lib/index-columns"
 import type { FormulaDisplay } from "@/lib/index-formula"
+import { arrangeLayout, type IndexLayout } from "@/lib/index-layouts"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 
@@ -919,6 +922,8 @@ export type IndexColumnContext = {
   showConversions?: boolean
   /** Rangement en onglets : les onglets de l'index, proposés dans la liste. */
   tabNames?: string[]
+  /** Une case de la même ligne, par son en-tête (couleurs du style imposé prises dans une colonne Couleur). */
+  rowValue?: (rowKey: string, header: string) => string
 }
 
 /**
@@ -944,6 +949,17 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
     description: spec.description,
     cellClassName: look.className || undefined,
     cellStyle: Object.keys(look.style).length ? look.style : undefined,
+  }
+  // Style imposé dont les couleurs viennent d'une colonne Couleur : chaque ligne a les siennes.
+  if (spec.style && !spec.style.keepCellFormatting && (spec.style.colorColumn || spec.style.backgroundColumn) && context.rowValue) {
+    const style = spec.style
+    const rowValue = context.rowValue
+    column.cellStyleOf = (rowKey) => {
+      const own = rowColumnStyle(style, (header) => rowValue(rowKey, header))
+      if (!own || own === style) return undefined
+      const css = columnStyleCss(own).style
+      return { ...(own.color && own.color !== "muted" ? { color: css.color } : {}), ...(own.background ? { backgroundColor: css.backgroundColor } : {}) }
+    }
   }
   const { valueOf, commit } = context
   const off = (rowKey: string) => Boolean(context.disabled || context.lockedRow?.(rowKey))
@@ -1060,6 +1076,8 @@ export type IndexFieldProps = {
   disabled?: boolean
   /** Colonne liée : les noms séparés par des virgules. */
   linkedHint?: boolean
+  /** Mise en page de la fiche : le nom de la colonne n'est pas écrit au-dessus du champ. */
+  hideLabel?: boolean
   /** Dans une fiche : les colonnes calculées, les tirages et les boutons de la ligne. */
   row?: {
     formula?: (spec: IndexColumnSpec) => FormulaDisplay
@@ -1075,10 +1093,12 @@ export type IndexFieldProps = {
 
 const fieldLabel = "grid content-start gap-1 text-xs font-semibold"
 
-export function IndexField({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row }: IndexFieldProps) {
+export function IndexField({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false }: IndexFieldProps) {
   const spec = normalizeSpec(input)
   const look = columnStyleCss(spec.style)
-  const title = <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
+  const title = hideLabel
+    ? <span className="sr-only">{label}</span>
+    : <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} /></div>
@@ -1136,36 +1156,49 @@ export type IndexFormField = { key: string; label: string; spec: IndexColumnSpec
  * Le formulaire d'ajout d'une ligne, construit à partir des colonnes et de leur type :
  * chaque index a les siennes, il n'y a donc pas de formulaire figé à écrire.
  */
-export function IndexEntryForm({ title, fields, pending, leading, onCancel, onSave }: {
+export function IndexEntryForm({ title, fields, pending, leading, layout, onCancel, onSave }: {
   title: string
   fields: IndexFormField[]
   pending: boolean
   /** Champ propre à la page, placé en tête (l'onglet de la vue « Tout »…). */
   leading?: ReactNode
+  /** La mise en page de la fiche de l'onglet (« Modifier » › Mise en page) ; absente : automatique. */
+  layout?: IndexLayout | null
   onCancel: () => void
   onSave: (values: Record<string, string>) => void
 }) {
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((field) => [field.key, ""])))
   const nameField = fields.find((field) => field.spec.kind === "name" || field.spec.kind === "name-form")
   const named = !nameField || (values[nameField.key] ?? "").replace(/<[^>]+>/g, "").trim().length > 0
+  const entryField = (field: IndexFormField, hideLabel = false) => <IndexField
+    key={field.key}
+    label={field.label}
+    // Dans le formulaire, le nom se saisit toujours : il n'ouvre pas de fiche.
+    spec={field.spec.kind === "name-form" ? { ...field.spec, kind: "name" } : field.spec}
+    value={values[field.key] ?? ""}
+    long={field.long}
+    hideLabel={hideLabel}
+    autoFocus={field === nameField}
+    onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
+  />
   return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm">
     <div className="flex items-center justify-between gap-3">
       <h3 className="font-display text-xl font-semibold">{title}</h3>
       <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
     </div>
-    <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
-      {leading}
-      {fields.map((field) => <IndexField
-        key={field.key}
-        label={field.label}
-        // Dans le formulaire, le nom se saisit toujours : il n'ouvre pas de fiche.
-        spec={field.spec.kind === "name-form" ? { ...field.spec, kind: "name" } : field.spec}
-        value={values[field.key] ?? ""}
-        long={field.long}
-        autoFocus={field === nameField}
-        onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
-      />)}
-    </div>
+    {layout
+      ? <div className="mt-4 grid gap-4">
+        {leading && <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{leading}</div>}
+        <IndexLayoutView
+          arranged={arrangeLayout(layout, fields, (field) => field.label)}
+          render={(field, placed) => <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel)}</div>}
+          renderRest={(rest) => <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{rest.map((field) => entryField(field))}</div>}
+        />
+      </div>
+      : <div className="mt-4 grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+        {leading}
+        {fields.map((field) => entryField(field))}
+      </div>}
     <div className="mt-4 flex justify-end gap-2">
       <Button type="button" variant="outline" onClick={onCancel}>Annuler</Button>
       <Button type="button" onClick={() => onSave(values)} disabled={pending || !named}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>

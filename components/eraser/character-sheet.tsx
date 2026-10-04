@@ -39,6 +39,7 @@ import {
 import {
   builtinCharacterCatalog,
   builtinPrincipalColors,
+  catalogDescriptionOf,
   catalogGroups,
   characterLayout,
   CRITICAL_FAILURE_METRIC,
@@ -48,7 +49,8 @@ import {
   type CatalogSkill,
   type CharacterCatalog,
 } from "@/lib/character-catalog"
-import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
+import { useCatalogDescriptions, useCharacterCatalog } from "@/components/eraser/use-character-catalog"
+import { HelpMark } from "@/components/eraser/help-mark"
 import type { CharacterSheetRecord, ClassRecord } from "@/lib/google-sheets"
 import type { ClassSpell } from "@/lib/class-content"
 import { keepCatalogFields, type CharacterInventoryRecord } from "@/lib/inventory-schema"
@@ -339,7 +341,7 @@ function ModifierHoverShell({ items, toggle, title, color, total, children }: { 
 /** Les neuf colonnes d'une compétence dans la fiche, dans l'ordre de `characterSkillMetrics`. */
 type SkillCells = number[]
 
-function SkillRow({ skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, usageItems = [], tint = "", fx = [], skillRule, characteristicRule, toggle }: { /** Les objets qui s'utilisent avec cette compétence. */ usageItems?: UsageItem[]; skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
+function SkillRow({ help = "", skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, usageItems = [], tint = "", fx = [], skillRule, characteristicRule, toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les objets qui s'utilisent avec cette compétence. */ usageItems?: UsageItem[]; skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const shortName = skill.name
     .replace(/^Maîtrise\b/, "Maît")
@@ -361,9 +363,9 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
   ]
   const metricModifiers = [statModifier, successModifier, failureModifier]
   const { anchorRef, above, measure } = useFlipPlacement()
-  return <div ref={anchorRef} className="relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+  return <div ref={anchorRef} className="group/skill relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     <button type="button" onClick={() => setOpen((current) => !current)} className={`relative grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border, ...(tint ? { backgroundColor: `${tint}38`, boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}>
-      <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}</span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? `text-foreground ${portraitImageFxClass(fx)}` : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
+      <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}<HelpMark title={skill.name} className="ml-1 text-muted-foreground opacity-0 hover:text-foreground group-hover/skill:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? `text-foreground ${portraitImageFxClass(fx)}` : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
       <FxOverlay fx={fx} />
     </button>
     {open && <div ref={measure} className={`absolute left-2 right-2 ${above ? "bottom-[calc(100%-2px)]" : "top-[calc(100%-2px)]"} z-30 rounded-xl border bg-popover p-3 text-popover-foreground shadow-2xl`} style={{ borderColor: color.border }}>
@@ -392,7 +394,7 @@ function SkillRow({ skill, cells, characteristicCell, values, color, commit, abi
  * En-tête coloré d’une caractéristique. Son survol montre les seuils critiques propres à la
  * caractéristique et les objets liés, au-dessus quand la place manque en dessous.
  */
-function CharacteristicHeader({ characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, usageItems = [], toggle }: { /** Les objets qui s'utilisent avec cette caractéristique. */ usageItems?: UsageItem[]; characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CharacteristicHeader({ help = "", characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, usageItems = [], toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les objets qui s'utilisent avec cette caractéristique. */ usageItems?: UsageItem[]; characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
   const { anchorRef, above, measure } = useFlipPlacement()
   const panelRef = useRef<HTMLDivElement>(null)
   const place = () => measure(panelRef.current)
@@ -403,7 +405,7 @@ function CharacteristicHeader({ characteristic, cells, color, values, commit, st
   const changed = statModifier !== 0 || hasRule(statRule)
   return <div ref={anchorRef} onMouseEnter={place} onFocusCapture={place} className="group relative rounded-t-2xl px-4 py-3 text-white" style={{ backgroundColor: color.accent, backgroundImage: tint ? `linear-gradient(${tint}d9, ${tint}d9)` : undefined }}>
     <FxOverlay fx={fx} />
-    <div className="flex items-center justify-between gap-2"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className={`inline-block text-2xl font-bold tabular-nums ${portraitImageFxClass(fx)}`} title={changed ? `Base ${values[cells.value] || "0"} ${modifierText(statModifier, statRule)}` : undefined}>{total}</span></InlineEdit></span></div>
+    <div className="flex items-center justify-between gap-2"><span className="flex min-w-0 items-center gap-1.5"><h3 className="truncate font-display text-lg font-semibold" title={characteristic.name}>{skillGroupTitle(characteristic.name)}</h3><HelpMark title={characteristic.name} className="text-white/70 opacity-0 hover:text-white group-hover:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span><span className="flex items-center gap-1.5"><InlineEdit numeric singleClick compact label={characteristic.name} value={values[cells.value]} onCommit={(value) => commit(cells.value, value)}><span className={`inline-block text-2xl font-bold tabular-nums ${portraitImageFxClass(fx)}`} title={changed ? `Base ${values[cells.value] || "0"} ${modifierText(statModifier, statRule)}` : undefined}>{total}</span></InlineEdit></span></div>
     <div ref={panelRef} className={`pointer-events-none absolute left-3 right-3 z-40 rounded-xl border bg-popover p-3 text-popover-foreground opacity-0 shadow-2xl transition group-hover:pointer-events-auto group-hover:translate-y-0 group-hover:opacity-100 group-focus-within:pointer-events-auto group-focus-within:opacity-100 ${above ? "bottom-[calc(100%-2px)] -translate-y-1" : "top-[calc(100%-2px)] translate-y-1"}`} style={{ borderColor: color.border }}>
       <p className="font-display text-sm font-semibold" style={{ color: color.accent }}>{characteristic.name}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Seuils critiques</p>
       <div className="grid grid-cols-2 gap-2">{(["success", "failure"] as const).map((kind) => { const index = cells[kind]; return <div key={kind}><p className="mb-1 flex items-center justify-between gap-1 text-[10px] text-muted-foreground">{kind === "success" ? "Réussite" : "Échec"}<ModifierBadge amount={criticalModifiers[kind]} /></p><InlineEdit numeric singleClick compact label={`${characteristic.name} ${kind}`} value={values[index]} onCommit={(value) => commit(index, value)}><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums">{values[index] || "0"}</span></InlineEdit></div> })}</div>
@@ -414,7 +416,7 @@ function CharacteristicHeader({ characteristic, cells, color, values, commit, st
   </div>
 }
 
-function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseColor, values, commit, compact = false, modifier = 0, rule, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; rule?: ModifierRule; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, help = "", color: baseColor, values, commit, compact = false, modifier = 0, rule, linkedItems = [], toggle }: { fieldIndex: number; label: string; popupLabel?: string; /** Description au survol du « ? ». */ help?: string; color: string; values: string[]; commit: (index: number, value: string) => Promise<void>; compact?: boolean; modifier?: number; rule?: ModifierRule; linkedItems?: LinkedModifierItem[]; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const definitionIndex = characterSecondaryCalculatedFields.findIndex((field) => field.valueIndex === fieldIndex)
   const bonusIndex = characterSecondaryCalculationValueIndex(definitionIndex, "bonus")
@@ -423,8 +425,8 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseCol
   // Un état coloré qui vise cette case la teinte de sa couleur.
   const color = stateTint(linkedItems) || baseColor
   const fx = stateFxOf(linkedItems)
-  return <div ref={anchorRef} className="relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}</span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
+  return <div ref={anchorRef} className="group/help relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
+    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={popupLabel || label} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
     {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier || hasRule(rule) ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés, les états et la classe">{modifierText(modifier, rule) || "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
@@ -434,7 +436,7 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, color: baseCol
  * objets et états, et au survol son calcul (valeur de base modifiable, modificateur) et ce
  * qui le change. − et + changent la valeur de base ; un état coloré teinte la carte.
  */
-function CounterTile({ label, color, span, value, modifier, rule, linkedItems, toggle, onCommit }: { label: string; color: string; span: string; value: string; modifier: number; rule?: ModifierRule; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
+function CounterTile({ label, help = "", color, span, value, modifier, rule, linkedItems, toggle, onCommit }: { label: string; /** Description au survol du « ? ». */ help?: string; color: string; span: string; value: string; modifier: number; rule?: ModifierRule; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
   const [open, setOpen] = useState(false)
   const { anchorRef, above, measure } = useFlipPlacement()
   const tint = stateTint(linkedItems)
@@ -443,9 +445,9 @@ function CounterTile({ label, color, span, value, modifier, rule, linkedItems, t
   const numeric = Number.parseFloat(value || "0") || 0
   const total = totalWithModifier(value, modifier, "0", rule)
   const changed = modifier !== 0 || hasRule(rule)
-  return <div ref={anchorRef} className={`relative flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${span}`} style={{ backgroundColor: `${shown}${tint ? "33" : "16"}`, borderTop: `2px solid ${shown}` }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+  return <div ref={anchorRef} className={`group/help relative flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${span}`} style={{ backgroundColor: `${shown}${tint ? "33" : "16"}`, borderTop: `2px solid ${shown}` }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
     <FxOverlay fx={fx} />
-    <p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p>
+    <p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></p>
     <div className="mt-1 inline-flex items-center gap-1">
       <button type="button" onClick={() => onCommit(String(numeric - 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Diminuer ${label}`}><Minus className="size-3" /></button>
       <InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className={`inline-block min-w-7 text-center text-xl font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={changed || tint ? { color: shown } : undefined} title={changed ? `Base ${value || "0"} ${modifierText(modifier, rule)}` : undefined}>{total}</span></InlineEdit>
@@ -464,16 +466,16 @@ function CounterTile({ label, color, span, value, modifier, rule, linkedItems, t
   </div>
 }
 
-function CombinedCalculatedCard({ label, groupColor, fields, values, commit, modifierFor, ruleFor, linkedFor, toggle }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string }>; values: string[]; commit: (index: number, value: string) => Promise<void>; modifierFor: (valueIndex: number) => number; ruleFor: (valueIndex: number) => ModifierRule | undefined; linkedFor: (valueIndex: number) => LinkedModifierItem[]; toggle: SlotToggle }) {
+function CombinedCalculatedCard({ label, groupColor, fields, values, commit, modifierFor, ruleFor, linkedFor, toggle }: { label: string; groupColor: string; fields: Array<{ index: number; label: string; shortLabel?: string; color: string; help?: string }>; values: string[]; commit: (index: number, value: string) => Promise<void>; modifierFor: (valueIndex: number) => number; ruleFor: (valueIndex: number) => ModifierRule | undefined; linkedFor: (valueIndex: number) => LinkedModifierItem[]; toggle: SlotToggle }) {
   return <div className="h-full min-h-20 rounded-xl border p-1.5 shadow-sm" style={{ backgroundColor: `${groupColor}18`, borderColor: `${groupColor}55`, borderTop: `2px solid ${groupColor}` }}>
     <p className="mb-1 text-center text-[9px] font-semibold uppercase tracking-[.18em]" style={{ color: groupColor }}>{label}</p>
     <div className="grid grid-cols-2 gap-1">
-      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} color={field.color} values={values} commit={commit} modifier={modifierFor(field.index)} rule={ruleFor(field.index)} linkedItems={linkedFor(field.index)} toggle={toggle} />)}
+      {fields.map((field) => <CalculatedSecondaryCard compact key={field.index} fieldIndex={field.index} label={field.shortLabel || field.label} popupLabel={field.label} help={field.help} color={field.color} values={values} commit={commit} modifier={modifierFor(field.index)} rule={ruleFor(field.index)} linkedItems={linkedFor(field.index)} toggle={toggle} />)}
     </div>
   </div>
 }
 
-function LifePool({ label = "Points de vie", color = "#6e9ee8", current, total, commit, modifier = 0, rule, currentModifier = 0, currentRule }: { label?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number; rule?: ModifierRule; currentModifier?: number; currentRule?: ModifierRule }) {
+function LifePool({ label = "Points de vie", help = "", color = "#6e9ee8", current, total, commit, modifier = 0, rule, currentModifier = 0, currentRule }: { label?: string; /** Description au survol du « ? ». */ help?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number; rule?: ModifierRule; currentModifier?: number; currentRule?: ModifierRule }) {
   const [editing, setEditing] = useState(false)
   const [expression, setExpression] = useState(current || "0")
   const [editingTotal, setEditingTotal] = useState(false)
@@ -491,7 +493,7 @@ function LifePool({ label = "Points de vie", color = "#6e9ee8", current, total, 
   const leaveTotal = useCommitOnLeave(editingTotal, totalExpression, total || "0", (next) => commit(10, String(calculateExpression(next, Number(total) || 0))))
   async function save() { if (await leaveCurrent.save()) setEditing(false) }
   async function saveTotal() { if (await leaveTotal.save()) setEditingTotal(false) }
-  return <div className="flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title={currentChanged ? `Base ${current || "0"} ${modifierText(currentModifier, currentRule)} — valeur, +10, -10%, *2 ou /3` : "Valeur, +10, -10%, *2 ou /3"}>{shownCurrent}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={totalChanged ? `Base ${total || "0"} ${modifierText(modifier, rule)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{shownTotal}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
+  return <div className="group/help flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title={currentChanged ? `Base ${current || "0"} ${modifierText(currentModifier, currentRule)} — valeur, +10, -10%, *2 ou /3` : "Valeur, +10, -10%, *2 ou /3"}>{shownCurrent}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={totalChanged ? `Base ${total || "0"} ${modifierText(modifier, rule)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{shownTotal}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
 }
 
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
@@ -500,6 +502,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Les caractéristiques et compétences viennent de leur index ; leurs colonnes sont
   // retrouvées par leur en-tête (celles ajoutées à l'index sont à la fin de la feuille).
   const catalog = useCharacterCatalog(initialCatalog)
+  // Le « ? » des caractéristiques et compétences : la colonne « Description » de leur index.
+  const descriptions = useCatalogDescriptions()
   const headers = character.headers
   const layout = useMemo(() => characterLayout(headers?.length ? headers : characterValueHeaders), [headers])
   const groups = useMemo(() => catalogGroups(catalog), [catalog])
@@ -949,16 +953,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     "Folie": { color: "#8f79b5", span: "xl:col-span-2" },
     "Destin": { color: "#e7ae69", span: "xl:col-span-3" },
   }
-  const counterTile = (key: string, label: string, index: number, style: { color: string; span: string }) => <CounterTile key={key} label={label} color={style.color} span={style.span} value={values[index]} modifier={modifierForValue(index)} rule={ruleForValue(index)} linkedItems={linkedForValue(index)} toggle={slotToggle} onCommit={(value) => commit(index, value)} />
-  const listTile = (key: string, label: string, index: number, options: string[], color: string) => <div key={key} className="flex min-h-20 flex-col items-center justify-center rounded-xl px-3 py-2 text-center xl:col-span-3" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}</p><div className="mt-1 max-w-full"><SelectEdit label={label} value={values[index]} options={options} onCommit={(value) => commit(index, value)} /></div></div>
+  const secondaryHelp = (key: string) => catalogDescriptionOf(descriptions, secondaries.find((candidate) => candidate.key === key) ?? { key, name: key })
+  const counterTile = (key: string, label: string, index: number, style: { color: string; span: string }) => <CounterTile key={key} label={label} help={secondaryHelp(key)} color={style.color} span={style.span} value={values[index]} modifier={modifierForValue(index)} rule={ruleForValue(index)} linkedItems={linkedForValue(index)} toggle={slotToggle} onCommit={(value) => commit(index, value)} />
+  const listTile = (key: string, label: string, index: number, options: string[], color: string) => <div key={key} className="group/help flex min-h-20 flex-col items-center justify-center rounded-xl px-3 py-2 text-center xl:col-span-3" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{secondaryHelp(key) && <IndexRichText html={secondaryHelp(key)} />}</HelpMark></p><div className="mt-1 max-w-full"><SelectEdit label={label} value={values[index]} options={options} onCommit={(value) => commit(index, value)} /></div></div>
   const renderedCombined = new Set<string>()
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} /><ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell></div>] }
+    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} /><ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell></div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
-    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
+    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} help={secondaryHelp(item.key)} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
     const combined = combinedCards.find((card) => card.members.some((member) => member.key === item.key))
     if (combined) {
       if (renderedCombined.has(combined.label)) return []
@@ -966,7 +971,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       const fields = combined.members.filter((member) => secondaryKeys.has(member.key)).map((member) => {
         // Renommée dans l'index, la case prend son nouveau nom ; sinon elle garde son libellé d'origine.
         const name = secondaryName(member.key, member.key)
-        return { index: member.index, label: name === member.key ? member.label : name, shortLabel: name === member.key ? member.short : name, color: secondaryColor(member.key, member.color) }
+        return { index: member.index, label: name === member.key ? member.label : name, shortLabel: name === member.key ? member.short : name, color: secondaryColor(member.key, member.color), help: secondaryHelp(member.key) }
       })
       return [<div key={combined.label} className={combined.span}><CombinedCalculatedCard label={combined.label} groupColor={combined.color} fields={fields} values={values} commit={commit} modifierFor={modifierForValue} ruleFor={ruleForValue} linkedFor={linkedForValue} toggle={slotToggle} /></div>]
     }
@@ -996,6 +1001,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return <article key={key || "autres"} className="overflow-visible rounded-2xl border bg-card/80 shadow-sm" style={{ borderColor: color.border }}>
       {group.characteristic && characteristicCells.value >= 0 && characteristicCells.success >= 0 && characteristicCells.failure >= 0
         ? <CharacteristicHeader
+          help={catalogDescriptionOf(descriptions, group.characteristic)}
           characteristic={group.characteristic}
           cells={characteristicCells}
           color={color}
@@ -1015,6 +1021,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         const failureIndexes = [globalFailure, characteristicCells.failure, cells[8]].filter((index) => index >= 0)
         return <SkillRow
           key={skill.key}
+          help={catalogDescriptionOf(descriptions, skill)}
           skill={skill}
           cells={cells}
           characteristicCell={characteristicCells.value}

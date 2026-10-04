@@ -15,11 +15,18 @@ export function forgetVisitedPages() {
 
 let installed = false
 
+/**
+ * Des POST qui ne changent aucune page : la lecture des références « { » (affichées dans
+ * presque toutes les pages) et le chat (jamais rendu par le serveur). Les compter comme des
+ * écritures vidait les copies à chaque affichage, et chaque retour sur une page la relisait.
+ */
+const notPageWrites = new Set(["/api/references", "/api/campaign-chat"])
+
 function isApiWrite(input: RequestInfo | URL, init?: RequestInit) {
   const method = (init?.method ?? (input instanceof Request ? input.method : "GET")).toUpperCase()
   if (method === "GET" || method === "HEAD") return false
   const url = new URL(typeof input === "string" ? input : input instanceof URL ? input.href : input.url, window.location.href)
-  return url.origin === window.location.origin && url.pathname.startsWith("/api/")
+  return url.origin === window.location.origin && url.pathname.startsWith("/api/") && !notPageWrites.has(url.pathname)
 }
 
 /** À appeler une fois dans la page : chaque écriture réussie vers /api oublie les pages visitées. */

@@ -14,6 +14,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { usePersistentState } from "@/hooks/use-persistent-state"
 import { compactRichText, isCheckedValue, type IndexColumnSpec } from "@/lib/index-columns"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { foldNpcName, genericNpcIndexPage, isNpcLibraryPage, npcIndexPage, npcIndexTabs } from "@/lib/npc-pages"
 import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
 
@@ -129,9 +130,8 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
     const folded = foldNpcName(query)
     const filtered = npcs.filter((npc) => tabOf(npc) === tab && (!folded || foldNpcName(`${npc.name} ${npc.title} ${npc.people} ${npc.occupation}`).includes(folded)))
     const plain = (npc: CampaignNpcRecord, column: string) => column === "campaigns" ? campaignsOf(npc).map((campaign) => campaign.name).join(", ") : column === "important" ? (npc.important ? "Oui" : "Non") : textFields.has(column) ? npc[column as TextField] : ""
-    const sorted = sort
-      ? [...filtered].sort((left, right) => plain(left, sort.column).localeCompare(plain(right, sort.column), "fr", { sensitivity: "base", numeric: true }) * (sort.direction === "asc" ? 1 : -1))
-      : filtered
+    // Le texte affiché (sans mise en forme), vides en bas.
+    const sorted = sort ? sortByIndexKey(filtered, (npc) => indexSortKey(plain(npc, sort.column)), sort.direction === "asc" ? 1 : -1) : filtered
     return sorted.map((npc, index) => ({ key: npc.id, rowNumber: index + 1 }))
   }, [campaignsOf, npcs, query, sort, tab])
 

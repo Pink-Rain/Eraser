@@ -113,6 +113,18 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
 
   const hideOnThisPage = /\/tabletop(\/|$)/.test(pathname)
   const roomId = campaignId ? `chat:${campaignId}` : ""
+  // Le salon en direct coûte cher à rejoindre (une vingtaine de connexions pair à pair, des
+  // relais) : il attend que l'application soit au repos, ou qu'on ouvre le chat. Le
+  // tabletop, qui a déjà son propre salon, ne le rejoint pas.
+  const [warm, setWarm] = useState(false)
+  useEffect(() => {
+    if (warm) return
+    if (open) { queueMicrotask(() => setWarm(true)); return }
+    const idle = typeof window.requestIdleCallback === "function"
+      ? { id: window.requestIdleCallback(() => setWarm(true), { timeout: 10_000 }), cancel: (id: number) => window.cancelIdleCallback(id) }
+      : { id: window.setTimeout(() => setWarm(true), 6_000), cancel: (id: number) => window.clearTimeout(id) }
+    return () => idle.cancel(idle.id)
+  }, [open, warm])
 
   useEffect(() => { membersRef.current = members }, [members])
   useEffect(() => { activityEndRef.current?.scrollIntoView({ block: "nearest" }) }, [activities.length, open])
@@ -133,6 +145,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }, [pathname])
 
   useEffect(() => {
+    if (!warm) return
     let cancelled = false
     void fetch("/api/campaign-chat?campaigns=1")
       .then((response) => responseJson<{ campaigns: ChatCampaign[] }>(response))
@@ -149,7 +162,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       })
       .catch(() => undefined)
     return () => { cancelled = true }
-  }, [])
+  }, [warm])
 
   useEffect(() => {
     if (!campaignId) {
@@ -176,7 +189,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
   }, [campaignId, markSeen, showNotice])
 
   useEffect(() => {
-    if (!roomId) return
+    if (!roomId || !warm || hideOnThisPage) return
     let cancelled = false
     let room: Room | null = null
     const presence = presenceRef.current
@@ -223,7 +236,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       presence.clear()
       if (room) void room.leave()
     }
-  }, [roomId, campaignId, markSeen, user.role, user.uid])
+  }, [roomId, campaignId, hideOnThisPage, markSeen, user.role, user.uid, warm])
 
   // Le nom du compte, partout : plus de « MJ » ni de nom de personnage.
   const speakerName = me?.name || "Joueur"

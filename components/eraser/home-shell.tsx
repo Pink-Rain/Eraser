@@ -23,6 +23,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
+import { listText } from "@/lib/character-card"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
 import { cn } from "@/lib/utils"
@@ -257,29 +258,31 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
     for (const character of characters) for (const campaign of character.campaigns) seen.set(campaign.id, campaign.name)
     return [...seen.entries()].sort((left, right) => left[1].localeCompare(right[1], "fr"))
   }, [characters])
-  const visible = useMemo(() => {
-    const query = folded(search.trim())
-    return characters
-      .filter((character) => campaignFilter === "all" || (campaignFilter === "none" ? !character.campaigns.length : character.campaigns.some((campaign) => campaign.id === campaignFilter)))
-      .filter((character) => !query || folded(`${character.name} ${character.subtitle} ${character.campaigns.map((campaign) => campaign.name).join(" ")}`).includes(query))
-      .sort((left, right) => sort === "name" ? left.name.localeCompare(right.name, "fr", { sensitivity: "base" }) : right.updatedAt.localeCompare(left.updatedAt))
-  }, [campaignFilter, characters, search, sort])
-  // Ouvrir la fiche sélectionne aussi le personnage dans le menu.
-  const open = (character: CharacterRecord) => router.push(`/personnage/${encodeURIComponent(character.id)}`)
   // Classe et rang, lus dans les fiches après l'affichage : l'accueil n'attend pas Sheets.
-  const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string }>>({})
+  const [summaries, setSummaries] = useState<Record<string, { classes: string; level: string; title?: string }>>({})
   // Tant que les fiches n'ont pas répondu, la classe reste en attente (pas « à choisir »).
   const [summariesLoaded, setSummariesLoaded] = useState(false)
   useEffect(() => {
     if (!characters.length) return
     let active = true
     fetch("/api/characters/summaries")
-      .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string }> } : null)
+      .then(async (response) => response.ok ? (await response.json()) as { summaries?: Record<string, { classes: string; level: string; title?: string }> } : null)
       .then((payload) => { if (active && payload?.summaries) setSummaries(payload.summaries) })
       .catch(() => { /* les cartes restent lisibles sans la classe */ })
       .finally(() => { if (active) setSummariesLoaded(true) })
     return () => { active = false }
   }, [characters.length])
+  const visible = useMemo(() => {
+    const query = folded(search.trim())
+    return characters
+      .filter((character) => campaignFilter === "all" || (campaignFilter === "none" ? !character.campaigns.length : character.campaigns.some((campaign) => campaign.id === campaignFilter)))
+      .filter((character) => !query || folded(`${character.name} ${listText(character.subtitle)} ${summaries[character.id]?.title ?? ""} ${character.campaigns.map((campaign) => campaign.name).join(" ")}`).includes(query))
+      .sort((left, right) => sort === "name" ? left.name.localeCompare(right.name, "fr", { sensitivity: "base" }) : right.updatedAt.localeCompare(left.updatedAt))
+  }, [campaignFilter, characters, search, sort, summaries])
+  // Ouvrir la fiche sélectionne aussi le personnage dans le menu.
+  const open = (character: CharacterRecord) => router.push(`/personnage/${encodeURIComponent(character.id)}`)
+  // Le titre honorifique choisi remplace le peuple (lisible, jamais la liste brute « ["…"] »).
+  const titleLine = (character: CharacterRecord) => summaries[character.id]?.title ?? ""
   const classLine = (character: CharacterRecord) => {
     const summary = summaries[character.id]
     if (!summary?.classes) return ""
@@ -317,7 +320,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
                 <div className="p-3">
                   <h3 className="font-display truncate text-base font-semibold">{character.name}</h3>
                   <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine(character) || (summariesLoaded ? "Classe à choisir" : "…")}</p>
-                  <p className="truncate text-xs text-muted-foreground">{character.subtitle || "Peuple à choisir"}</p>
+                  <p className="min-h-4 truncate text-xs italic text-muted-foreground">{titleLine(character) || (summariesLoaded ? "" : "…")}</p>
                   <div className="mt-1.5 flex min-h-4 flex-wrap gap-x-2 gap-y-0.5">
                     {character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="truncate text-[10px] font-medium" style={{ color: campaign.accentColor }}>{campaign.name}</span>) : <span className="text-[10px] text-muted-foreground/80">Sans campagne</span>}
                   </div>
@@ -333,7 +336,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
               <Portrait character={character} className="size-11 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="font-display truncate font-semibold">{character.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{[classLine(character), character.subtitle, character.campaigns.map((campaign) => campaign.name).join(", ") || "Sans campagne"].filter(Boolean).join(" · ")}</p>
+                <p className="truncate text-xs text-muted-foreground">{[classLine(character), titleLine(character), character.campaigns.map((campaign) => campaign.name).join(", ") || "Sans campagne"].filter(Boolean).join(" · ")}</p>
               </div>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" />
             </button>
