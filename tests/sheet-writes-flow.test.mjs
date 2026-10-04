@@ -206,3 +206,46 @@ test("Magasins : ajouter à la campagne ne réécrit que ses cases", async () =>
   assert.equal(row[8], "Oui");
   await assert.rejects(sheets.saveGeneratedShops("CAMP-2", [shop("SHOP-1", "Volé")], {}), /SHOP_NOT_ON_PAGE/);
 });
+
+const todoHeaders = ["ID", "ID admin", "Admin créateur", "Nom", "Contenu", "Priorité", "Étiquette", "Couleur", "Réalisée", "Créée le", "Modifiée le", "Supprimée le"];
+const todo = (id, name) => [id, "uid-1", "Admin", name, `Contenu ${name}`, "moyenne", "", "#927640", "non", "2026-09-01", "2026-09-01", ""];
+
+test("To-do : modifiée après un décalage fait ailleurs, c'est bien elle qui change", async () => {
+  const id = fresh("todos");
+  google.addSpreadsheet(id, [{ title: "To-do", grid: [todoHeaders, todo("T1", "Un"), todo("T2", "Deux"), todo("T3", "Trois")] }]);
+  await jdr.saveJdrSheet({ key: "admin_todos", spreadsheetId: id, name: "To-do administration", tabName: "To-do", webViewLink: "" });
+  // Une modification refusée lit (et garde) la ligne 3, celle de T2…
+  await assert.rejects(sheets.updateAdminTodo("T2", { content: "   " }), /INVALID_TODO_CONTENT/);
+  // …puis T1 est supprimée ailleurs : T2 remonte en ligne 2, T3 en ligne 3.
+  google.grid(id, "To-do").splice(1, 1);
+  await sheets.updateAdminTodo("T3", { name: "Trois bis", content: "- à faire" });
+  const rows = google.grid(id, "To-do");
+  assert.equal(rows[1][3], "Deux");
+  assert.equal(rows[2][0], "T3");
+  assert.equal(rows[2][3], "Trois bis");
+  assert.equal(rows[2][4], "- à faire");
+  // Une to-do créée garde son texte, même s'il commence par « - ».
+  const created = await sheets.createAdminTodo({ creatorUid: "uid-1", creatorName: "Admin", name: "= pas une formule", content: "- liste", priority: "haute", label: "", labelColor: "#123456" });
+  const added = google.grid(id, "To-do").find((row) => row[0] === created.id);
+  assert.equal(added[3], "= pas une formule");
+  assert.equal(added[4], "- liste");
+  assert.deepEqual(google.world.enteredCells.at(-1).slice(3, 5), [{ stringValue: "= pas une formule" }, { stringValue: "- liste" }]);
+});
+
+test("Vocabulaire : supprimé après une insertion faite ailleurs, c'est bien ce mot qui part", async () => {
+  const id = fresh("vocabulary");
+  google.addSpreadsheet(id, [{ title: "Vocabulaire", grid: [["Titre", "Contenu"], ["Arcane", "a"], ["Brume", "b"]] }]);
+  await jdr.saveJdrSheet({ key: "vocabulary", spreadsheetId: id, name: "Vocabulaire", tabName: "Vocabulaire", webViewLink: "" });
+  const vocabulary = await vocabularyModule();
+  assert.deepEqual((await vocabulary.listVocabulary()).map((entry) => [entry.rowNumber, entry.title]), [[2, "Arcane"], [3, "Brume"]]);
+  // Une première demande lit la feuille (et la garde en mémoire)…
+  await assert.rejects(vocabulary.deleteVocabularyEntry(2, "Inconnu"), /VOCABULARY_NOT_FOUND/);
+  // …puis un mot est inséré ailleurs en tête : Arcane passe en ligne 3, Brume en ligne 4.
+  google.grid(id, "Vocabulaire").splice(1, 0, ["Ancre", "z"]);
+  await vocabulary.deleteVocabularyEntry(3, "Brume");
+  assert.deepEqual(google.grid(id, "Vocabulaire").map((row) => row[0]), ["Titre", "Ancre", "Arcane"]);
+});
+
+async function vocabularyModule() {
+  return vite.ssrLoadModule("/lib/vocabulary.ts");
+}

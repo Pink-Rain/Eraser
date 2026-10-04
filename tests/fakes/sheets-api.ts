@@ -199,8 +199,11 @@ function handleSheets(path: string, init: RequestInit) {
     const valueRanges = (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area) }, dataFilters: [filter] } })
     return json({ valueRanges: world.reverseFilteredReads ? valueRanges.reverse() : valueRanges })
   }
+  // Comme Google en USER_ENTERED : l'apostrophe de tête force le texte et n'est pas gardée.
+  const entered = (raw: boolean, values: unknown[][]) => raw ? values : values.map((line) => line.map((value) => typeof value === "string" && value.startsWith("'") ? value.slice(1) : value))
   if (action === "batchUpdate") {
-    const responses = (body.data as Array<{ range: string; values: unknown[][] }>).map((item) => ({ updatedRange: writeArea(parseRange(file, item.range), item.values) }))
+    const raw = body.valueInputOption === "RAW"
+    const responses = (body.data as Array<{ range: string; values: unknown[][] }>).map((item) => ({ updatedRange: writeArea(parseRange(file, item.range), entered(raw, item.values)) }))
     return json({ responses })
   }
   const rangeText = tail.join("/")
@@ -218,7 +221,7 @@ function handleSheets(path: string, init: RequestInit) {
     return json({ updates: { updatedRange, updatedRows: body.values.length } })
   }
   if (method === "PUT") {
-    const updatedRange = writeArea(area, body.values)
+    const updatedRange = writeArea(area, entered(url.searchParams.get("valueInputOption") === "RAW", body.values))
     return json({ updatedRange, updatedData: { range: updatedRange, values: readArea({ ...area, bottom: area.top + body.values.length - 1 }) } })
   }
   return json({ range: areaName(area), values: readArea(area) })

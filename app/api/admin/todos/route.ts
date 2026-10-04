@@ -6,7 +6,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 export async function GET() {
   const admin = await authorizedAccount(["admin"])
   if (!admin) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-  return NextResponse.json({ todos: await listAdminTodos({ creatorUid: admin.uid, creatorName: admin.displayName || admin.email }) })
+  return NextResponse.json({ todos: await listAdminTodos() })
 }
 
 export async function POST(request: Request) {

@@ -16,6 +16,7 @@ function errorMessage(error: unknown, fallback: string) {
   if (code === "INVALID_VOCABULARY_TITLE") return "Le titre est obligatoire (160 caractères au plus)."
   if (code === "VOCABULARY_CONTENT_TOO_LONG") return "Le contenu est trop long pour une cellule Google Sheets."
   if (code === "VOCABULARY_NOT_FOUND") return "Ce mot n’existe plus dans la feuille « Vocabulaire ». Recharge la page."
+  if (code === "SHEET_ROW_CHECK_FAILED") return "La feuille « Vocabulaire » a changé entre-temps : recharge la page puis recommence."
   return fallback
 }
 

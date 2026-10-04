@@ -1,4 +1,4 @@
-import { appendRows, deleteGoogleSheetRow, ensureJdrSheet, ensureNamedColumns, namedAppendRange, namedRowWrites, readNamedSheet, resolveJdrSheet, updateRanges } from "@/lib/google-sheets"
+import { appendRows, deleteSheetRowWhere, ensureJdrSheet, ensureNamedColumns, namedAppendRange, namedRowWrites, readNamedSheet, resolveJdrSheet, updateRanges } from "@/lib/google-sheets"
 
 /**
  * Le glossaire des règles. La feuille « Vocabulaire » n'a que deux colonnes,
@@ -24,7 +24,7 @@ function normalizeInput(input: { title: string; content: string }) {
   return { title, content }
 }
 
-export function sortVocabulary(entries: VocabularyEntry[]) {
+function sortVocabulary(entries: VocabularyEntry[]) {
   return [...entries].sort((left, right) => left.title.localeCompare(right.title, "fr", { sensitivity: "base", numeric: true }))
 }
 
@@ -36,12 +36,13 @@ async function vocabularySheet() {
 
 const VOCABULARY_HEADERS = ["Titre", "Contenu"]
 
-function readVocabularySheet(spreadsheetId: string, tabName: string) {
-  return readNamedSheet(spreadsheetId, tabName, VOCABULARY_HEADERS)
+/** `fresh` pour une écriture : la feuille telle qu'elle est maintenant, jamais une copie gardée en mémoire. */
+function readVocabularySheet(spreadsheetId: string, tabName: string, options: { fresh?: boolean } = {}) {
+  return readNamedSheet(spreadsheetId, tabName, VOCABULARY_HEADERS, options)
 }
 
-async function readEntries(spreadsheetId: string, tabName: string) {
-  const { columns, rows } = await readVocabularySheet(spreadsheetId, tabName)
+async function readEntries(spreadsheetId: string, tabName: string, options: { fresh?: boolean } = {}) {
+  const { columns, rows } = await readVocabularySheet(spreadsheetId, tabName, options)
   return rows
     .map((row, index): VocabularyEntry => ({ rowNumber: index + 2, title: columns.get(row, "Titre").trim(), content: columns.get(row, "Contenu") }))
     .filter((entry) => entry.title)
@@ -54,12 +55,16 @@ export async function listVocabulary() {
   return sortVocabulary(await readEntries(sheet.spreadsheetId, sheet.tabName))
 }
 
-/** Retrouve la ligne d'une entrée, même si des lignes ont été ajoutées ou retirées dans Drive. */
+/**
+ * Retrouve la ligne d'une entrée dans la feuille relue, même si des lignes ont été ajoutées
+ * ou retirées ailleurs. Ailleurs qu'à la ligne attendue, le titre doit être unique : deux
+ * entrées du même titre ne sont jamais confondues.
+ */
 async function locateEntry(rowNumber: number, expectedTitle: string) {
   const sheet = await vocabularySheet()
-  const entries = await readEntries(sheet.spreadsheetId, sheet.tabName)
-  const entry = entries.find((item) => item.rowNumber === rowNumber && item.title === expectedTitle)
-    ?? entries.find((item) => item.title === expectedTitle)
+  const entries = await readEntries(sheet.spreadsheetId, sheet.tabName, { fresh: true })
+  const homonyms = entries.filter((item) => item.title === expectedTitle)
+  const entry = homonyms.find((item) => item.rowNumber === rowNumber) ?? (homonyms.length === 1 ? homonyms[0] : null)
   if (!entry) throw new Error("VOCABULARY_NOT_FOUND")
   return { sheet, entry }
 }
@@ -79,18 +84,19 @@ export async function createVocabularyEntry(input: { title: string; content: str
 /** Liste fraîche après une écriture : une suppression décale les lignes suivantes. */
 export async function listVocabularyAfterWrite() {
   const sheet = await vocabularySheet()
-  return sortVocabulary(await readEntries(sheet.spreadsheetId, sheet.tabName))
+  return sortVocabulary(await readEntries(sheet.spreadsheetId, sheet.tabName, { fresh: true }))
 }
 
 export async function updateVocabularyEntry(rowNumber: number, expectedTitle: string, input: { title: string; content: string }): Promise<VocabularyEntry> {
   const values = normalizeInput(input)
   const { sheet, entry } = await locateEntry(rowNumber, expectedTitle)
-  const { columns } = await readVocabularySheet(sheet.spreadsheetId, sheet.tabName)
+  const { columns } = await readVocabularySheet(sheet.spreadsheetId, sheet.tabName, { fresh: true })
   await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, entry.rowNumber, { Titre: values.title, Contenu: values.content }), { valueInputOption: "RAW" })
   return { rowNumber: entry.rowNumber, ...values }
 }
 
 export async function deleteVocabularyEntry(rowNumber: number, expectedTitle: string) {
   const { sheet, entry } = await locateEntry(rowNumber, expectedTitle)
-  await deleteGoogleSheetRow(sheet.spreadsheetId, sheet.tabName, entry.rowNumber)
+  // Le titre est revérifié dans la feuille juste avant : sinon rien n'est supprimé.
+  await deleteSheetRowWhere(sheet.spreadsheetId, sheet.tabName, entry.rowNumber, "Titre", entry.title)
 }

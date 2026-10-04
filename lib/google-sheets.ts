@@ -6679,10 +6679,6 @@ export async function setCharacterInventoryCurrency(characterId: string, contain
   return buildCharacterInventory(characterId, workbook)
 }
 
-function todoRow(todo: AdminTodoRecord) {
-  return [todo.id, todo.creatorUid, todo.creatorName, todo.name, todo.content, todo.priority, todo.label, todo.labelColor, todo.completed, todo.createdAt, todo.updatedAt, todo.deletedAt || ""]
-}
-
 /**
  * La ligne d'un ID, toujours lue dans la feuille elle-même au moment de s'en servir (une
  * copie en mémoire peut dater d'avant une ligne ajoutée, supprimée ou déplacée, ici ou sur
@@ -6710,66 +6706,41 @@ async function todoColumns(source: JdrSheetRecord) {
   return ensureNamedColumns(source.spreadsheetId, source.tabName, await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders))
 }
 
-async function updateTodoSheetRow(todo: AdminTodoRecord) {
-  const source = await ensureJdrSheet("admin_todos")
-  if (!source) throw new Error("TODOS_SHEET_UNAVAILABLE")
-  const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, todo.id)
-  if (!rowNumber) throw new Error("TODO_NOT_FOUND")
-  await updateRanges(source.spreadsheetId, canonicalWrites(source.tabName, await todoColumns(source), `A${rowNumber}:L${rowNumber}`, [todoRow(todo)]))
+/** Les cases d'une to-do, sous leur en-tête : seules celles qui changent sont écrites. */
+function todoCells(todo: Partial<AdminTodoRecord>): Record<string, SheetCell> {
+  const cells: Record<string, SheetCell> = {}
+  if (todo.name !== undefined) cells["Nom"] = textCell(todo.name)
+  if (todo.content !== undefined) cells["Contenu"] = textCell(todo.content)
+  if (todo.priority !== undefined) cells["Priorité"] = todo.priority
+  if (todo.label !== undefined) cells["Étiquette"] = textCell(todo.label)
+  if (todo.labelColor !== undefined) cells["Couleur"] = todo.labelColor
+  if (todo.completed !== undefined) cells["Réalisée"] = todo.completed
+  if (todo.updatedAt !== undefined) cells["Modifiée le"] = todo.updatedAt
+  if (todo.deletedAt !== undefined) cells["Supprimée le"] = todo.deletedAt || ""
+  return cells
 }
 
+/**
+ * Une to-do et sa ligne, relues dans la feuille au moment de s'en servir, en-tête compris.
+ * Relire la ligne en cache sous ce numéro rendait parfois la to-do qui l'occupait avant un
+ * décalage : on modifiait, mettait à la corbeille ou supprimait alors la mauvaise.
+ */
 async function findAdminTodoInGoogleSheet(id: string) {
   const source = await ensureJdrSheet("admin_todos")
   if (!source) throw new Error("TODOS_SHEET_UNAVAILABLE")
   const rowNumber = await findSheetRowById(source.spreadsheetId, source.tabName, id)
   if (!rowNumber) return null
-  const columns = await namedColumnsOf(source.spreadsheetId, source.tabName, todoSheetHeaders)
-  const [row] = await readRange(source.spreadsheetId, namedRowRange(source.tabName, columns, rowNumber))
-  return adminTodoFromSheetRow(canonicalRow(columns, row || []))
+  const [header, line] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, "1:1"), sheetTabRange(source.tabName, `${rowNumber}:${rowNumber}`)])
+  const columns = sheetColumns(header?.rows[0] ?? [], todoSheetHeaders)
+  const row = line?.startRow === rowNumber ? line.rows[0] ?? [] : []
+  if (columns.get(row, "ID") !== id) throw new Error("TODO_MOVED")
+  const todo = adminTodoFromSheetRow(canonicalRow(columns, row))
+  return todo ? { todo, source, rowNumber, columns } : null
 }
 
-const requestedAdminTodoSeed = [
-  { id: "roadmap-home-definition", name: "Définir le contenu de la page d’accueil", content: "Décider ce que les joueurs, MJ et administrateurs doivent voir et pouvoir faire depuis l’accueil.", priority: "haute", label: "Structure du site", labelColor: "#6d5bd0" },
-  { id: "roadmap-home-build", name: "Créer la page d’accueil", content: "Concevoir puis intégrer la page d’accueil à partir du contenu défini.", priority: "haute", label: "Structure du site", labelColor: "#6d5bd0" },
-  { id: "roadmap-lore", name: "Créer la partie Lore", content: "Définir l’organisation du lore et préparer ses pages, catégories et contenus.", priority: "moyenne", label: "Univers", labelColor: "#0f766e" },
-  { id: "roadmap-map", name: "Créer la partie Carte", content: "Définir les besoins de la carte puis construire son espace dans le site.", priority: "moyenne", label: "Univers", labelColor: "#0f766e" },
-  { id: "roadmap-rules-vocabulary", name: "Rédiger les règles — Vocabulaire", content: "Compléter la page de vocabulaire des règles.", priority: "moyenne", label: "Règles", labelColor: "#7c3aed" },
-  { id: "roadmap-rules-combat", name: "Rédiger les règles — Combat", content: "Compléter et structurer la page des règles de combat.", priority: "haute", label: "Règles", labelColor: "#7c3aed" },
-  { id: "roadmap-rules-out-combat", name: "Rédiger les règles — Hors combat", content: "Compléter et structurer la page des règles hors combat.", priority: "haute", label: "Règles", labelColor: "#7c3aed" },
-  { id: "roadmap-classes-sheets", name: "Créer les Google Sheets des classes", content: "Préparer les feuilles et colonnes nécessaires aux données complètes des classes.", priority: "haute", label: "Classes", labelColor: "#2563eb" },
-  { id: "roadmap-classes-content", name: "Rédiger le contenu de toutes les classes", content: "Compléter les informations, capacités et contenus de chaque classe.", priority: "moyenne", label: "Classes", labelColor: "#2563eb" },
-  { id: "roadmap-classes-images", name: "Renommer les illustrations de classes", content: "Uniformiser les noms des fichiers afin que le site puisse enfin les associer automatiquement aux classes.", priority: "haute", label: "Ressources", labelColor: "#be123c" },
-  { id: "roadmap-import-class-resources", name: "Importer les ressources de classes", content: "Importer et organiser les ressources nécessaires aux classes.", priority: "moyenne", label: "Ressources", labelColor: "#be123c" },
-  { id: "roadmap-import-npc-resources", name: "Importer les ressources de PNJ", content: "Importer et organiser les illustrations et ressources nécessaires aux PNJ.", priority: "moyenne", label: "Ressources", labelColor: "#be123c" },
-  { id: "roadmap-import-creature-resources", name: "Importer les ressources de créatures", content: "Importer et organiser les illustrations et ressources nécessaires aux créatures.", priority: "moyenne", label: "Ressources", labelColor: "#be123c" },
-  { id: "roadmap-npc-content", name: "Créer les PNJ", content: "Préparer les premiers PNJ et les informations qui composent leur fiche.", priority: "haute", label: "PNJ", labelColor: "#c2410c" },
-  { id: "roadmap-npc-creation", name: "Créer le système de création des PNJ", content: "Construire la page et le formulaire permettant de créer et modifier un PNJ.", priority: "haute", label: "PNJ", labelColor: "#c2410c" },
-  { id: "roadmap-inventory-campaign-link", name: "Lier les inventaires des personnages à la campagne", content: "Faire dépendre les transferts et les objets disponibles de la campagne liée au personnage.", priority: "haute", label: "Inventaire", labelColor: "#b45309" },
-  { id: "roadmap-campaign-inventory", name: "Créer l’inventaire commun de campagne", content: "Créer un espace partagé où le groupe peut conserver les objets de la campagne.", priority: "haute", label: "Inventaire", labelColor: "#b45309" },
-  { id: "roadmap-class-tab", name: "Relier l’onglet Classe aux classes", content: "Afficher dans la fiche de personnage les données de la classe réellement sélectionnée.", priority: "haute", label: "Fiche personnage", labelColor: "#4f46e5" },
-  { id: "roadmap-relational-journal", name: "Finir le journal relationnel", content: "Compléter le journal de personnage et relier ses entrées relationnelles aux PNJ.", priority: "moyenne", label: "Fiche personnage", labelColor: "#4f46e5" },
-  { id: "roadmap-item-effects", name: "Mettre en forme les attributs et effets des objets", content: "Définir un affichage clair pour les effets et attributs des armes, outils et équipements.", priority: "moyenne", label: "Objets", labelColor: "#0369a1" },
-  { id: "roadmap-wallet-capacity", name: "Rétablir la capacité visuelle de la bourse", content: "Ajouter la barre de remplissage, afficher la capacité maximale et empêcher d’ajouter trop de monnaie.", priority: "moyenne", label: "Inventaire", labelColor: "#b45309" },
-  { id: "roadmap-campaign-item-transfers", name: "Créer les transferts via l’inventaire commun", content: "Permettre d’ajouter des objets à l’inventaire commun puis de les transférer entre personnages.", priority: "haute", label: "Inventaire", labelColor: "#b45309" },
-  { id: "roadmap-npc-portability", name: "Rendre les PNJ transférables", content: "Permettre de déplacer ou copier des PNJ entre le bac à sable et différentes campagnes.", priority: "moyenne", label: "PNJ", labelColor: "#c2410c" },
-  { id: "roadmap-sandbox-shops", name: "Enregistrer les magasins du bac à sable dans une campagne", content: "Permettre de sélectionner une campagne de destination pour un magasin créé dans le bac à sable.", priority: "moyenne", label: "Magasins", labelColor: "#9f1239" },
-  { id: "roadmap-shop-names", name: "Permettre de nommer les magasins", content: "Ajouter un nom personnalisable aux magasins de campagne afin de pouvoir les réutiliser.", priority: "basse", label: "Magasins", labelColor: "#9f1239" },
-  { id: "roadmap-shop-line-reroll", name: "Relancer une seule ligne d’objet d’un magasin", content: "Permettre de remplacer individuellement un objet dans un magasin sauvegardé ou lié à une campagne.", priority: "moyenne", label: "Magasins", labelColor: "#9f1239" },
-  { id: "roadmap-peoples-index", name: "Créer l’index des peuples", content: "Créer l’index des peuples et autoriser l’ajout d’un peuple inventé pour une campagne.", priority: "haute", label: "Index", labelColor: "#15803d" },
-  { id: "roadmap-languages-index", name: "Créer l’index des langues", content: "Créer l’index des langues et autoriser l’ajout d’une langue inventée pour une campagne.", priority: "haute", label: "Index", labelColor: "#15803d" },
-  { id: "roadmap-religions-index", name: "Créer l’index des religions", content: "Créer l’index des religions et autoriser l’ajout d’une religion inventée pour une campagne.", priority: "haute", label: "Index", labelColor: "#15803d" },
-  { id: "roadmap-dashboard-roles", name: "Différencier le tableau de bord selon le rôle", content: "Créer une version joueur et une version MJ/administrateur du tableau de bord de campagne.", priority: "haute", label: "Campagne", labelColor: "#166534" },
-] as const satisfies ReadonlyArray<{ id: string; name: string; content: string; priority: AdminTodoRecord["priority"]; label: string; labelColor: string }>
-
-const deliveredRoadmapTodoIds = new Set([
-  "roadmap-npc-content",
-  "roadmap-npc-creation",
-  "roadmap-npc-portability",
-  "roadmap-sandbox-shops",
-  "roadmap-shop-names",
-  "roadmap-shop-line-reroll",
-])
-const DELIVERED_ROADMAP_SYNC_KEY = "roadmap:shops-npcs:v1"
+async function writeTodoCells(found: NonNullable<Awaited<ReturnType<typeof findAdminTodoInGoogleSheet>>>, changes: Partial<AdminTodoRecord>) {
+  await updateRanges(found.source.spreadsheetId, namedRowWrites(found.source.tabName, found.columns, found.rowNumber, todoCells(changes)))
+}
 
 function adminTodoFromSheetRow(row: string[]): AdminTodoRecord | null {
   if (!row[0] || !row[4]) return null
@@ -6784,39 +6755,15 @@ function adminTodoFromSheetRow(row: string[]): AdminTodoRecord | null {
   }
 }
 
-async function adminTodosFromGoogleSheet(owner?: { creatorUid: string; creatorName: string }) {
+async function adminTodosFromGoogleSheet() {
   const sheet = await ensureJdrSheet("admin_todos")
   if (!sheet) throw new Error("TODOS_SHEET_UNAVAILABLE")
   const read = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, todoSheetHeaders)
-  const existingRecords = read.rows.map((row) => adminTodoFromSheetRow(canonicalRow(read.columns, row))).filter((todo): todo is AdminTodoRecord => Boolean(todo))
-  if (!owner) return existingRecords
-
-  const existingSheetIds = new Set(existingRecords.map((todo) => todo.id))
-  const baseTime = Date.now()
-  const missingRecords: AdminTodoRecord[] = requestedAdminTodoSeed.filter((todo) => !existingSheetIds.has(todo.id)).map((todo, index) => {
-    const createdAt = new Date(baseTime + index).toISOString()
-    return { ...todo, creatorUid: owner.creatorUid, creatorName: owner.creatorName, completed: "non", createdAt, updatedAt: createdAt, deletedAt: null }
-  })
-  if (missingRecords.length) {
-    const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read.columns)
-    await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, missingRecords.map(todoRow)))
-  }
-  let records = [...existingRecords, ...missingRecords]
-  const db = getDb()
-  const [roadmapSynced] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, DELIVERED_ROADMAP_SYNC_KEY)).limit(1)
-  if (!roadmapSynced) {
-    const now = new Date().toISOString()
-    for (const todo of records.filter((record) => deliveredRoadmapTodoIds.has(record.id) && record.completed !== "oui")) {
-      await updateTodoSheetRow({ ...todo, completed: "oui", updatedAt: now })
-    }
-    records = records.map((todo) => deliveredRoadmapTodoIds.has(todo.id) ? { ...todo, completed: "oui", updatedAt: now } : todo)
-    await db.insert(sheetIndexSyncs).values({ key: DELIVERED_ROADMAP_SYNC_KEY, syncedAt: now }).onConflictDoNothing()
-  }
-  return records
+  return read.rows.map((row) => adminTodoFromSheetRow(canonicalRow(read.columns, row))).filter((todo): todo is AdminTodoRecord => Boolean(todo))
 }
 
-export async function listAdminTodos(owner?: { creatorUid: string; creatorName: string }) {
-  const records = await adminTodosFromGoogleSheet(owner)
+export async function listAdminTodos() {
+  const records = await adminTodosFromGoogleSheet()
   return records.filter((todo) => !todo.deletedAt).sort((left, right) => left.completed.localeCompare(right.completed) || left.createdAt.localeCompare(right.createdAt)).slice(0, 200)
 }
 
@@ -6841,19 +6788,18 @@ export async function createAdminTodo(input: {
   const sheet = await ensureJdrSheet("admin_todos")
   if (!sheet) throw new Error("TODOS_SHEET_UNAVAILABLE")
   const columns = await todoColumns(sheet)
-  await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, [todoRow(todo)]))
+  await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row({ "ID": todo.id, "ID admin": todo.creatorUid, "Admin créateur": textCell(todo.creatorName), "Créée le": todo.createdAt, ...todoCells(todo) })])
   return todo
 }
 
 export async function updateAdminTodo(id: string, patch: Partial<Pick<AdminTodoRecord, "name" | "content" | "priority" | "label" | "labelColor" | "completed">>) {
-  const existing = await findAdminTodoInGoogleSheet(id)
-  if (!existing || existing.deletedAt) throw new Error("TODO_NOT_FOUND")
+  const found = await findAdminTodoInGoogleSheet(id)
+  if (!found || found.todo.deletedAt) throw new Error("TODO_NOT_FOUND")
   const values = { ...patch, updatedAt: new Date().toISOString() }
   if (values.content !== undefined && !values.content.trim()) throw new Error("INVALID_TODO_CONTENT")
   if (values.labelColor !== undefined && !/^#[0-9a-f]{6}$/i.test(values.labelColor)) values.labelColor = "#927640"
-  const updated = { ...existing, ...values } as AdminTodoRecord
-  await updateTodoSheetRow(updated)
-  return updated
+  await writeTodoCells(found, values)
+  return { ...found.todo, ...values } as AdminTodoRecord
 }
 
 /**
@@ -6946,9 +6892,9 @@ export async function describeOwners(cells: readonly string[], sessionToken?: st
 export async function softDeleteItem(kind: "todo" | "character" | "campaign", id: string) {
   const deletedAt = new Date().toISOString()
   if (kind === "todo") {
-    const todo = await findAdminTodoInGoogleSheet(id)
-    if (!todo) throw new Error("TODO_NOT_FOUND")
-    await updateTodoSheetRow({ ...todo, deletedAt, updatedAt: deletedAt })
+    const found = await findAdminTodoInGoogleSheet(id)
+    if (!found) throw new Error("TODO_NOT_FOUND")
+    await writeTodoCells(found, { deletedAt, updatedAt: deletedAt })
     return
   }
   // Une ligne de la feuille absente de l'index local y est d'abord recopiée : sinon la mise
@@ -6982,10 +6928,9 @@ export async function listTrash() {
 
 export async function restoreItem(kind: "todo" | "character" | "campaign", id: string) {
   if (kind === "todo") {
-    const todo = await findAdminTodoInGoogleSheet(id)
-    if (!todo) throw new Error("TODO_NOT_FOUND")
-    const updatedAt = new Date().toISOString()
-    await updateTodoSheetRow({ ...todo, deletedAt: null, updatedAt })
+    const found = await findAdminTodoInGoogleSheet(id)
+    if (!found) throw new Error("TODO_NOT_FOUND")
+    await writeTodoCells(found, { deletedAt: null, updatedAt: new Date().toISOString() })
   } else if (kind === "character") {
     await shareTrashState(kind, id, "restored")
     await ensureIndexedFromSheet(kind, id)
@@ -6998,20 +6943,36 @@ export async function restoreItem(kind: "todo" | "character" | "campaign", id: s
 }
 
 /**
- * Supprime la ligne d'un ID. Sa place est relue dans la feuille juste avant, puis sa case
- * ID est vérifiée : si elle ne porte pas cet ID, rien n'est supprimé.
+ * Supprime la ligne d'un ID. L'onglet est retrouvé d'abord ; la place de la ligne est relue
+ * dans la feuille et sa case ID vérifiée juste avant de supprimer : si elle ne porte pas cet
+ * ID, rien n'est supprimé. Rend false si l'ID n'est plus dans la feuille.
  */
 async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string) {
-  const rowNumber = await findSheetRowById(spreadsheetId, tabName, id)
-  if (!rowNumber) return
-  const columns = sheetColumns((await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1")]))[0]?.rows[0] ?? [], ["ID"])
-  const idColumn = columns.at("ID")
+  const { sheetId } = await tabGrid(spreadsheetId, tabName)
+  const [header] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1")])
+  const idColumn = sheetColumns(header?.rows[0] ?? [], ["ID"]).at("ID")
   if (idColumn < 0) throw new Error("SHEET_ROW_CHECK_FAILED")
+  const rowNumber = await findSheetRowById(spreadsheetId, tabName, id)
+  if (!rowNumber) return false
   const [check] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, `${columnName(idColumn + 1)}${rowNumber}`)])
   if (check?.startRow !== rowNumber || (check.rows[0]?.[0] ?? "").trim() !== id) throw new Error("SHEET_ROW_CHECK_FAILED")
-  const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`)
-  const sheetId = metadata.sheets?.find((sheet) => sheet.properties?.title === tabName)?.properties?.sheetId
-  if (sheetId === undefined) return
+  await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } }] }),
+  })
+  return true
+}
+
+/**
+ * Supprime la ligne `rowNumber` si sa case `header` porte encore `value`, relue juste avant :
+ * pour une feuille sans colonne ID, comme le vocabulaire (une entrée y est repérée par son titre).
+ */
+export async function deleteSheetRowWhere(spreadsheetId: string, tabName: string, rowNumber: number, header: string, value: string) {
+  const { sheetId } = await tabGrid(spreadsheetId, tabName)
+  const [head, line] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, "1:1"), sheetTabRange(tabName, `${rowNumber}:${rowNumber}`)])
+  const columns = sheetColumns(head?.rows[0] ?? [], [header])
+  const row = line?.startRow === rowNumber ? line.rows[0] ?? [] : []
+  if (rowNumber < 2 || columns.at(header) < 0 || columns.get(row, header).trim() !== value.trim()) throw new Error("SHEET_ROW_CHECK_FAILED")
   await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
     method: "POST",
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } }] }),
@@ -7020,10 +6981,9 @@ async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string
 
 export async function permanentlyDeleteItem(kind: "todo" | "character" | "campaign", id: string) {
   if (kind === "todo") {
-    const todo = await findAdminTodoInGoogleSheet(id)
-    if (!todo?.deletedAt) throw new Error("TODO_NOT_FOUND")
-    const source = await ensureJdrSheet("admin_todos")
-    await deleteSheetRow(source.spreadsheetId, source.tabName, id)
+    const found = await findAdminTodoInGoogleSheet(id)
+    if (!found?.todo.deletedAt) throw new Error("TODO_NOT_FOUND")
+    await deleteSheetRow(found.source.spreadsheetId, found.source.tabName, id)
   } else if (kind === "character") {
     // Seulement ce qui est à la corbeille : une suppression définitive ne touche jamais une
     // fiche en service, même si on la demande par erreur.
