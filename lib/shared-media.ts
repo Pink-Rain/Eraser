@@ -3,6 +3,7 @@ import { env } from "cloudflare:workers"
 import {
   downloadDriveFile,
   driveFolderWithLegacy,
+  findDriveFolderByName,
   findDriveFileByName,
   listDriveFolderFiles,
   trashDriveFile,
@@ -40,11 +41,15 @@ function cacheKey(key: string, modifiedTime: string) {
   return `${key}@${modifiedTime.replace(/[^0-9A-Za-z]/g, "")}`
 }
 
+/** Le dossier où les visuels ont toujours été rangés faute de « Eraser - Visuels ». */
+const LEGACY_MEDIA_FOLDER = "Images Classe"
+let legacyMediaFolderId: Promise<string | null> | null = null
+
 async function folderId() {
   if (!mediaFolderId) {
     // Faute de dossier « Eraser - Visuels », les visuels sont dans « Images classes » depuis
     // toujours : on continue d'y lire et d'y écrire (un dossier neuf, vide, les aurait cachés).
-    mediaFolderId = driveFolderWithLegacy(MEDIA_FOLDER, "Images Classe").catch((error) => {
+    mediaFolderId = driveFolderWithLegacy(MEDIA_FOLDER, LEGACY_MEDIA_FOLDER).catch((error) => {
       mediaFolderId = null
       throw error
     })
@@ -56,10 +61,25 @@ async function folderId() {
 // otherwise make twenty separate Drive searches on a cold cache.
 let folderListing: { expiresAt: number; listedAt: number; byName: Promise<Map<string, MediaPointer>> } | null = null
 
+/**
+ * Les dossiers où chercher un visuel : le sien, puis l'ancien s'il est différent. Un dossier
+ * « Eraser - Visuels » créé à la main (vide, ou rempli à moitié) ne cache aucun visuel.
+ */
+async function mediaFolders() {
+  legacyMediaFolderId ??= findDriveFolderByName(LEGACY_MEDIA_FOLDER).then((folder) => folder?.id ?? null).catch(() => {
+    legacyMediaFolderId = null
+    return null
+  })
+  const [own, legacy] = await Promise.all([folderId(), legacyMediaFolderId])
+  return legacy && legacy !== own ? [own, legacy] : [own]
+}
+
 async function listingByName() {
   if (folderListing && folderListing.expiresAt > Date.now()) return folderListing.byName
-  const byName = listDriveFolderFiles(await folderId())
-    .then((files) => new Map(files.map((file) => [file.name, {
+  const byName = mediaFolders()
+    .then((folders) => Promise.all(folders.map((folder) => listDriveFolderFiles(folder))))
+    // Le dossier du visuel l'emporte sur l'ancien, qui ne fait que compléter.
+    .then((listings) => new Map(listings.reverse().flat().map((file) => [file.name, {
       fileId: file.id,
       modifiedTime: file.modifiedTime || "",
       contentType: file.mimeType || "image/*",
@@ -72,6 +92,15 @@ async function listingByName() {
   return byName
 }
 
+/** Un visuel cherché par son nom dans son dossier, puis dans l'ancien. */
+async function findInMediaFolders(name: string) {
+  for (const folder of await mediaFolders()) {
+    const file = await findDriveFileByName(folder, name)
+    if (file) return file
+  }
+  return null
+}
+
 async function pointerFor(key: string) {
   const cached = pointerCache.get(key)
   if (cached && cached.expiresAt > Date.now()) return cached.pointer
@@ -81,13 +110,13 @@ async function pointerFor(key: string) {
     pointer = (await listingByName()).get(name) ?? null
     // La liste du dossier a plus d'une minute : le média a pu être ajouté depuis.
     if (!pointer && folderListing && Date.now() - folderListing.listedAt > MISSING_TTL_MS) {
-      const file = await findDriveFileByName(await folderId(), name).catch(() => null)
+      const file = await findInMediaFolders(name).catch(() => null)
       if (file) pointer = { fileId: file.id, modifiedTime: file.modifiedTime || "", contentType: file.mimeType || "image/*" }
     }
   } catch {
     // Listing unavailable (folder too large to cache, transient failure):
     // fall back to a direct search for this one file.
-    const file = await findDriveFileByName(await folderId(), name)
+    const file = await findInMediaFolders(name)
     pointer = file
       ? { fileId: file.id, modifiedTime: file.modifiedTime || "", contentType: file.mimeType || "image/*" }
       : null
