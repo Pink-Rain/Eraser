@@ -520,7 +520,8 @@ export function RichTextInlineEditor({ html, fallback, canEdit, onSave, classNam
 
   async function save() {
     setPending(true)
-    await onSave(draft.current)
+    // Un enregistrement refusé laisse l'éditeur ouvert : le texte saisi n'est pas perdu.
+    try { await onSave(draft.current) } catch { setPending(false); return }
     setPending(false)
     setEditing(false)
     setReady(false)

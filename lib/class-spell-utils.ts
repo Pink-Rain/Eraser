@@ -158,3 +158,55 @@ export function classSpellState(spells: ClassSpell[], classId: string): ClassSpe
     unfinishedSpells: ranks.flatMap((rank) => rank.unfinished),
   }
 }
+
+/**
+ * Le JSON des sorts choisis d'une fiche (« Sorts de classe choisis JSON ») où des ID de
+ * sorts sont remplacés (`mapping` : ancien → nouveau), après une fusion. Seuls les ID
+ * changent : choix de rang, listes (ajouts, ordre, retraits) et clés par sort (charges,
+ * versions personnelles) ; tout le reste est gardé tel quel. Si l'ancien et le nouveau
+ * sort y figuraient tous deux, ce qui vaut pour le nouveau l'emporte, et il ne reste
+ * retiré de la fiche que si aucun des sorts réunis n'y était actif. Un JSON illisible,
+ * ou que rien ne change, est rendu tel quel.
+ */
+export function remapSpellChoiceIds(value: string, mapping: ReadonlyMap<string, string>) {
+  let parsed: unknown
+  try { parsed = JSON.parse(value) } catch { return value }
+  const isRecord = (item: unknown): item is Record<string, unknown> => Boolean(item) && typeof item === "object" && !Array.isArray(item)
+  if (!isRecord(parsed)) return value
+  const state: Record<string, unknown> = { ...parsed }
+  const rename = (id: unknown) => typeof id === "string" ? mapping.get(id) ?? id : id
+  const list = (key: string) => Array.isArray(state[key]) ? state[key] as unknown[] : null
+  // Actif : choisi à un rang ou ajouté à la main, sans avoir été retiré.
+  const removedBefore = new Set(list("removed") ?? [])
+  const chosen = isRecord(state.choices) ? Object.values(state.choices).flatMap((ranks) => isRecord(ranks) ? Object.values(ranks) : []) : []
+  const activeBefore = new Set([...(list("extras") ?? []), ...chosen].filter((id) => !removedBefore.has(id)))
+  if (isRecord(state.choices)) {
+    state.choices = Object.fromEntries(Object.entries(state.choices).map(([classId, ranks]) => [classId, isRecord(ranks) ? Object.fromEntries(Object.entries(ranks).map(([rank, id]) => [rank, rename(id)])) : ranks]))
+  }
+  for (const key of ["charges", "edits"]) {
+    const byId = state[key]
+    if (!isRecord(byId)) continue
+    const next = new Map<string, unknown>()
+    // Les charges et la version personnelle du sort gardé l'emportent sur celles d'un sort fusionné.
+    for (const [id, item] of Object.entries(byId)) {
+      const target = mapping.get(id) ?? id
+      if (!next.has(target) || target === id) next.set(target, item)
+    }
+    state[key] = Object.fromEntries(next)
+  }
+  for (const key of ["extras", "order"]) {
+    const items = list(key)
+    if (items) state[key] = [...new Set(items.map(rename))]
+  }
+  const removed = list("removed")
+  if (removed) {
+    const targets = new Set(mapping.values())
+    state.removed = [...new Set(removed.map(rename))].filter((id) => {
+      if (typeof id !== "string" || !targets.has(id)) return true
+      const sources = [id, ...[...mapping].flatMap(([from, to]) => to === id ? [from] : [])]
+      return !sources.some((source) => activeBefore.has(source))
+    })
+  }
+  const next = JSON.stringify(state)
+  return next === JSON.stringify(parsed) ? value : next
+}

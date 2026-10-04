@@ -7,14 +7,29 @@
 
 type Tab = { sheetId: number; title: string; grid: string[][]; columnCount: number; rowCount: number }
 type Spreadsheet = { tabs: Tab[] }
+/** Un fichier du Drive, pour les recherches par nom, type et dossier (files.list). */
+type DriveEntry = { id: string; name: string; mimeType: string; parents?: string[] }
 
-export const world = { files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false, enteredCells: [] as unknown[][] }
+export const world = {
+  files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false,
+  /** Les valeurs typées reçues par updateCells (formule, nombre, texte…), ligne par ligne. */
+  enteredCells: [] as unknown[][],
+  /** Chaque requête, adresse complète (paramètres compris) et corps. */
+  calls: [] as Array<{ method: string; url: string; body: unknown }>,
+  /** Vide : le Drive répond « introuvable », comme avant. */
+  drive: [] as DriveEntry[],
+  /** Onglets dont la lecture des valeurs échoue (Google refuse). */
+  failTabs: [] as string[],
+}
 
 export function reset() {
   world.files.clear()
   world.requests.length = 0
   world.reverseFilteredReads = false
   world.enteredCells.length = 0
+  world.calls.length = 0
+  world.drive.length = 0
+  world.failTabs.length = 0
 }
 
 export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>) {
@@ -120,6 +135,7 @@ function handleSheets(path: string, init: RequestInit) {
   const method = (init.method ?? "GET").toUpperCase()
   const body = init.body ? JSON.parse(String(init.body)) : {}
   world.requests.push(`${method} ${decodeURIComponent(url.pathname.replace(/^\/v4\/spreadsheets\/[^/]+/, ""))}${idAction ? `:${idAction}` : ""}`)
+  world.calls.push({ method, url: decodeURIComponent(url.href), body })
 
   if (!rest.length && idAction === "batchUpdate") {
     const replies: unknown[] = []
@@ -164,12 +180,16 @@ function handleSheets(path: string, init: RequestInit) {
       } else if (request.updateCells) {
         const { sheetId, startRowIndex, startColumnIndex } = request.updateCells.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
-        // Comme une lecture FORMATTED_VALUE en anglais : 12 → « 12 », vrai → « TRUE » ; une formule reste écrite.
-        const shown = (value?: { stringValue?: string; numberValue?: number; boolValue?: boolean; formulaValue?: string }) => value?.stringValue ?? value?.formulaValue ?? (value?.numberValue !== undefined ? String(value.numberValue) : value?.boolValue !== undefined ? (value.boolValue ? "TRUE" : "FALSE") : "")
-        const rows = request.updateCells.rows as Array<{ values: Array<{ userEnteredValue?: Parameters<typeof shown>[0] }> }>
-        world.enteredCells.push(...rows.map((row) => row.values.map((cell) => cell.userEnteredValue)))
-        const values = rows.map((row) => row.values.map((cell) => shown(cell.userEnteredValue)))
-        writeArea({ tab, top: startRowIndex, left: startColumnIndex, bottom: Infinity, right: Infinity, quoted: `'${tab.title}'` }, values)
+        // Comme Google : seuls les champs nommés dans `fields` changent (une couleur seule ne vide pas la case).
+        const fields = String(request.updateCells.fields ?? "userEnteredValue").split(",").map((field) => field.trim())
+        if (fields.some((field) => field === "*" || field.startsWith("userEnteredValue"))) {
+          // Comme une lecture FORMATTED_VALUE en anglais : 12 → « 12 », vrai → « TRUE » ; une formule reste écrite.
+          type Entered = { stringValue?: string; numberValue?: number; boolValue?: boolean; formulaValue?: string }
+          const shown = (value?: Entered) => value?.stringValue ?? value?.formulaValue ?? (value?.numberValue !== undefined ? String(value.numberValue) : value?.boolValue !== undefined ? (value.boolValue ? "TRUE" : "FALSE") : "")
+          const rows = request.updateCells.rows as Array<{ values: Array<{ userEnteredValue?: Entered }> }>
+          world.enteredCells.push(...rows.map((row) => row.values.map((cell) => cell.userEnteredValue)))
+          writeArea({ tab, top: startRowIndex, left: startColumnIndex, bottom: Infinity, right: Infinity, quoted: `'${tab.title}'` }, rows.map((row) => row.values.map((cell) => shown(cell.userEnteredValue))))
+        }
       }
       replies.push({})
     }
@@ -197,6 +217,7 @@ function handleSheets(path: string, init: RequestInit) {
     return json({ valueRanges: url.searchParams.getAll("ranges").map((range) => { const area = parseRange(file, range); return { range: areaName(area), values: readArea(area) } }) })
   }
   if (action === "batchGetByDataFilter") {
+    if ((body.dataFilters as Array<{ a1Range: string }>).some((filter) => world.failTabs.includes(parseRange(file, filter.a1Range).tab.title))) return json({ error: { message: "The caller does not have permission" } }, 403)
     // Comme Google : chaque réponse rappelle le filtre qui l'a trouvée, et l'ordre des
     // réponses n'est pas garanti (`reverseFilteredReads` les rend à l'envers).
     const valueRanges = (body.dataFilters as Array<{ a1Range: string }>).map((filter) => { const area = parseRange(file, filter.a1Range); return { valueRange: { range: `${area.quoted}!${letterOf(area.left === Infinity ? 0 : area.left)}${area.top + 1}:${letterOf(Math.min(area.right, area.tab.columnCount - 1))}${Math.min(area.bottom + 1, area.tab.rowCount)}`, values: readArea(area) }, dataFilters: [filter] } })
@@ -227,11 +248,23 @@ function handleSheets(path: string, init: RequestInit) {
     const updatedRange = writeArea(area, entered(url.searchParams.get("valueInputOption") === "RAW", body.values))
     return json({ updatedRange, updatedData: { range: updatedRange, values: readArea({ ...area, bottom: area.top + body.values.length - 1 }) } })
   }
+  if (world.failTabs.includes(area.tab.title)) return json({ error: { message: "The caller does not have permission" } }, 403)
   return json({ range: areaName(area), values: readArea(area) })
+}
+
+/** Les fichiers du Drive qui répondent à une recherche : nom exact, types, dossier parent. */
+function handleDriveList(url: URL) {
+  const query = url.searchParams.get("q") ?? ""
+  const name = /name = '((?:[^'\\]|\\.)*)'/.exec(query)?.[1]?.replace(/\\(.)/g, "$1")
+  const mimeTypes = [...query.matchAll(/mimeType = '([^']+)'/g)].map((match) => match[1])
+  const parent = /'([^']+)' in parents/.exec(query)?.[1]
+  const files = world.drive.filter((file) => (name === undefined || file.name === name) && (!mimeTypes.length || mimeTypes.includes(file.mimeType)) && (!parent || (file.parents ?? []).includes(parent)))
+  return json({ files: files.map((file) => ({ ...file, webViewLink: `https://docs.google.com/spreadsheets/d/${file.id}/edit` })) })
 }
 
 export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit = {}) {
   if (url.startsWith("https://sheets.googleapis.com/v4/")) return handleSheets(url.slice("https://sheets.googleapis.com/v4/".length), init)
+  if (world.drive.length && url.startsWith("https://www.googleapis.com/drive/v3/files?")) return handleDriveList(new URL(url))
   return json({ error: { message: "FAKE_NOT_FOUND" } }, 404)
 }
 
