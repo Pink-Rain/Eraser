@@ -20,6 +20,7 @@ import { parseCharacterStates, type CharacterState } from "@/lib/character-state
 import { classSpellActionKind, classSpellCategory, splitClassSpellSkills } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
+import { parseListCell } from "@/lib/multiple-values"
 
 const categoryTone = { actif: { background: "#7f1d1d", foreground: "#fff7ed" }, passif: { background: "#315b55", foreground: "#f0fdfa" }, bonus: { background: "#795a12", foreground: "#fffbeb" } }
 
@@ -106,12 +107,7 @@ function mergeSpellEdit(original: ClassSpell, current: CharacterSpellEdit | unde
 }
 
 export function selectedCharacterClasses(value: string, classes: ClassRecord[]) {
-  let names: string[] = []
-  try {
-    const parsed = JSON.parse(value)
-    if (Array.isArray(parsed)) names = parsed.filter((item): item is string => typeof item === "string")
-    else if (parsed && Array.isArray(parsed.values)) names = parsed.values.filter((item: unknown): item is string => typeof item === "string")
-  } catch { names = value ? [value] : [] }
+  const names = parseListCell(value).entries
   return classes.filter((item) => names.some((name) => normalizeClassLabel(name) === normalizeClassLabel(item.name) || name === item.id))
 }
 

@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { deleteColumnPreset, deleteIndexView, listColumnPresets, listIndexLayouts, listIndexViews, saveColumnPreset, saveIndexLayouts, saveIndexView } from "@/lib/index-settings"
+import { deleteColumnPreset, deleteIndexView, listColumnPresets, listIndexViews, saveColumnPreset, saveIndexView } from "@/lib/index-settings"
+import { listIndexLayouts, saveIndexLayouts } from "@/lib/index-layouts-store"
 import { parseIndexLayout } from "@/lib/index-layouts"
 import type { PresetColumn } from "@/lib/index-presets"
 import type { ViewCondition } from "@/lib/index-views"
@@ -13,6 +14,8 @@ const messages: Record<string, string> = {
   INDEX_PRESET_EMPTY: "Ce preset n’a aucune colonne à garder (le Nom et l’ID sont déjà dans chaque onglet).",
   INDEX_PRESET_NOT_FOUND: "Ce preset n’existe plus.",
   INDEX_LAYOUT_INVALID: "Cette mise en page n’a pas pu être lue.",
+  INDEX_LAYOUTS_UNAVAILABLE: "Les mises en page se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
+  INDEX_LAYOUT_TOO_LARGE: "Cette mise en page est trop grande pour être enregistrée : retire quelques sections ou lignes.",
 }
 
 /** Onglets-fenêtres et mises en page d'un index (`index`), et presets d'onglets, pour les MJ et administrateurs. */
@@ -37,7 +40,13 @@ export async function POST(request: Request) {
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
       const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover) }))
-      return NextResponse.json({ layouts: await saveIndexLayouts(String(body.index ?? ""), changes) })
+      try {
+        return NextResponse.json({ layouts: await saveIndexLayouts(String(body.index ?? ""), changes) })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_LAYOUTS_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "La mise en page n’a pas pu être enregistrée sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
     }
     if (body.action === "save-view") {
       const id = await saveIndexView({ id: body.id, index: String(body.index ?? ""), name: String(body.name ?? ""), source: String(body.source ?? "*"), match: body.match === "une" ? "une" : "toutes", conditions: Array.isArray(body.conditions) ? body.conditions : [] })

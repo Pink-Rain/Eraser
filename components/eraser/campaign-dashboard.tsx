@@ -15,6 +15,7 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import type { CampaignMemberRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
+import { parseListCell } from "@/lib/multiple-values"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="min-h-32 animate-pulse rounded-2xl border border-dashed bg-muted/20" />,
@@ -42,22 +43,6 @@ function DeferredCampaignInventory({ campaignId, readOnly }: { campaignId: strin
     return () => observer.disconnect()
   }, [])
   return <div ref={anchorRef} className="min-h-32">{visible && <CharacterInventory characterId={campaignId} endpoint={`/api/campaigns/${encodeURIComponent(campaignId)}/inventory`} flat readOnly={readOnly} />}</div>
-}
-
-function parseMultiple(value: string) {
-  if (!value) return { entries: [] as string[], selected: "" }
-  try {
-    const parsed = JSON.parse(value)
-    if (Array.isArray(parsed)) {
-      const entries = parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim()))
-      return { entries, selected: entries[0] || "" }
-    }
-    if (parsed && Array.isArray(parsed.values)) {
-      const entries = parsed.values.filter((item: unknown): item is string => typeof item === "string" && Boolean(item.trim()))
-      return { entries, selected: typeof parsed.selected === "string" ? parsed.selected : entries[0] || "" }
-    }
-  } catch { /* ancienne valeur simple */ }
-  return { entries: [value], selected: value }
 }
 
 export function CampaignDashboard({
@@ -258,9 +243,9 @@ export function CampaignDashboard({
           <div className="mt-6 grid gap-4 md:grid-cols-2 xl:grid-cols-3">
             {members.length ? members.map((character) => {
               const canOpen = canManage || (ownedCharacterIds.includes(character.id) && selectedCharacterId === character.id)
-              const people = parseMultiple(character.people).entries.join(" · ")
-              const classes = parseMultiple(character.classes).entries.join(" · ")
-              const honoraryTitle = parseMultiple(character.honoraryTitle).selected
+              const people = parseListCell(character.people).entries.join(" · ")
+              const classes = parseListCell(character.classes).entries.join(" · ")
+              const honoraryTitle = parseListCell(character.honoraryTitle).selected
               const classAndLevel = [classes, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
               return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}

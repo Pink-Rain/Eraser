@@ -15,6 +15,8 @@ export function googleDriveFileId(value: string) {
 }
 
 export function classImageUrl(value: string) {
+  // Une image importée dans Eraser (index) : son adresse locale telle quelle.
+  if (/^\/api\/resources\/index-images\/[\w-]+/.test(value.trim())) return value.trim()
   const driveFileId = googleDriveFileId(value)
   if (driveFileId) return `/api/classes/images/${encodeURIComponent(driveFileId)}`
 

@@ -722,8 +722,9 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
     return { kind: "rich" }
   }
   if (index === "classes") {
-    // L'image est souvent une formule =IMAGE(…) : la réécrire en texte l'effacerait.
-    if (is("Image")) return { kind: "archived" }
+    // Une vraie colonne Image : la case montre l'image actuelle de la classe (formule
+    // =IMAGE, image dans la cellule ou fichier du Drive) ; en importer une la remplace.
+    if (is("Image")) return { kind: "file", file: { accept: "image" }, description: "L’image de la classe. Importer une image (ou coller une adresse) la remplace dans la case." }
     if (is("Type")) return { kind: "choice", options: classTypeValues.map((value) => ({ value })) }
     if (is("Difficulté")) return { kind: "choice", options: classDifficultyValues.map((value) => ({ value })) }
     if (is("Couleur d’accent sombre", "Couleur d’accent clair")) return { kind: "color" }

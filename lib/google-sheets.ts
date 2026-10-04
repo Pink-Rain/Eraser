@@ -29,7 +29,7 @@ import {
 import { runInBackground } from "@/lib/background-work"
 import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectCombatHeaders } from "@/lib/object-combat"
 import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
-import { foldName, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { traced } from "@/lib/perf-trace"
@@ -1970,7 +1970,7 @@ async function listCharactersForUserUncached(uid: string) {
         const id = columns.get(row, "ID")
         const ownerUid = columns.get(row, "Joueur")
         if (!id || !identityUids.includes(ownerUid)) continue
-        const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: columns.get(row, "Peuple"), updatedAt: new Date().toISOString() }
+        const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"), updatedAt: new Date().toISOString() }
         await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: { ...fields, deletedAt: null } })
       }
     }
@@ -2152,7 +2152,9 @@ async function loadClassesFromGoogle() {
         id: cell("ID"),
         type,
         name: cell("Nom de la classe"),
-        image: imageNote || nativeImageUrl || cell("Image"),
+        // Une image importée ou collée dans la case (texte) l'emporte sur l'ancienne note
+        // du Drive et sur l'image de la cellule : c'est le dernier choix fait à la main.
+        image: (isImageSource(cell("Image")) ? cell("Image").trim() : "") || imageNote || nativeImageUrl || cell("Image"),
         keywords: [cell("Mots-clés 1"), cell("Mots-clés 2"), cell("Mots-clés 3")],
         difficulty: classDifficulties.includes(cell("Difficulté") as ClassDifficulty)
           ? (cell("Difficulté") as ClassDifficulty)
@@ -3448,7 +3450,7 @@ export async function syncExistingIdentityIndexes() {
     const next = {
       ownerUid: columns.get(row, "Joueur"),
       name: columns.get(row, "Nom personnage") || "Personnage sans nom",
-      subtitle: columns.get(row, "Peuple"),
+      subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"),
     }
     const current = characterById.get(id)
     if (current
@@ -3457,8 +3459,12 @@ export async function syncExistingIdentityIndexes() {
       && current.name === next.name
       && current.subtitle === next.subtitle) continue
     // La feuille n'a pas de date de modification : celle de l'index local avance seulement quand la fiche change.
-    await db.insert(characterIndex).values({ id, ...next, updatedAt: now, deletedAt: null })
-      .onConflictDoUpdate({ target: characterIndex.id, set: { ...next, updatedAt: now } })
+    // Un ancien sous-titre en JSON (`["Elfe"]`) réécrit en clair n'est pas un changement de la fiche.
+    const sameSheet = current && !current.deletedAt && current.ownerUid === next.ownerUid && current.name === next.name
+      && displayedMultipleValue(current.subtitle ?? "", "all") === next.subtitle
+    const updatedAt = sameSheet ? current.updatedAt : now
+    await db.insert(characterIndex).values({ id, ...next, updatedAt, deletedAt: null })
+      .onConflictDoUpdate({ target: characterIndex.id, set: { ...next, updatedAt } })
   }
 
   for (const link of relationLinks) {
@@ -4640,16 +4646,9 @@ export async function saveTabletopActivity(activity: TabletopActivityRecord) {
   return activity
 }
 
-/** Une cellule « Classe » de la fiche : texte simple, liste JSON ou { values: [...] }. */
+/** Une cellule « Classe » de la fiche (« A · B », ou ancien JSON) : les classes séparées par « · ». */
 export function formatCharacterClasses(value: string) {
-  const raw = value.trim()
-  if (!raw) return ""
-  try {
-    const parsed = JSON.parse(raw) as unknown
-    const list = Array.isArray(parsed) ? parsed : parsed && typeof parsed === "object" && Array.isArray((parsed as { values?: unknown }).values) ? (parsed as { values: unknown[] }).values : null
-    if (list) return list.filter((item): item is string => typeof item === "string" && Boolean(item.trim())).join(" · ")
-  } catch { /* texte simple */ }
-  return raw
+  return displayedMultipleValue(value, "all")
 }
 
 /**

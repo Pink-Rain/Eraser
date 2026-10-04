@@ -22,7 +22,7 @@ import {
   type ResolvedReference,
 } from "@/lib/index-references"
 import { arrangeLayout, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
-import { listIndexLayouts } from "@/lib/index-settings"
+import { listIndexLayouts } from "@/lib/index-layouts-store"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { isBuiltinWorldIndexKey, isEntityWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"

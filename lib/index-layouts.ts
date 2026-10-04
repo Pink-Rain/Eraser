@@ -12,7 +12,8 @@
  * disparaît simplement de la mise en page.
  *
  * Sans dépendance : l'éditeur, la fiche et la résolution des références (serveur) s'en
- * servent. Gardé en JSON dans « Eraser · Réglages des index », onglet « Mises en page ».
+ * servent. Gardé sur le serveur partagé d'Eraser (lib/index-layouts-store.ts), jamais dans
+ * Google Sheets.
  */
 import { foldName } from "@/lib/index-columns"
 

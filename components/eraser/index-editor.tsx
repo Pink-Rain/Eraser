@@ -1060,12 +1060,18 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         {layoutError && <p className="mb-1 text-destructive">{layoutError}</p>}
         <div className="flex items-center gap-2">
           <Settings2 className="size-3.5 shrink-0" />
-          <span className="font-semibold">{operations.length + layoutChanges.length ? `${operations.length + layoutChanges.length} changement${operations.length + layoutChanges.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "Aucun changement pour l’instant"}</span>
+          <span className="font-semibold">{operations.length + layoutChanges.length
+            ? [
+              operations.length ? `${operations.length} changement${operations.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "",
+              // Les mises en page sont des réglages d'Eraser : gardées sur son serveur partagé, pas dans Sheets.
+              layoutChanges.length ? `${layoutChanges.length} mise${layoutChanges.length > 1 ? "s" : ""} en page à enregistrer dans Eraser (pour tout le monde)` : "",
+            ].filter(Boolean).join(" · ")
+            : "Aucun changement pour l’instant"}</span>
           {operations.length + layoutChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
         </div>
         {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">
           {operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}
-          {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » : {!change.form && !change.hover ? "affichage automatique" : [change.form ? "fiche personnalisée" : "fiche automatique", change.hover ? "survol personnalisé" : "survol automatique"].join(", ")}</li>)}
+          {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » (dans Eraser) : {!change.form && !change.hover ? "affichage automatique" : [change.form ? "fiche personnalisée" : "fiche automatique", change.hover ? "survol personnalisé" : "survol automatique"].join(", ")}</li>)}
         </ul>}
       </div>
       <DialogFooter className="shrink-0 sm:justify-between">

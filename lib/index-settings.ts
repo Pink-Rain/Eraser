@@ -1,6 +1,5 @@
 /**
- * Les réglages partagés des index : onglets-fenêtres, presets d'onglets et mises en page
- * (fiche et survol de chaque onglet). Ils vivent
+ * Les réglages partagés des index : onglets-fenêtres et presets d'onglets. Ils vivent
  * dans un classeur du Drive, « Eraser · Réglages des index », lisible et modifiable dans
  * Sheets, partagé par toutes les installations.
  *
@@ -15,15 +14,12 @@ import { sheetColumns, type SheetCell, type SheetColumns } from "@/lib/sheet-col
 import { newIndexId } from "@/lib/index-columns"
 import { parsePresetColumns, presetColumnsOf, type ColumnPreset, type PresetColumn } from "@/lib/index-presets"
 import { parseViewConditions, type IndexView, type ViewCondition } from "@/lib/index-views"
-import { parseIndexLayout, serializeIndexLayout, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
 
 const SETTINGS_NAME = "Eraser · Réglages des index"
 const VIEWS_TAB = "Onglets-fenêtres"
 const PRESETS_TAB = "Presets"
 const VIEW_HEADERS = ["ID", "Index", "Nom", "Source", "Conditions (JSON)", "Toutes ou une", "Ordre", "Modifié le", "Supprimé le"]
 const PRESET_HEADERS = ["ID", "Nom", "Description", "Colonnes (JSON)", "Modifié le", "Supprimé le"]
-const LAYOUTS_TAB = "Mises en page"
-const LAYOUT_HEADERS = ["ID", "Index", "Onglet", "Fiche (JSON)", "Survol (JSON)", "Modifié le", "Supprimé le"]
 
 let workbookCache: { expiresAt: number; id: string | null } | null = null
 
@@ -41,7 +37,7 @@ async function settingsWorkbook(create: boolean) {
 /** Les deux onglets et leurs en-têtes ; le premier onglet vide d'un classeur neuf est réutilisé. */
 async function ensureTabs(id: string) {
   const tabs = await spreadsheetTabs(id)
-  for (const [name, headers] of [[VIEWS_TAB, VIEW_HEADERS], [PRESETS_TAB, PRESET_HEADERS], [LAYOUTS_TAB, LAYOUT_HEADERS]] as const) {
+  for (const [name, headers] of [[VIEWS_TAB, VIEW_HEADERS], [PRESETS_TAB, PRESET_HEADERS]] as const) {
     if (tabs.some((tab) => tab.title === name)) continue
     const blank = tabs.find((tab) => /^(Feuille|Sheet)\s*1$/i.test(tab.title))
     if (blank?.sheetId !== undefined) {
@@ -167,83 +163,4 @@ export async function deleteColumnPreset(presetId: string) {
   if (!id || index < 0) throw new Error("INDEX_PRESET_NOT_FOUND")
   await updateRanges(id, canonicalWrites(PRESETS_TAB, columns, `F${index + 2}:F${index + 2}`, [[new Date().toISOString()]]), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(id)
-}
-
-// ---------- Mises en page (fiche et survol) ----------
-
-/**
- * Toutes les mises en page, gardées 30 secondes : le survol des références les lit à
- * chaque résolution. Un enregistrement d'ici les relit aussitôt.
- */
-let layoutsCache: { expiresAt: number; promise: Promise<Map<string, Record<string, TabLayouts>>> } | null = null
-
-function layoutKey(index: string) {
-  return index.trim()
-}
-
-async function readAllLayouts() {
-  const { rows } = await rowsOf(LAYOUTS_TAB, LAYOUT_HEADERS)
-  const result = new Map<string, Record<string, TabLayouts>>()
-  for (const row of rows) {
-    const index = row[1]?.trim()
-    const tab = row[2]?.trim()
-    if (!row[0]?.trim() || !index || !tab || row[6]?.trim()) continue
-    const form = parseIndexLayout(row[3] ?? "")
-    const hover = parseIndexLayout(row[4] ?? "")
-    if (!form && !hover) continue
-    const entry = result.get(layoutKey(index)) ?? {}
-    entry[tab] = { ...(form ? { form } : {}), ...(hover ? { hover } : {}) }
-    result.set(layoutKey(index), entry)
-  }
-  return result
-}
-
-function allLayouts(fresh = false) {
-  if (!fresh && layoutsCache && layoutsCache.expiresAt > Date.now()) return layoutsCache.promise
-  const promise = readAllLayouts()
-  layoutsCache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (layoutsCache?.promise === promise) layoutsCache = null })
-  return promise
-}
-
-/** Les mises en page d'un index, par onglet. Aucune s'il n'y a pas encore de classeur de réglages. */
-export async function listIndexLayouts(index: string): Promise<Record<string, TabLayouts>> {
-  return (await allLayouts()).get(layoutKey(index)) ?? {}
-}
-
-/** La mise en page d'un onglet (fiche ou survol), ou null : l'affichage automatique. */
-export async function indexTabLayout(index: string, tab: string, kind: keyof TabLayouts): Promise<IndexLayout | null> {
-  const layouts = await listIndexLayouts(index).catch(() => ({} as Record<string, TabLayouts>))
-  const found = Object.entries(layouts).find(([name]) => name.trim().toLocaleLowerCase("fr") === tab.trim().toLocaleLowerCase("fr"))
-  return found?.[1][kind] ?? null
-}
-
-/**
- * Enregistre les mises en page d'onglets d'un index. Une mise en page vide (`null`) revient
- * à l'affichage automatique : sa ligne est marquée « Supprimé le », jamais effacée.
- */
-export async function saveIndexLayouts(index: string, changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) {
-  const key = layoutKey(index)
-  if (!key) throw new Error("INDEX_LAYOUT_INVALID")
-  const clean = changes.filter((change) => change.tab.trim()).slice(0, 100)
-  if (!clean.length) return listIndexLayouts(index)
-  const { id, columns, rows } = await rowsOf(LAYOUTS_TAB, LAYOUT_HEADERS, true)
-  if (!id) throw new Error("INDEX_SETTINGS_UNAVAILABLE")
-  const now = new Date().toISOString()
-  const appended: string[][] = []
-  const writes: Array<{ range: string; values: SheetCell[][] }> = []
-  for (const change of clean) {
-    const tab = change.tab.replace(/\s+/g, " ").trim().slice(0, 100)
-    const form = serializeIndexLayout(change.form)
-    const hover = serializeIndexLayout(change.hover)
-    const existing = rows.findIndex((row) => row[1]?.trim() === key && row[2]?.trim().toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr") && !row[6]?.trim())
-    if (existing < 0 && !form && !hover) continue
-    const values = [existing >= 0 ? rows[existing][0].trim() : newIndexId("MEP"), key, tab, form, hover, now, form || hover ? "" : now]
-    if (existing >= 0) writes.push(...canonicalWrites(LAYOUTS_TAB, columns, `A${existing + 2}:${columnName(columns.expected.length)}${existing + 2}`, [values]))
-    else appended.push(values)
-  }
-  if (writes.length) await updateRanges(id, writes, { valueInputOption: "RAW" })
-  if (appended.length) await appendRows(id, namedAppendRange(LAYOUTS_TAB, columns), canonicalRows(columns, appended), { valueInputOption: "RAW" })
-  clearSpreadsheetReadCache(id)
-  return (await allLayouts(true)).get(key) ?? {}
 }

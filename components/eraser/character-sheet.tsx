@@ -81,6 +81,7 @@ import { rangeLabel, rollHits, signedDice } from "@/lib/state-change"
 import type { StateEffect } from "@/lib/character-states"
 import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
+import { parseListCell, serializeListCell } from "@/lib/multiple-values"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
@@ -157,23 +158,14 @@ function SelectEdit({ label, value, options, onCommit }: { label: string; value:
   </NativeSelect>
 }
 
-function parseMultiple(value: string): { entries: string[]; selected: string } {
-  if (!value) return { entries: [] as string[], selected: "" }
-  try {
-    const parsed = JSON.parse(value)
-    if (Array.isArray(parsed)) { const entries = parsed.filter((item): item is string => typeof item === "string" && Boolean(item.trim())); return { entries, selected: entries[0] || "" } }
-    if (parsed && Array.isArray(parsed.values)) { const entries = parsed.values.filter((item: unknown): item is string => typeof item === "string" && Boolean(item.trim())); return { entries, selected: typeof parsed.selected === "string" ? parsed.selected : entries[0] || "" } }
-  } catch { /* ancienne valeur simple */ }
-  return { entries: [value], selected: value }
-}
-
 function MultipleValues({ label, value, options, selectActive = false, onCommit }: { label: string; value: string; options?: Array<{ value: string; label: string }>; selectActive?: boolean; onCommit: (value: string) => Promise<void> }) {
-  const { entries, selected } = parseMultiple(value)
+  const { entries, selected } = parseListCell(value)
   const [draft, setDraft] = useState("")
   const [adding, setAdding] = useState(entries.length === 0)
-  function serialize(nextEntries: string[], nextSelected = selected) { return JSON.stringify(selectActive ? { values: nextEntries, selected: nextEntries.includes(nextSelected) ? nextSelected : nextEntries[0] || "" } : nextEntries) }
+  // Texte lisible dans la feuille (« A · B ») ; pour un titre, le titre choisi vient en premier.
+  function serialize(nextEntries: string[], nextSelected = selected) { return serializeListCell(nextEntries, selectActive ? nextSelected : undefined) }
   async function add(raw: string) {
-    const nextValue = raw.trim(); if (!nextValue || entries.includes(nextValue)) return
+    const nextValue = raw.replace(/\s*·\s*/g, " ").trim(); if (!nextValue || entries.includes(nextValue)) return
     await onCommit(serialize([...entries, nextValue], selected || nextValue)); setDraft(""); setAdding(false)
   }
   return <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5">{entries.map((entry) => <button key={entry} type="button" onClick={() => selectActive && onCommit(serialize(entries, entry))} className={`group/tag inline-flex max-w-full shrink items-center gap-1 rounded-full border px-2 py-1 text-xs ${selectActive && selected === entry ? "border-primary/60 bg-primary/15 text-primary" : "bg-background/55"}`} title={selectActive ? "Choisir comme titre affiché" : undefined}><span className="truncate">{options?.find((option) => option.value === entry)?.label || entry}</span><span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); void onCommit(serialize(entries.filter((item) => item !== entry))) }} className="shrink-0 text-muted-foreground opacity-50 hover:text-destructive hover:opacity-100" aria-label={`Retirer ${entry}`}><X className="size-3" /></span></button>)}{entries.length > 0 && !adding && <button type="button" onClick={() => setAdding(true)} className="flex size-6 shrink-0 items-center justify-center rounded-full border border-dashed text-muted-foreground hover:border-primary/50 hover:text-primary" aria-label={`Ajouter ${label}`}><Plus className="size-3.5" /></button>}</div>{adding && <div className="mt-1.5 flex gap-1">{options ? <NativeSelect value="" onChange={(event) => add(event.target.value)} className="h-7 min-w-28 border-0 bg-transparent px-1 text-xs shadow-none"><NativeSelectOption value="">Ajouter…</NativeSelectOption>{options.filter((option) => !entries.includes(option.value)).map((option) => <NativeSelectOption key={option.value} value={option.value}>{option.label}</NativeSelectOption>)}</NativeSelect> : <><Input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void add(draft) } if (event.key === "Escape") { setDraft(""); setAdding(false) } }} onBlur={() => { if (draft.trim()) void add(draft) }} placeholder={`Ajouter ${label.toLowerCase()}…`} className="h-7 min-w-28 border-0 bg-transparent px-1 text-xs shadow-none" /><button type="button" onClick={() => add(draft)} className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Plus className="size-3.5" /></button>{entries.length > 0 && <button type="button" onClick={() => setAdding(false)} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"><X className="size-3.5" /></button>}</>}</div>}</div>
@@ -673,7 +665,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const classOptions = availableClasses.map((item) => ({ value: item.name, label: item.name }))
   const socialClasses = ["Errant·e", "Serf·ve", "Vilain·e", "Tenancier·ère", "Membre du clergé", "Noble"]
   const alignments = ["Bon·ne", "Neutre", "Mauvais·e"]
-  const activeTitle = parseMultiple(values[35]).selected
+  const activeTitle = parseListCell(values[35]).selected
   const campaignAccent = character.campaigns[0]?.accentColor || "#927640"
   const customTabs = parseCharacterTabs(values[characterCustomTabsIndex] || "")
   const characterTabs = [...baseCharacterTabs, ...customTabs]
