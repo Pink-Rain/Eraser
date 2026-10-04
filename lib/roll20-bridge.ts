@@ -75,7 +75,7 @@ export async function roll20LinkFromToken(token: string) {
   return link ?? null
 }
 
-export async function roll20LinkFromImageToken(campaignId: string, imageToken: string) {
+async function roll20LinkFromImageToken(campaignId: string, imageToken: string) {
   if (!imageToken.startsWith("img_") || imageToken.length > 100) return null
   const [link] = await getDb().select().from(roll20CampaignLinks).where(and(eq(roll20CampaignLinks.campaignId, campaignId), eq(roll20CampaignLinks.imageToken, imageToken))).limit(1)
   return link ?? null

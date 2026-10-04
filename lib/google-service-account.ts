@@ -12,13 +12,6 @@ export function runtimeEnv() {
   return env as unknown as Record<string, string | undefined>
 }
 
-export function googleServiceConfigured() {
-  const runtime = runtimeEnv()
-  return Boolean(
-    runtime.GOOGLE_SERVICE_ACCOUNT_EMAIL && runtime.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY,
-  )
-}
-
 function requireGoogleConfig() {
   const runtime = runtimeEnv()
   const clientEmail = runtime.GOOGLE_SERVICE_ACCOUNT_EMAIL?.trim()

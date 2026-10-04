@@ -11,6 +11,7 @@ import {
   listSavedShops,
   namedAppendRange,
   namedRowWrites,
+  oneAtATime,
   readNamedSheet,
   repairJdrSheet,
   saveGeneratedShops,
@@ -182,17 +183,20 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     updatedAt: now,
   }
   const sheet = await sessionsSheet()
-  // Les lignes blanchies par une suppression sont réutilisées avant d'ajouter à la fin.
-  const { columns, raw, startRow } = await readSessionRows()
-  // Seule une ligne entièrement vide est libre (rien d'écrit plus à droite non plus).
-  const free = raw.findIndex((row) => !row.some((cell) => cell?.trim()))
-  if (free >= 0) {
-    const rowNumber = startRow + free
-    await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
-  } else {
-    await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, [sessionRow(session)]), { valueInputOption: "RAW" })
-  }
-  clearSpreadsheetReadCache(sheet.spreadsheetId)
+  // Deux créations simultanées ne prennent pas la même ligne libre.
+  await oneAtATime("sessions", async () => {
+    // Les lignes blanchies par une suppression sont réutilisées avant d'ajouter à la fin.
+    const { columns, raw, startRow } = await readSessionRows()
+    // Seule une ligne entièrement vide est libre (rien d'écrit plus à droite non plus).
+    const free = raw.findIndex((row) => !row.some((cell) => cell?.trim()))
+    if (free >= 0) {
+      const rowNumber = startRow + free
+      await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [sessionRow(session)]), { valueInputOption: "RAW" })
+    } else {
+      await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), canonicalRows(columns, [sessionRow(session)]), { valueInputOption: "RAW" })
+    }
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+  })
   return session
 }
 

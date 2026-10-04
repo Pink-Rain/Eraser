@@ -360,3 +360,17 @@ test("Colonnes lues ensemble : jamais la vie d'un personnage attribuée à son v
   assert.notEqual(life.P1, "20");
   assert.ok(!("P2" in life) || life.P2 === "20");
 });
+
+test("Magasins : deux enregistrements simultanés ne prennent pas la même ligne libre", async () => {
+  const id = fresh("shops");
+  google.addSpreadsheet(id, [{ title: "Magasins", grid: [shopHeaders, ["SHOP-1", "CAMP-1", "Brume", "village", "market", "Premier", "Petit", "[]", "Non", "", "", ""], [], ["SHOP-3", "CAMP-1", "Brume", "village", "market", "Troisième", "Petit", "[]", "Non", "", "", ""]] }]);
+  await jdr.saveJdrSheet({ key: "shops", spreadsheetId: id, name: "shops", tabName: "Magasins", webViewLink: "" });
+  await Promise.all([
+    sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-A", "Alpha")], {}),
+    sheets.saveGeneratedShops("CAMP-1", [shop("SHOP-B", "Bêta")], {}),
+  ]);
+  const ids = google.grid(id, "Magasins").map((row) => row[0]);
+  assert.ok(ids.includes("SHOP-A"));
+  assert.ok(ids.includes("SHOP-B"));
+  assert.ok(ids.includes("SHOP-1") && ids.includes("SHOP-3"));
+});
