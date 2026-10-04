@@ -222,7 +222,27 @@ test("Index des personnages : chaque ligne de la feuille s'attribue et se met à
   assert.equal(google.grid(id, "Personnages").length, 3);
 });
 
-test("Vocabulaire : l'index lit et réécrit le HTML du Contenu tel que la page l'écrit", async () => {
+test("Vocabulaire : la page lit encore « Titre » avant le passage au moteur", async () => {
+  const id = fresh("vocabulary");
+  google.addSpreadsheet(id, [{ title: "Vocabulaire", grid: [["Titre", "Contenu"], ["Destin", "<p>Le destin.</p>"]] }]);
+  await link("vocabulary", id, "Vocabulaire");
+  const vocabulary = await vite.ssrLoadModule("/lib/vocabulary.ts");
+  assert.deepEqual((await vocabulary.listVocabulary()).map((entry) => [entry.title, entry.content]), [["Destin", "<p>Le destin.</p>"]]);
+  // Un mot ajouté par la page va sous « Titre » : rien n'est dédoublé, aucune colonne ID créée vide d'ici.
+  await vocabulary.createVocabularyEntry({ title: "Folie", content: "<p>La folie.</p>" });
+  let grid = google.grid(id, "Vocabulaire");
+  assert.deepEqual(grid[0], ["Titre", "Contenu"]);
+  assert.deepEqual(grid[2].slice(0, 2), ["Folie", "<p>La folie.</p>"]);
+  // Une fois la colonne ID ajoutée (par l'index), la page en donne un à chaque nouveau mot.
+  await engine.getWorldIndex("vocabulary", { refresh: true });
+  await vocabulary.createVocabularyEntry({ title: "Rapidité", content: "" });
+  grid = google.grid(id, "Vocabulaire");
+  assert.deepEqual(grid[0], ["Nom", "Contenu", "ID"]);
+  assert.equal(grid[3][0], "Rapidité");
+  assert.match(grid[3][2], /^VOC-/);
+});
+
+test("Vocabulaire : la feuille existante passe au moteur (Titre → Nom, ID masqué), le HTML du Contenu reste tel quel", async () => {
   const id = fresh("vocabulary");
   const definition = "<p>Les <strong>statistiques</strong> d'une entité.</p><ul><li>Force</li></ul>";
   google.addSpreadsheet(id, [{ title: "Vocabulaire", grid: [["Titre", "Contenu"], ["Caractéristiques", definition], ["Entité", "Un être capable de réactions."]] }]);
@@ -231,9 +251,12 @@ test("Vocabulaire : l'index lit et réécrit le HTML du Contenu tel que la page 
 
   const data = await engine.getWorldIndex("vocabulary", { refresh: true });
   const [table] = data.tables;
-  assert.deepEqual(table.headers, ["Titre", "Contenu"]);
-  // Le Titre est le nom de la ligne ; le Contenu montre son HTML, et sa valeur simple le texte.
-  assert.equal(data.columns.Vocabulaire.find((column) => column.header === "Titre").spec.kind, "name-form");
+  // L'en-tête seul est renommé, l'ID ajouté à droite : les valeurs n'ont pas bougé.
+  assert.deepEqual(table.headers, ["Nom", "Contenu", "ID"]);
+  const columns = Object.fromEntries(data.columns.Vocabulaire.map((column) => [column.header, column.spec]));
+  assert.equal(columns.Nom.kind, "name-form");
+  assert.equal(columns.ID.kind, "id");
+  assert.equal(columns.ID.hidden, true);
   assert.equal(table.rows[0].html[1], definition);
   assert.match(table.rows[0].values[1], /statistiques/);
   assert.doesNotMatch(table.rows[0].values[1], /<strong>/);
@@ -241,19 +264,26 @@ test("Vocabulaire : l'index lit et réécrit le HTML du Contenu tel que la page 
   // Modifier depuis l'index : le HTML est écrit tel quel, comme la page Vocabulaire l'écrit.
   const edited = "<p>Les <em>statistiques</em> d'une entité.</p>";
   await engine.updateWorldIndexCell("vocabulary", "Vocabulaire", { rowNumber: 2, id: "", name: "Caractéristiques" }, "Contenu", edited, { previous: definition });
-  assert.equal(google.grid(id, "Vocabulaire")[1][1], edited);
-  await engine.updateWorldIndexFields("vocabulary", "Vocabulaire", { rowNumber: 3, id: "", name: "Entité" }, { Contenu: "<p>Un <b>être</b>.</p>" }, { previous: { Contenu: "Un être capable de réactions." } });
+  let grid = google.grid(id, "Vocabulaire");
+  assert.deepEqual(grid[0], ["Nom", "Contenu", "ID"]);
+  assert.deepEqual(grid[1].slice(0, 2), ["Caractéristiques", edited]);
+  // Chaque mot existant a reçu son identifiant.
+  assert.match(grid[1][2], /^VOC-/);
+  assert.match(grid[2][2], /^VOC-/);
+  await engine.updateWorldIndexFields("vocabulary", "Vocabulaire", { rowNumber: 3, id: grid[2][2], name: "Entité" }, { Contenu: "<p>Un <b>être</b>.</p>" }, { previous: { Contenu: "Un être capable de réactions." } });
   assert.equal(google.grid(id, "Vocabulaire")[2][1], "<p>Un <b>être</b>.</p>");
 
-  // Ajouter depuis l'index : une ligne Titre / Contenu, rien d'autre ; le titre est obligatoire.
-  await engine.addWorldIndexRow("vocabulary", "Vocabulaire", ["Destin", "<p>Le <u>destin</u>.</p>"], ["Titre", "Contenu"]);
-  const grid = google.grid(id, "Vocabulaire");
-  assert.deepEqual(grid[0], ["Titre", "Contenu"]);
+  // Ajouter depuis l'index : Nom, Contenu et un ID ; le nom est obligatoire.
+  await engine.addWorldIndexRow("vocabulary", "Vocabulaire", ["Destin", "<p>Le <u>destin</u>.</p>"], ["Nom", "Contenu"]);
+  grid = google.grid(id, "Vocabulaire");
   assert.deepEqual(grid[3].slice(0, 2), ["Destin", "<p>Le <u>destin</u>.</p>"]);
-  await assert.rejects(() => engine.addWorldIndexRow("vocabulary", "Vocabulaire", ["", "sans titre"], ["Titre", "Contenu"]), /WORLD_INDEX_NAME_REQUIRED/);
+  assert.match(grid[3][2], /^VOC-/);
+  await assert.rejects(() => engine.addWorldIndexRow("vocabulary", "Vocabulaire", ["", "sans nom"], ["Nom", "Contenu"]), /WORLD_INDEX_NAME_REQUIRED/);
 
-  // La page Vocabulaire lit les mêmes lignes, mise en forme comprise.
+  // La page Vocabulaire lit les mêmes lignes, mise en forme comprise, sous « Nom ».
   const entries = await vocabulary.listVocabulary();
   assert.deepEqual(entries.map((entry) => entry.title), ["Caractéristiques", "Destin", "Entité"]);
   assert.equal(entries.find((entry) => entry.title === "Destin").content, "<p>Le <u>destin</u>.</p>");
+  await vocabulary.updateVocabularyEntry(entries.find((entry) => entry.title === "Destin").rowNumber, "Destin", { title: "Destinée", content: "<p>Le destin.</p>" });
+  assert.deepEqual(google.grid(id, "Vocabulaire")[3].slice(0, 2), ["Destinée", "<p>Le destin.</p>"]);
 });

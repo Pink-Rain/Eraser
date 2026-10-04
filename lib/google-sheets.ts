@@ -365,7 +365,7 @@ function classImageColumn(columns: SheetColumns) {
  * Le classeur et l'onglet d'un index d'entités, pour le moteur des index : la feuille
  * que lit le reste d'Eraser (reliée, jamais recréée si elle existe dans Drive).
  */
-export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes" | "vocabulary") {
+export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes") {
   const runtime = runtimeEnv()
   const configured = key === "characters" ? runtime.GOOGLE_CHARACTERS_SHEET_ID : key === "classes" ? runtime.GOOGLE_CLASSES_SHEET_ID : ""
   if (configured) {
@@ -3092,14 +3092,7 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     headers: shopSheetHeaders,
     columnWidths: [180, 190, 170, 150, 170, 220, 150, 520, 160, 180, 170, 170],
   },
-  {
-    key: "vocabulary",
-    name: "Vocabulaire",
-    tabName: "Vocabulaire",
-    frozenColumns: 1,
-    headers: ["Titre", "Contenu"],
-    columnWidths: [240, 720],
-  },
+  // Le vocabulaire est un index du monde (lib/world-index-definitions.ts) : déclaré plus bas.
   // Index du monde (Ressources) : colonnes, onglets supplémentaires et liens entre
   // index sont décrits dans lib/world-index-definitions.ts. Seul le premier onglet
   // de chaque classeur est déclaré ici ; les suivants sont ajoutés par lib/world-indexes.ts.

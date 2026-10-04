@@ -1,11 +1,12 @@
+import { newIndexId } from "@/lib/index-columns"
 import { appendRows, deleteSheetRowWhere, ensureJdrSheet, ensureNamedColumns, namedAppendRange, namedRowWrites, readNamedSheet, resolveJdrSheet, updateRanges } from "@/lib/google-sheets"
 
 /**
- * Le glossaire des règles. La feuille « Vocabulaire » n'a que deux colonnes,
- * Titre et Contenu, pour rester lisible et modifiable à la main dans Drive :
- * une entrée est donc repérée par son numéro de ligne, et le titre attendu sert
- * de garde-fou quand la feuille a bougé entre la lecture et l'écriture. Les deux
- * colonnes sont retrouvées par leur nom : les échanger dans Drive ne change rien.
+ * Le glossaire des règles. La feuille « Vocabulaire » a trois colonnes : Nom (l'ancien
+ * « Titre », toujours lu sous ce nom), Contenu et ID — c'est aussi l'Index du vocabulaire,
+ * sur le moteur des index. Une entrée est repérée par son numéro de ligne, et le nom
+ * attendu sert de garde-fou quand la feuille a bougé entre la lecture et l'écriture. Les
+ * colonnes sont retrouvées par leur nom : les déplacer dans Drive ne change rien.
  */
 export type VocabularyEntry = {
   rowNumber: number
@@ -34,17 +35,20 @@ async function vocabularySheet() {
   return sheet
 }
 
-const VOCABULARY_HEADERS = ["Titre", "Contenu"]
+// « ID » n'est pas exigé : il est ajouté par l'Index du vocabulaire (jamais créé vide d'ici).
+const VOCABULARY_HEADERS = ["Nom", "Contenu"]
+/** « Titre » : le nom de la colonne Nom avant le moteur des index. */
+const VOCABULARY_ALIASES = { Nom: ["Titre"] }
 
 /** `fresh` pour une écriture : la feuille telle qu'elle est maintenant, jamais une copie gardée en mémoire. */
 function readVocabularySheet(spreadsheetId: string, tabName: string, options: { fresh?: boolean } = {}) {
-  return readNamedSheet(spreadsheetId, tabName, VOCABULARY_HEADERS, options)
+  return readNamedSheet(spreadsheetId, tabName, VOCABULARY_HEADERS, { ...options, aliases: VOCABULARY_ALIASES })
 }
 
 async function readEntries(spreadsheetId: string, tabName: string, options: { fresh?: boolean } = {}) {
   const { columns, rows } = await readVocabularySheet(spreadsheetId, tabName, options)
   return rows
-    .map((row, index): VocabularyEntry => ({ rowNumber: index + 2, title: columns.get(row, "Titre").trim(), content: columns.get(row, "Contenu") }))
+    .map((row, index): VocabularyEntry => ({ rowNumber: index + 2, title: columns.get(row, "Nom").trim(), content: columns.get(row, "Contenu") }))
     .filter((entry) => entry.title)
 }
 
@@ -75,7 +79,9 @@ export async function createVocabularyEntry(input: { title: string; content: str
   const { columns: read } = await readVocabularySheet(sheet.spreadsheetId, sheet.tabName)
   const columns = await ensureNamedColumns(sheet.spreadsheetId, sheet.tabName, read)
   // RAW : un titre qui commence par « = » ou « + » reste du texte, pas une formule.
-  const result = await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row({ Titre: values.title, Contenu: values.content })], { valueInputOption: "RAW" })
+  // Chaque mot reçoit son identifiant, comme une ligne ajoutée depuis l'index (si la colonne ID existe déjà).
+  const id = columns.at("ID") >= 0 ? { ID: newIndexId("VOC") } : {}
+  const result = await appendRows(sheet.spreadsheetId, namedAppendRange(sheet.tabName, columns), [columns.row({ Nom: values.title, Contenu: values.content, ...id })], { valueInputOption: "RAW" })
   const rowNumber = Number(result.updatedRange.match(/![A-Z]+(\d+)/)?.[1])
   if (!Number.isInteger(rowNumber)) throw new Error("VOCABULARY_APPEND_FAILED")
   return { rowNumber, ...values }
@@ -91,12 +97,14 @@ export async function updateVocabularyEntry(rowNumber: number, expectedTitle: st
   const values = normalizeInput(input)
   const { sheet, entry } = await locateEntry(rowNumber, expectedTitle)
   const { columns } = await readVocabularySheet(sheet.spreadsheetId, sheet.tabName, { fresh: true })
-  await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, entry.rowNumber, { Titre: values.title, Contenu: values.content }), { valueInputOption: "RAW" })
+  await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, entry.rowNumber, { Nom: values.title, Contenu: values.content }), { valueInputOption: "RAW" })
   return { rowNumber: entry.rowNumber, ...values }
 }
 
 export async function deleteVocabularyEntry(rowNumber: number, expectedTitle: string) {
   const { sheet, entry } = await locateEntry(rowNumber, expectedTitle)
-  // Le titre est revérifié dans la feuille juste avant : sinon rien n'est supprimé.
-  await deleteSheetRowWhere(sheet.spreadsheetId, sheet.tabName, entry.rowNumber, "Titre", entry.title)
+  // Le nom est revérifié dans la feuille juste avant (sous son en-tête actuel, Nom ou Titre) : sinon rien n'est supprimé.
+  const { columns } = await readVocabularySheet(sheet.spreadsheetId, sheet.tabName, { fresh: true })
+  const header = columns.headers[columns.at("Nom")] || "Nom"
+  await deleteSheetRowWhere(sheet.spreadsheetId, sheet.tabName, entry.rowNumber, header, entry.title)
 }

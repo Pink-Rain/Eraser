@@ -714,7 +714,8 @@ function columnOf(headers: string[], name: string) {
 
 /** Une colonne dont la case garde son HTML en texte (le « Contenu » du vocabulaire) : écrite telle quelle. */
 function isHtmlTextColumn(key: WorldIndexKey, header: string) {
-  return (entityOf(key)?.htmlTextHeaders ?? []).some((name) => foldName(name) === foldName(header))
+  const names = isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].htmlTextHeaders ?? [] : []
+  return names.some((name) => foldName(name) === foldName(header))
 }
 
 /**
