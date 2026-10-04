@@ -321,10 +321,11 @@ test("Nouveau sort : le texte saisi reste du texte (RAW), rangs et charges reste
   const draft = { id: "", name: "- se méfie", effect: "=1+1", description: "+2 au moral", type: "Actif -Action mineur", skillsRaw: "@Discrétion", distance: "0", charges: 3, classRanks: { "CLA-0001": 4 } };
   const created = await spellAction({ action: "add", rowNumber: null, draft, index: "classes" });
   assert.equal(created.status, 200, JSON.stringify(created.body));
-  // L'ajout insère la ligne et la remplit d'un seul envoi (appendRows) : en RAW, le texte est
+  // L'ajout place la ligne d'un seul envoi (appendRows) : en RAW, le texte est
   // écrit tel quel (« =1+1 » n'est pas une formule) et les nombres restent des nombres.
-  const insert = google.world.calls.find((call) => (call.body?.requests ?? []).some((request) => request.updateCells && request.updateCells.rows?.[0]?.values?.some((cell) => cell.userEnteredValue?.stringValue === "- se méfie")));
-  const row = insert.body.requests.find((request) => request.updateCells).updateCells.rows[0].values.map((cell) => cell.userEnteredValue);
+  const appended = (request) => request.appendCells ?? request.updateCells;
+  const insert = google.world.calls.find((call) => (call.body?.requests ?? []).some((request) => appended(request)?.rows?.[0]?.values?.some((cell) => cell.userEnteredValue?.stringValue === "- se méfie")));
+  const row = appended(insert.body.requests.find((request) => appended(request)?.rows)).rows[0].values.map((cell) => cell.userEnteredValue);
   assert.deepEqual(row[spellHeaders.indexOf("Effet")], { stringValue: "=1+1" });
   assert.deepEqual(row[spellHeaders.indexOf("Charges")], { numberValue: 3 });
   assert.deepEqual(row[spellHeaders.indexOf("Guerrier·e")], { numberValue: 4 });

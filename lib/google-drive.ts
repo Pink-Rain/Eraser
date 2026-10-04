@@ -143,6 +143,19 @@ export async function downloadDriveFile(fileId: string) {
   )
 }
 
+/**
+ * Le dossier `name` ; à défaut, celui où ses fichiers ont toujours été rangés (`legacy`) ;
+ * créé seulement si aucun des deux n'existe. Une ancienne règle de recherche envoyait dans
+ * « Images classes » tout dossier introuvable : visuels (portraits, bannières, cartes) et
+ * icônes d'objets y sont, et doivent y rester lisibles.
+ */
+export async function driveFolderWithLegacy(name: string, legacy: string) {
+  const own = await findDriveFolderByName(name)
+  if (own) return own.id
+  const previous = await findDriveFolderByName(legacy)
+  return previous ? previous.id : ensureDriveFolder(name)
+}
+
 export async function ensureDriveFolder(name: string) {
   const existing = await findDriveFolderByName(name)
   if (existing) return existing.id

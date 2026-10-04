@@ -374,3 +374,16 @@ test("Magasins : deux enregistrements simultanés ne prennent pas la même ligne
   assert.ok(ids.includes("SHOP-B"));
   assert.ok(ids.includes("SHOP-1") && ids.includes("SHOP-3"));
 });
+
+test("Visuels et icônes : faute de dossier dédié, celui où ils sont déjà rangés est gardé", async () => {
+  const drive = await vite.ssrLoadModule("/lib/google-drive.ts");
+  const folder = "application/vnd.google-apps.folder";
+  google.world.drive.push({ id: "F-IMG", name: "Images classes", mimeType: folder }, { id: "F-OBJ", name: "Objets", mimeType: folder });
+  assert.equal(await drive.driveFolderWithLegacy("Eraser - Visuels", "Images Classe"), "F-IMG");
+  assert.equal(await drive.driveFolderWithLegacy("icone objet", "Images Classe"), "F-IMG");
+  // Un dossier « Objets » n'est jamais pris pour « Images classes », ni l'inverse.
+  assert.equal((await drive.findDriveFolderByName("Objets")).id, "F-OBJ");
+  assert.equal(await drive.findDriveFolderByName("Eraser - Visuels"), null);
+  google.world.drive.push({ id: "F-VIS", name: "Eraser - Visuels", mimeType: folder });
+  assert.equal(await drive.driveFolderWithLegacy("Eraser - Visuels", "Images Classe"), "F-VIS");
+});

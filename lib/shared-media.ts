@@ -2,7 +2,7 @@ import { env } from "cloudflare:workers"
 
 import {
   downloadDriveFile,
-  ensureDriveFolder,
+  driveFolderWithLegacy,
   findDriveFileByName,
   listDriveFolderFiles,
   trashDriveFile,
@@ -42,7 +42,9 @@ function cacheKey(key: string, modifiedTime: string) {
 
 async function folderId() {
   if (!mediaFolderId) {
-    mediaFolderId = ensureDriveFolder(MEDIA_FOLDER).catch((error) => {
+    // Faute de dossier « Eraser - Visuels », les visuels sont dans « Images classes » depuis
+    // toujours : on continue d'y lire et d'y écrire (un dossier neuf, vide, les aurait cachés).
+    mediaFolderId = driveFolderWithLegacy(MEDIA_FOLDER, "Images Classe").catch((error) => {
       mediaFolderId = null
       throw error
     })

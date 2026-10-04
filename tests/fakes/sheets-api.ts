@@ -182,6 +182,18 @@ function handleSheets(path: string, init: RequestInit) {
       } else if (request.updateSheetProperties?.properties?.gridProperties?.columnCount) {
         const tab = file.tabs.find((candidate) => candidate.sheetId === request.updateSheetProperties.properties.sheetId)!
         tab.columnCount = Math.max(tab.columnCount, request.updateSheetProperties.properties.gridProperties.columnCount)
+      } else if (request.appendCells) {
+        // Comme Google : après la dernière ligne qui porte une donnée, toutes colonnes confondues,
+        // à partir de la colonne A.
+        const tab = file.tabs.find((candidate) => candidate.sheetId === request.appendCells.sheetId)!
+        let last = -1
+        tab.grid.forEach((row, index) => { if (row.some((cell) => cell !== "")) last = index })
+        type Entered = { stringValue?: string; numberValue?: number; boolValue?: boolean; formulaValue?: string }
+        const shown = (value?: Entered) => value?.stringValue ?? value?.formulaValue ?? (value?.numberValue !== undefined ? String(value.numberValue) : value?.boolValue !== undefined ? (value.boolValue ? "TRUE" : "FALSE") : "")
+        const rows = request.appendCells.rows as Array<{ values: Array<{ userEnteredValue?: Entered }> }>
+        world.enteredCells.push(...rows.map((row) => row.values.map((cell) => cell.userEnteredValue)))
+        tab.rowCount = Math.max(tab.rowCount, last + 1 + rows.length)
+        writeArea({ tab, top: last + 1, left: 0, bottom: Infinity, right: Infinity, quoted: `'${tab.title}'` }, rows.map((row) => row.values.map((cell) => shown(cell.userEnteredValue))))
       } else if (request.updateCells) {
         const { sheetId, startRowIndex, startColumnIndex } = request.updateCells.range
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!

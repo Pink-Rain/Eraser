@@ -1119,13 +1119,14 @@ async function tabGrid(spreadsheetId: string, tabName: string) {
 
 
 /**
- * Ajoute des lignes juste sous la dernière ligne remplie de la plage, à partir de sa première
- * colonne. `values.append` laissait Google deviner où commence le « tableau » : il a écrit
- * des pions en colonne J et des magasins en colonne K (invisibles pour Eraser, et pris
- * ensuite pour des lignes libres), ou au milieu d'une feuille après une ligne vide.
- * Les lignes sont insérées et remplies d'un seul envoi : un ajout fait au même moment par
- * une autre installation décale les nôtres sans jamais les écraser. Dans ce processus, les
- * ajouts à un même onglet passent l'un après l'autre.
+ * Ajoute des lignes sous la dernière ligne remplie de l'onglet, à partir de la première
+ * colonne de la plage. `values.append` laissait Google deviner où commence le « tableau » :
+ * il a écrit des pions en colonne J et des magasins en colonne K (invisibles pour Eraser, et
+ * pris ensuite pour des lignes libres), ou au milieu d'une feuille après une ligne vide.
+ * `appendCells` place les lignes d'un seul geste chez Google, après la dernière ligne qui
+ * porte une donnée (dans n'importe quelle colonne) : un ajout fait au même moment par une
+ * autre installation passe avant ou après, sans jamais décaler ni écraser les nôtres. Leur
+ * place est ensuite relue (retrouvées par leur texte, depuis le bas) pour `updatedRange`.
  */
 export async function appendRows(
   spreadsheetId: string,
@@ -1141,34 +1142,43 @@ export async function appendRows(
     if (!values.length) return { updatedRange: "", updatedRows: 0 }
     const left = [...firstColumn].reduce((total, letter) => total * 26 + letter.charCodeAt(0) - 64, 0) - 1
     const width = Math.max(1, ...values.map((row) => row.length))
-    // La dernière ligne remplie, relue chez Google (jamais une copie gardée en mémoire).
-    const [[read], grid] = await Promise.all([readRangesFresh(spreadsheetId, [range]), tabGrid(spreadsheetId, tabName)])
-    const lastRow = read?.rows.length ? read.startRow + read.rows.length - 1 : 0
     const raw = options.valueInputOption === "RAW"
+    const entered = values.map((row) => Array.from({ length: width }, (_, column) => column < row.length ? enteredValue(row[column], raw) : null))
+    const grid = await tabGrid(spreadsheetId, tabName)
     const requests: unknown[] = []
-    if (lastRow >= grid.rowCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "ROWS", length: lastRow - grid.rowCount + values.length } })
     if (left + width > grid.columnCount) requests.push({ appendDimension: { sheetId: grid.sheetId, dimension: "COLUMNS", length: left + width - grid.columnCount } })
-    requests.push(
-      // Une ligne remplie au-dessus (pas l'en-tête) donne sa mise en forme, comme un ajout à la main.
-      { insertDimension: { range: { sheetId: grid.sheetId, dimension: "ROWS", startIndex: lastRow, endIndex: lastRow + values.length }, inheritFromBefore: lastRow > 1 } },
-      {
-        updateCells: {
-          range: { sheetId: grid.sheetId, startRowIndex: lastRow, endRowIndex: lastRow + values.length, startColumnIndex: left, endColumnIndex: left + width },
-          rows: values.map((row) => ({ values: Array.from({ length: width }, (_, column) => {
-            const entered = column < row.length ? enteredValue(row[column], raw) : null
-            return entered ? { userEnteredValue: entered } : {}
-          }) })),
-          fields: "userEnteredValue",
-        },
+    requests.push({
+      appendCells: {
+        sheetId: grid.sheetId,
+        rows: entered.map((row) => ({ values: [...Array.from({ length: left }, () => ({})), ...row.map((cell) => cell ? { userEnteredValue: cell } : {})] })),
+        fields: "userEnteredValue",
       },
-    )
+    })
     await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
     clearSpreadsheetReadCache(spreadsheetId)
+    const [read] = await readRangesFresh(spreadsheetId, [range])
+    const firstRow = read ? appendedRowNumber(read, entered) : null
     return {
-      updatedRange: sheetTabRange(tabName, `${columnName(left + 1)}${lastRow + 1}:${columnName(left + width)}${lastRow + values.length}`),
+      updatedRange: firstRow ? sheetTabRange(tabName, `${columnName(left + 1)}${firstRow}:${columnName(left + width)}${firstRow + values.length - 1}`) : "",
       updatedRows: values.length,
     }
   })
+}
+
+/**
+ * La première ligne d'un bloc qu'on vient d'ajouter, retrouvée dans la plage relue : en
+ * partant du bas, le premier bloc dont chaque texte écrit se relit à l'identique (les
+ * nombres et les formules se relisent mis en forme, ils ne servent pas à comparer).
+ */
+function appendedRowNumber(read: { rows: string[][]; startRow: number }, entered: Array<Array<EnteredValue | null>>) {
+  const texts = entered.map((row) => row.flatMap((cell, column) => cell && "stringValue" in cell ? [{ column, text: cell.stringValue }] : []))
+  const last = read.rows.length - entered.length
+  if (last < 0) return null
+  if (!texts.some((row) => row.length)) return read.startRow + last
+  for (let start = last; start >= 0; start -= 1) {
+    if (texts.every((row, offset) => row.every(({ column, text }) => (read.rows[start + offset]?.[column] ?? "") === text))) return read.startRow + start
+  }
+  return null
 }
 
 export async function updateRange(

@@ -1,4 +1,4 @@
-import { ensureDriveFolder, findDriveFolderByName, listDriveFolderFiles, shareDriveFileWithLink, uploadDriveFile, type DriveFile } from "@/lib/google-drive"
+import { driveFolderWithLegacy, findDriveFolderByName, listDriveFolderFiles, shareDriveFileWithLink, uploadDriveFile, type DriveFile } from "@/lib/google-drive"
 import { bundledIconBytes } from "@/lib/object-icon-assets"
 import { OBJECT_ICON_KEYS, objectIconDriveFileName, objectIconKeyFromDriveFileName } from "@/lib/object-icons"
 
@@ -6,7 +6,8 @@ import { OBJECT_ICON_KEYS, objectIconDriveFileName, objectIconKeyFromDriveFileNa
 export const OBJECT_ICON_FOLDER = "icone objet"
 
 export async function objectIconFolderId() {
-  return ensureDriveFolder(OBJECT_ICON_FOLDER)
+  // Faute de dossier « icone objet », les icônes sont dans « Images classes » : elles y restent.
+  return driveFolderWithLegacy(OBJECT_ICON_FOLDER, "Images Classe")
 }
 
 /**
