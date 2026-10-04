@@ -36,6 +36,7 @@ import {
   isBuiltinWorldIndexKey,
   isLongColumn,
   isNameColumn,
+  labelColumnIndex,
   linkEndCovers,
   splitNames,
   worldColumnSpec,
@@ -44,7 +45,7 @@ import {
   type WorldIndexKey,
   type WorldIndexLink,
 } from "@/lib/world-index-definitions"
-import type { WorldIndexData, WorldIndexRow, WorldIndexTable } from "@/lib/world-indexes"
+import type { WorldIndexData, WorldIndexRow, WorldIndexRowRef, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 
 // Les fenêtres (« Modifier », guide, fiche d'une créature) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
@@ -106,6 +107,15 @@ function isValidSort(value: unknown): value is SheetGridSort {
 function rowKeyOf(tabName: string, rowNumber: number) {
   return `${tabName}::${rowNumber}`
 }
+
+/**
+ * Ce que le serveur reçoit pour désigner une ligne : son onglet, son numéro (un simple indice,
+ * d'autres ont pu ajouter ou retirer des lignes), son identifiant et son nom.
+ */
+type RowTarget = WorldIndexRowRef & { tabName: string }
+
+/** Ce que fait une écriture lancée par un bouton : sa ligne, ce qu'il a vu de la case, et l'erreur renvoyée plutôt qu'affichée. */
+type CommitOptions = { row?: RowTarget; previous?: string; rethrow?: boolean }
 
 function parseRowKey(key: string) {
   const separator = key.lastIndexOf("::")
@@ -308,17 +318,41 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [indexKey, origin])
 
 
-  const commitCell = useCallback(async (rowKey: string, columnKey: string, value: string) => {
+  /** La ligne telle que la page la voit, pour le serveur : il la retrouve par son identifiant (ou son nom). */
+  const rowTargetOf = useCallback((rowKey: string): RowTarget | null => {
+    const found = locate(rowKey)
+    if (!found) return null
+    const label = labelColumnIndex(found.table.headers)
+    const idColumn = columnIndexOf(found.table, "ID")
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    // Un identifiant que la page voit sur deux lignes (une ligne copiée dans Sheets) ne dit pas
+    // laquelle : la ligne est alors reconnue par son nom à son numéro.
+    const shared = Boolean(id) && idColumn >= 0 && found.table.rows.filter((row) => (row.values[idColumn] ?? "").trim() === id).length > 1
+    return {
+      tabName: found.table.tabName,
+      rowNumber: found.row.rowNumber,
+      id: shared ? "" : id,
+      name: label >= 0 ? rawOf(rowKey, found.table.headers[label]) : "",
+    }
+  }, [locate, rawOf])
+
+  const commitCell = useCallback(async (rowKey: string, columnKey: string, value: string, options: CommitOptions = {}) => {
     const found = locate(rowKey)
     const column = found ? columnIndexOf(found.table, columnKey) : -1
-    if (!found || column < 0) return
+    const target = options.row ?? rowTargetOf(rowKey)
+    if (!found || column < 0 || !target) {
+      if (options.rethrow) throw new Error(`La colonne « ${columnKey} » n’existe pas dans cet onglet.`)
+      return
+    }
+    // Ce que la page montrait dans la case : le serveur refuse d'écrire si elle a changé entre-temps.
+    const previous = options.previous ?? rawOf(rowKey, columnKey)
     // Rangement en onglets : la valeur est écrite comme une autre ; la ligne reste dans son
     // onglet et apparaît aussi dans l'onglet de rangement qui porte cette valeur.
     localEdits.current[`${rowKey}:${columnKey}`] = value
     engineRef.current?.invalidate()
     setSaving((current) => current + 1)
     try {
-      const payload = await post({ action: "update-cell", tabName: found.table.tabName, rowNumber: found.row.rowNumber, column, html: value })
+      const payload = await post({ action: "update-cell", tabName: target.tabName, rowNumber: target.rowNumber, rowId: target.id, rowName: target.name, column, header: found.table.headers[column], html: value, previous })
       setError("")
       if (payload.data) applyData(payload.data, payload.seq)
       // Une valeur de rangement fait naître (ou disparaître) son onglet : l'index gardé ici
@@ -339,34 +373,45 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         })
       }
     } catch (reason) {
+      // Un bouton (ou la fiche) s'arrête à la première écriture refusée et affiche lui-même pourquoi.
+      if (options.rethrow) throw reason
       setError(reason instanceof Error ? reason.message : "Cette cellule n’a pas pu être enregistrée.")
+    } finally {
+      setSaving((current) => current - 1)
     }
-    setSaving((current) => current - 1)
-  }, [applyData, locate, post, specOf])
+  }, [applyData, locate, post, rawOf, rowTargetOf, specOf])
 
-  /** Une action sur des lignes, onglet par onglet : la vue « Tout » peut en mêler plusieurs. */
-  async function mutate(action: string, rowKeys: string[], label: string, extra: Record<string, unknown> = {}) {
+  /**
+   * Une action sur des lignes, onglet par onglet : la vue « Tout » peut en mêler plusieurs.
+   * Chaque ligne est désignée par son identifiant (et son nom), pas seulement par son numéro.
+   * `rethrow` : un bouton s'arrête à la première étape refusée et affiche lui-même l'erreur.
+   */
+  async function mutateRows(action: string, targets: RowTarget[], label: string, extra: Record<string, unknown> = {}, options: { rethrow?: boolean } = {}) {
     setPending(label); setError("")
     try {
-      const byTab = new Map<string, number[]>()
-      for (const key of rowKeys) {
-        const { tabName: rowTab, rowNumber } = parseRowKey(key)
-        byTab.set(rowTab, [...byTab.get(rowTab) ?? [], rowNumber])
-      }
-      for (const [rowTab, rowNumbers] of byTab) {
-        const payload = await post({ action, tabName: rowTab, rowNumbers, ...extra })
+      const byTab = new Map<string, RowTarget[]>()
+      for (const target of targets) byTab.set(target.tabName, [...byTab.get(target.tabName) ?? [], target])
+      for (const [rowTab, rows] of byTab) {
+        const payload = await post({ action, tabName: rowTab, rowNumbers: rows.map((row) => row.rowNumber), rows: rows.map(({ rowNumber, id, name }) => ({ rowNumber, id, name })), ...extra })
         if (payload.data) applyData(payload.data, payload.seq)
       }
     } catch (reason) {
+      if (options.rethrow) throw reason
       setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
+    } finally {
+      setPending("")
     }
-    setPending("")
   }
 
-  async function addRow(targetTab: string, values: string[]) {
+  function mutate(action: string, rowKeys: string[], label: string, extra: Record<string, unknown> = {}) {
+    return mutateRows(action, rowKeys.flatMap((key) => { const target = rowTargetOf(key); return target ? [target] : [] }), label, extra)
+  }
+
+  async function addRow(targetTab: string, values: string[], headers: string[]) {
     setPending("add"); setError("")
     try {
-      const payload = await post({ action: "add", tabName: targetTab, values })
+      // Les colonnes que suivent les valeurs : le serveur les range par nom.
+      const payload = await post({ action: "add", tabName: targetTab, values, headers })
       if (payload.data) applyData(payload.data, payload.seq)
       setCreating(false)
     } catch (reason) {
@@ -647,32 +692,46 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [data, indexKey, related, tables])
 
   /** Un tirage d'une colonne Aléatoire, écrit dans la case. `force` : même si elle est figée. */
-  const drawCell = useCallback(async (rowKey: string, header: string, spec: IndexColumnSpec, force = false) => {
+  const drawCell = useCallback(async (rowKey: string, header: string, spec: IndexColumnSpec, force = false, commit: CommitOptions = {}) => {
     const settings = normalizeSpec(spec).random
     if (!settings) return null
     if (!force && settings.mode === "fixed" && rawOf(rowKey, header).trim()) return null
     const draw = drawRandom(settings, { random: cryptoRandom, row: engine.context(rowKey), rowsOf })
     if (draw.error) { notify(`${header} : ${draw.error}`, "error"); return null }
     const text = drawText(draw)
-    await commitCell(rowKey, header, text)
+    await commitCell(rowKey, header, text, commit)
     if (draw.detail) notify(`${header} : ${text} (${draw.detail})`)
     return text
   }, [commitCell, engine, notify, rawOf, rowsOf])
 
   // Les boutons d'une ligne : ce qu'ils peuvent toucher dans un index du monde.
   const mutateRef = useRef<(action: string, rowKeys: string[], label: string, extra?: Record<string, unknown>) => Promise<void>>(async () => undefined)
+  const mutateRowsRef = useRef<(action: string, targets: RowTarget[], label: string, extra?: Record<string, unknown>, options?: { rethrow?: boolean }) => Promise<void>>(async () => undefined)
   const pathOf = useCallback((index: string) => isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].path : `/ressources/index/${index}`, [])
   const runtimeFor = useCallback((rowKey: string): ActionRuntime => {
     const found = locate(rowKey)
     const tab = found?.table.tabName ?? ""
     const sheetFields = (data?.columns[tab] ?? []).filter((column) => isSheetSpec(column.spec) && !["id", "actions"].includes(column.spec.kind))
+    // La ligne du clic, désignée à chaque étape par son identifiant : une étape (copie, lien,
+    // relecture) peut changer les numéros de ligne, le serveur la retrouve par lui.
+    const target = rowTargetOf(rowKey)
+    const targets = target ? [target] : []
+    // Ce que les étapes précédentes ont écrit : la suivante part de là, même si la page n'a pas encore relu.
+    const written = new Map<string, string>()
+    const cell = (header: string) => written.get(foldName(header)) ?? rawOf(rowKey, header)
+    const wrote = (header: string, value: string) => {
+      written.set(foldName(header), value)
+      // Une ligne sans identifiant est reconnue par son nom : le nouveau, s'il vient d'être écrit.
+      if (target && found && foldName(found.table.headers[labelColumnIndex(found.table.headers)] ?? "") === foldName(header)) target.name = value
+    }
     return {
       row: () => engine.context(rowKey),
-      cell: (header) => rawOf(rowKey, header),
+      cell,
       specOf: (header) => (data?.columns[tab] ?? []).some((column) => foldName(column.header) === foldName(header)) ? specOf(tab, header) : undefined,
       setCell: async (header, value) => {
-        if (!found || columnIndexOf(found.table, header) < 0) throw new Error(`La colonne « ${header} » n’existe pas dans cet onglet.`)
-        await commitCell(rowKey, header, value)
+        if (!found || !target || columnIndexOf(found.table, header) < 0) throw new Error(`La colonne « ${header} » n’existe pas dans cet onglet.`)
+        await commitCell(rowKey, header, value, { row: target, previous: cell(header), rethrow: true })
+        wrote(header, value)
       },
       confirm: async (message) => window.confirm(message),
       notify,
@@ -685,16 +744,21 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         return relation && first ? `${pathOf(relation.index)}?q=${encodeURIComponent(first)}` : undefined
       },
       indexHref: (index) => index ? pathOf(index) : undefined,
-      roll: async (header) => drawCell(rowKey, header, specOf(tab, header), true),
-      duplicate: () => mutateRef.current("duplicate", [rowKey], "duplicate"),
-      remove: () => mutateRef.current("delete", [rowKey], "delete"),
-      move: (target) => mutateRef.current("move", [rowKey], "move", { toTab: target }),
+      roll: async (header) => {
+        if (!target) throw new Error("Cette ligne n’existe plus : actualise le tableau.")
+        const text = await drawCell(rowKey, header, specOf(tab, header), true, { row: target, previous: cell(header), rethrow: true })
+        if (text !== null) wrote(header, text)
+        return text
+      },
+      duplicate: () => mutateRowsRef.current("duplicate", targets, "duplicate", {}, { rethrow: true }),
+      remove: () => mutateRowsRef.current("delete", targets, "delete", {}, { rethrow: true }),
+      move: (toTab) => mutateRowsRef.current("move", targets, "move", { toTab }, { rethrow: true }),
       create: async (index, targetTab, values) => {
-        const target = index === indexKey ? { tables: tables as LoadedWorldIndex["tables"] } : await loadWorldIndexData(index as WorldIndexKey)
-        const table = target?.tables.find((candidate) => !targetTab || candidate.tabName === targetTab) ?? target?.tables[0]
+        const source = index === indexKey ? { tables: tables as LoadedWorldIndex["tables"] } : await loadWorldIndexData(index as WorldIndexKey)
+        const table = source?.tables.find((candidate) => !targetTab || candidate.tabName === targetTab) ?? source?.tables[0]
         if (!table) throw new Error("Cet index ou cet onglet est introuvable.")
         const row = table.headers.map((header) => Object.entries(values).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")
-        const response = await fetch("/api/resources/world-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: index, action: "add", tabName: table.tabName, values: row }) })
+        const response = await fetch("/api/resources/world-indexes", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ key: index, action: "add", tabName: table.tabName, values: row, headers: table.headers }) })
         const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
         if (!response.ok) throw new Error(payload.error || "La ligne n’a pas pu être créée.")
         forgetWorldIndexData(index as WorldIndexKey)
@@ -714,7 +778,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         await sendToCampaignChat(campaign, message, audience)
       },
     }
-  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, pathOf, rawOf, relationOf, router, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
@@ -809,7 +873,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
-  useLayoutEffect(() => { moveRow.current = mutate; mutateRef.current = mutate })
+  useLayoutEffect(() => { moveRow.current = mutate; mutateRef.current = mutate; mutateRowsRef.current = mutateRows })
   const renderTabCell = useCallback((rowKey: string) => {
     const { tabName: rowTab } = parseRowKey(rowKey)
     return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void moveRow.current("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
@@ -863,13 +927,23 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   async function saveSheet(changes: Record<string, string>) {
     if (details === null) return
     setSheetPending(true); setSheetError("")
+    // La ligne de la fiche, désignée par son identifiant pour chacun de ses champs.
+    const target = rowTargetOf(details)
+    const label = detailsFound ? detailsFound.table.headers[labelColumnIndex(detailsFound.table.headers)] ?? "" : ""
     try {
-      // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs effets.
-      for (const [header, value] of Object.entries(changes)) await commitCell(details, header, value)
+      // Champ par champ, comme dans le tableau : un nom renommé ou une colonne liée gardent leurs
+      // effets. Le premier champ refusé (changé ailleurs entre-temps) arrête la suite.
+      for (const [header, value] of Object.entries(changes)) {
+        await commitCell(details, header, value, { row: target ?? undefined, rethrow: true })
+        if (target && foldName(header) === foldName(label)) target.name = value
+      }
     } catch (reason) {
       setSheetError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")
+      // La fiche garde ce qui a été saisi.
+      throw reason
+    } finally {
+      setSheetPending(false)
     }
-    setSheetPending(false)
   }
 
   // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
@@ -994,7 +1068,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         </label> : undefined}
         onCancel={() => setCreating(false)}
         // Ajouter depuis un onglet de rangement : la ligne reçoit sa valeur (elle y apparaît aussitôt).
-        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")))}
+        onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
       />}
 
       {table ? (
@@ -1019,7 +1093,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
           } : entity && !entity.rowCommands ? { append: startAdding } : {
             append: startAdding,
-            insertRows: (rowKey, count) => { const { tabName: rowTab, rowNumber } = parseRowKey(rowKey); void mutate("insert", [rowKey], "insert", { tabName: rowTab, rowNumber, count }) },
+            insertRows: (rowKey, count) => void mutate("insert", [rowKey], "insert", { count }),
             duplicate: (rowKeys) => void mutate("duplicate", rowKeys, "duplicate"),
             remove: (rowKeys) => void mutate("delete", rowKeys, "delete"),
           }}
@@ -1049,9 +1123,13 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         values={detailsFound.row.values}
         html={detailsFound.row.html}
         onClose={() => setDetails(null)}
-        onSave={async (fields) => {
+        onSave={async (fields, previous) => {
           if (!Object.keys(fields).length) return
-          const payload = await post({ action: "update-fields", tabName: detailsFound.table.tabName, rowNumber: detailsFound.row.rowNumber, fields })
+          // La créature désignée par son identifiant ; ce que la fiche montrait de chaque champ fait
+          // refuser l'enregistrement si l'un d'eux a changé ailleurs entre-temps.
+          const target = details === null ? null : rowTargetOf(details)
+          if (!target) throw new Error("Cette ligne n’existe plus : actualise le tableau.")
+          const payload = await post({ action: "update-fields", tabName: target.tabName, rowNumber: target.rowNumber, rowId: target.id, rowName: target.name, fields, previous })
           if (payload.data) applyData(payload.data, payload.seq)
         }}
       />}

@@ -1,16 +1,23 @@
+import { AsyncLocalStorage } from "node:async_hooks"
+
 import {
+  appendRows,
   clearSpreadsheetReadCache,
   columnName,
   configureStructuredSheet,
-  deleteGoogleSheetRow,
   ensureJdrSheet,
   ensureSheetColumnCount,
   entitySheetLocation,
   forgetClassIndexSync,
+  getCampaignForMj,
+  getCharacterForMj,
   googleSheetsJson,
+  listClassOptions,
   onSpreadsheetWrite,
   readFormattedSheet,
+  readNamedColumns,
   readRange,
+  readRangeFreshWithOffset,
   resolveJdrSheet,
   sheetTabAll,
   softDeleteItem,
@@ -26,17 +33,20 @@ import { getDb } from "@/db"
 import type { AccountRecord } from "@/lib/auth-types"
 import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
+import { sheetRangeStartRow } from "@/lib/google-sheet-values"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
-import { choiceCorrection, isIdHeader, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
-import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
+import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
+import { findEntry, readSchema, rewriteSchema, upsertEntry } from "@/lib/index-schema"
 import { columnMoves, headerProblem, isDisplayOnlyChange, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import {
   ID_HEADER,
   foldName,
   isBuiltinWorldIndexKey,
+  isClassRankHeader,
   isEntityWorldIndexKey,
   isNameColumn,
+  labelColumnIndex,
   linkEndCovers,
   nameColumnIndex,
   splitNames,
@@ -52,6 +62,7 @@ import {
   type WorldIndexLink,
   type WorldIndexLinkEnd,
   type WorldIndexTabDefinition,
+  type WorldPolicyContext,
 } from "@/lib/world-index-definitions"
 
 export type WorldIndexRow = { rowNumber: number; values: string[]; html: string[] }
@@ -117,8 +128,13 @@ type EffectiveIndex = {
   webViewLink: string
   definition: WorldIndexDefinition
   schema: SchemaEntry[]
-  /** Les réglages d'un autre index du même classeur (les sorts des créatures, dans celui des créatures) : réécrits tels quels. */
+  /** Les réglages d'un autre index du même classeur (les sorts des créatures, dans celui des créatures). */
   foreign: SchemaEntry[]
+  /**
+   * Le schéma n'a pas pu être lu : l'index s'affiche sans ses réglages, mais rien n'y est
+   * ajouté ni écrit (il recréerait les colonnes renommées ou supprimées). Relu à la demande suivante.
+   */
+  degraded?: boolean
 }
 
 /** La définition effective de chaque index chargé : lue une fois, puis à chaque changement de schéma. */
@@ -157,51 +173,71 @@ function entityLocation(key: EntityWorldIndexKey) {
   return entitySheetLocation(key)
 }
 
-async function loadEffectiveIndex(key: WorldIndexKey): Promise<EffectiveIndex> {
+/**
+ * Le schéma d'un classeur pour un index. `strict` (avant d'écrire) : relu à l'instant, et
+ * une lecture ratée arrête tout ; un schéma vide réécrit effaçait tous les réglages. Sinon
+ * (affichage) : une lecture ratée montre l'index sans ses réglages, marqué `degraded`.
+ */
+async function schemaFor(key: WorldIndexKey, spreadsheetId: string, strict: boolean) {
+  if (strict) return { all: await readSchema(spreadsheetId, { refresh: true }), degraded: false }
+  try {
+    return { all: await readSchema(spreadsheetId), degraded: false }
+  } catch (error) {
+    console.error("WORLD_INDEX_SCHEMA_READ_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return { all: [] as SchemaEntry[], degraded: true }
+  }
+}
+
+async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolean } = {}): Promise<EffectiveIndex> {
+  const strict = Boolean(options.strict)
   if (isBuiltinWorldIndexKey(key)) {
     const base = worldIndexDefinitions[key]
     if (isEntityWorldIndexKey(key)) {
       const sheet = await entityLocation(key)
-      const all = await readSchema(sheet.spreadsheetId).catch(() => [])
+      const { all, degraded } = await schemaFor(key, sheet.spreadsheetId, strict)
       // L'onglet porte le nom qu'il a dans Sheets ; seuls ses réglages concernent cet index.
       const tabs = base.tabs.map((tab, index) => index === 0 ? { ...tab, name: sheet.tabName } : tab)
       const own = (entry: SchemaEntry) => tabs.some((tab) => foldName(tab.name) === foldName(entry.tab))
       const schema = all.filter(own)
-      return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter((entry) => !own(entry)), definition: { ...base, tabs: effectiveTabs(tabs, schema) } }
+      return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter((entry) => !own(entry)), definition: { ...base, tabs: effectiveTabs(tabs, schema) }, degraded }
     }
     const sheet = await ensureJdrSheet(key as JdrSheetKey)
     if (!sheet) throw new Error("WORLD_INDEX_SHEET_UNAVAILABLE")
-    const all = await readSchema(sheet.spreadsheetId).catch(() => [])
+    const { all, degraded } = await schemaFor(key, sheet.spreadsheetId, strict)
     // L'onglet des sorts des créatures vit dans le classeur des créatures : ses réglages sont les siens.
     const foreign = (entry: SchemaEntry) => key === "creatures" && foldName(entry.tab) === foldName(CREATURE_SPELLS_TAB)
     const schema = all.filter((entry) => !foreign(entry))
-    return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter(foreign), definition: { ...base, tabs: effectiveTabs(base.tabs, schema) } }
+    return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter(foreign), definition: { ...base, tabs: effectiveTabs(base.tabs, schema) }, degraded }
   }
   const entry = await customIndexEntry(key)
   if (!entry) throw new Error("WORLD_INDEX_NOT_FOUND")
-  const schema = await readSchema(entry.spreadsheetId).catch(() => [])
+  const { all: schema, degraded } = await schemaFor(key, entry.spreadsheetId, strict)
   return {
     spreadsheetId: entry.spreadsheetId,
     webViewLink: `https://docs.google.com/spreadsheets/d/${entry.spreadsheetId}/edit`,
     schema,
     foreign: [],
     definition: { key, sheetName: entry.sheetName, title: entry.title, path: `/ressources/index/${key}`, tabs: effectiveTabs([], schema), custom: true, description: entry.description },
+    degraded,
   }
 }
 
 /**
  * Le classeur d'un index, relié ou créé au besoin (jamais en double : ensureJdrSheet
- * cherche d'abord une feuille du même nom dans Drive), avec tous ses onglets.
+ * cherche d'abord une feuille du même nom dans Drive), avec tous ses onglets. `strict` :
+ * son schéma relu à l'instant, avant de le modifier.
  */
-async function workbook(key: WorldIndexKey, options: { refresh?: boolean } = {}) {
-  let effective = options.refresh ? undefined : effectiveIndexes.get(key)
-  if (!effective) {
-    effective = await loadEffectiveIndex(key)
+async function workbook(key: WorldIndexKey, options: { refresh?: boolean; strict?: boolean } = {}) {
+  let effective = options.refresh || options.strict ? undefined : effectiveIndexes.get(key)
+  // Un schéma qui n'avait pas pu être lu est relu à la demande suivante.
+  if (!effective || effective.degraded) {
+    effective = await loadEffectiveIndex(key, { strict: options.strict })
     effectiveIndexes.set(key, effective)
   }
   const { definition } = effective
   const readyKey = `${effective.spreadsheetId}:${key}:${definition.tabs.map((tab) => `${tab.name}=${tab.headers.join("|")}`).join(";")}`
-  if (!readyWorkbooks.has(readyKey)) {
+  // Sans son schéma, un index ne reçoit aucune colonne : il recréerait celles qu'on a renommées ou supprimées.
+  if (!effective.degraded && !readyWorkbooks.has(readyKey)) {
     // Les en-têtes d'un index d'entités appartiennent au code de sa feuille (alias compris) :
     // le moteur n'en ajoute aucun, il les lit.
     if (!definition.entity) {
@@ -210,18 +246,29 @@ async function workbook(key: WorldIndexKey, options: { refresh?: boolean } = {})
     }
     readyWorkbooks.add(readyKey)
   }
-  return { spreadsheetId: effective.spreadsheetId, webViewLink: effective.webViewLink, definition, schema: effective.schema, foreign: effective.foreign }
+  return { spreadsheetId: effective.spreadsheetId, webViewLink: effective.webViewLink, definition, schema: effective.schema, foreign: effective.foreign, degraded: Boolean(effective.degraded) }
 }
 
-/** Enregistre les réglages d'un index sans perdre ceux d'un autre index du même classeur. */
-function saveSchema(effective: { spreadsheetId: string; foreign: SchemaEntry[] }, schema: SchemaEntry[]) {
-  return writeSchema(effective.spreadsheetId, [...effective.foreign, ...schema])
+/** Le classeur d'un index avant d'y écrire : sans son schéma (lecture ratée), on n'écrit rien. */
+async function writableWorkbook(key: WorldIndexKey) {
+  const sheet = await workbook(key)
+  if (sheet.degraded) throw new Error("WORLD_INDEX_SCHEMA_UNAVAILABLE")
+  return sheet
 }
 
 /** Relit la définition et le schéma d'un index (après une modification dans l'éditeur). */
 export function forgetEffectiveIndex(key: WorldIndexKey) {
   effectiveIndexes.delete(key)
   worldIndexCache.delete(key)
+}
+
+/**
+ * Oublie tout ce qui a été lu d'un classeur, pour chacun de ses index : les créatures et les
+ * sorts des créatures partagent le leur, et le schéma de l'un porte les réglages de l'autre.
+ */
+function forgetWorkbook(spreadsheetId: string) {
+  for (const [key, effective] of [...effectiveIndexes]) if (effective.spreadsheetId === spreadsheetId) forgetEffectiveIndex(key)
+  for (const name of [...sheetIds.keys()]) if (name.startsWith(`${spreadsheetId}\u0001`)) sheetIds.delete(name)
 }
 
 /**
@@ -241,8 +288,8 @@ async function ensureTab(spreadsheetId: string, key: WorldIndexKey, tab: WorldIn
     await configureStructuredSheet(spreadsheetId, structure, sheetId)
     return
   }
-  clearSpreadsheetReadCache(spreadsheetId)
-  const [firstRow = []] = await readRange(spreadsheetId, sheetTabRange(tab.name, "1:1"))
+  // Relue à l'instant : c'est d'après elle que les colonnes manquantes sont placées.
+  const [firstRow = []] = (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tab.name, "1:1"))).rows
   let used = firstRow.length
   while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
   // Une colonne renommée par Eraser : seul son en-tête est réécrit, ses valeurs restent.
@@ -303,6 +350,7 @@ async function readPartialTable(spreadsheetId: string, key: WorldIndexKey, tab: 
   const rows = body.flatMap((row, index) => index <= lastFilled
     ? [{ rowNumber: index + 2, values: columnsAt.map((column) => row?.[column]?.value ?? ""), html: columnsAt.map((column) => row?.[column]?.html ?? "") }]
     : [])
+  rememberSheetId(spreadsheetId, sheet.tabName, sheet.sheetId)
   return { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows, columnsAt }
 }
 
@@ -326,7 +374,27 @@ async function readTable(spreadsheetId: string, key: WorldIndexKey, tabName: str
         html: headers.map((_, column) => row?.[column]?.html ?? ""),
       }]
     : [])
+  rememberSheetId(spreadsheetId, sheet.tabName, sheet.sheetId)
   return { tabName: sheet.tabName, sheetId: sheet.sheetId, headers, rows }
+}
+
+/**
+ * L'identifiant d'onglet (sheetId) de chaque onglet lu, gardé une minute : les écritures
+ * mises en forme le demandent. Oublié à chaque changement d'onglets fait depuis Eraser.
+ */
+const sheetIds = new Map<string, { sheetId: number; expiresAt: number }>()
+
+function rememberSheetId(spreadsheetId: string, tabName: string, sheetId: number) {
+  sheetIds.set(`${spreadsheetId}\u0001${tabName}`, { sheetId, expiresAt: Date.now() + 60_000 })
+}
+
+async function sheetIdOf(spreadsheetId: string, tabName: string) {
+  const known = sheetIds.get(`${spreadsheetId}\u0001${tabName}`)
+  if (known && known.expiresAt > Date.now()) return known.sheetId
+  const sheetId = (await spreadsheetTabs(spreadsheetId)).find((tab) => tab.title === tabName)?.sheetId
+  if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+  rememberSheetId(spreadsheetId, tabName, sheetId)
+  return sheetId
 }
 
 /**
@@ -339,15 +407,24 @@ export function effectiveColumnSpec(key: WorldIndexKey, tab: string, header: str
   return entry?.spec ? { ...base, ...entry.spec } : base
 }
 
-/** Les colonnes d'un onglet hors corbeille, avec leur type. Une colonne en double n'apparaît qu'une fois. */
+/**
+ * Les colonnes d'un onglet hors corbeille, avec leur type. Une colonne en double n'apparaît
+ * qu'une fois. Un index d'entités les range dans l'ordre choisi dans « Modifier », gardé dans
+ * le schéma : sa feuille, elle, ne bouge pas.
+ */
 function columnsOf(key: WorldIndexKey, table: WorldIndexTable, schema: SchemaEntry[]): WorldIndexColumn[] {
   const seen = new Set<string>()
-  return table.headers.flatMap((header) => {
+  const columns = table.headers.flatMap((header) => {
     const folded = foldName(header)
     if (!header.trim() || seen.has(folded) || trashed(findEntry(schema, table.tabName, header))) return []
     seen.add(folded)
     return [{ header, spec: effectiveColumnSpec(key, table.tabName, header, schema) }]
   })
+  const tabSpec = findEntry(schema, table.tabName, "")?.spec
+  const order = tabSpec?.kind === "tab" ? tabSpec.columns ?? [] : []
+  if (!order.length) return columns
+  const place = (header: string, index: number) => { const at = order.findIndex((name) => foldName(name) === foldName(header)); return at >= 0 ? at : order.length + index }
+  return columns.map((column, index) => ({ column, place: place(column.header, index) })).sort((left, right) => left.place - right.place).map((item) => item.column)
 }
 
 /** Les liens d'un index : ceux prévus par Eraser et ceux créés dans l'éditeur (déclarés des deux côtés). */
@@ -420,11 +497,17 @@ async function fillNewColumns(key: WorldIndexKey, sheet: Awaited<ReturnType<type
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
   let tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
-  if (await seedEmptyIndex(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
-  else if (await fillNewColumns(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
-  // Un index d'entités ne reçoit d'identifiant que sur une ligne qui n'en a pas : celui d'une
-  // ligne existante (personnage, campagne…) n'est jamais réécrit, même en double.
-  if (sheet.definition.entity ? sheet.definition.entity.rowCommands && tables.some((table) => needsIds(table, true)) : tables.some((table) => needsIds(table))) scheduleIdBackfill(key)
+  // Sans son schéma (lecture ratée), l'index est seulement affiché : rien n'y est écrit.
+  if (!sheet.degraded) {
+    if (await seedEmptyIndex(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+    else if (await fillNewColumns(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+    // Un index d'entités ne reçoit d'identifiant que sur une ligne qui n'en a pas : celui d'une
+    // ligne existante (personnage, campagne…) n'est jamais réécrit, même en double. Un sort sans
+    // ID, lui, n'en reçoit pas d'ici : lib/class-content.ts lui en donne un, tiré de son contenu,
+    // relu après écriture. Donnés chacun de son côté, deux ID différents visaient le même sort.
+    const spells = key === "class-spells" || key === "creature-spells"
+    if (!spells && (sheet.definition.entity ? sheet.definition.entity.rowCommands && tables.some((table) => needsIds(table, true)) : tables.some((table) => needsIds(table)))) scheduleIdBackfill(key)
+  }
   return {
     key,
     webViewLink: sheet.webViewLink,
@@ -463,7 +546,7 @@ function scheduleIdBackfill(key: WorldIndexKey) {
   void serialized(async () => {
     const seen = new Set<string>()
     const data: Array<{ range: string; values: string[][] }> = []
-    const patches: Array<{ tabName: string; rowNumber: number; column: number; id: string }> = []
+    const patches: Array<{ tabName: string; row: CachedRowIdentity; cells: Array<{ header: string; html: string }> }> = []
     let spreadsheetId = ""
     const entity = isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].entity : undefined
     for (const tab of await tabsOf(key)) {
@@ -481,21 +564,22 @@ function scheduleIdBackfill(key: WorldIndexKey) {
         seen.add(id)
         const cell = `${columnName(column + 1)}${index + 1}`
         data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[id]] })
-        patches.push({ tabName: tab.name, rowNumber: index + 1, column, id })
+        const cells = [{ header: table.headers[column], html: id }]
         // La ligne d'un PNJ saisie sans page reçoit celle de la bibliothèque, comme un ajout.
         for (const [header, value] of Object.entries(entity?.addDefaults ?? {})) {
           const at = columnOf(table.headers, header)
           if (at < 0 || (row[at] ?? "").trim()) continue
           const target = `${columnName(at + 1)}${index + 1}`
           data.push({ range: sheetTabRange(tab.name, `${target}:${target}`), values: [[value]] })
-          patches.push({ tabName: tab.name, rowNumber: index + 1, column: at, id: value })
+          cells.push({ header: table.headers[at], html: value })
         }
+        patches.push({ tabName: tab.name, row: { rowNumber: index + 1, id: current, label: rowLabel(table, index) }, cells })
       })
     }
     if (!data.length) return
     await googleSheetsJson(`spreadsheets/${spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
     clearSpreadsheetReadCache(spreadsheetId)
-    for (const patch of patches) await patchCachedRow(key, patch.tabName, patch.rowNumber, [{ column: patch.column, html: patch.id }], { sheetColumns: true })
+    for (const patch of patches) await patchCachedRow(key, patch.tabName, patch.row, patch.cells)
   }).catch((error) => console.error("WORLD_INDEX_ID_BACKFILL_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
     .finally(() => backfilling.delete(key))
 }
@@ -510,6 +594,12 @@ function scheduleIdBackfill(key: WorldIndexKey) {
 const WORLD_INDEX_CACHE_MS = 5 * 60_000
 /** Au-delà, la version gardée est trop vieille pour être rendue sans attendre. */
 const WORLD_INDEX_STALE_MS = 30 * 60_000
+/** Un index lu sans son schéma (lecture ratée) n'est gardé que le temps de réessayer. */
+const WORLD_INDEX_DEGRADED_MS = 15_000
+
+function cacheLifetime(key: WorldIndexKey) {
+  return effectiveIndexes.get(key)?.degraded ? WORLD_INDEX_DEGRADED_MS : WORLD_INDEX_CACHE_MS
+}
 type WorldIndexCacheEntry = { expiresAt: number; promise: Promise<WorldIndexData>; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean; patchedAt?: number }
 const worldIndexCache = new Map<WorldIndexKey, WorldIndexCacheEntry>()
 
@@ -532,7 +622,7 @@ export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean }
         // garde la version corrigée et on relira plus tard.
         if ((cached.patchedAt ?? 0) >= startedAt) { cached.refreshing = false; return }
         lastLoaded.set(key, data)
-        worldIndexCache.set(key, { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise: Promise.resolve(data), loadedAt: Date.now() })
+        worldIndexCache.set(key, { expiresAt: Date.now() + cacheLifetime(key), promise: Promise.resolve(data), loadedAt: Date.now() })
       }, () => { cached.refreshing = false; cached.refreshFailed = true })
     }
     return cached.promise
@@ -540,7 +630,7 @@ export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean }
   const promise = loadWorldIndex(key)
   const entry: WorldIndexCacheEntry = { expiresAt: Date.now() + WORLD_INDEX_CACHE_MS, promise }
   worldIndexCache.set(key, entry)
-  promise.then((data) => { if (worldIndexCache.get(key) === entry) { lastLoaded.set(key, data); entry.loadedAt = Date.now() } }, () => undefined)
+  promise.then((data) => { if (worldIndexCache.get(key) === entry) { lastLoaded.set(key, data); entry.loadedAt = Date.now(); entry.expiresAt = Date.now() + cacheLifetime(key) } }, () => undefined)
   // Une lecture ratée ne doit pas rester en mémoire : la suivante réessaie.
   promise.catch(() => { if (worldIndexCache.get(key)?.promise === promise) worldIndexCache.delete(key) })
   return promise
@@ -580,11 +670,23 @@ function escapeCellHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/\n/g, "<br />")
 }
 
+/** Ce qui reconnaît une ligne gardée en mémoire : son numéro, et son identifiant et son nom avant l'écriture. */
+type CachedRowIdentity = { rowNumber: number; id: string; label: string }
+
+/** La ligne gardée en mémoire est-elle bien celle qu'on vient de lire dans Sheets ? */
+function cachedRowIs(table: WorldIndexTable, row: WorldIndexRow, expected: CachedRowIdentity) {
+  const idColumn = columnOf(table.headers, ID_HEADER)
+  const labelColumn = labelColumnIndex(table.headers)
+  const id = idColumn >= 0 ? (row.values[idColumn] ?? "").trim() : ""
+  return id === expected.id && foldName(labelColumn >= 0 ? row.values[labelColumn] ?? "" : "") === foldName(expected.label)
+}
+
 /**
- * Recopie dans la mémoire des cellules qu'on vient d'écrire dans Sheets. `sheetColumns` :
- * les colonnes sont celles de Sheets (une feuille lue en partie les place ailleurs).
+ * Recopie dans la mémoire des cellules qu'on vient d'écrire dans Sheets, par le nom de leur
+ * colonne. Seulement si la mémoire montre bien cette ligne à ce numéro (même identifiant,
+ * même nom) : sinon elle date d'avant un changement fait ailleurs, et elle est relue.
  */
-async function patchCachedRow(key: WorldIndexKey, tabName: string, rowNumber: number, cells: Array<{ column: number; html: string }>, options: { sheetColumns?: boolean } = {}) {
+async function patchCachedRow(key: WorldIndexKey, tabName: string, expected: CachedRowIdentity, cells: Array<{ header: string; html: string }>) {
   const entry = worldIndexCache.get(key)
   if (!entry) return
   // Une cellule qu'on vient d'écrire rend l'index frais : sans ça, la lecture suivante
@@ -594,10 +696,10 @@ async function patchCachedRow(key: WorldIndexKey, tabName: string, rowNumber: nu
   entry.expiresAt = Math.max(entry.expiresAt, Date.now() + WORLD_INDEX_CACHE_MS)
   const data = await entry.promise.catch(() => null)
   const table = data?.tables.find((candidate) => candidate.tabName === tabName)
-  const row = table?.rows.find((candidate) => candidate.rowNumber === rowNumber)
-  if (!table || !row) return invalidateWorldIndexes([key])
+  const row = table?.rows.find((candidate) => candidate.rowNumber === expected.rowNumber)
+  if (!table || !row || !cachedRowIs(table, row, expected)) return invalidateWorldIndexes([key])
   for (const cell of cells) {
-    const column = options.sheetColumns && table.columnsAt ? table.columnsAt.indexOf(cell.column) : cell.column
+    const column = columnOf(table.headers, cell.header)
     if (column < 0) continue
     const html = cell.html
     const rich = /<[a-z]/i.test(html)
@@ -617,14 +719,14 @@ function columnOf(headers: string[], name: string) {
  * (l'application Windows) : une file en mémoire suffit.
  */
 let linkQueue: Promise<unknown> = Promise.resolve()
-/** Écritures du moteur en cours : la mémoire est déjà corrigée par le moteur lui-même. */
-let ownWrites = 0
+/**
+ * Les tâches du moteur : une écriture faite pendant l'une d'elles (et seulement elle) est la
+ * sienne, la mémoire est déjà corrigée par le moteur lui-même.
+ */
+const engineTask = new AsyncLocalStorage<true>()
 
 function serialized<T>(task: () => Promise<T>): Promise<T> {
-  const tracked = async () => {
-    ownWrites += 1
-    try { return await task() } finally { ownWrites -= 1 }
-  }
+  const tracked = () => engineTask.run(true, task)
   const run = linkQueue.then(tracked, tracked)
   linkQueue = run.catch(() => undefined)
   return run
@@ -632,13 +734,15 @@ function serialized<T>(task: () => Promise<T>): Promise<T> {
 
 /**
  * Une écriture d'Eraser hors du moteur (un PNJ enregistré dans sa campagne, une fiche, une
- * classe créée) : l'index de ce classeur est relu à la prochaine ouverture. Une écriture
- * du moteur dans les classes ou les sorts fait relire leurs pages.
+ * classe créée) : l'index de ce classeur est relu à la prochaine ouverture, même si une
+ * tâche du moteur tourne au même moment ailleurs. Une écriture du moteur dans les classes ou
+ * les sorts fait relire leurs pages.
  */
 onSpreadsheetWrite((spreadsheetId) => {
+  const own = engineTask.getStore() === true
   for (const [key, effective] of effectiveIndexes) {
     if (effective.spreadsheetId !== spreadsheetId) continue
-    if (ownWrites === 0) { worldIndexCache.delete(key); continue }
+    if (!own) { worldIndexCache.delete(key); continue }
     if (key === "classes" || key === "class-spells" || key === "creature-spells") invalidateClassContentCaches()
     if (key === "classes") void forgetClassIndexSync().catch(() => undefined)
   }
@@ -661,43 +765,161 @@ function assertRowCommands(key: WorldIndexKey, action: "add" | "insert" | "dupli
   throw new Error("WORLD_INDEX_ROWS_LOCKED")
 }
 
-/** Les identifiants de lignes d'un onglet, d'après le tableau gardé en mémoire. */
-async function rowIds(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
-  const { table } = await tableFor(key, tabName)
-  const idColumn = columnOf(table.headers, ID_HEADER)
-  return rowNumbers.flatMap((rowNumber) => {
-    const id = idColumn >= 0 ? (table.rows.find((row) => row.rowNumber === rowNumber)?.values[idColumn] ?? "").trim() : ""
-    return id ? [id] : []
-  })
+/**
+ * Une ligne telle que la page l'a vue. Son numéro n'est qu'un indice : une autre installation
+ * (ou Sheets) a pu ajouter, retirer ou trier des lignes depuis. Elle est retrouvée par son
+ * identifiant ; une ligne qui n'en a pas encore, par son nom (`name`) à ce numéro.
+ */
+export type WorldIndexRowRef = { rowNumber: number; id?: string; name?: string }
+
+/**
+ * Ce qu'une écriture fait à une ligne, soumis à l'appelant avant d'écrire (les droits d'un
+ * compte sur un personnage ou une campagne) : l'identifiant de la ligne relue dans la feuille
+ * et les colonnes écrites. Lève une erreur pour refuser.
+ */
+export type WorldIndexRowGuard = (row: { id: string; headers: string[] }) => Promise<void>
+
+/**
+ * Personnages et campagnes, pour un MJ : seulement les lignes auxquelles il a accès (ses
+ * campagnes, les personnages de ses campagnes et les siens), jamais la case du propriétaire
+ * (« Joueur », « MJ »), qu'un administrateur change depuis l'administration. Rien à vérifier
+ * pour un administrateur ni pour les autres index.
+ */
+export function worldIndexRowGuard(key: WorldIndexKey, account: { uid: string; role: string }): WorldIndexRowGuard | undefined {
+  if (account.role === "admin" || (key !== "characters" && key !== "campaigns")) return undefined
+  const owner = key === "characters" ? "Joueur" : "MJ"
+  return async ({ id, headers }) => {
+    if (headers.some((header) => foldName(header) === foldName(owner))) throw new Error("WORLD_INDEX_OWNER_LOCKED")
+    const reachable = id ? (key === "characters" ? await getCharacterForMj(account.uid, id) : await getCampaignForMj(account.uid, id)) : null
+    if (!reachable) throw new Error("WORLD_INDEX_WRITE_DENIED")
+  }
 }
 
 /**
  * « Supprimer » un personnage ou une campagne : mise à la corbeille, comme depuis sa page.
  * Rien n'est effacé de Sheets ; `allowed` dit si ce compte peut le faire pour cet élément.
+ * L'élément est celui dont la page a montré l'identifiant, jamais celui qui occupe
+ * maintenant son numéro de ligne.
  */
-export async function trashWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[], allowed: (kind: "character" | "campaign", id: string) => Promise<boolean>) {
+export async function trashWorldIndexRows(key: WorldIndexKey, rows: WorldIndexRowRef[], allowed: (kind: "character" | "campaign", id: string) => Promise<boolean>) {
   const kind = entityOf(key)?.trashKind
   if (!kind) throw new Error("WORLD_INDEX_ROWS_LOCKED")
-  const ids = await rowIds(key, tabName, rowNumbers)
+  const ids = [...new Set(rows.map((row) => (row.id ?? "").trim()).filter(Boolean))]
   for (const id of ids) if (!await allowed(kind, id)) throw new Error("WORLD_INDEX_TRASH_DENIED")
   for (const id of ids) await softDeleteItem(kind, id)
   invalidateWorldIndexes([key])
 }
 
+/** La lecture brute d'un onglet : `rows[0]` est la ligne d'en-têtes, `rows[i]` la ligne i + 1 de la feuille. */
+type PlainTable = { spreadsheetId: string; headers: string[]; rows: string[][] }
+
 /**
- * Valeurs brutes d'un onglet, relues depuis Google à chaque fois : une entité ajoutée
- * à la main dans Sheets doit être vue tout de suite, sinon elle serait recréée.
+ * Valeurs brutes d'un onglet, relues dans Google à chaque fois : c'est d'après elles que se
+ * décide où écrire (une entité ajoutée à la main dans Sheets doit être vue tout de suite,
+ * sinon elle serait recréée). Lecture POST, jamais servie par un cache : un GET identique
+ * peut être resservi pendant le rendu d'une page. Une feuille immense (les personnages)
+ * n'est lue que dans les colonnes `wanted` (plus l'ID, le nom et les colonnes liées).
  */
-async function plainTable(key: WorldIndexKey, tabName: string) {
+async function plainTable(key: WorldIndexKey, tabName: string, wanted?: readonly string[]): Promise<PlainTable> {
   const sheet = await workbook(key)
   const tab = tabDefinition(key, tabName)
-  clearSpreadsheetReadCache(sheet.spreadsheetId)
-  const rows = await readRange(sheet.spreadsheetId, sheetTabAll(tabName))
+  const entity = entityOf(key)
+  let rows: string[][]
+  if (wanted && entity?.readHeaders) {
+    const read = await readNamedColumns(sheet.spreadsheetId, tabName, [], [ID_HEADER, entity.nameHeader, ...linkEndsOf(key, tabName).map(([end]) => end.column), ...wanted], { fresh: true })
+    rows = [read.columns.headers, ...read.rows]
+  } else {
+    const read = await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabAll(tabName))
+    // Google peut rendre l'onglet à partir de sa première ligne remplie.
+    rows = [...Array.from({ length: Math.max(0, read.startRow - 1) }, () => [] as string[]), ...read.rows]
+  }
   const headers = headersOf(rows[0] ?? [], tab, Math.max(0, ...rows.map((row) => row.length)), Boolean(sheet.definition.entity))
   return { spreadsheetId: sheet.spreadsheetId, headers, rows }
 }
 
-type PlainTable = Awaited<ReturnType<typeof plainTable>>
+/** L'identifiant d'une ligne lue (« » s'il n'y en a pas). */
+function rowId(table: PlainTable, rowIndex: number) {
+  const column = columnOf(table.headers, ID_HEADER)
+  return column >= 0 ? (table.rows[rowIndex]?.[column] ?? "").trim() : ""
+}
+
+/** Ce qui reconnaît une ligne sans identifiant : son nom (ou sa première colonne). */
+function rowLabel(table: PlainTable, rowIndex: number) {
+  const column = labelColumnIndex(table.headers)
+  return column >= 0 ? table.rows[rowIndex]?.[column] ?? "" : ""
+}
+
+/** Le nom vu par la page (texte, ou HTML d'une case enrichie) est-il celui de la feuille ? */
+function sameLabel(seen: string, current: string) {
+  const now = foldName(current)
+  return foldName(seen) === now || foldName(htmlToRichText(seen).text) === now
+}
+
+/**
+ * La case vue par la page est-elle encore celle de la feuille ? Comparées en texte : la page
+ * voit une case enrichie en HTML, Sheets en texte ; les espaces ne comptent pas.
+ */
+function sameCellText(seen: string, current: string) {
+  const squeeze = (value: string) => value.replace(/\s+/g, " ").trim()
+  const now = squeeze(current)
+  return squeeze(seen) === now || squeeze(htmlToRichText(seen).text) === now
+}
+
+/**
+ * La ligne que la page désigne, dans une lecture fraîche de l'onglet (sa place dans
+ * `table.rows`) : celle qui porte son identifiant, où qu'elle soit maintenant. Un identifiant
+ * disparu ou porté par deux lignes, ou (ligne sans identifiant) un autre nom à ce numéro :
+ * refusé, plutôt que d'écrire ou de supprimer dans la ligne voisine.
+ */
+function resolveRow(table: PlainTable, ref: WorldIndexRowRef) {
+  if (!Number.isInteger(ref.rowNumber) || ref.rowNumber < 2) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+  const id = (ref.id ?? "").trim()
+  const idColumn = columnOf(table.headers, ID_HEADER)
+  if (id && idColumn >= 0) {
+    const found = table.rows.flatMap((row, index) => index > 0 && (row?.[idColumn] ?? "").trim() === id ? [index] : [])
+    if (found.length > 1) throw new Error("WORLD_INDEX_ROW_DUPLICATE")
+    if (!found.length) throw new Error("WORLD_INDEX_ROW_CHANGED")
+    return found[0]
+  }
+  if (!sameLabel(ref.name ?? "", rowLabel(table, ref.rowNumber - 1))) throw new Error("WORLD_INDEX_ROW_CHANGED")
+  return ref.rowNumber - 1
+}
+
+/** Comme `resolveRow`, sans erreur : -1 si la ligne n'est plus sûrement là. */
+function findRow(table: PlainTable, ref: WorldIndexRowRef) {
+  try { return resolveRow(table, ref) } catch { return -1 }
+}
+
+/**
+ * Ce qui désigne une ligne lue, pour la retrouver dans une lecture suivante : son identifiant
+ * s'il n'est qu'à elle (une ligne copiée dans Sheets partage celui de l'original), sinon son
+ * nom à son numéro.
+ */
+function refOf(table: PlainTable, rowIndex: number): WorldIndexRowRef {
+  const id = rowId(table, rowIndex)
+  const own = Boolean(id) && table.rows.filter((_, index) => index > 0 && rowId(table, index) === id).length === 1
+  return { rowNumber: rowIndex + 1, id: own ? id : "", name: rowLabel(table, rowIndex) }
+}
+
+/** La ligne lue telle que la mémoire doit la montrer à ce numéro : même identifiant, même nom. */
+function cachedIdentityOf(table: PlainTable, rowIndex: number): CachedRowIdentity {
+  return { rowNumber: rowIndex + 1, id: rowId(table, rowIndex), label: rowLabel(table, rowIndex) }
+}
+
+/**
+ * Supprime des lignes en une seule requête, de la dernière à la première : retirer une
+ * ligne décale toutes les suivantes. Les numéros viennent d'une lecture faite à l'instant.
+ */
+async function deleteRows(spreadsheetId: string, tabName: string, rowNumbers: number[]) {
+  const ordered = [...new Set(rowNumbers)].filter((rowNumber) => rowNumber >= 2).sort((left, right) => right - left)
+  if (!ordered.length) return
+  const sheetId = await sheetIdOf(spreadsheetId, tabName)
+  await googleSheetsJson(`spreadsheets/${spreadsheetId}:batchUpdate`, {
+    method: "POST",
+    body: JSON.stringify({ requests: ordered.map((rowNumber) => ({ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } })) }),
+  })
+  clearSpreadsheetReadCache(spreadsheetId)
+}
 
 function rowName(table: PlainTable, rowIndex: number) {
   const nameColumn = nameColumnIndex(table.headers)
@@ -717,41 +939,45 @@ async function writeCell(table: PlainTable, tabName: string, rowIndex: number, c
 }
 
 /**
- * Écrit une ligne complète juste sous la dernière ligne remplie, en colonne A. L'ajout
- * « append » de Google devine lui-même où commence le tableau et pouvait décaler les
- * valeurs d'une ou plusieurs colonnes : on choisit la ligne nous-mêmes.
+ * Ajoute une ligne complète sous la dernière ligne remplie, en colonne A, avec `appendRows` :
+ * Google la place lui-même, d'un seul envoi. Écrite à un numéro choisi d'après une lecture,
+ * elle écrasait la ligne qu'un autre ajout (ailleurs dans Eraser ou dans une autre
+ * installation) venait d'y mettre. Les valeurs suivent les colonnes de `table` ; elles sont
+ * rangées par leur nom dans celles de l'onglet relu. Renvoie la ligne écrite et son
+ * identifiant.
  */
 async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: string, provided: string[]) {
+  const current = await plainTable(key, tabName)
+  // Rangées par nom de colonne : une colonne ajoutée ou déplacée entre-temps ne décale rien ;
+  // une colonne en double ne reçoit la valeur qu'une fois (la première, celle qu'on voit).
+  const given = new Map<string, string>()
+  table.headers.forEach((header, index) => { if (!given.has(foldName(header))) given.set(foldName(header), provided[index] ?? "") })
+  const placed = new Set<string>()
+  const named = current.headers.map((header) => {
+    const name = foldName(header)
+    if (placed.has(name)) return ""
+    placed.add(name)
+    return given.get(name) ?? ""
+  })
   // Toute nouvelle ligne reçoit son identifiant (une ligne déplacée garde le sien).
-  const idColumn = columnOf(table.headers, ID_HEADER)
-  const withId = idColumn >= 0 && !(provided[idColumn] ?? "").trim()
-    ? table.headers.map((_, index) => index === idColumn ? newIndexId(tabDefinition(key, tabName).idPrefix) : provided[index] ?? "")
-    : provided
+  const idColumn = columnOf(current.headers, ID_HEADER)
+  if (idColumn >= 0 && !(named[idColumn] ?? "").trim()) named[idColumn] = newIndexId(tabDefinition(key, tabName).idPrefix)
   // Une ligne d'index d'entités reçoit ce que son code attend (la page d'un PNJ, ses dates).
   const entity = entityOf(key)
   const now = new Date().toISOString()
-  const values = entity ? table.headers.map((header, index) => {
-    const value = withId[index] ?? ""
+  const values = entity ? current.headers.map((header, index) => {
+    const value = named[index] ?? ""
     if (value.trim()) return value
     const preset = Object.entries(entity.addDefaults ?? {}).find(([candidate]) => foldName(candidate) === foldName(header))?.[1]
     if (preset !== undefined) return preset
     return [foldName("Créé le"), foldName("Modifié le")].includes(foldName(header)) ? now : value
-  }) : withId
-  let rowIndex = table.rows.length
-  while (rowIndex > 1 && !(table.rows[rowIndex - 1] ?? []).some((value) => value.trim())) rowIndex -= 1
-  const range = sheetTabRange(tabName, `A${rowIndex + 1}:${columnName(values.length)}${rowIndex + 1}`)
-  try {
-    await updateRange(table.spreadsheetId, range, [values], { valueInputOption: "RAW" })
-  } catch {
-    // La grille est pleine : on lui ajoute des lignes puis on réessaie.
-    const tabs = await spreadsheetTabs(table.spreadsheetId)
-    const sheetId = tabs.find((tab) => tab.title === tabName)?.sheetId
-    if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-    await googleSheetsJson(`spreadsheets/${table.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ appendDimension: { sheetId, dimension: "ROWS", length: 500 } }] }) })
-    await updateRange(table.spreadsheetId, range, [values], { valueInputOption: "RAW" })
-  }
-  table.rows[rowIndex] = [...values]
-  return rowIndex + 1
+  }) : named
+  const { updatedRange } = await appendRows(current.spreadsheetId, sheetTabRange(tabName, `A:${columnName(Math.max(1, values.length))}`), [values], { valueInputOption: "RAW" })
+  const id = idColumn >= 0 ? (values[idColumn] ?? "").trim() : ""
+  // appendRows la retrouve par son texte, depuis le bas ; à défaut, son identifiant la désigne.
+  const rowNumber = sheetRangeStartRow(updatedRange) ?? (id ? findRow(await plainTable(key, tabName), { rowNumber: 2, id }) + 1 : 0)
+  if (rowNumber < 2) throw new Error("WORLD_INDEX_ROW_ADDED_UNSEEN")
+  return { rowNumber, id }
 }
 
 /** La ligne `name` parmi les onglets couverts par `end` ; -1 si elle n'existe nulle part. */
@@ -811,34 +1037,27 @@ function isSelfLink(key: WorldIndexKey, tabName: string, other: WorldIndexLinkEn
   return linkEndCovers(other, key, tabName) && foldName(target) === foldName(name)
 }
 
-/** Propage les colonnes liées d'une ligne vers les index d'en face. */
-async function syncRowLinks(key: WorldIndexKey, tabName: string, rowNumber: number, changed: Set<WorldIndexKey>) {
-  const table = await plainTable(key, tabName)
-  const name = rowName(table, rowNumber - 1)
+/**
+ * Propage les colonnes liées d'une ligne vers les index d'en face. La ligne vient d'être
+ * écrite : relue, et retrouvée par son identifiant si une autre a bougé entre-temps.
+ */
+async function syncRowLinks(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, changed: Set<WorldIndexKey>) {
+  const ends = linkEndsOf(key, tabName)
+  if (!ends.length) return
+  const table = await plainTable(key, tabName, [])
+  const rowIndex = findRow(table, row)
+  const name = rowIndex > 0 ? rowName(table, rowIndex) : ""
   if (!name) return
-  for (const [end, other] of linkEndsOf(key, tabName)) {
+  for (const [end, other] of ends) {
     const column = columnOf(table.headers, end.column)
     if (column < 0) continue
-    for (const target of splitNames(table.rows[rowNumber - 1]?.[column] || "")) {
+    for (const target of splitNames(table.rows[rowIndex]?.[column] || "")) {
       if (isSelfLink(key, tabName, other, target, name)) continue
       if (await addLink(other, target, name)) changed.add(other.index)
     }
   }
 }
 
-/** L'onglet tel qu'il est en mémoire : pas besoin de relire tout le classeur pour écrire une cellule. */
-async function tableFor(key: WorldIndexKey, tabName: string) {
-  const [sheet, data] = await Promise.all([workbook(key), getWorldIndex(key)])
-  const table = data.tables.find((candidate) => candidate.tabName === tabName)
-  if (!table) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-  return { sheet, table }
-}
-
-/**
- * Une cellule, avec sa mise en forme. Si elle est liée, l'autre côté suit : noms
- * ajoutés inscrits (et créés au besoin), noms effacés retirés, entité renommée
- * renommée partout où elle est citée. Renvoie les index modifiés par les liens.
- */
 /**
  * Une ligne renommée : les listes liées du même index qui la citaient prennent le nouveau
  * nom (la Caractéristique des compétences quand on renomme une caractéristique…). Seules
@@ -852,7 +1071,7 @@ async function renameLinkedChoices(key: WorldIndexKey, tabName: string, oldName:
     // Sans liste liée vers cet onglet (d'après la définition et le schéma), rien à relire.
     const known = [...tab.headers, ...schema.filter((entry) => entry.tab === tab.name && entry.column).map((entry) => entry.column)]
     if (!known.some((header) => pointsHere(tab.name, header))) continue
-    const table = await plainTable(key, tab.name)
+    const table = await plainTable(key, tab.name, known.filter((header) => pointsHere(tab.name, header)))
     const data: Array<{ range: string; values: string[][] }> = []
     table.headers.forEach((header, column) => {
       if (!pointsHere(tab.name, header)) return
@@ -873,57 +1092,82 @@ async function renameLinkedChoices(key: WorldIndexKey, tabName: string, oldName:
   if (touched) invalidateWorldIndexes([key])
 }
 
-export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, rowNumber: number, column: number, html: string) {
+/**
+ * Une cellule, avec sa mise en forme. La ligne est celle que la page a vue (retrouvée par son
+ * identifiant), la colonne celle qui porte ce nom ; `previous` est ce que la page y montrait :
+ * une case changée entre-temps (dans Sheets, par quelqu'un d'autre) n'est jamais écrasée sans
+ * avoir été vue. Si elle est liée, l'autre côté suit : noms ajoutés inscrits (et créés au
+ * besoin), noms effacés retirés, entité renommée renommée partout où elle est citée. Renvoie
+ * les index modifiés par les liens.
+ */
+export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, header: string, html: string, options: { previous?: string; guard?: WorldIndexRowGuard } = {}) {
   return serialized(async () => {
-    const { sheet, table } = await tableFor(key, tabName)
-    if (!table.rows.some((row) => row.rowNumber === rowNumber) || !Number.isInteger(column) || column < 0 || column >= table.headers.length) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
-    const header = table.headers[column]
-    const ends = linkEndsOf(key, tabName)
-    const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(header))
-    const touchesLinks = Boolean(linkedEnd) || (isNameColumn(header) && ends.length > 0)
-    const previousName = isNameColumn(header) ? (table.rows.find((row) => row.rowNumber === rowNumber)?.values[column] ?? "").replace(/\s+/g, " ").trim() : ""
-    const before = touchesLinks ? await plainTable(key, tabName) : null
-    // Une feuille lue en partie : la colonne du tableau n'est pas celle de Sheets.
-    await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column: table.columnsAt?.[column] ?? column, html })
-    await patchCachedRow(key, tabName, rowNumber, [{ column, html }])
-    const renamedTo = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
-    if (previousName && renamedTo && foldName(previousName) !== foldName(renamedTo)) await renameLinkedChoices(key, tabName, previousName, renamedTo)
-    const changed = new Set<WorldIndexKey>()
-    if (!before) return []
-    const oldName = rowName(before, rowNumber - 1)
+    const sheet = await writableWorkbook(key)
+    const before = await plainTable(key, tabName, [header])
+    const rowIndex = resolveRow(before, row)
+    const column = columnOf(before.headers, header)
+    if (column < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
+    const target = before.headers[column]
+    await options.guard?.({ id: rowId(before, rowIndex), headers: [target] })
+    const current = before.rows[rowIndex]?.[column] ?? ""
+    if (options.previous !== undefined && !sameCellText(options.previous, current)) throw new Error("WORLD_INDEX_CELL_CHANGED")
+    await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
+    await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
     const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
+    const previousName = isNameColumn(target) ? current.replace(/\s+/g, " ").trim() : ""
+    if (previousName && newValue && foldName(previousName) !== foldName(newValue)) await renameLinkedChoices(key, tabName, previousName, newValue)
+    const ends = linkEndsOf(key, tabName)
+    const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(target))
+    if (!linkedEnd && !(isNameColumn(target) && ends.length > 0)) return []
+    const changed = new Set<WorldIndexKey>()
+    const oldName = rowName(before, rowIndex)
 
     if (linkedEnd && oldName) {
       // Noms effacés de la cellule : l'autre côté les oublie aussi.
       const [end, other] = linkedEnd
       const kept = new Set(splitNames(newValue).map(foldName))
-      for (const removed of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
+      for (const removed of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
         if (!kept.has(foldName(removed)) && await removeLink(other, removed, oldName)) changed.add(other.index)
       }
     }
-    if (isNameColumn(header) && oldName && newValue && foldName(oldName) !== foldName(newValue)) {
+    if (isNameColumn(target) && oldName && newValue && foldName(oldName) !== foldName(newValue)) {
       // Entité renommée : chaque ligne qui la citait reçoit le nouveau nom.
       for (const [end, other] of ends) {
-        for (const target of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
-          if (await removeLink(other, target, oldName, newValue)) changed.add(other.index)
+        for (const linked of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
+          if (await removeLink(other, linked, oldName, newValue)) changed.add(other.index)
         }
       }
     }
-    await syncRowLinks(key, tabName, rowNumber, changed)
+    // Une ligne sans identifiant est reconnue par son nom : le nouveau, s'il vient de changer.
+    const written = refOf(before, rowIndex)
+    await syncRowLinks(key, tabName, column === labelColumnIndex(before.headers) ? { ...written, name: newValue } : written, changed)
     invalidateWorldIndexes(changed)
     return [...changed]
   })
 }
 
-/** Le formulaire d'ajout : les valeurs arrivent en HTML, les cellules gardent leur mise en forme. */
-export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: string[]) {
+/**
+ * Le formulaire d'ajout : les valeurs arrivent en HTML, les cellules gardent leur mise en
+ * forme. `headers` : les colonnes que suivent les valeurs, telles que la page les a vues.
+ */
+export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: string[], headers?: string[]) {
   return serialized(async () => {
     assertRowCommands(key)
-    const { sheet, table } = await tableFor(key, tabName)
-    // Les valeurs suivent les colonnes du tableau ; on les range par nom dans celles de Sheets.
-    const given = new Map(table.headers.map((header, index) => [foldName(header), String(provided[index] ?? "").slice(0, 50_000)]))
+    const sheet = await writableWorkbook(key)
+    const sent = headers ?? (await getWorldIndex(key)).tables.find((candidate) => candidate.tabName === tabName)?.headers
+    if (!sent) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
     const current = await plainTable(key, tabName)
-    const html = current.headers.map((header) => given.get(foldName(header)) ?? "")
+    // Les valeurs suivent les colonnes de la page ; on les range par nom dans celles de Sheets
+    // (une colonne en double ne reçoit la valeur qu'une fois : la première, celle qu'on voit).
+    const given = new Map<string, string>()
+    sent.forEach((header, index) => { if (!given.has(foldName(header))) given.set(foldName(header), String(provided[index] ?? "").slice(0, 50_000)) })
+    const placed = new Set<string>()
+    const html = current.headers.map((header) => {
+      const name = foldName(header)
+      if (placed.has(name)) return ""
+      placed.add(name)
+      return given.get(name) ?? ""
+    })
     const plain = html.map((value) => htmlToRichText(value).text)
     const nameColumn = nameColumnIndex(current.headers)
     if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
@@ -931,116 +1175,161 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
     // complète au lieu d'en créer une seconde. Pas dans un index d'entités : deux PNJs
     // (ou deux sorts) peuvent porter le même nom.
     const existing = nameColumn >= 0 && !entityOf(key) ? findRowByName(current, plain[nameColumn]) : -1
-    let rowNumber: number
+    // Les cases écrites : seules elles reçoivent ensuite leur mise en forme.
+    const filled = new Set<number>()
+    let row: WorldIndexRowRef
     if (existing > 0) {
-      rowNumber = existing + 1
+      // Compléter, jamais remplacer : une case déjà remplie garde sa valeur ; une colonne liée
+      // reçoit seulement les noms qui lui manquent.
       for (const [column, value] of plain.entries()) {
         if (column === nameColumn || !value.trim()) continue
         const previous = current.rows[existing][column] || ""
-        const merged = linkEndsOf(key, tabName).some(([end]) => foldName(end.column) === foldName(current.headers[column]))
-          ? splitNames(`${previous}, ${value}`).join(", ")
-          : value
-        await writeCell(current, tabName, existing, column, merged)
+        if (linkEndsOf(key, tabName).some(([end]) => foldName(end.column) === foldName(current.headers[column]))) {
+          const merged = splitNames(`${previous}, ${value}`).join(", ")
+          if (merged !== previous) await writeCell(current, tabName, existing, column, merged)
+          continue
+        }
+        if (previous.trim()) continue
+        await writeCell(current, tabName, existing, column, value)
+        filled.add(column)
       }
+      row = refOf(current, existing)
     } else {
-      rowNumber = await writeNewRow(key, current, tabName, plain)
+      const created = await writeNewRow(key, current, tabName, plain)
+      plain.forEach((_, column) => filled.add(column))
+      row = { ...created, name: plain[labelColumnIndex(current.headers)] ?? "" }
     }
-    for (const [column, value] of html.entries()) {
-      if (/<[a-z]/i.test(value)) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: table.sheetId, rowNumber, column, html: value })
+    const rich = html.flatMap((value, column) => /<[a-z]/i.test(value) && filled.has(column) ? [{ header: current.headers[column], html: value }] : [])
+    if (rich.length) {
+      // Relue avant la mise en forme : la ligne a pu descendre (une autre insérée au-dessus entre-temps).
+      const after = await plainTable(key, tabName, [])
+      const rowIndex = resolveRow(after, row)
+      const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
+      for (const cell of rich) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId, rowNumber: rowIndex + 1, column: columnOf(after.headers, cell.header), html: cell.html })
     }
     const changed = new Set<WorldIndexKey>([key])
-    await syncRowLinks(key, tabName, rowNumber, changed)
+    await syncRowLinks(key, tabName, row, changed)
     invalidateWorldIndexes(changed)
     return [...changed].filter((changedKey) => changedKey !== key)
   })
 }
 
 /**
- * « Ajouter une ligne » ou « plusieurs » : des lignes vides juste sous `afterRowNumber`,
- * avec la mise en forme de la ligne du dessus. La mémoire est décalée au lieu d'être
- * relue : des lignes vides en fin de tableau n'y seraient sinon plus visibles.
+ * « Ajouter une ligne » ou « plusieurs » : des lignes vides juste sous la ligne `anchor`
+ * (retrouvée par son identifiant), avec la mise en forme de la ligne du dessus.
  */
-export function insertWorldIndexRows(key: WorldIndexKey, tabName: string, afterRowNumber: number, count: number) {
+export function insertWorldIndexRows(key: WorldIndexKey, tabName: string, anchor: WorldIndexRowRef, count: number) {
   return serialized(async () => {
     assertRowCommands(key, "insert")
-    const { sheet, table } = await tableFor(key, tabName)
+    const sheet = await writableWorkbook(key)
     const rows = Math.max(1, Math.min(100, Math.trunc(count) || 1))
-    if (!Number.isInteger(afterRowNumber) || afterRowNumber < 1) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+    const table = await plainTable(key, tabName, [])
+    const rowIndex = resolveRow(table, anchor)
+    const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
     await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
       method: "POST",
-      body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: afterRowNumber, endIndex: afterRowNumber + rows }, inheritFromBefore: afterRowNumber > 1 } }] }),
+      body: JSON.stringify({ requests: [{ insertDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowIndex + 1, endIndex: rowIndex + 1 + rows }, inheritFromBefore: true } }] }),
     })
     clearSpreadsheetReadCache(sheet.spreadsheetId)
-    for (const row of table.rows) if (row.rowNumber > afterRowNumber) row.rowNumber += rows
-    const position = table.rows.findIndex((row) => row.rowNumber > afterRowNumber)
-    const blanks = Array.from({ length: rows }, (_, offset) => ({ rowNumber: afterRowNumber + offset + 1, values: table.headers.map(() => ""), html: table.headers.map(() => "") }))
-    table.rows.splice(position < 0 ? table.rows.length : position, 0, ...blanks)
-  })
-}
-
-/** La copie apparaît juste sous l'originale, mise en forme comprise. */
-export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
-  return serialized(async () => {
-  assertRowCommands(key, "duplicate")
-  const { sheet, table } = await tableFor(key, tabName)
-  // Un index d'entités copie toute la ligne (un personnage a des centaines de colonnes hors du tableau).
-  const columns = entityOf(key) ? {} : { startColumnIndex: 0, endColumnIndex: table.headers.length }
-  for (const rowNumber of [...rowNumbers].sort((left, right) => right - left)) {
-    if (!table.rows.some((row) => row.rowNumber === rowNumber)) continue
-    await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, {
-      method: "POST",
-      body: JSON.stringify({ requests: [
-        { insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: rowNumber, endIndex: rowNumber + 1 }, inheritFromBefore: true } },
-        { copyPaste: {
-          source: { sheetId: table.sheetId, startRowIndex: rowNumber - 1, endRowIndex: rowNumber, ...columns },
-          destination: { sheetId: table.sheetId, startRowIndex: rowNumber, endRowIndex: rowNumber + 1, ...columns },
-          pasteType: "PASTE_NORMAL",
-        } },
-      ] }),
-    })
-    // La copie reçoit son propre identifiant.
-    const idAt = columnOf(table.headers, ID_HEADER)
-    const idColumn = idAt >= 0 ? table.columnsAt?.[idAt] ?? idAt : -1
-    if (idColumn >= 0) {
-      const cell = `${columnName(idColumn + 1)}${rowNumber + 1}`
-      await updateRange(sheet.spreadsheetId, sheetTabRange(tabName, `${cell}:${cell}`), [[newIndexId(tabDefinition(key, tabName).idPrefix)]], { valueInputOption: "RAW" })
-    }
-  }
-  clearSpreadsheetReadCache(sheet.spreadsheetId)
-  invalidateWorldIndexes([key])
+    await insertCachedRows(key, tabName, cachedIdentityOf(table, rowIndex), rows)
   })
 }
 
 /**
- * Du bas vers le haut : retirer une ligne décale toutes les suivantes. Avant, l'entité
- * supprimée est retirée des colonnes liées qui la citaient.
+ * Des lignes vides insérées sous `anchor` : la mémoire est décalée au lieu d'être relue (des
+ * lignes vides en fin de tableau n'y seraient sinon plus visibles), et marquée : une relecture
+ * lancée avant ne la remplace pas. Seulement si elle montre bien cette ligne à ce numéro ;
+ * sinon elle date d'avant un changement fait ailleurs, et elle est relue.
  */
-export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNumbers: number[]) {
+async function insertCachedRows(key: WorldIndexKey, tabName: string, anchor: CachedRowIdentity, count: number) {
+  const entry = worldIndexCache.get(key)
+  if (!entry) return
+  const data = await entry.promise.catch(() => null)
+  const table = data?.tables.find((candidate) => candidate.tabName === tabName)
+  const row = table?.rows.find((candidate) => candidate.rowNumber === anchor.rowNumber)
+  if (!table || !row || !cachedRowIs(table, row, anchor) || worldIndexCache.get(key) !== entry) return invalidateWorldIndexes([key])
+  entry.patchedAt = Date.now()
+  entry.expiresAt = Math.max(entry.expiresAt, Date.now() + WORLD_INDEX_CACHE_MS)
+  for (const candidate of table.rows) if (candidate.rowNumber > anchor.rowNumber) candidate.rowNumber += count
+  const position = table.rows.findIndex((candidate) => candidate.rowNumber > anchor.rowNumber)
+  const blanks = Array.from({ length: count }, (_, offset) => ({ rowNumber: anchor.rowNumber + offset + 1, values: table.headers.map(() => ""), html: table.headers.map(() => "") }))
+  table.rows.splice(position < 0 ? table.rows.length : position, 0, ...blanks)
+}
+
+/**
+ * La copie apparaît juste sous l'originale, mise en forme comprise, avec son propre
+ * identifiant. Les lignes sont retrouvées par leur identifiant et toutes copiées d'une seule
+ * requête, de la dernière à la première. Dans les sorts des classes, la copie n'a aucun rang
+ * de classe : un rang n'admet que trois sorts, ils se choisissent depuis la classe.
+ */
+export function duplicateWorldIndexRows(key: WorldIndexKey, tabName: string, rows: WorldIndexRowRef[], options: { guard?: WorldIndexRowGuard } = {}) {
+  return serialized(async () => {
+    assertRowCommands(key, "duplicate")
+    const sheet = await writableWorkbook(key)
+    const table = await plainTable(key, tabName, [])
+    const indexes = [...new Set(rows.map((row) => resolveRow(table, row)))].sort((left, right) => right - left)
+    for (const index of indexes) await options.guard?.({ id: rowId(table, index), headers: [] })
+    if (!indexes.length) return
+    const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
+    // Un index d'entités copie toute la ligne (un personnage a des centaines de colonnes hors du tableau).
+    const columns = entityOf(key) ? {} : { startColumnIndex: 0, endColumnIndex: table.headers.length }
+    const idColumn = columnOf(table.headers, ID_HEADER)
+    const prefix = tabDefinition(key, tabName).idPrefix
+    const ranks = key === "class-spells" ? await classRankColumns(table.headers) : []
+    const cell = (rowIndex: number, column: number, value: string) => ({ updateCells: {
+      range: { sheetId, startRowIndex: rowIndex, endRowIndex: rowIndex + 1, startColumnIndex: column, endColumnIndex: column + 1 },
+      rows: [{ values: [value ? { userEnteredValue: { stringValue: value } } : {}] }],
+      fields: "userEnteredValue",
+    } })
+    const requests = indexes.flatMap((index) => [
+      { insertDimension: { range: { sheetId, dimension: "ROWS", startIndex: index + 1, endIndex: index + 2 }, inheritFromBefore: true } },
+      { copyPaste: {
+        source: { sheetId, startRowIndex: index, endRowIndex: index + 1, ...columns },
+        destination: { sheetId, startRowIndex: index + 1, endRowIndex: index + 2, ...columns },
+        pasteType: "PASTE_NORMAL",
+      } },
+      ...(idColumn >= 0 ? [cell(index + 1, idColumn, newIndexId(prefix))] : []),
+      ...ranks.map((column) => cell(index + 1, column, "")),
+    ])
+    await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+    clearSpreadsheetReadCache(sheet.spreadsheetId)
+    invalidateWorldIndexes([key])
+  })
+}
+
+/** Les colonnes de rang des classes (une par classe) dans la feuille des sorts des classes. */
+async function classRankColumns(headers: string[]) {
+  const classNames = (await listClassOptions()).map((item) => item.name)
+  return headers.flatMap((header, index) => isClassRankHeader(header, classNames) ? [index] : [])
+}
+
+/**
+ * Supprime des lignes, retrouvées par leur identifiant : deux homonymes ne se confondent
+ * jamais. Avant, l'entité supprimée est retirée des colonnes liées qui la citaient ; puis
+ * l'onglet est relu, et chaque ligne retrouvée de nouveau avant d'être supprimée.
+ */
+export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rows: WorldIndexRowRef[]) {
   return serialized(async () => {
     assertRowCommands(key, "delete")
-    const { sheet, table } = await tableFor(key, tabName)
-    const before = await plainTable(key, tabName)
-    const targets = [...new Set(rowNumbers)].filter((rowNumber) => table.rows.some((row) => row.rowNumber === rowNumber)).sort((left, right) => right - left)
-    const deletedNames = new Set(targets.map((rowNumber) => foldName(rowName(before, rowNumber - 1))))
-    for (const rowNumber of targets) {
-      const name = rowName(before, rowNumber - 1)
+    const sheet = await writableWorkbook(key)
+    const before = await plainTable(key, tabName, [])
+    const targets = [...new Set(rows.map((row) => resolveRow(before, row)))].map((index) => refOf(before, index))
+    const deletedNames = new Set(targets.map((target) => foldName(rowName(before, target.rowNumber - 1))))
+    for (const target of targets) {
+      const name = rowName(before, target.rowNumber - 1)
       if (!name) continue
       for (const [end, other] of linkEndsOf(key, tabName)) {
-        for (const target of splitNames(before.rows[rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
+        for (const linked of splitNames(before.rows[target.rowNumber - 1]?.[columnOf(before.headers, end.column)] || "")) {
           // Une ligne supprimée en même temps n'a pas besoin d'être nettoyée.
-          if (linkEndCovers(other, key, tabName) && deletedNames.has(foldName(target))) continue
-          await removeLink(other, target, name)
+          if (linkEndCovers(other, key, tabName) && deletedNames.has(foldName(linked))) continue
+          await removeLink(other, linked, name)
         }
       }
     }
-    // Les lignes ont pu bouger pendant le nettoyage : on les retrouve par leur nom.
-    const fresh = await plainTable(key, tabName)
-    const freshNumbers = targets.map((rowNumber) => {
-      const name = rowName(before, rowNumber - 1)
-      const index = name ? findRowByName(fresh, name) : rowNumber - 1
-      return index > 0 ? index + 1 : rowNumber
-    }).sort((left, right) => right - left)
-    for (const rowNumber of freshNumbers) await deleteGoogleSheetRow(sheet.spreadsheetId, tabName, rowNumber, table.sheetId)
+    // Le nettoyage a pu écrire dans cet onglet, et d'autres y ajouter ou retirer des lignes :
+    // relu, chaque ligne y est retrouvée de nouveau par son identifiant.
+    const fresh = await plainTable(key, tabName, [])
+    await deleteRows(sheet.spreadsheetId, tabName, targets.map((target) => resolveRow(fresh, target) + 1))
     invalidateWorldIndexes(linkedIndexes(key))
   })
 }
@@ -1048,52 +1337,55 @@ export function deleteWorldIndexRows(key: WorldIndexKey, tabName: string, rowNum
 /**
  * Plusieurs colonnes d'une même ligne, nommées par leur en-tête : c'est la fiche d'une
  * créature, dont la plupart des champs ne sont pas affichés dans le tableau. Seules les
- * valeurs modifiées sont écrites, pour ne pas effacer la mise en forme des autres.
+ * valeurs modifiées sont écrites, pour ne pas effacer la mise en forme des autres. La ligne
+ * est retrouvée par son identifiant ; `previous` (ce que la fiche montrait de chaque champ)
+ * fait tout refuser si l'un d'eux a changé entre-temps ailleurs.
  */
-export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowNumber: number, fields: Record<string, string>) {
+export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, fields: Record<string, string>, options: { previous?: Record<string, string>; guard?: WorldIndexRowGuard } = {}) {
   return serialized(async () => {
-    const table = await plainTable(key, tabName)
-    const rowIndex = rowNumber - 1
-    if (rowIndex < 1 || !table.rows[rowIndex]?.some((value) => value.trim())) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
+    const sheet = await writableWorkbook(key)
+    const table = await plainTable(key, tabName, Object.keys(fields))
+    const rowIndex = resolveRow(table, row)
+    const current = table.rows[rowIndex] ?? []
     const nameColumn = nameColumnIndex(table.headers)
-    const oldName = nameColumn >= 0 ? String(table.rows[rowIndex]?.[nameColumn] ?? "").trim() : ""
+    const oldName = nameColumn >= 0 ? String(current[nameColumn] ?? "").trim() : ""
+    // Tout est vérifié avant d'écrire : une colonne disparue, un nom vide ou un champ changé ailleurs n'écrit rien.
+    const targets = Object.entries(fields).map(([header, raw]) => ({ header, column: columnOf(table.headers, header), value: String(raw ?? "").slice(0, 50_000) }))
+    if (targets.some((target) => target.column < 0)) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
+    if (targets.some((target) => target.column === nameColumn && !target.value.trim())) throw new Error("WORLD_INDEX_NAME_REQUIRED")
+    await options.guard?.({ id: rowId(table, rowIndex), headers: targets.map((target) => table.headers[target.column]) })
+    for (const target of targets) {
+      const seen = options.previous?.[target.header]
+      if (seen !== undefined && !sameCellText(seen, current[target.column] ?? "")) throw new Error("WORLD_INDEX_CELL_CHANGED")
+    }
+    const rowNumber = rowIndex + 1
     const data: Array<{ range: string; values: string[][] }> = []
     const formatted: Array<{ column: number; html: string }> = []
-    const written = new Map<string, number>()
-    for (const [header, raw] of Object.entries(fields)) {
-      const column = columnOf(table.headers, header)
-      if (column < 0) continue
-      const value = String(raw ?? "").slice(0, 50_000)
-      if (column === nameColumn && !value.trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
-      if ((table.rows[rowIndex][column] ?? "") === value) continue
+    const written: Array<{ header: string; html: string }> = []
+    for (const target of targets) {
+      if ((current[target.column] ?? "") === target.value) continue
+      written.push({ header: table.headers[target.column], html: target.value })
       // Texte enrichi : écrit avec sa mise en forme plutôt qu'avec ses balises.
-      if (/<[a-z]/i.test(value)) { formatted.push({ column, html: value }); continue }
-      const cell = `${columnName(column + 1)}${rowNumber}`
-      const range = sheetTabRange(tabName, `${cell}:${cell}`)
-      written.set(range, column)
-      data.push({ range, values: [[value]] })
+      if (/<[a-z]/i.test(target.value)) { formatted.push({ column: target.column, html: target.value }); continue }
+      const cell = `${columnName(target.column + 1)}${rowNumber}`
+      data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[target.value]] })
     }
     if (data.length) {
-      await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, {
+      await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}/values:batchUpdate`, {
         method: "POST",
         body: JSON.stringify({ valueInputOption: "RAW", data }),
       })
-      clearSpreadsheetReadCache(table.spreadsheetId)
+      clearSpreadsheetReadCache(sheet.spreadsheetId)
     }
     if (formatted.length) {
-      const tabs = await spreadsheetTabs(table.spreadsheetId)
-      const sheetId = tabs.find((tab) => tab.title === tabName)?.sheetId
-      if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-      for (const cell of formatted) await updateFormattedCell({ spreadsheetId: table.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
+      const sheetId = await sheetIdOf(sheet.spreadsheetId, tabName)
+      for (const cell of formatted) await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId, rowNumber, column: cell.column, html: cell.html })
     }
-    await patchCachedRow(key, tabName, rowNumber, [
-      ...data.map((entry) => ({ column: written.get(entry.range) ?? -1, html: entry.values[0][0] })),
-      ...formatted,
-    ].filter((cell) => cell.column >= 0), { sheetColumns: true })
+    await patchCachedRow(key, tabName, cachedIdentityOf(table, rowIndex), written)
     const nameField = Object.entries(fields).find(([header]) => columnOf(table.headers, header) === nameColumn)?.[1]
     const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()
     if (oldName && newName && foldName(oldName) !== foldName(newName)) await renameLinkedChoices(key, tabName, oldName, newName)
-    return data.length + formatted.length
+    return written.length
   })
 }
 
@@ -1101,57 +1393,35 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, rowN
  * Déplace des lignes vers un autre onglet du même index (un lieu créé par un lien
  * arrive dans le premier onglet, on le range ensuite). Les colonnes sont recopiées
  * par leur nom, la ligne d'origine est ensuite retirée. Les liens suivent d'eux-mêmes :
- * ils désignent une entité par son nom, quel que soit son onglet.
+ * ils désignent une entité par son nom, quel que soit son onglet. Les lignes sont
+ * retrouvées par leur identifiant, avant la copie comme avant la suppression.
  */
-export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: string, rowNumbers: number[]) {
+export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: string, rows: WorldIndexRowRef[]) {
   return serialized(async () => {
     if (fromTab === toTab) return
     assertRowCommands(key, "move")
+    const sheet = await writableWorkbook(key)
     if (!(await tabsOf(key)).some((tab) => tab.name === toTab)) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
     const source = await plainTable(key, fromTab)
     const target = await plainTable(key, toTab)
-    const moved: number[] = []
-    for (const rowNumber of [...new Set(rowNumbers)].sort((left, right) => left - right)) {
-      const row = source.rows[rowNumber - 1]
-      if (rowNumber < 2 || !row?.some((value) => value.trim())) continue
+    const moved: WorldIndexRowRef[] = []
+    for (const index of [...new Set(rows.map((row) => resolveRow(source, row)))].sort((left, right) => left - right)) {
+      const row = source.rows[index]
+      if (!row?.some((value) => value.trim())) continue
       const values = target.headers.map((header) => {
         const column = columnOf(source.headers, header)
         return column >= 0 ? row[column] ?? "" : ""
       })
       await writeNewRow(key, target, toTab, values)
-      moved.push(rowNumber)
+      moved.push(refOf(source, index))
     }
-    const { sheet, table } = await tableFor(key, fromTab)
-    for (const rowNumber of moved.sort((left, right) => right - left)) await deleteGoogleSheetRow(sheet.spreadsheetId, fromTab, rowNumber, table.sheetId)
+    if (!moved.length) return
+    // Les lignes d'origine, retrouvées dans l'onglet relu : une ligne ajoutée ou retirée
+    // ailleurs entre-temps ne fait pas supprimer la voisine.
+    const fresh = await plainTable(key, fromTab)
+    await deleteRows(sheet.spreadsheetId, fromTab, moved.map((row) => resolveRow(fresh, row) + 1))
     invalidateWorldIndexes([key])
   })
-}
-
-/**
- * Une colonne « Rangement en onglets » : sa valeur est le nom de l'onglet où la ligne
- * doit vivre. La valeur est écrite, puis la ligne y est déplacée ; un onglet absent est
- * d'abord créé avec les mêmes colonnes que l'onglet de départ. Une case vidée ne déplace rien.
- */
-export async function sortWorldIndexRow(key: WorldIndexKey, fromTab: string, rowNumber: number, header: string, html: string) {
-  const value = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
-  const source = await plainTable(key, fromTab)
-  const column = columnOf(source.headers, header)
-  if (column < 0 || rowNumber < 2) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
-  // La colonne du tableau (une feuille lue en partie ne commence pas en A).
-  const data = await getWorldIndex(key)
-  const tableColumn = data.tables.find((table) => table.tabName === fromTab)?.headers.findIndex((candidate) => foldName(candidate) === foldName(header)) ?? -1
-  if (tableColumn < 0) throw new Error("WORLD_INDEX_ROW_NOT_FOUND")
-  await updateWorldIndexCell(key, fromTab, rowNumber, tableColumn, escapeCellHtml(value))
-  // Un index d'entités n'a qu'un onglet : la valeur reste un onglet de rangement (une vue).
-  if (!value || entityOf(key)) return
-  let target = (await tabsOf(key)).find((tab) => foldName(tab.name) === foldName(value))?.name
-  if (!target) {
-    const columns = (data.columns[fromTab] ?? []).filter((entry) => !isNameColumn(entry.header) && !isIdHeader(entry.header)).map((entry) => ({ header: entry.header, spec: entry.spec }))
-    await applyWorldSchemaOperations(key, [{ op: "add-tab", name: value, columns }])
-    forgetEffectiveIndex(key)
-    target = value.replace(/\s+/g, " ").trim()
-  }
-  if (target !== fromTab) await moveWorldIndexRows(key, fromTab, target, [rowNumber])
 }
 
 /**
@@ -1246,10 +1516,24 @@ export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name:
 // « Modifier » : le schéma d'un index du monde
 // ---------------------------------------------------------------------------
 
+/**
+ * Ce que les verrous ont besoin de savoir en plus de la définition : les classes, dont chacune
+ * a sa colonne de rang dans les sorts des classes (sous son ID ou sous son nom).
+ */
+async function policyContext(key: WorldIndexKey): Promise<WorldPolicyContext> {
+  if (key !== "class-spells") return {}
+  return { classNames: (await listClassOptions()).map((item) => item.name) }
+}
+
 /** Ce que l'éditeur montre d'un index : ses onglets, ses colonnes, leurs verrous et raisons. */
 export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorModel> {
   const data = await getWorldIndex(key)
   const links = data.links
+  // Pour l'affichage seulement : l'écriture relit les classes et refuse si elle ne le peut pas.
+  const context = await policyContext(key).catch((error) => {
+    console.error("WORLD_INDEX_POLICY_CONTEXT_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return {}
+  })
   const firstTab = data.definition.tabs[0]?.name
   const linkedTabs = new Set(links.flatMap(([end]) => end.index === key && end.tab !== "*" ? [end.tab] : []))
   const entity = entityOf(key)
@@ -1258,7 +1542,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
       const reason = "Onglet lu par Eraser sous ce nom : c’est la feuille de cet index."
       return {
         name: table.tabName,
-        columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links) })),
+        columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
         remove: false,
         removeReason: reason,
         rename: false,
@@ -1274,7 +1558,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
     const renameReason = planned ? "Onglet prévu par Eraser : il est retrouvé par son nom (créations, liens, statistiques)." : linkedTabs.has(table.tabName) ? "Une colonne liée vise cet onglet par son nom." : ""
     return {
       name: table.tabName,
-      columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links) })),
+      columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
       remove: !locked,
       removeReason: locked || undefined,
       rename: !renameReason,
@@ -1295,7 +1579,12 @@ export async function worldRelationTargets(): Promise<RelationTarget[]> {
     title: definition.title,
     tabs: effectiveIndexes.get(definition.key)?.definition.tabs.map((tab) => ({ name: tab.name, columns: tab.headers })) ?? definition.tabs.map((tab) => ({ name: tab.name, columns: tab.headers })),
   }))
-  const custom = await Promise.all((await listCustomIndexes()).map(async (entry) => {
+  // Le registre illisible un instant : la liste des cibles s'en passe (rien n'est écrit d'ici).
+  const entries = await listCustomIndexes().catch((error) => {
+    console.error("WORLD_INDEX_RELATION_TARGETS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return []
+  })
+  const custom = await Promise.all(entries.map(async (entry) => {
     const tabs = await tabsOf(entry.key).catch(() => [] as WorldIndexTabDefinition[])
     return { index: entry.key, title: entry.title, tabs: tabs.map((tab) => ({ name: tab.name, columns: tab.headers })) }
   }))
@@ -1307,10 +1596,9 @@ async function writeHeader(spreadsheetId: string, tabName: string, column: numbe
   await updateRange(spreadsheetId, sheetTabRange(tabName, `${cell}:${cell}`), [[header]], { valueInputOption: "RAW" })
 }
 
-/** Ajoute une colonne à droite de la dernière colonne remplie de l'en-tête. */
+/** Ajoute une colonne à droite de la dernière colonne remplie de l'en-tête, relu à l'instant. */
 async function appendHeader(spreadsheetId: string, tabName: string, header: string) {
-  clearSpreadsheetReadCache(spreadsheetId)
-  const [firstRow = []] = await readRange(spreadsheetId, sheetTabRange(tabName, "1:1"))
+  const [firstRow = []] = (await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(tabName, "1:1"))).rows
   let used = firstRow.length
   while (used > 0 && !firstRow[used - 1]?.trim()) used -= 1
   if (firstRow.slice(0, used).some((existing) => foldName(existing) === foldName(header))) return
@@ -1325,140 +1613,175 @@ function assertPolicy(allowed: boolean, reasons: string[]) {
 /**
  * Crée l'autre côté d'une colonne liée : la colonne qui lui répond dans l'index visé,
  * déclarée dans son propre schéma. Une colonne déjà présente est reprise telle quelle.
+ * L'index visé et son schéma sont relus à l'instant : celui d'un classeur partagé (les
+ * créatures et leurs sorts) porte aussi les réglages de l'autre index, jamais réécrits d'avant.
  */
 async function ensureReciprocal(key: WorldIndexKey, tab: string, header: string, link: NonNullable<IndexColumnSpec["link"]>) {
-  const target = await workbook(link.index)
+  const target = await workbook(link.index, { strict: true })
   const tabs = link.tab === "*" ? target.definition.tabs.map((item) => item.name) : [link.tab]
-  const schema = [...target.schema]
-  for (const targetTab of tabs) {
-    await appendHeader(target.spreadsheetId, targetTab, link.column)
-    upsertEntry(schema, targetTab, link.column, { spec: { kind: "linked", also: ["rich"], link: { index: key, tab, column: header } }, deletedAt: "" })
-  }
-  await saveSchema(target, schema)
-  forgetEffectiveIndex(link.index)
+  for (const targetTab of tabs) await appendHeader(target.spreadsheetId, targetTab, link.column)
+  await rewriteSchema(target.spreadsheetId, (entries) => {
+    for (const targetTab of tabs) upsertEntry(entries, targetTab, link.column, { spec: { kind: "linked", also: ["rich"], link: { index: key, tab, column: header } }, deletedAt: "" })
+  })
+  forgetWorkbook(target.spreadsheetId)
+}
+
+/** La ligne d'un onglet dans le schéma : sa place, et pour un index d'entités l'ordre d'affichage de ses colonnes. */
+function setTabSpec(entries: SchemaEntry[], tab: string, changes: Pick<IndexColumnSpec, "position" | "columns">) {
+  const current = findEntry(entries, tab, "")?.spec
+  upsertEntry(entries, tab, "", { spec: { ...(current?.kind === "tab" ? current : {}), kind: "tab", ...changes } })
 }
 
 /**
  * Applique les changements de l'éditeur, un par un, dans la file des écritures. Une
- * opération verrouillée est refusée même si l'interface l'avait laissée passer.
+ * opération verrouillée est refusée même si l'interface l'avait laissée passer. Ce que
+ * chaque opération change au schéma est rejoué, à la fin, sur le schéma relu à l'instant :
+ * rien n'est écrit d'un schéma vieilli ou mal lu, ni par-dessus un changement fait ailleurs.
+ * Un index d'entités (sa feuille sert aussi ailleurs dans Eraser) ne voit jamais ses colonnes
+ * déplacées ni ses en-têtes lus par Eraser renommés.
  */
 export function applyWorldSchemaOperations(key: WorldIndexKey, operations: SchemaOperation[]) {
   return serialized(async () => {
-    const sheet = await workbook(key, { refresh: true })
-    const schema = [...sheet.schema]
+    const sheet = await workbook(key, { strict: true })
+    // Une copie de travail : chaque vérification voit les opérations précédentes.
+    const schema = sheet.schema.map((entry) => ({ ...entry }))
+    const edits: Array<(entries: SchemaEntry[]) => void> = []
+    const edit = (change: (entries: SchemaEntry[]) => void) => { change(schema); edits.push(change) }
     const links = linksOf(key)
+    const context = await policyContext(key)
+    const entity = entityOf(key)
     const now = new Date().toISOString()
-    for (const operation of operations) {
-      // Un index d'entités garde son seul onglet, celui que lit Eraser.
-      if (entityOf(key) && ["add-tab", "order-tabs", "rename-tab", "remove-tab"].includes(operation.op)) throw new Error("INDEX_SCHEMA_LOCKED:Onglet lu par Eraser sous ce nom : c’est la feuille de cet index.")
-      if (operation.op === "add-tab") {
-        const problem = tabProblem(operation.name, [...(await spreadsheetTabs(sheet.spreadsheetId)).map((tab) => tab.title)])
-        if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-        const name = operation.name.replace(/\s+/g, " ").trim()
-        const columns = operation.columns.filter((column) => !["nom", "id"].includes(foldName(column.header)))
-        await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: Math.max(26, columns.length + 2), frozenRowCount: 1, frozenColumnCount: 1 } } } }] }) })
-        const headers = ["Nom", ...columns.map((column) => column.header.trim()), ID_HEADER]
-        await updateRange(sheet.spreadsheetId, sheetTabRange(name, `A1:${columnName(headers.length)}1`), [headers], { valueInputOption: "RAW" })
-        upsertEntry(schema, name, "", { state: "ajouté", deletedAt: "" })
-        for (const column of columns) {
-          upsertEntry(schema, name, column.header.trim(), { spec: column.spec, state: "ajouté", deletedAt: "" })
-          if (column.spec.kind === "linked" && column.spec.link) await ensureReciprocal(key, name, column.header.trim(), column.spec.link)
+    try {
+      for (const operation of operations) {
+        // Un index d'entités garde son seul onglet, celui que lit Eraser.
+        if (entity && ["add-tab", "order-tabs", "rename-tab", "remove-tab"].includes(operation.op)) throw new Error("INDEX_SCHEMA_LOCKED:Onglet lu par Eraser sous ce nom : c’est la feuille de cet index.")
+        if (operation.op === "add-tab") {
+          const problem = tabProblem(operation.name, [...(await spreadsheetTabs(sheet.spreadsheetId)).map((tab) => tab.title)])
+          if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+          const name = operation.name.replace(/\s+/g, " ").trim()
+          const columns = operation.columns.filter((column) => !["nom", "id"].includes(foldName(column.header)))
+          await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ addSheet: { properties: { title: name, gridProperties: { rowCount: 1000, columnCount: Math.max(26, columns.length + 2), frozenRowCount: 1, frozenColumnCount: 1 } } } }] }) })
+          const headers = ["Nom", ...columns.map((column) => column.header.trim()), ID_HEADER]
+          await updateRange(sheet.spreadsheetId, sheetTabRange(name, `A1:${columnName(headers.length)}1`), [headers], { valueInputOption: "RAW" })
+          edit((entries) => upsertEntry(entries, name, "", { state: "ajouté", deletedAt: "" }))
+          for (const column of columns) {
+            const header = column.header.trim()
+            edit((entries) => upsertEntry(entries, name, header, { spec: column.spec, state: "ajouté", deletedAt: "" }))
+            if (column.spec.kind === "linked" && column.spec.link) await ensureReciprocal(key, name, header, column.spec.link)
+          }
+          continue
         }
-        continue
-      }
-      if (operation.op === "order-tabs") {
-        const existing = await spreadsheetTabs(sheet.spreadsheetId)
-        const requests: unknown[] = []
-        operation.tabs.forEach((name, position) => {
-          upsertEntry(schema, name, "", { spec: { kind: "tab", position } })
-          const sheetId = existing.find((candidate) => candidate.title === name)?.sheetId
-          if (sheetId !== undefined) requests.push({ updateSheetProperties: { properties: { sheetId, index: position }, fields: "index" } })
-        })
-        if (requests.length) await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-        continue
-      }
-      const tab = sheet.definition.tabs.find((candidate) => candidate.name === operation.tab)
-      if (!tab) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-      if (operation.op === "rename-tab") {
-        const model = await worldEditorModel(key)
-        const target = model.tabs.find((candidate) => candidate.name === tab.name)
-        assertPolicy(Boolean(target?.rename), [target?.renameReason ?? ""])
-        const existing = await spreadsheetTabs(sheet.spreadsheetId)
-        const problem = tabProblem(operation.to, existing.map((candidate) => candidate.title).filter((title) => title !== tab.name))
-        if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-        const to = operation.to.replace(/\s+/g, " ").trim()
-        const sheetId = existing.find((candidate) => candidate.title === tab.name)?.sheetId
-        if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-        await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId, title: to }, fields: "title" } }] }) })
-        for (const entry of schema) if (entry.tab === tab.name) entry.tab = to
-        clearSpreadsheetReadCache(sheet.spreadsheetId)
-        continue
-      }
-      if (operation.op === "order-columns") {
-        clearSpreadsheetReadCache(sheet.spreadsheetId)
-        const [firstRow = []] = await readRange(sheet.spreadsheetId, sheetTabRange(tab.name, "1:1"))
-        const moves = columnMoves(firstRow, operation.headers)
-        const sheetId = (await spreadsheetTabs(sheet.spreadsheetId)).find((candidate) => candidate.title === tab.name)?.sheetId
-        if (moves.length && sheetId !== undefined) {
-          await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
+        if (operation.op === "order-tabs") {
+          const existing = await spreadsheetTabs(sheet.spreadsheetId)
+          const requests: unknown[] = []
+          operation.tabs.forEach((name, position) => {
+            edit((entries) => setTabSpec(entries, name, { position }))
+            const sheetId = existing.find((candidate) => candidate.title === name)?.sheetId
+            if (sheetId !== undefined) requests.push({ updateSheetProperties: { properties: { sheetId, index: position }, fields: "index" } })
+          })
+          if (requests.length) await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
+          continue
+        }
+        const tab = sheet.definition.tabs.find((candidate) => candidate.name === operation.tab)
+        if (!tab) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+        if (operation.op === "rename-tab") {
+          const model = await worldEditorModel(key)
+          const target = model.tabs.find((candidate) => candidate.name === tab.name)
+          assertPolicy(Boolean(target?.rename), [target?.renameReason ?? ""])
+          const existing = await spreadsheetTabs(sheet.spreadsheetId)
+          const problem = tabProblem(operation.to, existing.map((candidate) => candidate.title).filter((title) => title !== tab.name))
+          if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+          const to = operation.to.replace(/\s+/g, " ").trim()
+          const sheetId = existing.find((candidate) => candidate.title === tab.name)?.sheetId
+          if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+          await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId, title: to }, fields: "title" } }] }) })
+          edit((entries) => { for (const entry of entries) if (entry.tab === tab.name) entry.tab = to })
           clearSpreadsheetReadCache(sheet.spreadsheetId)
+          continue
         }
-        continue
-      }
-      if (operation.op === "remove-tab") {
-        const model = await worldEditorModel(key)
-        const target = model.tabs.find((candidate) => candidate.name === tab.name)
-        assertPolicy(Boolean(target?.remove), [target?.removeReason ?? ""])
-        upsertEntry(schema, tab.name, "", { deletedAt: now })
-        continue
-      }
-      const table = await plainTable(key, tab.name)
-      if (operation.op === "add-column") {
-        const problem = headerProblem(operation.header, table.headers)
-        if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-        const header = operation.header.replace(/\s+/g, " ").trim()
-        await appendHeader(sheet.spreadsheetId, tab.name, header)
-        upsertEntry(schema, tab.name, header, { spec: operation.spec, state: "ajouté", deletedAt: "" })
-        if (operation.spec.kind === "linked" && operation.spec.link) await ensureReciprocal(key, tab.name, header, operation.spec.link)
-        continue
-      }
-      const column = columnOf(table.headers, operation.header)
-      if (column < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
-      const policy = worldColumnPolicy(key, tab.name, operation.header, links)
-      const entry = findEntry(schema, tab.name, operation.header)
-      if (operation.op === "rename") {
-        assertPolicy(policy.rename || Boolean(operation.force), policy.reasons)
-        const problem = headerProblem(operation.to, table.headers, operation.header)
-        if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
-        const to = operation.to.replace(/\s+/g, " ").trim()
-        await writeHeader(sheet.spreadsheetId, tab.name, column, to)
-        // Une colonne prévue par Eraser garde son nom d'origine : elle n'est pas recréée.
-        const planned = tab.headers.some((header) => foldName(header) === foldName(operation.header)) && !entry?.state
-        if (entry) Object.assign(entry, { column: to, origin: entry.origin || (planned ? operation.header : "") })
-        else schema.push({ tab: tab.name, column: to, origin: planned ? operation.header : "", spec: null, state: "", deletedAt: "" })
-        // Les Recherches et Agrégats qui suivaient cette colonne suivent son nouveau nom.
-        for (const other of schema) {
-          if (other.tab !== tab.name || !other.spec) continue
-          if (other.spec.lookup?.via && foldName(other.spec.lookup.via) === foldName(operation.header)) other.spec.lookup.via = to
-          if (other.spec.rollup?.via && foldName(other.spec.rollup.via) === foldName(operation.header)) other.spec.rollup.via = to
+        if (operation.op === "order-columns") {
+          // Un index d'entités : ses colonnes ne bougent pas dans la feuille (d'autres pages la
+          // lisent). L'ordre choisi n'est que celui de l'affichage, gardé dans le schéma.
+          if (entity) {
+            const headers = operation.headers.map((header) => header.replace(/\s+/g, " ").trim()).filter(Boolean)
+            edit((entries) => setTabSpec(entries, tab.name, { columns: headers }))
+            continue
+          }
+          const [firstRow = []] = (await readRangeFreshWithOffset(sheet.spreadsheetId, sheetTabRange(tab.name, "1:1"))).rows
+          const moves = columnMoves(firstRow, operation.headers)
+          if (moves.length) {
+            const sheetId = await sheetIdOf(sheet.spreadsheetId, tab.name)
+            await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: moves.map((move) => ({ moveDimension: { source: { sheetId, dimension: "COLUMNS", startIndex: move.from, endIndex: move.from + 1 }, destinationIndex: move.to } })) }) })
+            clearSpreadsheetReadCache(sheet.spreadsheetId)
+          }
+          continue
         }
-        continue
+        if (operation.op === "remove-tab") {
+          const model = await worldEditorModel(key)
+          const target = model.tabs.find((candidate) => candidate.name === tab.name)
+          assertPolicy(Boolean(target?.remove), [target?.removeReason ?? ""])
+          edit((entries) => upsertEntry(entries, tab.name, "", { deletedAt: now }))
+          continue
+        }
+        const table = await plainTable(key, tab.name, [])
+        if (operation.op === "add-column") {
+          const problem = headerProblem(operation.header, table.headers)
+          if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+          const header = operation.header.replace(/\s+/g, " ").trim()
+          await appendHeader(sheet.spreadsheetId, tab.name, header)
+          edit((entries) => upsertEntry(entries, tab.name, header, { spec: operation.spec, state: "ajouté", deletedAt: "" }))
+          if (operation.spec.kind === "linked" && operation.spec.link) await ensureReciprocal(key, tab.name, header, operation.spec.link)
+          continue
+        }
+        const column = columnOf(table.headers, operation.header)
+        if (column < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
+        const policy = worldColumnPolicy(key, tab.name, operation.header, links, context)
+        if (operation.op === "rename") {
+          // Une colonne qu'Eraser lit dans la feuille d'un index d'entités garde son nom, même
+          // déverrouillée : la renommer dans Sheets la couperait des pages qui la lisent.
+          assertPolicy(policy.rename || (Boolean(operation.force) && !entity), policy.reasons)
+          const problem = headerProblem(operation.to, table.headers, operation.header)
+          if (problem) throw new Error(`INDEX_SCHEMA_INVALID:${problem}`)
+          const to = operation.to.replace(/\s+/g, " ").trim()
+          const from = operation.header
+          await writeHeader(sheet.spreadsheetId, tab.name, column, to)
+          const planned = tab.headers.some((header) => foldName(header) === foldName(from))
+          edit((entries) => {
+            const entry = findEntry(entries, tab.name, from)
+            // Une colonne prévue par Eraser garde son nom d'origine : elle n'est pas recréée.
+            if (entry) Object.assign(entry, { column: to, origin: entry.origin || (planned && !entry.state ? from : "") })
+            else entries.push({ tab: tab.name, column: to, origin: planned ? from : "", spec: null, state: "", deletedAt: "" })
+            // Les Recherches et Agrégats qui suivaient cette colonne suivent son nouveau nom.
+            for (const other of entries) {
+              if (other.tab !== tab.name || !other.spec) continue
+              if (other.spec.lookup?.via && foldName(other.spec.lookup.via) === foldName(from)) other.spec = { ...other.spec, lookup: { ...other.spec.lookup, via: to } }
+              if (other.spec.rollup?.via && foldName(other.spec.rollup.via) === foldName(from)) other.spec = { ...other.spec, rollup: { ...other.spec.rollup, via: to } }
+            }
+            // L'ordre d'affichage gardé pour un index d'entités suit le nouveau nom.
+            const order = findEntry(entries, tab.name, "")?.spec
+            if (order?.kind === "tab" && order.columns) setTabSpec(entries, tab.name, { columns: order.columns.map((header) => foldName(header) === foldName(from) ? to : header) })
+          })
+          continue
+        }
+        if (operation.op === "spec") {
+          const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
+          if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type || Boolean(operation.force), policy.reasons)
+          edit((entries) => upsertEntry(entries, tab.name, operation.header, { spec: operation.spec }))
+          if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await ensureReciprocal(key, tab.name, operation.header, operation.spec.link)
+          continue
+        }
+        if (operation.op === "remove-column") {
+          // À la corbeille dans le schéma seulement : la colonne reste dans la feuille.
+          assertPolicy(policy.remove || Boolean(operation.force), policy.reasons)
+          edit((entries) => upsertEntry(entries, tab.name, operation.header, { deletedAt: now }))
+        }
       }
-      if (operation.op === "spec") {
-        const current = effectiveColumnSpec(key, tab.name, operation.header, schema)
-        if (!isDisplayOnlyChange(current, operation.spec)) assertPolicy(policy.type || Boolean(operation.force), policy.reasons)
-        upsertEntry(schema, tab.name, operation.header, { spec: operation.spec })
-        if (operation.spec.kind === "linked" && operation.spec.link && !current.link) await ensureReciprocal(key, tab.name, operation.header, operation.spec.link)
-        continue
-      }
-      if (operation.op === "remove-column") {
-        assertPolicy(policy.remove || Boolean(operation.force), policy.reasons)
-        upsertEntry(schema, tab.name, operation.header, { deletedAt: now })
-      }
+      if (edits.length) await rewriteSchema(sheet.spreadsheetId, (entries) => { for (const change of edits) change(entries) })
+    } finally {
+      // Les onglets ou colonnes ont pu changer même si une opération a été refusée en route.
+      forgetWorkbook(sheet.spreadsheetId)
+      readyWorkbooks.clear()
     }
-    await saveSchema(sheet, schema)
-    forgetEffectiveIndex(key)
-    readyWorkbooks.clear()
     return getWorldIndex(key, { refresh: true })
   })
 }
@@ -1484,63 +1807,81 @@ async function existingWorkbook(key: WorldIndexKey) {
 /** Les colonnes et onglets à la corbeille de tous les index du monde. */
 export async function listWorldIndexTrash(): Promise<IndexTrashItem[]> {
   const keys: WorldIndexKey[] = [...Object.keys(worldIndexDefinitions) as WorldIndexKey[], ...(await listCustomIndexes()).map((entry) => entry.key)]
+  const unreadable = (key: WorldIndexKey) => (error: unknown) => {
+    // La corbeille de cet index n'est pas montrée cette fois : on le dit dans le journal, sans la croire vide.
+    console.error("WORLD_INDEX_TRASH_READ_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return null
+  }
   const items = await Promise.all(keys.map(async (key) => {
     // Un index jamais ouvert n'a ni classeur ni corbeille : il n'est pas créé pour autant.
-    if (isBuiltinWorldIndexKey(key) && !await existingWorkbook(key).catch(() => false)) return []
-    const effective = await loadEffectiveIndex(key).catch(() => null)
+    if (isBuiltinWorldIndexKey(key) && !await existingWorkbook(key).catch(unreadable(key))) return []
+    const effective = await loadEffectiveIndex(key, { strict: true }).catch(unreadable(key))
     if (!effective) return []
     return effective.schema.filter((entry) => entry.deletedAt && entry.state !== "supprimé").map((entry): IndexTrashItem => ({ family: "world", key, title: effective.definition.title, tab: entry.tab, column: entry.column, deletedAt: entry.deletedAt, filled: 0 }))
   }))
   return items.flat()
 }
 
-/** Restaure une colonne ou un onglet de la corbeille. */
+/** Restaure une colonne ou un onglet de la corbeille, dans le schéma relu à l'instant. */
 export function restoreWorldIndexTrash(key: WorldIndexKey, tab: string, column: string) {
   return serialized(async () => {
-    const effective = await loadEffectiveIndex(key)
-    const schema = [...effective.schema]
-    const entry = findEntry(schema, tab, column)
-    if (!entry) throw new Error("INDEX_TRASH_NOT_FOUND")
-    entry.deletedAt = ""
-    await saveSchema(effective, schema)
-    forgetEffectiveIndex(key)
-    readyWorkbooks.clear()
+    const effective = await loadEffectiveIndex(key, { strict: true })
+    if (!findEntry(effective.schema, tab, column)) throw new Error("INDEX_TRASH_NOT_FOUND")
+    try {
+      await rewriteSchema(effective.spreadsheetId, (entries) => {
+        const entry = findEntry(entries, tab, column)
+        if (!entry) throw new Error("INDEX_TRASH_NOT_FOUND")
+        entry.deletedAt = ""
+      })
+    } finally {
+      forgetWorkbook(effective.spreadsheetId)
+      readyWorkbooks.clear()
+    }
   })
 }
 
 /**
  * Suppression définitive : la colonne (ou l'onglet) est effacée de Google Sheets. Le
- * schéma garde une trace « supprimé » pour qu'Eraser ne la recrée pas.
+ * schéma garde une trace « supprimé » pour qu'Eraser ne la recrée pas. Vérifié dans le
+ * schéma et l'en-tête relus à l'instant ; jamais dans la feuille d'un index d'entités
+ * (personnages, campagnes, PNJ, classes, sorts : d'autres pages d'Eraser la lisent), ni
+ * quand plusieurs colonnes portent ce nom (on ne saurait pas laquelle effacer).
  */
 export function purgeWorldIndexTrash(key: WorldIndexKey, tab: string, column: string) {
   return serialized(async () => {
-    const effective = await loadEffectiveIndex(key)
-    const schema = [...effective.schema]
-    const entry = findEntry(schema, tab, column)
+    if (entityOf(key)) throw new Error("INDEX_TRASH_ENTITY_LOCKED")
+    const effective = await loadEffectiveIndex(key, { strict: true })
+    const entry = findEntry(effective.schema, tab, column)
     if (!entry?.deletedAt) throw new Error("INDEX_TRASH_NOT_FOUND")
     const tabs = await spreadsheetTabs(effective.spreadsheetId)
     const sheetId = tabs.find((candidate) => candidate.title === tab)?.sheetId
-    if (sheetId !== undefined) {
-      if (!column) {
-        await googleSheetsJson(`spreadsheets/${effective.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteSheet: { sheetId } }] }) })
-      } else {
-        clearSpreadsheetReadCache(effective.spreadsheetId)
-        const [firstRow = []] = await readRange(effective.spreadsheetId, sheetTabRange(tab, "1:1"))
-        const index = firstRow.findIndex((header) => foldName(header) === foldName(column))
-        if (index >= 0) await googleSheetsJson(`spreadsheets/${effective.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "COLUMNS", startIndex: index, endIndex: index + 1 } } }] }) })
+    try {
+      if (sheetId !== undefined) {
+        if (!column) {
+          await googleSheetsJson(`spreadsheets/${effective.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteSheet: { sheetId } }] }) })
+        } else {
+          const [firstRow = []] = (await readRangeFreshWithOffset(effective.spreadsheetId, sheetTabRange(tab, "1:1"))).rows
+          const found = firstRow.flatMap((header, index) => foldName(header) === foldName(column) ? [index] : [])
+          if (found.length > 1) throw new Error("INDEX_TRASH_AMBIGUOUS")
+          if (found.length) await googleSheetsJson(`spreadsheets/${effective.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "COLUMNS", startIndex: found[0], endIndex: found[0] + 1 } } }] }) })
+        }
       }
+      // Une colonne ou un onglet ajouté depuis Eraser disparaît du schéma ; un élément prévu
+      // par Eraser y reste marqué « supprimé » pour ne jamais être recréé.
+      const planned = !column
+        ? isBuiltinWorldIndexKey(key) && worldIndexDefinitions[key].tabs.some((candidate) => candidate.name === tab)
+        : Boolean(entry.origin) || (isBuiltinWorldIndexKey(key) && worldIndexDefinitions[key].tabs.some((candidate) => candidate.name === tab && candidate.headers.some((header) => foldName(header) === foldName(column))))
+      await rewriteSchema(effective.spreadsheetId, (entries) => {
+        const current = findEntry(entries, tab, column)
+        if (!current) return entries
+        return planned
+          ? entries.map((candidate) => candidate === current ? { ...candidate, state: "supprimé" as const } : candidate)
+          : entries.filter((candidate) => candidate !== current && !(column === "" && candidate.tab === tab))
+      })
+    } finally {
+      clearSpreadsheetReadCache(effective.spreadsheetId)
+      forgetWorkbook(effective.spreadsheetId)
+      readyWorkbooks.clear()
     }
-    // Une colonne ou un onglet ajouté depuis Eraser disparaît du schéma ; un élément prévu
-    // par Eraser y reste marqué « supprimé » pour ne jamais être recréé.
-    const planned = !column
-      ? isBuiltinWorldIndexKey(key) && worldIndexDefinitions[key].tabs.some((candidate) => candidate.name === tab)
-      : Boolean(entry.origin) || (isBuiltinWorldIndexKey(key) && worldIndexDefinitions[key].tabs.some((candidate) => candidate.name === tab && candidate.headers.some((header) => foldName(header) === foldName(column))))
-    const next = planned
-      ? schema.map((candidate) => candidate === entry ? { ...candidate, state: "supprimé" as const } : candidate)
-      : schema.filter((candidate) => candidate !== entry && !(column === "" && candidate.tab === tab))
-    await saveSchema(effective, next)
-    clearSpreadsheetReadCache(effective.spreadsheetId)
-    forgetEffectiveIndex(key)
-    readyWorkbooks.clear()
   })
 }

@@ -25,10 +25,12 @@ const HEADERS = ["Onglet", "Colonne", "Nom d’origine", "Type et réglages (JSO
 /**
  * Le schéma de chaque classeur, gardé en mémoire. Passé CACHE_MS, il est rendu aussitôt
  * et relu en arrière-plan (une modification faite ailleurs apparaît à la lecture
- * suivante) ; les changements faits depuis Eraser relisent le schéma tout de suite.
+ * suivante), mais pas au-delà de STALE_MS : plus vieux, on attend sa relecture. Les
+ * changements faits depuis Eraser relisent le schéma tout de suite (`refresh`).
  */
-const cache = new Map<string, { expiresAt: number; promise: Promise<SchemaEntry[]>; loaded?: boolean; refreshing?: boolean }>()
+const cache = new Map<string, { expiresAt: number; promise: Promise<SchemaEntry[]>; loadedAt?: number; refreshing?: boolean }>()
 const CACHE_MS = 5 * 60_000
+const STALE_MS = 30 * 60_000
 
 function parseSpec(value: string): IndexColumnSpec | null {
   if (!value.trim()) return null
@@ -53,22 +55,26 @@ function parseState(value: string): SchemaEntry["state"] {
   return ""
 }
 
-/** Les lignes du schéma d'un classeur ; aucune si l'onglet n'existe pas encore. */
+/**
+ * Les lignes du schéma d'un classeur ; aucune si l'onglet n'existe pas encore. Une lecture
+ * ratée échoue (elle n'est jamais prise pour un schéma vide). `refresh` : relu à l'instant
+ * dans Sheets, ce que fait toute écriture du schéma.
+ */
 export function readSchema(spreadsheetId: string, options: { refresh?: boolean } = {}) {
   const cached = cache.get(spreadsheetId)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
-  if (!options.refresh && cached?.loaded) {
+  if (!options.refresh && cached?.loadedAt && Date.now() - cached.loadedAt < STALE_MS) {
     if (!cached.refreshing) {
       cached.refreshing = true
       const fresh = loadSchema(spreadsheetId)
-      fresh.then((entries) => { if (cache.get(spreadsheetId) === cached) cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(entries), loaded: true }) }, () => { cached.refreshing = false })
+      fresh.then((entries) => { if (cache.get(spreadsheetId) === cached) cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(entries), loadedAt: Date.now() }) }, () => { cached.refreshing = false })
     }
     return cached.promise
   }
   const promise = loadSchema(spreadsheetId)
-  const entry: { expiresAt: number; promise: Promise<SchemaEntry[]>; loaded?: boolean } = { expiresAt: Date.now() + CACHE_MS, promise }
+  const entry: { expiresAt: number; promise: Promise<SchemaEntry[]>; loadedAt?: number } = { expiresAt: Date.now() + CACHE_MS, promise }
   cache.set(spreadsheetId, entry)
-  promise.then(() => { entry.loaded = true }, () => { if (cache.get(spreadsheetId) === entry) cache.delete(spreadsheetId) })
+  promise.then(() => { entry.loadedAt = Date.now() }, () => { if (cache.get(spreadsheetId) === entry) cache.delete(spreadsheetId) })
   return promise
 }
 
@@ -93,16 +99,33 @@ async function ensureSchemaTab(spreadsheetId: string) {
   await updateRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, `A1:F1`), [HEADERS], { valueInputOption: "RAW" })
 }
 
-/** Réécrit tout le schéma d'un classeur (il ne compte que quelques dizaines de lignes). */
+/**
+ * Réécrit tout le schéma d'un classeur (il ne compte que quelques dizaines de lignes).
+ * `entries` doit venir d'une lecture du moment : voir `rewriteSchema`.
+ */
 export async function writeSchema(spreadsheetId: string, entries: SchemaEntry[]) {
   await ensureSchemaTab(spreadsheetId)
   const rows = entries.map((entry) => [entry.tab, entry.column, entry.origin, entry.spec ? JSON.stringify(entry.spec) : "", entry.state, entry.deletedAt])
-  // Les anciennes lignes en trop sont vidées : le schéma écrit est le schéma complet.
-  const previous = await readSchema(spreadsheetId, { refresh: true }).catch(() => [])
-  const blanks = Array.from({ length: Math.max(0, previous.length - rows.length) }, () => HEADERS.map(() => ""))
+  // Les anciennes lignes en trop sont vidées : le schéma écrit est le schéma complet. Leur
+  // nombre est relu (lignes vides comprises) ; une lecture ratée arrête l'écriture plutôt que
+  // de laisser des lignes d'avant à la suite.
+  const previous = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))
+  const used = previous.rows.length ? previous.startRow - 2 + previous.rows.length : 0
+  const blanks = Array.from({ length: Math.max(0, used - rows.length) }, () => HEADERS.map(() => ""))
   const all = [...rows, ...blanks]
   if (all.length) await updateRange(spreadsheetId, sheetTabRange(SCHEMA_TAB, `A2:F${all.length + 1}`), all, { valueInputOption: "RAW" })
   cache.delete(spreadsheetId)
+}
+
+/**
+ * Modifie le schéma d'un classeur à partir de sa version relue à l'instant dans Sheets :
+ * jamais d'une copie gardée en mémoire (une autre installation a pu le changer, ou l'autre
+ * index du même classeur), ni d'une lecture ratée (tous les réglages seraient effacés).
+ * `change` y applique les modifications d'Eraser, puis le schéma est réécrit.
+ */
+export async function rewriteSchema(spreadsheetId: string, change: (entries: SchemaEntry[]) => SchemaEntry[] | void) {
+  const entries = (await readSchema(spreadsheetId, { refresh: true })).map((entry) => ({ ...entry }))
+  await writeSchema(spreadsheetId, change(entries) ?? entries)
 }
 
 /** Les lignes du schéma telles qu'écrites dans la feuille (types inconnus compris). */

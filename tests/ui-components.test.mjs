@@ -842,6 +842,34 @@ test("runs a button's steps in order, with column templates and formulas", async
   assert.ok(actionStepCatalog.length >= 17);
 });
 
+test("a button stops after its row is deleted or moved, and at the first refused step", async () => {
+  const { runActionButton } = await vite.ssrLoadModule("/lib/index-actions.ts");
+  const done = [];
+  const notices = [];
+  const runtime = {
+    row: () => ({ column: () => undefined }),
+    cell: () => "",
+    specOf: () => undefined,
+    setCell: async (header, value) => {
+      if (header === "Refusée") throw new Error("Le tableau a changé entre-temps : actualise puis recommence.");
+      done.push(`${header}=${value}`);
+    },
+    confirm: async () => true,
+    notify: (message, tone) => notices.push(`${tone ?? "info"}:${message}`),
+    openUrl: () => {}, navigate: () => {}, copy: async () => {},
+    remove: async () => { done.push("supprimée"); },
+    move: async (tab) => { done.push(`déplacée:${tab}`); },
+  };
+  // La ligne n'est plus là : les étapes suivantes écriraient dans celle qui a pris sa place.
+  assert.equal(await runActionButton({ id: "a", label: "x", steps: [{ type: "delete" }, { type: "set", column: "Statut", value: "Mort" }] }, runtime), true);
+  assert.equal(await runActionButton({ id: "b", label: "x", steps: [{ type: "move", tab: "Villes" }, { type: "set", column: "Statut", value: "Rangé" }] }, runtime), true);
+  assert.deepEqual(done, ["supprimée", "déplacée:Villes"]);
+  // Une écriture refusée arrête le bouton, et son message est affiché.
+  assert.equal(await runActionButton({ id: "c", label: "x", steps: [{ type: "set", column: "Refusée", value: "1" }, { type: "set", column: "Statut", value: "Ensuite" }] }, runtime), false);
+  assert.deepEqual(done, ["supprimée", "déplacée:Villes"]);
+  assert.match(notices.at(-1), /^error:Le tableau a changé entre-temps/);
+});
+
 test("reorders sheet columns with the fewest moves and tells display changes apart", async () => {
   const { columnMoves, isDisplayOnlyChange } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
   const apply = (headers, moves) => { const working = [...headers]; for (const move of moves) { const [item] = working.splice(move.from, 1); working.splice(move.to, 0, item) } return working };

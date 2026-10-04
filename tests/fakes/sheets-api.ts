@@ -2,13 +2,16 @@
  * Un Google Sheets en mémoire, branché à la place de lib/google-oauth : le vrai code
  * de lib/google-sheets.ts lui envoie ses requêtes REST (lecture de plages, écritures,
  * ajouts de lignes, métadonnées) et les tests regardent ce qui a été écrit, case par
- * case. Drive et Apps Script répondent « introuvable ».
+ * case. Drive répond pour les fichiers de `world.drive` (recherche, lecture, mise à la
+ * corbeille) ; sans eux, comme Apps Script, il répond « introuvable ».
  */
 
 type Tab = { sheetId: number; title: string; grid: string[][]; columnCount: number; rowCount: number }
 type Spreadsheet = { tabs: Tab[] }
-/** Un fichier du Drive, pour les recherches par nom, type et dossier (files.list). */
-type DriveEntry = { id: string; name: string; mimeType: string; parents?: string[] }
+/** Un fichier du Drive, pour les recherches par nom, type et dossier (files.list), la lecture et la corbeille. */
+type DriveEntry = { id: string; name: string; mimeType: string; parents?: string[]; trashed?: boolean }
+type ReadFailure = { match: string; status: number; times: number }
+type RequestHook = (url: string, init: RequestInit) => Promise<void> | void
 
 export const world = {
   files: new Map<string, Spreadsheet>(), requests: [] as string[], reverseFilteredReads: false,
@@ -22,6 +25,10 @@ export const world = {
   failTabs: [] as string[],
   /** Si un test le donne : le résultat affiché d'une formule, rendu par les lectures de valeurs sauf en `FORMULA` (comme Google). */
   formulaResults: null as ((formula: string) => string) | null,
+  /** Pannes passagères des lectures (voir `failReads`). */
+  failures: [] as ReadFailure[],
+  /** Appelé (et attendu) avant chaque requête, pour glisser une écriture d'ailleurs entre deux. */
+  beforeRequest: null as RequestHook | null,
 }
 
 export function reset() {
@@ -33,12 +40,33 @@ export function reset() {
   world.drive.length = 0
   world.failTabs.length = 0
   world.formulaResults = null
+  world.failures.length = 0
+  world.beforeRequest = null
 }
 
-export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>) {
+/** Un classeur ; avec `name`, il est aussi dans le Drive (retrouvé par son nom, mis à la corbeille). */
+export function addSpreadsheet(id: string, tabs: Array<{ title: string; grid: string[][] }>, options: { name?: string } = {}) {
   world.files.set(id, {
     tabs: tabs.map((tab, index) => ({ sheetId: index + 1, title: tab.title, grid: tab.grid.map((row) => row.map(String)), columnCount: Math.max(26, ...tab.grid.map((row) => row.length)), rowCount: 1000 })),
   })
+  if (options.name) world.drive.push({ id, name: options.name, mimeType: SPREADSHEET_MIME_TYPE })
+}
+
+/**
+ * Une panne de Google : les lectures d'une plage qui contient `match` échouent, `times` fois
+ * (sans fin par défaut). Renvoie de quoi la faire cesser.
+ */
+export function failReads(match: string, options: { status?: number; times?: number } = {}) {
+  const failure = { match, status: options.status ?? 503, times: options.times ?? Infinity }
+  world.failures.push(failure)
+  return () => { const at = world.failures.indexOf(failure); if (at >= 0) world.failures.splice(at, 1) }
+}
+
+function failedRead(ranges: string[]) {
+  const failure = world.failures.find((candidate) => candidate.times > 0 && ranges.some((range) => decodeURIComponent(range).includes(candidate.match)))
+  if (!failure) return null
+  failure.times -= 1
+  return json({ error: { message: "FAKE_BACKEND_ERROR" } }, failure.status)
 }
 
 export function grid(id: string, title: string) {
@@ -161,6 +189,16 @@ function handleSheets(path: string, init: RequestInit) {
         const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
         for (const row of tab.grid) row.splice(startIndex, endIndex - startIndex)
         tab.columnCount -= endIndex - startIndex
+      } else if (request.moveDimension?.source?.dimension === "COLUMNS") {
+        // Comme Google : la destination est comptée avant que les colonnes déplacées soient retirées.
+        const { sheetId, startIndex, endIndex } = request.moveDimension.source
+        const to = request.moveDimension.destinationIndex
+        const tab = file.tabs.find((candidate) => candidate.sheetId === sheetId)!
+        for (const row of tab.grid) {
+          while (row.length < Math.max(endIndex, to)) row.push("")
+          const moved = row.splice(startIndex, endIndex - startIndex)
+          row.splice(to > startIndex ? to - moved.length : to, 0, ...moved)
+        }
       } else if (request.copyPaste) {
         const { source, destination } = request.copyPaste
         const tab = file.tabs.find((candidate) => candidate.sheetId === source.sheetId)!
@@ -215,6 +253,11 @@ function handleSheets(path: string, init: RequestInit) {
       replies.push({})
     }
     return json({ replies })
+  }
+  // Une lecture (GET, ou lecture par filtres en POST) d'une plage en panne échoue.
+  if (method === "GET" || rest[0] === "values:batchGetByDataFilter") {
+    const failure = failedRead([...url.searchParams.getAll("ranges"), ...((body.dataFilters ?? []) as Array<{ a1Range: string }>).map((filter) => filter.a1Range), ...(rest[0] === "values" ? [rest.slice(1).join("/")] : [])])
+    if (failure) return failure
   }
   if (!rest.length && url.searchParams.get("includeGridData") === "true") {
     // Les cellules mises en forme (le tableau des index) : une zone par plage demandée.
@@ -273,19 +316,36 @@ function handleSheets(path: string, init: RequestInit) {
   return json({ range: areaName(area), values: readArea(area, url.searchParams.get("valueRenderOption")) })
 }
 
-/** Les fichiers du Drive qui répondent à une recherche : nom exact, types, dossier parent. */
+const SPREADSHEET_MIME_TYPE = "application/vnd.google-apps.spreadsheet"
+
+/** Les fichiers du Drive qui répondent à une recherche : nom exact, types, dossier parent, hors corbeille. */
 function handleDriveList(url: URL) {
   const query = url.searchParams.get("q") ?? ""
   const name = /name = '((?:[^'\\]|\\.)*)'/.exec(query)?.[1]?.replace(/\\(.)/g, "$1")
   const mimeTypes = [...query.matchAll(/mimeType = '([^']+)'/g)].map((match) => match[1])
   const parent = /'([^']+)' in parents/.exec(query)?.[1]
-  const files = world.drive.filter((file) => (name === undefined || file.name === name) && (!mimeTypes.length || mimeTypes.includes(file.mimeType)) && (!parent || (file.parents ?? []).includes(parent)))
+  const live = query.includes("trashed = false")
+  const files = world.drive.filter((file) => (name === undefined || file.name === name) && (!mimeTypes.length || mimeTypes.includes(file.mimeType)) && (!parent || (file.parents ?? []).includes(parent)) && !(live && file.trashed))
   return json({ files: files.map((file) => ({ ...file, webViewLink: `https://docs.google.com/spreadsheets/d/${file.id}/edit` })) })
 }
 
+/** Un fichier du Drive par son ID : lu (nom, type, corbeille) ou mis à la corbeille. Rien ne se crée ni ne se télécharge. */
+function handleDriveFile(url: URL, init: RequestInit) {
+  const method = (init.method ?? "GET").toUpperCase()
+  const id = decodeURIComponent(url.pathname.slice("/drive/v3/files/".length))
+  const file = world.drive.find((candidate) => candidate.id === id)
+  if (!file || url.searchParams.get("alt") === "media") return json({ error: { message: "File not found." } }, 404)
+  world.requests.push(`DRIVE ${method} ${id}`)
+  if (method === "PATCH" && JSON.parse(String(init.body ?? "{}")).trashed) file.trashed = true
+  return json({ id: file.id, name: file.name, mimeType: file.mimeType, trashed: Boolean(file.trashed) })
+}
+
 export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit = {}) {
+  const hook = world.beforeRequest
+  if (hook) await hook(url, init)
   if (url.startsWith("https://sheets.googleapis.com/v4/")) return handleSheets(url.slice("https://sheets.googleapis.com/v4/".length), init)
   if (world.drive.length && url.startsWith("https://www.googleapis.com/drive/v3/files?")) return handleDriveList(new URL(url))
+  if (world.drive.length && url.startsWith("https://www.googleapis.com/drive/v3/files/")) return handleDriveFile(new URL(url), init)
   return json({ error: { message: "FAKE_NOT_FOUND" } }, 404)
 }
 

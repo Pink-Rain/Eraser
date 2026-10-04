@@ -49,8 +49,12 @@ export function IndexRowSheet({ open, title, subtitle, fields, layout, rowFor, p
   }
 
   async function save() {
-    await onSave(changes)
-    setDrafts({})
+    try {
+      await onSave(changes)
+      setDrafts({})
+    } catch {
+      // Enregistrement refusé : la page en affiche la raison, et les champs saisis restent pour réessayer.
+    }
   }
 
   const field = (item: RowSheetField, hideLabel = false) => <IndexField

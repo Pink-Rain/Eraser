@@ -37,6 +37,7 @@ import {
   achievementTypeColors,
 } from "@/lib/achievements-shared"
 import { classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions } from "@/lib/class-spell-utils"
+import { normalizeClassLabel } from "@/lib/class-utils"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders, spellSheetHeaders } from "@/lib/entity-sheets"
 
 export { foldName }
@@ -491,7 +492,7 @@ export function isBuiltinWorldIndexKey(value: unknown): value is BuiltinWorldInd
 export type WorldIndexLink = [WorldIndexLinkEnd, WorldIndexLinkEnd]
 
 /** Les colonnes d'un onglet que le code d'Eraser lit par leur nom, avec la raison. */
-function builtinReaders(index: WorldIndexKey, tab: string, header: string): string[] {
+function builtinReaders(index: WorldIndexKey, tab: string, header: string, context: WorldPolicyContext): string[] {
   const folded = foldName(header)
   const reasons: string[] = []
   if (index === "creatures") {
@@ -520,7 +521,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_APPLY_HEADER)) reasons.push("La fiche de personnage dessine les FX de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
   }
-  if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header))
+  if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header, context))
   if (index === "skills") {
     if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
     if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
@@ -531,14 +532,30 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string): stri
   return reasons
 }
 
+/**
+ * Les autres noms sous lesquels les pages de sorts retrouvent une colonne de leur feuille
+ * (en plus de `spellSheetHeaders`) ; une colonne qui contient « compétence » est lue aussi.
+ */
+const spellReaderHeaders = ["ID sort", "ID du sort", "Nom du sort", "Sort", "Effets", "Effet du sort", "Description du sort", "Type de sort", "Type d’action", "Compétence", "Compétence utilisée", "Compétences utilisées", "Portée", "Charge", "Nombre de charges"]
+
+/** Ce que les verrous de « Modifier » ont besoin de savoir en plus de la définition : les classes (une colonne par classe dans les sorts). */
+export type WorldPolicyContext = { classNames?: readonly string[] }
+
+/** Une colonne de rang d'une classe dans une feuille de sorts : l'ID de la classe (« CLA-0003 ») ou son nom (« Guerrier·e »). */
+export function isClassRankHeader(header: string, classNames: readonly string[] = []) {
+  const label = normalizeClassLabel(header)
+  return /^CLA-/i.test(header.trim()) || (Boolean(label) && classNames.some((name) => normalizeClassLabel(name) === label))
+}
+
 /** Pourquoi le code d'Eraser lit une colonne d'un index d'entités (son verrou dans « Modifier »). */
-function entityReaders(index: EntityWorldIndexKey, header: string): string[] {
+function entityReaders(index: EntityWorldIndexKey, header: string, context: WorldPolicyContext): string[] {
   const among = (headers: readonly string[]) => headers.some((candidate) => foldName(candidate) === foldName(header))
   if (index === "npcs" && among(npcSheetHeaders)) return ["Les PNJ des campagnes, les sessions, le groupe des joueurs, les tokens du tabletop et le pont Roll20 lisent cette colonne par son nom."]
   if (index === "campaigns" && among(campaignSheetHeaders)) return ["Les campagnes (tableau de bord, accès des joueurs, couleur, bannière) lisent cette colonne par son nom."]
   if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le tabletop lisent cette colonne par son nom."]
   if (index === "classes" && among(classSheetHeaders)) return ["Les pages de classes, la création de personnage et les statistiques lisent cette colonne par son nom."]
-  if ((index === "class-spells" || index === "creature-spells") && (among(spellSheetHeaders) || /^CLA-/i.test(header.trim()))) return ["Les fiches de classe, les créatures, les PNJ et les personnages retrouvent les sorts par cette colonne (rangs des classes compris)."]
+  // Une colonne de rang porte l'ID ou le nom de sa classe ; « Compétence » est lue sous plusieurs noms.
+  if ((index === "class-spells" || index === "creature-spells") && (among(spellSheetHeaders) || among(spellReaderHeaders) || foldName(header).includes("competence") || isClassRankHeader(header, context.classNames))) return ["Les fiches de classe, les créatures, les PNJ et les personnages retrouvent les sorts par cette colonne (rangs des classes compris)."]
   return []
 }
 
@@ -546,7 +563,7 @@ function entityReaders(index: EntityWorldIndexKey, header: string): string[] {
  * Ce qu'on peut changer sur une colonne d'un index du monde, et pourquoi pas le reste.
  * `links` : les liens de l'index (prévus par Eraser et créés dans l'éditeur).
  */
-export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: string, links: WorldIndexLink[]): ColumnPolicy {
+export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: string, links: WorldIndexLink[], context: WorldPolicyContext = {}): ColumnPolicy {
   const all = "Tout : nom, type, réglages, suppression."
   const only = "Seulement la description et l’option « Masquée »."
   if (isIdHeader(header)) return { rename: false, type: false, remove: false, reasons: ["Généré par Eraser pour reconnaître chaque ligne (et masqué d’office)."], allowed: only }
@@ -557,7 +574,7 @@ export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: str
     const where = isBuiltinWorldIndexKey(other.index) ? worldIndexDefinitions[other.index].title : other.index
     return { rename: false, type: false, remove: false, reasons: [`Répond à « ${other.column} » (${where}${other.tab === "*" ? "" : `, onglet ${other.tab}`}) : les deux colonnes se recopient par leur nom. Changer son nom, son type ou la supprimer couperait le lien.`], allowed: only }
   }
-  const readers = builtinReaders(index, tab, header)
+  const readers = builtinReaders(index, tab, header, context)
   if (readers.length) return { rename: false, type: false, remove: false, reasons: readers, allowed: only }
   return { rename: true, type: true, remove: true, reasons: [], allowed: all }
 }
@@ -588,6 +605,15 @@ export function isNameColumn(header: string) {
 export function nameColumnIndex(headers: readonly string[]) {
   const exact = headers.findIndex((header) => foldName(header) === "nom")
   return exact >= 0 ? exact : headers.findIndex((header) => isNameColumn(header))
+}
+
+/**
+ * La colonne qui reconnaît une ligne encore sans identifiant : son nom, sinon (un onglet
+ * sans « Nom », comme les succès obtenus) sa première colonne.
+ */
+export function labelColumnIndex(headers: readonly string[]) {
+  const name = nameColumnIndex(headers)
+  return name >= 0 ? name : headers.findIndex((header) => header.trim() && !isIdHeader(header))
 }
 
 /** Colonnes de liste de noms : saisies en texte brut pour que les liens restent lisibles. */

@@ -53,7 +53,8 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
   /** Les mêmes cellules avec leur mise en forme, pour les champs de texte enrichi. */
   html: string[]
   onClose: () => void
-  onSave: (fields: Record<string, string>) => Promise<void>
+  /** Les champs changés, et ce que la fiche en montrait : le serveur refuse si l'un a changé ailleurs entre-temps. */
+  onSave: (fields: Record<string, string>, previous: Record<string, string>) => Promise<void>
 }) {
   const initial = useMemo(() => Object.fromEntries(allFields.map((field) => {
     const index = headers.findIndex((header) => foldName(header) === foldName(field))
@@ -69,7 +70,8 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
     if (!fields.Nom.trim()) return setError("Le nom est obligatoire.")
     setPending(true); setError("")
     try {
-      await onSave(Object.fromEntries(Object.entries(fields).filter(([field, value]) => value !== initial[field])))
+      const changed = Object.entries(fields).filter(([field, value]) => value !== initial[field])
+      await onSave(Object.fromEntries(changed), Object.fromEntries(changed.map(([field]) => [field, initial[field] ?? ""])))
       onClose()
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")

@@ -95,9 +95,8 @@ test("PNJs : le moteur lit la feuille par le nom de ses colonnes, sans toucher a
 
 test("PNJs : une case modifiée dans l'index est lue par les campagnes", async () => {
   const id = await linkNpcs(npcGrid([{ "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor" }]));
-  const data = await engine.getWorldIndex("npcs", { refresh: true });
-  const column = data.tables[0].headers.indexOf("Titre");
-  await engine.updateWorldIndexCell("npcs", "PNJs", 2, column, "Le sage");
+  await engine.getWorldIndex("npcs", { refresh: true });
+  await engine.updateWorldIndexCell("npcs", "PNJs", { rowNumber: 2, id: "PNJ-1", name: "Aldor" }, "Titre", "Le sage", { previous: "" });
   assert.equal(record(google.grid(id, "PNJs"), 1)["Titre"], "Le sage");
   const [aldor] = await sheets.listNpcs("CAMP-1");
   assert.equal(aldor.title, "Le sage");
@@ -138,20 +137,20 @@ test("Personnages : seules les colonnes de l'index sont lues, au-delà de AZ, et
   assert.equal(table.rows[0].values[name], "Brin");
   assert.equal(table.columnsAt[name], headers.indexOf("Nom personnage"));
 
-  const title = table.headers.indexOf("Titre honorifique");
-  await engine.updateWorldIndexCell("characters", "Personnages", 2, title, "La Brave");
+  const brin = { rowNumber: 2, id: "PER-1", name: "Brin" };
+  await engine.updateWorldIndexCell("characters", "Personnages", brin, "Titre honorifique", "La Brave");
   const saved = record(google.grid(id, "Personnages"), 1);
   assert.equal(saved["Titre honorifique"], "La Brave");
   assert.equal(saved["Force"], "12");
   assert.equal(saved["Nom personnage"], "Brin");
 
   // Un personnage naît de sa page et part à la corbeille : pas depuis le tableau.
-  await assert.rejects(() => engine.addWorldIndexRow("characters", "Personnages", table.headers.map(() => "")), /WORLD_INDEX_ROWS_LOCKED/);
-  await assert.rejects(() => engine.deleteWorldIndexRows("characters", "Personnages", [2]), /WORLD_INDEX_ROWS_LOCKED/);
+  await assert.rejects(() => engine.addWorldIndexRow("characters", "Personnages", table.headers.map(() => ""), table.headers), /WORLD_INDEX_ROWS_LOCKED/);
+  await assert.rejects(() => engine.deleteWorldIndexRows("characters", "Personnages", [brin]), /WORLD_INDEX_ROWS_LOCKED/);
   assert.equal(record(google.grid(id, "Personnages"), 1)["ID"], "PER-1");
 
   // Dupliquer copie toute la ligne (colonnes hors du tableau comprises), avec un nouvel identifiant.
-  await engine.duplicateWorldIndexRows("characters", "Personnages", [2]);
+  await engine.duplicateWorldIndexRows("characters", "Personnages", [brin]);
   const copy = record(google.grid(id, "Personnages"), 2);
   assert.match(copy["ID"], /^PER-[0-9A-F]{8}$/);
   assert.equal(copy["Nom personnage"], "Brin");

@@ -46,8 +46,8 @@ export const actionStepCatalog: ActionStepInfo[] = [
   { type: "clear", group: "Modifier la ligne", label: "Vider une colonne", description: "Efface la valeur d’une colonne de la ligne.", fields: [{ key: "column", label: "Colonne", kind: "column" }] },
   { type: "roll", group: "Jeu", label: "Tirer au sort", description: "Relance le tirage d’une colonne Aléatoire de la ligne (même si elle est figée) et écrit le résultat.", fields: [{ key: "column", label: "Colonne Aléatoire", kind: "column" }] },
   { type: "duplicate", group: "Gérer la ligne", label: "Dupliquer la ligne", description: "Ajoute une copie de la ligne juste en dessous (nouvel identifiant).", fields: [] },
-  { type: "delete", group: "Gérer la ligne", label: "Supprimer la ligne", description: "Supprime la ligne de la feuille. Pense à demander une confirmation.", fields: [] },
-  { type: "move", group: "Gérer la ligne", label: "Déplacer vers un onglet", description: "Déplace la ligne dans un autre onglet aux mêmes colonnes.", fields: [{ key: "tab", label: "Onglet", kind: "tab" }], only: "world" },
+  { type: "delete", group: "Gérer la ligne", label: "Supprimer la ligne", description: "Supprime la ligne de la feuille. Pense à demander une confirmation. Dernière étape : celles qui suivent ne sont pas faites.", fields: [] },
+  { type: "move", group: "Gérer la ligne", label: "Déplacer vers un onglet", description: "Déplace la ligne dans un autre onglet aux mêmes colonnes. Dernière étape : celles qui suivent ne sont pas faites.", fields: [{ key: "tab", label: "Onglet", kind: "tab" }], only: "world" },
   { type: "create", group: "Créer ailleurs", label: "Créer une ligne dans un index", description: "Ajoute une ligne pré-remplie dans un index (celui-ci ou un autre) : chaque colonne reçoit un texte, une {Colonne} de cette ligne ou une =formule. Sert aussi à copier une ligne vers un autre index.", fields: [{ key: "index", label: "Index", kind: "index" }, { key: "tab", label: "Onglet", kind: "tab" }, { key: "values", label: "Valeurs", kind: "mapping" }, { key: "open", label: "Ouvrir l’index ensuite", kind: "boolean" }], only: "world" },
   { type: "campaign-inventory", group: "Créer ailleurs", label: "Ajouter à un inventaire", description: "Ajoute l’objet à un inventaire d’une campagne : celui de la campagne, d’un personnage ou d’un PNJ (choisis au clic).", fields: [], only: "objects" },
   { type: "chat", group: "Jeu", label: "Envoyer dans le chat d’une campagne", description: "Envoie un message dans le chat d’une campagne (choisie au clic, la dernière est retenue), pour tous ou pour le MJ seulement.", fields: [{ key: "message", label: "Message", kind: "text", hint: "{Nom} attaque ! — ou =formule" }, { key: "audience", label: "Pour", kind: "audience" }] },
@@ -262,7 +262,9 @@ async function runStep(step: ActionStep, runtime: ActionRuntime) {
 
 /**
  * Exécute un bouton : sa confirmation, puis ses étapes dans l'ordre. Une étape qui
- * échoue arrête la suite et son message est affiché.
+ * échoue arrête la suite et son message est affiché. Une ligne supprimée ou déplacée
+ * dans un autre onglet arrête aussi la suite : les étapes suivantes n'ont plus de ligne où
+ * écrire (elles écrivaient dans celle qui avait pris sa place).
  */
 export async function runActionButton(button: ActionButton, runtime: ActionRuntime) {
   try {
@@ -270,7 +272,10 @@ export async function runActionButton(button: ActionButton, runtime: ActionRunti
       const message = resolveText(button.confirm, runtime.row())
       if (!await runtime.confirm(message)) return false
     }
-    for (const step of button.steps) await runStep(step, runtime)
+    for (const step of button.steps) {
+      await runStep(step, runtime)
+      if (step.type === "delete" || step.type === "move") break
+    }
     return true
   } catch (error) {
     runtime.notify(error instanceof FormulaError ? `Formule : ${error.message}` : error instanceof Error ? error.message : "L’action a échoué.", "error")

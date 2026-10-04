@@ -415,6 +415,11 @@ export type IndexColumnSpec = {
   max?: number
   /** Ligne d'onglet du schéma (`kind: "tab"`) : la place de l'onglet dans l'index. */
   position?: number
+  /**
+   * Ligne d'onglet du schéma (`kind: "tab"`) d'un index d'entités : l'ordre d'affichage de ses
+   * colonnes. Sa feuille sert ailleurs dans Eraser : ses colonnes n'y bougent jamais.
+   */
+  columns?: string[]
 }
 
 const displayStyles: Record<NonNullable<IndexColumnSpec["display"]>, ColumnStyle> = {
