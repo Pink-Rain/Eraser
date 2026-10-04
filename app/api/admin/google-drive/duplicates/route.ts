@@ -15,7 +15,10 @@ export async function DELETE(request: Request) {
     if (!body.fileId) throw new Error("INVALID_DRIVE_FILE_ID")
     await trashRedundantDriveSpreadsheet(body.fileId)
     return NextResponse.json({ ok: true, groups: await listDriveSpreadsheetDuplicates() })
-  } catch {
-    return NextResponse.json({ error: "Ce fichier est utilisé par Eraser ou n’est pas un doublon supprimable." }, { status: 400 })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    return NextResponse.json({ error: code === "DRIVE_FILE_HAS_DATA"
+      ? "Ce doublon contient des lignes : il n’est pas mis à la corbeille. Vérifie son contenu dans Google Sheets."
+      : "Ce fichier est utilisé par Eraser ou n’est pas un doublon supprimable." }, { status: 400 })
   }
 }

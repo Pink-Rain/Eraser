@@ -3532,10 +3532,18 @@ export async function listDriveSpreadsheetDuplicates(): Promise<DriveSpreadsheet
   }).sort((left, right) => left.label.localeCompare(right.label, "fr"))
 }
 
+/**
+ * Met à la corbeille un doublon vide. « En service » ne se juge que d'après les liens de
+ * cette installation : un doublon qui contient des lignes (sous les en-têtes) peut être
+ * celui d'une autre installation ou d'un index, il n'est jamais touché.
+ */
 export async function trashRedundantDriveSpreadsheet(fileId: string) {
   const groups = await listDriveSpreadsheetDuplicates()
   const candidate = groups.flatMap((group) => group.files).find((file) => file.id === fileId)
   if (!candidate || candidate.inUse || candidate.keep) throw new Error("DRIVE_FILE_PROTECTED")
+  const tabs = await spreadsheetTabs(candidate.id)
+  const reads = await readRangesFresh(candidate.id, tabs.map((tab) => sheetTabRange(tab.title, "A2:ZZ")))
+  if (reads.some((read) => read.rows.some((row) => row.some((cell) => cell.trim())))) throw new Error("DRIVE_FILE_HAS_DATA")
   return trashDriveFile(candidate.id)
 }
 
@@ -3585,23 +3593,33 @@ function storeTabName(sheet: JdrSheetRecord, tabName: string) {
 async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSheetDefinition) {
   const cacheKey = `${sheet.spreadsheetId}:${definition.key}`
   if (verifiedJdrSheetTabs.has(cacheKey)) return sheet
+  let missingTab: Error | null = null
   try {
     const tabs = await spreadsheetTabs(sheet.spreadsheetId)
     if (!tabs.length || tabs.some((tab) => tab.title === definition.tabName)) {
       verifiedJdrSheetTabs.add(cacheKey)
       return sheet.tabName === definition.tabName ? sheet : (await storeTabName(sheet, definition.tabName)) ?? sheet
     }
-    // Un seul onglet : c'est forcément celui du classeur qu'on a relié, on le
-    // renomme pour ne perdre aucune ligne. Plusieurs onglets : on en ajoute un.
-    const requests = tabs.length === 1
-      ? [{ updateSheetProperties: { properties: { sheetId: tabs[0].sheetId, title: definition.tabName }, fields: "title" } }]
-      : [{ addSheet: { properties: { title: definition.tabName, gridProperties: { rowCount: 1000, columnCount: definition.headers.length, frozenRowCount: 1, frozenColumnCount: definition.frozenColumns } } } }]
+    // Un classeur relié par son nom dont le seul onglet porte encore le nom donné par Google
+    // (« Feuille 1 ») : on le renomme, sans perdre aucune ligne. Dans tous les autres cas
+    // (onglet renommé à la main, plusieurs onglets), rien n'est créé ni renommé : un onglet
+    // vide ajouté faisait disparaître toutes les lignes de l'onglet renommé.
+    const ownTabs = tabs.filter((tab) => !tab.title.startsWith("Eraser ·"))
+    if (ownTabs.length !== 1 || !/^(?:Feuille|Sheet|Hoja|Foglio|Tabelle|Planilha|Blad)\s?\d+$/i.test(ownTabs[0].title)) {
+      console.error("JDR_SHEET_TAB_MISSING", definition.key, tabs.map((tab) => tab.title).join(" | "), "->", definition.tabName)
+      missingTab = new Error(`JDR_SHEET_TAB_MISSING:${definition.tabName}`)
+      throw missingTab
+    }
+    const requests = [{ updateSheetProperties: { properties: { sheetId: ownTabs[0].sheetId, title: definition.tabName }, fields: "title" } }]
     await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
     clearSpreadsheetReadCache(sheet.spreadsheetId)
     verifiedJdrSheetTabs.add(cacheKey)
     console.error("JDR_SHEET_TAB_REPAIRED", definition.key, tabs.map((tab) => tab.title).join(" | "), "->", definition.tabName)
     return (await storeTabName(sheet, definition.tabName)) ?? { ...sheet, tabName: definition.tabName }
   } catch (error) {
+    // L'onglet attendu manque : l'erreur remonte (Administration la montre) au lieu de laisser
+    // lire et écrire dans un onglet qui n'existe pas.
+    if (error === missingTab) throw error
     console.error("JDR_SHEET_TAB_CHECK_FAILED", definition.key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return sheet
   }

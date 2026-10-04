@@ -155,6 +155,9 @@ function handleSheets(path: string, init: RequestInit) {
         file.tabs.push({ sheetId, title: request.addSheet.properties.title, grid: [], columnCount: request.addSheet.properties.gridProperties?.columnCount ?? 26, rowCount: 1000 })
         replies.push({ addSheet: { properties: { sheetId } } })
         continue
+      } else if (request.updateSheetProperties?.fields === "title") {
+        const tab = file.tabs.find((candidate) => candidate.sheetId === request.updateSheetProperties.properties.sheetId)!
+        tab.title = request.updateSheetProperties.properties.title
       } else if (request.updateSheetProperties?.properties?.gridProperties?.columnCount) {
         const tab = file.tabs.find((candidate) => candidate.sheetId === request.updateSheetProperties.properties.sheetId)!
         tab.columnCount = Math.max(tab.columnCount, request.updateSheetProperties.properties.gridProperties.columnCount)

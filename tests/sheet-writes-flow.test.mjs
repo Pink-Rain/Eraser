@@ -333,3 +333,17 @@ test("Tabletop : une feuille réglée en français garde ses décimales, un chan
   await sheets.updateTabletopMap("MAP-1", { name: "Forêt sombre" });
   assert.deepEqual(google.grid(id, "Cartes")[1].slice(2, 9), ["Forêt sombre", "", "1600", "900", "70", "1,5", "m"]);
 });
+
+test("Feuille reliée : un onglet renommé à la main n'est jamais remplacé par un onglet vide", async () => {
+  const renamed = fresh("camps");
+  google.addSpreadsheet(renamed, [{ title: "Mes campagnes", grid: [["ID", "MJ", "Nom de la campagne"], ["CAMP-1", "mj-1", "Les Brumes"]] }, { title: "Notes", grid: [["libre"]] }]);
+  await jdr.saveJdrSheet({ key: "campaigns", spreadsheetId: renamed, name: "Campagnes", tabName: "Campagnes", webViewLink: "" });
+  await assert.rejects(sheets.ensureJdrSheet("campaigns"), /JDR_SHEET_TAB_MISSING/);
+  assert.deepEqual(google.world.files.get(renamed).tabs.map((tab) => tab.title), ["Mes campagnes", "Notes"]);
+  // Un classeur neuf dont le seul onglet porte le nom donné par Google est simplement renommé.
+  const blank = fresh("vocabulary");
+  google.addSpreadsheet(blank, [{ title: "Feuille 1", grid: [["Titre", "Contenu"], ["Arcane", "a"]] }]);
+  await jdr.saveJdrSheet({ key: "vocabulary", spreadsheetId: blank, name: "Vocabulaire", tabName: "Vocabulaire", webViewLink: "" });
+  await sheets.ensureJdrSheet("vocabulary");
+  assert.deepEqual(google.world.files.get(blank).tabs.map((tab) => tab.title), ["Vocabulaire"]);
+});
