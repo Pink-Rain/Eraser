@@ -75,10 +75,10 @@ import {
 } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
-import { displayedMultipleValue, isLegacyListCell, parseListCell, serializeListCell } from "@/lib/multiple-values"
+import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
-import { normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
+import { matchValueRanges, normalizeGoogleSheetRows, sheetRangeStartRow, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
@@ -519,6 +519,14 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
 
 export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
   const response = await googleSheetsFetch(path, init)
+  // Des lignes ou colonnes ajoutées, supprimées ou déplacées décalent toutes les suivantes :
+  // les numéros de ligne et les plages gardées en mémoire pour ce classeur ne valent plus
+  // rien. Les garder faisait supprimer ou modifier la ligne voisine.
+  if (typeof init?.body === "string" && /"(deleteDimension|insertDimension|moveDimension|deleteRange|insertRange)"/.test(init.body)) {
+    const spreadsheetId = /^spreadsheets\/([^/:?]+)/.exec(path)?.[1]
+    if (spreadsheetId) clearSpreadsheetReadCache(spreadsheetId)
+    forgetSheetRows()
+  }
   return response.json() as Promise<T>
 }
 
@@ -909,21 +917,29 @@ export async function readNamedSheet(spreadsheetId: string, tabName: string, exp
   return { columns: sheetColumns(headers, expected, options.aliases), rows }
 }
 
-/** Plusieurs plages lues sans cache, chacune avec la ligne où elle commence vraiment. */
+/**
+ * Plusieurs plages lues sans cache, chacune avec la ligne où elle commence vraiment.
+ *
+ * Google ne rend pas forcément les plages d'une lecture par filtres dans l'ordre demandé :
+ * chaque réponse est rattachée à SA plage (le filtre qui l'a trouvée, sinon sa colonne),
+ * jamais à sa position. Les prendre dans l'ordre mélangeait les colonnes (l'« ID » d'un
+ * personnage lu dans « Joueur » ou « Nom personnage ») et créait des fiches fantômes.
+ */
 async function readRangesFresh(spreadsheetId: string, ranges: string[]) {
   if (!ranges.length) return [] as Array<{ rows: string[][]; startRow: number }>
   const payload = await googleSheetsJson<{
-    valueRanges?: Array<{ valueRange?: { range?: string; values?: GoogleSheetCellValue[][] } }>
+    valueRanges?: Array<{ valueRange?: { range?: string; values?: GoogleSheetCellValue[][] }; dataFilters?: Array<{ a1Range?: string }> }>
   }>(`spreadsheets/${spreadsheetId}/values:batchGetByDataFilter`, {
     method: "POST",
     cache: "no-store",
     body: JSON.stringify({ dataFilters: ranges.map((a1Range) => ({ a1Range })), majorDimension: "ROWS", valueRenderOption: "FORMATTED_VALUE", dateTimeRenderOption: "FORMATTED_STRING" }),
   })
-  return ranges.map((range, index) => {
-    const matched = payload.valueRanges?.[index]?.valueRange
-    return { rows: normalizeGoogleSheetRows(matched?.values), startRow: sheetRangeStartRow(matched?.range) ?? sheetRangeStartRow(range) ?? 1 }
-  })
+  return matchValueRanges(ranges, payload.valueRanges ?? []).map((matched, index) => ({
+    rows: normalizeGoogleSheetRows(matched?.values),
+    startRow: sheetRangeStartRow(matched?.range) ?? sheetRangeStartRow(ranges[index]) ?? 1,
+  }))
 }
+
 
 /**
  * Quelques colonnes d'un onglet, retrouvées par leur nom : la ligne 1 d'abord, puis
@@ -1979,13 +1995,28 @@ function inSheets(kind: "characters" | "campaigns", item: { id: string; updatedA
   return Number.isFinite(updated) && updated > presence.readAt - 120_000
 }
 
+/**
+ * Une liste sans ses entrées absentes des feuilles. Garde-fou : si le tri en écarterait
+ * la moitié ou plus, la relecture n'est pas digne de confiance et rien n'est écarté. Jamais
+ * appliqué à l'ouverture d'une fiche ou d'une campagne : seulement aux listes.
+ */
+function listedInSheets<T extends { id: string; updatedAt?: string | null }>(kind: "characters" | "campaigns", items: T[]) {
+  const kept = items.filter((item) => inSheets(kind, item))
+  const hidden = items.length - kept.length
+  if (hidden > 2 && hidden * 2 >= items.length) {
+    console.error("SHEET_PRESENCE_SUSPICIOUS", kind, hidden, items.length)
+    return items
+  }
+  return kept
+}
+
 async function listCharactersForUserUncached(uid: string) {
   await refreshIdentityIndexes()
   const db = getDb()
   const identityUids = await identityUidsForUser(uid)
   let characters = await db.select().from(characterIndex)
     .where(and(ownedByAny(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
-  if (characters.length) return decorateCharacters(characters)
+  if (characters.length) return decorateCharacters(listedInSheets("characters", characters))
   const syncKey = `characters:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!sync) {
@@ -2004,7 +2035,7 @@ async function listCharactersForUserUncached(uid: string) {
     characters = await db.select().from(characterIndex)
       .where(and(ownedByAny(characterIndex.ownerUid, identityUids), isNull(characterIndex.deletedAt))).orderBy(desc(characterIndex.updatedAt)).limit(100)
   }
-  return decorateCharacters(characters)
+  return decorateCharacters(listedInSheets("characters", characters))
 }
 
 export const listCharactersForUser = cache(listCharactersForUserUncached)
@@ -2033,8 +2064,7 @@ async function getCharacterByIdUncached(id: string) {
 
 export const getCharacterById = cache(getCharacterByIdUncached)
 
-async function decorateCharacters<T extends { id: string; ownerUid: string; name: string; subtitle: string; updatedAt: string }>(listed: T[]) {
-  const characters = listed.filter((character) => inSheets("characters", character))
+async function decorateCharacters<T extends { id: string; ownerUid: string; name: string; subtitle: string; updatedAt: string }>(characters: T[]) {
   if (!characters.length) return []
   const links = await getDb().select({
     characterId: campaignCharacters.characterId,
@@ -2057,7 +2087,7 @@ async function listCampaignsForMjUncached(uid: string) {
   const identityUids = await identityUidsForUser(uid)
   let campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
     .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
-  if (campaigns.length) return campaigns.filter((campaign) => inSheets("campaigns", campaign))
+  if (campaigns.length) return listedInSheets("campaigns", campaigns)
   const syncKey = `campaigns:${identityUids.slice().sort().join(":")}`
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, syncKey)).limit(1)
   if (!sync) {
@@ -2076,7 +2106,7 @@ async function listCampaignsForMjUncached(uid: string) {
     campaigns = await db.select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
       .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), isNull(campaignIndex.deletedAt))).orderBy(desc(campaignIndex.updatedAt)).limit(100)
   }
-  return campaigns.filter((campaign) => inSheets("campaigns", campaign))
+  return listedInSheets("campaigns", campaigns)
 }
 
 export const listCampaignsForMj = cache(listCampaignsForMjUncached)
@@ -2123,7 +2153,7 @@ export async function getCampaignForMj(uid: string, id: string) {
   const identityUids = await identityUidsForUser(uid)
   const [campaign] = await getDb().select({ id: campaignIndex.id, mjUid: campaignIndex.mjUid, name: campaignIndex.name, description: campaignIndex.description, bannerUrl: campaignIndex.bannerUrl, accentColor: campaignIndex.accentColor, updatedAt: campaignIndex.updatedAt })
     .from(campaignIndex).where(and(ownedByAny(campaignIndex.mjUid, identityUids), eq(campaignIndex.id, id), isNull(campaignIndex.deletedAt))).limit(1)
-  return campaign && inSheets("campaigns", campaign) ? campaign : null
+  return campaign ?? null
 }
 
 function numberFromCell(value: unknown, fallback = 0) {
@@ -4683,77 +4713,6 @@ export async function saveTabletopActivity(activity: TabletopActivityRecord) {
   return activity
 }
 
-/** Les cases à plusieurs valeurs d'une fiche, que les anciennes versions écrivaient en JSON. */
-const CHARACTER_LIST_HEADERS = ["Peuple", "Classe", "Langue parlée", "Titre honorifique", "Religion"] as const
-const LIST_CELL_BACKUPS = "character-list-cells-backups"
-
-export type LegacyListCell = { characterId: string; characterName: string; header: string; rowNumber: number; column: number; before: string; after: string }
-
-/** Les cases de la feuille des personnages encore écrites en ancien JSON, et leur texte lisible. */
-export async function legacyCharacterListCells(options: { fresh?: boolean } = {}): Promise<LegacyListCell[]> {
-  const source = await charactersSource()
-  if (!source) return []
-  const { columns, rows } = await readCharacterColumns(source, ["Nom personnage", ...CHARACTER_LIST_HEADERS], options)
-  const id = columns.at("ID")
-  if (id < 0) return []
-  return rows.flatMap((row, offset) => {
-    const characterId = (row[id] ?? "").trim()
-    if (!characterId) return []
-    return CHARACTER_LIST_HEADERS.flatMap((header) => {
-      const column = columns.at(header)
-      const before = column >= 0 ? row[column] ?? "" : ""
-      if (column < 0 || !isLegacyListCell(before)) return []
-      const { entries, selected } = parseListCell(before)
-      return [{ characterId, characterName: columns.get(row, "Nom personnage") || characterId, header, rowNumber: offset + 2, column, before, after: serializeListCell(entries, selected) }]
-    })
-  })
-}
-
-/**
- * Réécrit en texte lisible les cases encore en ancien JSON (« ["Elfe"] » → « Elfe »),
- * à la demande d'un administrateur. Le texte d'avant est d'abord gardé sur le serveur
- * partagé : sans cette sauvegarde, rien n'est écrit, et « Annuler » le remet en place.
- */
-export async function rewriteLegacyCharacterListCells() {
-  const source = await charactersSource()
-  if (!source) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
-  if (!sharedStoreAvailable()) throw new Error("LIST_CELLS_BACKUP_UNAVAILABLE")
-  const cells = await legacyCharacterListCells({ fresh: true })
-  if (!cells.length) return { backup: "", cells }
-  const backup = `${new Date().toISOString()}`
-  const saved = JSON.stringify({ spreadsheetId: source.spreadsheetId, tabName: source.tabName, cells })
-  if (saved.length > 20_000) throw new Error("LIST_CELLS_BACKUP_TOO_LARGE")
-  await writeSharedRecord(LIST_CELL_BACKUPS, backup, saved)
-  await updateRanges(source.spreadsheetId, cells.map((cell) => ({ range: sheetTabRange(source.tabName, `${columnName(cell.column + 1)}${cell.rowNumber}`), values: [[cell.after]] })), { valueInputOption: "RAW" })
-  for (const cell of cells) characterSheetCache.delete(cell.characterId)
-  return { backup, cells }
-}
-
-/**
- * Remet le texte d'avant une réécriture, seulement dans les cases que personne n'a
- * modifiées depuis. Chaque case est retrouvée par l'ID de sa fiche et le nom de sa
- * colonne : des lignes ou colonnes déplacées entre-temps ne changent rien.
- */
-export async function restoreLegacyCharacterListCells(backup: string) {
-  const record = (await listSharedRecords(LIST_CELL_BACKUPS)).find((item) => item.key === backup)
-  if (!record) throw new Error("LIST_CELLS_BACKUP_NOT_FOUND")
-  const saved = JSON.parse(record.value) as { spreadsheetId: string; tabName: string; cells: LegacyListCell[] }
-  const source = await charactersSource()
-  if (!source || source.spreadsheetId !== saved.spreadsheetId) throw new Error("CHARACTERS_SHEET_UNAVAILABLE")
-  const { columns, rows } = await readCharacterColumns(source, ["Nom personnage", ...CHARACTER_LIST_HEADERS], { fresh: true })
-  const id = columns.at("ID")
-  const rowOf = new Map(rows.map((row, offset) => [(row[id] ?? "").trim(), { row, rowNumber: offset + 2 }]))
-  const writes = saved.cells.flatMap((cell) => {
-    const found = rowOf.get(cell.characterId)
-    const column = columns.at(cell.header)
-    if (!found || column < 0 || (found.row[column] ?? "") !== cell.after) return []
-    return [{ cell, range: sheetTabRange(source.tabName, `${columnName(column + 1)}${found.rowNumber}`) }]
-  })
-  await updateRanges(source.spreadsheetId, writes.map((write) => ({ range: write.range, values: [[write.cell.before]] })), { valueInputOption: "RAW" })
-  for (const write of writes) characterSheetCache.delete(write.cell.characterId)
-  return { restored: writes.length, skipped: saved.cells.length - writes.length }
-}
-
 /** Une cellule « Classe » de la fiche (« A · B », ou ancien JSON) : les classes séparées par « · ». */
 export function formatCharacterClasses(value: string) {
   return displayedMultipleValue(value, "all")
@@ -4934,7 +4893,7 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
       .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
     accountLookup(sessionToken),
   ])
-  const decorated = await withCharacterClasses(await decorateCharacters(rows.map((row) => row.character)))
+  const decorated = await withCharacterClasses(await decorateCharacters(listedInSheets("characters", rows.map((row) => row.character))))
   return decorated.map((character) => ({ ...character, ...ownerLabels(character.ownerUid, owners) }))
 }
 
@@ -4960,7 +4919,8 @@ export async function listAllCampaignsForAdmin(sessionToken?: string) {
       .from(campaignCharacters).innerJoin(characterIndex, eq(campaignCharacters.characterId, characterIndex.id))
       .where(isNull(characterIndex.deletedAt)),
   ])
-  return rows.filter((row) => inSheets("campaigns", row.campaign)).map((row) => {
+  const listed = new Set(listedInSheets("campaigns", rows.map((row) => row.campaign)))
+  return rows.filter((row) => listed.has(row.campaign)).map((row) => {
     return {
       ...row.campaign,
       ...ownerLabels(row.campaign.mjUid, owners),
@@ -5150,7 +5110,7 @@ export async function listAvailableCampaignCharacters() {
   // si une relecture date de quelques secondes).
   await ensureIdentityIndexes({ maxAgeMs: 5_000 })
   const rows = await getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500)
-  return decorateCharacters(rows)
+  return decorateCharacters(listedInSheets("characters", rows))
 }
 
 export async function addCharacterToCampaign(mjUid: string | null, campaignId: string, characterId: string, duplicate: boolean) {
@@ -6784,15 +6744,24 @@ function todoRow(todo: AdminTodoRecord) {
 const sheetRowCache = new Map<string, { rowNumber: number; expiresAt: number }>()
 
 /** La ligne d'un identifiant, cherché dans la colonne « ID » (retrouvée par son nom). */
+/** Oublie les numéros de ligne retenus : une ligne a été ajoutée, supprimée ou déplacée. */
+function forgetSheetRows() {
+  sheetRowCache.clear()
+}
+
+/**
+ * La ligne d'un ID, lue dans la feuille elle-même (jamais dans une copie en mémoire, qui
+ * peut dater d'avant une suppression) et retenue une minute.
+ */
 async function findSheetRowById(spreadsheetId: string, tabName: string, id: string) {
   const cacheKey = `${spreadsheetId}:${tabName}:${id}`
   const cached = sheetRowCache.get(cacheKey)
   if (cached && cached.expiresAt > Date.now()) return cached.rowNumber
-  const { columns, rows } = await readNamedColumns(spreadsheetId, tabName, ["ID"], ["ID"])
+  const { columns, rows } = await readNamedColumns(spreadsheetId, tabName, ["ID"], ["ID"], { fresh: true })
   const rowIndex = rows.findIndex((row) => columns.get(row, "ID") === id)
   if (rowIndex < 0) return null
   const rowNumber = rowIndex + 2
-  sheetRowCache.set(cacheKey, { rowNumber, expiresAt: Date.now() + 10 * 60_000 })
+  sheetRowCache.set(cacheKey, { rowNumber, expiresAt: Date.now() + 60_000 })
   return rowNumber
 }
 
@@ -7035,9 +7004,19 @@ export async function restoreItem(kind: "todo" | "character" | "campaign", id: s
   }
 }
 
+/**
+ * Supprime la ligne d'un ID. Sa place est relue dans la feuille juste avant, puis sa case
+ * ID est vérifiée : si elle ne porte pas cet ID, rien n'est supprimé.
+ */
 async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string) {
+  forgetSheetRows()
   const rowNumber = await findSheetRowById(spreadsheetId, tabName, id)
   if (!rowNumber) return
+  const columns = await namedColumnsOf(spreadsheetId, tabName, ["ID"])
+  const idColumn = columns.at("ID")
+  if (idColumn < 0) throw new Error("SHEET_ROW_CHECK_FAILED")
+  const [check] = await readRangesFresh(spreadsheetId, [sheetTabRange(tabName, `${columnName(idColumn + 1)}${rowNumber}`)])
+  if (check?.startRow !== rowNumber || (check.rows[0]?.[0] ?? "").trim() !== id) throw new Error("SHEET_ROW_CHECK_FAILED")
   const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(`spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`)
   const sheetId = metadata.sheets?.find((sheet) => sheet.properties?.title === tabName)?.properties?.sheetId
   if (sheetId === undefined) return
@@ -7045,7 +7024,6 @@ async function deleteSheetRow(spreadsheetId: string, tabName: string, id: string
     method: "POST",
     body: JSON.stringify({ requests: [{ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } }] }),
   })
-  sheetRowCache.clear()
 }
 
 export async function permanentlyDeleteItem(kind: "todo" | "character" | "campaign", id: string) {

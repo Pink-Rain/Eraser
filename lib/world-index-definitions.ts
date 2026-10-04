@@ -722,8 +722,6 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
   if (index === "characters") {
     if (is("Joueur")) return { kind: "rich", hidden: true }
     if (is("Portrait")) return { kind: "file", file: { accept: "image" }, description: "Le portrait du personnage. Importer une image (ou coller une adresse) le remplace, comme sur sa fiche." }
-    // Lus sur la fiche, qui seule les modifie (la classe et le rang décident de la progression).
-    if (is("Peuple", "Classe", "Level", "Titre honorifique")) return { kind: "rich", readOnly: true, description: "Se modifie depuis la fiche du personnage." }
     return { kind: "rich" }
   }
   if (index === "classes") {

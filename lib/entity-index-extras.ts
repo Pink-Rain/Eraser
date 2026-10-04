@@ -1,4 +1,4 @@
-import { legacyCharacterListCells, listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
 import { ownersOf } from "@/lib/ownership"
 import { classImageUrl } from "@/lib/class-images"
 import { isImageSource } from "@/lib/index-columns"
@@ -81,6 +81,22 @@ function withReadableLists(data: WorldIndexData): WorldIndexData {
   }
 }
 
+/**
+ * Index des personnages et des campagnes : leurs cases sont écrites par la fiche et le
+ * tableau de bord, en texte simple. Une couleur de texte ou de fond posée dans Google
+ * Sheets (souvent un blanc hérité de la mise en forme de la feuille) les rendait
+ * illisibles : elle est ignorée à l'affichage, le reste de la mise en forme est gardé.
+ */
+function withoutSheetColors(data: WorldIndexData): WorldIndexData {
+  const strip = (html: string) => html
+    .replace(/\sstyle=(["'])(.*?)\1/gi, (_match, quote: string, css: string) => {
+      const kept = css.split(";").filter((declaration) => declaration.trim() && !/^\s*(?:color|background(?:-color)?)\s*:/i.test(declaration)).join(";")
+      return kept ? ` style=${quote}${kept}${quote}` : ""
+    })
+    .replace(/<font\b[^>]*>/gi, "").replace(/<\/font>/gi, "")
+  return { ...data, tables: data.tables.map((table) => ({ ...table, rows: table.rows.map((row) => row.html.some((html) => /color|<font/i.test(html)) ? { ...row, html: row.html.map(strip) } : row) })) }
+}
+
 function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
@@ -88,7 +104,7 @@ function escapeHtml(value: string) {
 export async function withEntityExtras(data: WorldIndexData, account: { role: string }, token?: string): Promise<WorldIndexData> {
   if (data.key === "classes") return withClassImages(data)
   if (data.key !== "characters" && data.key !== "campaigns") return data
-  if (data.key === "characters") data = withReadableLists(data)
+  data = withoutSheetColors(data.key === "characters" ? withReadableLists(data) : data)
   const kind = data.key === "characters" ? "character" : "campaign"
   const isAdmin = account.role === "admin"
   try {
@@ -136,7 +152,6 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
       }
       return table
     })
-    const legacyListCells = isAdmin && kind === "character" ? (await legacyCharacterListCells().catch(() => [])).length : 0
     return {
       ...data,
       tables,
@@ -145,7 +160,6 @@ export async function withEntityExtras(data: WorldIndexData, account: { role: st
         rows,
         accounts,
         canAssign: isAdmin,
-        ...(legacyListCells ? { legacyListCells } : {}),
       },
     }
   } catch (error) {

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
-import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck } from "lucide-react"
+import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
 
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
@@ -174,8 +174,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Gardée pour cette page : changer d'onglet d'Eraser puis revenir la retrouve.
   const [query, setQuery] = useRememberedSearch()
   const [details, setDetails] = useState<string | null>(null)
-  // Index des personnages : la dernière réécriture des anciennes cases JSON, qu'on peut annuler.
-  const [listRewrite, setListRewrite] = useState("")
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
   const engineRef = useRef<ReturnType<typeof createRowEngine> | null>(null)
@@ -756,8 +754,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
           if (!row) return <span className="px-2 text-xs text-muted-foreground">—</span>
           if (row.trashed && entity?.trashKind) return <TrashedRowActions kind={entity.trashKind} id={id} ownerName={row.ownerName} ask={ask} onDone={(message) => { notify(message); void refreshRef.current() }} />
-          if (!extras.canAssign || !entity?.trashKind) return <span className="px-2 text-sm text-muted-foreground">{row.ownerName}</span>
-          return <OwnerSelector key={row.ownerUid} kind={entity.trashKind} itemId={id} ownerUids={row.ownerUids} accounts={extras.accounts} onSaved={() => void refreshRef.current()} />
+          // Mettre à la corbeille, à côté du propriétaire : la ligne reste visible (marquée) pour un administrateur.
+          const trash = entity?.trashKind ? <Button type="button" size="xs" variant="ghost" disabled={busy} onClick={() => void mutateRef.current("delete", [rowKey], "delete")} className="self-start text-muted-foreground hover:text-destructive" title="Mettre à la corbeille"><Trash2 />Corbeille</Button> : null
+          if (!extras.canAssign || !entity?.trashKind) return <div className="flex flex-col gap-1 px-2 py-1"><span className="text-sm text-muted-foreground">{row.ownerName}</span>{trash}</div>
+          return <div className="flex flex-col"><OwnerSelector key={row.ownerUid} kind={entity.trashKind} itemId={id} ownerUids={row.ownerUids} accounts={extras.accounts} onSaved={() => void refreshRef.current()} />{trash}</div>
         },
       })
       const links = indexGridColumn(LINKS_COLUMN, extras.linksLabel, { kind: "auto-links" }, 300, context, { sortable: true })
@@ -959,7 +959,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
       </div>
-      {indexKey === "characters" && (extras?.legacyListCells || listRewrite) ? <LegacyListCellsNotice count={extras?.legacyListCells ?? 0} backup={listRewrite} onChange={(backup) => { setListRewrite(backup); void refreshRef.current() }} /> : null}
 
       {editor && <IndexEditor
         model={editor}
@@ -1130,47 +1129,5 @@ function TrashedRowActions({ kind, id, ownerName, ask, onDone }: {
       <Button type="button" size="xs" variant="ghost" disabled={pending} onClick={() => void run("DELETE")} className="text-destructive hover:text-destructive">{pending ? <LoaderCircle className="animate-spin" /> : null}Supprimer définitivement</Button>
     </div>
     {error && <p className="text-[11px] text-destructive">{error}</p>}
-  </div>
-}
-
-/**
- * Index des personnages, administrateur : des cases de fiches sont encore écrites en ancien
- * JSON (`["Elfe"]`). Eraser les affiche déjà en clair partout ; ce bouton les réécrit aussi
- * dans Google Sheets, à la demande, après avoir gardé l'ancien texte (« Annuler » le remet).
- */
-function LegacyListCellsNotice({ count, backup, onChange }: { count: number; backup: string; onChange: (backup: string) => void }) {
-  const [pending, setPending] = useState(false)
-  const [message, setMessage] = useState("")
-  const [error, setError] = useState("")
-  async function run(body: { action: "rewrite" } | { action: "restore"; backup: string }) {
-    setPending(true)
-    setError("")
-    try {
-      const response = await fetch("/api/admin/character-list-cells", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-      const payload = await response.json().catch(() => ({})) as { error?: string; backup?: string; rewritten?: number; restored?: number; skipped?: number }
-      if (!response.ok) throw new Error(payload.error || "L’opération a échoué.")
-      if (body.action === "rewrite") {
-        setMessage(`${payload.rewritten ?? 0} case${(payload.rewritten ?? 0) > 1 ? "s" : ""} réécrite${(payload.rewritten ?? 0) > 1 ? "s" : ""} en texte lisible.`)
-        onChange(payload.backup ?? "")
-      } else {
-        setMessage(`Ancien texte remis dans ${payload.restored ?? 0} case${(payload.restored ?? 0) > 1 ? "s" : ""}${payload.skipped ? ` (${payload.skipped} modifiée${payload.skipped > 1 ? "s" : ""} depuis, laissée${payload.skipped > 1 ? "s" : ""} telle${payload.skipped > 1 ? "s" : ""} quelle${payload.skipped > 1 ? "s" : ""})` : ""}.`)
-        onChange("")
-      }
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "L’opération a échoué.")
-    } finally {
-      setPending(false)
-    }
-  }
-  return <div className="flex flex-wrap items-center gap-2 rounded-lg border border-amber-600/30 bg-amber-500/10 px-3 py-2 text-sm">
-    <span className="min-w-0 flex-1">
-      {count > 0
-        ? <>{count} case{count > 1 ? "s" : ""} de fiches (peuple, classe, langue, titre, religion) {count > 1 ? "sont" : "est"} encore écrite{count > 1 ? "s" : ""} à l’ancienne dans Google Sheets (<code className="text-xs">[&quot;…&quot;]</code>). Eraser les affiche déjà en clair ; tu peux aussi les réécrire dans la feuille.</>
-        : message}
-      {count > 0 && message && <span className="ml-1 text-muted-foreground">{message}</span>}
-      {error && <span className="ml-1 text-destructive">{error}</span>}
-    </span>
-    {count > 0 && <Button type="button" size="sm" variant="outline" disabled={pending} onClick={() => void run({ action: "rewrite" })}>{pending ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Réécrire en texte lisible</Button>}
-    {backup && <Button type="button" size="sm" variant="ghost" disabled={pending} onClick={() => void run({ action: "restore", backup })}>Annuler</Button>}
   </div>
 }

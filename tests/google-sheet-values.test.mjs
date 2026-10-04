@@ -1,0 +1,31 @@
+import assert from "node:assert/strict";
+import test, { after } from "node:test";
+import { fileURLToPath } from "node:url";
+
+import { createServer } from "vite";
+
+const root = fileURLToPath(new URL("..", import.meta.url));
+const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
+after(async () => { await vite.close(); });
+const values = await vite.ssrLoadModule("/lib/google-sheet-values.ts");
+
+const ranges = ["'Personnages'!A:A", "'Personnages'!C:C", "'Personnages'!D:D", "'Personnages'!AA:AA"];
+const answer = (range, filter, cell) => ({ valueRange: { range, values: [[cell]] }, ...(filter ? { dataFilters: [{ a1Range: filter }] } : {}) });
+
+test("une lecture groupée rendue dans le désordre garde chaque colonne à sa place (par filtre)", () => {
+  const shuffled = [answer("Personnages!AA1:AA9", ranges[3], "Langue"), answer("Personnages!A1:A9", ranges[0], "ID"), answer("Personnages!D1:D9", ranges[2], "Peuple"), answer("Personnages!C1:C9", ranges[1], "Nom")];
+  assert.deepEqual(values.matchValueRanges(ranges, shuffled).map((matched) => matched?.values?.[0]?.[0]), ["ID", "Nom", "Peuple", "Langue"]);
+});
+
+test("sans filtre dans la réponse, chaque plage est retrouvée par ses colonnes", () => {
+  const shuffled = [answer("Personnages!D1:D9", "", "Peuple"), answer("Personnages!AA1:AA9", "", "Langue"), answer("Personnages!A1:A9", "", "ID"), answer("Personnages!C1:C9", "", "Nom")];
+  assert.deepEqual(values.matchValueRanges(ranges, shuffled).map((matched) => matched?.values?.[0]?.[0]), ["ID", "Nom", "Peuple", "Langue"]);
+  assert.equal(values.sameRangeColumns("Personnages!A1:A20", "'Personnages'!A:A"), true);
+  assert.equal(values.sameRangeColumns("Personnages!AA1:AA20", "'Personnages'!A:A"), false);
+  assert.equal(values.sameRangeColumns("Autre!A1:A20", "'Personnages'!A:A"), false);
+});
+
+test("une réponse manquante reste vide au lieu de prendre la colonne voisine", () => {
+  const partial = [answer("Personnages!A1:A9", ranges[0], "ID"), answer("Personnages!D1:D9", ranges[2], "Peuple")];
+  assert.deepEqual(values.matchValueRanges(ranges, partial).map((matched) => matched?.values?.[0]?.[0]), ["ID", undefined, "Peuple", undefined]);
+});

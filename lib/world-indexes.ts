@@ -103,8 +103,6 @@ export type EntityIndexExtras = {
   /** Comptes à qui attribuer une ligne : seulement pour un administrateur. */
   accounts: AccountRecord[]
   canAssign: boolean
-  /** Index des personnages, administrateur : cases de fiches encore écrites en ancien JSON. */
-  legacyListCells?: number
 }
 
 export function isWorldIndexKey(value: unknown): value is WorldIndexKey {
