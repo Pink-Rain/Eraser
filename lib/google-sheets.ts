@@ -2052,13 +2052,15 @@ async function listCharactersForUserUncached(uid: string) {
   if (!sync) {
     const source = await charactersSource()
     if (source) {
-      const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"])
+      // Lu frais : le joueur de chaque ligne décide de ce que ce compte voit.
+      const { columns, rows } = await readCharacterColumns(source, ["Joueur", "Nom personnage", "Peuple"], { fresh: true })
       for (const row of rows) {
         const id = columns.get(row, "ID")
         const ownerUid = columns.get(row, "Joueur")
         if (!id || !ownedBy(ownerUid, identityUids)) continue
         const fields = { ownerUid, name: columns.get(row, "Nom personnage") || "Personnage sans nom", subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"), updatedAt: new Date().toISOString() }
-        await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: { ...fields, deletedAt: null } })
+        // Une fiche mise à la corbeille y reste : elle ne réapparaît pas dans la liste.
+        await db.insert(characterIndex).values({ id, ...fields }).onConflictDoUpdate({ target: characterIndex.id, set: fields })
       }
     }
     await db.insert(sheetIndexSyncs).values({ key: syncKey }).onConflictDoNothing()
@@ -3478,6 +3480,20 @@ export type LegacyIdentityCandidate = {
 }
 
 /**
+ * Une colonne qui dit à qui est une entrée ou comment elle s'appelle (« Joueur », « Nom
+ * personnage », « MJ », « Nom de la campagne ») ne sert à la resynchronisation que si la
+ * feuille l'a (un en-tête renommé dans Sheets la fait disparaître) et qu'au moins une ligne
+ * la remplit (une colonne recréée vide). Sinon l'index local garde ses valeurs : la relire
+ * retirait le joueur ou le nom de tout le monde.
+ */
+function identityColumnUsable(kind: string, sheet: NamedSheet, rows: readonly string[][], name: string) {
+  const identified = rows.filter((row) => sheet.columns.get(row, "ID").trim())
+  if (!identified.length || (sheet.columns.at(name) >= 0 && identified.some((row) => sheet.columns.get(row, name).trim()))) return true
+  console.error("IDENTITY_SYNC_COLUMN_UNUSABLE", kind, name)
+  return false
+}
+
+/**
  * Imports only the lightweight ownership indexes from the already linked sheets.
  * This never writes to Google Sheets; it lets the desktop account recognize data
  * created by the live site without changing that site's identifiers.
@@ -3515,11 +3531,14 @@ export async function syncExistingIdentityIndexes() {
   const characterById = new Map(existingCharacters.map((row) => [row.id, row]))
   const linkKeys = new Set(existingLinks.map((row) => `${row.campaignId}::${row.characterId}`))
 
+  const mjUsable = campaignSheet ? identityColumnUsable("campaigns", campaignSheet, campaignRows, "MJ") : false
+  const campaignNameUsable = campaignSheet ? identityColumnUsable("campaigns", campaignSheet, campaignRows, "Nom de la campagne") : false
   for (const row of campaignRows) {
     const campaign = campaignSheet ? campaignFromRow(row, campaignSheet.columns) : null
     if (!campaign) continue
-    const { id, ...next } = campaign
+    const { id, ...read } = campaign
     const current = campaignById.get(id)
+    const next = { ...read, mjUid: mjUsable ? read.mjUid : current?.mjUid ?? "", name: campaignNameUsable ? read.name : current?.name ?? read.name }
     if (current
       && !current.deletedAt
       && current.mjUid === next.mjUid
@@ -3531,16 +3550,19 @@ export async function syncExistingIdentityIndexes() {
       .onConflictDoUpdate({ target: campaignIndex.id, set: { ...next, updatedAt: now } })
   }
 
+  const ownersUsable = characterSheet ? identityColumnUsable("characters", characterSheet, characterRows, "Joueur") : false
+  const namesUsable = characterSheet ? identityColumnUsable("characters", characterSheet, characterRows, "Nom personnage") : false
   for (const row of characterRows) {
     const columns = characterSheet?.columns
     const id = columns?.get(row, "ID").trim() ?? ""
     if (!columns || !id) continue
-    const next = {
-      ownerUid: columns.get(row, "Joueur"),
-      name: columns.get(row, "Nom personnage") || "Personnage sans nom",
-      subtitle: displayedMultipleValue(columns.get(row, "Peuple"), "all"),
-    }
     const current = characterById.get(id)
+    const next = {
+      ownerUid: ownersUsable ? columns.get(row, "Joueur") : current?.ownerUid ?? "",
+      name: namesUsable ? columns.get(row, "Nom personnage") || "Personnage sans nom" : current?.name ?? "Personnage sans nom",
+      // Sans colonne « Peuple », le sous-titre connu reste.
+      subtitle: columns.at("Peuple") >= 0 ? displayedMultipleValue(columns.get(row, "Peuple"), "all") : current?.subtitle ?? "",
+    }
     if (current
       && !current.deletedAt
       && current.ownerUid === next.ownerUid
