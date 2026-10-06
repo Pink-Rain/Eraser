@@ -13,6 +13,8 @@ import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
+import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
+import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
@@ -204,6 +206,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const tables = useMemo(() => data?.tables ?? [], [data])
   // Les onglets-fenêtres : des onglets sans données propres, qui réaffichent des lignes existantes.
   const settings = useIndexSettings(indexKey)
+  // Tableau ou cartes, et la carte choisie : retenus pour cet index, sur ce poste.
+  const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${indexKey}:display`, "table", isIndexDisplay)
+  const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${indexKey}:card`, "", isCardChoice)
+  // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
+  const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   const activeView = useMemo(() => { const id = viewIdOfSelectKey(tabName); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [settings.views, tabName])
   // Les onglets de rangement : une par valeur des colonnes « Rangement en onglets ».
@@ -898,6 +905,18 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [busy, moveTargetsOf])
 
   const detailsFound = details !== null ? locate(details) : null
+
+  // La vue en cartes : la carte de l'onglet affiché ; dans « Tout », chaque ligne prend celle de son onglet.
+  const tabCards = table ? tabCardsOf(settings.cards, indexKey, table.tabName) : null
+  const shownCard = tabCards ? pickCard(tabCards, cardChoice) : null
+  const cardOf = useCallback((rowKey: string) => {
+    const entry = tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName)
+    return pickCard(entry, cardChoice) ?? shownCard!
+  }, [cardChoice, indexKey, settings.cards, shownCard])
+  const cardRow = useCallback((rowKey: string): CardRowSource => ({
+    value: (header) => valueOf(rowKey, header),
+    spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
+  }), [locate, specOf, valueOf])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -975,7 +994,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
   const weightColumns = table ? (data?.columns[table.tabName] ?? []).filter((column) => ["number", "gauge", "formula", "rollup"].includes(column.spec.kind)).map((column) => column.header) : []
 
-  async function openEditor() {
+  async function openEditor(mode: "columns" | "cards" = "columns") {
+    setEditorMode(mode)
     setPending("editor"); setEditorError("")
     try {
       const response = await fetch(`/api/resources/index-schema?key=${encodeURIComponent(indexKey)}`, { cache: "no-store" })
@@ -1040,7 +1060,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}
-        {table && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans le tableau…" className="pl-9" /></div>}
+        {table && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
+        {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} onEdit={() => void openEditor("cards")} disabled={busy} />}
         <div className="flex flex-wrap gap-2 lg:ml-auto">
           {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
@@ -1054,7 +1075,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             disabled={busy}
           />}
           <Button type="button" variant="outline" onClick={() => setViewDialog("new")} disabled={busy || !tables.length} title="Un onglet qui réaffiche les lignes répondant à des conditions, sans les copier"><Filter />Onglet-fenêtre</Button>
-          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={busy} title="Colonnes, types, réglages et onglets de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
         </div>
@@ -1071,6 +1092,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         onDeleteIndex={() => void deleteIndex()}
         layouts={settings.layouts}
         onSaveLayouts={settings.saveLayouts}
+        cardsIndex={indexKey}
+        cards={settings.cards}
+        onSaveCards={settings.saveCards}
+        initialMode={editorMode}
+        initialTab={table?.tabName}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -1097,7 +1123,18 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
       />}
 
-      {table ? (
+      {table && display === "cards" ? (shownCard
+        ? <IndexCardGrid
+          card={shownCard}
+          cardOf={spanning ? cardOf : undefined}
+          rows={displayedRows}
+          rowSource={cardRow}
+          onOpen={openRow}
+          hrefOf={rowHref}
+          empty={activeView ? "Aucune ligne ne remplit les conditions de cet onglet-fenêtre." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
+        />
+        : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />
+      ) : table ? (
         <SheetGrid
           layoutKey={`eraser:world-index:grid:${indexKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
           columns={columns}
