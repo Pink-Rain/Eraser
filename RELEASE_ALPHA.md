@@ -1,28 +1,37 @@
-# Eraser 0.1.1-alpha.147 — Étiquettes : un clic pour les modifier
+# Eraser 0.1.1-alpha.148 — Les index en cartes
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Étiquettes « { » dans un texte qu'on écrit
+## Tableau ou cartes
 
-- **Clic gauche sur une étiquette** (`{Objet:Arc long}`) : son texte se modifie
-  directement (« Arcs longs », « Arc très long oui »…). Le lien ne s'ouvre plus au
-  clic, ce qui empêchait le double-clic de la 146 de fonctionner.
-  - **Entrée** ou un clic ailleurs valide, **Échap** annule, **vider le texte** efface
-    l'étiquette ; réécrire le nom exact de la ligne lui rend son texte automatique.
-  - Une case citée (`{Objet:Arc long:Prix}`) affiche sa valeur : un clic ne fait rien.
-- **Clic droit sur une étiquette** : « Ouvrir dans un nouvel onglet », « Ouvrir dans une
-  nouvelle fenêtre » ou « Ouvrir ici ». Le clic du milieu et Ctrl+clic ouvrent toujours
-  un nouvel onglet.
-- Hors édition (fiches en lecture, survols, pages), un clic sur une étiquette ouvre sa
-  ligne, comme avant.
+- Chaque index a maintenant une bascule **Tableau / Cartes**, à côté de la recherche. En
+  cartes, chaque ligne s'affiche avec son image, sa couleur et les informations choisies ;
+  la recherche, les onglets-fenêtres et le tri s'appliquent comme dans le tableau. Un clic
+  ouvre la fiche (ou la page d'un personnage, d'une campagne, d'une classe).
+- Les cartes arrivent par paquets de 60 en descendant : un index de mille lignes reste fluide.
 
-## Phrases modèles
+## « Modifier » › Cartes
 
-- Une colonne de phrase qui contient des `{Nom}`, `{Type}` et des étiquettes s'affiche
-  correctement quand on la cite (`{Objet:Arc long:Phrase}`) : les accolades sont lues
-  sur la ligne citée, les étiquettes gardent leur texte choisi et leur survol.
+- Un nouvel onglet **Cartes** dans « Modifier ». À gauche, les cartes de l'onglet (l'étoile
+  choisit celle montrée d'abord) ; au milieu, leurs réglages ; à droite, l'aperçu en direct
+  sur les vraies lignes. Un clic sur un bloc de l'aperçu ouvre ses réglages.
+- Une carte se règle sans code : l'image (en haut, à gauche, à droite ou en fond ; format,
+  recadrage, forme, médaillon coloré), la couleur d'accent (prise dans une colonne ou fixe),
+  le cadre, la largeur dans la grille, puis ses blocs : titre, ligne composée
+  (« Lame · rang 4 »), texte, pastilles, libellé : valeur, barre de progression, tuiles de
+  valeurs, image, valeur selon son type, détails repliables, séparateur.
+- Un onglet peut avoir plusieurs cartes. « Nouvelle carte » propose des formes de départ
+  remplies avec les colonnes de l'onglet ; une carte s'enregistre en **preset** (commun à
+  tous les index) ou se copie vers un autre onglet.
 
-## Version affichée
+## Les cartes qu'Eraser avait déjà
 
-- Sous « Chercher les mises à jour », en tout petit : la version qui tourne
-  (mise à jour sans réinstallation comprise).
+- Personnages, Campagnes, Classes, Sorts des classes et des créatures, PNJs, Succès, États,
+  Armes - Modificateurs, Vocabulaire, Créatures et Objets partent avec leurs cartes, refaites
+  avec le moteur. On peut les modifier ; « Revenir aux cartes d'Eraser » les restaure.
+- Les cartes sont gardées dans Eraser (pour tout le monde), jamais dans Google Sheets :
+  aucune donnée des feuilles n'est touchée.
+
+Rappel de la 147 : un clic gauche sur une étiquette « { » modifie son texte, un clic droit
+l'ouvre dans un nouvel onglet, une nouvelle fenêtre ou ici ; la version qui tourne s'affiche
+sous « Chercher les mises à jour ».

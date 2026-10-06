@@ -10,9 +10,12 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
 import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
 import type { IndexLayout, LayoutKind, LayoutPreset, TabLayouts } from "@/lib/index-layouts"
+import type { CardPreset, CardTemplate, TabCards } from "@/lib/index-cards"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[] }
+
+const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [] }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -26,7 +29,7 @@ async function postSettings(body: Record<string, unknown>) {
 
 /** Les onglets-fenêtres d'un index et les presets d'onglets (partagés par tous les index). */
 export function useIndexSettings(index: string) {
-  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? { views: [], presets: [], layouts: {}, layoutPresets: [] })
+  const [settings, setSettings] = useState<Settings>(() => known.get(index) ?? emptySettings)
   const [error, setError] = useState("")
   useEffect(() => {
     let active = true
@@ -35,7 +38,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [] }
         known.set(index, next)
         setSettings(next)
       })
@@ -85,7 +88,23 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-layout-preset", id })
     if (payload.layoutPresets) update({ layoutPresets: payload.layoutPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset }
+  /** Les cartes d'onglets de cet index ; `null` : l'onglet revient aux cartes d'Eraser. */
+  const saveCards = useCallback(async (changes: Array<{ tab: string; cards: TabCards | null }>) => {
+    if (!changes.length) return
+    const payload = await postSettings({ action: "save-cards", index, changes })
+    if (payload.cards) update({ cards: payload.cards })
+  }, [index, update])
+  /** Les presets de cartes, communs à tous les index. */
+  const saveCardPreset = useCallback(async (preset: { id?: string; name: string; card: CardTemplate }) => {
+    const payload = await postSettings({ action: "save-card-preset", ...preset })
+    if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
+    return payload.id ?? ""
+  }, [update])
+  const deleteCardPreset = useCallback(async (id: string) => {
+    const payload = await postSettings({ action: "delete-card-preset", id })
+    if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
+  }, [update])
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })

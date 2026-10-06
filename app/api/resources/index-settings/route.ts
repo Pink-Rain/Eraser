@@ -3,6 +3,8 @@ import { NextResponse } from "next/server"
 import { deleteColumnPreset, deleteIndexView, listColumnPresets, listIndexViews, saveColumnPreset, saveIndexView } from "@/lib/index-settings"
 import { deleteLayoutPreset, listIndexLayouts, listLayoutPresets, saveIndexLayouts, saveLayoutPreset } from "@/lib/index-layouts-store"
 import { parseIndexLayout } from "@/lib/index-layouts"
+import { deleteCardPreset, listCardPresets, listIndexCards, saveCardPreset, saveIndexCards } from "@/lib/index-cards-store"
+import { parseCardTemplate, parseTabCards } from "@/lib/index-cards"
 import type { PresetColumn } from "@/lib/index-presets"
 import type { ViewCondition } from "@/lib/index-views"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -16,16 +18,26 @@ const messages: Record<string, string> = {
   INDEX_LAYOUT_INVALID: "Cette mise en page n’a pas pu être lue.",
   INDEX_LAYOUTS_UNAVAILABLE: "Les mises en page se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
   INDEX_LAYOUT_TOO_LARGE: "Cette mise en page est trop grande pour être enregistrée : retire quelques sections ou lignes.",
+  INDEX_CARDS_INVALID: "Ces cartes n’ont pas pu être lues.",
+  INDEX_CARDS_UNAVAILABLE: "Les cartes se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
+  INDEX_CARDS_TOO_LARGE: "Les cartes de cet onglet sont trop grandes pour être enregistrées : retire une carte ou quelques blocs.",
 }
 
-/** Onglets-fenêtres et mises en page d'un index (`index`), et presets d'onglets, pour les MJ et administrateurs. */
+/** Onglets-fenêtres, mises en page et cartes d'un index (`index`), et presets, pour les MJ et administrateurs. */
 export async function GET(request: Request) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const index = new URL(request.url).searchParams.get("index")?.trim() ?? ""
   try {
-    const [views, presets, layouts, layoutPresets] = await Promise.all([index ? listIndexViews(index) : Promise.resolve([]), listColumnPresets(), index ? listIndexLayouts(index).catch(() => ({})) : Promise.resolve({}), listLayoutPresets().catch(() => [])])
-    return NextResponse.json({ views, presets, layouts, layoutPresets })
+    const [views, presets, layouts, layoutPresets, cards, cardPresets] = await Promise.all([
+      index ? listIndexViews(index) : Promise.resolve([]),
+      listColumnPresets(),
+      index ? listIndexLayouts(index).catch(() => ({})) : Promise.resolve({}),
+      listLayoutPresets().catch(() => []),
+      index ? listIndexCards(index).catch(() => ({})) : Promise.resolve({}),
+      listCardPresets().catch(() => []),
+    ])
+    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets })
   } catch (error) {
     console.error("INDEX_SETTINGS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les onglets-fenêtres et les presets n’ont pas pu être chargés." }, { status: 503 })
@@ -60,6 +72,31 @@ export async function POST(request: Request) {
         const code = error instanceof Error ? error.message : ""
         console.error("INDEX_LAYOUT_PRESET_SAVE_FAILED", code)
         return NextResponse.json({ error: messages[code] ?? "Le preset de mise en page n’a pas pu être enregistré sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
+    }
+    if (body.action === "save-cards") {
+      // Les cartes de chaque onglet ; `null` : l'onglet revient aux cartes d'Eraser.
+      const raw = body as { changes?: Array<{ tab?: unknown; cards?: unknown }> }
+      const changes = (Array.isArray(raw.changes) ? raw.changes : []).map((change) => ({ tab: String(change.tab ?? ""), cards: change.cards === null ? null : parseTabCards(change.cards) ?? { cards: [] } }))
+      try {
+        return NextResponse.json({ cards: await saveIndexCards(String(body.index ?? ""), changes) })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_CARDS_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "Les cartes n’ont pas pu être enregistrées sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
+    }
+    if (body.action === "save-card-preset" || body.action === "delete-card-preset") {
+      try {
+        const raw = body as { card?: unknown }
+        const id = body.action === "save-card-preset"
+          ? await saveCardPreset({ id: body.id, name: String(body.name ?? ""), card: parseCardTemplate(raw.card) })
+          : (await deleteCardPreset(String(body.id ?? "")), "")
+        return NextResponse.json({ id, cardPresets: await listCardPresets() })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_CARD_PRESET_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "Le preset de carte n’a pas pu être enregistré sur le serveur partagé d’Eraser." }, { status: 400 })
       }
     }
     if (body.action === "save-view") {

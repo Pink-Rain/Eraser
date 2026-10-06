@@ -16,6 +16,8 @@ import { shownReferenceText } from "@/components/eraser/reference-store"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
+import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
+import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
 import { ObjectIndexRegroup } from "@/components/eraser/object-index-regroup"
 import { useShellData } from "@/components/eraser/app-shell"
@@ -102,6 +104,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   )
   // Les onglets-fenêtres de l'index des objets : des lignes de un ou plusieurs tableaux, selon des conditions.
   const settings = useIndexSettings("objects")
+  // Tableau ou cartes, et la carte choisie : retenus sur ce poste.
+  const [display, setDisplay] = usePersistentState<IndexDisplay>("eraser:object-index:display", "table", isIndexDisplay)
+  const [cardChoice, setCardChoice] = usePersistentState<string>("eraser:object-index:card", "", isCardChoice)
+  const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
   const { viewRole } = useShellData()
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
@@ -313,6 +319,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return sortByIndexKey(rows, (row) => indexSortKey(valueOf(row.key, sort.column), spec, { resolveReference: shownReferenceText }), sort.direction === "asc" ? 1 : -1)
   }, [deferredQuery, haystacks, selected, sort, specs, valueOf])
 
+  // La vue en cartes : celles du tableau affiché (index « objects », onglet du tableau).
+  const tabCards = selected ? tabCardsOf(settings.cards, "objects", selected.tabName) : null
+  const shownCard = tabCards ? pickCard(tabCards, cardChoice) : null
+  const cardRow = useCallback((rowKey: string): CardRowSource => ({
+    value: (header) => { const index = columnOfHeader(header); return index >= 0 ? valueOf(rowKey, String(index)) : "" },
+    spec: (header) => { const index = columnOfHeader(header); return index >= 0 ? specs[index] : undefined },
+  }), [columnOfHeader, specs, valueOf])
+
   /** Les lignes du tableau affiché, pour un tirage « ligne de cet index ». */
   const rowsOf = useCallback((): RandomCandidateRow[] | undefined => {
     if (!selected) return undefined
@@ -476,8 +490,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     await refresh()
   }
 
-  async function openEditor() {
+  async function openEditor(mode: "columns" | "cards" = "columns") {
     if (!selected) return
+    setEditorMode(mode)
     setPending("editor"); setError("")
     try {
       const response = await fetch(`/api/resources/index-schema?family=objects&key=${encodeURIComponent(selected.fileId)}`, { cache: "no-store" })
@@ -570,6 +585,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           </span>
         </label>
         {selected && !activeView && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
+        {selected && !activeView && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} onEdit={() => void openEditor("cards")} disabled={busy} />}
         <div className="flex flex-wrap gap-2">
           <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
@@ -582,7 +598,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
             onOpen={setDetails}
             disabled={busy}
           />}
-          <Button type="button" variant="outline" onClick={() => void openEditor()} disabled={!selected || busy || Boolean(activeView)} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
+          <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={!selected || busy || Boolean(activeView)} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" variant="outline" onClick={() => void syncIcons()} disabled={!tables.length || busy} title="Remplit les cases « Icône » vides avec les icônes d’Eraser du dossier « icone objet » ; une icône choisie à la main reste en place.">{pending === "icons" ? <LoaderCircle className="animate-spin" /> : <ImageIcon />}Mettre à jour les icônes</Button>
           <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy || Boolean(activeView)}><Plus />Ajouter un objet</Button>
@@ -600,6 +616,11 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onDeleteIndex={() => undefined}
         layouts={settings.layouts}
         onSaveLayouts={settings.saveLayouts}
+        cardsIndex="objects"
+        cards={settings.cards}
+        onSaveCards={settings.saveCards}
+        initialMode={editorMode}
+        initialTab={selected?.tabName}
       />}
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -614,7 +635,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((header, index) => [header, values[String(index)] ?? ""]) }, "add")}
       />}
 
-      {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected ? (
+      {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
+        ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier objet."} />
+        : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
+      ) : selected ? (
         <SheetGrid
           layoutKey={`eraser:object-index:grid:${selected.fileId}:${selected.sheetId}`}
           columns={columns}
