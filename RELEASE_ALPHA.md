@@ -1,4 +1,4 @@
-# Eraser 0.1.1-alpha.146 — Les index en cartes
+# Eraser 0.1.1-alpha.148 — Les index en cartes
 
 Cette version arrive par la mise à jour sans réinstallation.
 
@@ -31,3 +31,7 @@ Cette version arrive par la mise à jour sans réinstallation.
   avec le moteur. On peut les modifier ; « Revenir aux cartes d'Eraser » les restaure.
 - Les cartes sont gardées dans Eraser (pour tout le monde), jamais dans Google Sheets :
   aucune donnée des feuilles n'est touchée.
+
+Rappel de la 147 : un clic gauche sur une étiquette « { » modifie son texte, un clic droit
+l'ouvre dans un nouvel onglet, une nouvelle fenêtre ou ici ; la version qui tourne s'affiche
+sous « Chercher les mises à jour ».

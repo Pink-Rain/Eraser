@@ -10,7 +10,7 @@
  * ligne renomme toutes ses citations. Dans l'éditeur, elle forme un bloc qu'on efface
  * d'un coup ; son libellé est remis au nom actuel à l'ouverture.
  */
-import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type ReactNode, type RefObject } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type FormEvent, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type ReactNode, type RefObject } from "react"
 import { createPortal } from "react-dom"
 import { ChevronRight, LoaderCircle, Rows3, TableProperties, Tag } from "lucide-react"
 
@@ -59,14 +59,92 @@ export function prepareReferenceAnchors(root: HTMLElement, refreshLabels = true)
   for (const anchor of root.querySelectorAll<HTMLAnchorElement>(ANCHORS)) {
     anchor.contentEditable = "false"
     if (!refreshLabels) continue
+    // Une étiquette enregistrée pendant qu'on modifiait son texte n'est plus en cours de modification.
+    delete anchor.dataset.editing
     const reference = parseReferenceHref(anchor.getAttribute("href") ?? "")
-    if (!reference) continue
+    // Un libellé réécrit à la main garde son texte.
+    if (!reference || reference.custom) continue
     void resolveReference({ ...reference, name: referenceNameFromLabel(anchor.textContent ?? "") }).then((resolved) => {
       if (!resolved || !anchor.isConnected) return
       const next = referenceLabel(resolved.name, reference.column ? resolved.column ?? reference.column : undefined)
       if (next !== anchor.textContent) anchor.textContent = next
     })
   }
+}
+
+/**
+ * Clic sur une étiquette : son texte se modifie en place (« Arc long » → « Arcs
+ * longs », « Arc très long oui »), sans couper le lien vers la ligne ni son survol. Entrée
+ * ou un clic ailleurs valide, Échap annule ; vider le texte efface l'étiquette. Réécrire
+ * exactement le nom de la ligne lui rend son libellé automatique (il suit les renommages).
+ * `changed` : le texte de la zone a changé (à enregistrer).
+ */
+export function editReferenceAnchor(anchor: HTMLAnchorElement, root: HTMLElement, changed: () => void) {
+  const reference = parseReferenceHref(anchor.getAttribute("href") ?? "")
+  // La valeur d'une case citée (« Arc long › Prix ») s'affiche telle quelle : rien à réécrire.
+  if (!reference || reference.column || anchor.dataset.editing) return false
+  const before = anchor.textContent ?? ""
+  // Le nom actuel de la ligne : le réécrire rend l'étiquette automatique.
+  let rowName = reference.custom ? "" : referenceNameFromLabel(before)
+  void resolveReference({ index: reference.index, id: reference.id, name: rowName }).then((resolved) => { if (resolved?.name) rowName = resolved.name })
+  anchor.dataset.editing = "1"
+  // Un petit champ posé exactement sur l'étiquette : modifier le texte d'un lien directement
+  // dans la zone fait glisser la frappe hors du lien (comportement des navigateurs).
+  const rect = anchor.getBoundingClientRect()
+  const style = window.getComputedStyle(anchor)
+  const input = document.createElement("input")
+  input.type = "text"
+  input.value = before
+  input.setAttribute("aria-label", "Texte de l’étiquette")
+  input.dataset.richTextPopover = ""
+  Object.assign(input.style, {
+    position: "fixed", left: `${rect.left - 4}px`, top: `${rect.top - 3}px`, zIndex: "400",
+    width: `${Math.max(rect.width + 48, 140)}px`, height: `${rect.height + 6}px`, padding: "0 4px",
+    font: style.font, color: style.color, background: "var(--background)",
+    border: "1px solid var(--primary)", borderRadius: "6px", outline: "none", boxShadow: "0 4px 14px rgb(0 0 0 / 0.18)",
+  } satisfies Partial<CSSStyleDeclaration>)
+  let done = false
+  const finish = (cancel: boolean) => {
+    if (done) return
+    done = true
+    delete anchor.dataset.editing
+    const text = input.value.replace(/\s+/g, " ").trim()
+    input.remove()
+    if (cancel || text === before.trim()) { root.focus(); return }
+    if (!text) {
+      // Vidée : l'étiquette est effacée (avec l'espace posé après elle).
+      const next = anchor.nextSibling
+      if (next?.nodeType === Node.TEXT_NODE && next.textContent?.startsWith("\u00a0")) next.textContent = next.textContent.slice(1)
+      const caret = document.createRange()
+      caret.setStartBefore(anchor)
+      caret.collapse(true)
+      anchor.remove()
+      root.focus()
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(caret)
+    } else {
+      anchor.textContent = text
+      const automatic = Boolean(rowName) && text === rowName
+      anchor.setAttribute("href", referenceHref({ index: reference.index, id: reference.id, ...(automatic ? {} : { custom: true }) }))
+      // Le curseur reprend juste après l'étiquette, dans la zone.
+      root.focus()
+      const after = document.createRange()
+      after.setStartAfter(anchor)
+      after.collapse(true)
+      window.getSelection()?.removeAllRanges()
+      window.getSelection()?.addRange(after)
+    }
+    changed()
+  }
+  input.addEventListener("keydown", (event) => {
+    if (event.key === "Enter") { event.preventDefault(); event.stopPropagation(); finish(false) }
+    else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(true) }
+  })
+  input.addEventListener("blur", () => finish(false))
+  document.body.append(input)
+  input.focus()
+  input.select()
+  return true
 }
 
 // ---------------------------------------------------------------------------
@@ -333,6 +411,20 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
     }
   }, [choose, close, finishTyped, highlight, options, setHighlight, token])
 
+  /**
+   * Clic sur une étiquette dans la zone qu'on écrit : son texte se modifie en place (le
+   * lien ne s'ouvre pas). L'ouvrir passe par le clic droit (ici, nouvel onglet, nouvelle
+   * fenêtre), le clic du milieu ou Ctrl+clic.
+   */
+  const onClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+    const root = editor.current
+    const anchor = (event.target as HTMLElement).closest?.(ANCHORS) as HTMLAnchorElement | null
+    if (!enabled || !root || !anchor || !root.contains(anchor) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+    event.preventDefault()
+    // Une case citée (« Arc long › Prix ») montre sa valeur : rien à réécrire.
+    editReferenceAnchor(anchor, root, () => root.dispatchEvent(new Event("input", { bubbles: true })))
+  }, [editor, enabled])
+
   const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
     if (!enabled) return
     const native = event.nativeEvent as InputEvent
@@ -367,10 +459,10 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
         </button>)
           : <p className="px-2 py-5 text-center text-xs text-muted-foreground">{stage?.kind === "unknown" ? `Aucun index ne s’appelle « ${stage.text} ».` : "Rien ne correspond."}</p>}
     </div>
-    <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer</div>
+    <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer · clic sur une étiquette : changer son texte · clic droit : l’ouvrir</div>
   </div>, document.body) : null
 
-  return { onKeyDown, onInput, close, element, open }
+  return { onKeyDown, onInput, onClick, close, element, open }
 }
 
 function headerOf(stage: Stage | null) {

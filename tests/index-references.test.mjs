@@ -37,6 +37,16 @@ test("les mots du menu viennent des noms d'éléments", () => {
   assert.equal(refs.entryLabelFromItemLabel("une ligne"), "");
 });
 
+test("une étiquette au texte réécrit garde son lien vers la ligne", () => {
+  const href = refs.referenceHref({ index: "objects", id: "OBJ-1", custom: true });
+  assert.equal(href, "/reference/objects/OBJ-1?libre=1");
+  assert.deepEqual(refs.parseReferenceHref(href), { index: "objects", id: "OBJ-1", custom: true });
+  // Même ligne que l'étiquette automatique : survol et cache partagés.
+  assert.equal(refs.referenceKey(refs.parseReferenceHref(href)), refs.referenceKey({ index: "objects", id: "OBJ-1" }));
+  assert.deepEqual(refs.parseReferenceHref("/reference/objects/OBJ-1"), { index: "objects", id: "OBJ-1" });
+  assert.equal(refs.referenceHref({ index: "objects", id: "OBJ-1", column: "Prix" }), "/reference/objects/OBJ-1?colonne=Prix");
+});
+
 test("tout index se cite par le mot de ses lignes et par son propre nom", () => {
   const vocabulary = refs.indexEntries({ key: "vocabulary", title: "Vocabulaire", itemLabel: "un mot", tabs: [{ name: "Vocabulaire", itemLabel: "un mot" }] });
   assert.deepEqual(vocabulary.map((entry) => entry.label), ["Mot", "Vocabulaire"]);
@@ -86,4 +96,18 @@ test("une case citée s'affiche comme dans le tableau, dans le style de sa colon
   const details = cells.rowDetails(source, row);
   assert.equal(details.descriptionHtml, "<strong>Un</strong> arc");
   assert.equal(details.color, "#285f8f");
+});
+
+test("une case citée qui contient des étiquettes et des « {Colonne} » les garde pour l'affichage", () => {
+  const headers = ["Nom", "Type", "Phrase"];
+  const specs = { Type: { kind: "text" }, Phrase: { kind: "rich" } };
+  const tag = '<a href="/reference/objects/OBJ-2?libre=1">Arcs longs</a>';
+  const source = table(headers, specs, ["Arc long", "Arme", "{Nom} est une {Type}, cousine des Arcs longs"], ["Arc long", "Arme", `{Nom} est une {Type}, cousine des ${tag}`]);
+  const phrase = cells.citedCell(source, source.rows[0], "Phrase");
+  // Le texte cité garde le lien de l'étiquette (dessinée avec son survol) et ses accolades,
+  // lues ensuite sur la ligne citée elle-même.
+  assert.equal(phrase.valueHtml, `{Nom} est une {Type}, cousine des ${tag}`);
+  // Sans mise en forme, la case reste un texte échappé dont les accolades sont intactes.
+  const plain = table(headers, specs, ["Arc long", "Arme", "{Nom} & {Type}"]);
+  assert.equal(cells.citedCell(plain, plain.rows[0], "Phrase").valueHtml, "{Nom} &amp; {Type}");
 });

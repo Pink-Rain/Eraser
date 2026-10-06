@@ -73,6 +73,9 @@ import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { campaignCreatedEvent, characterCreatedEvent } from "@/lib/selection-events"
 import { cn } from "@/lib/utils"
+// Seul le numéro de version est gardé (import nommé d'un JSON) : c'est celui du serveur
+// qui tourne, donc aussi d'une mise à jour reçue sans réinstallation.
+import { version as appVersion } from "@/package.json"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
@@ -712,7 +715,9 @@ export function AppShell({
             <SidebarMenu>
               <SidebarMenuItem>
                 <SidebarMenuButton tooltip="Chercher les mises à jour" className="h-10" onClick={() => void checkForUpdates()} disabled={checkingUpdate}>
-                  <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} /><span>{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span>
+                  <DownloadCloud className={checkingUpdate ? "animate-pulse" : undefined} />
+                  {/* La version qui tourne (celle du serveur, mise à jour sans réinstallation comprise), en tout petit. */}
+                  <span className="flex min-w-0 flex-col leading-tight"><span className="truncate">{checkingUpdate ? "Recherche…" : "Chercher les mises à jour"}</span><span className="truncate text-[10px] font-normal text-sidebar-foreground/40">{appVersion}</span></span>
                 </SidebarMenuButton>
                 {updateNotice && <p className="px-2 pb-1 pt-0.5 text-[11px] leading-4 text-sidebar-foreground/60 group-data-[collapsible=icon]:hidden">{updateNotice}</p>}
               </SidebarMenuItem>
