@@ -97,3 +97,17 @@ test("une case citée s'affiche comme dans le tableau, dans le style de sa colon
   assert.equal(details.descriptionHtml, "<strong>Un</strong> arc");
   assert.equal(details.color, "#285f8f");
 });
+
+test("une case citée qui contient des étiquettes et des « {Colonne} » les garde pour l'affichage", () => {
+  const headers = ["Nom", "Type", "Phrase"];
+  const specs = { Type: { kind: "text" }, Phrase: { kind: "rich" } };
+  const tag = '<a href="/reference/objects/OBJ-2?libre=1">Arcs longs</a>';
+  const source = table(headers, specs, ["Arc long", "Arme", "{Nom} est une {Type}, cousine des Arcs longs"], ["Arc long", "Arme", `{Nom} est une {Type}, cousine des ${tag}`]);
+  const phrase = cells.citedCell(source, source.rows[0], "Phrase");
+  // Le texte cité garde le lien de l'étiquette (dessinée avec son survol) et ses accolades,
+  // lues ensuite sur la ligne citée elle-même.
+  assert.equal(phrase.valueHtml, `{Nom} est une {Type}, cousine des ${tag}`);
+  // Sans mise en forme, la case reste un texte échappé dont les accolades sont intactes.
+  const plain = table(headers, specs, ["Arc long", "Arme", "{Nom} & {Type}"]);
+  assert.equal(cells.citedCell(plain, plain.rows[0], "Phrase").valueHtml, "{Nom} &amp; {Type}");
+});

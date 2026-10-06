@@ -73,7 +73,7 @@ export function prepareReferenceAnchors(root: HTMLElement, refreshLabels = true)
 }
 
 /**
- * Double-clic sur une étiquette : son texte se modifie en place (« Arc long » → « Arcs
+ * Clic sur une étiquette : son texte se modifie en place (« Arc long » → « Arcs
  * longs », « Arc très long oui »), sans couper le lien vers la ligne ni son survol. Entrée
  * ou un clic ailleurs valide, Échap annule ; vider le texte efface l'étiquette. Réécrire
  * exactement le nom de la ligne lui rend son libellé automatique (il suit les renommages).
@@ -411,12 +411,18 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
     }
   }, [choose, close, finishTyped, highlight, options, setHighlight, token])
 
-  /** Double-clic sur une étiquette : son texte se modifie en place. */
-  const onDoubleClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
+  /**
+   * Clic sur une étiquette dans la zone qu'on écrit : son texte se modifie en place (le
+   * lien ne s'ouvre pas). L'ouvrir passe par le clic droit (ici, nouvel onglet, nouvelle
+   * fenêtre), le clic du milieu ou Ctrl+clic.
+   */
+  const onClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const root = editor.current
     const anchor = (event.target as HTMLElement).closest?.(ANCHORS) as HTMLAnchorElement | null
-    if (!enabled || !root || !anchor || !root.contains(anchor)) return
-    if (editReferenceAnchor(anchor, root, () => root.dispatchEvent(new Event("input", { bubbles: true })))) event.preventDefault()
+    if (!enabled || !root || !anchor || !root.contains(anchor) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
+    event.preventDefault()
+    // Une case citée (« Arc long › Prix ») montre sa valeur : rien à réécrire.
+    editReferenceAnchor(anchor, root, () => root.dispatchEvent(new Event("input", { bubbles: true })))
   }, [editor, enabled])
 
   const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
@@ -453,10 +459,10 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
         </button>)
           : <p className="px-2 py-5 text-center text-xs text-muted-foreground">{stage?.kind === "unknown" ? `Aucun index ne s’appelle « ${stage.text} ».` : "Rien ne correspond."}</p>}
     </div>
-    <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer · double-clic sur une étiquette : changer son texte</div>
+    <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer · clic sur une étiquette : changer son texte · clic droit : l’ouvrir</div>
   </div>, document.body) : null
 
-  return { onKeyDown, onInput, onDoubleClick, close, element, open }
+  return { onKeyDown, onInput, onClick, close, element, open }
 }
 
 function headerOf(stage: Stage | null) {

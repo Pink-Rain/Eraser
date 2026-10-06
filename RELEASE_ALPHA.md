@@ -1,20 +1,28 @@
-# Eraser 0.1.1-alpha.146 — Étiquettes « { » : leur texte se modifie
+# Eraser 0.1.1-alpha.147 — Étiquettes : un clic pour les modifier
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Modifier le texte d'une étiquette
+## Étiquettes « { » dans un texte qu'on écrit
 
-- **Double-clic sur une étiquette** (`{Objet:Arc long}`) dans un texte qu'on écrit : un
-  petit champ s'ouvre dessus, et son texte se modifie entièrement — « Arcs longs »,
-  « ArcS LongS », « Arc très long oui »… Le lien vers la ligne et son survol ne changent
-  pas.
-  - **Entrée** ou un clic ailleurs valide, **Échap** annule.
-  - **Vider le texte** efface l'étiquette (comme avant, Retour arrière juste après une
-    étiquette l'efface d'un coup).
-  - Réécrire exactement le nom de la ligne lui rend son texte automatique : il suit de
-    nouveau les renommages. Un texte choisi à la main, lui, reste tel quel.
-- Partout où les textes d'index s'affichent (fiches, survols, pages), l'étiquette montre
-  son texte choisi ; le survol montre toujours la ligne citée.
-- Les cases citées (`{Objet:Arc long:Prix}`) affichent toujours leur valeur.
+- **Clic gauche sur une étiquette** (`{Objet:Arc long}`) : son texte se modifie
+  directement (« Arcs longs », « Arc très long oui »…). Le lien ne s'ouvre plus au
+  clic, ce qui empêchait le double-clic de la 146 de fonctionner.
+  - **Entrée** ou un clic ailleurs valide, **Échap** annule, **vider le texte** efface
+    l'étiquette ; réécrire le nom exact de la ligne lui rend son texte automatique.
+  - Une case citée (`{Objet:Arc long:Prix}`) affiche sa valeur : un clic ne fait rien.
+- **Clic droit sur une étiquette** : « Ouvrir dans un nouvel onglet », « Ouvrir dans une
+  nouvelle fenêtre » ou « Ouvrir ici ». Le clic du milieu et Ctrl+clic ouvrent toujours
+  un nouvel onglet.
+- Hors édition (fiches en lecture, survols, pages), un clic sur une étiquette ouvre sa
+  ligne, comme avant.
 
-Rappel de la 145 : chaque index se cite aussi par son propre nom (`{Vocabulaire:…}`).
+## Phrases modèles
+
+- Une colonne de phrase qui contient des `{Nom}`, `{Type}` et des étiquettes s'affiche
+  correctement quand on la cite (`{Objet:Arc long:Phrase}`) : les accolades sont lues
+  sur la ligne citée, les étiquettes gardent leur texte choisi et leur survol.
+
+## Version affichée
+
+- Sous « Chercher les mises à jour », en tout petit : la version qui tourne
+  (mise à jour sans réinstallation comprise).
