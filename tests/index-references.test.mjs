@@ -37,6 +37,16 @@ test("les mots du menu viennent des noms d'éléments", () => {
   assert.equal(refs.entryLabelFromItemLabel("une ligne"), "");
 });
 
+test("une étiquette au texte réécrit garde son lien vers la ligne", () => {
+  const href = refs.referenceHref({ index: "objects", id: "OBJ-1", custom: true });
+  assert.equal(href, "/reference/objects/OBJ-1?libre=1");
+  assert.deepEqual(refs.parseReferenceHref(href), { index: "objects", id: "OBJ-1", custom: true });
+  // Même ligne que l'étiquette automatique : survol et cache partagés.
+  assert.equal(refs.referenceKey(refs.parseReferenceHref(href)), refs.referenceKey({ index: "objects", id: "OBJ-1" }));
+  assert.deepEqual(refs.parseReferenceHref("/reference/objects/OBJ-1"), { index: "objects", id: "OBJ-1" });
+  assert.equal(refs.referenceHref({ index: "objects", id: "OBJ-1", column: "Prix" }), "/reference/objects/OBJ-1?colonne=Prix");
+});
+
 test("tout index se cite par le mot de ses lignes et par son propre nom", () => {
   const vocabulary = refs.indexEntries({ key: "vocabulary", title: "Vocabulaire", itemLabel: "un mot", tabs: [{ name: "Vocabulaire", itemLabel: "un mot" }] });
   assert.deepEqual(vocabulary.map((entry) => entry.label), ["Mot", "Vocabulaire"]);

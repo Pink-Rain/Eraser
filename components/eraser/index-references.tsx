@@ -211,14 +211,14 @@ function nameLook(style: ColumnStyle | undefined) {
   return { className: css.className, style: css.style, color }
 }
 
-function StateChip({ definition, nameStyle }: { definition: StateDefinition; nameStyle?: ColumnStyle }) {
+function StateChip({ definition, nameStyle, label }: { definition: StateDefinition; nameStyle?: ColumnStyle; label?: string }) {
   const color = definition.gauge.color || DEFAULT_STATE_COLOR
   const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
     <HoverCardTrigger asChild>
       <span tabIndex={0} className={cn(chipClass, look && "font-normal", look?.className)} style={{ textDecorationColor: `${color}99`, ...look?.style } as CSSProperties}>
         <span className="mr-0.5 inline-flex translate-y-[2px]" style={{ color: look ? look.color : firstHtmlColor(definition.nameHtml) ?? color }}><IndexIconGlyph icon={definition.gauge.icon || "clock"} emoji={definition.gauge.emoji} className="size-[1em]" filled={false} /></span>
-        {look ? <span>{definition.name}</span> : <FormattedName name={definition.name} html={definition.nameHtml} color={color} />}
+        {label !== undefined ? <span style={look ? undefined : { color: firstHtmlColor(definition.nameHtml) ?? color }}>{label}</span> : look ? <span>{definition.name}</span> : <FormattedName name={definition.name} html={definition.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
@@ -227,13 +227,13 @@ function StateChip({ definition, nameStyle }: { definition: StateDefinition; nam
   </HoverCard>
 }
 
-function ModifierChip({ modifier, nameStyle }: { modifier: WeaponModifierRef; nameStyle?: ColumnStyle }) {
+function ModifierChip({ modifier, nameStyle, label }: { modifier: WeaponModifierRef; nameStyle?: ColumnStyle; label?: string }) {
   const color = modifier.color || "#7f5a3a"
   const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
     <HoverCardTrigger asChild>
       <span tabIndex={0} className={cn(chipClass, look && "font-normal", look?.className)} style={{ textDecorationColor: `${color}99`, ...look?.style } as CSSProperties}>
-        {look ? <span style={look.color ? { color: look.color } : undefined}><ModifierIcon modifier={modifier} />{modifier.name}</span> : <ModifierName modifier={modifier} color={color} />}
+        {look ? <span style={look.color ? { color: look.color } : undefined}><ModifierIcon modifier={modifier} />{label ?? modifier.name}</span> : label !== undefined ? <span style={{ color }}><ModifierIcon modifier={modifier} color={firstHtmlColor(modifier.nameHtml)} /><span style={{ color: firstHtmlColor(modifier.nameHtml) ?? color }}>{label}</span></span> : <ModifierName modifier={modifier} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
@@ -341,7 +341,7 @@ function LayoutDetails({ reference, layout, color, depth }: { reference: Resolve
  * Le nom d'une ligne citée, dans le style de la colonne Nom de son index, avec son détail
  * au survol. Son icône a la couleur du mot.
  */
-function RowChip({ reference, depth }: { reference: ResolvedReference; depth: number }) {
+function RowChip({ reference, depth, label }: { reference: ResolvedReference; depth: number; label?: string }) {
   const color = reference.color
   const look = parseGlyphValue(reference.icon ?? "")
   const nameCss = columnStyleCss(reference.nameStyle)
@@ -353,7 +353,7 @@ function RowChip({ reference, depth }: { reference: ResolvedReference; depth: nu
         {(look.icon || look.emoji)
           ? <span className="mr-0.5 inline-flex translate-y-[2px]" style={wordColor ? { color: wordColor } : undefined}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span>
           : reference.object && <span className="mr-0.5 inline-flex translate-y-[2px]"><ObjectGlyph object={reference.object} name={reference.name} color={wordColor ?? "currentColor"} /></span>}
-        {reference.nameStyle ? <span>{reference.name}</span> : <FormattedName name={reference.name} html={reference.nameHtml} color={color} />}
+        {label !== undefined ? <span style={reference.nameStyle || !wordColor ? undefined : { color: wordColor }}>{label}</span> : reference.nameStyle ? <span>{reference.name}</span> : <FormattedName name={reference.name} html={reference.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
     <HoverCardContent side="top" align="start" collisionPadding={12} className={`${reference.layout ? "max-h-[min(34rem,75vh)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto" : "w-80"} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
@@ -391,20 +391,22 @@ function CellValue({ reference, depth }: { reference: ResolvedReference; depth: 
 }
 
 function Cited({ citation, value, depth, states, modifiers }: { citation: Citation; value: ResolvedReference | null | undefined; depth: number; states: StateDefinition[]; modifiers: WeaponModifierRef[] | null }) {
-  const name = referenceNameFromLabel(citation.label)
+  // Un libellé réécrit à la main (« Arcs longs ») s'affiche tel quel ; le survol montre la ligne.
+  const custom = citation.request.custom && !citation.request.column ? citation.label : undefined
+  const name = custom ?? referenceNameFromLabel(citation.label)
   // Pas encore lue : le dernier nom connu (rien pour « {Prix} », qui ne doit pas clignoter).
   if (value === undefined) return citation.self ? null : <span>{name}</span>
   if (!value) return citation.self ? <span>{citation.raw}</span> : <MissingReference label={name} />
   if (citation.request.column) return <CellValue reference={value} depth={depth} />
   if (value.index === "states") {
     const definition = states.find((candidate) => candidate.id === value.id) ?? states.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (definition) return <StateChip definition={definition} nameStyle={value.nameStyle} />
+    if (definition) return <StateChip definition={definition} nameStyle={value.nameStyle} label={custom} />
   }
   if (value.index === "weapon-modifiers") {
     const modifier = modifiers?.find((candidate) => candidate.id === value.id) ?? modifiers?.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (modifier) return <ModifierChip modifier={modifier} nameStyle={value.nameStyle} />
+    if (modifier) return <ModifierChip modifier={modifier} nameStyle={value.nameStyle} label={custom} />
   }
-  return <RowChip reference={value} depth={depth} />
+  return <RowChip reference={value} depth={depth} label={custom} />
 }
 
 /**
@@ -426,7 +428,8 @@ export function IndexRichText({ html, fill, self, depth = 0, className = "", as 
     let marked = filled.includes("/reference/") ? filled.replace(referenceAnchor, (match, href: string, label: string) => {
       const reference = parseReferenceHref(href)
       if (!reference) return match
-      found.push({ request: { ...reference, name: referenceNameFromLabel(plainLabel(label)) }, label: plainLabel(label), raw: match, self: false })
+      // Un libellé réécrit à la main n'est pas le nom de la ligne : elle n'est cherchée que par son identifiant.
+      found.push({ request: { ...reference, name: reference.custom ? "" : referenceNameFromLabel(plainLabel(label)) }, label: plainLabel(label), raw: match, self: false })
       return `<span data-eraser-ref="${found.length - 1}"></span>`
     }) : filled
     if (selfIndex && selfId && marked.includes("{")) {

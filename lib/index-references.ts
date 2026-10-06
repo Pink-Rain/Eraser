@@ -15,7 +15,11 @@ export const REFERENCE_PATH = "/reference/"
 /** L'index des objets, à côté des index du monde. */
 export const OBJECT_REFERENCE_INDEX = "objects"
 
-export type IndexReference = { index: string; id: string; column?: string }
+/**
+ * `custom` : le libellé du lien a été réécrit à la main (« Arcs longs » pour « Arc long ») ;
+ * il s'affiche tel quel au lieu du nom actuel de la ligne, que le survol montre toujours.
+ */
+export type IndexReference = { index: string; id: string; column?: string; custom?: boolean }
 
 function fold(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
@@ -23,7 +27,8 @@ function fold(value: string) {
 
 export function referenceHref(reference: IndexReference) {
   const column = reference.column?.trim()
-  return `${REFERENCE_PATH}${encodeURIComponent(reference.index)}/${encodeURIComponent(reference.id)}${column ? `?colonne=${encodeURIComponent(column)}` : ""}`
+  const query = [column ? `colonne=${encodeURIComponent(column)}` : "", reference.custom ? "libre=1" : ""].filter(Boolean).join("&")
+  return `${REFERENCE_PATH}${encodeURIComponent(reference.index)}/${encodeURIComponent(reference.id)}${query ? `?${query}` : ""}`
 }
 
 /** La référence d'un lien, ou null pour un lien ordinaire. Accepte l'adresse complète que garde Sheets. */
@@ -35,7 +40,8 @@ export function parseReferenceHref(href: string): IndexReference | null {
     const [index, id] = url.pathname.slice(REFERENCE_PATH.length).split("/").map((part) => decodeURIComponent(part ?? "").trim())
     if (!index || !id) return null
     const column = url.searchParams.get("colonne")?.trim()
-    return { index, id, ...(column ? { column } : {}) }
+    const custom = url.searchParams.get("libre") === "1"
+    return { index, id, ...(column ? { column } : {}), ...(custom ? { custom: true } : {}) }
   } catch {
     return null
   }

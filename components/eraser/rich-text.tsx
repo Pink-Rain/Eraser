@@ -411,6 +411,7 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
       onInput={(event) => { references.onInput(event); if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, delay) }}
       onBlur={() => { references.close(); flush() }}
       onClick={toggleCheckbox}
+      onDoubleClick={references.onDoubleClick}
       onFocus={() => { if (editor.current && onActivate) onActivate({ node: editor.current, flush }) }}
       className={`whitespace-pre-wrap break-words outline-none empty:before:text-muted-foreground/50 empty:before:content-[attr(data-placeholder)] ${richTextRendering} ${className}`}
       style={{ overflowWrap: "anywhere", wordBreak: "break-word" }}
