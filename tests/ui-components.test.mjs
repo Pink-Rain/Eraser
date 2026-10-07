@@ -56,6 +56,35 @@ test("preserves Google Sheets rich-text runs", async () => {
   assert.deepEqual(roundTrip.runs.map((run) => run.startIndex), [0, 6]);
 });
 
+test("keeps the bold of a cell's first characters and says when text is not bold", async () => {
+  const { richTextHtml, htmlToRichText } = await vite.ssrLoadModule(
+    "/lib/google-sheet-rich-text.ts",
+  );
+  // Google omet le startIndex nul du premier morceau.
+  assert.equal(richTextHtml("Effet : brûle", [{ format: { bold: true } }, { startIndex: 6, format: {} }]), "<strong>Effet </strong>: brûle");
+  // Une cellule grasse dans Sheets, un morceau explicitement non gras.
+  assert.equal(richTextHtml("Nom suite", [{ startIndex: 4, format: { bold: false } }], { bold: true }), "<strong>Nom </strong>suite");
+  // Écrit : chaque morceau dit gras ou non, sinon Sheets reprend le gras de la cellule.
+  const written = htmlToRichText("<strong>Effet</strong> : brûle");
+  assert.deepEqual(written.runs.map((run) => [run.startIndex, run.format.bold]), [[0, true], [5, false]]);
+  assert.equal(htmlToRichText('<span style="font-weight:700">x</span> y').runs[0].format.bold, true);
+  assert.equal(htmlToRichText('<strong>a<span style="font-weight: normal;">b</span></strong>').runs[1].format.bold, false);
+  assert.equal(htmlToRichText('<b style="font-weight:normal" id="docs-internal-guid-1">collé</b>').runs[0].format.bold, false);
+  assert.equal(htmlToRichText("<h2>Titre</h2>texte").runs[0].format.bold, true);
+  // Les lignes vides resserrées n'emportent pas le gras plus loin.
+  const spaced = htmlToRichText("a\n\n\n\nbb <strong>gras</strong> fin");
+  assert.equal(spaced.text, "a\n\nbb gras fin");
+  const bold = spaced.runs.find((run) => run.format.bold);
+  assert.equal(spaced.text.slice(bold.startIndex, bold.startIndex + 4), "gras");
+});
+
+test("keeps bold written as CSS when cleaning rich text", async () => {
+  const { sanitizeRichText } = await vite.ssrLoadModule("/components/eraser/rich-text.tsx");
+  assert.equal(sanitizeRichText('<span style="font-weight: 700; color: rgb(255, 0, 0)">x</span>'), '<span style="color:#ff0000;font-weight:bold">x</span>');
+  assert.equal(sanitizeRichText('<b style="font-weight:normal;" id="docs-internal-guid-1">collé</b>'), '<strong style="font-weight:normal">collé</strong>');
+  assert.equal(sanitizeRichText("<b>gras</b><br><i>it</i><input type=\"checkbox\">"), '<strong>gras</strong><br><em>it</em><input type="checkbox">');
+});
+
 test("preserves Google Sheets text colors", async () => {
   const { richTextHtml, htmlToRichText, normalizeCssColorToHex } = await vite.ssrLoadModule(
     "/lib/google-sheet-rich-text.ts",

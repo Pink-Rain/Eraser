@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withEntityExtras } from "@/lib/entity-index-extras"
 import { getCampaignForMj, getCharacterForUser } from "@/lib/google-sheets"
+import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import {
   addWorldIndexRow,
@@ -49,10 +50,9 @@ function errorMessage(code: string) {
   if (code === "WORLD_INDEX_TAB_NOT_FOUND") return "Cet onglet n’existe plus dans Google Sheets. Actualise le tableau."
   if (code === "WORLD_INDEX_TRASH_DENIED") return "Seul son propriétaire (ou un administrateur) peut mettre cet élément à la corbeille."
   if (code === "WORLD_INDEX_ROWS_LOCKED") return "Les lignes de cet index se créent depuis leur page et partent à la corbeille : le tableau n’en ajoute, n’en copie ni n’en supprime."
-  // Le refus de Google, tel quel : sans lui, impossible de savoir ce qui bloque.
-  const google = code.match(/^SHEETS_API_ERROR:(\d+)(?::([\s\S]*))?$/)
-  if (google?.[1] === "429") return "Google Sheets refuse : trop de modifications d’un coup. Attends une minute puis recommence."
-  if (google) return `Google Sheets a refusé la modification (${google[1]}${google[2] ? ` : ${google[2].slice(0, 300)}` : ""}).`
+  // Le refus de Google (ou une coupure), tel quel : sans lui, impossible de savoir ce qui bloque.
+  const google = googleFailureMessage(code)
+  if (google) return google
   return `Cette modification n’a pas pu être enregistrée dans Google Sheets.${/^[A-Z0-9_]{3,60}$/.test(code) ? ` (${code})` : ""}`
 }
 
@@ -101,9 +101,10 @@ export async function POST(request: Request) {
     const guard = worldIndexRowGuard(key, account)
     let changed: string[] = []
     if (body.action === "update-cell" && row && typeof body.header === "string" && body.header.trim() && typeof body.html === "string") {
-      changed = await updateWorldIndexCell(key, body.tabName, row, body.header, body.html, { previous: typeof body.previous === "string" ? body.previous : undefined, guard })
+      let warning = ""
+      changed = await updateWorldIndexCell(key, body.tabName, row, body.header, body.html, { previous: typeof body.previous === "string" ? body.previous : undefined, guard, onWarning: (message) => { warning = message } })
       // La frappe reste fluide : le classeur n'est renvoyé que si un lien l'a modifié.
-      return NextResponse.json({ ok: true, changed, data: changed.includes(key) ? await withExtras(await getWorldIndex(key)) : undefined })
+      return NextResponse.json({ ok: true, changed, ...(warning ? { warning } : {}), data: changed.includes(key) ? await withExtras(await getWorldIndex(key)) : undefined })
     }
     if (body.action === "ensure" && typeof body.name === "string") {
       // Liste déroulante liée : la réponse reste légère, la page n'affiche pas cet index.

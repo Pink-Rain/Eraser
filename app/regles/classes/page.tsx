@@ -1,5 +1,6 @@
 import { Suspense } from "react"
-import { ExternalLink, LibraryBig } from "lucide-react"
+import Link from "next/link"
+import { LibraryBig, PencilRuler } from "lucide-react"
 import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
@@ -15,7 +16,6 @@ import {
   classTypes,
   listClasses,
 } from "@/lib/google-sheets"
-import { getJdrSheet } from "@/lib/jdr-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -91,7 +91,8 @@ async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSamp
 export default async function ClassesRulesPage() {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
   if (!account) redirect("/connexion")
-  const classesSheet = account.role === "admin" ? await getJdrSheet("classes").catch(() => null) : null
+  // Les classes se consultent ici ; elles se modifient dans le créateur de classe.
+  const canCreate = account.role === "admin" || account.role === "mj"
 
   return (
     <AuthenticatedShell pageLabel="Classe">
@@ -116,12 +117,12 @@ export default async function ClassesRulesPage() {
               </div>
             </div>
           </div>
-          {classesSheet && (
-            <Button asChild variant="outline" className="admin-view-only hidden shrink-0">
-              <a href={classesSheet.webViewLink} target="_blank" rel="noreferrer">
-                Ouvrir le tableau
-                <ExternalLink className="size-4" />
-              </a>
+          {canCreate && (
+            <Button asChild variant="outline" className="shrink-0">
+              <Link href="/creation-de-classe">
+                <PencilRuler className="size-4" />
+                Créateur de classe
+              </Link>
             </Button>
           )}
         </section>

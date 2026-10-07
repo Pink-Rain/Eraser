@@ -227,10 +227,14 @@ export function forgetWorldIndexData(index: WorldIndexKey) {
 export function loadWorldIndexData(index: WorldIndexKey) {
   let promise = dataCache.get(index)
   if (!promise) {
+    // Un index qui n'a pas pu être lu (Google indisponible un instant) n'est pas gardé comme
+    // vide : les listes liées et les recherches le redemandent à la prochaine occasion.
     promise = fetch(`/api/resources/world-indexes?key=${index}`)
-      .then((response) => response.json())
-      .then((payload: { data?: LoadedWorldIndex }) => payload.data ?? null)
-      .catch(() => { dataCache.delete(index); return null })
+      .then(async (response) => {
+        if (!response.ok) throw new Error(String(response.status))
+        return ((await response.json()) as { data?: LoadedWorldIndex }).data ?? null
+      })
+      .catch(() => { forgetWorldIndexData(index); return null })
     dataCache.set(index, promise)
   }
   return promise

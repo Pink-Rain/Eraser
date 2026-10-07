@@ -104,10 +104,7 @@ export type ClassContent = {
   characterClass: ClassRecord
   presentation: ClassPresentation | null
   spells: ClassSpell[]
-  allSpells: ClassSpell[]
   supplements: ClassSupplementTable[]
-  presentationSheetUrl: string
-  spellsSheetUrl: string
   /** Bonus gagnés à chaque rang, communs à toutes les classes. */
   rankBonuses: RankBonus[]
 }
@@ -668,12 +665,12 @@ async function cartomancerCards(characterClass: ClassRecord, file: ClassWorkbook
   return rows.length ? [{ title: CARDS_TAB, headers: normalizedHeaders, rows }] : []
 }
 
-/** `fresh` : la personne peut modifier les sorts, la page relit donc la feuille. */
-export async function getClassContent(classId: string, options: { fresh?: boolean } = {}): Promise<ClassContent | null> {
+/** La page d'une classe dans Règles (lecture seule) : les feuilles gardées en mémoire suffisent. */
+export async function getClassContent(classId: string): Promise<ClassContent | null> {
   const classes = await listClasses()
   const characterClass = classes.find((item) => item.id === classId)
   if (!characterClass) return null
-  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([options.fresh ? presentationCache.get("presentations", () => loadClassPresentations(), { refresh: true }) : listClassPresentations(), options.fresh ? spellListCache.get("classes", () => loadClassSpells(false, "classes"), { refresh: true }) : listClassSpells(), listRankBonuses()])
+  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([listClassPresentations(), listClassSpells(), listRankBonuses()])
   const presentations = presentationsResult.status === "fulfilled" ? presentationsResult.value : null
   const spellData = spellsResult.status === "fulfilled" ? spellsResult.value : null
   const presentation = presentations?.presentations.find((item) => item.classId === classId) ?? null
@@ -683,10 +680,7 @@ export async function getClassContent(classId: string, options: { fresh?: boolea
     characterClass,
     presentation,
     spells,
-    allSpells: spellData?.spells ?? [],
     supplements,
-    presentationSheetUrl: presentations?.file.webViewLink || (presentations ? `https://docs.google.com/spreadsheets/d/${presentations.file.id}/edit` : ""),
-    spellsSheetUrl: spellData?.file.webViewLink || (spellData ? `https://docs.google.com/spreadsheets/d/${spellData.file.id}/edit` : ""),
     rankBonuses: bonusResult.status === "fulfilled" ? bonusResult.value.bonuses : [],
   }
 }

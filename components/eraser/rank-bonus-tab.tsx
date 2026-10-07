@@ -1,9 +1,11 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useState } from "react"
-import { ExternalLink, LoaderCircle, Plus, RefreshCw } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
+import { ExternalLink, FileText, LoaderCircle, Plus, RefreshCw } from "lucide-react"
 
+import { IndexRowSheet, type RowSheetField } from "@/components/eraser/index-row-sheet"
 import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
+import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { RankBonusTable } from "@/lib/class-content"
@@ -59,6 +61,10 @@ export function RankBonusTab() {
   const canEdit = Boolean(table?.canEdit)
   const [version, setVersion] = useState(0)
   const [newColumn, setNewColumn] = useState("")
+  // Le rang ouvert dans sa fiche (le formulaire des index), et ce qui l'a fait refuser.
+  const [openRank, setOpenRank] = useState<string | null>(null)
+  const [sheetError, setSheetError] = useState("")
+  const lastError = useRef("")
 
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     const rank = Number(rowKey)
@@ -75,7 +81,8 @@ export function RankBonusTab() {
       setTable(payload)
       return true
     } catch (reason) {
-      setError(reason instanceof Error ? reason.message : "Enregistrement impossible.")
+      lastError.current = reason instanceof Error ? reason.message : "Enregistrement impossible."
+      setError(lastError.current)
       setVersion((current) => current + 1)
       return false
     }
@@ -87,8 +94,32 @@ export function RankBonusTab() {
     if (await save(1, label, "")) { setNewColumn(""); setVersion((current) => current + 1) }
   }
 
+  /** Les bonus d'un rang, enregistrés d'eux-mêmes par sa fiche, colonne par colonne. */
+  async function saveSheet(rowKey: string, changes: Record<string, string>) {
+    setSheetError("")
+    for (const [column, value] of Object.entries(changes)) {
+      lastError.current = ""
+      if (!(await save(Number(rowKey), column, value))) {
+        const message = lastError.current || "Ce bonus n’a pas pu être enregistré dans Google Sheets."
+        setSheetError(message)
+        throw new Error(message)
+      }
+    }
+    // Le tableau derrière la fiche montre aussitôt ce qui vient d'être écrit.
+    setVersion((current) => current + 1)
+  }
+
+  const sheetFields: RowSheetField[] = openRank === null ? [] : (columns.length ? columns : ["Bonus"]).map((column) => ({
+    key: column,
+    label: column,
+    // Écrit tel quel dans Sheets : un champ de texte simple, sans mise en forme.
+    spec: { kind: "fixed", readOnly: !canEdit },
+    value: valueOf(openRank, column),
+    long: true,
+  }))
+
   const gridColumns = useMemo<SheetGridColumn[]>(() => [
-    { key: "__rank", label: "Rang", width: 110, plain: true, computed: true, control: (rowKey: string) => <span className="flex min-h-8 items-center px-2 font-semibold">Rang {rowKey}</span>, typeLabel: "Rang", description: "Les rangs 1 à 20, communs à toutes les classes.", sortKey: (value) => Number(value.replace(/\D/g, "")) || 0 },
+    { key: "__rank", label: "Rang", width: 110, plain: true, computed: true, control: (rowKey: string) => <button type="button" onClick={() => { setSheetError(""); setOpenRank(rowKey) }} className="flex min-h-8 w-full items-center px-2 text-left font-semibold underline-offset-4 hover:text-primary hover:underline" title="Ouvrir la fiche du rang">Rang {rowKey}</button>, typeLabel: "Rang", description: "Les rangs 1 à 20, communs à toutes les classes.", sortKey: (value) => Number(value.replace(/\D/g, "")) || 0 },
     ...(columns.length ? columns : ["Bonus"]).map((column) => ({ key: column, label: column, width: 260, plain: true, typeLabel: "Texte", description: "Affiché sous chaque rang dans Règles › Classe et sur la fiche de personnage." })),
   ], [columns])
   const rows = useMemo(() => Array.from({ length: 20 }, (_, index) => ({ key: String(index + 1), rowNumber: index + 1 })), [])
@@ -119,6 +150,21 @@ export function RankBonusTab() {
       readOnly={!canEdit}
       version={version}
       empty="Aucun rang."
+      rowMenuExtras={(rowKey) => <>
+        <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => { setSheetError(""); setOpenRank(rowKey) }}><FileText />Ouvrir la fiche</ContextMenuItem>
+      </>}
+    />}
+    {openRank !== null && <IndexRowSheet
+      open
+      rowKey={openRank}
+      title={`Rang ${openRank}`}
+      subtitle="Bonus de rang · communs à toutes les classes"
+      fields={sheetFields}
+      error={sheetError}
+      navigation={{ rows: rows.map((row) => row.key), labelOf: (key) => `Rang ${key}`, onGo: (key) => { setSheetError(""); setOpenRank(key) } }}
+      onSave={saveSheet}
+      onClose={() => { setOpenRank(null); setSheetError("") }}
     />}
   </section>
 }

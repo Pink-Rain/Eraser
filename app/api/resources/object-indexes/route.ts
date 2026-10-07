@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { googleFailureMessage } from "@/lib/google-failures"
 import {
   addObjectIndexRow,
   addObjectIndexRowWithValues,
@@ -107,7 +108,9 @@ export async function POST(request: Request) {
   } catch (error) {
     // La ligne ou la colonne n'est plus là où la page la voyait : rien n'a été écrit.
     if (error instanceof Error && error.message === "OBJECT_INDEX_CHANGED") return NextResponse.json({ error: OBJECT_INDEX_CHANGED_MESSAGE }, { status: 409 })
-    return NextResponse.json({ error: "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
+    const code = error instanceof Error ? error.message : ""
+    console.error("OBJECT_INDEX_WRITE_FAILED", code || "UNKNOWN_ERROR")
+    return NextResponse.json({ error: googleFailureMessage(code) || "Cette modification n’a pas pu être enregistrée dans Google Sheets." }, { status: 400 })
   }
 }
 

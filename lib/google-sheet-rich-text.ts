@@ -94,10 +94,13 @@ function wrapFormattedText(value: string, format: GoogleTextFormat = {}) {
 export function richTextHtml(value: string, runs: GoogleTextFormatRun[] = [], baseFormat: GoogleTextFormat = {}) {
   if (!value) return ""
   if (!runs.length) return wrapFormattedText(value, baseFormat)
-  const ordered = [...runs]
-    .filter((run) => Number.isInteger(run.startIndex) && (run.startIndex ?? 0) >= 0 && (run.startIndex ?? 0) < value.length)
-    .sort((left, right) => (left.startIndex ?? 0) - (right.startIndex ?? 0))
-  if (!ordered.length || (ordered[0].startIndex ?? 0) > 0) ordered.unshift({ startIndex: 0, format: baseFormat })
+  // Google n'écrit pas un `startIndex` nul : le premier morceau arrive sans. L'écarter faisait
+  // perdre le gras (l'italique…) de tout ce qui commence une cellule (« **Effet :** … »).
+  const ordered = runs
+    .map((run) => ({ startIndex: run.startIndex ?? 0, format: run.format }))
+    .filter((run) => Number.isInteger(run.startIndex) && run.startIndex >= 0 && run.startIndex < value.length)
+    .sort((left, right) => left.startIndex - right.startIndex)
+  if (!ordered.length || ordered[0].startIndex > 0) ordered.unshift({ startIndex: 0, format: baseFormat })
   return ordered.map((run, index) => {
     const start = run.startIndex ?? 0
     const end = ordered[index + 1]?.startIndex ?? value.length
@@ -106,15 +109,16 @@ export function richTextHtml(value: string, runs: GoogleTextFormatRun[] = [], ba
 }
 
 function decodeEntities(value: string) {
+  // « &amp; » en dernier : un « &lt; » écrit dans la case (« &amp;lt; ») reste « &lt; ».
   return value
     .replace(/&nbsp;/gi, " ")
-    .replace(/&amp;/gi, "&")
     .replace(/&lt;/gi, "<")
     .replace(/&gt;/gi, ">")
     .replace(/&quot;/gi, '"')
     .replace(/&#39;|&apos;/gi, "'")
     .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
     .replace(/&#x([0-9a-f]+);/gi, (_, code: string) => String.fromCodePoint(Number.parseInt(code, 16)))
+    .replace(/&amp;/gi, "&")
 }
 
 function formatsEqual(left: GoogleTextFormat, right: GoogleTextFormat) {
@@ -126,6 +130,36 @@ function formatsEqual(left: GoogleTextFormat, right: GoogleTextFormat) {
     && googleColorToHex(textColor(left)) === googleColorToHex(textColor(right))
 }
 
+/** Le gras (ou non) que dit un `style` : `font-weight: 700`, `bold`, `normal`… ; rien s'il n'en dit rien. */
+function styleWeight(token: string) {
+  const weight = token.match(/\bstyle\s*=\s*["'][^"']*\bfont-weight\s*:\s*([^;"']+)/i)?.[1]?.trim().toLowerCase()
+  if (!weight) return undefined
+  return weight === "bold" || weight === "bolder" || Number(weight) >= 600
+}
+
+function styleItalic(token: string) {
+  const style = token.match(/\bstyle\s*=\s*["'][^"']*\bfont-style\s*:\s*([^;"']+)/i)?.[1]?.trim().toLowerCase()
+  return style ? /italic|oblique/.test(style) : undefined
+}
+
+/**
+ * Le format écrit pour un morceau de texte : gras, italique, souligné et barré y sont
+ * toujours dits, vrais ou faux. Un format vide signifie pour Sheets « comme la cellule » :
+ * une cellule mise en gras dans Sheets redevenait alors grasse en entier, et ce qu'on
+ * avait dégraissé dans Eraser revenait gras à la relecture. Le lien et la couleur, eux,
+ * restent hérités quand ils ne sont pas donnés (la couleur d'une colonne vient de la cellule).
+ */
+function explicitFormat(format: GoogleTextFormat): GoogleTextFormat {
+  return {
+    ...format,
+    bold: Boolean(format.bold),
+    italic: Boolean(format.italic),
+    underline: Boolean(format.underline),
+    strikethrough: Boolean(format.strikethrough),
+    link: format.link ? { ...format.link } : undefined,
+  }
+}
+
 export function htmlToRichText(value: string) {
   const tokens = value.replace(/\r/g, "").split(/(<[^>]+>)/g).filter(Boolean)
   const stack: Array<{ tag: string; format: GoogleTextFormat }> = [{ tag: "root", format: {} }]
@@ -134,11 +168,15 @@ export function htmlToRichText(value: string) {
 
   function activeFormat() { return stack[stack.length - 1]?.format || {} }
   function pushText(raw: string) {
-    const decoded = decodeEntities(raw.replace(/<[^>]*>/g, ""))
+    let decoded = decodeEntities(raw.replace(/<[^>]*>/g, ""))
+    // Pas plus d'une ligne vide d'affilée. Resserré ici, avant de compter les positions :
+    // resserré après coup, le texte reculait sous ses mises en forme (le gras glissait).
+    const trailing = text.match(/\n*$/)?.[0].length ?? 0
+    decoded = decoded.replace(/\n{3,}/g, "\n\n").replace(/^\n+/, (lines) => lines.slice(0, Math.max(0, 2 - trailing)))
     if (!decoded) return
     const format = activeFormat()
     const previous = runs[runs.length - 1]
-    if (!previous || !formatsEqual(previous.format || {}, format)) runs.push({ startIndex: text.length, format: { ...format, link: format.link ? { ...format.link } : undefined } })
+    if (!previous || !formatsEqual(previous.format || {}, format)) runs.push({ startIndex: text.length, format: explicitFormat(format) })
     text += decoded
   }
   function newline() {
@@ -158,8 +196,13 @@ export function htmlToRichText(value: string) {
     }
     if (["p", "div", "li", "h2", "h3"].includes(tag) && text) newline()
     const next: GoogleTextFormat = { ...activeFormat(), link: activeFormat().link ? { ...activeFormat().link } : undefined }
-    if (tag === "strong" || tag === "b") next.bold = true
+    if (tag === "strong" || tag === "b" || tag === "h2" || tag === "h3") next.bold = true
     if (tag === "em" || tag === "i") next.italic = true
+    // Un collage (Google Docs, Sheets) ou Ctrl+B après une couleur : le gras dit en CSS.
+    const weight = styleWeight(token)
+    if (weight !== undefined) next.bold = weight
+    const italic = styleItalic(token)
+    if (italic !== undefined) next.italic = italic
     if (tag === "u") next.underline = true
     if (tag === "s" || tag === "strike") next.strikethrough = true
     if (tag === "a") {
@@ -175,7 +218,7 @@ export function htmlToRichText(value: string) {
     stack.push({ tag, format: next })
     if (tag === "li") pushText("• ")
   }
-  text = text.replace(/\n{3,}/g, "\n\n").replace(/\n+$/, "")
+  text = text.replace(/\n+$/, "")
   return { text, runs: runs.filter((run) => (run.startIndex ?? 0) < text.length) }
 }
 

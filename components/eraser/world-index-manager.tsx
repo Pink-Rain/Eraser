@@ -183,11 +183,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)
   const [editorError, setEditorError] = useState("")
   const [version, setVersion] = useState(0)
+  // Les lignes réécrites depuis leur fiche : le tableau (ou les cartes) les redessine aussitôt.
+  const [rowVersions, setRowVersions] = useState<Record<string, number>>({})
   // Gardée pour cette page : changer d'onglet d'Eraser puis revenir la retrouve.
   const [query, setQuery] = useRememberedSearch()
   const [details, setDetails] = useState<string | null>(null)
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
+  // Pour chaque saisie : ses écritures encore en route, et le numéro de requête atteint quand
+  // la dernière a abouti. Une relecture demandée avant ne la contient peut-être pas encore.
+  const editsInFlight = useRef<Record<string, number>>({})
+  const editsSettledAt = useRef<Record<string, number>>({})
   const engineRef = useRef<ReturnType<typeof createRowEngine> | null>(null)
   const router = useRouter()
   const { notify, view: noticesView } = useIndexNotices()
@@ -291,7 +297,20 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const applyData = useCallback((next: WorldIndexData, seq: number) => {
     if (seq < appliedSeq.current) return
     appliedSeq.current = seq
-    const remount = () => { if (seq < appliedSeq.current) return; localEdits.current = {}; setData(next); setVersion((current) => current + 1) }
+    const remount = () => {
+      if (seq < appliedSeq.current) return
+      // Une saisie encore en route, ou enregistrée après le départ de cette relecture, reste
+      // affichée : la relecture plus ancienne la remettait à l'ancienne valeur, et la
+      // modification suivante était refusée comme « changée entre-temps ».
+      const kept: Record<string, string> = {}
+      for (const [key, value] of Object.entries(localEdits.current)) {
+        if ((editsInFlight.current[key] ?? 0) > 0 || (editsSettledAt.current[key] ?? -1) >= seq) kept[key] = value
+        else delete editsSettledAt.current[key]
+      }
+      localEdits.current = kept
+      setData(next)
+      setVersion((current) => current + 1)
+    }
     const active = document.activeElement
     if (active instanceof HTMLElement && active.isContentEditable) active.addEventListener("blur", () => window.setTimeout(remount, 0), { once: true })
     else remount()
@@ -315,8 +334,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ key: indexKey, ...body }),
-    })
-    const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; changed?: string[]; error?: string }
+    }).catch(() => { throw new Error("Eraser n’a pas pu joindre son serveur local (il redémarre peut-être) : rien n’a été enregistré. Recommence dans un instant.") })
+    const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; changed?: string[]; error?: string; warning?: string }
     if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
     // Les autres vues (onglet « États » ailleurs, listes liées, fiches) relisent aussitôt.
     announceWorldIndexChange([indexKey, ...(payload.changed ?? [])], origin)
@@ -354,12 +373,18 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const previous = options.previous ?? rawOf(rowKey, columnKey)
     // Rangement en onglets : la valeur est écrite comme une autre ; la ligne reste dans son
     // onglet et apparaît aussi dans l'onglet de rangement qui porte cette valeur.
-    localEdits.current[`${rowKey}:${columnKey}`] = value
+    const editKey = `${rowKey}:${columnKey}`
+    localEdits.current[editKey] = value
+    editsInFlight.current[editKey] = (editsInFlight.current[editKey] ?? 0) + 1
     engineRef.current?.invalidate()
     setSaving((current) => current + 1)
+    let saved = false
     try {
       const payload = await post({ action: "update-cell", tabName: target.tabName, rowNumber: target.rowNumber, rowId: target.id, rowName: target.name, column, header: found.table.headers[column], html: value, previous })
-      setError("")
+      setError(payload.warning ?? "")
+      saved = true
+      editsInFlight.current[editKey] -= 1
+      editsSettledAt.current[editKey] = requestSeq.current
       if (payload.data) applyData(payload.data, payload.seq)
       // Une valeur de rangement fait naître (ou disparaître) son onglet : l'index gardé ici
       // reçoit la valeur tout de suite, sans attendre une relecture.
@@ -379,6 +404,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         })
       }
     } catch (reason) {
+      if (!saved) {
+        editsInFlight.current[editKey] -= 1
+        // Refusée : la page ne la tient plus pour la valeur de Sheets. La suivante dira avoir vu
+        // la vraie valeur, et ne sera pas refusée à son tour comme « changée entre-temps ».
+        // (Le texte tapé reste dans la case, ou dans la fiche, pour être repris.)
+        if (localEdits.current[editKey] === value) delete localEdits.current[editKey]
+        engineRef.current?.invalidate()
+      }
       // Un bouton (ou la fiche) s'arrête à la première écriture refusée et affiche lui-même pourquoi.
       if (options.rethrow) throw reason
       setError(reason instanceof Error ? reason.message : "Cette cellule n’a pas pu être enregistrée.")
@@ -432,10 +465,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   async function refresh() {
     setPending("refresh"); setError("")
     const seq = ++requestSeq.current
-    const response = await fetch(`/api/resources/world-indexes?key=${indexKey}&refresh=1`, { cache: "no-store" })
-    const payload = (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string }
+    // Le serveur local injoignable (il redémarre) : le tableau ne reste pas bloqué sur « Actualiser ».
+    const response = await fetch(`/api/resources/world-indexes?key=${indexKey}&refresh=1`, { cache: "no-store" }).catch(() => null)
+    const payload = (await response?.json().catch(() => ({})) ?? {}) as { data?: WorldIndexData; error?: string }
     setPending("")
-    if (!response.ok || !payload.data) return setError(payload.error || "Actualisation impossible.")
+    if (!response?.ok || !payload.data) return setError(payload.error || "Actualisation impossible : Eraser n’a pas pu relire Google Sheets. Réessaie dans un instant.")
     // Les formules au hasard (ALEA, DES…) sont retirées à chaque actualisation.
     setSeed(`${indexKey}:${Date.now()}`)
     applyData(payload.data, seq)
@@ -491,6 +525,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         // entre-temps »).
         const written = `/api/${characters ? "characters/portrait" : "campaigns/banner"}/${encodeURIComponent(id)}`
         localEdits.current[`${rowKey}:${columnKey}`] = written
+        editsSettledAt.current[`${rowKey}:${columnKey}`] = requestSeq.current
         // La même adresse qu'avant : `?v=` fait voir la nouvelle image tout de suite.
         return `${written}?v=${Date.now()}`
       },
@@ -916,7 +951,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const cardRow = useCallback((rowKey: string): CardRowSource => ({
     value: (header) => valueOf(rowKey, header),
     spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
-  }), [locate, specOf, valueOf])
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- une ligne réécrite depuis sa fiche redessine ses cartes
+  }), [locate, specOf, valueOf, rowVersions])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -983,10 +1019,16 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         if (target && foldName(header) === foldName(label)) target.name = value
       }
     } catch (reason) {
+      bumpRow(rowKey)
       setSheetError(reason instanceof Error ? reason.message : "La fiche n’a pas pu être enregistrée.")
       // La fiche garde ce qui a été saisi.
       throw reason
     }
+    bumpRow(rowKey)
+  }
+  /** Le tableau derrière la fiche montre tout de suite ce qui vient d'y être enregistré. */
+  function bumpRow(rowKey: string) {
+    setRowVersions((current) => ({ ...current, [rowKey]: (current[rowKey] ?? 0) + 1 }))
   }
   // Précédente, « Aller à… », Suivante : les lignes du tableau, dans l'ordre affiché.
   const sheetNavigation = { rows: displayedRows.map((row) => row.key), labelOf: nameOf, onGo: (rowKey: string) => { setSheetError(""); setDetails(rowKey) } }
@@ -1146,6 +1188,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           onSort={setSort}
           disabled={busy}
           version={version}
+          rowVersions={rowVersions}
           addRowLabel={`Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
           // Personnages, campagnes et classes naissent de leur page et partent à la corbeille :
           // le tableau n'en insère, n'en copie ni n'en supprime aucune ligne.

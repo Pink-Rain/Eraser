@@ -33,7 +33,7 @@ import { objectCombatColumn, objectPriceColumn, objectTraitLooks, planObjectComb
 import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey, type EntityWorldIndexKey } from "@/lib/world-index-definitions"
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
-import { googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
+import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
@@ -245,6 +245,10 @@ const pendingJdrSheetResolutions = new Map<JdrSheetKey, Promise<JdrSheetRecord |
 // chercher à chaque page coûtait une recherche Drive par minute. « Relier mes feuilles
 // existantes » la retrouve aussitôt.
 const MISSING_JDR_SHEET_RETRY_MS = 10 * 60_000
+// Une recherche qui a échoué (réseau, jeton, Drive indisponible) ne dit pas que la feuille
+// manque : retentée vingt secondes plus tard. Bloquée dix minutes comme une feuille absente,
+// elle faisait afficher « pas reliée » et des index vides jusqu'au redémarrage d'Eraser.
+const FAILED_JDR_SHEET_LOOKUP_RETRY_MS = 20_000
 
 export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord | null> {
   const stored = await getJdrSheet(key)
@@ -272,7 +276,7 @@ export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord 
       return linked ? await verifyJdrSheetTab(linked, definition) : linked
     } catch (error) {
       console.error("JDR_SHEET_AUTOLINK_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
-      missingJdrSheetRetryAt.set(key, Date.now() + MISSING_JDR_SHEET_RETRY_MS)
+      missingJdrSheetRetryAt.set(key, Date.now() + FAILED_JDR_SHEET_LOOKUP_RETRY_MS)
       return null
     }
   })().finally(() => pendingJdrSheetResolutions.delete(key))
@@ -443,24 +447,55 @@ function announceSpreadsheetWrite(path: string, method: string) {
   }
 }
 
+/** Une coupure réseau (veille, Wi-Fi, connexion fermée par Google) : la requête n'a pas abouti. */
+const NETWORK_FAILURE = /fetch failed|network|socket|ECONNRESET|ECONNREFUSED|ETIMEDOUT|EAI_AGAIN|ENOTFOUND|UND_ERR|other side closed|terminated/i
+
+function networkFailureOf(error: unknown) {
+  if (!(error instanceof Error)) return ""
+  if (error.name === "TimeoutError" || error.name === "AbortError") return "SHEETS_TIMEOUT"
+  const cause = (error as Error & { cause?: { code?: string; message?: string } }).cause
+  return NETWORK_FAILURE.test(`${error.message} ${cause?.code ?? ""} ${cause?.message ?? ""}`) ? "SHEETS_NETWORK_ERROR" : ""
+}
+
+const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
+
 async function googleSheetsFetch(path: string, init?: RequestInit) {
   const url = `https://sheets.googleapis.com/v4/${path}`
+  const label = `${init?.method ?? "GET"} ${path}`
+  const repeatable = repeatableRequest(path, init)
   let response: Response | null = null
-  for (let attempt = 0; attempt < 3; attempt += 1) {
-    const label = `${init?.method ?? "GET"} ${path}`
+  let renewed = false
+  // 429 : Google compte par minute ; on lui laisse jusqu'à une demi-minute (1, 2, 4, 8, 16 s)
+  // plutôt que d'abandonner au bout de 6 s. Le reste : trois essais.
+  for (let attempt = 0; ; attempt += 1) {
     try {
       response = await traced("sheets", label, () => googleOAuthAuthorizedFetch(url, init), (reply) => String(reply.status))
     } catch (error) {
-      if (!(error instanceof Error) || error.message !== "GOOGLE_DRIVE_NOT_AUTHORIZED") throw error
-      response = await traced("sheets", label, () => googleServiceAuthorizedFetch(url, init), (reply) => String(reply.status))
+      if (error instanceof Error && error.message === "GOOGLE_DRIVE_NOT_AUTHORIZED") {
+        response = await traced("sheets", label, () => googleServiceAuthorizedFetch(url, init), (reply) => String(reply.status))
+      } else {
+        const failure = networkFailureOf(error)
+        if (!failure) throw error
+        console.error("SHEETS_REQUEST_FAILED", failure, label.slice(0, 120), error instanceof Error ? `${error.message} ${String((error as Error & { cause?: { code?: string } }).cause?.code ?? "")}` : "")
+        // Une lecture, ou des valeurs écrites à des cases fixes : renvoyée sans risque. Un ajout
+        // ou une suppression de ligne, lui, a peut-être eu lieu : on ne le rejoue jamais.
+        if (!repeatable || attempt >= 2) throw new Error(failure)
+        await wait(500 * 2 ** attempt)
+        continue
+      }
+    }
+    // 401 : le jeton n'est plus valable (renouvelé ailleurs, expiré) ; Google n'a rien fait.
+    if (response.status === 401 && !renewed) {
+      renewed = true
+      forgetGoogleAccessToken()
+      continue
     }
     // 429 : Google a refusé sans rien faire. Une erreur 5xx, elle, peut arriver après coup :
     // rejouer un ajout ou une suppression de ligne l'aurait fait deux fois (ligne suivante
     // supprimée, ligne ajoutée en double).
-    const retry = response.status === 429 || ([500, 502, 503, 504].includes(response.status) && repeatableRequest(path, init))
-    if (!retry || attempt === 2) break
-    // Trop de requêtes (429) : Google compte par minute, on attend plus longtemps.
-    await new Promise((resolve) => setTimeout(resolve, response?.status === 429 ? 2_000 * (attempt + 1) : 250 * (attempt + 1)))
+    if (response.status === 429 && attempt < 5) { await wait(1_000 * 2 ** attempt + Math.random() * 400); continue }
+    if ([500, 502, 503, 504].includes(response.status) && repeatable && attempt < 2) { await wait(250 * (attempt + 1)); continue }
+    break
   }
   if (!response?.ok) {
     const status = response?.status ?? 0

@@ -35,14 +35,35 @@ function colorFromTag(tag: string) {
   return normalizeCssColorToHex(styleColor || attributeColor)
 }
 
+/**
+ * Le gras et l'italique dits en CSS (un collage depuis Google Docs ou Sheets, Ctrl+B après une
+ * couleur, « dégraisser » un mot d'un texte gras) : gardés sous une forme simple, que
+ * l'écriture vers Sheets comprend. Les jeter faisait perdre ce gras à l'enregistrement.
+ */
+function typeStyleOf(tag: string) {
+  const style = tag.match(/\bstyle\s*=\s*["']([^"']*)["']/i)?.[1] || ""
+  const weight = style.match(/(?:^|;)\s*font-weight\s*:\s*([^;]+)/i)?.[1]?.trim().toLowerCase()
+  const italic = style.match(/(?:^|;)\s*font-style\s*:\s*([^;]+)/i)?.[1]?.trim().toLowerCase()
+  return [
+    weight ? `font-weight:${weight === "bold" || weight === "bolder" || Number(weight) >= 600 ? "bold" : "normal"}` : "",
+    italic ? `font-style:${/italic|oblique/.test(italic) ? "italic" : "normal"}` : "",
+  ].filter(Boolean).join(";")
+}
+
+function spanOf(tag: string) {
+  const color = colorFromTag(tag)
+  const style = [color ? `color:${color}` : "", typeStyleOf(tag)].filter(Boolean).join(";")
+  return style ? `<span style="${style}">` : "<span>"
+}
+
 export function sanitizeRichText(html: string) {
   return String(html ?? "")
     .replace(/<(script|style)[^>]*>[\s\S]*?<\/\1>/gi, "")
     .replace(/☑/g, '<input type="checkbox" checked>')
     .replace(/☐/g, '<input type="checkbox">')
-    .replace(/<font\b[^>]*>/gi, (tag) => { const color = colorFromTag(tag); return color ? `<span style="color:${color}">` : "<span>" })
+    .replace(/<font\b[^>]*>/gi, spanOf)
     .replace(/<\/font\s*>/gi, "</span>")
-    .replace(/<span\b[^>]*>/gi, (tag) => { const color = colorFromTag(tag); return color ? `<span style="color:${color}">` : "<span>" })
+    .replace(/<span\b[^>]*>/gi, spanOf)
     .replace(/<input\b[^>]*>/gi, (tag) => `<input type="checkbox"${/\schecked(?:\s|=|>)/i.test(tag) ? " checked" : ""}>`)
     .replace(new RegExp(`<(?!/?(?:${allowedTags})\\b)[^>]*>`, "gi"), "")
     .replace(/<a\b[^>]*href\s*=\s*["']([^"']+)["'][^>]*>/gi, (_, href: string) => {
@@ -54,9 +75,11 @@ export function sanitizeRichText(html: string) {
         return ["http:", "https:"].includes(url.protocol) ? `<a href="${url.toString().replace(/"/g, "&quot;")}" target="_blank" rel="noreferrer">` : "<a>"
       } catch { return "<a>" }
     })
-    .replace(/<(strong|b|em|i|u|s|br|p|div|ul|ol|li|h2|h3|hr)\b[^>]*>/gi, "<$1>")
-    .replace(/<b>/gi, "<strong>").replace(/<\/b>/gi, "</strong>")
-    .replace(/<i>/gi, "<em>").replace(/<\/i>/gi, "</em>")
+    // Le gras d'un <b style="font-weight:normal"> (l'enveloppe d'un collage Google Docs) n'en est pas.
+    .replace(/<(strong|b|em|i)\b([^>]*)>/gi, (_, tag: string, rest: string) => { const style = typeStyleOf(rest); return style ? `<${tag} style="${style}">` : `<${tag}>` })
+    .replace(/<(u|s|br|p|div|ul|ol|li|h2|h3|hr)\b[^>]*>/gi, "<$1>")
+    .replace(/<b(\s[^>]*)?>/gi, "<strong$1>").replace(/<\/b>/gi, "</strong>")
+    .replace(/<i(\s[^>]*)?>/gi, "<em$1>").replace(/<\/i>/gi, "</em>")
     .replace(/\s(?:on\w+|class|id)=(?:"[^"]*"|'[^']*')/gi, "")
     .replace(/javascript:/gi, "")
 }
@@ -183,6 +206,8 @@ export function runRichTextCommand(target: RichTextTarget | null, saved: Mutable
       const color = normalizeCssColorToHex(value || "")
       if (!color) return false
       document.execCommand("foreColor", false, color)
+      // Le réglage vaut pour toute la page : laissé actif, Ctrl+B écrivait ensuite le gras en CSS.
+      document.execCommand("styleWithCSS", false, "false")
     } else if (name === "link") {
       if (!value) return false
       let href = internalAppPath(value)
@@ -409,7 +434,7 @@ export const RichTextSurface = memo(function RichTextSurface({ initialHtml, plai
       data-placeholder={placeholder}
       onKeyDown={references.onKeyDown}
       onInput={(event) => { references.onInput(event); if (timer.current) window.clearTimeout(timer.current); timer.current = window.setTimeout(flush, delay) }}
-      onBlur={() => { references.close(); flush() }}
+      onBlur={() => { references.onBlur(); flush() }}
       onClick={(event) => { references.onClick(event); toggleCheckbox(event) }}
       onFocus={() => { if (editor.current && onActivate) onActivate({ node: editor.current, flush }) }}
       className={`whitespace-pre-wrap break-words outline-none empty:before:text-muted-foreground/50 empty:before:content-[attr(data-placeholder)] ${richTextRendering} ${className}`}

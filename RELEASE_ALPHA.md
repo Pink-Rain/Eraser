@@ -1,37 +1,52 @@
-# Eraser 0.1.1-alpha.148 — Les index en cartes
+# Eraser 0.1.1-alpha.149 — Sauvegardes fiables, étiquettes et créateur de classe
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Tableau ou cartes
+## Enregistrer dans Google Sheets
 
-- Chaque index a maintenant une bascule **Tableau / Cartes**, à côté de la recherche. En
-  cartes, chaque ligne s'affiche avec son image, sa couleur et les informations choisies ;
-  la recherche, les onglets-fenêtres et le tri s'appliquent comme dans le tableau. Un clic
-  ouvre la fiche (ou la page d'un personnage, d'une campagne, d'une classe).
-- Les cartes arrivent par paquets de 60 en descendant : un index de mille lignes reste fluide.
+- Une coupure réseau (mise en veille, Wi-Fi), un Google trop sollicité ou un jeton expiré
+  ne font plus échouer l'enregistrement : Eraser réessaie de lui-même (jusqu'à une
+  demi-minute quand Google demande d'attendre) et renouvelle son accès à Google, même
+  pendant un travail d'arrière-plan.
+- Quand un enregistrement échoue malgré tout, le message dit pourquoi (connexion coupée,
+  Google qui ne répond pas, accès refusé…) au lieu du message général. La fiche propose
+  **Réessayer** et garde ce qui a été tapé.
+- Une saisie refusée ne provoque plus ensuite des « modifiée entre-temps » à répétition, et
+  une relecture plus ancienne n'efface plus une saisie toute récente.
+- Une recherche de feuille ratée un instant n'affiche plus « pas reliée » (ni des index
+  vides) pendant dix minutes : Eraser réessaie vingt secondes plus tard.
+- Une requête Google bloquée ne fige plus les enregistrements de tous les index.
+- Ce qui est modifié dans la fiche d'une ligne apparaît aussitôt dans le tableau derrière.
 
-## « Modifier » › Cartes
+## Le gras venu de Sheets
 
-- Un nouvel onglet **Cartes** dans « Modifier ». À gauche, les cartes de l'onglet (l'étoile
-  choisit celle montrée d'abord) ; au milieu, leurs réglages ; à droite, l'aperçu en direct
-  sur les vraies lignes. Un clic sur un bloc de l'aperçu ouvre ses réglages.
-- Une carte se règle sans code : l'image (en haut, à gauche, à droite ou en fond ; format,
-  recadrage, forme, médaillon coloré), la couleur d'accent (prise dans une colonne ou fixe),
-  le cadre, la largeur dans la grille, puis ses blocs : titre, ligne composée
-  (« Lame · rang 4 »), texte, pastilles, libellé : valeur, barre de progression, tuiles de
-  valeurs, image, valeur selon son type, détails repliables, séparateur.
-- Un onglet peut avoir plusieurs cartes. « Nouvelle carte » propose des formes de départ
-  remplies avec les colonnes de l'onglet ; une carte s'enregistre en **preset** (commun à
-  tous les index) ou se copie vers un autre onglet.
+- Le gras du début d'une cellule n'est plus perdu à la relecture.
+- Une cellule mise en gras dans Sheets ne redevient plus grasse en entier : Eraser écrit
+  chaque morceau gras ou non gras explicitement.
+- Le gras collé depuis Google Docs ou Sheets, ou posé avec Ctrl+B après une couleur, est gardé.
 
-## Les cartes qu'Eraser avait déjà
+## Étiquettes « { »
 
-- Personnages, Campagnes, Classes, Sorts des classes et des créatures, PNJs, Succès, États,
-  Armes - Modificateurs, Vocabulaire, Créatures et Objets partent avec leurs cartes, refaites
-  avec le moteur. On peut les modifier ; « Revenir aux cartes d'Eraser » les restaure.
-- Les cartes sont gardées dans Eraser (pour tout le monde), jamais dans Google Sheets :
-  aucune donnée des feuilles n'est touchée.
+- Dans la fiche (vue formulaire), cliquer une proposition du menu « { » fonctionne, et le
+  champ qui modifie le texte d'une étiquette se referme normalement.
+- Une étiquette créée en fin de paragraphe reste sur sa ligne ; celles qui avaient sauté à
+  la ligne y reviennent à la prochaine modification.
+- Une citation laissée en plan (« {État:Empoi ») rouvre le menu dès qu'on continue de l'écrire.
 
-Rappel de la 147 : un clic gauche sur une étiquette « { » modifie son texte, un clic droit
-l'ouvre dans un nouvel onglet, une nouvelle fenêtre ou ici ; la version qui tourne s'affiche
-sous « Chercher les mises à jour ».
+## Créateur de classe
+
+- Actifs, Passifs, Bonus et Bonus de rang s'ouvrent dans la fiche des index (barre de mise
+  en forme, Précédent, « Aller à… », Suivant, enregistrement automatique) : clic sur le nom
+  (ou le rang), ou clic droit › Ouvrir la fiche.
+- Onglet Classes : la corbeille d'un sort demande s'il faut le supprimer de l'index (pour
+  toutes les classes) ou seulement le retirer de ce rang. Un bouton « Retirer de ce rang »
+  est aussi sur chaque carte.
+- La recherche d'un sort se referme d'un clic ailleurs ou avec Échap, sans jamais choisir un
+  sort qu'on n'a pas cliqué.
+- La présentation de la classe (caractéristiques, spécialités) se modifie ici, dans la
+  nouvelle partie « Présentation ».
+
+## Règles › Classes
+
+- Les pages des classes se consultent seulement : elles ne se modifient plus d'ici. Un
+  bouton mène au créateur de classe pour les administrateurs et les MJ.

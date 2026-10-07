@@ -1,7 +1,7 @@
 "use client"
 
-import { useCallback, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, Search } from "lucide-react"
+import { useCallback, useEffect, useMemo, useRef, useState, type MutableRefObject, type ReactNode } from "react"
+import { Check, ChevronLeft, ChevronRight, CircleAlert, LoaderCircle, RefreshCw, Search } from "lucide-react"
 
 import { IndexField, type IndexFieldProps } from "@/components/eraser/index-cells"
 import { RichTextToolbar, RichTextToolbarHost, type RichTextTarget } from "@/components/eraser/rich-text"
@@ -25,7 +25,7 @@ export type RowSheetNavigation = {
 const pictureField = (spec: IndexColumnSpec) => spec.kind === "file" && spec.file?.accept === "image" && !spec.file.multiple
 
 /** Le temps de laisser finir la frappe avant d'enregistrer. */
-const SAVE_DELAY = 450
+const SAVE_DELAY = 800
 
 type SaveStatus = "idle" | "saving" | "saved" | "error"
 
@@ -44,7 +44,7 @@ function releaseFocus() {
  * ni « Fermer ». Une seule barre de mise en forme, en haut, sert à tous les champs. En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
  * à l'autre sans quitter la fiche.
  */
-export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, error = "", footer, navigation, onSave, onClose }: {
+export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose }: {
   open: boolean
   /** La ligne affichée : chaque enregistrement la désigne, même si on est passé à une autre entre-temps. */
   rowKey: string
@@ -55,6 +55,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   layout?: IndexLayout | null
   /** Les calculs, tirages et boutons propres à chaque champ de la ligne. */
   rowFor?: (key: string) => IndexFieldProps["row"]
+  /** Un champ que la page dessine elle-même (« Classes et rangs » d'un sort) ; `undefined` : le champ ordinaire. */
+  renderField?: (field: RowSheetField) => ReactNode | undefined
   error?: string
   footer?: ReactNode
   navigation?: RowSheetNavigation
@@ -63,6 +65,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   onClose: () => void
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
+  // « Réessayer » : renvoie ce que la fiche n'a pas pu enregistrer.
+  const retryRef = useRef<(() => void) | null>(null)
   // Une seule barre de mise en forme, en haut, pour tous les champs (comme le tableau) :
   // elle agit sur le champ où se trouve le curseur.
   const targetRef = useRef<RichTextTarget | null>(null)
@@ -107,7 +111,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
       </div>
       {/* Une ligne, un corps : passer à une autre ligne enregistre ce qui restait et repart de ses valeurs. */}
       <RichTextToolbarHost.Provider value={toolbarHost}>
-        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} onSave={onSave} onStatus={setStatus} />
+        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} />
       </RichTextToolbarHost.Provider>
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
@@ -121,6 +125,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
         </span> : <span />}
         <span className="flex flex-wrap items-center justify-end gap-2">
           {footer}
+          {(error || status === "error") && status !== "saving" && <Button type="button" size="sm" variant="outline" onClick={() => retryRef.current?.()} title="Renvoyer ce qui n’a pas été enregistré"><RefreshCw />Réessayer</Button>}
           <SaveIndicator status={error ? "error" : status} />
         </span>
       </DialogFooter>
@@ -198,11 +203,13 @@ function RowJump({ navigation, current, position, onGo }: { navigation: RowSheet
  * (la frappe continue), puis partent l'une après l'autre ; ce qui reste quand on change de
  * ligne ou qu'on ferme la fiche part aussitôt, toujours vers la ligne d'où il vient.
  */
-function RowSheetBody({ rowKey, fields, layout, rowFor, onSave, onStatus }: {
+function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus }: {
   rowKey: string
   fields: RowSheetField[]
   layout?: IndexLayout | null
   rowFor?: (key: string) => IndexFieldProps["row"]
+  renderField?: (field: RowSheetField) => ReactNode | undefined
+  retryRef: MutableRefObject<(() => void) | null>
   onSave: (rowKey: string, changes: Record<string, string>) => Promise<void> | void
   onStatus: (status: SaveStatus) => void
 }) {
@@ -216,20 +223,31 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, onSave, onStatus }: {
   const statusRef = useRef(onStatus)
   useEffect(() => { saveRef.current = onSave; statusRef.current = onStatus })
 
+  // Ce qui a été refusé : repart avec la prochaine modification, ou avec « Réessayer ».
+  const failed = useRef<Record<string, string>>({})
   const flush = useCallback(() => {
     if (timer.current) { window.clearTimeout(timer.current); timer.current = null }
-    const changes = queued.current
+    const changes = { ...failed.current, ...queued.current }
     if (!Object.keys(changes).length) return
     queued.current = {}
+    failed.current = {}
     if (mounted.current) statusRef.current("saving")
     chain.current = chain.current
       .then(() => saveRef.current(rowKey, changes))
       .then(
         () => { if (mounted.current && !Object.keys(queued.current).length) statusRef.current("saved") },
         // Refusé : la page dit pourquoi ; la saisie reste affichée pour la reprendre.
-        () => { if (mounted.current) statusRef.current("error") },
+        () => {
+          // Une saisie plus récente du même champ l'emporte sur celle qui a été refusée.
+          failed.current = { ...changes, ...failed.current }
+          if (mounted.current) statusRef.current("error")
+        },
       )
   }, [rowKey])
+  useEffect(() => {
+    retryRef.current = flush
+    return () => { if (retryRef.current === flush) retryRef.current = null }
+  }, [flush, retryRef])
 
   // Changer de ligne ou fermer : ce qui attendait part tout de suite.
   useEffect(() => {
@@ -250,7 +268,11 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, onSave, onStatus }: {
   const pictures = fields.filter((field) => pictureField(normalizeSpec(field.spec)))
   const others = fields.filter((field) => !pictureField(normalizeSpec(field.spec)) && normalizeSpec(field.spec).kind !== "id")
 
-  const field = (item: RowSheetField, hideLabel = false) => <IndexField
+  const field = (item: RowSheetField, hideLabel = false) => {
+    const own = renderField?.(item)
+    return own !== undefined ? <div key={item.key} className={item.long ? "md:col-span-2" : undefined}>{own}</div> : plainField(item, hideLabel)
+  }
+  const plainField = (item: RowSheetField, hideLabel: boolean) => <IndexField
     key={item.key}
     label={item.label}
     // Dans la fiche, le nom se modifie : il n'ouvre pas une autre fiche.

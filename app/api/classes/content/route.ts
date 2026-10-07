@@ -1,7 +1,30 @@
 import { NextResponse } from "next/server"
 
-import { invalidateClassContentCaches, updateClassPresentationCell } from "@/lib/class-content"
+import { invalidateClassContentCaches, listClassPresentations, updateClassPresentationCell } from "@/lib/class-content"
 import { authorizedAccount } from "@/lib/server-auth"
+
+/**
+ * La présentation d'une classe (caractéristiques, spécialités), pour le créateur de classe :
+ * c'est là qu'elle se modifie ; Règles › Classes la montre seulement.
+ */
+export async function GET(request: Request) {
+  if (!await authorizedAccount(["admin", "mj"])) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const parameters = new URL(request.url).searchParams
+  const classId = parameters.get("classId") ?? ""
+  if (!classId) return NextResponse.json({ error: "Classe inconnue." }, { status: 400 })
+  try {
+    const { presentations, file } = await listClassPresentations(parameters.get("refresh") === "1")
+    return NextResponse.json({
+      presentation: presentations.find((item) => item.classId === classId) ?? null,
+      sheetUrl: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`,
+    })
+  } catch (error) {
+    const code = error instanceof Error ? error.message : ""
+    console.error("CLASS_PRESENTATION_LOAD_FAILED", code || "UNKNOWN_ERROR")
+    if (code === "CLASS_PRESENTATION_SHEET_NOT_FOUND") return NextResponse.json({ error: "La feuille « Présentation des classes » n’a pas été trouvée dans le Drive relié." }, { status: 404 })
+    return NextResponse.json({ error: "La présentation de cette classe n’a pas pu être lue dans Google Sheets." }, { status: 502 })
+  }
+}
 
 /**
  * Modifie une case de la présentation d'une classe : `header` (l'en-tête de sa colonne) et

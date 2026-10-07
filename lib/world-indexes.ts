@@ -1128,7 +1128,7 @@ async function renameLinkedChoices(key: WorldIndexKey, tabName: string, oldName:
  * besoin), noms effacés retirés, entité renommée renommée partout où elle est citée. Renvoie
  * les index modifiés par les liens.
  */
-export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, header: string, html: string, options: { previous?: string; guard?: WorldIndexRowGuard } = {}) {
+export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: WorldIndexRowRef, header: string, html: string, options: { previous?: string; guard?: WorldIndexRowGuard; onWarning?: (message: string) => void } = {}) {
   return serialized(async () => {
     const sheet = await writableWorkbook(key)
     const before = await plainTable(key, tabName, [header])
@@ -1143,37 +1143,52 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
     if (isHtmlTextColumn(key, target)) await writeCell(before, tabName, rowIndex, column, html)
     else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
     await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
-    const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
-    const previousName = isNameColumn(target) ? current.replace(/\s+/g, " ").trim() : ""
-    if (previousName && newValue && foldName(previousName) !== foldName(newValue)) await renameLinkedChoices(key, tabName, previousName, newValue)
-    const ends = linkEndsOf(key, tabName)
-    const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(target))
-    if (!linkedEnd && !(isNameColumn(target) && ends.length > 0)) return []
+    // La case est écrite. Ce qui suit (les liens vers d'autres index) peut échouer sans que
+    // l'écriture soit annoncée comme refusée : la page croirait la case non enregistrée, et
+    // la modification suivante serait refusée comme « changée entre-temps ».
     const changed = new Set<WorldIndexKey>()
-    const oldName = rowName(before, rowIndex)
-
-    if (linkedEnd && oldName) {
-      // Noms effacés de la cellule : l'autre côté les oublie aussi.
-      const [end, other] = linkedEnd
-      const kept = new Set(splitNames(newValue).map(foldName))
-      for (const removed of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
-        if (!kept.has(foldName(removed)) && await removeLink(other, removed, oldName)) changed.add(other.index)
-      }
+    try {
+      return await propagateCellLinks(key, tabName, before, rowIndex, column, target, current, html, changed)
+    } catch (error) {
+      console.error("WORLD_INDEX_LINKS_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      invalidateWorldIndexes(changed)
+      options.onWarning?.("La case est enregistrée, mais les index liés n’ont pas tous pu être mis à jour. Actualise-les, puis réécris la case si un lien manque.")
+      return [...changed]
     }
-    if (isNameColumn(target) && oldName && newValue && foldName(oldName) !== foldName(newValue)) {
-      // Entité renommée : chaque ligne qui la citait reçoit le nouveau nom.
-      for (const [end, other] of ends) {
-        for (const linked of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
-          if (await removeLink(other, linked, oldName, newValue)) changed.add(other.index)
-        }
-      }
-    }
-    // Une ligne sans identifiant est reconnue par son nom : le nouveau, s'il vient de changer.
-    const written = refOf(before, rowIndex)
-    await syncRowLinks(key, tabName, column === labelColumnIndex(before.headers) ? { ...written, name: newValue } : written, changed)
-    invalidateWorldIndexes(changed)
-    return [...changed]
   })
+}
+
+/** Les effets d'une case écrite sur les index liés : renommages, liens retirés ou ajoutés. */
+async function propagateCellLinks(key: WorldIndexKey, tabName: string, before: Awaited<ReturnType<typeof plainTable>>, rowIndex: number, column: number, target: string, current: string, html: string, changed: Set<WorldIndexKey>) {
+  const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
+  const previousName = isNameColumn(target) ? current.replace(/\s+/g, " ").trim() : ""
+  if (previousName && newValue && foldName(previousName) !== foldName(newValue)) await renameLinkedChoices(key, tabName, previousName, newValue)
+  const ends = linkEndsOf(key, tabName)
+  const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(target))
+  if (!linkedEnd && !(isNameColumn(target) && ends.length > 0)) return []
+  const oldName = rowName(before, rowIndex)
+
+  if (linkedEnd && oldName) {
+    // Noms effacés de la cellule : l'autre côté les oublie aussi.
+    const [end, other] = linkedEnd
+    const kept = new Set(splitNames(newValue).map(foldName))
+    for (const removed of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
+      if (!kept.has(foldName(removed)) && await removeLink(other, removed, oldName)) changed.add(other.index)
+    }
+  }
+  if (isNameColumn(target) && oldName && newValue && foldName(oldName) !== foldName(newValue)) {
+    // Entité renommée : chaque ligne qui la citait reçoit le nouveau nom.
+    for (const [end, other] of ends) {
+      for (const linked of splitNames(before.rows[rowIndex]?.[columnOf(before.headers, end.column)] || "")) {
+        if (await removeLink(other, linked, oldName, newValue)) changed.add(other.index)
+      }
+    }
+  }
+  // Une ligne sans identifiant est reconnue par son nom : le nouveau, s'il vient de changer.
+  const written = refOf(before, rowIndex)
+  await syncRowLinks(key, tabName, column === labelColumnIndex(before.headers) ? { ...written, name: newValue } : written, changed)
+  invalidateWorldIndexes(changed)
+  return [...changed]
 }
 
 /**

@@ -29,6 +29,8 @@ export const world = {
   failures: [] as ReadFailure[],
   /** Appelé (et attendu) avant chaque requête, pour glisser une écriture d'ailleurs entre deux. */
   beforeRequest: null as RequestHook | null,
+  /** Jetons oubliés après un refus 401 de Google. */
+  forgottenTokens: 0,
 }
 
 export function reset() {
@@ -42,6 +44,7 @@ export function reset() {
   world.formulaResults = null
   world.failures.length = 0
   world.beforeRequest = null
+  world.forgottenTokens = 0
 }
 
 /** Un classeur ; avec `name`, il est aussi dans le Drive (retrouvé par son nom, mis à la corbeille). */
@@ -351,6 +354,10 @@ export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit 
 
 export async function warmGoogleOAuthAccessToken() {
   return undefined
+}
+
+export function forgetGoogleAccessToken() {
+  world.forgottenTokens += 1
 }
 
 export async function getGoogleOAuthSettings() {

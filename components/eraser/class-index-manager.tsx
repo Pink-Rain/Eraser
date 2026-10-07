@@ -1,14 +1,17 @@
 "use client"
 
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
-import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, X, Zap } from "lucide-react"
+import { Check, ChevronDown, CircleDotDashed, CopyCheck, FileText, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, Unlink, X, Zap } from "lucide-react"
 
 import { indexGridColumn, RankedLinksCell } from "@/components/eraser/index-cells"
 import { ReadOnlyIndexEditorButton } from "@/components/eraser/index-editor"
 import { spellEditorModel } from "@/lib/system-index-models"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { SheetGrid, type SheetGridColumn } from "@/components/eraser/sheet-grid"
+import { IndexRowSheet, type RowSheetField } from "@/components/eraser/index-row-sheet"
+import { ClassPresentationEditor } from "@/components/eraser/class-presentation-editor"
+import { shownReferenceText } from "@/components/eraser/reference-store"
+import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
@@ -22,6 +25,7 @@ import type { ClassSpell, ClassSpellDraft, SpellIndexKind, SpellSimilarity } fro
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
 import type { IndexColumnSpec } from "@/lib/index-columns"
+import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-duplicates"
 import { ClassStateDetail, ClassStateOverview } from "@/components/eraser/class-state-overview"
 import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
@@ -190,7 +194,7 @@ function RankRail({ counts, accent }: { counts: number[]; accent: string }) {
     return () => observer.disconnect()
   }, [counts])
   return <nav aria-label="Aller à une partie de la classe" className="fixed right-2 top-1/2 z-30 hidden max-h-[80svh] -translate-y-1/2 flex-col items-center gap-0.5 overflow-y-auto rounded-full border border-border/50 bg-background/70 px-1 py-2 opacity-60 shadow-sm backdrop-blur transition-opacity hover:opacity-100 focus-within:opacity-100 md:flex">
-    {[["classe-etat", "État", "État de la classe"], ["classe-stats", "Stat", "Statistiques de la classe"]].map(([id, label, title]) => <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} title={title} className="shrink-0 rounded-full px-1 py-1 text-[9px] font-bold uppercase tracking-wide text-foreground/70 hover:bg-muted">{label}</button>)}
+    {[["classe-etat", "État", "État de la classe"], ["classe-presentation", "Prés", "Présentation de la classe"], ["classe-stats", "Stat", "Statistiques de la classe"]].map(([id, label, title]) => <button key={id} type="button" onClick={() => document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" })} title={title} className="shrink-0 rounded-full px-1 py-1 text-[9px] font-bold uppercase tracking-wide text-foreground/70 hover:bg-muted">{label}</button>)}
     <span className="my-1 h-px w-4 shrink-0 bg-border" aria-hidden />
     {counts.map((count, rank) => <button
       key={rank}
@@ -210,7 +214,10 @@ type SaveStatus = "idle" | "saving" | "saved" | "error"
 // jamais toute la ligne. Il n'y a plus de bouton Enregistrer : le sort s'enregistre
 // seul après une courte pause de frappe, quand on quitte la page ou change de classe,
 // et l'état de l'enregistrement s'affiche à la place du bouton.
-function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDelete, onShowDuplicates }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; onSave: (spell: ClassSpell, draft: ClassSpellDraft, base: ClassSpell) => Promise<ClassSpell | null>; onDelete: (spell: ClassSpell) => void; onShowDuplicates: (spell: ClassSpell) => void }) {
+/** La place du sort affiché : la classe et le rang sous lesquels sa carte est rangée. */
+type SpellPlace = { className: string; rank: number; onUnlink: (spell: ClassSpell) => void }
+
+function EditableSpell({ spell, classes, allSpells, similarities, place, onSave, onDelete, onShowDuplicates }: { spell: ClassSpell; classes: ClassRecord[]; allSpells: ClassSpell[]; similarities: SpellSimilarity[]; place?: SpellPlace; onSave: (spell: ClassSpell, draft: ClassSpellDraft, base: ClassSpell) => Promise<ClassSpell | null>; onDelete: (spell: ClassSpell) => void; onShowDuplicates: (spell: ClassSpell) => void }) {
   // Le sort tel qu'il était quand la saisie a commencé : seuls les champs changés depuis
   // partent. Un changement venu d'ailleurs (un lien ajouté, le sort relu) est repris tant
   // que rien n'est en cours de saisie ; il n'est jamais réécrit avec l'ancienne valeur.
@@ -276,8 +283,22 @@ function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDele
   const actions = <>
     {statusLabel}
     {matchCount > 0 && <Button type="button" size="sm" variant="outline" onClick={() => onShowDuplicates(spell)} title="Comparer et fusionner les sorts semblables"><CopyCheck />{matchCount} doublon{matchCount > 1 ? "s" : ""}</Button>}
-    {confirmDelete ? <><Button type="button" size="sm" variant="destructive" onClick={() => onDelete(spell)}>Confirmer</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => setConfirmDelete(false)}><X /></Button></> : <Button type="button" size="icon-sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete(true)} title="Supprimer"><Trash2 /></Button>}
+    {place && !confirmDelete && <Button type="button" size="icon-sm" variant="ghost" onClick={() => place.onUnlink(spell)} title={`Retirer de ce rang (${place.className}, ${rankLabel(place.rank).toLowerCase()}) : le sort reste dans l’index`}><Unlink /></Button>}
+    {confirmDelete
+      ? (place ? null : <><Button type="button" size="sm" variant="destructive" onClick={() => onDelete(spell)}>Confirmer</Button><Button type="button" size="icon-sm" variant="ghost" onClick={() => setConfirmDelete(false)}><X /></Button></>)
+      : <Button type="button" size="icon-sm" variant="ghost" className="text-destructive" onClick={() => setConfirmDelete(true)} title="Supprimer le sort de l’index"><Trash2 /></Button>}
   </>
+  // La corbeille d'une carte rangée sous une classe : supprimer le sort de l'index (pour
+  // toutes les classes) n'est souvent pas ce qu'on veut ; le retirer de ce rang l'est.
+  const deletePrompt = place && confirmDelete ? <div role="alertdialog" aria-label="Supprimer le sort de l’index ?" className="mt-3 rounded-xl border border-destructive/30 bg-destructive/5 p-3 text-sm">
+    <p className="font-semibold text-destructive">Supprimer « {spell.name} » de l’index des sorts ?</p>
+    <p className="mt-1 text-xs leading-5 text-muted-foreground">Il disparaîtra pour <b>toutes</b> les classes, pas seulement pour {place.className}. Pour seulement l’enlever de ce rang, choisis « Retirer de ce rang » (c’est aussi la petite croix de l’étiquette « {place.className} {place.rank === 0 ? "C" : `R${place.rank}`} »).</p>
+    <div className="mt-3 flex flex-wrap justify-end gap-2">
+      <Button type="button" size="sm" variant="ghost" onClick={() => setConfirmDelete(false)}>Annuler</Button>
+      <Button type="button" size="sm" variant="outline" autoFocus onClick={() => { setConfirmDelete(false); place.onUnlink(spell) }}><Unlink />Retirer de ce rang</Button>
+      <Button type="button" size="sm" variant="destructive" onClick={() => onDelete(spell)}><Trash2 />Supprimer de l’index</Button>
+    </div>
+  </div> : null
 
   return <article className="rounded-xl border bg-card/75 p-4 shadow-sm" style={{ borderColor: `${tone.background}66` }}>
     <div className="flex items-start gap-3">
@@ -298,14 +319,51 @@ function EditableSpell({ spell, classes, allSpells, similarities, onSave, onDele
       </div>
     </div>
     <div className="mt-3 flex min-h-8 flex-wrap items-center justify-end gap-2">{actions}</div>
+    {deletePrompt}
   </article>
 }
 
+/** Les boutons « Chercher un sort » : un appui dessus ne compte pas comme un clic « ailleurs ». */
+const SEARCH_TOGGLE = "data-spell-search-toggle"
+
+/**
+ * La recherche d'un sort à ranger. Un clic ailleurs (ou Échap) la referme sans rien
+ * choisir. Un sort n'est choisi que par un clic franc sur lui : appuyé et relâché sur la
+ * même proposition, pas pendant que la page bouge (la liste qui s'ouvre, un autre panneau
+ * qui se ferme au-dessus) ; avant, un clic « ailleurs » ou un double clic pouvait tomber
+ * sur une proposition venue se glisser sous la souris.
+ */
 function SearchExisting({ classId, rank, spells, pending, error, onClose, onLink }: { classId: string; rank: number; spells: ClassSpell[]; pending: boolean; error: string; onClose: () => void; onLink: (spell: ClassSpell) => void }) {
   const [query, setQuery] = useState("")
+  const panel = useRef<HTMLDivElement>(null)
+  const pressed = useRef<{ id: string; at: number } | null>(null)
+  const openedAt = useRef(0)
+  const close = useRef(onClose)
+  useEffect(() => { close.current = onClose })
+  useEffect(() => {
+    openedAt.current = performance.now()
+    const outside = (event: PointerEvent) => {
+      const target = event.target as Element | null
+      if (!target || panel.current?.contains(target) || target.closest?.(`[${SEARCH_TOGGLE}]`)) return
+      close.current()
+    }
+    const escape = (event: KeyboardEvent) => { if (event.key === "Escape") close.current() }
+    document.addEventListener("pointerdown", outside, true)
+    document.addEventListener("keydown", escape)
+    return () => { document.removeEventListener("pointerdown", outside, true); document.removeEventListener("keydown", escape) }
+  }, [])
   const normalized = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const results = spells.filter((spell) => spell.classRanks[classId] !== rank && (!normalized || searchText(spell).includes(normalized))).slice(0, 40)
-  return <div className="mb-3 rounded-xl border bg-card/75 p-3"><div className="flex items-center gap-2"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><Button type="button" variant="ghost" size="icon-sm" onClick={onClose}><X /></Button></div>{/* L'erreur s'affiche ici aussi : en haut de page, elle passait inaperçue. */}{error && <p className="mt-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}<div className="mt-2 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{results.map((spell) => <button key={spell.id} type="button" disabled={pending} onClick={() => onLink(spell)} className="rounded-lg border bg-background/55 p-3 text-left hover:bg-muted/45"><span className="flex flex-wrap items-center gap-2"><b>{spell.name}</b><Badge variant="outline">{spell.type}</Badge>{spell.category === "actif" && <SpellChargeStars total={spell.charges} />}</span>{spell.skills.length > 0 && <span className="mt-1 block text-xs font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}<blockquote className="mt-1 line-clamp-2 border-l-2 pl-2 text-xs text-muted-foreground">{spell.effect || spell.description || "Aucun texte"}</blockquote></button>)}</div>{!results.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucun sort correspondant.</p>}</div>
+  const choose = (spell: ClassSpell, event: ReactMouseEvent) => {
+    const press = pressed.current
+    pressed.current = null
+    // Entrée ou Espace sur une proposition (clavier) : choisie.
+    if (event.detail === 0) { onLink(spell); return }
+    // Un double clic, un appui commencé ailleurs ou juste à l'ouverture : rien n'est choisi.
+    if (event.detail > 1 || !press || press.id !== spell.id || press.at - openedAt.current < 250) return
+    onLink(spell)
+  }
+  return <div ref={panel} className="mb-3 rounded-xl border bg-card/75 p-3"><div className="flex items-center gap-2"><div className="relative flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><Button type="button" variant="ghost" size="icon-sm" onClick={onClose} title="Fermer sans choisir (Échap)"><X /></Button></div>{/* L'erreur s'affiche ici aussi : en haut de page, elle passait inaperçue. */}{error && <p className="mt-2 rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}<p className="mt-2 text-[11px] text-muted-foreground">Clique sur un sort pour le ranger ici · un clic ailleurs ou Échap referme sans rien choisir.{results.some((spell) => typeof spell.classRanks[classId] === "number") ? " Un sort déjà rangé dans un autre rang de cette classe y est déplacé." : ""}</p><div className="mt-2 grid max-h-80 gap-2 overflow-y-auto md:grid-cols-2">{results.map((spell) => { const elsewhere = spell.classRanks[classId]; return <button key={spell.id} type="button" disabled={pending} onPointerDown={() => { pressed.current = { id: spell.id, at: performance.now() } }} onClick={(event) => choose(spell, event)} className="rounded-lg border bg-background/55 p-3 text-left hover:bg-muted/45"><span className="flex flex-wrap items-center gap-2"><b>{spell.name}</b><Badge variant="outline">{spell.type}</Badge>{typeof elsewhere === "number" && <Badge variant="secondary">déjà en {elsewhere === 0 ? "C" : `R${elsewhere}`}</Badge>}{spell.category === "actif" && <SpellChargeStars total={spell.charges} />}</span>{spell.skills.length > 0 && <span className="mt-1 block text-xs font-semibold text-[#b3261e]">{spell.skills.join(" · ")}</span>}<blockquote className="mt-1 line-clamp-2 border-l-2 pl-2 text-xs text-muted-foreground">{spell.effect || spell.description || "Aucun texte"}</blockquote></button> })}</div>{!results.length && <p className="py-5 text-center text-xs text-muted-foreground">Aucun sort correspondant.</p>}</div>
 }
 
 /**
@@ -412,6 +470,13 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   const latestSpells = useRef(data.spells)
   useEffect(() => { latestSpells.current = data.spells }, [data.spells])
   const [searchRank, setSearchRank] = useState<number | null>(null)
+  // Le tri choisi dans l'en-tête du tableau : la fiche passe d'un sort à l'autre dans cet ordre.
+  const [gridSort, setGridSort] = useState<SheetGridSort>(null)
+  // Les sorts réécrits depuis leur fiche : le tableau derrière les redessine aussitôt.
+  const [rowVersions, setRowVersions] = useState<Record<string, number>>({})
+  const [sheetError, setSheetError] = useState("")
+  // La raison du dernier refus : la fiche l'affiche (le message de la page est caché derrière elle).
+  const lastError = useRef("")
   const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const filtered = useMemo(() => data.spells.filter((spell) => !normalizedQuery || searchText(spell).includes(normalizedQuery)), [data.spells, normalizedQuery])
   const selectedClass = data.classes.find((item) => item.id === selectedClassId)
@@ -423,6 +488,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   // ailleurs plutôt que d'occuper la largeur pour rien.
   // L'enregistrement passe par une référence : les colonnes ne se reconstruisent pas à chaque rendu.
   const latestCommit = useRef<(rowKey: string, columnKey: string, value: string) => void>(() => undefined)
+  const latestOpenSheet = useRef<(rowKey: string) => void>(() => undefined)
   // Chaque ligne du tableau est désignée par l'ID de son sort, jamais par sa place : une
   // ligne supprimée plus haut ne fait plus écrire dans le sort voisin. Un ID présent deux
   // fois (ligne copiée dans Sheets) est distingué par sa ligne.
@@ -455,7 +521,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
       valueOf,
       commit: (rowKey: string, columnKey: string, value: string) => latestCommit.current(rowKey, columnKey, value),
       idComputed: (rowKey: string) => valueOf(rowKey, "id").startsWith("LIGNE-"),
-      openForm: (rowKey: string) => setEditingSpell(rowKey),
+      openForm: (rowKey: string) => latestOpenSheet.current(rowKey),
     }
     const column = (key: keyof typeof spellSpecs, label: string, width: number) => indexGridColumn(key, label, spellSpecs[key], width, context, key === "type" ? { renderValue: (value) => <SpellTypeLabel value={value} /> } : {})
     return [
@@ -532,7 +598,8 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
       if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
       return payload.result ?? null
     } catch (error) {
-      setError(error instanceof Error ? error.message : "Enregistrement impossible.")
+      lastError.current = error instanceof Error ? error.message : "Enregistrement impossible."
+      setError(lastError.current)
       return false
     } finally { if (silent) setCellSaves((current) => Math.max(0, current - 1)); else setPending(false) }
   }
@@ -562,6 +629,9 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     // Des cases saisies depuis l'envoi restent affichées jusqu'à leur propre envoi.
     const waiting = pendingEdits.current.get(spell.id)
     const shown = waiting ? materialize(draftWithEdits(saved, waiting.edits), saved.rowNumber, saved.id, saved.tone) : saved
+    // Tout de suite, sans attendre le rendu : l'enregistrement suivant (la fiche enchaîne
+    // les siens) part de ce que la feuille contient, et n'est pas refusé comme « changé entre-temps ».
+    latestSpells.current = latestSpells.current.map((item) => item.id === spell.id ? shown : item)
     updateSpells((spells) => spells.map((item) => item.id === spell.id ? shown : item))
     return saved
   }
@@ -666,15 +736,89 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
 
   useLayoutEffect(() => { latestCommit.current = commitCell })
 
+  // Les sorts de l'onglet affiché, dans l'ordre du tableau (recherche, puis tri de l'en-tête).
+  // Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs.
+  const tabSpells = useMemo(() => tab === "actifs" ? filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif")
+    : tab === "passifs" ? filtered.filter((spell) => spell.category === "passif")
+      : tab === "bonus" ? filtered.filter((spell) => spell.category === "bonus") : [], [filtered, forClasses, tab])
+  const displayedRows = useMemo(() => {
+    const rows = tabSpells.map((spell) => ({ key: keyOfSpell.get(spell) ?? spell.id, rowNumber: spell.rowNumber }))
+    if (!gridSort) return rows
+    const spec = spellSpecs[gridSort.column as keyof typeof spellSpecs] as IndexColumnSpec | undefined
+    return sortByIndexKey(rows, (row) => indexSortKey(valueOf(row.key, gridSort.column), spec, { resolveReference: shownReferenceText }), gridSort.direction === "asc" ? 1 : -1)
+  }, [gridSort, keyOfSpell, tabSpells, valueOf])
+
+  // La fiche d'un sort : le formulaire des index (barre de mise en forme commune, Précédent,
+  // « Aller à… », Suivant, enregistrement automatique), branché sur l'enregistrement des sorts.
+  // Ouverte depuis le Nom d'une ligne, elle parcourt les sorts du tableau dans leur ordre affiché.
+  const [sheetRows, setSheetRows] = useState<string[]>([])
+  function openSheet(rowKey: string) {
+    setSheetError("")
+    // Gardée telle qu'à l'ouverture : un sort changé de type pendant qu'on le modifie ne fait pas perdre sa place.
+    setSheetRows(displayedRows.map((row) => row.key))
+    setEditingSpell(rowKey)
+  }
+  useLayoutEffect(() => { latestOpenSheet.current = openSheet })
+  const sheetSpell = editingSpell !== null ? spellByKey.get(editingSpell) : undefined
+  const sheetFields: RowSheetField[] = sheetSpell ? ([
+    ["name", "Nom"],
+    ["type", "Type"],
+    ["skills", "Compétences"],
+    ...(sheetSpell.category === "actif" ? [["distance", "Distance"], ["charges", "Charges"]] : []),
+    ["effect", "Effet", true],
+    ["description", "Description", true],
+    ...(forClasses ? [["classes", "Classes et rangs", true]] : []),
+    ["id", "ID"],
+  ] as Array<[keyof typeof spellSpecs, string, boolean?]>).map(([key, label, long]) => ({
+    key,
+    label,
+    spec: spellSpecs[key],
+    // Un sort sans titre s'écrit vide ; une désignation « LIGNE-n » n'est pas un ID.
+    value: key === "name" && sheetSpell.name === UNNAMED_CLASS_SPELL ? "" : key === "id" && sheetSpell.id.startsWith("LIGNE-") ? "" : valueOf(editingSpell!, key),
+    long,
+  })) : []
+
+  /** Les champs d'un sort, enregistrés d'eux-mêmes par sa fiche (le sort est donné : on a pu passer à un autre). */
+  async function saveSheetSpell(rowKey: string, changes: Record<string, string>) {
+    setSheetError("")
+    const id = spellByKey.get(rowKey)?.id
+    const current = latestSpells.current.find((item) => item.id === id)
+    const refuse = (message: string) => { setSheetError(message); return new Error(message) }
+    if (!current) throw refuse("Ce sort n’existe plus : actualise le tableau.")
+    const draft = draftWithEdits(current, changes)
+    if (!hasContent(draft)) throw refuse("Un sort peut être sans titre, mais pas entièrement vide.")
+    lastError.current = ""
+    const saved = await save(current, draft, true, toDraft(current))
+    if (!saved) throw refuse(lastError.current || "Ce sort n’a pas pu être enregistré dans Google Sheets.")
+    setRowVersions((versions) => ({ ...versions, [rowKey]: (versions[rowKey] ?? 0) + 1 }))
+    // Un sort sans ID en reçoit un à son premier enregistrement : la fiche le suit.
+    if (saved.id !== current.id && rowKey === current.id) {
+      setSheetRows((rows) => rows.map((key) => key === rowKey ? saved.id : key))
+      setEditingSpell((open) => open === rowKey ? saved.id : open)
+    }
+  }
+
+  async function saveSheetRanks(spell: ClassSpell, classRanks: Record<string, number | null>) {
+    setSheetError("")
+    lastError.current = ""
+    const current = latestSpells.current.find((item) => item.id === spell.id) ?? spell
+    const saved = await save(current, { ...toDraft(current), classRanks }, true)
+    if (!saved) setSheetError(lastError.current || "Les classes de ce sort n’ont pas pu être enregistrées.")
+  }
+
   // Même grille que l'Index des objets : en-têtes figés en haut, barre horizontale
   // en bas de l'écran, cellules toujours modifiables.
-  const tableFor = (spells: ClassSpell[]) => <SheetGrid
+  /* eslint-disable react-hooks/refs -- les gestes du tableau n'écrivent ces références qu'en enregistrant, jamais pendant le rendu */
+  const tableFor = () => <SheetGrid
     layoutKey={`eraser:${forClasses ? "class-index" : "creature-spell-index"}:spell-grid:${tab}`}
     version={version}
+    rowVersions={rowVersions}
     columns={spellColumns}
-    rows={spells.map((spell) => ({ key: keyOfSpell.get(spell) ?? spell.id, rowNumber: spell.rowNumber }))}
+    rows={displayedRows}
     valueOf={valueOf}
     onCommit={commitCell}
+    sort={gridSort}
+    onSort={setGridSort}
     toolbarTrailing={cellSaves > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
     empty="Aucun sort dans cette vue."
     renderCustomCell={(rowKey, columnKey) => {
@@ -700,10 +844,12 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
       if (!spell) return null
       return <>
         <ContextMenuSeparator />
+        <ContextMenuItem onSelect={() => openSheet(rowKey)}><FileText />Ouvrir la fiche</ContextMenuItem>
         <ContextMenuItem onSelect={() => showDuplicates(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem>
       </>
     }}
   />
+  /* eslint-enable react-hooks/refs */
 
   const page = <section className="flex flex-col gap-3" {...(forClasses ? { [IN_PLACE_ATTRIBUTE]: CLASS_CREATION_PATH } : {})}>
     <datalist id="class-spell-types">{classSpellTypeSuggestions.filter((type) => forClasses || classSpellCategory(type) !== "bonus").map((type) => <option key={type} value={type} />)}</datalist>
@@ -716,29 +862,27 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
         {editing && <SpellForm key={`${editing.rowNumber}:${editing.id}`} withClasses={forClasses} initial={toDraft(editing)} classes={data.classes} spells={data.spells} pending={pending} title={`Ligne ${editing.rowNumber}`} onCancel={() => setEditing(null)} onSave={(draft, original) => void save(editing, draft, false, original).then(() => setEditing(null))} />}
       </DialogContent>
     </Dialog>
-    {editingSpell !== null && spellByKey.get(editingSpell) && <Dialog open onOpenChange={(open) => { if (!open) setEditingSpell(null) }}>
-      <DialogContent className="max-h-[92svh] overflow-y-auto sm:max-w-5xl">
-        <DialogHeader><DialogTitle className="sr-only">Fiche du sort</DialogTitle></DialogHeader>
-        <SpellForm
-          key={editingSpell}
-          initial={toDraft(spellByKey.get(editingSpell)!)}
-          classes={data.classes}
-          spells={data.spells}
-          pending={pending}
-          withClasses={forClasses}
-          title={spellByKey.get(editingSpell)!.name}
-          onCancel={() => setEditingSpell(null)}
-          onSave={(draft, original) => { const spell = spellByKey.get(editingSpell)!; void save(spell, draft, false, original).then((saved) => { if (saved) setEditingSpell(null) }) }}
-        />
-      </DialogContent>
-    </Dialog>}
+    {editingSpell !== null && sheetSpell && <IndexRowSheet
+      open
+      rowKey={editingSpell}
+      title={sheetSpell.name}
+      subtitle={`${forClasses ? "Sorts des classes" : "Sorts des créatures"} · ${sheetSpell.type || "Type non renseigné"}`}
+      fields={sheetFields}
+      error={sheetError}
+      renderField={(field) => field.key !== "classes" ? undefined : <div className="grid content-start gap-1 text-xs font-semibold">
+        Classes et rangs
+        <ClassLinksEditor draft={toDraft(sheetSpell)} classes={data.classes} spells={data.spells} spellId={sheetSpell.id} onChange={(classRanks) => void saveSheetRanks(sheetSpell, classRanks)} />
+      </div>}
+      navigation={{ rows: sheetRows.filter((key) => spellByKey.has(key)), labelOf: (key) => spellByKey.get(key)?.name ?? "", onGo: (key) => { setSheetError(""); setEditingSpell(key) } }}
+      onSave={saveSheetSpell}
+      onClose={() => { setEditingSpell(null); setSheetError("") }}
+    />}
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Classes</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
-      <TabsContent value="classes" className="mt-3"><div className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<ClassPicker classes={data.classes} selected={selectedClass} onSelect={selectClass} /></div>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} hrefFor={classCreationHref} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.id}:${spell.rowNumber}:${version}`} spell={spell} {...editableProps} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
-      {/* Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs. */}
-      <TabsContent value="actifs" className="mt-3">{tableFor(filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif"))}</TabsContent>
-      <TabsContent value="passifs" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "passif"))}</TabsContent>
-      <TabsContent value="bonus" className="mt-3">{tableFor(filtered.filter((spell) => spell.category === "bonus"))}</TabsContent>
+      <TabsContent value="classes" className="mt-3"><div className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<ClassPicker classes={data.classes} selected={selectedClass} onSelect={selectClass} /></div>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} hrefFor={classCreationHref} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-presentation" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Présentation</h3></div><ClassPresentationEditor key={selectedClass.id} classId={selectedClass.id} accent={selectedClass.accentDark} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} {...{ [SEARCH_TOGGLE]: "" }} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.id}:${spell.rowNumber}:${version}`} spell={spell} {...editableProps} place={{ className: selectedClass.name, rank, onUnlink: (item) => void link(item, selectedClass.id, null) }} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
+      <TabsContent value="actifs" className="mt-3">{tab === "actifs" && tableFor()}</TabsContent>
+      <TabsContent value="passifs" className="mt-3">{tab === "passifs" && tableFor()}</TabsContent>
+      <TabsContent value="bonus" className="mt-3">{tab === "bonus" && tableFor()}</TabsContent>
       <TabsContent value="duplicates" className="mt-3">{data.similaritiesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{data.similaritiesError}</p>}<SpellDuplicates key={duplicateFocus ?? "tous"} spells={data.spells} classes={data.classes} similarities={data.similarities} focusSpellId={duplicateFocus} pending={pending} onMerge={merge} onIgnore={ignore} onEdit={setEditing} onDelete={remove} /></TabsContent>
       {forClasses && <TabsContent value="rank-bonus" className="mt-3"><RankBonusTab /></TabsContent>}
     </Tabs>

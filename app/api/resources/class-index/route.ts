@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { deleteClassSpell, ignoreSpellPairs, invalidateClassContentCaches, linkClassSpell, listClassResources, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
 import { renameCreatureSpells } from "@/lib/world-indexes"
+import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorized() {
@@ -28,7 +29,7 @@ function errorMessage(code: string) {
   if (code.startsWith("CLASS_SPELL_COLUMN_MISSING:")) return `La feuille des sorts n’a pas de colonne « ${code.slice("CLASS_SPELL_COLUMN_MISSING:".length)} » : rien n’a été enregistré. Ajoute cette colonne en ligne 1 dans Google Sheets, puis recommence.`
   if (code.startsWith("CLASS_RANK_FULL")) return "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux."
   if (code.startsWith("CLASS_COLUMN_NOT_FOUND")) return "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée."
-  return "Cette modification n’a pas pu être enregistrée dans Google Sheets."
+  return googleFailureMessage(code) || "Cette modification n’a pas pu être enregistrée dans Google Sheets."
 }
 
 export async function GET(request: Request) {

@@ -223,7 +223,7 @@ type SheetGridRowActions = {
  */
 const SheetGridRowView = memo(function SheetGridRowView({
   rowKey, rowNumber, rowIndex, columns, firstKey, manualHeight, selected, activeColumn, fillColumn,
-  version, writeTick, disabled, readOnly, valueOf, renderCustomCell, actions, striped,
+  version, rowVersion, writeTick, disabled, readOnly, valueOf, renderCustomCell, actions, striped,
 }: {
   rowKey: string
   rowNumber: number
@@ -235,6 +235,8 @@ const SheetGridRowView = memo(function SheetGridRowView({
   activeColumn: string | null
   fillColumn: string | null
   version: number
+  /** Cette ligne seule, réécrite ailleurs (sa fiche) : ses cellules relisent leur valeur. */
+  rowVersion: number
   writeTick: number
   disabled: boolean
   readOnly: boolean
@@ -292,7 +294,7 @@ const SheetGridRowView = memo(function SheetGridRowView({
           : column.control
             ? column.control(rowKey)
             : <RichTextSurface
-                key={`${version}:${writeTick}:${column.key}`}
+                key={`${version}:${rowVersion}:${writeTick}:${column.key}`}
                 initialHtml={column.plain ? escapeRichText(valueOf(rowKey, column.key)) : sanitizeRichText(valueOf(rowKey, column.key))}
                 plain={Boolean(column.plain)}
                 disabled={disabled || readOnly}
@@ -391,7 +393,7 @@ function NewRowDraft({ columns, firstKey, settings, disabled, onDone }: {
 
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
-  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, fit = false,
+  sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, rowVersions, fit = false,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -415,6 +417,9 @@ export function SheetGrid({
   /** À incrémenter quand les valeurs viennent réellement du serveur : les cellules
    *  sont alors remontées avec le nouveau contenu. Une frappe ne doit jamais le changer. */
   version?: number
+  /** Le même signal, ligne par ligne : une ligne enregistrée depuis sa fiche est redessinée
+   *  seule, sans remonter tout le tableau. */
+  rowVersions?: Record<string, number>
   /** Petit tableau posé dans une page (statistiques, diagnostic) : à la hauteur de ses lignes, sans se figer sous l'en-tête. */
   fit?: boolean
 }) {
@@ -807,6 +812,7 @@ export function SheetGrid({
             activeColumn={activeCell?.row === row.key ? activeCell.column : null}
             fillColumn={fill && rowIndex >= fill.from && rowIndex <= fill.to ? fill.column : null}
             version={version}
+            rowVersion={rowVersions?.[row.key] ?? 0}
             writeTick={writeTick}
             disabled={disabled}
             readOnly={readOnly}

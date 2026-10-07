@@ -50,12 +50,58 @@ export function ReferenceScopeProvider({ scope, children }: { scope: ReferenceSc
 
 const ANCHORS = 'a[href^="/reference/"]'
 
+// ---------------------------------------------------------------------------
+// Ce qui flotte au-dessus de la zone (le menu, le champ d'une étiquette)
+// ---------------------------------------------------------------------------
+
+/**
+ * Où poser ce qui flotte au-dessus d'une zone éditable. Dans une fenêtre (la fiche d'une
+ * ligne, celle d'un PNJ…), il doit être dedans : une fenêtre garde pour elle le focus et
+ * les clics. Posés hors d'elle, le menu « { » se refermait au premier clic sur une
+ * proposition et le champ d'une étiquette ne recevait jamais le focus (il restait affiché).
+ *
+ * Une fenêtre centrée par `transform` devient le repère des positions `fixed` de ce qu'elle
+ * contient : `place` convertit un point de l'écran dans ce repère.
+ */
+export function floatingLayer(node: Element | null) {
+  const host = (node?.closest?.('[role="dialog"], [role="alertdialog"]') as HTMLElement | null) ?? document.body
+  let origin = { left: 0, top: 0, bottom: window.innerHeight }
+  let bounds = { right: window.innerWidth, bottom: window.innerHeight }
+  if (host !== document.body) {
+    const probe = document.createElement("div")
+    probe.style.cssText = "position:fixed;left:0;top:0;width:0;height:0;visibility:hidden;pointer-events:none"
+    host.append(probe)
+    const start = probe.getBoundingClientRect()
+    probe.style.top = "auto"
+    probe.style.bottom = "0"
+    const end = probe.getBoundingClientRect()
+    probe.remove()
+    origin = { left: start.left, top: start.top, bottom: end.top }
+    // Une fenêtre qui défile coupe ce qui la dépasse : le menu reste dans ses bords.
+    const style = window.getComputedStyle(host)
+    if (style.overflowY !== "visible" || style.overflowX !== "visible") {
+      const box = host.getBoundingClientRect()
+      bounds = { right: Math.min(bounds.right, box.right), bottom: Math.min(bounds.bottom, box.bottom) }
+    }
+  }
+  return {
+    host,
+    bounds,
+    /** Un point de l'écran, en coordonnées `fixed` dans `host`. */
+    left: (x: number) => x - origin.left,
+    top: (y: number) => y - origin.top,
+    /** La distance d'un point de l'écran au bas du repère (pour `bottom`). */
+    bottom: (y: number) => origin.bottom - y,
+  }
+}
+
 /**
  * Les références d'une zone éditable forment chacune un bloc (effacé d'un coup, jamais
  * modifié lettre à lettre) et reprennent le nom actuel de leur ligne. Le texte n'est pas
  * enregistré pour autant : il le sera avec la prochaine modification.
  */
 export function prepareReferenceAnchors(root: HTMLElement, refreshLabels = true) {
+  if (refreshLabels) rejoinStrayAnchors(root)
   for (const anchor of root.querySelectorAll<HTMLAnchorElement>(ANCHORS)) {
     anchor.contentEditable = "false"
     if (!refreshLabels) continue
@@ -69,6 +115,29 @@ export function prepareReferenceAnchors(root: HTMLElement, refreshLabels = true)
       const next = referenceLabel(resolved.name, reference.column ? resolved.column ?? reference.column : undefined)
       if (next !== anchor.textContent) anchor.textContent = next
     })
+  }
+}
+
+/**
+ * Une étiquette posée en fin de ligne (de paragraphe) par une version d'avant se
+ * retrouvait hors de sa ligne, seule dessous, sans moyen de l'y remonter :
+ * `<div>Il est </div><a>Empoisonné</a> `. Elle rejoint sa ligne, avec ce qui la suit
+ * jusqu'au prochain retour à la ligne. Rien n'est enregistré pour autant : le texte le
+ * sera avec la prochaine modification.
+ */
+function rejoinStrayAnchors(root: HTMLElement) {
+  for (const anchor of [...root.querySelectorAll<HTMLAnchorElement>(ANCHORS)]) {
+    if (anchor.parentNode !== root) continue
+    let line = anchor.previousSibling
+    while (line && line.nodeType === Node.TEXT_NODE && !line.textContent) line = line.previousSibling
+    if (!(line instanceof HTMLElement) || !/^(DIV|P)$/.test(line.tagName) || line.lastChild?.nodeName === "BR") continue
+    // L'étiquette et la fin de sa ligne : jusqu'au prochain bloc ou retour à la ligne.
+    const moved: Node[] = []
+    for (let node: Node | null = anchor; node; node = node.nextSibling) {
+      if (node.nodeName === "BR" || (node instanceof HTMLElement && /^(DIV|P|UL|OL|H2|H3|HR)$/.test(node.tagName))) break
+      moved.push(node)
+    }
+    line.append(...moved)
   }
 }
 
@@ -92,13 +161,14 @@ export function editReferenceAnchor(anchor: HTMLAnchorElement, root: HTMLElement
   // dans la zone fait glisser la frappe hors du lien (comportement des navigateurs).
   const rect = anchor.getBoundingClientRect()
   const style = window.getComputedStyle(anchor)
+  const layer = floatingLayer(root)
   const input = document.createElement("input")
   input.type = "text"
   input.value = before
   input.setAttribute("aria-label", "Texte de l’étiquette")
   input.dataset.richTextPopover = ""
   Object.assign(input.style, {
-    position: "fixed", left: `${rect.left - 4}px`, top: `${rect.top - 3}px`, zIndex: "400",
+    position: "fixed", left: `${layer.left(rect.left - 4)}px`, top: `${layer.top(rect.top - 3)}px`, zIndex: "400",
     width: `${Math.max(rect.width + 48, 140)}px`, height: `${rect.height + 6}px`, padding: "0 4px",
     font: style.font, color: style.color, background: "var(--background)",
     border: "1px solid var(--primary)", borderRadius: "6px", outline: "none", boxShadow: "0 4px 14px rgb(0 0 0 / 0.18)",
@@ -141,7 +211,7 @@ export function editReferenceAnchor(anchor: HTMLAnchorElement, root: HTMLElement
     else if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); finish(true) }
   })
   input.addEventListener("blur", () => finish(false))
-  document.body.append(input)
+  layer.host.append(input)
   input.focus()
   input.select()
   return true
@@ -263,7 +333,9 @@ function replaceToken(token: Token, content: { text: string } | { html: string }
 function referenceHtml(option: Extract<Option, { kind: "name" | "column" }>) {
   const column = option.kind === "column" ? option.column : undefined
   const href = referenceHref({ index: option.entry.index, id: option.row.id, column })
-  return `<a href="${escapeHtml(href)}" contenteditable="false">${escapeHtml(referenceLabel(option.row.name, column))}</a>&nbsp;`
+  // Sans contenteditable="false" dans le HTML inséré : Chrome sortait alors l'étiquette du
+  // paragraphe quand elle le terminait (elle passait seule à la ligne). Il est posé juste après.
+  return `<a href="${escapeHtml(href)}">${escapeHtml(referenceLabel(option.row.name, column))}</a>&nbsp;`
 }
 
 // ---------------------------------------------------------------------------
@@ -272,16 +344,18 @@ function referenceHtml(option: Extract<Option, { kind: "name" | "column" }>) {
 
 type Position = { left: number; top?: number; bottom?: number }
 
-function caretPosition(token: Token): Position {
+function caretPosition(token: Token, layer: ReturnType<typeof floatingLayer>): Position {
   const range = document.createRange()
   range.setStart(token.node, Math.min(token.end, token.node.length))
   range.collapse(true)
   let rect: DOMRect | undefined = range.getClientRects()[0]
   if (!rect || (!rect.width && !rect.height && !rect.top)) rect = token.node.parentElement?.getBoundingClientRect()
-  const left = Math.max(8, Math.min((rect?.left ?? 8) - 8, window.innerWidth - 336))
+  const left = Math.max(8, Math.min((rect?.left ?? 8) - 8, layer.bounds.right - 336))
   const below = (rect?.bottom ?? 0) + 6
   // Trop bas dans la fenêtre : le menu s'ouvre au-dessus de la ligne.
-  return below + 320 > window.innerHeight ? { left, bottom: window.innerHeight - (rect?.top ?? 0) + 6 } : { left, top: below }
+  return below + 320 > layer.bounds.bottom
+    ? { left: layer.left(left), bottom: layer.bottom((rect?.top ?? 0) - 6) }
+    : { left: layer.left(left), top: layer.top(below) }
 }
 
 /**
@@ -297,10 +371,17 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
   // La ligne surlignée, pour ce qui est tapé : une nouvelle frappe repart de la première.
   const [highlighted, setHighlighted] = useState({ query: "", index: 0 })
   const [position, setPosition] = useState<Position | null>(null)
+  // Le menu est posé dans la fenêtre qui contient la zone (sinon dans la page).
+  const [host, setHost] = useState<HTMLElement | null>(null)
   const list = useRef<HTMLDivElement>(null)
+  // Rouvert de lui-même (on reprend un « {État:Empoi » laissé en plan) : il se retire si rien ne correspond.
+  const resumed = useRef(false)
+  // Le « { » dont le menu a été fermé par Échap : la frappe qui suit ne le rouvre pas.
+  const dismissed = useRef<{ node: Text; start: number } | null>(null)
 
   const close = useCallback(() => {
     active.current = false
+    resumed.current = false
     setToken(null)
   }, [])
 
@@ -309,13 +390,17 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
     if (!active.current || !node) return
     const next = caretToken(node)
     if (!next) { close(); return }
+    const layer = floatingLayer(node)
     setToken(next)
-    setPosition(caretPosition(next))
+    setHost(layer.host)
+    setPosition(caretPosition(next, layer))
   }, [close, editor])
 
-  const open = useCallback(() => {
+  const open = useCallback((resume = false) => {
     if (referenceCatalogDenied()) return
     active.current = true
+    resumed.current = resume
+    dismissed.current = null
     setLoading(true)
     void loadReferenceCatalog().then((loaded) => {
       setLoading(false)
@@ -326,6 +411,14 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
     refresh()
   }, [close, refresh])
 
+  /** Échap : le menu se ferme, et ne revient pas tant qu'on continue d'écrire après ce « { ». */
+  const dismiss = useCallback(() => {
+    const node = editor.current
+    const current = node ? caretToken(node) : null
+    dismissed.current = current ? { node: current.node, start: current.start } : null
+    close()
+  }, [close, editor])
+
   // Le curseur déplacé (clic, flèches gauche/droite) : le menu suit ou se ferme.
   useEffect(() => {
     if (!token) return
@@ -335,7 +428,7 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
       if (event.key !== "Escape" || !active.current) return
       event.preventDefault()
       event.stopPropagation()
-      close()
+      dismiss()
     }
     document.addEventListener("selectionchange", onSelection)
     window.addEventListener("keydown", onEscape, true)
@@ -343,7 +436,7 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
       document.removeEventListener("selectionchange", onSelection)
       window.removeEventListener("keydown", onEscape, true)
     }
-  }, [close, refresh, token])
+  }, [close, dismiss, refresh, token])
 
   const stage = useMemo(() => catalog && token ? stageOf(catalog, token.query) : null, [catalog, token])
   const options = useMemo(() => catalog && stage ? optionsOf(catalog, stage, scope) : [], [catalog, scope, stage])
@@ -358,6 +451,10 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
   useEffect(() => {
     list.current?.querySelector<HTMLElement>(`[data-option="${highlight}"]`)?.scrollIntoView({ block: "nearest" })
   }, [highlight])
+  // Rouvert de lui-même sur un texte qui ne cite rien (« {vraiment} » écrit à la main) : il se retire.
+  useEffect(() => {
+    if (resumed.current && catalog && token && !options.length) close()
+  }, [catalog, close, options.length, token])
 
   const choose = useCallback((option: Option) => {
     const current = editor.current ? caretToken(editor.current) : null
@@ -395,7 +492,7 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
       else close()
       return
     }
-    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); close(); return }
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); dismiss(); return }
     if (!options.length) return
     if (event.key === "ArrowDown" || event.key === "ArrowUp") {
       event.preventDefault()
@@ -409,7 +506,7 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
       const option = options[Math.min(highlight, options.length - 1)]
       if (option) choose(option)
     }
-  }, [choose, close, finishTyped, highlight, options, setHighlight, token])
+  }, [choose, close, dismiss, finishTyped, highlight, options, setHighlight, token])
 
   /**
    * Clic sur une étiquette dans la zone qu'on écrit : son texte se modifie en place (le
@@ -418,6 +515,8 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
    */
   const onClick = useCallback((event: ReactMouseEvent<HTMLDivElement>) => {
     const root = editor.current
+    // Revenir à la souris sur un « { » fermé par Échap : la frappe peut le rouvrir.
+    dismissed.current = null
     const anchor = (event.target as HTMLElement).closest?.(ANCHORS) as HTMLAnchorElement | null
     if (!enabled || !root || !anchor || !root.contains(anchor) || event.button !== 0 || event.ctrlKey || event.metaKey || event.shiftKey) return
     event.preventDefault()
@@ -428,11 +527,23 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
   const onInput = useCallback((event: FormEvent<HTMLDivElement>) => {
     if (!enabled) return
     const native = event.nativeEvent as InputEvent
-    if (native.data?.endsWith("{")) open()
-    else if (active.current) refresh()
-  }, [enabled, open, refresh])
+    if (native.data?.endsWith("{")) { open(); return }
+    if (active.current) { refresh(); return }
+    // Une citation laissée en plan (« {État:Empoi », le menu refermé) : continuer de l'écrire
+    // rouvre le menu là où on en était.
+    const node = editor.current
+    const resumable = node && /^insert(Text|CompositionText)$|^delete/.test(native.inputType ?? "") ? caretToken(node) : null
+    if (!resumable || (dismissed.current?.node === resumable.node && dismissed.current.start === resumable.start)) return
+    open(true)
+  }, [editor, enabled, open, refresh])
 
-  const element = enabled && token && position && typeof document !== "undefined" ? createPortal(<div
+  /** Le curseur quitte la zone : le menu se ferme, un « { » fermé par Échap pourra être repris. */
+  const onBlur = useCallback(() => {
+    dismissed.current = null
+    close()
+  }, [close])
+
+  const element = enabled && token && position && host?.isConnected ? createPortal(<div
     data-rich-text-popover=""
     role="listbox"
     aria-label="Citer une ligne d’index"
@@ -460,9 +571,9 @@ export function useReferenceMenu(editor: RefObject<HTMLDivElement | null>, enabl
           : <p className="px-2 py-5 text-center text-xs text-muted-foreground">{stage?.kind === "unknown" ? `Aucun index ne s’appelle « ${stage.text} ».` : "Rien ne correspond."}</p>}
     </div>
     <div className="border-t px-3 py-1 text-[10px] text-muted-foreground">↑↓ choisir · Entrée valider · <b>{"}"}</b> terminer · Échap fermer · clic sur une étiquette : changer son texte · clic droit : l’ouvrir</div>
-  </div>, document.body) : null
+  </div>, host) : null
 
-  return { onKeyDown, onInput, onClick, close, element, open }
+  return { onKeyDown, onInput, onClick, onBlur, close, element, open }
 }
 
 function headerOf(stage: Stage | null) {

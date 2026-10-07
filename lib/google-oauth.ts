@@ -32,6 +32,18 @@ type GoogleTokenResponse = {
 
 let cachedAccessToken: { token: string; expiresAt: number } | null = null
 let accessTokenPromise: Promise<string> | null = null
+/**
+ * La dernière session vue sur cette installation (mode serveur partagé). Le jeton Google
+ * se renouvelle environ une fois par heure ; quand ce renouvellement tombait sur un travail
+ * d'arrière-plan (une relecture d'index après la réponse), il n'avait pas de session, le
+ * serveur partagé le refusait, et toutes les écritures qui l'attendaient échouaient avec
+ * lui (« n'a pas pu être enregistrée dans Google Sheets »). Jamais journalisée.
+ */
+let lastSessionToken: string | undefined
+/** Renouvelé cinq minutes avant son expiration : une requête lente ne part pas avec un jeton mourant. */
+const ACCESS_TOKEN_MARGIN_MS = 5 * 60_000
+/** Une requête Google qui ne répond plus ne bloque pas tout Eraser (la file des écritures l'attend). */
+const GOOGLE_REQUEST_TIMEOUT_MS = 90_000
 
 function runtimeEnv() {
   return env as unknown as RuntimeEnv
@@ -111,6 +123,7 @@ async function tokenRequest(body: URLSearchParams) {
     method: "POST",
     headers: { "content-type": "application/x-www-form-urlencoded" },
     body,
+    signal: AbortSignal.timeout(30_000),
   })
   const payload = (await response.json()) as GoogleTokenResponse
   if (!response.ok || !payload.access_token) {
@@ -405,14 +418,13 @@ async function getAuthorizationWithToken() {
   return authorization
 }
 
-async function loadGoogleOAuthAccessToken() {
-  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + 60_000) {
+async function loadGoogleOAuthAccessToken(sessionToken: string | undefined) {
+  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + ACCESS_TOKEN_MARGIN_MS) {
     return cachedAccessToken.token
   }
 
   const remote = remoteAccountsConfig(env)
   if (remote) {
-    const sessionToken = await currentAuthToken().catch(() => undefined)
     const response = (await remoteAccountsFetch(remote, "/google/access-token", { method: "GET", token: sessionToken })) as {
       accessToken: string
       expiresAt: number
@@ -463,13 +475,21 @@ async function loadGoogleOAuthAccessToken() {
 }
 
 export async function googleOAuthAccessToken() {
-  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + 60_000) return cachedAccessToken.token
+  if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + ACCESS_TOKEN_MARGIN_MS) return cachedAccessToken.token
+  // La session de la requête en cours, sinon la dernière vue (travail d'arrière-plan).
+  const own = remoteAccountsConfig(env) ? await currentAuthToken().catch(() => undefined) : undefined
+  if (own) lastSessionToken = own
   if (!accessTokenPromise) {
-    accessTokenPromise = loadGoogleOAuthAccessToken().finally(() => {
+    accessTokenPromise = loadGoogleOAuthAccessToken(own ?? lastSessionToken).finally(() => {
       accessTokenPromise = null
     })
   }
   return accessTokenPromise
+}
+
+/** Google a refusé le jeton (401) : le prochain appel en demande un neuf. */
+export function forgetGoogleAccessToken() {
+  cachedAccessToken = null
 }
 
 // In remote-accounts mode (see accounts-remote.ts), fetching the shared Drive
@@ -495,7 +515,8 @@ export async function googleOAuthAuthorizedFetch(url: string, init: RequestInit 
   const headers = new Headers(init.headers)
   headers.set("authorization", `Bearer ${token}`)
   if (init.body && !headers.has("content-type")) headers.set("content-type", "application/json")
-  return fetch(url, { ...init, headers })
+  const timeout = AbortSignal.timeout(GOOGLE_REQUEST_TIMEOUT_MS)
+  return fetch(url, { ...init, headers, signal: init.signal ? AbortSignal.any([init.signal, timeout]) : timeout })
 }
 
 export function randomOAuthState() {
