@@ -119,6 +119,15 @@ export function playItemEquipped() {
   })
 }
 
+/** Un objet déséquipé (desequiperitem.mp3) ; à défaut, un petit déclic descendant. */
+export function playItemUnequipped() {
+  playFile("desequiperitem", (ctx) => {
+    const now = ctx.currentTime + 0.01
+    note(ctx, 1174.66, now, 0.12, 0.04, "triangle")
+    note(ctx, 783.99, now + 0.05, 0.18, 0.04, "triangle")
+  })
+}
+
 /** Un objet reçu (notifrecevoirobjet.mp3) ; à défaut, « ploup ploup » : deux bulles qui montent. */
 export function playItemReceived() {
   playFile("notifrecevoirobjet", bubbles)

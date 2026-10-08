@@ -26,7 +26,7 @@ import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { ObjectText, ObjectTraits } from "@/components/eraser/object-combat-details"
 import { loadFullInventory } from "@/lib/inventory-fetch"
-import { playItemEquipped } from "@/lib/sounds"
+import { playItemEquipped, playItemUnequipped } from "@/lib/sounds"
 
 const categoryPresentation: Record<InventoryCategory, { icon: typeof Sword; color: string; singular: string; label?: string }> = {
   Armes: { icon: Sword, color: "#b9504e", singular: "un rangement d’armes" },
@@ -223,7 +223,7 @@ function InventoryItemLine({ slot, container, compatibleContainers, transferTarg
   return <article className="relative rounded-xl border border-border/55 bg-background/40 p-3 shadow-sm" onPointerMove={fresh.isNew ? fresh.seen : undefined} onFocusCapture={fresh.isNew ? fresh.seen : undefined}>
     {fresh.isNew && <span className="absolute -left-1 -top-1 size-2.5 rounded-full bg-rose-400 ring-2 ring-card" title="Objet reçu — disparaît au survol" aria-label="Nouvel objet reçu" />}
     <div className="flex items-start gap-3">
-      {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => { if (checked === true) playItemEquipped(); void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`) }} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
+      {equippable && <Checkbox checked={slot.equipped} disabled={pending} onCheckedChange={(checked) => { if (checked === true) playItemEquipped(); else playItemUnequipped(); void mutate({ action: "set-equipped", slotId: slot.id, equipped: checked === true }, `slot:${slot.id}`) }} className="mt-3" aria-label={`${slot.equipped ? "Déséquiper" : "Équiper"} ${item.name}`} title={slot.equipped ? (modifiers.length ? "Équipé — ses liens comptent dans les totaux" : "Équipé") : "Non équipé"} />}
       {/* L'icône, et sous elle les compétences liées : la place sous l'icône était vide. */}
       <div className="flex w-14 shrink-0 flex-col items-center gap-1.5">
         <div className="flex size-14 items-center justify-center overflow-hidden rounded-lg bg-muted/70 text-muted-foreground">{visualIsImage ? <img src={item.image} alt="" loading="lazy" decoding="async" className="size-full object-cover" /> : <ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full p-0.5" emojiClassName="text-2xl" fallback={<PackageOpen className="size-4" />} />}</div>

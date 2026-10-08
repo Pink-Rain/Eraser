@@ -106,6 +106,8 @@ export type RankBonusSelection = {
   spread: Record<number, Record<string, number>>
   /** Le sort sur mesure choisi. */
   spell: ClassSpell | null
+  /** « Déjà ajoutés à la main » : le rang est validé sans rien ajouter à la fiche. */
+  manual?: boolean
 }
 
 /** Une caractéristique principale entre lesquelles répartir un bonus « Caractéristique ». */
@@ -118,7 +120,7 @@ function emptySelection(bonus: RankBonus | undefined): RankBonusSelection {
 
 /** Ce qu'il reste à faire avant d'obtenir les bonus du rang ; vide quand tout est prêt. */
 export function rankBonusMissing(bonus: RankBonus | undefined, selection: RankBonusSelection) {
-  if (!bonus) return [] as string[]
+  if (!bonus || selection.manual) return [] as string[]
   const missing: string[] = []
   const wanted = rankBonusPickCount(bonus)
   if (selection.slots.length < wanted) missing.push(wanted - selection.slots.length > 1 ? `choisir ${wanted - selection.slots.length} bonus` : "choisir un bonus")
@@ -184,10 +186,16 @@ function RankBonusPicker({ bonus, accent, characteristics, canApply, spellPool, 
   return <section className="rounded-2xl border bg-card/80 p-4 text-left shadow-sm" style={{ borderColor: `${accent}55` }}>
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="flex items-center gap-2 font-display text-lg font-semibold"><span className="flex size-7 items-center justify-center rounded-lg text-white" style={{ backgroundColor: accent }}><Sparkles className="size-4" /></span>Bonus du rang {bonus.rank}</p>
-      {missing.length
-        ? <span className="rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">Reste à {missing.join(", ")}</span>
-        : <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300"><Check className="size-3" />Prêts</span>}
+      <span className="flex flex-wrap items-center gap-2">
+        {selection.manual
+          ? <span className="inline-flex items-center gap-1 rounded-full bg-muted px-2.5 py-0.5 text-[11px] font-semibold text-muted-foreground"><Check className="size-3" />Déjà sur la fiche : rien ne sera ajouté</span>
+          : missing.length
+            ? <span className="rounded-full border border-border px-2.5 py-0.5 text-[11px] font-medium text-muted-foreground">Reste à {missing.join(", ")}</span>
+            : <span className="inline-flex items-center gap-1 rounded-full bg-emerald-500/15 px-2.5 py-0.5 text-[11px] font-semibold text-emerald-600 dark:text-emerald-300"><Check className="size-3" />Prêts</span>}
+        <button type="button" onClick={() => onChange({ ...selection, manual: !selection.manual })} className="rounded-full px-2 py-0.5 text-[11px] font-medium text-muted-foreground underline-offset-4 hover:text-foreground hover:underline" title="Ces bonus ont déjà été reportés sur la fiche : le rang est validé sans rien y ajouter.">{selection.manual ? "Les ajouter quand même" : "Déjà ajoutés à la main ?"}</button>
+      </span>
     </div>
+    {!selection.manual && <>
     {bonus.bonuses.length > 0 && <>
       <p className="mt-2 text-xs text-muted-foreground">{choosing ? `Choisis ${wanted} bonus parmi ${bonus.bonuses.length}.` : bonus.bonuses.length > 1 ? "Tu gagnes ces bonus :" : "Tu gagnes ce bonus :"} Ils s’ajoutent au bonus/malus de leur cible.</p>
       <div className={`mt-3 grid gap-2 ${bonus.bonuses.length > 1 ? "sm:grid-cols-2" : ""} ${bonus.bonuses.length > 2 ? "lg:grid-cols-4" : ""}`}>
@@ -250,6 +258,7 @@ function RankBonusPicker({ bonus, accent, characteristics, canApply, spellPool, 
           </div>}
         </>}
     </div>}
+    </>}
     {(bonus.other || bonus.entries.length > 0) && <div className="mt-3 space-y-1 rounded-xl bg-muted/40 px-3 py-2 text-sm">
       {bonus.other && <p><span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Autre · </span>{bonus.other}</p>}
       {bonus.entries.map((entry, index) => <p key={`${entry.label}:${index}`}><span className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{entry.label} · </span>{entry.value}</p>)}
@@ -340,7 +349,7 @@ export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options
         <div className={`flex flex-col items-center gap-3 ${bonusOnly ? "mt-6" : "mt-1"}`}>
           {bonusOnly && <Button type="button" size="lg" disabled={Boolean(picked) || !ready} onClick={() => void pick(null)} style={ready ? { backgroundColor: accent, color: "#fff" } : undefined} variant={ready ? "default" : "outline"}>{picked ? <LoaderCircle className="animate-spin" /> : ready ? <Check /> : null}{ready ? "Obtenir les bonus" : "Termine tes bonus pour les obtenir"}</Button>}
           {onLater && <Button type="button" variant="outline" size="sm" className="rounded-full" onClick={() => { setPickedFor(null); setSelectionFor(null); onLater() }} disabled={Boolean(picked)}>Choisir plus tard</Button>}
-          <p className="text-center text-xs text-muted-foreground">{onLater ? "Le choix t’attend dans l’onglet Sorts. " : ""}{bonusOnly ? "Les bonus s’ajoutent au bonus/malus de leur cible sur la fiche." : "Le sort reste modifiable dans la progression de la classe (« Rechoisir »)."}</p>
+          <p className="text-center text-xs text-muted-foreground">{onLater ? "Le choix t’attend dans l’onglet Sorts. " : ""}{bonusOnly ? "Les bonus s’ajoutent au bonus/malus de leur cible sur la fiche." : "Pour changer de sort plus tard, retire-le de tes capacités : son rang te reproposera ses sorts."}</p>
         </div>
       </div>
     </DialogContent>

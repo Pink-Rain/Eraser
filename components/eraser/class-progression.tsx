@@ -1,18 +1,16 @@
 "use client"
 
-import { IndexRichText } from "@/components/eraser/index-references"
 import { useMemo, useState, type DragEvent, type MouseEvent } from "react"
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { Check, ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, RotateCcw, Search, Trash2, Undo2, X, Zap } from "lucide-react"
+import { ChevronDown, CircleDotDashed, Crosshair, Gauge, GripVertical, Plus, Search, Trash2, Undo2, X, Zap } from "lucide-react"
 
-import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { InlineEdit } from "@/components/eraser/inline-edit"
 import { RichTextInlineEditor } from "@/components/eraser/rich-text"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
-import { RankBonusLine, useRankBonuses } from "@/components/eraser/rank-bonus"
+import { useRankBonuses } from "@/components/eraser/rank-bonus"
 import { NewSpellSlot } from "@/components/eraser/spell-choice-dialog"
 import { markNewSlots, NewSlotsContext, useNewSlot, useNewSlots } from "@/components/eraser/new-inventory-items"
 import type { ClassSpell } from "@/lib/class-content"
@@ -52,7 +50,7 @@ export type CharacterClassChoices = {
 }
 
 /** Ce qu'un rang a ajouté à la fiche : les valeurs écrites, et le sort sur mesure choisi. */
-export type RankBonusTaken = { applied: Array<{ target: string; amount: number }>; spell?: string; at?: string }
+export type RankBonusTaken = { applied: Array<{ target: string; amount: number }>; spell?: string; at?: string; /** Validé sans rien ajouter : déjà reporté à la main. */ manual?: boolean }
 
 function parseRankBonusState(value: unknown): CharacterClassChoices["rankBonuses"] {
   const source = value && typeof value === "object" && !Array.isArray(value) ? value as Record<string, unknown> : {}
@@ -63,7 +61,7 @@ function parseRankBonusState(value: unknown): CharacterClassChoices["rankBonuses
       if (!raw || typeof raw !== "object") continue
       const entry = raw as Record<string, unknown>
       const applied = Array.isArray(entry.applied) ? entry.applied.flatMap((item) => item && typeof item === "object" && typeof (item as { target?: unknown }).target === "string" && typeof (item as { amount?: unknown }).amount === "number" ? [{ target: (item as { target: string }).target, amount: (item as { amount: number }).amount }] : []) : []
-      taken[rank] = { applied, ...(typeof entry.spell === "string" ? { spell: entry.spell } : {}), ...(typeof entry.at === "string" ? { at: entry.at } : {}) }
+      taken[rank] = { applied, ...(typeof entry.spell === "string" ? { spell: entry.spell } : {}), ...(typeof entry.at === "string" ? { at: entry.at } : {}), ...(entry.manual === true ? { manual: true } : {}) }
     }
   }
   return { from, taken }
@@ -190,10 +188,13 @@ export type PendingRankStep = {
 }
 
 /** Les rangs dont les bonus restent à obtenir : après `from`, jusqu'au niveau, pas encore pris. */
+/**
+ * Les rangs atteints dont les bonus restent à obtenir : tous ceux qui ne sont pas encore
+ * notés comme obtenus (un rang reporté à la main se valide avec « Déjà ajoutés à la main »).
+ */
 export function pendingRankBonuses(bonuses: RankBonus[], level: number, value: string) {
   const { rankBonuses } = parseClassChoices(value)
-  if (rankBonuses.from === null) return []
-  return bonuses.filter((bonus) => bonus.rank > rankBonuses.from! && bonus.rank <= level && rankBonusHasContent(bonus) && !rankBonuses.taken[String(bonus.rank)])
+  return bonuses.filter((bonus) => bonus.rank <= level && rankBonusHasContent(bonus) && !rankBonuses.taken[String(bonus.rank)])
 }
 
 export function pendingRankSteps(classes: ClassRecord[], spells: ClassSpell[], level: number, value: string, bonuses: RankBonus[]): PendingRankStep[] {
@@ -207,16 +208,6 @@ export function pendingRankSteps(classes: ClassRecord[], spells: ClassSpell[], l
   const first = classes[0]
   for (const bonus of waiting.values()) steps.push({ key: `bonus:${bonus.rank}`, rank: bonus.rank, bonus, className: first?.name ?? "", accent: first?.accentDark || "#927640", accentLight: first?.accentLight || "#d8c39a" })
   return steps.sort((left, right) => left.rank - right.rank || Number(Boolean(right.bonus)) - Number(Boolean(left.bonus)))
-}
-
-/**
- * Les choix après un passage de niveau : la première fois, les rangs déjà atteints
- * (`previousLevel`) sont notés comme obtenus avant les bonus de rang.
- */
-export function startRankBonuses(value: string, previousLevel: number) {
-  const state = parseClassChoices(value)
-  if (state.rankBonuses.from !== null) return value
-  return JSON.stringify({ ...state, rankBonuses: { ...state.rankBonuses, from: Math.max(0, Math.trunc(previousLevel)) } })
 }
 
 /** Note les bonus d'un rang comme obtenus ; le sort sur mesure rejoint les sorts de la fiche. */
@@ -337,14 +328,6 @@ function KnownSpell({ spell, original, customized, rank, accent, currentCharges,
   </details>
 }
 
-function ChoiceCard({ spell, selected, accent, onChoose }: { spell: ClassSpell; selected: boolean; accent: string; onChoose: () => void }) {
-  const tone = spellTone(spell)
-  return <button type="button" onClick={onChoose} className="min-h-32 rounded-2xl border bg-card/70 p-4 text-left transition hover:-translate-y-0.5 hover:shadow-md" style={{ borderColor: selected ? accent : `${accent}38`, backgroundColor: selected ? `${accent}12` : undefined }}>
-    <div className="flex items-start gap-3"><span className="flex size-8 shrink-0 items-center justify-center rounded-lg" style={{ backgroundColor: tone.background, color: tone.foreground }}><span className="flex size-4 items-center justify-center [&>svg]:size-4"><SpellGlyph category={spell.category} /></span></span><span className="min-w-0 flex-1"><span className="flex items-center gap-2"><span className="font-display text-lg font-semibold leading-tight">{spell.name}</span>{selected && <Check className="size-4" style={{ color: accent }} />}</span><span className="mt-1 block text-xs text-muted-foreground">{spell.type}</span></span></div>
-    {(spell.effect || spell.description) && <span className="mt-3 line-clamp-4 block text-sm leading-5"><IndexRichText as="span" html={spell.effectHtml || spell.effect} className="block font-medium" />{spell.description && <IndexRichText as="span" html={spell.descriptionHtml || spell.description} className="mt-1 block text-muted-foreground" />}</span>}
-    {spell.category === "actif" && <SpellChargeStars total={spell.charges} accent={accent} className="mt-3" />}
-  </button>
-}
 
 /**
  * La progression de classe d'un personnage. La fenêtre « Nouveau sort » appartient à la
@@ -356,9 +339,7 @@ export function ClassProgression({ classes, spells, level, characterLevel = leve
   // Les sorts tout juste obtenus portent une pastille jusqu'à ce qu'on les survole.
   const spellsKey = newSpellsKey(ownerId)
   const newSpells = useNewSlots(spellsKey)
-  const [reconsidering, setReconsidering] = useState<Record<string, boolean>>({})
-  // Bonus de rang (communs à toutes les classes) : affichés sous le titre de chaque rang.
-  // Gardés d'un affichage à l'autre : revenir sur l'onglet Sorts ne les fait pas disparaître.
+  // Bonus de rang (communs à toutes les classes), pour l'emplacement « Nouveau sort / Bonus de rang ».
   const { bonuses: rankBonuses } = useRankBonuses()
   const [sort, setSort] = usePersistentState<"rank" | "name" | "type" | "manual">(
     "eraser:class-progression:sort", "rank",
@@ -368,17 +349,11 @@ export function ClassProgression({ classes, spells, level, characterLevel = leve
   const [query, setQuery] = useState("")
   const [searchCategory, setSearchCategory] = useState<"all" | ClassSpell["category"]>("all")
   const known = knownSpellsForCharacter(classes, spells, level, value)
-  const pending = useMemo(() => pendingSpellChoices(classes, spells, level, value), [classes, spells, level, value])
   // Ce que la fenêtre de passage de rang propose : sorts à choisir et bonus de rang.
   const steps = useMemo(() => pendingRankSteps(classes, spells, characterLevel, value, rankBonuses), [classes, spells, characterLevel, value, rankBonuses])
   const currentStep = steps[0]
 
   async function update(next: CharacterClassChoices) { await onCommit(JSON.stringify(next)) }
-  function choose(classId: string, rank: number, spellId: string) {
-    setReconsidering((current) => ({ ...current, [`${classId}:${rank}`]: false }))
-    if (ownerId) markNewSlots(spellsKey, [spellId])
-    return onCommit(chooseClassSpell(value, classId, rank, spellId))
-  }
   function setCharges(spell: ClassSpell, count: number) {
     return update({ ...state, charges: { ...state.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } })
   }
@@ -491,28 +466,5 @@ export function ClassProgression({ classes, spells, level, characterLevel = leve
       </div>}
     </section>
 
-    {classes.map((characterClass) => {
-      const classSpells = spells.filter((spell) => characterClass.id in spell.classRanks && spell.classRanks[characterClass.id] <= level)
-      const ranks = Array.from({ length: level + 1 }, (_, rank) => rank)
-      const hasChoicePending = pending.some((choice) => choice.classId === characterClass.id)
-      return <details key={characterClass.id} className="group rounded-2xl border bg-card/40" style={{ borderColor: `${characterClass.accentDark}45` }}>
-        <summary className="flex cursor-pointer list-none flex-wrap items-center justify-between gap-3 p-4 sm:p-5 [&::-webkit-details-marker]:hidden"><div><p className="flex items-center gap-2 text-[10px] font-semibold uppercase tracking-[.2em]" style={{ color: characterClass.accentDark }}>Progression de classe{hasChoicePending && <span className="flex size-5 items-center justify-center rounded-full bg-destructive text-xs font-bold text-destructive-foreground" title="Un rang est à choisir">!</span>}</p><h2 className="font-display mt-1 text-2xl font-semibold">{characterClass.name}</h2></div><div className="flex items-center gap-2"><Badge variant="outline" style={{ borderColor: `${characterClass.accentDark}55`, color: characterClass.accentDark }}>Rang actuel : {level}</Badge><ChevronDown className="size-5 text-muted-foreground transition group-open:rotate-180" /></div></summary>
-        <div className="border-t px-4 pb-4 sm:px-5 sm:pb-5" style={{ borderColor: `${characterClass.accentDark}28` }}>
-        {ranks.length ? <div className="mt-5 space-y-6">{ranks.map((rank) => {
-          const available = classSpells.filter((spell) => spell.classRanks[characterClass.id] === rank).slice(0, 3)
-          const chosenId = rank === 0 ? "" : state.choices[characterClass.id]?.[String(rank)] || ""
-          // Un sort choisi puis retiré de la fiche rend le choix de son rang à nouveau ouvert.
-          const selectedId = chosenId && !state.removed.includes(chosenId) ? chosenId : ""
-          const key = `${characterClass.id}:${rank}`
-          const choosing = rank > 0 && (!selectedId || reconsidering[key])
-          return <section key={rank} className="border-t pt-4" style={{ borderColor: `${characterClass.accentDark}28` }}>
-            <div className="mb-3 flex flex-wrap items-center justify-between gap-2"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ backgroundColor: `${characterClass.accentLight}42`, color: characterClass.accentDark }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display font-semibold">{rank === 0 ? "Rang commun" : `Rang ${rank}`}</h3><p className="text-[11px] text-muted-foreground">{rank === 0 ? "Acquis automatiquement" : choosing ? "Choisis une capacité" : "Choix enregistré"}</p></div></div>{rank > 0 && selectedId && !choosing && <Button type="button" variant="ghost" size="sm" onClick={() => setReconsidering((current) => ({ ...current, [key]: true }))}><RotateCcw />Rechoisir</Button>}{rank > 0 && selectedId && choosing && <Button type="button" variant="ghost" size="sm" onClick={() => setReconsidering((current) => ({ ...current, [key]: false }))}>Annuler</Button>}</div>
-            <RankBonusLine bonus={rankBonuses.find((bonus) => bonus.rank === rank)} taken={Boolean(state.rankBonuses.taken[String(rank)])} accent={characterClass.accentDark} className="-mt-1 mb-3 pl-10" />
-            <div className={`grid gap-3 ${choosing || rank === 0 ? "lg:grid-cols-3" : "grid-cols-1"}`}>{(choosing || rank === 0 ? available : available.filter((spell) => spell.id === selectedId)).map((spell) => <ChoiceCard key={spell.id} spell={spell} selected={rank === 0 || spell.id === selectedId} accent={characterClass.accentDark} onChoose={() => { if (rank > 0) void choose(characterClass.id, rank, spell.id) }} />)}</div>
-          </section>
-        })}</div> : <p className="mt-5 rounded-xl border border-dashed px-4 py-7 text-center text-sm text-muted-foreground">Aucun sort n’est encore lié à cette classe jusqu’au rang {level}.</p>}
-        </div>
-      </details>
-    })}
   </div></NewSlotsContext.Provider>
 }

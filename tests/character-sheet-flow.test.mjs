@@ -131,6 +131,35 @@ test("Fiche ouverte après une ligne supprimée ailleurs : le bon personnage, se
   assert.equal(record(google.grid(characters, "Personnages"), 1)["Nom personnage"], "Brin");
 });
 
+test("Ligne déjà lue qui a bougé (ligne ajoutée ou supprimée au-dessus) : retrouvée par son ID, jamais la voisine", async () => {
+  const [a, b, c] = ["A", "B", "C"].map((letter) => fresh(`PERSO-${letter}`));
+  const characters = await linkCharacters([
+    { "ID": a, "Joueur": "uid-1", "Nom personnage": "Aldor" },
+    { "ID": b, "Joueur": "uid-1", "Nom personnage": "Brin" },
+    { "ID": c, "Joueur": "uid-1", "Nom personnage": "Cael" },
+  ]);
+  await sheets.syncExistingIdentityIndexes();
+  const note = characterValueHeaders.indexOf("Note");
+  const write = (id, value) => sheets.patchCharacterSheet(null, id, [{ index: note, header: characterValueHeaders[note], value }]);
+  // Brin est lu en ligne 3 : la fois suivante, cette ligne est relue directement…
+  await write(b, "un");
+  assert.equal(record(google.grid(characters, "Personnages"), 2)["Note"], "un");
+  // …mais Aldor est supprimé ailleurs : Cael occupe maintenant la ligne 3, Brin la ligne 2.
+  google.grid(characters, "Personnages").splice(1, 1);
+  await write(b, "deux");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Nom personnage"], "Brin");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Note"], "deux");
+  assert.equal(record(google.grid(characters, "Personnages"), 2)["Note"], undefined);
+  // Une ligne ajoutée au-dessus : Brin descend, et c'est toujours lui qui est écrit.
+  const added = Array(google.grid(characters, "Personnages")[0].length).fill("");
+  added[headers.indexOf("ID")] = fresh("PERSO-N");
+  google.grid(characters, "Personnages").splice(1, 0, added);
+  await write(b, "trois");
+  assert.equal(record(google.grid(characters, "Personnages"), 2)["Note"], "trois");
+  assert.equal(record(google.grid(characters, "Personnages"), 1)["Note"], undefined);
+  assert.equal(record(google.grid(characters, "Personnages"), 3)["Note"], undefined);
+});
+
 test("Colonne insérée ailleurs avant les colonnes de l'index : refus, ou écriture à la vraie place", async () => {
   const id = fresh("PERSO");
   const sheetHeaders = [...headers, "Pêche [COM-1]", "Chasse [COM-2]"];

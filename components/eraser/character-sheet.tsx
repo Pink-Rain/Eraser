@@ -16,7 +16,7 @@ import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
-import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, startRankBonuses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
+import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
 import { SpellChoiceDialog, type RankBonusSelection } from "@/components/eraser/spell-choice-dialog"
 import { useRankBonuses } from "@/components/eraser/rank-bonus"
 import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
@@ -85,7 +85,7 @@ import type { StateEffect } from "@/lib/character-states"
 import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { parseListCell, serializeListCell } from "@/lib/multiple-values"
-import { playItemEquipped, preloadSounds } from "@/lib/sounds"
+import { playItemEquipped, playItemUnequipped, preloadSounds } from "@/lib/sounds"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
@@ -165,7 +165,9 @@ function SelectEdit({ label, value, options, onCommit }: { label: string; value:
 function MultipleValues({ label, value, options, selectActive = false, onCommit }: { label: string; value: string; options?: Array<{ value: string; label: string }>; selectActive?: boolean; onCommit: (value: string) => Promise<void> }) {
   const { entries, selected } = parseListCell(value)
   const [draft, setDraft] = useState("")
-  const [adding, setAdding] = useState(entries.length === 0)
+  const [wantsToAdd, setAdding] = useState(false)
+  // Vide (la dernière valeur vient d'être retirée, ou rien n'a encore été choisi) : l'ajout reste toujours proposé.
+  const adding = wantsToAdd || entries.length === 0
   // Texte lisible dans la feuille (« A · B ») ; pour un titre, le titre choisi vient en premier.
   function serialize(nextEntries: string[], nextSelected = selected) { return serializeListCell(nextEntries, selectActive ? nextSelected : undefined) }
   async function add(raw: string) {
@@ -541,6 +543,9 @@ type PendingChange = Omit<CharacterSheetChange, "index">
 /** Les cases JSON que la fiche réécrit en entier : sorts choisis (états, charges, choix) et onglets ajoutés. */
 const wholeJsonCells = new Set([characterClassChoicesIndex, characterCustomTabsIndex])
 
+// Les classes et sorts lus par la dernière fiche ouverte (gardés d'une fiche à l'autre).
+let knownClassCatalog: { classes: ClassRecord[]; spells: ClassSpell[] } | null = null
+
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
   const [character, setCharacter] = useState(initialCharacter)
   const [values, setValues] = useState(initialCharacter.values)
@@ -554,9 +559,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const groups = useMemo(() => catalogGroups(catalog), [catalog])
   const secondaries = useMemo(() => catalog.characteristics.filter((item) => item.kind === "secondaire"), [catalog])
   const modifierTargets = useMemo(() => buildItemModifierTargets(catalog, layout), [catalog, layout])
-  const [availableClasses, setAvailableClasses] = useState(classes)
-  const [availableClassSpells, setAvailableClassSpells] = useState(classSpells)
-  const [classCatalogLoading, setClassCatalogLoading] = useState(loadClassCatalog)
+  // Les classes et sorts déjà lus sur une autre fiche s'affichent tout de suite, relus derrière.
+  const [availableClasses, setAvailableClasses] = useState(() => loadClassCatalog && knownClassCatalog ? knownClassCatalog.classes : classes)
+  const [availableClassSpells, setAvailableClassSpells] = useState(() => loadClassCatalog && knownClassCatalog ? knownClassCatalog.spells : classSpells)
+  const [classCatalogLoading, setClassCatalogLoading] = useState(loadClassCatalog && !knownClassCatalog)
   const [classCatalogError, setClassCatalogError] = useState("")
   const [portraitPending, setPortraitPending] = useState(false)
   const [narrativeExpanded, setNarrativeExpanded] = useState(true)
@@ -628,6 +634,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   async function setSlotEquipped(slotId: string, equipped: boolean) {
     if (equipped) playItemEquipped()
+    else playItemUnequipped()
     // La case change tout de suite (et les totaux avec) ; un refus la remet comme avant.
     const setEquipped = (value: boolean) => setInventory((current) => current && { ...current, containers: current.containers.map((container) => ({ ...container, slots: container.slots.map((slot) => slot.id === slotId ? { ...slot, equipped: value } : slot) })) })
     setEquipped(equipped)
@@ -646,7 +653,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const slotToggle: SlotToggle = { pendingSlot: equipPending, onToggle: (slotId, equipped) => void setSlotEquipped(slotId, equipped) }
 
   // Les sons de la fiche, chargés d'avance : le premier ne part pas en retard.
-  useEffect(() => { preloadSounds(["levelup", "choixsort", "equiperitem", "notifrecevoirobjet"]) }, [])
+  useEffect(() => { preloadSounds(["levelup", "choixsort", "equiperitem", "desequiperitem", "notifrecevoirobjet"]) }, [])
 
   // Toujours la dernière version de la fiche : deux champs quittés coup sur coup
   // (clic ailleurs, survol refermé) partent chacun de la précédente, sans l'effacer.
@@ -829,11 +836,6 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       return commit(3, value)
     }
     if (nextLevel > characterLevel) {
-      // Le premier passage de niveau depuis l'arrivée des bonus de rang : les rangs déjà
-      // atteints ne les reproposent pas, seuls les nouveaux rangs les donnent.
-      const choices = latestValues.current[characterClassChoicesIndex] || ""
-      const started = startRankBonuses(choices, characterLevel)
-      if (started !== choices) void commit(characterClassChoicesIndex, started)
       setSpellChoiceWanted(true)
     }
     return commit(3, value)
@@ -885,7 +887,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       markNewSlots(newSpellsKey(character.id), [spell.id])
       choices = chooseClassSpell(choices, step.choice.classId, step.choice.rank, spell.id)
     }
-    if (step.bonus && selection) {
+    if (step.bonus && selection?.manual) {
+      // Déjà reportés à la main : le rang est noté comme obtenu, rien n'est ajouté.
+      choices = takeRankBonus(choices, step.rank, { applied: [], manual: true })
+    } else if (step.bonus && selection) {
       const applied: RankBonusTaken["applied"] = []
       for (const entry of step.bonus.bonuses) {
         if (!selection.slots.includes(entry.slot)) continue
@@ -911,13 +916,19 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return commit(characterClassChoicesIndex, choices)
   }
 
-  function linkedAbilities(skillName: string) {
-    const normalized = skillName.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
-    return knownClassSpells.filter((spell) => spell.category !== "bonus" && spell.skills.some((skill) => {
-      const candidate = skill.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
-      return candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate)
-    }))
-  }
+  // Les sorts de chaque compétence, calculés une fois par liste de sorts (et non à chaque
+  // rendu de chaque ligne) : la même liste revient tant que rien n'a changé.
+  const abilitiesBySkill = useMemo(() => {
+    const fold = (text: string) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr")
+    const spells = knownClassSpells.filter((spell) => spell.category !== "bonus").map((spell) => ({ spell, skills: spell.skills.map(fold) }))
+    const map = new Map<string, ClassSpell[]>()
+    for (const skill of catalog.skills) {
+      const normalized = fold(skill.name)
+      map.set(skill.name, spells.filter((entry) => entry.skills.some((candidate) => candidate === normalized || candidate.includes(normalized) || normalized.includes(candidate))).map((entry) => entry.spell))
+    }
+    return map
+  }, [catalog.skills, knownClassSpells])
+  const linkedAbilities = (skillName: string) => abilitiesBySkill.get(skillName) ?? []
 
   /**
    * La case où un effet lancé écrit : la vie actuelle, le bonus d'une compétence ou d'une
@@ -1065,18 +1076,20 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (!loadClassCatalog) return
     let cancelled = false
     async function load() {
-      setClassCatalogLoading(true)
+      if (!knownClassCatalog) setClassCatalogLoading(true)
       setClassCatalogError("")
       try {
         const response = await fetch("/api/classes/catalog", { cache: "no-store" })
         const payload = await response.json() as { classes?: ClassRecord[]; spells?: ClassSpell[]; error?: string }
         if (!response.ok || !payload.classes || !payload.spells) throw new Error(payload.error || "Catalogue indisponible")
+        knownClassCatalog = { classes: payload.classes, spells: payload.spells }
         if (!cancelled) {
           setAvailableClasses(payload.classes)
           setAvailableClassSpells(payload.spells)
         }
       } catch (error) {
-        if (!cancelled) setClassCatalogError(error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
+        // Déjà connus : la fiche garde ceux lus avant plutôt que d'afficher une erreur.
+        if (!cancelled && !knownClassCatalog) setClassCatalogError(error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
       } finally {
         if (!cancelled) setClassCatalogLoading(false)
       }

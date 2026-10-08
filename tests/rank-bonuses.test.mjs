@@ -70,33 +70,34 @@ test("Déplacement : un nouveau type de caractéristique, avec ses colonnes écr
   assert.equal(modifiers.modifierTargetIdForName(catalog.builtinCharacterCatalog, "Action de déplacement majeure"), `carac:${catalog.MOVEMENT_MAJOR_KEY}`);
 });
 
-test("Passage de rang : les bonus ne sont proposés qu'aux rangs atteints après leur arrivée, une seule fois", () => {
+test("Passage de rang : les bonus de chaque rang atteint sont proposés une seule fois, anciens personnages compris", () => {
   const list = bonuses.parseRankBonusRows([headers, row(1, { "Cible 1": "Rapidité", "Valeur 1": "5" }), row(2, { "Autre": "Un titre" }), row(21, { "Cible 1": "Force", "Valeur 1": "1" })]).bonuses;
   const classes = [{ id: "CLA-1", name: "Guerrier", accentDark: "#123456", accentLight: "#abcdef" }];
   const spells = [{ id: "S1", classRanks: { "CLA-1": 2 } }, { id: "S2", classRanks: { "CLA-1": 2 } }];
-  // Un personnage d'avant les bonus de rang : rien n'est reproposé.
-  assert.deepEqual(progression.pendingRankBonuses(list, 21, ""), []);
-  // Il passe du niveau 1 au niveau 2 : seul le rang 2 donne ses bonus, avec son sort.
-  let value = progression.startRankBonuses("", 1);
-  assert.equal(progression.startRankBonuses(value, 5), value);
+  // Un personnage qui n'a encore rien reçu (même d'avant les bonus de rang) : tous ses rangs atteints.
+  assert.deepEqual(progression.pendingRankBonuses(list, 2, "").map((bonus) => bonus.rank), [1, 2]);
+  // Une ancienne fiche notée « à partir du rang 14 » reçoit aussi ses premiers rangs.
+  assert.deepEqual(progression.pendingRankBonuses(list, 2, JSON.stringify({ rankBonuses: { from: 14, taken: {} } })).map((bonus) => bonus.rank), [1, 2]);
+  let value = ""
   let steps = progression.pendingRankSteps(classes, spells, 2, value, list);
-  assert.equal(steps.length, 1);
-  assert.equal(steps[0].rank, 2);
-  assert.equal(steps[0].choice.options.length, 2);
-  assert.equal(steps[0].bonus.other, "Un titre");
+  // Le rang 2 propose son sort et ses bonus ensemble ; le rang 1 n'a que ses bonus.
+  assert.deepEqual(steps.map((step) => [step.rank, Boolean(step.choice), Boolean(step.bonus)]), [[1, false, true], [2, true, true]]);
+  assert.equal(steps[1].choice.options.length, 2);
+  assert.equal(steps[1].bonus.other, "Un titre");
   // Le rang 21 (au-delà des sorts) n'a que ses bonus.
   steps = progression.pendingRankSteps(classes, spells, 21, value, list);
-  assert.deepEqual(steps.map((step) => [step.rank, Boolean(step.choice), Boolean(step.bonus)]), [[2, true, true], [21, false, true]]);
-  // Obtenus : plus jamais proposés ; le sort sur mesure rejoint la fiche.
+  assert.deepEqual(steps.map((step) => [step.rank, Boolean(step.choice), Boolean(step.bonus)]), [[1, false, true], [2, true, true], [21, false, true]]);
+  // Obtenus (ou déjà ajoutés à la main) : plus jamais proposés ; le sort sur mesure rejoint la fiche.
   value = progression.takeRankBonus(value, 21, { applied: [{ target: "Force", amount: 1 }], spell: "S9" });
+  value = progression.takeRankBonus(value, 1, { applied: [], manual: true });
   const state = progression.parseClassChoices(value);
   assert.deepEqual(state.extras, ["S9"]);
   assert.deepEqual(state.rankBonuses.taken["21"].applied, [{ target: "Force", amount: 1 }]);
+  assert.equal(state.rankBonuses.taken["1"].manual, true);
   assert.deepEqual(progression.pendingRankSteps(classes, spells, 21, value, list).map((step) => step.rank), [2]);
   // Les autres réglages de la fiche survivent.
   const kept = progression.parseClassChoices(progression.takeRankBonus(JSON.stringify({ states: [{ id: "ETA-1", name: "Peur", level: 1 }], rankBonuses: { from: 3, taken: {} } }), 4, { applied: [] }));
   assert.equal(kept.states.length, 1);
-  assert.equal(kept.rankBonuses.from, 3);
 });
 
 test("Passage de rang : il reste à choisir, répartir et chercher avant d'obtenir les bonus", () => {
@@ -113,8 +114,7 @@ test("Perte de niveau : les sorts et bonus des rangs perdus sont oubliés, et re
   const list = bonuses.parseRankBonusRows([headers, row(2, { "Cible 1": "Force", "Valeur 1": "1" }), row(3, { "Cible 1": "Rapidité", "Valeur 1": "5", "Sort sur mesure": "Oui" })]).bonuses;
   const classes = [{ id: "CLA-1", name: "Guerrier", accentDark: "#123456", accentLight: "#abcdef" }];
   const spells = [{ id: "S2", classRanks: { "CLA-1": 2 } }, { id: "S3", classRanks: { "CLA-1": 3 } }];
-  let value = progression.startRankBonuses("", 1);
-  value = progression.chooseClassSpell(value, "CLA-1", 2, "S2");
+  let value = progression.chooseClassSpell("", "CLA-1", 2, "S2");
   value = progression.takeRankBonus(value, 2, { applied: [{ target: "Force", amount: 1 }] });
   value = progression.chooseClassSpell(value, "CLA-1", 3, "S3");
   value = progression.takeRankBonus(value, 3, { applied: [{ target: "Rapidité", amount: 5 }], spell: "SUR-MESURE" });

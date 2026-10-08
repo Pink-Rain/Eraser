@@ -3,6 +3,7 @@ export const soundFileNames = {
   levelup: "levelup.mp3",
   choixsort: "choixsort.mp3",
   equiperitem: "equiperitem.mp3",
+  desequiperitem: "desequiperitem.mp3",
   notifrecevoirobjet: "notifrecevoirobjet.mp3",
 } as const
 

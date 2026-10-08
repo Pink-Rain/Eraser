@@ -2481,6 +2481,23 @@ async function getCharacterForMjUncached(uid: string, id: string) {
 
 export const getCharacterForMj = cache(getCharacterForMjUncached)
 
+/**
+ * La fiche d'un compte, après avoir relu les feuilles quand l'index local ne la connaît pas
+ * encore (créée ou rendue sur un autre poste, index pas encore à jour) : on ne conclut à une
+ * fiche introuvable qu'après cette relecture. Les recherches mises en cache sont contournées.
+ */
+export async function findCharacterForAccount(account: { uid: string; role: string }, id: string) {
+  const lookup = (fresh: boolean) => account.role === "admin"
+    ? (fresh ? getCharacterByIdUncached(id) : getCharacterById(id))
+    : account.role === "mj"
+      ? (fresh ? getCharacterForMjUncached(account.uid, id) : getCharacterForMj(account.uid, id))
+      : getCharacterForUser(account.uid, id)
+  const found = await lookup(false).catch(() => null)
+  if (found) return found
+  await syncExistingIdentityIndexes().catch((error) => console.error("CHARACTER_LOOKUP_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+  return lookup(true).catch(() => null)
+}
+
 export async function getCampaignForMj(uid: string, id: string) {
   const listed = (await listCampaignsForMj(uid)).find((campaign) => campaign.id === id)
   if (listed) return listed
@@ -5886,6 +5903,9 @@ function sameHeaderRow(headers: readonly string[], map: CharacterSheetMap) {
  * Sheets ou sur une autre installation refait d'abord la carte des colonnes. La ligne est
  * retrouvée par son ID, puis relue, et sa case ID vérifiée. Null si la feuille n'a pas cette fiche.
  */
+/** Le numéro de ligne de chaque fiche lue : une supposition, toujours vérifiée par sa case ID. */
+const knownCharacterRows = new Map<string, number>()
+
 async function readCharacterRow(source: { spreadsheetId: string; tabName: string }, id: string): Promise<CharacterRow | null> {
   const wanted = id.trim()
   let columns = await characterColumns(source.spreadsheetId, source.tabName)
@@ -5894,17 +5914,30 @@ async function readCharacterRow(source: { spreadsheetId: string; tabName: string
     // Sans colonne ID, aucune ligne ne peut être retrouvée : rien n'est lu ni écrit au hasard.
     if (idColumn < 0) throw new Error("SHEET_COLUMN_MISSING:ID")
     const letter = columnName(idColumn + 1)
-    const [header, ids] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, "1:1"), sheetTabRange(source.tabName, `${letter}:${letter}`)])
+    const rowKey = `${source.spreadsheetId}:${source.tabName}:${wanted}`
+    // La ligne lue la dernière fois est relue avec l'en-tête et la colonne ID, dans le même
+    // appel : une fiche s'ouvre (et s'enregistre) avec un aller-retour Google de moins.
+    const guessed = knownCharacterRows.get(rowKey)
+    const guessRange = guessed ? sheetTabRange(source.tabName, `A${guessed}:${columnName(columns.map.width)}${guessed}`) : ""
+    const [header, ids, guess] = await readRangesFresh(source.spreadsheetId, [sheetTabRange(source.tabName, "1:1"), sheetTabRange(source.tabName, `${letter}:${letter}`), ...(guessRange ? [guessRange] : [])])
     if (!sameHeaderRow(header?.rows[0] ?? [], columns.map)) {
       columns = await characterColumns(source.spreadsheetId, source.tabName, { fresh: true })
       continue
     }
+    if (guessed && guess && guess.startRow === guessed && columns.map.columns.get(guess.rows[0] ?? [], "ID").trim() === wanted) {
+      const row = guess.rows[0] ?? []
+      return { ...columns, rowNumber: guessed, row, values: characterValuesOf(columns.map, row) }
+    }
+    knownCharacterRows.delete(rowKey)
     const offset = (ids?.rows ?? []).findIndex((cells, index) => ids!.startRow + index >= 2 && String(cells[0] ?? "").trim() === wanted)
     if (!ids || offset < 0) return null
     const rowNumber = ids.startRow + offset
     const read = await readRangeFreshWithOffset(source.spreadsheetId, sheetTabRange(source.tabName, `A${rowNumber}:${columnName(columns.map.width)}${rowNumber}`))
     const row = read.rows[0] ?? []
-    if (read.startRow === rowNumber && columns.map.columns.get(row, "ID").trim() === wanted) return { ...columns, rowNumber, row, values: characterValuesOf(columns.map, row) }
+    if (read.startRow === rowNumber && columns.map.columns.get(row, "ID").trim() === wanted) {
+      knownCharacterRows.set(rowKey, rowNumber)
+      return { ...columns, rowNumber, row, values: characterValuesOf(columns.map, row) }
+    }
     // La ligne a bougé entre les deux lectures (ajout ou suppression ailleurs) : on la cherche de nouveau.
   }
   throw new Error("CHARACTER_SHEET_ROW_MOVED")
