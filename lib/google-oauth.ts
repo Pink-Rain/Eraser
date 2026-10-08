@@ -474,11 +474,28 @@ async function loadGoogleOAuthAccessToken(sessionToken: string | undefined) {
   return cachedAccessToken.token
 }
 
+/** Le dernier renouvellement anticipé : au plus un toutes les 30 secondes. */
+let lastEarlyRenewal = 0
+
 export async function googleOAuthAccessToken() {
   if (cachedAccessToken && cachedAccessToken.expiresAt > Date.now() + ACCESS_TOKEN_MARGIN_MS) return cachedAccessToken.token
   // La session de la requête en cours, sinon la dernière vue (travail d'arrière-plan).
   const own = remoteAccountsConfig(env) ? await currentAuthToken().catch(() => undefined) : undefined
   if (own) lastSessionToken = own
+  // Encore valable plus d'une minute : servi tout de suite, renouvelé derrière. Attendre le
+  // renouvellement à chaque requête ralentissait tout Eraser quand le serveur partagé rendait
+  // un jeton à moins de cinq minutes de sa fin (chaque requête en redemandait un).
+  const current = cachedAccessToken
+  if (current && current.expiresAt > Date.now() + 60_000) {
+    if (!accessTokenPromise && Date.now() - lastEarlyRenewal > 30_000) {
+      lastEarlyRenewal = Date.now()
+      accessTokenPromise = loadGoogleOAuthAccessToken(own ?? lastSessionToken).finally(() => {
+        accessTokenPromise = null
+      })
+      accessTokenPromise.catch(() => undefined)
+    }
+    return current.token
+  }
   if (!accessTokenPromise) {
     accessTokenPromise = loadGoogleOAuthAccessToken(own ?? lastSessionToken).finally(() => {
       accessTokenPromise = null

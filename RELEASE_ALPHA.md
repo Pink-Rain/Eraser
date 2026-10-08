@@ -1,27 +1,17 @@
-# Eraser 0.1.1-alpha.151 — Bonus de rang plus rapides, et de nouveaux sons
+# Eraser 0.1.1-alpha.152 — Correctif : lenteur et cases « équipé »
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Le tableau « Bonus de rang »
+## Équiper et déséquiper
 
-- Bien plus rapide : les cases modifiées coup sur coup (ou collées) partent ensemble en
-  une seule écriture, et le tableau n'est plus relu en entier après chaque case.
-- Ce qui vient d'être tapé reste affiché pendant l'enregistrement : une réponse arrivée
-  entre-temps pour une autre case ne le fait plus disparaître. « Enregistrement… » s'affiche
-  tant que Google n'a pas tout confirmé.
-- Plus de « Le bonus n'a pas pu être enregistré » en remplissant vite. Si Google refuse
-  malgré tout, le message dit pourquoi (connexion coupée, trop de modifications d'un coup…).
-- Dans la liste des cibles, « Déplacement » ouvre maintenant le groupe Déplacement (il va
-  toujours à l'action gratuite) ; seul « Caractéristique » reste « au choix du joueur ».
+- La case se coche (ou se décoche) tout de suite, sans attendre Google : les totaux de la
+  fiche suivent aussitôt.
+- Une case en cours d'enregistrement ne bloque plus les autres objets du contenant.
+- Si l'enregistrement échoue (Google lent, serveur local qui redémarre), la case revient
+  comme avant, un message le dit, et plus rien ne reste bloqué.
+- Même chose pour les cases d'objets au survol des caractéristiques et des compétences.
 
-## Les sons
+## Lenteur
 
-Les sons viennent du dossier « Sons » du Drive : remplacer un fichier là-bas change le son
-pour tout le monde, sans nouvelle version.
-
-- **levelup.mp3** : l'ouverture de la fenêtre de passage de rang.
-- **choixsort.mp3** : le sort (ou les bonus) choisis, rang terminé.
-- **equiperitem.mp3** : un objet équipé (case cochée dans l'inventaire ou au survol d'une
-  caractéristique).
-- **notifrecevoirobjet.mp3** : la notification d'un objet reçu.
-- Tant qu'un fichier manque ou que Google ne répond pas, l'ancien son le remplace.
+- Le jeton d'accès à Google n'est plus redemandé avant chaque requête dans les dernières
+  minutes de sa validité : il est renouvelé en arrière-plan, sans faire attendre.

@@ -628,13 +628,20 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   async function setSlotEquipped(slotId: string, equipped: boolean) {
     if (equipped) playItemEquipped()
+    // La case change tout de suite (et les totaux avec) ; un refus la remet comme avant.
+    const setEquipped = (value: boolean) => setInventory((current) => current && { ...current, containers: current.containers.map((container) => ({ ...container, slots: container.slots.map((slot) => slot.id === slotId ? { ...slot, equipped: value } : slot) })) })
+    setEquipped(equipped)
     setEquipPending(slotId)
     try {
       const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "set-equipped", slotId, equipped }) })
-      const payload = (await response.json()) as { inventory?: CharacterInventoryRecord }
+      const payload = (await response.json().catch(() => ({}))) as { inventory?: CharacterInventoryRecord }
       if (response.ok && payload.inventory) setInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current?.items || [] }))
-    } catch { /* l’inventaire reste affiché tel quel */ }
-    setEquipPending("")
+      else setEquipped(!equipped)
+    } catch {
+      setEquipped(!equipped)
+    } finally {
+      setEquipPending((current) => current === slotId ? "" : current)
+    }
   }
   const slotToggle: SlotToggle = { pendingSlot: equipPending, onToggle: (slotId, equipped) => void setSlotEquipped(slotId, equipped) }
 

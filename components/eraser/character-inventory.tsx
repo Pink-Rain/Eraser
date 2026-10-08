@@ -288,16 +288,26 @@ function CategorySection({ category, inventory, pendingKey, openSearch, catalogL
   return <div className="rounded-[1.4rem] border p-3" style={{ borderColor: `${presentation.color}42`, background: `linear-gradient(145deg, ${presentation.color}12, rgba(255,255,255,.015))` }}><div className="mb-3 flex items-center gap-3 px-1"><div className="flex size-9 items-center justify-center rounded-xl" style={{ color: presentation.color, backgroundColor: `${presentation.color}18` }}><Icon className="size-4.5" /></div><h3 className="font-display flex-1 text-xl font-semibold" style={{ color: presentation.color }}>{presentation.label || category}</h3>{!readOnly && !fixed && <Button type="button" variant="ghost" size="icon-sm" onClick={() => openContainerCreation(category)} aria-label={`Ajouter ${presentation.singular}`}><Plus /></Button>}</div><div className="space-y-3">{cards}</div></div>
 }
 
+/** L'inventaire avec les cases « équipé » changées mais pas encore confirmées par le serveur. */
+function withEquipped(inventory: CharacterInventoryRecord, overrides: Record<string, boolean>): CharacterInventoryRecord {
+  if (!Object.keys(overrides).length) return inventory
+  return { ...inventory, containers: inventory.containers.map((container) => container.slots.some((slot) => slot.id in overrides) ? { ...container, slots: container.slots.map((slot) => slot.id in overrides ? { ...slot, equipped: overrides[slot.id] } : slot) } : container) }
+}
+
 export function CharacterInventory({ characterId, initialInventory, endpoint, flat = false, readOnly = false, mode = "character", inventory: controlledInventory, onInventoryChange }: { characterId: string; initialInventory?: CharacterInventoryRecord; endpoint?: string; flat?: boolean; readOnly?: boolean; mode?: "character" | "npc"; inventory?: CharacterInventoryRecord | null; onInventoryChange?: (inventory: CharacterInventoryRecord) => void }) {
   // Mode contrôlé : la fiche de personnage détient l’inventaire pour que l’onglet
   // Compétences voie les mêmes objets équipés. Sinon le composant gère son état.
   const controlled = Boolean(onInventoryChange)
   const [ownInventory, setOwnInventory] = useState(initialInventory || emptyCharacterInventory())
-  const inventory = controlled ? controlledInventory || emptyCharacterInventory() : ownInventory
+  const storedInventory = controlled ? controlledInventory || emptyCharacterInventory() : ownInventory
+  // Équiper ou déséquiper s'affiche tout de suite, avant la réponse du serveur ; un refus remet la case.
+  const [equipOverrides, setEquipOverrides] = useState<Record<string, boolean>>({})
+  const inventory = useMemo(() => withEquipped(storedInventory, equipOverrides), [equipOverrides, storedInventory])
   const [initialLoading, setInitialLoading] = useState(!initialInventory && !controlled)
 
   function applyInventory(next: CharacterInventoryRecord | ((current: CharacterInventoryRecord) => CharacterInventoryRecord)) {
-    const resolved = typeof next === "function" ? next(inventory) : next
+    // Depuis l'inventaire enregistré, sans les cases encore en attente (elles restent par-dessus).
+    const resolved = typeof next === "function" ? next(storedInventory) : next
     if (onInventoryChange) onInventoryChange(resolved)
     else setOwnInventory(resolved)
   }
@@ -348,20 +358,38 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
 
   async function mutate(body: MutationBody, key: string) {
     if (readOnly) return false
-    setPendingKey(key); setError("")
-    const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-    const payload = (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string }
-    setPendingKey("")
-    if (!response.ok || !payload.inventory) {
-      setError(payload.error || "La modification n’a pas pu être enregistrée.")
-      // La feuille a changé ailleurs entre-temps (409) : l'inventaire affiché est relu.
-      if (response.status === 409) void fetch(`${inventoryEndpoint}?summary=1`, { cache: "no-store" })
-        .then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null)
-        .then((loaded) => { if (loaded) applyInventory((current) => keepCatalogFields(loaded, current)) })
-        .catch(() => { /* le message suffit */ })
+    // Équiper ne bloque pas le reste de l'inventaire : la case change aussitôt, les autres restent cliquables.
+    const equip = body.action === "set-equipped" ? body : null
+    if (equip) setEquipOverrides((current) => ({ ...current, [equip.slotId]: equip.equipped }))
+    else setPendingKey(key)
+    setError("")
+    try {
+      const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+      const payload = (await response.json().catch(() => ({}))) as { inventory?: CharacterInventoryRecord; error?: string }
+      if (!response.ok || !payload.inventory) {
+        setError(payload.error || "La modification n’a pas pu être enregistrée.")
+        // La feuille a changé ailleurs entre-temps (409) : l'inventaire affiché est relu.
+        if (response.status === 409) void fetch(`${inventoryEndpoint}?summary=1`, { cache: "no-store" })
+          .then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null)
+          .then((loaded) => { if (loaded) applyInventory((current) => keepCatalogFields(loaded, current)) })
+          .catch(() => { /* le message suffit */ })
+        return false
+      }
+      applyInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items }))
+      return true
+    } catch {
+      // Serveur local injoignable ou réponse coupée : rien n'est enregistré, et rien ne reste bloqué.
+      setError("Eraser n’a pas pu joindre son serveur local : la modification n’a pas été enregistrée. Réessaie dans un instant.")
       return false
+    } finally {
+      if (equip) setEquipOverrides((current) => {
+        if (current[equip.slotId] !== equip.equipped) return current
+        const next = { ...current }
+        delete next[equip.slotId]
+        return next
+      })
+      else setPendingKey((current) => current === key ? "" : current)
     }
-    applyInventory((current) => ({ ...payload.inventory!, items: payload.inventory!.items.length ? payload.inventory!.items : current.items })); return true
   }
 
   async function openItemSearch(containerId: string) {
