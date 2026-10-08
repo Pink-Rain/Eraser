@@ -47,10 +47,13 @@ export async function PATCH(request: Request, { params }: { params: Promise<{ id
   } catch (error) {
     // Rien n'a été écrit : la fiche relue part avec la réponse, la page l'affiche.
     if (error instanceof CharacterSheetChangedError) return NextResponse.json({ error: "La fiche a changé entre-temps : actualise puis recommence.", character: error.character }, { status: 409 })
+    // Un refus (nom vide, image trop lourde) : 400, la fiche abandonne ce qui est refusé.
+    // Le reste (Google lent ou injoignable) : 503, la fiche réessaie.
     const code = error instanceof Error ? error.message : ""
-    const message = code === "INVALID_CHARACTER_NAME" ? "Le nom du personnage est obligatoire."
-      : code === "INVALID_PORTRAIT" ? "Choisis une image de moins de 10 Mo."
-        : "La fiche n’a pas pu être enregistrée."
-    return NextResponse.json({ error: message }, { status: 400 })
+    if (code === "INVALID_CHARACTER_NAME") return NextResponse.json({ error: "Le nom du personnage est obligatoire (120 caractères au plus).", rejected: "name" }, { status: 400 })
+    if (code === "INVALID_PORTRAIT") return NextResponse.json({ error: "Choisis une image de moins de 10 Mo.", rejected: "portrait" }, { status: 400 })
+    if (code === "INVALID_VALUES") return NextResponse.json({ error: "Ces modifications sont illisibles : actualise la fiche.", rejected: "values" }, { status: 400 })
+    console.error("CHARACTER_SHEET_SAVE_FAILED", id, code || "UNKNOWN_ERROR")
+    return NextResponse.json({ error: "La fiche n’a pas pu être enregistrée." }, { status: 503 })
   }
 }

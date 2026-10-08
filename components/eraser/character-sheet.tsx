@@ -150,7 +150,7 @@ function groupColor(characteristic: CatalogCharacteristic | null, position: numb
 
 
 function Stepper({ label, value, onCommit }: { label: string; value: string; onCommit: (value: string) => Promise<void> }) {
-  const numeric = Number.parseFloat(value || "0") || 0
+  const numeric = sheetNumber(value || "0")
   return <div className="inline-flex items-center gap-1"><button type="button" onClick={() => onCommit(String(numeric - 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Diminuer ${label}`}><Minus className="size-3" /></button><InlineEdit numeric singleClick compact label={label} value={value} onCommit={onCommit}><span className="min-w-7 text-center text-xl font-semibold tabular-nums">{value || "0"}</span></InlineEdit><button type="button" onClick={() => onCommit(String(numeric + 1))} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Augmenter ${label}`}><Plus className="size-3" /></button></div>
 }
 
@@ -172,7 +172,9 @@ function MultipleValues({ label, value, options, selectActive = false, onCommit 
   function serialize(nextEntries: string[], nextSelected = selected) { return serializeListCell(nextEntries, selectActive ? nextSelected : undefined) }
   async function add(raw: string) {
     const nextValue = raw.replace(/\s+·\s+/g, " ").trim(); if (!nextValue || entries.includes(nextValue)) return
-    await onCommit(serialize([...entries, nextValue], selected || nextValue)); setDraft(""); setAdding(false)
+    // La case se vide tout de suite : ce qui est tapé pendant l'enregistrement n'est pas effacé à son retour.
+    setDraft(""); setAdding(false)
+    await onCommit(serialize([...entries, nextValue], selected || nextValue))
   }
   return <div className="min-w-0"><div className="flex flex-wrap items-center gap-1.5">{entries.map((entry) => <button key={entry} type="button" onClick={() => selectActive && onCommit(serialize(entries, entry))} className={`group/tag inline-flex max-w-full shrink items-center gap-1 rounded-full border px-2 py-1 text-xs ${selectActive && selected === entry ? "border-primary/60 bg-primary/15 text-primary" : "bg-background/55"}`} title={selectActive ? "Choisir comme titre affiché" : undefined}><span className="truncate">{options?.find((option) => option.value === entry)?.label || entry}</span><span role="button" tabIndex={0} onClick={(event) => { event.stopPropagation(); void onCommit(serialize(entries.filter((item) => item !== entry))) }} className="shrink-0 text-muted-foreground opacity-50 hover:text-destructive hover:opacity-100" aria-label={`Retirer ${entry}`}><X className="size-3" /></span></button>)}{entries.length > 0 && !adding && <button type="button" onClick={() => setAdding(true)} className="flex size-6 shrink-0 items-center justify-center rounded-full border border-dashed text-muted-foreground hover:border-primary/50 hover:text-primary" aria-label={`Ajouter ${label}`}><Plus className="size-3.5" /></button>}</div>{adding && <div className="mt-1.5 flex gap-1">{options ? <NativeSelect value="" onChange={(event) => add(event.target.value)} className="h-7 min-w-28 border-0 bg-transparent px-1 text-xs shadow-none"><NativeSelectOption value="">Ajouter…</NativeSelectOption>{options.filter((option) => !entries.includes(option.value)).map((option) => <NativeSelectOption key={option.value} value={option.value}>{option.label}</NativeSelectOption>)}</NativeSelect> : <><Input autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void add(draft) } if (event.key === "Escape") { setDraft(""); setAdding(false) } }} onBlur={() => { if (draft.trim()) void add(draft) }} placeholder={`Ajouter ${label.toLowerCase()}…`} className="h-7 min-w-28 border-0 bg-transparent px-1 text-xs shadow-none" /><button type="button" onClick={() => add(draft)} className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Plus className="size-3.5" /></button>{entries.length > 0 && <button type="button" onClick={() => setAdding(false)} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"><X className="size-3.5" /></button>}</>}</div>}</div>
 }
@@ -209,6 +211,14 @@ function NotesEditor({ value, onCommit, label = "Carnet de notes", compact = fal
       className={plain ? "border-0 bg-transparent" : "rounded-none border-0 bg-transparent"}
     />}
   </section>
+}
+
+/**
+ * Un clic de souris sur une case déjà ouverte par le survol la laisse ouverte (il la
+ * refermait aussitôt) ; au doigt ou au clavier, il l'ouvre et la referme.
+ */
+function clickKeepsOpen(event: { nativeEvent: Event }) {
+  return "pointerType" in event.nativeEvent && (event.nativeEvent as PointerEvent).pointerType === "mouse"
 }
 
 function sheetNumber(value: string) {
@@ -362,7 +372,7 @@ function SkillRow({ help = "", skill, cells, characteristicCell, values, color, 
   const metricModifiers = [statModifier, successModifier, failureModifier]
   const { anchorRef, above, measure } = useFlipPlacement()
   return <div ref={anchorRef} className="group/skill relative" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border, ...(tint ? { backgroundColor: `${tint}38`, boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}>
+    <button type="button" onClick={(event) => setOpen((current) => clickKeepsOpen(event) || !current)} className={`relative grid w-full grid-cols-[minmax(0,1fr)_repeat(3,2.15rem)] items-center gap-1 border-t px-3 py-2.5 text-left text-xs transition hover:bg-white/[.035] ${open ? "bg-white/[.055]" : ""}`} style={{ borderColor: color.border, ...(tint ? { backgroundColor: `${tint}38`, boxShadow: `inset 3px 0 0 ${tint}` } : {}) }}>
       <span className={`whitespace-normal pr-1 font-medium leading-tight ${shortName.length > 24 ? "text-[10px]" : "text-[11px]"}`}>{shortName}<HelpMark title={skill.name} className="ml-1 text-muted-foreground opacity-0 hover:text-foreground group-hover/skill:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span>{totals.map((total, index) => <span key={index} className={`text-center font-semibold tabular-nums ${index === 0 ? `text-foreground ${portraitImageFxClass(fx)}` : index === 1 ? "text-emerald-300" : "text-rose-300"}`}>{total}</span>)}
       <FxOverlay fx={fx} />
     </button>
@@ -424,7 +434,7 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, help = "", col
   const color = stateTint(linkedItems) || baseColor
   const fx = stateFxOf(linkedItems)
   return <div ref={anchorRef} className="group/help relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={popupLabel || label} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
+    <button type="button" onClick={(event) => setOpen((current) => clickKeepsOpen(event) || !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={popupLabel || label} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
     {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier || hasRule(rule) ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés, les états et la classe">{modifierText(modifier, rule) || "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
@@ -440,7 +450,7 @@ function CounterTile({ label, help = "", color, span, value, modifier, rule, lin
   const tint = stateTint(linkedItems)
   const fx = stateFxOf(linkedItems)
   const shown = tint || color
-  const numeric = Number.parseFloat(value || "0") || 0
+  const numeric = sheetNumber(value || "0")
   const total = totalWithModifier(value, modifier, "0", rule)
   const changed = modifier !== 0 || hasRule(rule)
   return <div ref={anchorRef} className={`group/help relative flex min-h-20 flex-col items-center justify-center rounded-xl px-2 py-2 text-center ${span}`} style={{ backgroundColor: `${shown}${tint ? "33" : "16"}`, borderTop: `2px solid ${shown}` }} onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
@@ -493,7 +503,7 @@ function MovementCell({ role, name, help = "", color: baseColor, value, own, sho
   const changed = modifier !== 0 || hasRule(rule)
   const label = role ? movementLabels[role].short : name
   return <div ref={anchorRef} className="group/help relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
-    <button type="button" onClick={() => setOpen((current) => !current)} className="relative flex h-full min-h-14 w-full flex-col items-center justify-center rounded-lg px-1 py-2 text-center" style={{ backgroundColor: `${color}24`, borderBottom: `2px solid ${color}66` }}>
+    <button type="button" onClick={(event) => setOpen((current) => clickKeepsOpen(event) || !current)} className="relative flex h-full min-h-14 w-full flex-col items-center justify-center rounded-lg px-1 py-2 text-center" style={{ backgroundColor: `${color}24`, borderBottom: `2px solid ${color}66` }}>
       <span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={name} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span>
       <span className={`mt-1 inline-block text-lg font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{shown}</span>
       <FxOverlay fx={fx} />
@@ -522,12 +532,12 @@ function LifePool({ label = "Points de vie", help = "", color = "#6e9ee8", curre
   const shownTotal = totalWithModifier(total, modifier, "0", rule)
   const currentChanged = currentModifier !== 0 || hasRule(currentRule)
   const totalChanged = modifier !== 0 || hasRule(rule)
-  const currentNumber = Number.parseFloat(shownCurrent || "0") || 0
-  const totalNumber = Number.parseFloat(shownTotal || "0") || 0
+  const currentNumber = sheetNumber(shownCurrent || "0")
+  const totalNumber = sheetNumber(shownTotal || "0")
   const healthRatio = totalNumber > 0 ? Math.max(0, Math.min(100, (currentNumber / totalNumber) * 100)) : 0
   // Une expression (« -10 », « *2 ») s'applique aussi en cliquant ailleurs, sans Entrée.
-  const leaveCurrent = useCommitOnLeave(editing, expression, current || "0", (next) => commit(9, String(calculateExpression(next, Number(current) || 0))))
-  const leaveTotal = useCommitOnLeave(editingTotal, totalExpression, total || "0", (next) => commit(10, String(calculateExpression(next, Number(total) || 0))))
+  const leaveCurrent = useCommitOnLeave(editing, expression, current || "0", (next) => commit(9, String(calculateExpression(next, sheetNumber(current || "0")))))
+  const leaveTotal = useCommitOnLeave(editingTotal, totalExpression, total || "0", (next) => commit(10, String(calculateExpression(next, sheetNumber(total || "0")))))
   async function save() { if (await leaveCurrent.save()) setEditing(false) }
   async function saveTotal() { if (await leaveTotal.save()) setEditingTotal(false) }
   return <div className="group/help flex h-full min-h-20 flex-col items-center justify-between rounded-xl px-4 py-3 text-center shadow-sm" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></p><div className="my-auto flex flex-wrap items-center justify-center gap-2">{editing ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={expression} onChange={(event) => setExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void save(); if (event.key === "Escape") { leaveCurrent.cancel(); setEditing(false) } }} onBlur={() => void save()} className="h-8 w-24" placeholder="-10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void save()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setExpression(current || "0"); setEditing(true) }} className="text-2xl font-semibold tabular-nums" style={{ color }} title={currentChanged ? `Base ${current || "0"} ${modifierText(currentModifier, currentRule)} — valeur, +10, -10%, *2 ou /3` : "Valeur, +10, -10%, *2 ou /3"}>{shownCurrent}</button>}<span className="text-sm text-muted-foreground">sur</span>{editingTotal ? <div className="flex min-w-0 items-center gap-1"><Input autoFocus value={totalExpression} onChange={(event) => setTotalExpression(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") void saveTotal(); if (event.key === "Escape") { leaveTotal.cancel(); setEditingTotal(false) } }} onBlur={() => void saveTotal()} className="h-8 w-24" placeholder="+10%, *2…" /><button type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => void saveTotal()} className="flex size-8 items-center justify-center rounded-md text-primary hover:bg-primary/10"><Check className="size-4" /></button></div> : <button type="button" onClick={() => { setTotalExpression(total || "0"); setEditingTotal(true) }} className="text-2xl font-semibold tabular-nums opacity-80" style={{ color }} title={totalChanged ? `Base ${total || "0"} ${modifierText(modifier, rule)} — valeur, +10%, *2 ou /3` : "Valeur, +10%, *2 ou /3"}>{shownTotal}</button>}</div><div className="w-full"><div className="mb-1 flex justify-between text-[8px] font-semibold uppercase tracking-wider text-muted-foreground"><span>Actuelle</span><span>Totale</span></div><div className="h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${color}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${healthRatio}%`, backgroundColor: color }} /></div></div></div>
@@ -538,7 +548,10 @@ function LifePool({ label = "Points de vie", help = "", color = "#6e9ee8", curre
  * sa place (refusée si les colonnes de la feuille ont bougé entre-temps) et, pour une case
  * JSON réécrite en entier, la valeur d'où elle est partie.
  */
-type PendingChange = Omit<CharacterSheetChange, "index">
+type PendingChange = Omit<CharacterSheetChange, "index"> & {
+  /** Des cases qui vont ensemble (les bonus d'un rang et le rang noté comme obtenu) : abandonnées ensemble. */
+  group?: string
+}
 
 /** Les cases JSON que la fiche réécrit en entier : sorts choisis (états, charges, choix) et onglets ajoutés. */
 const wholeJsonCells = new Set([characterClassChoicesIndex, characterCustomTabsIndex])
@@ -586,7 +599,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
    */
   const pendingChanges = useRef(new Map<number, PendingChange>())
   const persistQueue = useRef(Promise.resolve())
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict">("idle")
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict" | "rejected">("idle")
+  // Ce que le serveur a refusé (nom vide, image trop lourde) : dit tel quel, le reste continue.
+  const [rejection, setRejection] = useState("")
+  // Un portrait pas encore envoyé (Google injoignable) : « Réessayer » le renvoie.
+  const failedPortrait = useRef<File | null>(null)
   // Les cases abandonnées au dernier conflit, nommées dans l'avertissement.
   const [conflictHeaders, setConflictHeaders] = useState<string[]>([])
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
@@ -672,11 +689,30 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     setValues(merged)
   }
 
-  function flush(portrait?: File) {
+  /** Les cases refusées par le serveur sont oubliées : la fiche reprend ce qu'il a confirmé. */
+  function dropPending(indexes: Iterable<number>) {
+    for (const index of indexes) pendingChanges.current.delete(index)
+    const server = serverSheet.current.values
+    const merged = latestValues.current.map((cell, index) => pendingChanges.current.get(index)?.value ?? server[index] ?? cell)
+    latestValues.current = merged
+    setValues(merged)
+  }
+
+  function reject(message: string) {
+    setRejection(message)
+    setSaveState("rejected")
+  }
+
+  function flush(file?: File) {
     const run = persistQueue.current.then(async () => {
-      if (!pendingChanges.current.size && !portrait) return
+      const portrait = file ?? failedPortrait.current ?? undefined
+      if (!pendingChanges.current.size && !portrait) {
+        setSaveState((state) => state === "saving" ? "idle" : state)
+        return
+      }
       const batch = new Map(pendingChanges.current)
-      const changes = [...batch].map(([index, change]) => ({ index, ...change }))
+      // Le groupe reste dans la fiche : seules la place, l'en-tête et la valeur partent.
+      const changes = [...batch].map(([index, change]) => ({ index, header: change.header, value: change.value, ...(change.before !== undefined ? { before: change.before } : {}) }))
       const delays = [800, 2500, 6000]
       for (let attempt = 0; ; attempt += 1) {
         try {
@@ -687,7 +723,18 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           } else {
             response = await fetch(`/api/characters/${encodeURIComponent(character.id)}`, { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes }) })
           }
-          const payload = (await response.json().catch(() => ({}))) as { character?: CharacterSheetRecord; error?: string }
+          const payload = (await response.json().catch(() => ({}))) as { character?: CharacterSheetRecord; error?: string; rejected?: string }
+          if (response.status === 400 || response.status === 403 || response.status === 404) {
+            // Refusé, pas en panne : réessayer ne changerait rien, et bloquerait tout ce qui suit.
+            // Seul ce qui est refusé est abandonné ; les autres cases repartent seules.
+            // Un portrait parti avec un nom refusé repart avec le reste.
+            failedPortrait.current = payload.rejected === "name" && portrait ? portrait : null
+            if (payload.rejected === "name") dropPending([0])
+            else if (payload.rejected !== "portrait") dropPending(batch.keys())
+            reject(payload.error || "Cette modification a été refusée.")
+            if ((pendingChanges.current.size || failedPortrait.current) && (payload.rejected === "name" || payload.rejected === "portrait")) void flush()
+            return
+          }
           if (response.status === 409) {
             // La fiche a changé ailleurs entre-temps (colonne déplacée, case JSON réécrite par un
             // autre) : rien n'a été écrit. Seules les cases touchées par ce changement sont
@@ -700,7 +747,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
               if (!moved && !overwritten) continue
               dropped.push(pending.header.replace(/ JSON$/, ""))
               pendingChanges.current.delete(index)
+              // Les bonus d'un rang ne partent pas sans le rang noté comme obtenu : ils seraient
+              // ajoutés de nouveau quand la fenêtre le reproposerait.
+              if (pending.group) {
+                for (const [other, change] of pendingChanges.current) {
+                  if (change.group !== pending.group) continue
+                  dropped.push(change.header.replace(/ JSON$/, ""))
+                  pendingChanges.current.delete(other)
+                }
+              }
             }
+            failedPortrait.current = null
             if (reread) applyServer(reread)
             setConflictHeaders([...new Set(dropped)])
             setSaveState("conflict")
@@ -714,13 +771,18 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             // Une case JSON changée de nouveau pendant l'envoi part maintenant de ce qui vient d'être écrit.
             else if (pending?.before !== undefined) pending.before = change.value
           }
+          if (portrait) failedPortrait.current = null
           applyServer(payload.character)
           // L'avertissement d'un conflit reste affiché tant que rien de nouveau n'est saisi.
           const stillPending = pendingChanges.current.size > 0
-          setSaveState((state) => stillPending ? "saving" : state === "conflict" ? state : "saved")
+          setSaveState((state) => stillPending ? "saving" : state === "conflict" || state === "rejected" ? state : "saved")
           return
         } catch {
-          if (attempt >= delays.length) { setSaveState("error"); return }
+          if (attempt >= delays.length) {
+            if (portrait) failedPortrait.current = portrait
+            setSaveState("error")
+            return
+          }
           await new Promise((resolve) => window.setTimeout(resolve, delays[attempt]))
         }
       }
@@ -729,7 +791,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return run
   }
 
-  async function commit(index: number, value: string) {
+  async function commit(index: number, value: string, group?: string) {
     // Un plancher ou un plafond sur la vie actuelle (« ≥1 » : plus de dégâts létaux) vaut
     // aussi pour ce qui est enregistré : tant que l'état est posé, la vie n'y descend pas.
     if (index === 9 && (currentLifeRule?.min !== undefined || currentLifeRule?.max !== undefined)) {
@@ -746,9 +808,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       header: (server.headers.length ? server.headers : characterValueHeaders)[index] ?? "",
       // Une case JSON part de la valeur confirmée (ou de celle d'où partait sa modification encore en attente).
       ...(wholeJsonCells.has(index) ? { before: previous?.before ?? server.values[index] ?? "" } : {}),
+      ...(group ? { group } : {}),
     })
     setSaveState("saving")
-    await flush()
+    // La valeur est déjà affichée : le champ se referme sans attendre Google (jusqu'à 9 s
+    // quand il est lent). L'envoi continue derrière, suivi par « Enregistrement… ».
+    void flush()
   }
 
   async function changePortrait(file?: File) {
@@ -825,8 +890,10 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   }, [classCatalogLoading, currentChoice, rankBonusesLoaded, spellChoiceWanted])
   // Une descente de niveau qui retirerait des sorts ou des bonus attend d'être confirmée.
   const [levelDrop, setLevelDrop] = useState<{ value: string; level: number; loss: RankLoss } | null>(null)
-  function commitLevel(value: string) {
-    const nextLevel = Math.max(0, Math.trunc(Number(value) || 0))
+  function commitLevel(typed: string) {
+    // Un niveau est un entier positif : « -1 » devient 0, « 3,5 » devient 3 (vide reste vide).
+    const nextLevel = Math.max(0, Math.trunc(sheetNumber(typed) || 0))
+    const value = typed.trim() ? String(nextLevel) : ""
     if (nextLevel < characterLevel) {
       const loss = rankLossOf(latestValues.current[characterClassChoicesIndex] || "", nextLevel)
       if (loss.ranks.length) { setLevelDrop({ value, level: nextLevel, loss }); return Promise.resolve() }
@@ -851,9 +918,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const targetId = targetOfName(target)
     return targetId ? writableIndexFor(targetId) : -1
   }
-  function addToCell(index: number, amount: number) {
+  function addToCell(index: number, amount: number, group: string) {
     const next = Math.round((sheetNumber(latestValues.current[index] ?? "") + amount) * 100) / 100
-    void commit(index, String(next))
+    void commit(index, String(next), group)
   }
   /**
    * Descend au niveau confirmé : les bonus des rangs perdus sont retirés de leurs cases (là
@@ -864,14 +931,16 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const drop = levelDrop
     if (!drop) return
     setLevelDrop(null)
+    // Bonus retirés, rangs oubliés et niveau : enregistrés ensemble, ou pas du tout.
+    const group = `niveau-${drop.level}-${crypto.randomUUID()}`
     for (const { taken } of drop.loss.bonuses) {
       for (const entry of taken.applied) {
         const index = rankBonusCell(entry.target)
-        if (index >= 0 && entry.amount) addToCell(index, -entry.amount)
+        if (index >= 0 && entry.amount) addToCell(index, -entry.amount, group)
       }
     }
-    void commit(characterClassChoicesIndex, dropRanksAbove(latestValues.current[characterClassChoicesIndex] || "", drop.level))
-    void commit(3, drop.value)
+    void commit(characterClassChoicesIndex, dropRanksAbove(latestValues.current[characterClassChoicesIndex] || "", drop.level), group)
+    void commit(3, String(drop.level), group)
   }
 
   /**
@@ -883,6 +952,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const step = currentChoice
     if (!step) return
     let choices = latestValues.current[characterClassChoicesIndex] || ""
+    // Les bonus et le rang noté comme obtenu : enregistrés ensemble, ou pas du tout.
+    const group = `rang-${step.rank}-${crypto.randomUUID()}`
     if (spell && step.choice) {
       markNewSlots(newSpellsKey(character.id), [spell.id])
       choices = chooseClassSpell(choices, step.choice.classId, step.choice.rank, spell.id)
@@ -899,21 +970,21 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           for (const [key, points] of Object.entries(selection.spread[entry.slot] ?? {})) {
             const index = layout.index(key)
             if (!points || index < 0) continue
-            addToCell(index, sign * points)
+            addToCell(index, sign * points, group)
             applied.push({ target: catalog.characteristics.find((item) => item.key === key)?.name ?? key, amount: sign * points })
           }
           continue
         }
         const index = rankBonusCell(entry.target)
         if (index < 0 || !entry.amount) continue
-        addToCell(index, entry.amount)
+        addToCell(index, entry.amount, group)
         applied.push({ target: entry.target, amount: entry.amount })
       }
       if (selection.spell) markNewSlots(newSpellsKey(character.id), [selection.spell.id])
       choices = takeRankBonus(choices, step.rank, { applied, ...(selection.spell ? { spell: selection.spell.id } : {}) })
     }
     if (pendingChoiceCount <= 1) setSpellChoiceOpen(false)
-    return commit(characterClassChoicesIndex, choices)
+    return commit(characterClassChoicesIndex, choices, group)
   }
 
   // Les sorts de chaque compétence, calculés une fois par liste de sorts (et non à chaque
@@ -1122,9 +1193,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const definition = tabTypes.find((tab) => tab.type === newTabType)
     if (!definition) return
     const nextTab: CharacterTab = { id: crypto.randomUUID(), type: definition.type, label: definition.label, removable: true }
-    await commit(characterCustomTabsIndex, JSON.stringify([...customTabs, nextTab]))
-    setActiveTab(nextTab.id)
+    // L'onglet s'ouvre tout de suite (un double clic n'en ajoute pas deux) ; il s'enregistre derrière.
     setAddingTab(false)
+    const commitTabs = commit(characterCustomTabsIndex, JSON.stringify([...parseCharacterTabs(latestValues.current[characterCustomTabsIndex] || ""), nextTab]))
+    setActiveTab(nextTab.id)
+    await commitTabs
   }
 
   async function removeCharacterTab(id: string) {
@@ -1328,14 +1401,19 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           {portrait.images.map((image) => <span key={image} aria-hidden="true" className="pointer-events-none absolute inset-0"><IndexImage value={image} alt="" className="size-full object-contain" fallback={null} /></span>)}
           <PortraitFx fx={portrait.fx} />
           <span className="absolute inset-x-3 bottom-3 flex items-center justify-center gap-2 rounded-lg bg-black/65 px-3 py-2 text-xs text-white opacity-0 backdrop-blur transition group-hover:opacity-100"><ImagePlus className="size-4" />{portraitPending ? "Envoi…" : "Changer"}</span>
-          <input type="file" accept="image/*" className="sr-only" onChange={(event) => changePortrait(event.target.files?.[0])} />
+          <input type="file" accept="image/*" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void changePortrait(file) }} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
         <CharacterStatesPanel states={postedStates} autoStates={autoLife.auto} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">
-            <div><p className="text-[10px] font-semibold uppercase tracking-[.28em]" style={{ color: campaignAccent }}>Identité</p><InlineEdit label="Nom" value={values[0]} onCommit={(value) => commit(0, value)}><h1 className="mt-1 font-display text-4xl font-semibold tracking-tight sm:text-6xl">{values[0] || "Sans nom"}</h1></InlineEdit>{activeTitle && <p className="mt-1 font-display text-lg" style={{ color: campaignAccent }}>{activeTitle}</p>}</div>
+            <div><p className="text-[10px] font-semibold uppercase tracking-[.28em]" style={{ color: campaignAccent }}>Identité</p><InlineEdit label="Nom" value={values[0]} onCommit={(value) => {
+              // Un nom vide (ou trop long) est refusé ici : l'ancien reste affiché.
+              const name = value.trim()
+              if (!name || name.length > 120) { reject(name ? "le nom fait plus de 120 caractères." : "le personnage doit garder un nom."); return Promise.resolve() }
+              return commit(0, value)
+            }}><h1 className="mt-1 font-display text-4xl font-semibold tracking-tight sm:text-6xl">{values[0] || "Sans nom"}</h1></InlineEdit>{activeTitle && <p className="mt-1 font-display text-lg" style={{ color: campaignAccent }}>{activeTitle}</p>}</div>
             <div className="flex flex-wrap justify-end gap-2">{character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="rounded-full border px-3 py-1 text-xs font-medium" style={{ color: campaign.accentColor, borderColor: `${campaign.accentColor}66`, backgroundColor: `${campaign.accentColor}12` }}>{campaign.name}</span>) : <span className="rounded-full border px-3 py-1 text-xs text-muted-foreground">Sans campagne</span>}</div>
           </div>
           <div className="mt-6 divide-y border-y">
@@ -1381,6 +1459,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
+      {saveState === "rejected" && <><X className="size-3.5" />Pas enregistré : {rejection}<button type="button" className="font-semibold underline" onClick={() => setSaveState("idle")}>Fermer</button></>}
       {saveState === "conflict" && <><X className="size-3.5" />{conflictHeaders.length ? `La fiche a changé ailleurs entre-temps. Pas enregistré : ${conflictHeaders.join(", ")}. Recommence sur la fiche à jour.` : "La fiche a changé entre-temps : actualise puis recommence."}</>}
     </div>}
 

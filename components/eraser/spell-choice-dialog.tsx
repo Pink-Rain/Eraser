@@ -319,7 +319,13 @@ export function SpellChoiceDialog({ open, onOpenChange, title, subtitle, options
     setPickedFor({ key: choiceKey, id: spell?.id ?? "bonus" })
     playSpellChosen()
     if (spell) await new Promise((resolve) => window.setTimeout(resolve, 650))
-    await onChoose(spell, bonus ? selection : null)
+    try {
+      await onChoose(spell, bonus ? selection : null)
+    } finally {
+      // Le même rang peut revenir (la fiche a changé ailleurs, rien n'a été gardé) : ses cartes
+      // redeviennent cliquables au lieu de rester figées.
+      setPickedFor(null)
+    }
     setSelectionFor(null)
     if (remaining <= 1) changeOpen(false)
   }
