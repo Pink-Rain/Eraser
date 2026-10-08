@@ -76,26 +76,25 @@ export function rememberRankBonuses(bonuses: RankBonus[]) {
 }
 
 /**
- * Ce qu'une « Cible » de bonus de rang peut viser : « Caractéristique » et « Déplacement »
- * d'abord, puis tout ce que la fiche affiche, rangé comme elle (général, déplacement,
- * chaque caractéristique avec ses compétences).
+ * Ce qu'une « Cible » de bonus de rang peut viser : « Caractéristique » (au choix du
+ * joueur) d'abord, puis tout ce que la fiche affiche, rangé comme elle (général,
+ * déplacement avec « Déplacement » en tête, chaque caractéristique avec ses compétences).
  */
 export function rankBonusTargetOptions(catalog: CharacterCatalog) {
   const listSecondaries = new Set(["Classe sociale", "Alignement"])
   const special = "Au choix du joueur"
   const options: ChoiceOption[] = [
     { value: ANY_CHARACTERISTIC_TARGET, group: special, hint: "Le joueur répartit la valeur entre ses caractéristiques principales." },
-    { value: MOVEMENT_TARGET, group: special, hint: "Ajouté à l’action de déplacement gratuite (et donc aux trois)." },
   ]
   const groups: Array<{ name: string; color?: string }> = [{ name: special, color: "#b48745" }, { name: "Général", color: "#8a9bb0" }]
   for (const item of catalog.characteristics) {
     if (item.kind === "secondaire" && !listSecondaries.has(item.key)) options.push({ value: item.name, group: "Général" })
   }
-  const movement = catalog.characteristics.filter((item) => item.kind === "deplacement")
-  if (movement.length) {
-    groups.push({ name: "Déplacement", color: "#5f9fa0" })
-    for (const item of movement) options.push({ value: item.name, group: "Déplacement" })
-  }
+  // « Déplacement » n'est pas un choix du joueur : il va toujours à l'action gratuite.
+  // Il ouvre donc le groupe Déplacement, au-dessus des trois actions.
+  groups.push({ name: "Déplacement", color: "#5f9fa0" })
+  options.push({ value: MOVEMENT_TARGET, group: "Déplacement", hint: "Ajouté à l’action de déplacement gratuite (et donc aux trois)." })
+  for (const item of catalog.characteristics.filter((characteristic) => characteristic.kind === "deplacement")) options.push({ value: item.name, group: "Déplacement" })
   for (const group of catalogGroups(catalog)) {
     const name = group.characteristic?.name ?? "Autres compétences"
     groups.push({ name, color: group.characteristic?.color })

@@ -41,6 +41,8 @@ const choiceOptions = ["1", "2", "3", "4"].map((value) => ({ value, hint: `Le jo
  * Chaque colonne a son rôle, comme dans l'index des états : Cible / Valeur (×4), Choix,
  * Sort sur mesure et Autre. « Ajouter un rang » ajoute le rang suivant, sans limite.
  */
+const cellKey = (rank: number, column: string) => `${rank}\u0001${foldCatalogName(column)}`
+
 // Le dernier tableau lu : changer d'onglet puis revenir le montre aussitôt, relu derrière.
 let knownTable: LoadedRankBonuses | null = null
 
@@ -83,44 +85,80 @@ export function RankBonusTab() {
   // Le rang ouvert dans sa fiche (le formulaire des index), et ce qui l'a fait refuser.
   const [openRank, setOpenRank] = useState<string | null>(null)
   const [sheetError, setSheetError] = useState("")
+  /**
+   * Ce qui est tapé s'affiche tout de suite et le reste tant que Google ne l'a pas confirmé :
+   * une réponse arrivée entre-temps (pour une autre case) ne le fait plus disparaître.
+   */
+  const [overrides, setOverrides] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  // Les cases en attente d'envoi : une rafale de saisies (ou un collage) part en une seule requête.
+  const pending = useRef(new Map<string, { change: { rank: number; column: string; value: string }; waiters: Array<(ok: boolean) => void> }>())
+  const timer = useRef<number | null>(null)
+  const sending = useRef<Promise<void>>(Promise.resolve())
   const lastError = useRef("")
 
   const valueOf = useCallback((rowKey: string, columnKey: string) => {
     const rank = Number(rowKey)
     if (columnKey === "__rank") return `Rang ${rank}`
+    const typed = overrides[cellKey(rank, columnKey)]
+    if (typed !== undefined) return typed
     const column = headers.findIndex((header) => foldCatalogName(header) === foldCatalogName(columnKey))
     return column >= 0 ? byRank.get(rank)?.[column] ?? "" : ""
-  }, [byRank, headers])
+  }, [byRank, headers, overrides])
 
-  const save = useCallback(async (rank: number, column: string, value: string) => {
-    setError("")
-    try {
-      const response = await fetch("/api/classes/rank-bonuses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ rank, column, value }) })
-      const payload = await response.json() as LoadedRankBonuses & { error?: string }
-      if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
-      setTable(payload)
-      return true
-    } catch (reason) {
-      lastError.current = reason instanceof Error ? reason.message : "Enregistrement impossible."
-      setError(lastError.current)
-      setVersion((current) => current + 1)
-      return false
-    }
+  const flush = useCallback(() => {
+    timer.current = null
+    const batch = [...pending.current.entries()]
+    pending.current.clear()
+    if (!batch.length) return
+    setSaving(true)
+    sending.current = sending.current.then(async () => {
+      let ok = true
+      try {
+        const response = await fetch("/api/classes/rank-bonuses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ changes: batch.map(([, item]) => item.change) }) })
+        const payload = await response.json().catch(() => ({})) as LoadedRankBonuses & { error?: string }
+        if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
+        setTable(payload)
+        setError("")
+      } catch (reason) {
+        ok = false
+        lastError.current = reason instanceof Error ? reason.message : "Enregistrement impossible."
+        setError(lastError.current)
+        setVersion((current) => current + 1)
+      }
+      // Confirmées (ou refusées) : ces cases montrent de nouveau la feuille, sauf celles retapées depuis.
+      setOverrides((current) => {
+        const next = { ...current }
+        for (const [key, item] of batch) if (next[key] === item.change.value && !pending.current.has(key)) delete next[key]
+        return next
+      })
+      for (const [, item] of batch) for (const resolve of item.waiters) resolve(ok)
+      if (!pending.current.size && !timer.current) setSaving(false)
+    })
   }, [setTable])
 
-  /** Les bonus d'un rang, enregistrés d'eux-mêmes par sa fiche, colonne par colonne. */
+  /** Met une case en attente d'envoi ; vrai une fois enregistrée dans Google Sheets. */
+  const save = useCallback((rank: number, column: string, value: string) => new Promise<boolean>((resolve) => {
+    const key = cellKey(rank, column)
+    const previous = pending.current.get(key)
+    pending.current.set(key, { change: { rank, column, value }, waiters: [...(previous?.waiters ?? []), resolve] })
+    setOverrides((current) => ({ ...current, [key]: value }))
+    setSaving(true)
+    if (timer.current) window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(flush, 350)
+  }), [flush])
+
+  // Quitter l'onglet n'abandonne pas une saisie pas encore partie.
+  useEffect(() => () => { if (timer.current) { window.clearTimeout(timer.current); flush() } }, [flush])
+
+  /** Les bonus d'un rang, enregistrés d'eux-mêmes par sa fiche, en une seule écriture. */
   async function saveSheet(rowKey: string, changes: Record<string, string>) {
     setSheetError("")
-    for (const [column, value] of Object.entries(changes)) {
-      lastError.current = ""
-      if (!(await save(Number(rowKey), column, value))) {
-        const message = lastError.current || "Ce bonus n’a pas pu être enregistré dans Google Sheets."
-        setSheetError(message)
-        throw new Error(message)
-      }
-    }
-    // Le tableau derrière la fiche montre aussitôt ce qui vient d'être écrit.
-    setVersion((current) => current + 1)
+    const results = await Promise.all(Object.entries(changes).map(([column, value]) => save(Number(rowKey), column, value)))
+    if (results.every(Boolean)) return
+    const message = lastError.current || "Ce bonus n’a pas pu être enregistré dans Google Sheets."
+    setSheetError(message)
+    throw new Error(message)
   }
 
   // La fiche d'un rang : les mêmes colonnes que le tableau, avec leurs listes et leur case à cocher.
@@ -209,7 +247,8 @@ export function RankBonusTab() {
       </div>
       <div className="flex flex-wrap gap-2">
         {canEdit && table?.exists && <Button type="button" variant="outline" size="sm" disabled={adding} onClick={() => void addRank()}>{adding ? <LoaderCircle className="animate-spin" /> : <Plus />}Ajouter un rang</Button>}
-        <Button type="button" variant="outline" size="sm" disabled={loading} onClick={() => void load(true)}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+        {saving && <span className="flex items-center gap-1.5 px-1 text-xs text-muted-foreground" role="status"><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</span>}
+        <Button type="button" variant="outline" size="sm" disabled={loading || saving} onClick={() => void load(true)}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
         {table?.sheetUrl && <Button asChild variant="outline" size="sm"><a href={table.sheetUrl} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
       </div>
     </div>

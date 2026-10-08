@@ -1301,7 +1301,8 @@ export function mergeClassSpells(keep: SpellTarget, removed: SpellTarget[], draf
 export { RANK_BONUS_TAB }
 export type { RankBonus, RankBonusTable }
 
-let rankBonusCache: { expiresAt: number; table: RankBonusTable } | null = null
+/** `matrix` : les cases lues (ligne 0 = ligne 1 de Sheets), pour recalculer le tableau après une écriture sans tout relire. */
+let rankBonusCache: { expiresAt: number; table: RankBonusTable; matrix?: string[][] } | null = null
 let rankBonusCreation: Promise<void> | null = null
 /** Les en-têtes déjà vérifiés, par classeur, depuis le démarrage. */
 const rankBonusHeadersReady = new Set<string>()
@@ -1399,23 +1400,36 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
     const read = await readRangeFreshWithOffset(file.id, range)
     return [...Array.from({ length: Math.max(0, read.startRow - 1) }, () => [] as string[]), ...read.rows]
   })() : await readRange(file.id, range)
-  const { headers, bonuses, rows: raw } = parseRankBonusRows(rows)
-  const table = { bonuses, headers, rows: raw, sheetUrl: tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`, exists: true }
-  rankBonusCache = { expiresAt: Date.now() + 60_000, table }
+  const matrix = rows.map((row) => row.map((cell) => String(cell ?? "")))
+  const table = rankBonusTableOf(matrix, tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`)
+  rankBonusCache = { expiresAt: Date.now() + 60_000, table, matrix }
   return table
+}
+
+function rankBonusTableOf(matrix: string[][], sheetUrl: string): RankBonusTable {
+  const { headers, bonuses, rows } = parseRankBonusRows(matrix)
+  return { bonuses, headers, rows, sheetUrl, exists: true }
 }
 
 /** Les bonus s'écrivent un à un : deux colonnes ajoutées coup sur coup ne prennent pas la même place. */
 let rankBonusQueue: Promise<unknown> = Promise.resolve()
 
+export type RankBonusCellChange = { rank: number; column: string; value: string }
+
 /**
- * Écrit un bonus de rang : la case du rang (lignes « Rang 1 », « Rang 2 »…) dans la
- * colonne de ce nom. Une colonne absente est ajoutée à droite des autres.
+ * Écrit des bonus de rang, autant qu'on en a tapé ou collé d'un coup : chaque case du rang
+ * (lignes « Rang 1 », « Rang 2 »…) dans la colonne de ce nom, en une seule écriture. Une
+ * colonne absente est ajoutée à droite des autres. Le tableau renvoyé est recalculé à partir
+ * de ce qui vient d'être écrit, sans relire tout l'onglet.
  */
-export async function saveRankBonus(rank: number, header: string, value: string) {
-  if (!Number.isInteger(rank) || rank < 1 || rank > RANK_BONUS_MAX_RANK) throw new Error("RANK_BONUS_INVALID_RANK")
-  const label = header.replace(/\s+/g, " ").trim()
-  if (!label || label.length > 80) throw new Error("RANK_BONUS_INVALID_COLUMN")
+export async function saveRankBonusCells(changes: RankBonusCellChange[]) {
+  const cleaned = changes.map((change) => {
+    if (!Number.isInteger(change.rank) || change.rank < 1 || change.rank > RANK_BONUS_MAX_RANK) throw new Error("RANK_BONUS_INVALID_RANK")
+    const label = String(change.column ?? "").replace(/\s+/g, " ").trim()
+    if (!label || label.length > 80) throw new Error("RANK_BONUS_INVALID_COLUMN")
+    return { rank: change.rank, label, value: String(change.value ?? "").slice(0, 2000) }
+  })
+  if (!cleaned.length) return listRankBonuses()
   const { spells: file } = await classWorkbookFiles()
   if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
   const run = rankBonusQueue.then(async () => {
@@ -1425,23 +1439,55 @@ export async function saveRankBonus(rank: number, header: string, value: string)
       readRangeFreshWithOffset(file.id, `${quoteTab(RANK_BONUS_TAB)}!A:A`),
     ])
     const headers = (headerRead.startRow === 1 ? headerRead.rows[0] ?? [] : []).map((cell) => String(cell ?? "").trim())
-    const rankOffset = rankRead.rows.findIndex((row, offset) => rankRead.startRow + offset > 1 && rankOfCell(String(row[0] ?? "")) === rank)
-    if (rankOffset < 0) throw new Error("RANK_BONUS_ROW_NOT_FOUND")
-    let column = headers.findIndex((candidate, index) => index > 0 && foldRankHeader(candidate) === foldRankHeader(label))
-    const added = column < 0
-    if (added) {
-      column = Math.max(1, headers.length)
-      await ensureSheetColumnCount(file.id, RANK_BONUS_TAB, column + 1)
-      await updateRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}1`, [[label]], { valueInputOption: "RAW" })
+    while (headers.length && !headers[headers.length - 1]) headers.pop()
+    const rowOf = new Map<number, number>()
+    rankRead.rows.forEach((row, offset) => {
+      const rank = rankOfCell(String(row[0] ?? ""))
+      if (rankRead.startRow + offset > 1 && rank !== null && !rowOf.has(rank)) rowOf.set(rank, rankRead.startRow + offset)
+    })
+    const writes: Array<{ range: string; values: string[][] }> = []
+    const written: Array<{ row: number; column: number; value: string }> = []
+    const width = headers.length
+    for (const change of cleaned) {
+      const row = rowOf.get(change.rank)
+      if (!row) throw new Error("RANK_BONUS_ROW_NOT_FOUND")
+      let column = headers.findIndex((candidate, index) => index > 0 && foldRankHeader(candidate) === foldRankHeader(change.label))
+      if (column < 0) {
+        column = Math.max(1, headers.length)
+        headers[column] = change.label
+        writes.push({ range: `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}1`, values: [[change.label]] })
+      }
+      writes.push({ range: `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}${row}`, values: [[change.value]] })
+      written.push({ row, column, value: change.value })
     }
-    if (value !== "" || !added) {
-      await updateRange(file.id, `${quoteTab(RANK_BONUS_TAB)}!${columnName(column + 1)}${rankRead.startRow + rankOffset}`, [[value.slice(0, 2000)]], { valueInputOption: "RAW" })
-    }
+    if (headers.length > width) await ensureSheetColumnCount(file.id, RANK_BONUS_TAB, headers.length)
+    await updateRanges(file.id, writes, { valueInputOption: "RAW" })
+    return { headers, written }
   })
   rankBonusQueue = run.catch(() => undefined)
-  await run
-  rankBonusCache = null
-  return listRankBonuses({ refresh: true })
+  const { headers, written } = await run
+  const cached = rankBonusCache
+  if (!cached?.matrix || !cached.table.exists) {
+    rankBonusCache = null
+    return listRankBonuses({ refresh: true })
+  }
+  // Le tableau gardé, avec ce qui vient d'être écrit : la ligne d'en-têtes relue, et chaque case.
+  const matrix = cached.matrix.map((row) => [...row])
+  matrix[0] = [...headers]
+  for (const cell of written) {
+    while (matrix.length < cell.row) matrix.push([])
+    const line = matrix[cell.row - 1]
+    while (line.length <= cell.column) line.push("")
+    line[cell.column] = cell.value
+  }
+  const table = rankBonusTableOf(matrix, cached.table.sheetUrl)
+  rankBonusCache = { expiresAt: Date.now() + 60_000, table, matrix }
+  return table
+}
+
+/** Écrit un seul bonus de rang (voir saveRankBonusCells). */
+export function saveRankBonus(rank: number, header: string, value: string) {
+  return saveRankBonusCells([{ rank, column: header, value }])
 }
 
 /** Ajoute le rang suivant (« Rang 21 ») sous le dernier : les bonus de rang n'ont pas de limite. */

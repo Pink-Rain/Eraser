@@ -85,6 +85,7 @@ import type { StateEffect } from "@/lib/character-states"
 import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { parseListCell, serializeListCell } from "@/lib/multiple-values"
+import { playItemEquipped, preloadSounds } from "@/lib/sounds"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
   loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
@@ -626,6 +627,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const linkedForValue = (valueIndex: number) => modifiersByValueIndex.get(valueIndex)?.items || []
 
   async function setSlotEquipped(slotId: string, equipped: boolean) {
+    if (equipped) playItemEquipped()
     setEquipPending(slotId)
     try {
       const response = await fetch(inventoryEndpoint, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "set-equipped", slotId, equipped }) })
@@ -635,6 +637,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     setEquipPending("")
   }
   const slotToggle: SlotToggle = { pendingSlot: equipPending, onToggle: (slotId, equipped) => void setSlotEquipped(slotId, equipped) }
+
+  // Les sons de la fiche, chargés d'avance : le premier ne part pas en retard.
+  useEffect(() => { preloadSounds(["levelup", "choixsort", "equiperitem", "notifrecevoirobjet"]) }, [])
 
   // Toujours la dernière version de la fiche : deux champs quittés coup sur coup
   // (clic ailleurs, survol refermé) partent chacun de la précédente, sans l'effacer.

@@ -419,6 +419,15 @@ test("Bonus de rang : l'ancienne colonne « Bonus » vide devient « Cible 1 »,
   const final = await content.listRankBonuses({ refresh: true });
   assert.deepEqual(final.bonuses.find((bonus) => bonus.rank === 2).bonuses, [{ target: "Rapidité", value: "+5", amount: 5, slot: 1 }]);
   assert.equal(final.bonuses.find((bonus) => bonus.rank === 21).other, "Un titre");
+  // Plusieurs cases d'un coup : une seule écriture, et le tableau renvoyé les montre sans relire l'onglet.
+  const writes = () => google.world.calls.filter((call) => call.url.includes("values:batchUpdate")).length;
+  const reads = () => google.world.calls.filter((call) => call.url.includes("Bonus%20de%20rang") || JSON.stringify(call.body ?? "").includes("Bonus de rang")).length;
+  const [writesBefore, readsBefore] = [writes(), reads()];
+  const batch = await content.saveRankBonusCells([{ rank: 3, column: "Cible 1", value: "Force" }, { rank: 3, column: "Valeur 1", value: "2" }, { rank: 4, column: "Choix", value: "1" }]);
+  assert.equal(writes() - writesBefore, 1);
+  assert.ok(reads() - readsBefore <= 3);
+  assert.deepEqual(batch.bonuses.find((bonus) => bonus.rank === 3).bonuses, [{ target: "Force", value: "2", amount: 2, slot: 1 }]);
+  assert.equal(google.grid(SPELLS, "Bonus de rang")[3][1], "Force");
 });
 
 test("Remplacer des ID dans le JSON d'une fiche ne touche à rien d'autre", () => {

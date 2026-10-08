@@ -1,8 +1,10 @@
 /**
- * Petits sons d'Eraser, synthétisés sur place (aucun fichier à télécharger) : le
- * carillon d'un nouveau sort à choisir, le « ploup ploup » d'un objet reçu. Discrets,
- * et coupables : la préférence est gardée dans ce navigateur.
+ * Petits sons d'Eraser : le passage de rang, le sort choisi, l'objet équipé, l'objet reçu.
+ * Ils viennent du dossier Drive « Sons » (levelup.mp3…), chargés une fois puis gardés ;
+ * tant qu'un fichier manque (ou que Google ne répond pas), le son synthétisé d'origine le
+ * remplace. Discrets, et coupables : la préférence est gardée dans ce navigateur.
  */
+import type { SoundName } from "@/lib/sound-names"
 
 const SOUND_PREFERENCE = "eraser:sounds"
 
@@ -25,6 +27,51 @@ function audio() {
   return context
 }
 
+// Les fichiers des sons, décodés une fois. Un échec est oublié au bout d'une minute.
+const decoded = new Map<SoundName, Promise<AudioBuffer | null>>()
+
+function loadSound(ctx: AudioContext, name: SoundName) {
+  let promise = decoded.get(name)
+  if (!promise) {
+    promise = fetch(`/api/sounds/${name}`, { cache: "force-cache" })
+      .then(async (response) => response.ok ? await ctx.decodeAudioData(await response.arrayBuffer()) : null)
+      .catch(() => null)
+    decoded.set(name, promise)
+    void promise.then((buffer) => { if (!buffer) window.setTimeout(() => { if (decoded.get(name) === promise) decoded.delete(name) }, 60_000) })
+  }
+  return promise
+}
+
+/** Charge les sons à l'avance : le premier ne part pas en retard. */
+export function preloadSounds(names: SoundName[]) {
+  const ctx = audio()
+  if (!ctx) return
+  for (const name of names) void loadSound(ctx, name)
+}
+
+/**
+ * Joue le fichier du son ; s'il n'est pas prêt assez vite, ou introuvable, le son de
+ * secours (synthétisé) le remplace. Un son en retard n'est jamais joué après coup.
+ */
+function playFile(name: SoundName, fallback: (ctx: AudioContext) => void, volume = 0.8) {
+  const ctx = audio()
+  if (!ctx) return
+  let settled = false
+  const timer = window.setTimeout(() => { if (!settled) { settled = true; fallback(ctx) } }, 700)
+  void loadSound(ctx, name).then((buffer) => {
+    if (settled) return
+    settled = true
+    window.clearTimeout(timer)
+    if (!buffer) { fallback(ctx); return }
+    const source = ctx.createBufferSource()
+    const gain = ctx.createGain()
+    gain.gain.value = volume
+    source.buffer = buffer
+    source.connect(gain).connect(ctx.destination)
+    source.start()
+  })
+}
+
 /** Une note douce : attaque courte, extinction en douceur. */
 function note(ctx: AudioContext, frequency: number, start: number, duration: number, volume: number, type: OscillatorType = "sine") {
   const oscillator = ctx.createOscillator()
@@ -39,10 +86,12 @@ function note(ctx: AudioContext, frequency: number, start: number, duration: num
   oscillator.stop(start + duration + 0.05)
 }
 
-/** Carillon montant, un peu scintillant : trois sorts se présentent. */
+/** Le passage de rang (levelup.mp3) ; à défaut, un carillon montant, un peu scintillant. */
 export function playSpellChoiceChime() {
-  const ctx = audio()
-  if (!ctx) return
+  playFile("levelup", chime)
+}
+
+function chime(ctx: AudioContext) {
   const now = ctx.currentTime + 0.02
   ;[659.25, 783.99, 987.77, 1318.51].forEach((frequency, index) => {
     note(ctx, frequency, now + index * 0.085, 0.9, 0.05, "triangle")
@@ -50,19 +99,32 @@ export function playSpellChoiceChime() {
   })
 }
 
-/** Petit son de validation quand un sort est choisi. */
+/** Le sort choisi, rang terminé (choixsort.mp3) ; à défaut, un petit son de validation. */
 export function playSpellChosen() {
-  const ctx = audio()
-  if (!ctx) return
+  playFile("choixsort", validation)
+}
+
+function validation(ctx: AudioContext) {
   const now = ctx.currentTime + 0.01
   note(ctx, 523.25, now, 0.35, 0.05, "triangle")
   note(ctx, 783.99, now + 0.07, 0.6, 0.05, "triangle")
 }
 
-/** « Ploup ploup » : deux bulles qui montent, pour un objet reçu. */
+/** Un objet équipé (equiperitem.mp3) ; à défaut, un petit déclic. */
+export function playItemEquipped() {
+  playFile("equiperitem", (ctx) => {
+    const now = ctx.currentTime + 0.01
+    note(ctx, 880, now, 0.12, 0.05, "triangle")
+    note(ctx, 1174.66, now + 0.05, 0.18, 0.04, "triangle")
+  })
+}
+
+/** Un objet reçu (notifrecevoirobjet.mp3) ; à défaut, « ploup ploup » : deux bulles qui montent. */
 export function playItemReceived() {
-  const ctx = audio()
-  if (!ctx) return
+  playFile("notifrecevoirobjet", bubbles)
+}
+
+function bubbles(ctx: AudioContext) {
   const now = ctx.currentTime + 0.01
   ;[0, 0.13].forEach((offset, index) => {
     const oscillator = ctx.createOscillator()
