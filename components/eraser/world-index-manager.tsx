@@ -1,7 +1,7 @@
 "use client"
 
 import dynamic from "next/dynamic"
-import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react"
+import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
 import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
@@ -149,7 +149,37 @@ function fallbackDefinition(indexKey: WorldIndexKey): WorldIndexDefinition {
   return isBuiltinWorldIndexKey(indexKey) ? worldIndexDefinitions[indexKey] : { key: indexKey, sheetName: indexKey, title: indexKey, path: `/ressources/index/${indexKey}`, tabs: [], custom: true }
 }
 
-type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean }
+/** Une ligne de la vue intégrée, telle que la page qui l'accueille la voit. */
+export type IndexEmbedRow = { rowKey: string; id: string; name: string; cell: (header: string) => string }
+
+/**
+ * Le moteur d'un index affiché dans une autre page (les Actifs du créateur de classe) :
+ * mêmes cartes, onglets-fenêtres, « Modifier », tri, fiche et colonnes calculées que la page
+ * de l'index, mais sur les lignes que la page choisit, sans sélecteur d'onglets ni adresse
+ * réécrite. La page peut ajouter ses colonnes, son menu de ligne et son « Ajouter ».
+ */
+export type IndexEmbed = {
+  /** Distingue les réglages gardés sur ce poste (tri, tableau ou cartes, largeurs). */
+  id: string
+  /** Le nom de la vue, premier choix quand l'index a des onglets-fenêtres (« Actifs »). */
+  label: string
+  /** Les lignes montrées, lues dans leurs cases. */
+  rowFilter: (cell: (header: string) => string) => boolean
+  /** La recherche tapée dans la page qui l'accueille : la vue n'a alors pas la sienne. */
+  query?: string
+  /** Colonnes de l'index cachées dans cette vue (Distance et Charges hors des actifs). */
+  hiddenColumns?: string[]
+  /** Colonnes propres à la page, placées après `after` (sinon à la fin), et aussi dans la fiche. */
+  extraColumns?: Array<{ key: string; label: string; width: number; after?: string; render: (row: IndexEmbedRow, compact: boolean) => ReactNode }>
+  rowMenuExtras?: (row: IndexEmbedRow) => ReactNode
+  /** « Ajouter » : la page s'en charge (le formulaire d'un nouveau sort). */
+  onAdd?: () => void
+  addLabel?: string
+  /** Ce que reçoit une ligne ajoutée dans le tableau (le Type des passifs). */
+  addDefaults?: Record<string, string>
+}
+
+type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean; embed?: IndexEmbed }
 
 /**
  * Les pages d'index rendent ce composant au même endroit de l'arbre : sans clé,
@@ -157,7 +187,22 @@ type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndex
  * visitée (ses données, son onglet, son tri). La clé repart de zéro à chaque index.
  */
 export function WorldIndexManager(props: WorldIndexManagerProps) {
-  return <WorldIndexView key={props.indexKey} {...props} />
+  return <WorldIndexView key={props.embed ? `${props.indexKey}:${props.embed.id}` : props.indexKey} {...props} />
+}
+
+/** Un index intégré dans une autre page : il charge ses données lui-même. */
+export function EmbeddedWorldIndex({ indexKey, embed }: { indexKey: WorldIndexKey; embed: IndexEmbed }) {
+  const [state, setState] = useState<{ data: WorldIndexData | null; error: string } | null>(null)
+  useEffect(() => {
+    let alive = true
+    fetch(`/api/resources/world-indexes?key=${encodeURIComponent(indexKey)}`, { cache: "no-store" })
+      .then(async (response) => ({ ok: response.ok, payload: (await response.json().catch(() => ({}))) as { data?: WorldIndexData; error?: string } }))
+      .then(({ ok, payload }) => { if (alive) setState({ data: ok ? payload.data ?? null : null, error: ok ? "" : payload.error || "Cet index n’a pas pu être lu dans Google Sheets." }) })
+      .catch(() => { if (alive) setState({ data: null, error: "Eraser n’a pas pu joindre son serveur local : actualise dans un instant." }) })
+    return () => { alive = false }
+  }, [indexKey])
+  if (!state) return <div className="grid min-h-40 place-items-center rounded-2xl border border-dashed text-sm text-muted-foreground"><span className="flex items-center gap-2"><LoaderCircle className="size-4 animate-spin" />Chargement de l’index…</span></div>
+  return <WorldIndexManager indexKey={indexKey} initialData={state.data} initialError={state.error} embed={embed} />
 }
 
 /**
@@ -165,13 +210,19 @@ export function WorldIndexManager(props: WorldIndexManagerProps) {
  * sur son classeur Google Sheets. Les colonnes liées d'un index à l'autre se complètent
  * côté serveur ; le tableau se recharge quand un lien a touché l'index affiché.
  */
-function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails = false }: WorldIndexManagerProps) {
+function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails = false, embed }: WorldIndexManagerProps) {
   const [data, setData] = useState(initialData)
   const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
   // L'onglet affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.
+  // Intégré dans une autre page : son premier onglet (ou un onglet-fenêtre), sans toucher à l'adresse.
   const pathname = usePathname()
-  const [tabName, setTabName, tabHref] = useIndexTabParam(pathname, `eraser:world-index:${indexKey}:view`, ALL_TABS)
+  const [urlTab, setUrlTab, tabHref] = useIndexTabParam(pathname, `eraser:world-index:${indexKey}:view`, ALL_TABS)
+  const [embedTab, setEmbedTab] = useState("")
+  const tabName = embed ? embedTab || (data?.tables[0]?.tabName ?? "") : urlTab
+  const setTabName = embed ? setEmbedTab : setUrlTab
+  // Les réglages de ce poste (tri, tableau ou cartes) : propres à chaque vue intégrée.
+  const storeKey = embed ? `${indexKey}:${embed.id}` : indexKey
   const [pending, setPending] = useState("")
   const [error, setError] = useState(initialError)
   const [saving, setSaving] = useState(0)
@@ -186,9 +237,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // Les lignes réécrites depuis leur fiche : le tableau (ou les cartes) les redessine aussitôt.
   const [rowVersions, setRowVersions] = useState<Record<string, number>>({})
   // Gardée pour cette page : changer d'onglet d'Eraser puis revenir la retrouve.
-  const [query, setQuery] = useRememberedSearch()
+  const [ownQuery, setQuery] = useRememberedSearch()
+  const query = embed?.query ?? ownQuery
   const [details, setDetails] = useState<string | null>(null)
-  const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${indexKey}:sort`, null, isValidSort)
+  const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${storeKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
   // Pour chaque saisie : ses écritures encore en route, et le numéro de requête atteint quand
   // la dernière a abouti. Une relecture demandée avant ne la contient peut-être pas encore.
@@ -204,17 +256,19 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const [guideOpen, setGuideOpen] = useState(false)
   // Un lien « ?q=… » (bouton « Ouvrir la ligne liée ») ouvre l'index filtré sur ce nom.
   useEffect(() => {
+    if (embed) return
     const initial = new URLSearchParams(window.location.search).get("q")
     // L'adresse n'est connue qu'une fois la page affichée : la lire au rendu ferait différer le serveur et le navigateur.
     if (initial) setQuery(initial)
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- lue une fois, à l'ouverture de la page
   }, [setQuery])
 
   const tables = useMemo(() => data?.tables ?? [], [data])
   // Les onglets-fenêtres : des onglets sans données propres, qui réaffichent des lignes existantes.
   const settings = useIndexSettings(indexKey)
   // Tableau ou cartes, et la carte choisie : retenus pour cet index, sur ce poste.
-  const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${indexKey}:display`, "table", isIndexDisplay)
-  const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${indexKey}:card`, "", isCardChoice)
+  const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${storeKey}:display`, "table", isIndexDisplay)
+  const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${storeKey}:card`, "", isCardChoice)
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
   const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
@@ -278,6 +332,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
   // Un index d'entités : le nom mène à la page de la ligne, « Ajouter » à sa page de création.
   const entity = definition.entity
+  /** La colonne du nom d'une ligne de cet index : celle que l'index d'entités désigne (« Rang » des bonus de rang), sinon « Nom ». */
+  const ownNameColumn = useCallback((headers: string[]) => {
+    const own = entity?.nameHeader ? headers.findIndex((header) => foldName(header) === foldName(entity.nameHeader)) : -1
+    return own >= 0 ? own : nameColumnOf(headers)
+  }, [entity])
 
   const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
     const { tabName: rowTab, rowNumber } = parseRowKey(rowKey)
@@ -451,7 +510,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     setPending("add"); setError("")
     try {
       // Les colonnes que suivent les valeurs : le serveur les range par nom.
-      const payload = await post({ action: "add", tabName: targetTab, values, headers })
+      const payload = await post({ action: "add", tabName: targetTab, values: withAddDefaults(headers, values), headers })
       if (payload.data) applyData(payload.data, payload.seq)
       setCreating(false)
     } catch (reason) {
@@ -493,9 +552,17 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   /** Le nom d'une ligne, quelle que soit sa colonne (« Nom », « Nom du PNJ »…). */
   const nameOf = useCallback((rowKey: string) => {
     const found = locate(rowKey)
-    const column = found ? nameColumnOf(found.table.headers) : -1
+    const column = found ? ownNameColumn(found.table.headers) : -1
     return found && column >= 0 ? rawOf(rowKey, found.table.headers[column]).replace(/<[^>]+>/g, "") : ""
-  }, [locate, rawOf])
+  }, [locate, ownNameColumn, rawOf])
+
+  /** Une ligne telle que la page qui accueille la vue intégrée la voit. */
+  const embedRow = useCallback((rowKey: string): IndexEmbedRow => ({
+    rowKey,
+    id: rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim(),
+    name: nameOf(rowKey),
+    cell: (header) => rawOf(rowKey, header),
+  }), [nameOf, rawOf])
 
   /** Ouvre une ligne : sa page (personnage, campagne, classe) ou sa fiche. */
   const openRow = useCallback((rowKey: string) => {
@@ -537,16 +604,20 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
     if (!id) return undefined
     if (entity?.nameHref) return entity.nameHref.replace("{id}", encodeURIComponent(id))
+    // Intégré dans une autre page (Création de classe) : la ligne s'ouvre dans sa fiche, ici.
+    if (embed) return undefined
     return `${pathname}?ligne=${encodeURIComponent(id)}`
-  }, [entity, pathname, rawOf])
+  }, [embed, entity, pathname, rawOf])
   // « ?ligne=ID » (clic droit sur un nom › nouvel onglet, fenêtre ou ici) ouvre la fiche de la ligne.
   const [wantedRow, setWantedRow] = useState<string | null>(null)
   useEffect(() => {
+    if (embed) return
     const read = () => setWantedRow(new URLSearchParams(window.location.search).get("ligne"))
     const timer = window.setTimeout(read, 0)
     window.addEventListener(URL_CHANGE_EVENT, read)
     window.addEventListener("popstate", read)
     return () => { window.clearTimeout(timer); window.removeEventListener(URL_CHANGE_EVENT, read); window.removeEventListener("popstate", read) }
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- une vue intégrée le reste pour toute sa vie
   }, [])
   useEffect(() => {
     if (!wantedRow || !tables.length) return
@@ -566,15 +637,20 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     }, 0)
     return () => window.clearTimeout(timer)
   }, [tables, wantedRow])
+  const embedAdd = embed?.onAdd
   const startAdding = useCallback(() => {
-    if (entity?.addHref) router.push(entity.addHref)
+    if (embedAdd) embedAdd()
+    else if (entity?.addHref) router.push(entity.addHref)
     else setCreating(true)
-  }, [entity, router])
+  }, [embedAdd, entity, router])
+  /** Une ligne ajoutée depuis la vue intégrée reçoit ce que la page impose (le Type des passifs). */
+  const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? {}).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [embed])
 
   // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
   // Ailleurs, toutes les colonnes sont dans la liste : la grille cache les masquées (et les
   // anciennes « Formulaire seulement ») et les montre d'un clic.
-  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => nameOpensDetails ? isGridSpec(column.spec) : column.spec.kind !== "archived").map((column) => column.header) : [], [data, nameOpensDetails, table])
+  const hiddenInEmbed = useMemo(() => new Set((embed?.hiddenColumns ?? []).map(foldName)), [embed])
+  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => (nameOpensDetails ? isGridSpec(column.spec) : column.spec.kind !== "archived") && !hiddenInEmbed.has(foldName(column.header))).map((column) => column.header) : [], [data, hiddenInEmbed, nameOpensDetails, table])
 
   // Recherche, Agrégat, formules et tirages lisent d'autres index : chargés une fois pour la page.
   const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
@@ -825,14 +901,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       card: () => rowCard(nameOf(rowKey) || "Sans nom", sheetFields.filter((column) => !isComputedSpec(column.spec) || column.spec.kind === "formula").map((column) => {
         const text = valueOf(rowKey, column.header).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
         return { label: column.header, text }
-      }).filter((field) => { const found = locate(rowKey); return found ? foldName(field.label) !== foldName(found.table.headers[nameColumnOf(found.table.headers)] ?? "") : !isNameColumn(field.label) })),
+      }).filter((field) => { const found = locate(rowKey); return found ? foldName(field.label) !== foldName(found.table.headers[ownNameColumn(found.table.headers)] ?? "") : !isNameColumn(field.label) })),
       chat: async (message, audience) => {
         const campaign = await chooseCampaign(ask, "chat")
         if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
         await sendToCampaignChat(campaign, message, audience)
       },
     }
-  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, ownNameColumn, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
@@ -862,6 +938,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey, header) } : {},
     ))
     if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
+    // Les colonnes propres à la page qui accueille la vue (« Classes et rangs »).
+    for (const extra of embed?.extraColumns ?? []) {
+      const at = extra.after ? list.findIndex((column) => foldName(column.key) === foldName(extra.after!)) : -1
+      list.splice(at >= 0 ? at + 1 : list.length, 0, { key: extra.key, label: extra.label, width: extra.width, custom: true, sortable: false })
+    }
     if (extras) {
       // Après le nom : le propriétaire (qu'un administrateur réattribue) et les liens.
       const context = { valueOf, commit: () => undefined, autoLinks: (rowKey: string) => extrasOf(rowKey)?.links ?? [] }
@@ -883,7 +964,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [ask, busy, commitCell, computed, drawCell, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [ask, busy, commitCell, computed, drawCell, embed, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -908,6 +989,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     const folded = foldName(deferredQuery)
     const rows = viewTables.flatMap((owner) => owner.rows
       .filter((row) => !activeView || matchesView(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
+      // Vue intégrée : seulement les lignes que la page a choisies (onglets-fenêtres compris).
+      .filter((row) => !embed || embed.rowFilter((header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
       .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
       .filter((row) => !folded || (haystacks.get(row) ?? "").includes(folded) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
@@ -923,12 +1006,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       { resolveReference: shownReferenceText },
     ), sort.direction === "asc" ? 1 : -1)
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [activeSort, activeView, deferredQuery, extraText, extras, haystacks, sort, specOf, valueOf, viewTables])
+  }, [activeSort, activeView, deferredQuery, embed, extraText, extras, haystacks, sort, specOf, valueOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
   useLayoutEffect(() => { moveRow.current = mutate; mutateRef.current = mutate; mutateRowsRef.current = mutateRows })
-  const renderTabCell = useCallback((rowKey: string) => {
+  const renderTabCell = useCallback((rowKey: string, columnKey: string) => {
+    const extra = embed?.extraColumns?.find((column) => column.key === columnKey)
+    if (extra) return extra.render(embedRow(rowKey), true)
     const { tabName: rowTab } = parseRowKey(rowKey)
     return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void moveRow.current("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
       <SelectTrigger size="sm" aria-label="Onglet" title="Changer d’onglet" className="h-8 w-full border-transparent bg-transparent px-2 text-muted-foreground shadow-none hover:border-input dark:bg-transparent"><SelectValue /></SelectTrigger>
@@ -937,7 +1022,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         {moveTargetsOf(rowTab).map((target) => <SelectItem key={target} value={target}>{target}</SelectItem>)}
       </SelectContent>
     </Select>
-  }, [busy, moveTargetsOf])
+  }, [busy, embed, embedRow, moveTargetsOf])
 
   const detailsFound = details !== null ? locate(details) : null
 
@@ -971,11 +1056,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   // « Ajouter » au bas du tableau : la ligne naît dans le tableau, son nom tapé dans sa case.
   // Depuis un onglet de rangement, elle reçoit sa valeur (elle y apparaît aussitôt).
-  const nameHeader = table ? table.headers[nameColumnOf(table.headers)] : undefined
-  const appendNamed = formTable && nameHeader && nameColumnOf(formTable.headers) >= 0 ? {
+  const nameHeader = table ? table.headers[ownNameColumn(table.headers)] : undefined
+  const appendNamed = formTable && nameHeader && ownNameColumn(formTable.headers) >= 0 ? {
     nameColumn: nameHeader,
     placeholder: `Nom (${formDefinition.itemLabel})…`,
-    add: (name: string) => addRow(formTable.tabName, formTable.headers.map((header, index) => index === nameColumnOf(formTable.headers) ? name : activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : ""), formTable.headers, true),
+    add: (name: string) => addRow(formTable.tabName, formTable.headers.map((header, index) => index === ownNameColumn(formTable.headers) ? name : activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : ""), formTable.headers, true),
   } : undefined
 
   /** Le texte enregistré d'une case (la fiche relit la ligne telle que Sheets l'a renvoyée). */
@@ -991,7 +1076,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
   const sheetFields = detailsFound && !nameOpensDetails ? (data?.columns[detailsFound.table.tabName] ?? [])
     .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
-    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) })) : []
+    .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) }))
+    // Les colonnes propres à la page qui accueille la vue, dessinées par elle.
+    .concat((embed?.extraColumns ?? []).map((extra) => ({ key: `__embed:${extra.key}`, label: extra.label, spec: { kind: "ranked-links" } as IndexColumnSpec, value: "", long: true }))) : []
   /* eslint-enable react-hooks/refs */
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
     ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details, header) } : {}),
@@ -1079,9 +1166,20 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   return (
     <ReferenceScopeProvider scope={referenceScope}>
-    <section className="mt-4 flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
+    <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
       <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
-        {(tables.length > 1 || settings.views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+        {/* Intégrée : la vue de la page, puis les onglets-fenêtres de l'index (combinés à elle). */}
+        {embed && settings.views.length > 0 && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+          Vue
+          <span className="flex items-center gap-1">
+            <NativeSelect value={activeView ? viewSelectKey(activeView.id) : ""} onChange={(event) => { setTabName(event.target.value); setCreating(false); setDetails(null) }} disabled={busy} className="h-9 min-w-44 text-foreground">
+              <NativeSelectOption value="">{embed.label}</NativeSelectOption>
+              {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
+            </NativeSelect>
+            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+          </span>
+        </label>}
+        {!embed && (tables.length > 1 || settings.views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Onglet
           <span className="flex items-center gap-1">
             <IndexTabPicker
@@ -1102,7 +1200,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}
-        {table && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
+        {table && embed?.query === undefined && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
         {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} onEdit={() => void openEditor("cards")} disabled={busy} />}
         <div className="flex flex-wrap gap-2 lg:ml-auto">
           {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
@@ -1119,7 +1217,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           <Button type="button" variant="outline" onClick={() => setViewDialog("new")} disabled={busy || !tables.length} title="Un onglet qui réaffiche les lignes répondant à des conditions, sans les copier"><Filter />Onglet-fenêtre</Button>
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
-          <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />Ajouter {spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}</Button>
+          <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
         </div>
       </div>
 
@@ -1178,7 +1276,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />
       ) : table ? (
         <SheetGrid
-          layoutKey={`eraser:world-index:grid:${indexKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
+          layoutKey={`eraser:world-index:grid:${storeKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
           columns={columns}
           rows={displayedRows}
           valueOf={valueOf}
@@ -1189,7 +1287,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
           disabled={busy}
           version={version}
           rowVersions={rowVersions}
-          addRowLabel={`Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
+          addRowLabel={embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}
           // Personnages, campagnes et classes naissent de leur page et partent à la corbeille :
           // le tableau n'en insère, n'en copie ni n'en supprime aucune ligne.
           rowCommands={entity?.trashKind ? {
@@ -1209,6 +1307,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             return <>
               <ContextMenuSeparator />
               <ContextMenuItem onSelect={() => setDetails(rowKey)}><FileText className="size-3.5" />Ouvrir la fiche</ContextMenuItem>
+              {embed?.rowMenuExtras?.(embedRow(rowKey))}
               {targets.length > 0 && <>
                 <ContextMenuSeparator />
                 <ContextMenuLabel className="flex items-center gap-1.5"><ArrowRightLeft className="size-3.5" />Déplacer vers</ContextMenuLabel>
@@ -1244,11 +1343,15 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {!nameOpensDetails && detailsFound && details !== null && <IndexRowSheet
         open
         rowKey={details}
-        title={savedCell(detailsFound, detailsFound.table.headers[nameColumnOf(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
+        title={savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
         layout={sheetLayout}
         rowFor={sheetRow}
+        renderField={(field) => {
+          const extra = field.key.startsWith("__embed:") ? embed?.extraColumns?.find((column) => `__embed:${column.key}` === field.key) : undefined
+          return extra ? <div className="grid content-start gap-1 text-xs font-semibold md:col-span-2">{extra.label}{extra.render(embedRow(details), false)}</div> : undefined
+        }}
         error={sheetError}
         navigation={sheetNavigation}
         onSave={saveSheet}
@@ -1262,7 +1365,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)).flatMap((candidate) => (data?.columns[candidate.tabName] ?? []).map((column) => column.header)).filter((header) => !/^id$/i.test(header)))]}
         onSave={async (view) => { const id = await settings.saveView(view); setTabName(viewSelectKey(id)); return id }}
-        onDelete={async (id) => { await settings.deleteView(id); setTabName(ALL_TABS) }}
+        onDelete={async (id) => { await settings.deleteView(id); setTabName(embed ? "" : ALL_TABS) }}
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}

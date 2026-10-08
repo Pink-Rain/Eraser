@@ -2,21 +2,18 @@
 
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState, type MouseEvent as ReactMouseEvent } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
-import { Check, ChevronDown, CircleDotDashed, CopyCheck, FileText, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, Unlink, X, Zap } from "lucide-react"
+import { Check, ChevronDown, CircleDotDashed, CopyCheck, Gauge, LoaderCircle, Plus, RefreshCw, Search, Trash2, Unlink, X, Zap } from "lucide-react"
 
-import { indexGridColumn, RankedLinksCell } from "@/components/eraser/index-cells"
+import { RankedLinksCell } from "@/components/eraser/index-cells"
 import { ReadOnlyIndexEditorButton } from "@/components/eraser/index-editor"
 import { spellEditorModel } from "@/lib/system-index-models"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { IndexRowSheet, type RowSheetField } from "@/components/eraser/index-row-sheet"
 import { ClassPresentationEditor } from "@/components/eraser/class-presentation-editor"
-import { shownReferenceText } from "@/components/eraser/reference-store"
-import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Badge } from "@/components/ui/badge"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
-import { ContextMenuItem, ContextMenuSeparator } from "@/components/ui/context-menu"
+import { ContextMenuItem } from "@/components/ui/context-menu"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -24,14 +21,14 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import type { ClassSpell, ClassSpellDraft, SpellIndexKind, SpellSimilarity } from "@/lib/class-content"
 import { classSpellActionKind, classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions, findClassSpellSimilarities, MAX_CLASS_SPELLS_PER_RANK, splitClassSpellSkills, UNNAMED_CLASS_SPELL } from "@/lib/class-spell-utils"
 import type { ClassRecord } from "@/lib/google-sheets"
-import type { IndexColumnSpec } from "@/lib/index-columns"
-import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { groupSimilarities, SpellDuplicates } from "@/components/eraser/spell-duplicates"
 import { ClassStateDetail, ClassStateOverview } from "@/components/eraser/class-state-overview"
-import { RankBonusTab } from "@/components/eraser/rank-bonus-tab"
 import { ClassStatisticsFor, GlobalClassStatistics, useClassPlayData } from "@/components/eraser/class-statistics"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { PageLabel } from "@/components/eraser/app-shell"
+import { EmbeddedWorldIndex, type IndexEmbed, type IndexEmbedRow } from "@/components/eraser/world-index-manager"
+import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
+import type { WorldIndexKey } from "@/lib/world-index-definitions"
 
 type ResourceData = { classes: ClassRecord[]; spells: ClassSpell[]; similarities: SpellSimilarity[]; headers: string[]; file: { id: string; name: string; webViewLink?: string } | null; similaritiesError?: string }
 /** `spell` : le sort tel que la feuille le contient après l'écriture (relu par le serveur). */
@@ -123,26 +120,6 @@ function ClassLinksEditor({ draft, classes, spells, spellId, compact = false, on
     compact={compact}
     onChange={onChange}
   />
-}
-
-/** Les types des colonnes du tableau des sorts. */
-const spellSpecs = {
-  // Le nom ouvre la fiche du sort (Nom formulaire), comme dans tous les index.
-  name: { kind: "name-form", also: ["fixed"] },
-  effect: { kind: "rich" },
-  description: { kind: "rich", display: "muted" },
-  type: { kind: "choice", also: ["fixed"], options: classSpellTypeSuggestions.map((value) => ({ value })), allowCustom: true },
-  skills: { kind: "fixed", display: "skills" },
-  distance: { kind: "rich" },
-  charges: { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count", unlimited: "✦" } },
-  classes: { kind: "ranked-links" },
-  id: { kind: "id", hidden: true },
-} satisfies Record<string, IndexColumnSpec>
-
-/** Le type d'un sort, dans la couleur de sa catégorie. */
-function SpellTypeLabel({ value }: { value: string }) {
-  const tone = classSpellCategoryTones[classSpellCategory(value)]
-  return <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold" style={{ backgroundColor: tone.background, color: tone.foreground }}>{value}</span>
 }
 
 /** `onSave` reçoit aussi le sort tel qu'il était à l'ouverture : seuls les champs changés depuis partent. */
@@ -419,13 +396,13 @@ function ClassPicker({ classes, selected, onSelect }: { classes: ClassRecord[]; 
 
 export function ClassIndexManager({ initialData, initialError, kind = "classes", initialClassId = "" }: { initialData: ResourceData; initialError: string; kind?: SpellIndexKind; initialClassId?: string }) {
   const forClasses = kind === "classes"
+  // L'index des sorts dans le moteur des index, et cette page, pour reconnaître ses propres annonces.
+  const spellIndexKey: WorldIndexKey = forClasses ? "class-spells" : "creature-spells"
+  const [spellOrigin] = useState(() => `sorts-${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`)
   const allowedTabs = forClasses ? ["classes", "actifs", "passifs", "bonus", "duplicates", "rank-bonus"] : ["actifs", "passifs", "duplicates"]
   const [data, setData] = useState(initialData)
   const [error, setError] = useState(initialError)
   const [pending, setPending] = useState(false)
-  // Les enregistrements déclenchés par la frappe ne bloquent pas le tableau :
-  // ils s'annoncent dans la barre d'outils et laissent les cellules modifiables.
-  const [cellSaves, setCellSaves] = useState(0)
   // Remonte les cellules seulement quand les lignes changent réellement (actualisation,
   // création, suppression) : une frappe enregistrée ne doit rien remonter.
   const [version, setVersion] = useState(0)
@@ -451,91 +428,23 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   }, [forClasses])
   const playData = useClassPlayData(forClasses)
   const [newDraft, setNewDraft] = useState<ClassSpellDraft | null>(null)
-  // Clé de ligne (l'ID du sort) du sort ouvert dans sa fiche.
-  const [editingSpell, setEditingSpell] = useState<string | null>(null)
   // Sort dont on veut voir le groupe de doublons, et sort ouvert dans l'éditeur.
   const [duplicateFocus, setDuplicateFocus] = useState<string | null>(null)
   const [editing, setEditing] = useState<ClassSpell | null>(null)
   const [notice, setNotice] = useState("")
   // Paires marquées « pas des doublons » : le calcul local ne doit pas les ramener.
   const ignoredPairs = useRef(ignoredPairsOf(initialData))
-  // Les colonnes modifiées coup sur coup partent ensemble : un seul enregistrement par
-  // sort. Rangées par ID de sort, jamais par ligne : une suppression plus haut pendant
-  // l'attente décalait les lignes, et les modifications partaient sur le sort suivant.
-  // Seules les valeurs saisies sont gardées, avec le sort tel qu'il était avant elles
-  // (`original`) : seuls ces champs partent, et le serveur refuse s'ils ont changé entre-temps.
-  const pendingEdits = useRef(new Map<string, { edits: Record<string, string>; original: ClassSpell }>())
-  const flushTimers = useRef(new Map<string, number>())
-  // L'enregistrement différé lit l'état courant, pas celui du rendu qui l'a programmé.
+  // L'enregistrement d'un sort lit l'état courant, pas celui du rendu qui l'a programmé.
   const latestSpells = useRef(data.spells)
   useEffect(() => { latestSpells.current = data.spells }, [data.spells])
   const [searchRank, setSearchRank] = useState<number | null>(null)
-  // Le tri choisi dans l'en-tête du tableau : la fiche passe d'un sort à l'autre dans cet ordre.
-  const [gridSort, setGridSort] = useState<SheetGridSort>(null)
-  // Les sorts réécrits depuis leur fiche : le tableau derrière les redessine aussitôt.
-  const [rowVersions, setRowVersions] = useState<Record<string, number>>({})
-  const [sheetError, setSheetError] = useState("")
-  // La raison du dernier refus : la fiche l'affiche (le message de la page est caché derrière elle).
+  // La raison du dernier refus.
   const lastError = useRef("")
   const normalizedQuery = query.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
   const filtered = useMemo(() => data.spells.filter((spell) => !normalizedQuery || searchText(spell).includes(normalizedQuery)), [data.spells, normalizedQuery])
   const selectedClass = data.classes.find((item) => item.id === selectedClassId)
   const selectedClassKey = selectedClass?.id || ""
   const rankCounts = useMemo(() => Array.from({ length: 21 }, (_, rank) => data.spells.filter((spell) => spell.classRanks[selectedClassKey] === rank).length), [data.spells, selectedClassKey])
-  // La grille partagée gère largeurs, hauteurs et mise en forme : le composant
-  // ne décrit plus que ses colonnes.
-  // Distance et charges ne concernent que les actifs : les colonnes disparaissent
-  // ailleurs plutôt que d'occuper la largeur pour rien.
-  // L'enregistrement passe par une référence : les colonnes ne se reconstruisent pas à chaque rendu.
-  const latestCommit = useRef<(rowKey: string, columnKey: string, value: string) => void>(() => undefined)
-  const latestOpenSheet = useRef<(rowKey: string) => void>(() => undefined)
-  // Chaque ligne du tableau est désignée par l'ID de son sort, jamais par sa place : une
-  // ligne supprimée plus haut ne fait plus écrire dans le sort voisin. Un ID présent deux
-  // fois (ligne copiée dans Sheets) est distingué par sa ligne.
-  const spellByKey = useMemo(() => {
-    const seen = new Set<string>()
-    return new Map(data.spells.map((spell) => {
-      const key = seen.has(spell.id) ? `${spell.id}@${spell.rowNumber}` : spell.id
-      seen.add(spell.id)
-      return [key, spell] as const
-    }))
-  }, [data.spells])
-  const keyOfSpell = useMemo(() => new Map([...spellByKey].map(([key, spell]) => [spell, key])), [spellByKey])
-  const valueOf = useCallback((rowKey: string, columnKey: string) => {
-    const spell = spellByKey.get(rowKey)
-    if (!spell) return ""
-    if (columnKey === "name") return spell.name
-    if (columnKey === "effect") return spell.effectHtml || spell.effect
-    if (columnKey === "description") return spell.descriptionHtml || spell.description
-    if (columnKey === "type") return spell.type
-    if (columnKey === "skills") return spell.skillsRaw
-    if (columnKey === "distance") return spell.distanceHtml || spell.distance
-    // « ✦ » (charges sans nombre) reste affiché tel quel.
-    if (columnKey === "charges") return spell.charges === null ? spell.chargesLabel ?? "" : String(spell.charges)
-    if (columnKey === "id") return spell.id
-    return ""
-  }, [spellByKey])
-  /* eslint-disable react-hooks/refs -- les cellules ne lisent ces valeurs qu'en se dessinant, comme avant : indexGridColumn ne fait que les ranger dans la colonne */
-  const spellColumns = useMemo<SheetGridColumn[]>(() => {
-    const context = {
-      valueOf,
-      commit: (rowKey: string, columnKey: string, value: string) => latestCommit.current(rowKey, columnKey, value),
-      idComputed: (rowKey: string) => valueOf(rowKey, "id").startsWith("LIGNE-"),
-      openForm: (rowKey: string) => latestOpenSheet.current(rowKey),
-    }
-    const column = (key: keyof typeof spellSpecs, label: string, width: number) => indexGridColumn(key, label, spellSpecs[key], width, context, key === "type" ? { renderValue: (value) => <SpellTypeLabel value={value} /> } : {})
-    return [
-      column("name", "Nom", 220),
-      column("effect", "Effet", 380),
-      column("description", "Description", 380),
-      column("type", "Type", 190),
-      column("skills", "Compétences", 200),
-      ...(tab === "actifs" ? [column("distance", "Distance", 130), column("charges", "Charges", 130)] : []),
-      ...(forClasses ? [column("classes", "Classes et rangs", 280)] : []),
-      column("id", "ID", 150),
-    ]
-  }, [forClasses, tab, valueOf])
-  /* eslint-enable react-hooks/refs */
 
   function updateSpells(updater: (spells: ClassSpell[]) => ClassSpell[]) {
     setData((current) => { const spells = updater(current.spells); return { ...current, spells, similarities: findClassSpellSimilarities(spells).filter((match) => !ignoredPairs.current.has(pairKey(match.leftId, match.rightId))) } })
@@ -590,18 +499,20 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   }
 
   async function mutate(body: Record<string, unknown>, silent = false): Promise<MutationResult | false> {
-    if (silent) setCellSaves((current) => current + 1); else setPending(true)
+    if (!silent) setPending(true)
     setError("")
     try {
       const response = await fetch("/api/resources/class-index", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ ...body, index: kind }) })
       const payload = await response.json() as { result?: MutationResult; error?: string }
       if (!response.ok) throw new Error(payload.error || "Enregistrement impossible.")
+      // Les onglets Actifs, Passifs et Bonus (le moteur des index) relisent les sorts.
+      announceWorldIndexChange([spellIndexKey], spellOrigin)
       return payload.result ?? null
     } catch (error) {
       lastError.current = error instanceof Error ? error.message : "Enregistrement impossible."
       setError(lastError.current)
       return false
-    } finally { if (silent) setCellSaves((current) => Math.max(0, current - 1)); else setPending(false) }
+    } finally { if (!silent) setPending(false) }
   }
 
   async function refresh() {
@@ -626,9 +537,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     if (result === false) return null
     // Le sort relu par le serveur : la prochaine modification part de ce que la feuille contient vraiment.
     const saved = result?.spell ?? materialize(draft, result?.rowNumber || spell.rowNumber, result?.id || draft.id || spell.id, result?.tone)
-    // Des cases saisies depuis l'envoi restent affichées jusqu'à leur propre envoi.
-    const waiting = pendingEdits.current.get(spell.id)
-    const shown = waiting ? materialize(draftWithEdits(saved, waiting.edits), saved.rowNumber, saved.id, saved.tone) : saved
+    const shown = saved
     // Tout de suite, sans attendre le rendu : l'enregistrement suivant (la fiche enchaîne
     // les siens) part de ce que la feuille contient, et n'est pas refusé comme « changé entre-temps ».
     latestSpells.current = latestSpells.current.map((item) => item.id === spell.id ? shown : item)
@@ -661,20 +570,6 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     setVersion((current) => current + 1)
   }
 
-  /** Dupliquer garde tout sauf l'ID, qui est régénéré à la création. */
-  async function duplicateRows(rowKeys: string[]) {
-    for (const rowKey of rowKeys) {
-      const id = spellByKey.get(rowKey)?.id
-      const spell = latestSpells.current.find((item) => item.id === id)
-      if (spell) await create({ ...toDraft(spell), id: "", name: `${spell.name} (copie)` })
-    }
-  }
-
-  /** Du bas vers le haut ; chaque sort est retrouvé par son ID, où qu'il soit alors. */
-  async function removeRows(rowKeys: string[]) {
-    const spells = rowKeys.map((rowKey) => spellByKey.get(rowKey)).filter((spell): spell is ClassSpell => Boolean(spell))
-    for (const spell of [...spells].sort((left, right) => right.rowNumber - left.rowNumber)) await remove(spell)
-  }
 
   function startCreate(classId?: string, rank?: number) {
     const draft = emptyDraft()
@@ -684,176 +579,90 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
 
   const editableProps = { classes: data.classes, allSpells: data.spells, similarities: data.similarities, onSave: (spell: ClassSpell, draft: ClassSpellDraft, base: ClassSpell) => save(spell, draft, true, toDraft(base)), onDelete: remove, onShowDuplicates: showDuplicates }
   const duplicateGroups = useMemo(() => groupSimilarities(data.spells, data.similarities).length, [data.similarities, data.spells])
+
+  // Une modification faite dans les onglets du moteur (ou ailleurs) : les sorts de cette page
+  // (classes, rangs, doublons, statistiques) sont relus, sans bloquer la page.
+  useEffect(() => {
+    let timer = 0
+    let alive = true
+    const stop = onWorldIndexChange((keys, from) => {
+      if (from === spellOrigin || !keys.includes(spellIndexKey)) return
+      window.clearTimeout(timer)
+      timer = window.setTimeout(async () => {
+        const response = await fetch(`/api/resources/class-index?index=${kind}`, { cache: "no-store" }).catch(() => null)
+        const payload = (await response?.json().catch(() => ({})) ?? {}) as { data?: ResourceData }
+        if (!alive || !response?.ok || !payload.data) return
+        ignoredPairs.current = ignoredPairsOf(payload.data)
+        setData(payload.data)
+      }, 400)
+    })
+    return () => { alive = false; window.clearTimeout(timer); stop() }
+  }, [kind, spellIndexKey, spellOrigin])
+
+  // Les gestes de la page, lus à l'appel : les vues du moteur ne se reconstruisent pas à chaque rendu.
+  const pageActions = useRef({ save, showDuplicates, startCreate })
+  useLayoutEffect(() => { pageActions.current = { save, showDuplicates, startCreate } })
+  const spellById = useMemo(() => new Map(data.spells.map((spell) => [spell.id, spell])), [data.spells])
   /**
-   * Un sort s'enregistre en bloc : chaque colonne modifiée est accumulée dans le même
-   * brouillon, puis la ligne part une seule fois. Sans cela, coller une ligne entière
-   * déclenchait une sauvegarde par colonne, chacune construite sur l'état précédent,
-   * et la dernière écrasait toutes les autres.
+   * Actifs, Passifs et Bonus : l'index des sorts dans le moteur des index (cartes, onglets-
+   * fenêtres, « Modifier », formules, tri, fiche…), limité à leurs sorts. La page y ajoute
+   * « Classes et rangs », « Doublons » et « Créer un sort ».
    */
-  function applyColumn(draft: ClassSpellDraft, columnKey: string, value: string): ClassSpellDraft | null {
-    if (columnKey === "name") return { ...draft, name: value }
-    if (columnKey === "effect") return { ...draft, effectHtml: value, effect: plainText(value) }
-    if (columnKey === "description") return { ...draft, descriptionHtml: value, description: plainText(value) }
-    if (columnKey === "type") return { ...draft, type: value }
-    if (columnKey === "skills") return { ...draft, skillsRaw: value }
-    if (columnKey === "distance") return { ...draft, distanceHtml: value, distance: plainText(value) }
-    if (columnKey === "charges") {
-      // « ✦ » : charges illimitées ; un nombre : le nombre de charges du sort (0 à 5).
-      if (value.trim() === "✦") return { ...draft, charges: null, chargesLabel: "✦" }
-      const parsed = Number.parseInt(value.replace(/[^0-9]/g, ""), 10)
-      return Number.isFinite(parsed) ? { ...draft, charges: Math.max(0, Math.min(5, parsed)), chargesLabel: undefined } : { ...draft, charges: null, chargesLabel: "" }
-    }
-    return null
-  }
+  const spellViews = useMemo(() => Object.fromEntries((["actifs", "passifs", "bonus"] as const).map((view): [string, IndexEmbed] => [view, {
+    id: `${kind}:${view}`,
+    label: view === "actifs" ? "Actifs" : view === "passifs" ? "Passifs" : "Bonus",
+    rowFilter: (cell) => {
+      const category = classSpellCategory(cell("Type") || cell("Type de sort"))
+      // Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs.
+      return view === "actifs" ? (forClasses ? category === "actif" : category !== "passif") : category === (view === "passifs" ? "passif" : "bonus")
+    },
+    query,
+    // Distance et charges ne concernent que les actifs.
+    hiddenColumns: view === "actifs" ? [] : ["Distance", "Charges"],
+    extraColumns: forClasses ? [{
+      key: "__classes",
+      label: "Classes et rangs",
+      width: 280,
+      after: "Compétences",
+      render: (row: IndexEmbedRow, compact: boolean) => {
+        const spell = spellById.get(row.id)
+        if (!spell) return <span className="px-2 text-xs text-muted-foreground" title="Le sort reçoit son identifiant à son premier enregistrement.">—</span>
+        const draft = toDraft(spell)
+        return <ClassLinksEditor compact={compact} draft={draft} classes={data.classes} spells={data.spells} spellId={spell.id} onChange={(classRanks) => void pageActions.current.save(spell, { ...draft, classRanks }, true)} />
+      },
+    }] : [],
+    rowMenuExtras: (row: IndexEmbedRow) => {
+      const spell = spellById.get(row.id)
+      return spell ? <ContextMenuItem onSelect={() => pageActions.current.showDuplicates(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem> : null
+    },
+    onAdd: () => pageActions.current.startCreate(),
+    addLabel: "Créer un sort",
+    ...(view === "actifs" ? {} : { addDefaults: { Type: view === "passifs" ? "Passif" : "Bonus" } }),
+  }])), [data.classes, data.spells, forClasses, kind, query, spellById])
 
-  /** Applique les colonnes en attente sur le sort tel qu'il est maintenant. */
-  function draftWithEdits(spell: ClassSpell, edits: Record<string, string>) {
-    return Object.entries(edits).reduce<ClassSpellDraft>((draft, [columnKey, value]) => applyColumn(draft, columnKey, value) ?? draft, toDraft(spell))
-  }
+  /**
+   * Bonus de rang : l'onglet « Bonus de rang » du classeur des sorts, dans le moteur des index
+   * comme les sorts. Une ligne par rang ; « Ajouter un rang » ajoute le suivant, sans limite.
+   */
+  const rankBonusView = useMemo<IndexEmbed>(() => ({
+    id: "bonus-de-rang",
+    label: "Tous les rangs",
+    rowFilter: () => true,
+    query,
+    addLabel: "Ajouter un rang",
+    onAdd: () => void (async () => {
+      setError("")
+      const response = await fetch("/api/classes/rank-bonuses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add-rank" }) }).catch(() => null)
+      const payload = (await response?.json().catch(() => ({})) ?? {}) as { error?: string }
+      if (!response?.ok) { setError(payload.error || "Le rang n’a pas pu être ajouté."); return }
+      announceWorldIndexChange(["rank-bonuses"], spellOrigin)
+    })(),
+  }), [query, spellOrigin])
 
-  function commitCell(rowKey: string, columnKey: string, value: string) {
-    if (!applyColumn(emptyDraft(), columnKey, value)) return
-    const id = spellByKey.get(rowKey)?.id
-    const spell = latestSpells.current.find((item) => item.id === id)
-    if (!id || !spell) return
-    const waiting = pendingEdits.current.get(id)
-    const edits = { ...(waiting?.edits ?? {}), [columnKey]: value }
-    pendingEdits.current.set(id, { edits, original: waiting?.original ?? spell })
-    // Le tableau affiche tout de suite ce qui vient d'être écrit, sans attendre Sheets.
-    updateSpells((spells) => spells.map((item) => item.id === id ? materialize(draftWithEdits(item, edits), item.rowNumber, item.id, item.tone) : item))
-    const previous = flushTimers.current.get(id)
-    if (previous) window.clearTimeout(previous)
-    flushTimers.current.set(id, window.setTimeout(() => {
-      const final = pendingEdits.current.get(id)
-      pendingEdits.current.delete(id)
-      flushTimers.current.delete(id)
-      const current = latestSpells.current.find((item) => item.id === id)
-      if (!current || !final) return
-      // Seules les colonnes saisies partent, comparées au sort tel qu'il était avant elles.
-      void save(current, draftWithEdits(final.original, final.edits), true, toDraft(final.original))
-    }, 400))
-  }
-
-  useLayoutEffect(() => { latestCommit.current = commitCell })
-
-  // Les sorts de l'onglet affiché, dans l'ordre du tableau (recherche, puis tri de l'en-tête).
-  // Pas de bonus chez les créatures : un sort ainsi typé reste visible avec les actifs.
-  const tabSpells = useMemo(() => tab === "actifs" ? filtered.filter((spell) => forClasses ? spell.category === "actif" : spell.category !== "passif")
-    : tab === "passifs" ? filtered.filter((spell) => spell.category === "passif")
-      : tab === "bonus" ? filtered.filter((spell) => spell.category === "bonus") : [], [filtered, forClasses, tab])
-  const displayedRows = useMemo(() => {
-    const rows = tabSpells.map((spell) => ({ key: keyOfSpell.get(spell) ?? spell.id, rowNumber: spell.rowNumber }))
-    if (!gridSort) return rows
-    const spec = spellSpecs[gridSort.column as keyof typeof spellSpecs] as IndexColumnSpec | undefined
-    return sortByIndexKey(rows, (row) => indexSortKey(valueOf(row.key, gridSort.column), spec, { resolveReference: shownReferenceText }), gridSort.direction === "asc" ? 1 : -1)
-  }, [gridSort, keyOfSpell, tabSpells, valueOf])
-
-  // La fiche d'un sort : le formulaire des index (barre de mise en forme commune, Précédent,
-  // « Aller à… », Suivant, enregistrement automatique), branché sur l'enregistrement des sorts.
-  // Ouverte depuis le Nom d'une ligne, elle parcourt les sorts du tableau dans leur ordre affiché.
-  const [sheetRows, setSheetRows] = useState<string[]>([])
-  function openSheet(rowKey: string) {
-    setSheetError("")
-    // Gardée telle qu'à l'ouverture : un sort changé de type pendant qu'on le modifie ne fait pas perdre sa place.
-    setSheetRows(displayedRows.map((row) => row.key))
-    setEditingSpell(rowKey)
-  }
-  useLayoutEffect(() => { latestOpenSheet.current = openSheet })
-  const sheetSpell = editingSpell !== null ? spellByKey.get(editingSpell) : undefined
-  const sheetFields: RowSheetField[] = sheetSpell ? ([
-    ["name", "Nom"],
-    ["type", "Type"],
-    ["skills", "Compétences"],
-    ...(sheetSpell.category === "actif" ? [["distance", "Distance"], ["charges", "Charges"]] : []),
-    ["effect", "Effet", true],
-    ["description", "Description", true],
-    ...(forClasses ? [["classes", "Classes et rangs", true]] : []),
-    ["id", "ID"],
-  ] as Array<[keyof typeof spellSpecs, string, boolean?]>).map(([key, label, long]) => ({
-    key,
-    label,
-    spec: spellSpecs[key],
-    // Un sort sans titre s'écrit vide ; une désignation « LIGNE-n » n'est pas un ID.
-    value: key === "name" && sheetSpell.name === UNNAMED_CLASS_SPELL ? "" : key === "id" && sheetSpell.id.startsWith("LIGNE-") ? "" : valueOf(editingSpell!, key),
-    long,
-  })) : []
-
-  /** Les champs d'un sort, enregistrés d'eux-mêmes par sa fiche (le sort est donné : on a pu passer à un autre). */
-  async function saveSheetSpell(rowKey: string, changes: Record<string, string>) {
-    setSheetError("")
-    const id = spellByKey.get(rowKey)?.id
-    const current = latestSpells.current.find((item) => item.id === id)
-    const refuse = (message: string) => { setSheetError(message); return new Error(message) }
-    if (!current) throw refuse("Ce sort n’existe plus : actualise le tableau.")
-    const draft = draftWithEdits(current, changes)
-    if (!hasContent(draft)) throw refuse("Un sort peut être sans titre, mais pas entièrement vide.")
-    lastError.current = ""
-    const saved = await save(current, draft, true, toDraft(current))
-    if (!saved) throw refuse(lastError.current || "Ce sort n’a pas pu être enregistré dans Google Sheets.")
-    setRowVersions((versions) => ({ ...versions, [rowKey]: (versions[rowKey] ?? 0) + 1 }))
-    // Un sort sans ID en reçoit un à son premier enregistrement : la fiche le suit.
-    if (saved.id !== current.id && rowKey === current.id) {
-      setSheetRows((rows) => rows.map((key) => key === rowKey ? saved.id : key))
-      setEditingSpell((open) => open === rowKey ? saved.id : open)
-    }
-  }
-
-  async function saveSheetRanks(spell: ClassSpell, classRanks: Record<string, number | null>) {
-    setSheetError("")
-    lastError.current = ""
-    const current = latestSpells.current.find((item) => item.id === spell.id) ?? spell
-    const saved = await save(current, { ...toDraft(current), classRanks }, true)
-    if (!saved) setSheetError(lastError.current || "Les classes de ce sort n’ont pas pu être enregistrées.")
-  }
-
-  // Même grille que l'Index des objets : en-têtes figés en haut, barre horizontale
-  // en bas de l'écran, cellules toujours modifiables.
-  /* eslint-disable react-hooks/refs -- les gestes du tableau n'écrivent ces références qu'en enregistrant, jamais pendant le rendu */
-  const tableFor = () => <SheetGrid
-    layoutKey={`eraser:${forClasses ? "class-index" : "creature-spell-index"}:spell-grid:${tab}`}
-    version={version}
-    rowVersions={rowVersions}
-    columns={spellColumns}
-    rows={displayedRows}
-    valueOf={valueOf}
-    onCommit={commitCell}
-    sort={gridSort}
-    onSort={setGridSort}
-    toolbarTrailing={cellSaves > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
-    empty="Aucun sort dans cette vue."
-    renderCustomCell={(rowKey, columnKey) => {
-      const spell = spellByKey.get(rowKey)
-      if (!spell || columnKey !== "classes") return null
-      const draft = toDraft(spell)
-      return <ClassLinksEditor compact draft={draft} classes={data.classes} spells={data.spells} spellId={spell.id} onChange={(classRanks) => void save(spell, { ...draft, classRanks }, true)} />
-    }}
-    addRowLabel="Créer un sort"
-    rowCommands={{
-      append: () => startCreate(),
-      // Un sort a besoin d'un nom : les nouvelles lignes s'appellent « Nouveau sort »,
-      // du même type que la ligne choisie, et se renomment directement dans le tableau.
-      insertRows: (rowKey, count) => void (async () => {
-        const reference = spellByKey.get(rowKey)
-        for (let index = 0; index < count; index += 1) await create({ ...emptyDraft(), name: "Nouveau sort", type: reference?.type || "Passif" })
-      })(),
-      duplicate: (rowKeys) => void duplicateRows(rowKeys),
-      remove: (rowKeys) => void removeRows(rowKeys),
-    }}
-    rowMenuExtras={(rowKey) => {
-      const spell = spellByKey.get(rowKey)
-      if (!spell) return null
-      return <>
-        <ContextMenuSeparator />
-        <ContextMenuItem onSelect={() => openSheet(rowKey)}><FileText />Ouvrir la fiche</ContextMenuItem>
-        <ContextMenuItem onSelect={() => showDuplicates(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem>
-      </>
-    }}
-  />
-  /* eslint-enable react-hooks/refs */
-
+  const engineTab = ["actifs", "passifs", "bonus", "rank-bonus"].includes(tab)
   const page = <section className="flex flex-col gap-3" {...(forClasses ? { [IN_PLACE_ATTRIBUTE]: CLASS_CREATION_PATH } : {})}>
     <datalist id="class-spell-types">{classSpellTypeSuggestions.filter((type) => forClasses || classSpellCategory(type) !== "bonus").map((type) => <option key={type} value={type} />)}</datalist>
-    <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div><div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><ReadOnlyIndexEditorButton model={() => spellEditorModel(kind)} disabled={pending} /><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div></div>
+    <div className="flex shrink-0 flex-col gap-3 rounded-2xl border bg-card/75 p-3 shadow-sm lg:flex-row lg:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Titre, compétence, type, effet ou description…" className="pl-9" /></div>{/* Les onglets du moteur des index ont leurs propres boutons (Actualiser, Modifier, Créer…) : ici, seule la recherche reste. */}{!engineTab && <div className="flex flex-wrap gap-2"><Button type="button" variant="outline" onClick={() => void refresh()} disabled={pending}>{pending ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button><ReadOnlyIndexEditorButton model={() => spellEditorModel(kind)} disabled={pending} /><Button type="button" onClick={() => startCreate()}><Plus />Créer un sort</Button></div>}</div>
     {error && <p className="shrink-0 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     {notice && <p className="flex shrink-0 items-center gap-2 rounded-xl border border-emerald-600/25 bg-emerald-600/5 px-4 py-2.5 text-sm text-emerald-800 dark:text-emerald-300"><Check className="size-4" />{notice}<button type="button" onClick={() => setNotice("")} className="ml-auto text-muted-foreground hover:text-foreground" aria-label="Fermer"><X className="size-4" /></button></p>}
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open) setEditing(null) }}>
@@ -862,29 +671,12 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
         {editing && <SpellForm key={`${editing.rowNumber}:${editing.id}`} withClasses={forClasses} initial={toDraft(editing)} classes={data.classes} spells={data.spells} pending={pending} title={`Ligne ${editing.rowNumber}`} onCancel={() => setEditing(null)} onSave={(draft, original) => void save(editing, draft, false, original).then(() => setEditing(null))} />}
       </DialogContent>
     </Dialog>
-    {editingSpell !== null && sheetSpell && <IndexRowSheet
-      open
-      rowKey={editingSpell}
-      title={sheetSpell.name}
-      subtitle={`${forClasses ? "Sorts des classes" : "Sorts des créatures"} · ${sheetSpell.type || "Type non renseigné"}`}
-      fields={sheetFields}
-      error={sheetError}
-      renderField={(field) => field.key !== "classes" ? undefined : <div className="grid content-start gap-1 text-xs font-semibold">
-        Classes et rangs
-        <ClassLinksEditor draft={toDraft(sheetSpell)} classes={data.classes} spells={data.spells} spellId={sheetSpell.id} onChange={(classRanks) => void saveSheetRanks(sheetSpell, classRanks)} />
-      </div>}
-      navigation={{ rows: sheetRows.filter((key) => spellByKey.has(key)), labelOf: (key) => spellByKey.get(key)?.name ?? "", onGo: (key) => { setSheetError(""); setEditingSpell(key) } }}
-      onSave={saveSheetSpell}
-      onClose={() => { setEditingSpell(null); setSheetError("") }}
-    />}
     {newDraft && Object.keys(newDraft.classRanks).length === 0 && <div className="shrink-0"><SpellForm withClasses={forClasses} initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title="Nouveau sort" onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}
     <Tabs value={tab} onValueChange={setTab} className="flex flex-col"><TabsList variant="line" className="h-auto w-full shrink-0 flex-wrap justify-start">{forClasses && <TabsTrigger value="classes">Classes</TabsTrigger>}<TabsTrigger value="actifs">Actifs</TabsTrigger><TabsTrigger value="passifs">Passifs</TabsTrigger>{forClasses && <TabsTrigger value="bonus">Bonus</TabsTrigger>}<TabsTrigger value="duplicates">Doublons {duplicateGroups > 0 && <Badge variant="destructive">{duplicateGroups}</Badge>}</TabsTrigger>{forClasses && <TabsTrigger value="rank-bonus">Bonus Rang</TabsTrigger>}</TabsList>
       <TabsContent value="classes" className="mt-3"><div className="mb-5 grid max-w-sm gap-1.5 text-sm font-medium">Classe<ClassPicker classes={data.classes} selected={selectedClass} onSelect={selectClass} /></div>{!selectedClass ? <div className="space-y-10"><ClassStateOverview classes={data.classes} spells={data.spells} headers={data.headers} onSelect={selectClass} hrefFor={classCreationHref} /><GlobalClassStatistics classes={data.classes} spells={data.spells} playData={playData} /></div> : <div className="space-y-8 md:pr-8">{tab === "classes" && <RankRail counts={rankCounts} accent={selectedClass.accentDark} />}<section id="classe-etat" className="scroll-mt-24"><ClassStateDetail characterClass={selectedClass} spells={data.spells} headers={data.headers} onRank={(rank) => scrollToSection(`rang-${rank}`)} onBack={() => selectClass("")} /></section><section id="classe-presentation" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Présentation</h3></div><ClassPresentationEditor key={selectedClass.id} classId={selectedClass.id} accent={selectedClass.accentDark} /></section><section id="classe-stats" className="scroll-mt-24 space-y-2"><div><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Statistiques</h3></div><ClassStatisticsFor characterClass={selectedClass} classes={data.classes} spells={data.spells} playData={playData} /></section><div className="border-t pt-6"><p className="text-[10px] font-semibold uppercase tracking-[.2em] text-primary/75">{selectedClass.name}</p><h3 className="font-display text-2xl font-semibold">Rangs et sorts</h3></div>{Array.from({ length: 21 }, (_, rank) => { const allAtRank = data.spells.filter((spell) => spell.classRanks[selectedClass.id] === rank); const shown = filtered.filter((spell) => spell.classRanks[selectedClass.id] === rank); const full = allAtRank.length >= MAX_CLASS_SPELLS_PER_RANK; return <section key={rank} id={`rang-${rank}`} data-rank={rank} className="scroll-mt-24 rounded-2xl border bg-background/25 p-4" style={{ borderColor: `${selectedClass.accentDark}32` }}><div className="mb-3 flex flex-wrap items-center justify-between gap-3"><div className="flex items-center gap-2"><span className="flex size-8 items-center justify-center rounded-full text-xs font-bold" style={{ color: selectedClass.accentDark, backgroundColor: `${selectedClass.accentLight}45` }}>{rank === 0 ? "C" : rank}</span><div><h3 className="font-display text-lg font-semibold">{rankLabel(rank)}</h3><p className={`text-xs ${allAtRank.length > 3 ? "text-destructive" : "text-muted-foreground"}`}>{allAtRank.length} / {MAX_CLASS_SPELLS_PER_RANK} sort{allAtRank.length > 1 ? "s" : ""}{allAtRank.length > 3 ? " — corriger le dépassement" : ""}</p></div></div><div className="flex gap-2"><Button type="button" size="sm" variant="outline" disabled={full} {...{ [SEARCH_TOGGLE]: "" }} onClick={() => { setError(""); setSearchRank(searchRank === rank ? null : rank) }}><Search />Chercher un sort</Button><Button type="button" size="sm" disabled={full} onClick={() => startCreate(selectedClass.id, rank)}><Plus />Créer ici</Button></div></div>{searchRank === rank && <SearchExisting classId={selectedClass.id} rank={rank} spells={data.spells} pending={pending} error={error} onClose={() => setSearchRank(null)} onLink={(spell) => void link(spell, selectedClass.id, rank)} />}{newDraft?.classRanks[selectedClass.id] === rank && <div className="mb-3"><SpellForm initial={newDraft} classes={data.classes} spells={data.spells} pending={pending} title={`Nouveau sort — ${rankLabel(rank)}`} onCancel={() => setNewDraft(null)} onSave={(draft) => void create(draft)} /></div>}<div className="grid gap-3 xl:grid-cols-3">{shown.map((spell) => <EditableSpell key={`${spell.id}:${spell.rowNumber}:${version}`} spell={spell} {...editableProps} place={{ className: selectedClass.name, rank, onUnlink: (item) => void link(item, selectedClass.id, null) }} />)}</div>{!shown.length && <p className="rounded-xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">{normalizedQuery ? "Aucun résultat dans ce rang." : "Ce rang est vide."}</p>}</section> })}</div>}</TabsContent>
-      <TabsContent value="actifs" className="mt-3">{tab === "actifs" && tableFor()}</TabsContent>
-      <TabsContent value="passifs" className="mt-3">{tab === "passifs" && tableFor()}</TabsContent>
-      <TabsContent value="bonus" className="mt-3">{tab === "bonus" && tableFor()}</TabsContent>
+      {(["actifs", "passifs", "bonus"] as const).map((view) => <TabsContent key={view} value={view} className="mt-3">{tab === view && <EmbeddedWorldIndex key={view} indexKey={spellIndexKey} embed={spellViews[view]} />}</TabsContent>)}
       <TabsContent value="duplicates" className="mt-3">{data.similaritiesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{data.similaritiesError}</p>}<SpellDuplicates key={duplicateFocus ?? "tous"} spells={data.spells} classes={data.classes} similarities={data.similarities} focusSpellId={duplicateFocus} pending={pending} onMerge={merge} onIgnore={ignore} onEdit={setEditing} onDelete={remove} /></TabsContent>
-      {forClasses && <TabsContent value="rank-bonus" className="mt-3"><RankBonusTab /></TabsContent>}
+      {forClasses && <TabsContent value="rank-bonus" className="mt-3">{tab === "rank-bonus" && <EmbeddedWorldIndex key="rank-bonus" indexKey="rank-bonuses" embed={rankBonusView} />}</TabsContent>}
     </Tabs>
   </section>
   // Le titre de l'onglet suit la classe affichée.

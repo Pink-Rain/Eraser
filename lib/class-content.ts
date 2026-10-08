@@ -1490,6 +1490,18 @@ export function saveRankBonus(rank: number, header: string, value: string) {
   return saveRankBonusCells([{ rank, column: header, value }])
 }
 
+/**
+ * L'onglet « Bonus de rang » pour le moteur des index : créé s'il manque, ses colonnes
+ * complétées (une seule fois par démarrage), puis désigné comme une feuille d'entités.
+ */
+export async function rankBonusSheetLocation() {
+  const table = await listRankBonuses({ create: true })
+  if (!table.exists) throw new Error("SHEET_TAB_NOT_FOUND")
+  const { spells: file } = await classWorkbookFiles()
+  if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
+  return { spreadsheetId: file.id, tabName: RANK_BONUS_TAB, webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit` }
+}
+
 /** Ajoute le rang suivant (« Rang 21 ») sous le dernier : les bonus de rang n'ont pas de limite. */
 export async function addRankBonusRow() {
   const { spells: file } = await classWorkbookFiles()

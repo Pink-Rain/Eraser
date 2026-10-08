@@ -430,6 +430,28 @@ test("Bonus de rang : l'ancienne colonne « Bonus » vide devient « Cible 1 »,
   assert.equal(google.grid(SPELLS, "Bonus de rang")[3][1], "Force");
 });
 
+test("Bonus de rang dans le moteur des index : lu dans son onglet, une case écrite à sa place, relue par la fiche", async () => {
+  const engine = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const headers = ["Rang", "Cible 1", "Valeur 1", "Cible 2", "Valeur 2", "Cible 3", "Valeur 3", "Cible 4", "Valeur 4", "Choix", "Sort sur mesure", "Autre"];
+  spellSheet([fireball], { tabs: [{ title: "Bonus de rang", grid: [headers, ...Array.from({ length: 3 }, (_, index) => [`Rang ${index + 1}`])] }] });
+  engine.forgetEffectiveIndex("rank-bonuses");
+  const data = await engine.getWorldIndex("rank-bonuses", { refresh: true });
+  const table = data.tables[0];
+  assert.equal(table.tabName, "Bonus de rang");
+  assert.deepEqual(table.rows.map((row) => row.values[0]), ["Rang 1", "Rang 2", "Rang 3"]);
+  // La cible est une liste liée à l'Index des caractéristiques, comme les effets d'états.
+  assert.equal(data.columns["Bonus de rang"].find((column) => column.header === "Cible 1").spec.kind, "linked-choice");
+  assert.equal(data.columns["Bonus de rang"].find((column) => column.header === "Sort sur mesure").spec.kind, "checkbox");
+  const row = table.rows[1];
+  await engine.updateWorldIndexCell("rank-bonuses", "Bonus de rang", { rowNumber: row.rowNumber, id: "", name: "Rang 2" }, "Valeur 1", "+4");
+  await engine.updateWorldIndexCell("rank-bonuses", "Bonus de rang", { rowNumber: row.rowNumber, id: "", name: "Rang 2" }, "Cible 1", "Force");
+  assert.equal(google.grid(SPELLS, "Bonus de rang")[2][1], "Force");
+  assert.equal(google.grid(SPELLS, "Bonus de rang")[2][2], "+4");
+  // La fiche de personnage lit le même onglet.
+  const bonuses = await content.listRankBonuses({ refresh: true });
+  assert.deepEqual(bonuses.bonuses.find((bonus) => bonus.rank === 2).bonuses, [{ target: "Force", value: "+4", amount: 4, slot: 1 }]);
+});
+
 test("Remplacer des ID dans le JSON d'une fiche ne touche à rien d'autre", () => {
   const mapping = new Map([["SOR-B", "SOR-A"]]);
   const untouched = "{ \"choices\": {}, \"extras\": [\"SOR-C\"] }";

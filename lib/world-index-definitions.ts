@@ -39,6 +39,19 @@ import {
 } from "@/lib/achievements-shared"
 import { classSpellCategory, classSpellCategoryTones, classSpellTypeSuggestions } from "@/lib/class-spell-utils"
 import { normalizeClassLabel } from "@/lib/class-utils"
+import {
+  ANY_CHARACTERISTIC_TARGET,
+  MOVEMENT_TARGET,
+  RANK_BONUS_CHOICE_HEADER,
+  RANK_BONUS_HEADERS,
+  RANK_BONUS_OTHER_HEADER,
+  RANK_BONUS_RANK_HEADER,
+  RANK_BONUS_SLOTS,
+  RANK_BONUS_SPELL_HEADER,
+  RANK_BONUS_TAB,
+  rankBonusTargetHeader,
+  rankBonusValueHeader,
+} from "@/lib/rank-bonuses"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders, spellSheetHeaders } from "@/lib/entity-sheets"
 
 export { foldName }
@@ -88,7 +101,7 @@ export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
  * lues et écrites ailleurs par le code d'Eraser (par le nom de leurs colonnes) ; le moteur
  * leur donne tout le reste : tableau, fiche, « Modifier », onglets-fenêtres, formules…
  */
-export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells"
+export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells" | "rank-bonuses"
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | "vocabulary" | EntityWorldIndexKey
 
@@ -440,6 +453,19 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     tabs: [{ name: "Sorts", itemLabel: "un sort", headers: spellSheetHeaders, widths: [130, 240, 380, 320, 190, 200, 160, 120], idPrefix: "SOR" }],
     entity: { nameHeader: "Nom", rowCommands: true },
   },
+  // Les bonus gagnés à chaque rang, communs à toutes les classes : l'onglet « Bonus de rang »
+  // du classeur des sorts. Une ligne par rang (ajoutée par « Ajouter un rang »), jamais
+  // insérée ni supprimée depuis le tableau : la fiche de personnage les lit rang par rang.
+  "rank-bonuses": {
+    key: "rank-bonuses",
+    sheetName: "Sorts de classe",
+    title: "Bonus de rang",
+    // Pas de page à elle : ses lignes se modifient dans Création de classe › Bonus Rang.
+    path: "/creation-de-classe",
+    itemLabel: "un rang",
+    tabs: [{ name: RANK_BONUS_TAB, itemLabel: "un rang", headers: RANK_BONUS_HEADERS, widths: [110, 200, 90, 200, 90, 200, 90, 200, 90, 100, 120, 280], idPrefix: "RNG" }],
+    entity: { nameHeader: RANK_BONUS_RANK_HEADER, rowCommands: false },
+  },
   "creature-spells": {
     key: "creature-spells",
     sheetName: "Index des créatures",
@@ -588,6 +614,7 @@ function entityReaders(index: EntityWorldIndexKey, header: string, context: Worl
   if (index === "campaigns" && among(campaignSheetHeaders)) return ["Les campagnes (tableau de bord, accès des joueurs, couleur, bannière) lisent cette colonne par son nom."]
   if (index === "characters" && among(characterIndexHeaders)) return ["La fiche de personnage, les campagnes et le tabletop lisent cette colonne par son nom."]
   if (index === "classes" && among(classSheetHeaders)) return ["Les pages de classes, la création de personnage et les statistiques lisent cette colonne par son nom."]
+  if (index === "rank-bonuses" && among(RANK_BONUS_HEADERS)) return ["La fiche de personnage lit cette colonne par son nom au passage de rang (cibles, valeurs, choix, sort sur mesure)."]
   // Une colonne de rang porte l'ID ou le nom de sa classe ; « Compétence » est lue sous plusieurs noms.
   if ((index === "class-spells" || index === "creature-spells") && (among(spellSheetHeaders) || among(spellReaderHeaders) || foldName(header).includes("competence") || isClassRankHeader(header, context.classNames))) return ["Les fiches de classe, les créatures, les PNJ et les personnages retrouvent les sorts par cette colonne (rangs des classes compris)."]
   return []
@@ -780,9 +807,25 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
     if (is("Couleur d’accent sombre", "Couleur d’accent clair")) return { kind: "color" }
     return { kind: "rich" }
   }
+  if (index === "rank-bonuses") {
+    // Le rang ouvre sa fiche ; il se crée avec « Ajouter un rang ».
+    if (is(RANK_BONUS_RANK_HEADER)) return { kind: "name-form", also: ["fixed"], description: "Le rang gagné par le personnage (son Level), sans limite à 20." }
+    const slot = Array.from({ length: RANK_BONUS_SLOTS }, (_, at) => at + 1)
+    // Comme les cibles des effets d'états : l'Index des caractéristiques et compétences.
+    if (slot.some((number) => is(rankBonusTargetHeader(number)))) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB, extra: [ANY_CHARACTERISTIC_TARGET, MOVEMENT_TARGET] }, description: "Une caractéristique ou une compétence de la fiche. « Caractéristique » : le joueur répartit la valeur entre ses caractéristiques principales ; « Déplacement » : l’action de déplacement gratuite." }
+    if (slot.some((number) => is(rankBonusValueHeader(number)))) return { kind: "fixed", description: "Ce que gagne la cible du même numéro (+5, -2…), ajouté à son bonus/malus sur la fiche." }
+    if (is(RANK_BONUS_CHOICE_HEADER)) return { kind: "choice", options: ["1", "2", "3", "4"].map((value) => ({ value })), description: "Combien de ces bonus le joueur choisit. Vide : il les a tous." }
+    if (is(RANK_BONUS_SPELL_HEADER)) return { kind: "checkbox", description: "Cochée : au passage de rang, le joueur cherche un sort et l’ajoute à sa fiche." }
+    if (is(RANK_BONUS_OTHER_HEADER)) return { kind: "rich", description: "Un autre avantage, affiché tel quel au passage de rang." }
+    return { kind: "rich" }
+  }
   // Sorts des classes et des créatures : une colonne par classe donne le rang du sort.
   if (/^CLA-/i.test(header.trim())) return { kind: "number", hidden: true, description: "Le rang du sort dans cette classe (vide : pas dans la classe)." }
   if (is("Type", "Type de sort")) return { kind: "choice", allowCustom: true, options: index === "creature-spells" ? spellTypeOptions.filter((option) => classSpellCategory(option.value) !== "bonus") : spellTypeOptions }
+  // Comme sur les fiches de sorts : les compétences en rouge, les charges en étoiles (✦ : illimitées).
+  if (is("Compétences", "Compétence")) return { kind: "fixed", display: "skills" }
+  if (is("Charges")) return { kind: "gauge", also: ["number"], gauge: { style: "icons", max: 5, mode: "count", unlimited: "✦" } }
+  if (is("Description")) return { kind: "rich", display: "muted" }
   return { kind: "rich" }
 }
 

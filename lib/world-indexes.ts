@@ -26,7 +26,7 @@ import {
   updateFormattedCell,
   updateRange,
 } from "@/lib/google-sheets"
-import { CREATURE_SPELLS_TAB, invalidateClassContentCaches, spellSheetLocation } from "@/lib/class-content"
+import { CREATURE_SPELLS_TAB, invalidateClassContentCaches, rankBonusSheetLocation, spellSheetLocation } from "@/lib/class-content"
 import { eq } from "drizzle-orm"
 
 import { getDb } from "@/db"
@@ -171,6 +171,7 @@ function effectiveTabs(base: WorldIndexTabDefinition[], schema: SchemaEntry[]) {
 function entityLocation(key: EntityWorldIndexKey) {
   if (key === "class-spells") return spellSheetLocation("classes")
   if (key === "creature-spells") return spellSheetLocation("creatures")
+  if (key === "rank-bonuses") return rankBonusSheetLocation()
   return entitySheetLocation(key)
 }
 
