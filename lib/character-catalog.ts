@@ -20,7 +20,11 @@ import {
   innateCharacterSkills,
 } from "@/lib/character-sheet-schema"
 
-export type CharacteristicKind = "principale" | "secondaire"
+/**
+ * « deplacement » : une caractéristique de déplacement (Action de déplacement gratuite,
+ * mineure, majeure). La fiche les regroupe dans une seule case, « Déplacement ».
+ */
+export type CharacteristicKind = "principale" | "secondaire" | "deplacement"
 
 export type CatalogCharacteristic = {
   /** Clé de fiche : le nom de ses colonnes dans la feuille de personnage. */
@@ -60,6 +64,21 @@ export const CATALOG_COLOR_HEADER = "Couleur"
 export const CATALOG_DESCRIPTION_HEADER = "Description"
 export const PRINCIPAL_LABEL = "Principale"
 export const SECONDARY_LABEL = "Secondaire"
+/** Le type des caractéristiques de déplacement dans l'index (« Caractéristique de déplacement »). */
+export const MOVEMENT_LABEL = "Déplacement"
+
+/** Le type écrit dans l'index pour un genre de caractéristique. */
+export function characteristicKindLabel(kind: CharacteristicKind) {
+  return kind === "principale" ? PRINCIPAL_LABEL : kind === "deplacement" ? MOVEMENT_LABEL : SECONDARY_LABEL
+}
+
+/** Le genre d'une caractéristique d'après la case Type de l'index (Principale par défaut). */
+export function characteristicKindOf(type: string): CharacteristicKind {
+  const folded = foldCatalogName(type)
+  if (folded.startsWith("second")) return "secondaire"
+  if (folded.includes("deplacement")) return "deplacement"
+  return "principale"
+}
 
 /**
  * Les caractéristiques secondaires d'origine, dans l'ordre de la fiche. Leur clé est
@@ -83,6 +102,36 @@ export const builtinSecondaryCharacteristics: Array<{ key: string; name: string;
   { key: "Réussite critique", name: "Réussite critique", defaultValue: "5", color: "#d9b85c" },
 ]
 
+/**
+ * Les caractéristiques de déplacement d'origine. Leur clé est l'en-tête de leur colonne
+ * dans la feuille de personnage (ajoutée à droite). Les actions mineure et majeure
+ * s'ajoutent à l'action gratuite : la fiche affiche gratuite + mineure et gratuite + majeure.
+ */
+export const MOVEMENT_FREE_KEY = "Action de déplacement gratuite"
+export const MOVEMENT_MINOR_KEY = "Action de déplacement mineure"
+export const MOVEMENT_MAJOR_KEY = "Action de déplacement majeure"
+export const builtinMovementCharacteristics: Array<{ key: string; name: string; defaultValue: string; color: string }> = [
+  { key: MOVEMENT_FREE_KEY, name: "Action de déplacement gratuite", defaultValue: "0", color: "#5f9fa0" },
+  { key: MOVEMENT_MINOR_KEY, name: "Action de déplacement mineure", defaultValue: "0", color: "#5f9fa0" },
+  { key: MOVEMENT_MAJOR_KEY, name: "Action de déplacement majeure", defaultValue: "0", color: "#5f9fa0" },
+]
+export const builtinMovementKeys = new Set(builtinMovementCharacteristics.map((item) => item.key))
+
+/**
+ * Le rôle d'une caractéristique de déplacement : sa clé d'origine, sinon son nom
+ * (« … gratuite », « … mineure », « … majeure ») pour une ligne ajoutée à l'index.
+ */
+export function movementRole(item: { key: string; name: string }): "gratuite" | "mineure" | "majeure" | null {
+  if (item.key === MOVEMENT_FREE_KEY) return "gratuite"
+  if (item.key === MOVEMENT_MINOR_KEY) return "mineure"
+  if (item.key === MOVEMENT_MAJOR_KEY) return "majeure"
+  const name = foldCatalogName(item.name)
+  if (name.includes("gratuit")) return "gratuite"
+  if (name.includes("mineur")) return "mineure"
+  if (name.includes("majeur")) return "majeure"
+  return null
+}
+
 /** Les couleurs d'origine des cartes de caractéristiques principales. */
 export const builtinPrincipalColors: Record<string, string> = {
   "Capacité de combat": "#b9504e", "Capacité de tir": "#b9504e", "Capacité magique": "#b9504e",
@@ -92,7 +141,7 @@ export const builtinPrincipalColors: Record<string, string> = {
 
 /** La couleur d'origine d'une caractéristique, d'après sa clé de fiche. */
 export function builtinCharacteristicColor(key: string) {
-  return builtinPrincipalColors[key] ?? builtinSecondaryCharacteristics.find((item) => item.key === key)?.color ?? ""
+  return builtinPrincipalColors[key] ?? builtinSecondaryCharacteristics.find((item) => item.key === key)?.color ?? builtinMovementCharacteristics.find((item) => item.key === key)?.color ?? ""
 }
 
 /** La liste telle qu'elle était écrite dans le code : graines de l'index et repli sans lui. */
@@ -101,6 +150,7 @@ export const builtinCharacterCatalog: CharacterCatalog = {
   characteristics: [
     ...characterSkillGroups.map((group) => ({ key: group.characteristic, name: group.characteristic, kind: "principale" as const, defaultValue: "0", color: builtinPrincipalColors[group.characteristic] })),
     ...builtinSecondaryCharacteristics.map((item) => ({ ...item, kind: "secondaire" as const })),
+    ...builtinMovementCharacteristics.map((item) => ({ ...item, kind: "deplacement" as const })),
   ],
   skills: characterSkillGroups.flatMap((group) => group.skills.map((skill) => ({
     key: skill,
@@ -115,7 +165,7 @@ export function catalogSeedRows(): Record<string, Array<Record<string, string>>>
   return {
     [CHARACTERISTICS_TAB]: builtinCharacterCatalog.characteristics.map((item) => ({
       Nom: item.name,
-      [CATALOG_TYPE_HEADER]: item.kind === "principale" ? PRINCIPAL_LABEL : SECONDARY_LABEL,
+      [CATALOG_TYPE_HEADER]: characteristicKindLabel(item.kind),
       [CATALOG_DEFAULT_HEADER]: item.defaultValue,
       [CATALOG_KEY_HEADER]: item.key,
       [CATALOG_COLOR_HEADER]: item.color ?? "",
@@ -159,7 +209,7 @@ export function catalogFromTables(characteristics: CatalogTable | null, skills: 
     if (!name) continue
     const key = keyOf(characteristics!, row)
     if (!key) continue
-    const kind = foldCatalogName(cellOf(characteristics!, row, CATALOG_TYPE_HEADER)).startsWith("second") ? "secondaire" : "principale"
+    const kind = characteristicKindOf(cellOf(characteristics!, row, CATALOG_TYPE_HEADER))
     const color = cellOf(characteristics!, row, CATALOG_COLOR_HEADER)
     characteristicList.push({ key, name, kind, defaultValue: cellOf(characteristics!, row, CATALOG_DEFAULT_HEADER), ...(/^#[0-9a-f]{3,8}$/i.test(color) ? { color } : {}) })
   }

@@ -16,8 +16,10 @@ import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
-import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingSpellChoices, selectedCharacterClasses } from "@/components/eraser/class-progression"
-import { SpellChoiceDialog } from "@/components/eraser/spell-choice-dialog"
+import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, selectedCharacterClasses, startRankBonuses, takeRankBonus, type RankBonusTaken } from "@/components/eraser/class-progression"
+import { SpellChoiceDialog, type RankBonusSelection } from "@/components/eraser/spell-choice-dialog"
+import { useRankBonuses } from "@/components/eraser/rank-bonus"
+import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
 import { FxOverlay, PageFxOverlay, PortraitFx, pageImageFxClass, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
 import { applyRule, hasRule, ruleLabel, type ModifierRule } from "@/lib/state-change"
@@ -44,6 +46,7 @@ import {
   characterLayout,
   CRITICAL_FAILURE_METRIC,
   CRITICAL_SUCCESS_METRIC,
+  movementRole,
   type CatalogCharacteristic,
   type CatalogGroup,
   type CatalogSkill,
@@ -467,6 +470,45 @@ function CombinedCalculatedCard({ label, groupColor, fields, values, commit, mod
   </div>
 }
 
+type MovementRole = "gratuite" | "mineure" | "majeure"
+const movementLabels: Record<MovementRole, { short: string; long: string }> = {
+  gratuite: { short: "Gratuite", long: "Action gratuite" },
+  mineure: { short: "Mineure", long: "Action mineure" },
+  majeure: { short: "Majeure", long: "Action majeure" },
+}
+
+/**
+ * Une action de déplacement dans la case Déplacement. Son survol montre son calcul :
+ * bonus/malus (sa valeur, modifiable), modificateur (objets, états) et total ; les
+ * actions mineure et majeure s'ajoutent à l'action gratuite.
+ */
+function MovementCell({ role, name, help = "", color: baseColor, value, own, shown, freeTotal, modifier, rule, linkedItems, toggle, onCommit, alignEnd = false }: { /** La dernière case : son survol s'aligne sur son bord droit, sans sortir de la fenêtre. */ alignEnd?: boolean; role: MovementRole | null; name: string; help?: string; color: string; value: string; /** Son propre total (bonus/malus + modificateur). */ own: string; /** Ce que la case affiche (gratuite comprise). */ shown: string; /** Le total de l'action gratuite, ajouté aux deux autres. */ freeTotal: string | null; modifier: number; rule?: ModifierRule; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
+  const [open, setOpen] = useState(false)
+  const { anchorRef, above, measure } = useFlipPlacement()
+  const color = stateTint(linkedItems) || baseColor
+  const fx = stateFxOf(linkedItems)
+  const changed = modifier !== 0 || hasRule(rule)
+  const label = role ? movementLabels[role].short : name
+  return <div ref={anchorRef} className="group/help relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)} onFocusCapture={() => setOpen(true)}>
+    <button type="button" onClick={() => setOpen((current) => !current)} className="relative flex h-full min-h-14 w-full flex-col items-center justify-center rounded-lg px-1 py-2 text-center" style={{ backgroundColor: `${color}24`, borderBottom: `2px solid ${color}66` }}>
+      <span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={name} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span>
+      <span className={`mt-1 inline-block text-lg font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{shown}</span>
+      <FxOverlay fx={fx} />
+    </button>
+    {open && <div ref={measure} className={`absolute ${alignEnd ? "right-0" : "left-1/2 -translate-x-1/2"} ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-60 rounded-xl border bg-popover p-3 text-left text-popover-foreground shadow-2xl`} style={{ borderColor: `${color}66` }}>
+      <p className="font-display text-sm font-semibold" style={{ color }}>{name}</p>
+      <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p>
+      <div className="grid grid-cols-3 gap-2">
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${name} : bonus/malus`} value={value} onCommit={onCommit}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold tabular-nums text-primary">{value || "0"}</span></InlineEdit></div>
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Mod.</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Total</p><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums" style={{ color }}>{own}</span></div>
+      </div>
+      {freeTotal !== null && <p className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: `${color}40` }}><span className="text-muted-foreground">Gratuite {freeTotal} + {role ? movementLabels[role].short.toLocaleLowerCase("fr") : "action"} {own}</span><b className="tabular-nums" style={{ color }}>{shown}</b></p>}
+      <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} />
+    </div>}
+  </div>
+}
+
 function LifePool({ label = "Points de vie", help = "", color = "#6e9ee8", current, total, commit, modifier = 0, rule, currentModifier = 0, currentRule }: { label?: string; /** Description au survol du « ? ». */ help?: string; color?: string; current: string; total: string; commit: (index: number, value: string) => Promise<void>; modifier?: number; rule?: ModifierRule; currentModifier?: number; currentRule?: ModifierRule }) {
   const [editing, setEditing] = useState(false)
   const [expression, setExpression] = useState(current || "0")
@@ -718,7 +760,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const campaignAccent = character.campaigns[0]?.accentColor || "#927640"
   const customTabs = parseCharacterTabs(values[characterCustomTabsIndex] || "")
   const characterTabs = [...baseCharacterTabs, ...customTabs]
-  const currentLevel = Math.max(0, Math.min(20, Math.trunc(Number(values[3]) || 0)))
+  // Les sorts de classe s'arrêtent au rang 20 ; les bonus de rang continuent au-delà.
+  const characterLevel = Math.max(0, Math.trunc(Number(values[3]) || 0))
+  const currentLevel = Math.min(20, characterLevel)
   const characterClassValue = values[2] || ""
   const assignedClasses = useMemo(() => selectedCharacterClasses(characterClassValue, availableClasses), [characterClassValue, availableClasses])
   const classChoicesValue = values[characterClassChoicesIndex] || ""
@@ -734,12 +778,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Des objets reçus pas encore survolés : la même pastille discrète sur l'onglet Inventaire.
   const newSlots = useNewSlots(character.id)
   const hasNewItems = Boolean(inventory?.containers.some((container) => container.slots.some((slot) => slot.item && newSlots.isNew(slot.id))))
-  const pendingChoices = useMemo(
-    () => pendingSpellChoices(assignedClasses, availableClassSpells, currentLevel, classChoicesValue),
-    [assignedClasses, availableClassSpells, currentLevel, classChoicesValue],
+  // Le passage de rang : les sorts à choisir et les bonus de rang à obtenir, rang par rang.
+  const { bonuses: rankBonuses, loaded: rankBonusesLoaded } = useRankBonuses()
+  const pendingSteps = useMemo(
+    () => pendingRankSteps(assignedClasses, availableClassSpells, characterLevel, classChoicesValue, rankBonuses),
+    [assignedClasses, availableClassSpells, characterLevel, classChoicesValue, rankBonuses],
   )
-  const pendingChoiceCount = pendingChoices.length
-  const currentChoice = pendingChoices[0]
+  const pendingChoiceCount = pendingSteps.length
+  const currentChoice = pendingSteps[0]
   // La dernière proposition reste affichée le temps que la fenêtre se referme (après le
   // dernier choix, il n'y en a plus) : elle ne disparaît plus d'un coup.
   const [shownChoice, setShownChoice] = useState(currentChoice)
@@ -751,22 +797,76 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const [spellChoiceOpen, setSpellChoiceOpen] = useState(false)
   const [spellChoiceWanted, setSpellChoiceWanted] = useState(false)
   useEffect(() => {
-    if (!spellChoiceWanted || classCatalogLoading) return
+    if (!spellChoiceWanted || classCatalogLoading || !rankBonusesLoaded) return
     const timer = window.setTimeout(() => {
       setSpellChoiceWanted(false)
       if (currentChoice) setSpellChoiceOpen(true)
     }, 0)
     return () => window.clearTimeout(timer)
-  }, [classCatalogLoading, currentChoice, spellChoiceWanted])
+  }, [classCatalogLoading, currentChoice, rankBonusesLoaded, spellChoiceWanted])
   function commitLevel(value: string) {
-    if (Math.trunc(Number(value) || 0) > currentLevel) setSpellChoiceWanted(true)
+    if (Math.trunc(Number(value) || 0) > characterLevel) {
+      // Le premier passage de niveau depuis l'arrivée des bonus de rang : les rangs déjà
+      // atteints ne les reproposent pas, seuls les nouveaux rangs les donnent.
+      const choices = latestValues.current[characterClassChoicesIndex] || ""
+      const started = startRankBonuses(choices, characterLevel)
+      if (started !== choices) void commit(characterClassChoicesIndex, started)
+      setSpellChoiceWanted(true)
+    }
     return commit(3, value)
   }
-  function chooseSpell(spell: ClassSpell) {
-    if (!currentChoice) return
-    markNewSlots(newSpellsKey(character.id), [spell.id])
+
+  // Les caractéristiques principales, entre lesquelles répartir un bonus « Caractéristique ».
+  const principalCharacteristics = useMemo(() => catalog.characteristics.filter((item) => item.kind === "principale").map((item, position) => ({ key: item.key, name: item.name, color: groupColor(item, position).accent })), [catalog])
+  const movementItems = useMemo(() => catalog.characteristics.filter((item) => item.kind === "deplacement"), [catalog])
+  const freeMovement = movementItems.find((item) => movementRole(item) === "gratuite") ?? movementItems[0]
+  /** La case où un bonus de rang s'ajoute : le bonus/malus de sa cible (sa valeur de base s'il n'en a pas). */
+  function rankBonusCell(target: string) {
+    if (isMovementTarget(target)) return freeMovement ? layout.index(freeMovement.key) : -1
+    const targetId = targetOfName(target)
+    return targetId ? writableIndexFor(targetId) : -1
+  }
+  function addToCell(index: number, amount: number) {
+    const next = Math.round((sheetNumber(latestValues.current[index] ?? "") + amount) * 100) / 100
+    void commit(index, String(next))
+  }
+  /**
+   * Le passage d'un rang : le sort choisi, puis les bonus gardés, ajoutés au bonus/malus de
+   * leur cible (jamais au modificateur, réservé à ce qui est temporaire), et le sort sur
+   * mesure ajouté aux sorts de la fiche. Le rang est noté comme obtenu : rien n'est ajouté deux fois.
+   */
+  function chooseSpell(spell: ClassSpell | null, selection: RankBonusSelection | null) {
+    const step = currentChoice
+    if (!step) return
+    let choices = latestValues.current[characterClassChoicesIndex] || ""
+    if (spell && step.choice) {
+      markNewSlots(newSpellsKey(character.id), [spell.id])
+      choices = chooseClassSpell(choices, step.choice.classId, step.choice.rank, spell.id)
+    }
+    if (step.bonus && selection) {
+      const applied: RankBonusTaken["applied"] = []
+      for (const entry of step.bonus.bonuses) {
+        if (!selection.slots.includes(entry.slot)) continue
+        if (isAnyCharacteristicTarget(entry.target)) {
+          const sign = entry.amount < 0 ? -1 : 1
+          for (const [key, points] of Object.entries(selection.spread[entry.slot] ?? {})) {
+            const index = layout.index(key)
+            if (!points || index < 0) continue
+            addToCell(index, sign * points)
+            applied.push({ target: catalog.characteristics.find((item) => item.key === key)?.name ?? key, amount: sign * points })
+          }
+          continue
+        }
+        const index = rankBonusCell(entry.target)
+        if (index < 0 || !entry.amount) continue
+        addToCell(index, entry.amount)
+        applied.push({ target: entry.target, amount: entry.amount })
+      }
+      if (selection.spell) markNewSlots(newSpellsKey(character.id), [selection.spell.id])
+      choices = takeRankBonus(choices, step.rank, { applied, ...(selection.spell ? { spell: selection.spell.id } : {}) })
+    }
     if (pendingChoiceCount <= 1) setSpellChoiceOpen(false)
-    return commit(characterClassChoicesIndex, chooseClassSpell(classChoicesValue, currentChoice.classId, currentChoice.rank, spell.id))
+    return commit(characterClassChoicesIndex, choices)
   }
 
   function linkedAbilities(skillName: string) {
@@ -989,17 +1089,18 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const combinedCards: Array<{ label: string; color: string; span: string; members: Array<{ key: string; index: number; label: string; short: string; color: string }> }> = [
     { label: "Dégâts", color: "#b96485", span: "sm:col-span-2 xl:col-span-4", members: [{ key: "Bonus de dégâts physiques", index: 17, label: "Dégâts physiques", short: "Physiques", color: "#c85f78" }, { key: "Bonus de dégâts magiques", index: 18, label: "Dégâts magiques", short: "Magiques", color: "#a96991" }] },
     { label: "Armure", color: "#6da184", span: "sm:col-span-2 xl:col-span-4", members: [{ key: "Armure physique", index: 19, label: "Armure physique", short: "Physique", color: "#74a968" }, { key: "Armure magique", index: 20, label: "Armure magique", short: "Magique", color: "#6599a0" }] },
-    { label: "Critique", color: "#d19466", span: "sm:col-span-2 xl:col-span-5", members: [{ key: "Échec critique", index: 22, label: "Échec critique", short: "Échec", color: "#c86f6f" }, { key: "Réussite critique", index: 23, label: "Réussite critique", short: "Réussite", color: "#d9b85c" }] },
+    { label: "Critique", color: "#d19466", span: "sm:col-span-2 xl:col-span-4", members: [{ key: "Échec critique", index: 22, label: "Échec critique", short: "Échec", color: "#c86f6f" }, { key: "Réussite critique", index: 23, label: "Réussite critique", short: "Réussite", color: "#d9b85c" }] },
   ]
   const counterStyles: Record<string, { color: string; span: string }> = {
     "Notoriété": { color: "#70a8c5", span: "xl:col-span-2" },
     "Moralité": { color: "#bd7b99", span: "xl:col-span-2" },
     "Folie": { color: "#8f79b5", span: "xl:col-span-2" },
-    "Destin": { color: "#e7ae69", span: "xl:col-span-3" },
+    // La case Déplacement prend place à droite du Destin, au-dessus de la Rapidité.
+    "Destin": { color: "#e7ae69", span: movementItems.length ? "xl:col-span-2" : "xl:col-span-5" },
   }
   const secondaryHelp = (key: string) => catalogDescriptionOf(descriptions, secondaries.find((candidate) => candidate.key === key) ?? { key, name: key })
   const counterTile = (key: string, label: string, index: number, style: { color: string; span: string }) => <CounterTile key={key} label={label} help={secondaryHelp(key)} color={style.color} span={style.span} value={values[index]} modifier={modifierForValue(index)} rule={ruleForValue(index)} linkedItems={linkedForValue(index)} toggle={slotToggle} onCommit={(value) => commit(index, value)} />
-  const listTile = (key: string, label: string, index: number, options: string[], color: string) => <div key={key} className="group/help flex min-h-20 flex-col items-center justify-center rounded-xl px-3 py-2 text-center xl:col-span-3" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{secondaryHelp(key) && <IndexRichText html={secondaryHelp(key)} />}</HelpMark></p><div className="mt-1 max-w-full"><SelectEdit label={label} value={values[index]} options={options} onCommit={(value) => commit(index, value)} /></div></div>
+  const listTile = (key: string, label: string, index: number, options: string[], color: string) => <div key={key} className="group/help flex min-h-20 flex-col items-center justify-center rounded-xl px-3 py-2 text-center xl:col-span-2" style={{ backgroundColor: `${color}16`, borderTop: `2px solid ${color}` }}><p className="text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{label}<HelpMark title={label} className="ml-1 size-3 normal-case tracking-normal opacity-0 hover:text-foreground group-hover/help:opacity-100">{secondaryHelp(key) && <IndexRichText html={secondaryHelp(key)} />}</HelpMark></p><div className="mt-1 max-w-full"><SelectEdit label={label} value={values[index]} options={options} onCommit={(value) => commit(index, value)} /></div></div>
   const renderedCombined = new Set<string>()
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
@@ -1007,7 +1108,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} /><ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell></div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
-    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-2"><CalculatedSecondaryCard fieldIndex={21} label={item.name} help={secondaryHelp(item.key)} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
+    if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-3"><CalculatedSecondaryCard fieldIndex={21} label={item.name} help={secondaryHelp(item.key)} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
     const combined = combinedCards.find((card) => card.members.some((member) => member.key === item.key))
     if (combined) {
       if (renderedCombined.has(combined.label)) return []
@@ -1022,7 +1123,42 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const style = counterStyles[item.key] ?? { color: "#8a9bb0", span: "xl:col-span-2" }
     return [counterTile(item.key, item.name, index, { ...style, color: item.color || style.color })]
   })
-  const secondaryCharacteristics = secondaryTiles.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(18,minmax(0,1fr))]">{secondaryTiles}</div> : null
+  /**
+   * La case Déplacement : actions gratuite, mineure et majeure côte à côte. Les actions
+   * mineure et majeure affichent l'action gratuite en plus de la leur.
+   */
+  const movementCells = movementItems.flatMap((item) => {
+    const index = layout.index(item.key)
+    return index < 0 ? [] : [{ item, index, role: movementRole(item) }]
+  }).sort((left, right) => ["gratuite", "mineure", "majeure"].indexOf(left.role ?? "") - ["gratuite", "mineure", "majeure"].indexOf(right.role ?? ""))
+  const movementColor = freeMovement?.color || "#5f9fa0"
+  const ownMovement = (cell: { index: number }) => totalWithModifier(values[cell.index], modifierForValue(cell.index), "0", ruleForValue(cell.index))
+  const freeCell = movementCells.find((cell) => cell.role === "gratuite")
+  const freeTotal = freeCell ? ownMovement(freeCell) : null
+  const movementTile = movementCells.length ? <div key="Déplacement" className="sm:col-span-2 lg:col-span-1 xl:col-span-3"><div className="h-full min-h-20 rounded-xl border p-1.5 shadow-sm" style={{ backgroundColor: `${movementColor}18`, borderColor: `${movementColor}55`, borderTop: `2px solid ${movementColor}` }}>
+    <p className="mb-1 text-center text-[9px] font-semibold uppercase tracking-[.18em]" style={{ color: movementColor }}>Déplacement</p>
+    <div className="grid gap-1" style={{ gridTemplateColumns: `repeat(${movementCells.length}, minmax(0, 1fr))` }}>
+      {movementCells.map((cell, position) => {
+        const own = ownMovement(cell)
+        const addsFree = Boolean(freeTotal !== null && cell.role && cell.role !== "gratuite")
+        const shown = addsFree ? String(Math.round((sheetNumber(freeTotal!) + sheetNumber(own)) * 100) / 100) : own
+        return <MovementCell key={cell.item.key} role={cell.role} name={cell.item.name} help={catalogDescriptionOf(descriptions, cell.item)} color={cell.item.color || movementColor} value={values[cell.index]} own={own} shown={shown} freeTotal={addsFree ? freeTotal : null} modifier={modifierForValue(cell.index)} rule={ruleForValue(cell.index)} linkedItems={linkedForValue(cell.index)} toggle={slotToggle} onCommit={(value) => commit(cell.index, value)} alignEnd={position === movementCells.length - 1} />
+      })}
+    </div>
+  </div></div> : null
+  // Ordre de la fiche : la Rapidité à droite du Critique, le Déplacement à droite du Destin (au-dessus d'elle).
+  const orderedTiles = [...secondaryTiles]
+  const rapidity = orderedTiles.findIndex((tile) => tile.key === "Rapidité")
+  if (rapidity >= 0 && orderedTiles.some((tile) => tile.key === "Critique")) {
+    const [tile] = orderedTiles.splice(rapidity, 1)
+    orderedTiles.splice(orderedTiles.findIndex((candidate) => candidate.key === "Critique") + 1, 0, tile)
+  }
+  if (movementTile) {
+    const destiny = orderedTiles.findIndex((tile) => tile.key === "Destin")
+    const firstCombined = orderedTiles.findIndex((tile) => tile.key === "Dégâts")
+    orderedTiles.splice(destiny >= 0 ? destiny + 1 : firstCombined >= 0 ? firstCombined : orderedTiles.length, 0, movementTile)
+  }
+  const secondaryCharacteristics = orderedTiles.length ? <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-[repeat(18,minmax(0,1fr))]">{orderedTiles}</div> : null
 
   const successLabel = "Réussite crit."
   const failureLabel = "Échec crit."
@@ -1105,7 +1241,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "inventaire") return inventoryLoading
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
-    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
+    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }
@@ -1196,13 +1332,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     {shownChoice && <SpellChoiceDialog
       open={spellChoiceOpen && Boolean(currentChoice)}
       onOpenChange={setSpellChoiceOpen}
-      title="Nouveau sort"
-      subtitle={`${shownChoice.className} · rang ${shownChoice.rank}`}
-      options={shownChoice.options}
+      title={shownChoice.choice ? "Nouveau sort" : "Bonus de rang"}
+      subtitle={shownChoice.choice ? `${shownChoice.className} · rang ${shownChoice.rank}` : `Rang ${shownChoice.rank}`}
+      options={shownChoice.choice?.options ?? []}
       accent={shownChoice.accent}
       accentLight={shownChoice.accentLight}
-      choiceKey={`${shownChoice.classId}:${shownChoice.rank}`}
+      choiceKey={shownChoice.key}
       remaining={Math.max(1, pendingChoiceCount)}
+      bonus={shownChoice.bonus}
+      characteristics={principalCharacteristics}
+      canApply={(target) => rankBonusCell(target) >= 0}
+      spellPool={availableClassSpells.filter((spell) => !knownClassSpells.some((known) => known.id === spell.id))}
       onChoose={chooseSpell}
       onLater={() => setSpellChoiceOpen(false)}
     />}

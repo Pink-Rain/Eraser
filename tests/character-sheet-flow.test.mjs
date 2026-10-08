@@ -86,7 +86,9 @@ test("Tabletop : seule la vie changée est écrite, « 12,5 » reste « 12,5 »"
   await sheets.syncExistingIdentityIndexes();
   const before = copyOf(google.grid(characters, "Personnages"));
   const entity = await tabletop.updateTabletopEntityHp(admin, "bac-a-sable", "character", id, { currentHp: 9 });
-  assert.deepEqual(changedCells(before, google.grid(characters, "Personnages")), ["1:Vie actuelle"]);
+  // Les colonnes du déplacement (liste d'origine) arrivent une fois, à droite : elles ne comptent pas ici.
+  const movement = new Set(["Action de déplacement gratuite", "Action de déplacement mineure", "Action de déplacement majeure"]);
+  assert.deepEqual(changedCells(before, google.grid(characters, "Personnages")).filter((cell) => !movement.has(cell.slice(2))), ["1:Vie actuelle"]);
   assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie actuelle"], "9");
   assert.equal(record(google.grid(characters, "Personnages"), 1)["Vie totale"], "12,5");
   assert.equal(entity.currentHp, 9);

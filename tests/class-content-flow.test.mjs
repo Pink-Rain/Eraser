@@ -404,6 +404,23 @@ test("Bonus de rang : la ligne 1 est lue en entier, une colonne au-delà de Z es
   assert.equal(google.grid(SPELLS, "Bonus de rang")[1][28], "Oui");
 });
 
+test("Bonus de rang : l'ancienne colonne « Bonus » vide devient « Cible 1 », les autres colonnes s'ajoutent, un rang 21 aussi", async () => {
+  spellSheet([fireball], { tabs: [{ title: "Bonus de rang", grid: [["Rang", "Bonus"], ...Array.from({ length: 20 }, (_, index) => [`Rang ${index + 1}`])] }] });
+  const table = await content.listRankBonuses({ create: true });
+  const expected = ["Rang", "Cible 1", "Valeur 1", "Cible 2", "Valeur 2", "Cible 3", "Valeur 3", "Cible 4", "Valeur 4", "Choix", "Sort sur mesure", "Autre"];
+  assert.deepEqual(google.grid(SPELLS, "Bonus de rang")[0], expected);
+  assert.deepEqual(table.headers, expected);
+  assert.equal(table.rows.length, 20);
+  await content.saveRankBonus(2, "Cible 1", "Rapidité");
+  await content.saveRankBonus(2, "Valeur 1", "+5");
+  const added = await content.addRankBonusRow();
+  assert.deepEqual(added.rows.map((row) => row.rank).slice(-2), [20, 21]);
+  await content.saveRankBonus(21, "Autre", "Un titre");
+  const final = await content.listRankBonuses({ refresh: true });
+  assert.deepEqual(final.bonuses.find((bonus) => bonus.rank === 2).bonuses, [{ target: "Rapidité", value: "+5", amount: 5, slot: 1 }]);
+  assert.equal(final.bonuses.find((bonus) => bonus.rank === 21).other, "Un titre");
+});
+
 test("Remplacer des ID dans le JSON d'une fiche ne touche à rien d'autre", () => {
   const mapping = new Map([["SOR-B", "SOR-A"]]);
   const untouched = "{ \"choices\": {}, \"extras\": [\"SOR-C\"] }";

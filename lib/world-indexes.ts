@@ -53,6 +53,7 @@ import {
   worldColumnPolicy,
   worldIndexDefinitions,
   worldIndexColumnFills,
+  worldIndexRowAdditions,
   worldIndexSeeds,
   worldColumnSpec,
   worldIndexLinks,
@@ -494,13 +495,55 @@ async function fillNewColumns(key: WorldIndexKey, sheet: Awaited<ReturnType<type
   return wrote
 }
 
+/**
+ * Ajoute une fois les lignes prévues après coup (worldIndexRowAdditions) au bas de leur
+ * onglet : seulement celles qui n'y sont pas encore (même clé ou même nom). Aucune ligne
+ * existante n'est touchée ; une ligne supprimée ensuite dans Sheets ne revient pas.
+ */
+async function addMissingRows(key: WorldIndexKey, sheet: Awaited<ReturnType<typeof workbook>>, tables: WorldIndexTable[]) {
+  const additions = isBuiltinWorldIndexKey(key) ? worldIndexRowAdditions[key] ?? [] : []
+  let wrote = false
+  for (const addition of additions) {
+    const table = tables.find((candidate) => candidate.tabName === addition.tab)
+    if (!table) continue
+    const flag = `world-index-rows:${key}:${addition.id}:${sheet.spreadsheetId}`
+    const [done] = await getDb().select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, flag)).limit(1)
+    if (done) continue
+    const match = columnOf(table.headers, addition.matchColumn)
+    const name = nameColumnIndex(table.headers)
+    const present = new Set(table.rows.flatMap((row) => [match, name].flatMap((column) => column >= 0 && row.values[column]?.trim() ? [foldName(row.values[column])] : [])))
+    const missing = addition.rows().filter((row) => {
+      const keyValue = Object.entries(row).find(([header]) => foldName(header) === foldName(addition.matchColumn))?.[1] ?? ""
+      const nameValue = Object.entries(row).find(([header]) => foldName(header) === "nom")?.[1] ?? ""
+      return !present.has(foldName(keyValue)) && !present.has(foldName(nameValue))
+    })
+    if (missing.length && table.headers.length) {
+      const prefix = tabDefinition(key, table.tabName).idPrefix
+      const values = missing.map((row) => table.headers.map((header) => {
+        if (foldName(header) === foldName(ID_HEADER)) return newIndexId(prefix)
+        return Object.entries(row).find(([candidate]) => foldName(candidate) === foldName(header))?.[1] ?? ""
+      }))
+      await appendRows(sheet.spreadsheetId, sheetTabRange(table.tabName, `A:${columnName(table.headers.length)}`), values, { valueInputOption: "RAW" })
+      clearSpreadsheetReadCache(sheet.spreadsheetId)
+      wrote = true
+      console.info("WORLD_INDEX_ROWS_ADDED", key, addition.id, missing.length)
+    }
+    await getDb().insert(sheetIndexSyncs).values({ key: flag }).onConflictDoNothing()
+  }
+  return wrote
+}
+
 async function loadWorldIndex(key: WorldIndexKey): Promise<WorldIndexData> {
   const sheet = await workbook(key)
   let tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
   // Sans son schéma (lecture ratée), l'index est seulement affiché : rien n'y est écrit.
   if (!sheet.degraded) {
     if (await seedEmptyIndex(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
-    else if (await fillNewColumns(key, sheet, tables)) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+    else {
+      const filled = await fillNewColumns(key, sheet, tables)
+      const added = await addMissingRows(key, sheet, tables)
+      if (filled || added) tables = await Promise.all(sheet.definition.tabs.map((tab) => readTable(sheet.spreadsheetId, key, tab.name)))
+    }
     // Un index d'entités ne reçoit d'identifiant que sur une ligne qui n'en a pas : celui d'une
     // ligne existante (personnage, campagne…) n'est jamais réécrit, même en double. Un sort sans
     // ID, lui, n'en reçoit pas d'ici : lib/class-content.ts lui en donne un, tiré de son contenu,

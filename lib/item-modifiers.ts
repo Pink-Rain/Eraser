@@ -91,6 +91,8 @@ export function buildItemModifierTargets(catalog: CharacterCatalog, layout?: Cha
       ? { id: known.id, label: item.name === builtinName ? known.label : item.name, group: "Général", kind: known.kind, valueIndex: at(item.key) }
       : { id: characteristicModifierTargetId(item.key), label: item.name, group: "Général", kind: "valeur", valueIndex: at(item.key) }
   })
+  // Les actions de déplacement (gratuite, mineure, majeure) : leur valeur, comme une secondaire.
+  const movement: ItemModifierTarget[] = catalog.characteristics.filter((item) => item.kind === "deplacement").map((item) => ({ id: characteristicModifierTargetId(item.key), label: item.name, group: "Déplacement", kind: "valeur", valueIndex: at(item.key) }))
   const groups = catalogGroups(catalog).flatMap((group) => {
     const groupName = group.characteristic?.name ?? "Autres compétences"
     const characteristicTargets = group.characteristic ? (() => {
@@ -112,7 +114,7 @@ export function buildItemModifierTargets(catalog: CharacterCatalog, layout?: Cha
       }),
     ]
   })
-  return [...general, ...groups]
+  return [...general, ...movement, ...groups]
 }
 
 /** Les cibles de la liste d'origine, situées dans les colonnes d'origine. */

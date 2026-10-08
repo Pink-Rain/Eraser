@@ -241,7 +241,7 @@ export function loadWorldIndexData(index: WorldIndexKey) {
 }
 
 function sourceKey(source: ChoiceSource) {
-  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${source.exclude.value}` : ""}:${source.include ? `${source.include.column}^${source.include.value}` : ""}:${(source.extra ?? []).join("|")}`
+  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${[source.exclude.value, ...(source.exclude.others ?? [])].join("|")}` : ""}:${source.include ? `${source.include.column}^${source.include.value}` : ""}:${(source.extra ?? []).join("|")}`
 }
 
 export function loadWorldIndexNames(source: ChoiceSource) {
@@ -255,10 +255,11 @@ export function loadWorldIndexNames(source: ChoiceSource) {
       const names = tables.flatMap((table) => {
         const column = table.headers.findIndex((header) => foldName(header) === "nom")
         const excluded = source.exclude ? table.headers.findIndex((header) => foldName(header) === foldName(source.exclude!.column)) : -1
+        const excludedValues = new Set(source.exclude ? [source.exclude.value, ...(source.exclude.others ?? [])].map(foldName) : [])
         const included = source.include ? table.headers.findIndex((header) => foldName(header) === foldName(source.include!.column)) : -1
         if (source.include && included < 0) return []
         return column >= 0 ? table.rows
-          .filter((row) => excluded < 0 || foldName(row.values[excluded] ?? "") !== foldName(source.exclude!.value))
+          .filter((row) => excluded < 0 || !excludedValues.has(foldName(row.values[excluded] ?? "")))
           .filter((row) => included < 0 || foldName(row.values[included] ?? "").startsWith(foldName(source.include!.value)))
           .map((row) => row.values[column]?.trim() ?? "") : []
       })

@@ -13,6 +13,7 @@ import {
   CATALOG_KEY_HEADER,
   CATALOG_TYPE_HEADER,
   CHARACTERISTICS_TAB,
+  MOVEMENT_LABEL,
   PRINCIPAL_LABEL,
   SECONDARY_LABEL,
   SKILLS_TAB,
@@ -476,6 +477,21 @@ export const worldIndexColumnFills: Partial<Record<BuiltinWorldIndexKey, Array<{
 }
 
 /**
+ * Des lignes prévues par Eraser après coup, ajoutées une seule fois au bas d'un index déjà
+ * rempli (les trois caractéristiques de déplacement) : seulement celles dont la valeur de
+ * `matchColumn` (ou le nom) n'est encore sur aucune ligne. Supprimées ensuite dans Sheets,
+ * elles ne reviennent pas. Gardé hors de la définition envoyée à la page.
+ */
+export const worldIndexRowAdditions: Partial<Record<BuiltinWorldIndexKey, Array<{ id: string; tab: string; matchColumn: string; rows: () => Array<Record<string, string>> }>>> = {
+  skills: [{
+    id: "deplacement-v1",
+    tab: CHARACTERISTICS_TAB,
+    matchColumn: CATALOG_KEY_HEADER,
+    rows: () => (catalogSeedRows()[CHARACTERISTICS_TAB] ?? []).filter((row) => row[CATALOG_TYPE_HEADER] === MOVEMENT_LABEL),
+  }],
+}
+
+/**
  * Un côté d'un lien. `tab: "*"` désigne n'importe quel onglet de l'index : un lieu
  * cité peut être une ville comme un pays. Une entité absente est alors créée dans
  * le premier onglet, d'où elle peut être déplacée.
@@ -541,7 +557,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
   if (index === "vocabulary" && foldName(header) === foldName("Contenu")) reasons.push("La page Règles › Vocabulaire affiche cette colonne (la définition de chaque mot) et la lit par son nom.")
   if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header, context))
   if (index === "skills") {
-    if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences) ou Secondaire (une case en haut de la fiche).")
+    if (folded === foldName(CATALOG_TYPE_HEADER)) reasons.push("La fiche de personnage range chaque caractéristique d’après cette colonne : Principale (une carte avec ses compétences), Secondaire (une case en haut de la fiche) ou Déplacement (la case Déplacement : actions gratuite, mineure et majeure).")
     if (folded === foldName(CATALOG_CHARACTERISTIC_HEADER)) reasons.push("La fiche de personnage range chaque compétence sous cette caractéristique et calcule son total à partir d’elle.")
     if (folded === foldName(CATALOG_DEFAULT_HEADER)) reasons.push("La fiche de personnage écrit cette valeur à la création d’un personnage, et dans les fiches existantes quand la ligne est ajoutée.")
     if (folded === foldName(CATALOG_COLOR_HEADER)) reasons.push("La fiche de personnage colore la carte (principale) ou la case (secondaire) de la caractéristique avec cette couleur.")
@@ -700,9 +716,9 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     return { kind: "rich" }
   }
   if (index === "skills") {
-    if (isHeader(header, [CATALOG_TYPE_HEADER])) return { kind: "choice", options: [{ value: PRINCIPAL_LABEL, color: "#397f88" }, { value: SECONDARY_LABEL, color: "#b48745" }] }
-    // Une compétence dépend d'une caractéristique principale : les secondaires ne sont pas proposées.
-    if (isHeader(header, [CATALOG_CHARACTERISTIC_HEADER])) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB, onlyTab: true, exclude: { column: CATALOG_TYPE_HEADER, value: SECONDARY_LABEL } } }
+    if (isHeader(header, [CATALOG_TYPE_HEADER])) return { kind: "choice", options: [{ value: PRINCIPAL_LABEL, color: "#397f88" }, { value: SECONDARY_LABEL, color: "#b48745" }, { value: MOVEMENT_LABEL, color: "#5f9fa0", hint: "Caractéristique de déplacement : regroupée dans la case Déplacement de la fiche." }] }
+    // Une compétence dépend d'une caractéristique principale : ni les secondaires ni le déplacement ne sont proposés.
+    if (isHeader(header, [CATALOG_CHARACTERISTIC_HEADER])) return { kind: "linked-choice", source: { index: "skills", tab: CHARACTERISTICS_TAB, onlyTab: true, exclude: { column: CATALOG_TYPE_HEADER, value: SECONDARY_LABEL, others: [MOVEMENT_LABEL] } } }
     if (isHeader(header, [CATALOG_COLOR_HEADER])) return { kind: "color" }
     if (isHeader(header, [CATALOG_DEFAULT_HEADER])) return tab === SKILLS_TAB ? { kind: "number" } : { kind: "rich" }
     if (isHeader(header, [CATALOG_KEY_HEADER])) return { kind: "rich", hidden: true, placement: "table" }

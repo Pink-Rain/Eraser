@@ -213,7 +213,8 @@ test("Fiche de personnage : colonnes déplacées, valeurs et formules à leur vr
   assert.equal(written["Peuple"], "Elfe");
   assert.equal(written["Force"], "55");
   assert.equal(written["Mes notes"], "=1+1");
-  assert.deepEqual(google.grid(characters, "Personnages")[0], headers);
+  // Rien n'a bougé : seules les colonnes du déplacement (liste d'origine) sont venues à droite.
+  assert.deepEqual(google.grid(characters, "Personnages")[0], [...headers, "Action de déplacement gratuite", "Action de déplacement mineure", "Action de déplacement majeure"]);
 
   const created = await sheets.createCharacterForUser("uid-2", ["Vesna", "Naine"]);
   const added = record(google.grid(characters, "Personnages"), 2);

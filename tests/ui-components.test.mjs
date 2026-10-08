@@ -922,8 +922,11 @@ test("reads the character sheet from the characteristics and skills index withou
   const schema = await vite.ssrLoadModule("/lib/character-sheet-schema.ts");
   const { builtinCharacterCatalog, catalogFromTables, catalogSeedRows, characterLayout, planCatalogColumns, catalogGroups, CHARACTERISTICS_TAB, SKILLS_TAB } = catalogModule;
 
-  // Une feuille existante et la liste d'origine : rien à ajouter, rien à renommer.
-  const base = [...schema.characterValueHeaders];
+  // Une feuille existante et la liste d'origine : rien à renommer ; seules les trois actions
+  // de déplacement, venues après, s'ajoutent à droite.
+  const movementKeys = ["Action de déplacement gratuite", "Action de déplacement mineure", "Action de déplacement majeure"];
+  assert.deepEqual(planCatalogColumns([...schema.characterValueHeaders], builtinCharacterCatalog), { append: movementKeys.map((key) => ({ key, metric: "", header: key })), rename: [] });
+  const base = [...schema.characterValueHeaders, ...movementKeys];
   assert.deepEqual(planCatalogColumns(base, builtinCharacterCatalog), { append: [], rename: [] });
 
   // Les lignes de départ de l'index redonnent exactement la liste d'origine.
@@ -1036,13 +1039,16 @@ test("sends builtin index definitions to the page without functions", async () =
   const seeds = worldIndexSeeds.skills();
   assert.equal(seeds["Compétences"].length, 78);
 
-  assert.equal(seeds["Caractéristiques"].length, 24);
+  // 10 principales, 14 secondaires et 3 actions de déplacement.
+  assert.equal(seeds["Caractéristiques"].length, 27);
   assert.equal(seeds["Caractéristiques"].find((row) => row["Clé de fiche"] === "Folie")["Couleur"], "#8f79b5");
 
-  // La Caractéristique d'une compétence ne propose que les principales de l'onglet Caractéristiques.
+  // La Caractéristique d'une compétence ne propose que les principales de l'onglet Caractéristiques
+  // (ni les secondaires, ni le déplacement).
   const { worldColumnSpec } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
   const spec = worldColumnSpec("skills", "Compétences", "Caractéristique");
-  assert.deepEqual(spec.source, { index: "skills", tab: "Caractéristiques", onlyTab: true, exclude: { column: "Type", value: "Secondaire" } });
+  assert.deepEqual(spec.source, { index: "skills", tab: "Caractéristiques", onlyTab: true, exclude: { column: "Type", value: "Secondaire", others: ["Déplacement"] } });
+  assert.ok(worldColumnSpec("skills", "Caractéristiques", "Type").options.some((option) => option.value === "Déplacement"));
   assert.equal(worldColumnSpec("skills", "Caractéristiques", "Couleur").kind, "color");
   assert.ok(worldIndexDefinitions.skills.tabs[0].headers.includes("Couleur"));
 

@@ -408,3 +408,34 @@ test("Une écriture d'un autre module pendant une tâche du moteur fait relire l
   const data = await engine.getWorldIndex("creatures");
   assert.equal(data.tables[0].rows[0].values[data.tables[0].headers.indexOf("Type")], "Garou");
 });
+
+test("Index des caractéristiques : les trois actions de déplacement s'ajoutent une seule fois, sans toucher aux lignes", async () => {
+  const id = fresh("skills");
+  const tabs = definitions.worldIndexDefinitions.skills.tabs;
+  const characteristicHeaders = tabs[0].headers;
+  const rows = [
+    line(characteristicHeaders, { "Nom": "Force", "Type": "Principale", "Clé de fiche": "Force", "ID": "CAR-1", "Couleur": "#111111" }),
+    line(characteristicHeaders, { "Nom": "Course", "Type": "Secondaire", "Clé de fiche": "CAR-2", "ID": "CAR-2" }),
+  ];
+  google.addSpreadsheet(id, [{ title: tabs[0].name, grid: [characteristicHeaders, ...rows] }, { title: tabs[1].name, grid: [tabs[1].headers] }]);
+  await link("skills", id, tabs[0].name);
+  engine.forgetEffectiveIndex("skills");
+  await engine.getWorldIndex("skills", { refresh: true });
+  const grid = google.grid(id, tabs[0].name);
+  assert.deepEqual(grid.slice(1, 3), rows);
+  const added = grid.slice(3).map((row) => Object.fromEntries(characteristicHeaders.map((header, column) => [header, row[column] ?? ""])));
+  assert.deepEqual(added.map((row) => [row["Nom"], row["Type"], row["Clé de fiche"]]), [
+    ["Action de déplacement gratuite", "Déplacement", "Action de déplacement gratuite"],
+    ["Action de déplacement mineure", "Déplacement", "Action de déplacement mineure"],
+    ["Action de déplacement majeure", "Déplacement", "Action de déplacement majeure"],
+  ]);
+  assert.ok(added.every((row) => /^CAR-/.test(row["ID"])));
+  // Relu, rien ne s'ajoute de nouveau ; supprimées à la main, elles ne reviennent pas.
+  engine.forgetEffectiveIndex("skills");
+  await engine.getWorldIndex("skills", { refresh: true });
+  assert.equal(google.grid(id, tabs[0].name).length, 6);
+  google.addSpreadsheet(id, [{ title: tabs[0].name, grid: [characteristicHeaders, ...rows] }, { title: tabs[1].name, grid: [tabs[1].headers] }]);
+  engine.forgetEffectiveIndex("skills");
+  await engine.getWorldIndex("skills", { refresh: true });
+  assert.equal(google.grid(id, tabs[0].name).length, 3);
+});

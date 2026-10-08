@@ -5,7 +5,7 @@
  * valeur est retrouvée par son en-tête, et les formules écrites par Eraser visent la
  * vraie case. Sans dépendance au serveur : les tests le vérifient directement.
  */
-import { characterLayout, isCatalogColumnHeader, type CharacterLayout } from "@/lib/character-catalog"
+import { builtinMovementKeys, characterLayout, isCatalogColumnHeader, type CharacterLayout } from "@/lib/character-catalog"
 import { characterSheetHeaders, characterValueHeaders } from "@/lib/character-sheet-schema"
 import { sheetColumnLetter, sheetColumns, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 
@@ -26,7 +26,7 @@ export type CharacterSheetMap = {
   /** La colonne réelle (0 = A) de chaque valeur de la fiche, -1 si la feuille ne l'a pas. */
   valueColumns: number[]
   layout: CharacterLayout
-  /** Les valeurs qu'Eraser écrit : celles de la fiche d'origine et les colonnes de l'index. */
+  /** Les valeurs qu'Eraser écrit : celles de la fiche d'origine, les colonnes de l'index et celles du déplacement. */
   writable: boolean[]
   /** Valeurs rangées comme la fiche, dès la colonne C et sans trou : une seule plage suffit. */
   contiguous: boolean
@@ -41,7 +41,8 @@ export function characterSheetMap(headerRow: readonly (string | undefined)[]): C
   const extras = columns.headers.flatMap((header, index) => header && !taken.has(index) ? [index] : [])
   const valueColumns = [...canonical, ...extras]
   const headers = [...characterValueHeaders, ...extras.map((index) => columns.headers[index])]
-  const writable = headers.map((header, index) => index < characterValueHeaders.length || isCatalogColumnHeader(header))
+  // Les caractéristiques de déplacement d'origine ont des colonnes à leur nom, ajoutées à droite.
+  const writable = headers.map((header, index) => index < characterValueHeaders.length || isCatalogColumnHeader(header) || builtinMovementKeys.has(header))
   const contiguous = columns.at("ID") === 0 && columns.at("Joueur") === 1 && valueColumns.every((column, index) => column === index + 2)
   const layout = characterLayout(headers, contiguous ? undefined : (index, rowNumber) => {
     const column = valueColumns[index] ?? -1

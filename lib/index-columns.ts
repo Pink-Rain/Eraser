@@ -95,7 +95,8 @@ export type ChoiceSource = {
   index: WorldIndexKey
   tab: string
   onlyTab?: boolean
-  exclude?: { column: string; value: string }
+  /** `others` : d'autres valeurs écartées de la même façon (« Secondaire », « Déplacement »). */
+  exclude?: { column: string; value: string; others?: string[] }
   /**
    * Ne garde que les lignes dont une colonne commence par une valeur (« Rune » garde
    * « Rune » et « Runes ») ; un nom créé depuis la liste reçoit cette valeur.
