@@ -108,3 +108,29 @@ test("Passage de rang : il reste à choisir, répartir et chercher avant d'obten
   assert.deepEqual(dialog.rankBonusMissing(bonus, { slots: [2], spread: { 2: { Force: 4, Charisme: 6 } }, spell: { id: "S1" } }), []);
   assert.deepEqual(dialog.rankBonusMissing(undefined, empty), []);
 });
+
+test("Perte de niveau : les sorts et bonus des rangs perdus sont oubliés, et reproposés en reprenant ces rangs", () => {
+  const list = bonuses.parseRankBonusRows([headers, row(2, { "Cible 1": "Force", "Valeur 1": "1" }), row(3, { "Cible 1": "Rapidité", "Valeur 1": "5", "Sort sur mesure": "Oui" })]).bonuses;
+  const classes = [{ id: "CLA-1", name: "Guerrier", accentDark: "#123456", accentLight: "#abcdef" }];
+  const spells = [{ id: "S2", classRanks: { "CLA-1": 2 } }, { id: "S3", classRanks: { "CLA-1": 3 } }];
+  let value = progression.startRankBonuses("", 1);
+  value = progression.chooseClassSpell(value, "CLA-1", 2, "S2");
+  value = progression.takeRankBonus(value, 2, { applied: [{ target: "Force", amount: 1 }] });
+  value = progression.chooseClassSpell(value, "CLA-1", 3, "S3");
+  value = progression.takeRankBonus(value, 3, { applied: [{ target: "Rapidité", amount: 5 }], spell: "SUR-MESURE" });
+  assert.deepEqual(progression.pendingRankSteps(classes, spells, 3, value, list), []);
+  // Descendre au niveau 1 : les rangs 2 et 3 sont perdus, avec ce qu'ils avaient donné.
+  const loss = progression.rankLossOf(value, 1);
+  assert.deepEqual(loss.ranks, [2, 3]);
+  assert.deepEqual(loss.spells.map((item) => item.spellId), ["S2", "S3"]);
+  assert.deepEqual(loss.bonuses.find((item) => item.rank === 3).taken.applied, [{ target: "Rapidité", amount: 5 }]);
+  const dropped = progression.dropRanksAbove(value, 1);
+  const state = progression.parseClassChoices(dropped);
+  assert.deepEqual(state.choices["CLA-1"], {});
+  assert.deepEqual(state.rankBonuses.taken, {});
+  assert.deepEqual(state.extras, []);
+  // Reprendre les niveaux : tout est à rechoisir, sorts et bonus.
+  assert.deepEqual(progression.pendingRankSteps(classes, spells, 3, dropped, list).map((step) => [step.rank, Boolean(step.choice), Boolean(step.bonus)]), [[2, true, true], [3, true, true]]);
+  // Descendre sans rien perdre ne change rien.
+  assert.equal(progression.dropRanksAbove(dropped, 1), dropped);
+});

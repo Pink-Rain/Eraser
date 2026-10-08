@@ -16,7 +16,7 @@ import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
 
 import { Button } from "@/components/ui/button"
-import { chooseClassSpell, ClassProgression, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, selectedCharacterClasses, startRankBonuses, takeRankBonus, type RankBonusTaken } from "@/components/eraser/class-progression"
+import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, startRankBonuses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
 import { SpellChoiceDialog, type RankBonusSelection } from "@/components/eraser/spell-choice-dialog"
 import { useRankBonuses } from "@/components/eraser/rank-bonus"
 import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
@@ -816,8 +816,19 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     }, 0)
     return () => window.clearTimeout(timer)
   }, [classCatalogLoading, currentChoice, rankBonusesLoaded, spellChoiceWanted])
+  // Une descente de niveau qui retirerait des sorts ou des bonus attend d'être confirmée.
+  const [levelDrop, setLevelDrop] = useState<{ value: string; level: number; loss: RankLoss } | null>(null)
   function commitLevel(value: string) {
-    if (Math.trunc(Number(value) || 0) > characterLevel) {
+    const nextLevel = Math.max(0, Math.trunc(Number(value) || 0))
+    if (nextLevel < characterLevel) {
+      const loss = rankLossOf(latestValues.current[characterClassChoicesIndex] || "", nextLevel)
+      if (loss.ranks.length) { setLevelDrop({ value, level: nextLevel, loss }); return Promise.resolve() }
+      const choices = latestValues.current[characterClassChoicesIndex] || ""
+      const dropped = dropRanksAbove(choices, nextLevel)
+      if (dropped !== choices) void commit(characterClassChoicesIndex, dropped)
+      return commit(3, value)
+    }
+    if (nextLevel > characterLevel) {
       // Le premier passage de niveau depuis l'arrivée des bonus de rang : les rangs déjà
       // atteints ne les reproposent pas, seuls les nouveaux rangs les donnent.
       const choices = latestValues.current[characterClassChoicesIndex] || ""
@@ -842,6 +853,25 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const next = Math.round((sheetNumber(latestValues.current[index] ?? "") + amount) * 100) / 100
     void commit(index, String(next))
   }
+  /**
+   * Descend au niveau confirmé : les bonus des rangs perdus sont retirés de leurs cases (là
+   * où ils avaient été ajoutés), leurs sorts choisis et sorts sur mesure oubliés. En reprenant
+   * ces rangs, la fenêtre de passage de rang repropose tout.
+   */
+  function confirmLevelDrop() {
+    const drop = levelDrop
+    if (!drop) return
+    setLevelDrop(null)
+    for (const { taken } of drop.loss.bonuses) {
+      for (const entry of taken.applied) {
+        const index = rankBonusCell(entry.target)
+        if (index >= 0 && entry.amount) addToCell(index, -entry.amount)
+      }
+    }
+    void commit(characterClassChoicesIndex, dropRanksAbove(latestValues.current[characterClassChoicesIndex] || "", drop.level))
+    void commit(3, drop.value)
+  }
+
   /**
    * Le passage d'un rang : le sort choisi, puis les bonus gardés, ajoutés au bonus/malus de
    * leur cible (jamais au modificateur, réservé à ce qui est temporaire), et le sort sur
@@ -1358,6 +1388,32 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       onChoose={chooseSpell}
       onLater={() => setSpellChoiceOpen(false)}
     />}
+
+    <Dialog open={Boolean(levelDrop)} onOpenChange={(open) => { if (!open) setLevelDrop(null) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Descendre au niveau {levelDrop?.level} ?</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">Ce que le personnage avait gagné aux rangs perdus est retiré de sa fiche. En reprenant ces niveaux, tout sera à rechoisir.</p>
+        <div className="max-h-72 space-y-2 overflow-y-auto">
+          {levelDrop?.loss.ranks.map((rank) => {
+            const spells = levelDrop.loss.spells.filter((item) => item.rank === rank)
+            const taken = levelDrop.loss.bonuses.find((item) => item.rank === rank)?.taken
+            const custom = taken?.spell ? availableClassSpells.find((spell) => spell.id === taken.spell)?.name ?? "un sort sur mesure" : ""
+            return <div key={rank} className="rounded-xl border border-border/70 bg-background/50 px-3 py-2 text-sm">
+              <p className="font-display font-semibold">Rang {rank}</p>
+              <ul className="mt-1 space-y-0.5 text-xs text-muted-foreground">
+                {spells.map((item) => <li key={`${item.classId}:${item.spellId}`}>Sort : <b className="text-foreground">{availableClassSpells.find((spell) => spell.id === item.spellId)?.name ?? "sort choisi"}</b>{assignedClasses.length > 1 ? ` (${assignedClasses.find((entry) => entry.id === item.classId)?.name ?? "classe"})` : ""}</li>)}
+                {taken?.applied.map((entry, index) => <li key={`${entry.target}:${index}`}>Bonus retiré : <b className="text-foreground">{entry.amount > 0 ? "+" : ""}{entry.amount} {entry.target}</b></li>)}
+                {custom && <li>Sort sur mesure retiré : <b className="text-foreground">{custom}</b></li>}
+              </ul>
+            </div>
+          })}
+        </div>
+        <div className="flex flex-wrap justify-end gap-2 pt-1">
+          <Button type="button" variant="outline" onClick={() => setLevelDrop(null)}>Annuler</Button>
+          <Button type="button" variant="destructive" onClick={confirmLevelDrop}><Minus />Retirer et descendre</Button>
+        </div>
+      </DialogContent>
+    </Dialog>
 
     <Dialog open={addingTab} onOpenChange={setAddingTab}>
       <DialogContent>

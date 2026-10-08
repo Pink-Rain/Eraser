@@ -233,6 +233,39 @@ export function takeRankBonus(value: string, rank: number, taken: RankBonusTaken
   })
 }
 
+/** Ce qu'un personnage perd en descendant au niveau `level` : sorts choisis et bonus obtenus aux rangs au-dessus. */
+export type RankLoss = { ranks: number[]; spells: Array<{ classId: string; rank: number; spellId: string }>; bonuses: Array<{ rank: number; taken: RankBonusTaken }> }
+
+export function rankLossOf(value: string, level: number): RankLoss {
+  const state = parseClassChoices(value)
+  const spells = Object.entries(state.choices).flatMap(([classId, ranks]) => Object.entries(ranks ?? {}).flatMap(([rank, spellId]) => Number(rank) > level && typeof spellId === "string" && spellId ? [{ classId, rank: Number(rank), spellId }] : []))
+  const bonuses = Object.entries(state.rankBonuses.taken).flatMap(([rank, taken]) => Number(rank) > level ? [{ rank: Number(rank), taken }] : [])
+  const ranks = [...new Set([...spells.map((item) => item.rank), ...bonuses.map((item) => item.rank)])].sort((left, right) => left - right)
+  return { ranks, spells, bonuses }
+}
+
+/**
+ * Les choix après une descente au niveau `level` : les sorts choisis aux rangs au-dessus
+ * sont oubliés, leurs bonus et leurs sorts sur mesure aussi, et ces rangs redeviennent à
+ * choisir quand le personnage les reprend. (Les valeurs ajoutées à la fiche sont retirées
+ * par la fiche, qui sait où elles ont été écrites.)
+ */
+export function dropRanksAbove(value: string, level: number) {
+  const state = parseClassChoices(value)
+  const loss = rankLossOf(value, level)
+  if (!loss.ranks.length && (state.rankBonuses.from === null || state.rankBonuses.from <= level)) return value
+  const customSpells = new Set(loss.bonuses.flatMap((item) => item.taken.spell ? [item.taken.spell] : []))
+  const choices = Object.fromEntries(Object.entries(state.choices).map(([classId, ranks]) => [classId, Object.fromEntries(Object.entries(ranks ?? {}).filter(([rank]) => Number(rank) <= level))]))
+  const taken = Object.fromEntries(Object.entries(state.rankBonuses.taken).filter(([rank]) => Number(rank) <= level))
+  return JSON.stringify({
+    ...state,
+    choices,
+    extras: state.extras.filter((id) => !customSpells.has(id)),
+    order: state.order.filter((id) => !customSpells.has(id)),
+    rankBonuses: { from: state.rankBonuses.from === null ? null : Math.min(state.rankBonuses.from, level), taken },
+  })
+}
+
 /** La clé des pastilles « nouveau sort » d'un personnage. */
 export const newSpellsKey = (ownerId: string) => `sorts:${ownerId}`
 

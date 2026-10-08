@@ -1,17 +1,20 @@
-# Eraser 0.1.1-alpha.152 — Correctif : lenteur et cases « équipé »
+# Eraser 0.1.1-alpha.153 — Perdre un niveau défait ses rangs
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Équiper et déséquiper
+## Descendre de niveau
 
-- La case se coche (ou se décoche) tout de suite, sans attendre Google : les totaux de la
-  fiche suivent aussitôt.
-- Une case en cours d'enregistrement ne bloque plus les autres objets du contenant.
-- Si l'enregistrement échoue (Google lent, serveur local qui redémarre), la case revient
-  comme avant, un message le dit, et plus rien ne reste bloqué.
-- Même chose pour les cases d'objets au survol des caractéristiques et des compétences.
+- Baisser le Level d'un personnage retire ce que les rangs perdus lui avaient donné : les
+  sorts choisis à ces rangs, les bonus de rang (retirés des cases où ils avaient été
+  ajoutés : bonus/malus, caractéristiques réparties, déplacement) et le sort sur mesure.
+- Avant, une fenêtre liste rang par rang ce qui sera retiré : **Retirer et descendre**, ou
+  **Annuler** (un clic de trop sur « − » ne fait rien perdre).
+- En reprenant ces niveaux, la fenêtre de passage de rang repropose tout : sorts et bonus,
+  à rechoisir.
+- Descendre d'un niveau qui n'avait rien donné (ancien personnage, rang sans sort) se fait
+  directement, sans fenêtre.
 
-## Lenteur
+## Rappel de l'alpha.152
 
-- Le jeton d'accès à Google n'est plus redemandé avant chaque requête dans les dernières
-  minutes de sa validité : il est renouvelé en arrière-plan, sans faire attendre.
+- Équiper et déséquiper s'affiche tout de suite et ne bloque plus les autres objets.
+- Le jeton d'accès à Google se renouvelle en arrière-plan, sans ralentir les requêtes.
