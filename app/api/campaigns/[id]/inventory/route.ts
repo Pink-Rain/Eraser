@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import {
+  forgetInventoryReads,
   addCharacterInventoryItem,
   campaignInventoryOwnerId,
   createCharacterInventoryItem,
@@ -47,6 +48,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ transferTargets: await campaignTransferTargets(authorization, id) })
     }
     const summary = url.searchParams.get("summary") === "1"
+    // Un objet vient d'arriver (écrit par une autre installation) : relu dans Google, pas en mémoire.
+    if (url.searchParams.get("reload") === "1") forgetInventoryReads()
     const inventory = summary ? await getCampaignInventorySummary(id) : await getCampaignInventory(id)
     return NextResponse.json({ inventory })
   } catch {

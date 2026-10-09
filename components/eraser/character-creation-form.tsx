@@ -50,6 +50,15 @@ export function CharacterCreationForm({ classes, classesError = "", peoples }: {
   const rebalance = rebalanceSummary(adjustments)
   // Verrou immédiat contre un double envoi (deux personnages identiques).
   const sending = useRef(false)
+  // Pas de classes (Google saturé ou lent) : la lecture continue sur le service local ; la
+  // page la redemande toute seule, toutes les 15 s, au lieu d'attendre un clic.
+  const [classRetries, setClassRetries] = useState(0)
+  const retryingClasses = !classes.length && Boolean(classesError) && classRetries < 12
+  useEffect(() => {
+    if (!retryingClasses) return
+    const timer = window.setTimeout(() => { setClassRetries((count) => count + 1); router.refresh() }, 15_000)
+    return () => window.clearTimeout(timer)
+  }, [retryingClasses, classRetries, router])
 
   // L’aperçu d’un fichier importé est une URL locale à libérer quand il change.
   const filePreview = useMemo(() => portraitFile ? URL.createObjectURL(portraitFile) : "", [portraitFile])
@@ -284,7 +293,7 @@ export function CharacterCreationForm({ classes, classesError = "", peoples }: {
                     )
                   })}
                   {!visibleClasses.length && classes.length > 0 && <p className="col-span-full py-6 text-center text-xs text-muted-foreground">Aucune classe ne correspond.</p>}
-                  {!classes.length && <p className="col-span-full rounded-xl border border-amber-400/40 bg-amber-50/60 px-3 py-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{classesError || "Aucune classe n’a pu être lue."} <button type="button" onClick={() => router.refresh()} className="font-semibold underline underline-offset-2">Réessayer</button> <span className="text-muted-foreground">La classe peut aussi se choisir plus tard, sur la fiche.</span></p>}
+                  {!classes.length && <p className="col-span-full rounded-xl border border-amber-400/40 bg-amber-50/60 px-3 py-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{classesError || "Aucune classe n’a pu être lue."} {retryingClasses && <span className="inline-flex items-center gap-1 font-medium"><LoaderCircle className="size-3 animate-spin" />Nouvel essai automatique…</span>} <button type="button" onClick={() => router.refresh()} className="font-semibold underline underline-offset-2">Réessayer</button> <span className="text-muted-foreground">La classe peut aussi se choisir plus tard, sur la fiche.</span></p>}
                 </div>
               </div>
 

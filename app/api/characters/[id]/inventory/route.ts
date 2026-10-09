@@ -11,6 +11,7 @@ import {
   getCharacterForUser,
   getCharacterForMj,
   getCharacterInventory,
+  forgetInventoryReads,
   getCharacterInventorySummary,
   listCharacterRelations,
   getCharacterCompanions,
@@ -73,6 +74,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
       return NextResponse.json({ transferTargets: await transferTargets(authorization) })
     }
     const summary = url.searchParams.get("summary") === "1"
+    // Un objet vient d'arriver (écrit par une autre installation) : relu dans Google, pas en mémoire.
+    if (url.searchParams.get("reload") === "1") forgetInventoryReads()
     const inventory = summary ? await getCharacterInventorySummary(id) : await getCharacterInventory(id)
     return NextResponse.json({ inventory })
   } catch {

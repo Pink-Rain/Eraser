@@ -141,6 +141,23 @@ test("Le résumé et la fiche complète chargés ensemble : aucun contenant ni e
   assert.equal(new Set(pairs).size, pairs.length);
 });
 
+test("Le résumé puis l'inventaire complet : une seule lecture des onglets ; un objet reçu fait relire Google", async () => {
+  const { inventory } = await linkInventory();
+  // Ses contenants créés, puis tout oublié : comme une fiche qu'on rouvre.
+  await sheets.getCharacterInventory("PERSO-R");
+  sheets.forgetInventoryReads();
+  const reads = () => google.world.calls.filter((call) => call.url.includes(`/${inventory}/values:batchGet`)).length;
+  const before = reads();
+  await sheets.getCharacterInventorySummary("PERSO-R");
+  await sheets.getCharacterInventory("PERSO-R");
+  await sheets.getCharacterInventorySummary("PERSO-R");
+  assert.equal(reads() - before, 1, "la fiche relisait les onglets d'inventaire à chaque demande");
+  // Une autre installation vient d'y ranger un objet : la page le redemande, Google est relu.
+  sheets.forgetInventoryReads();
+  await sheets.getCharacterInventorySummary("PERSO-R");
+  assert.equal(reads() - before, 2);
+});
+
 test("Un déplacement dans l'inventaire : arrivée et départ écrits en une seule fois", async () => {
   const { inventory } = await linkInventory();
   const corde = await characterWith("PERSO-A", "Corde");

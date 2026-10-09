@@ -1264,7 +1264,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         const fresh = unseenItemNotifications(received)
         showItemNotifications(received)
         if (!fresh.length) return
-        const loaded = await fetch(`${inventoryEndpoint}?summary=1`).then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null).catch(() => null)
+        const loaded = await fetch(`${inventoryEndpoint}?summary=1&reload=1`).then(async (reply) => reply.ok ? ((await reply.json()) as { inventory?: CharacterInventoryRecord }).inventory ?? null : null).catch(() => null)
         if (!alive || !loaded) return
         const slots = loaded.containers.flatMap((container) => container.slots)
         const names = new Set(fresh.filter((item) => !item.slotId).map((item) => item.itemName.trim().toLocaleLowerCase("fr")))
@@ -1289,7 +1289,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   // Un objet envoyé à ce personnage : l'inventaire affiché se met à jour tout seul.
   useInventoryReceived([character.id], () => {
-    fetch(`${inventoryEndpoint}?summary=1`)
+    // Écrit par une autre installation : relu dans Google, pas dans la copie en mémoire.
+    fetch(`${inventoryEndpoint}?summary=1&reload=1`)
       .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
       .then(({ ok, payload }) => {
         if (!ok || !payload.inventory) return

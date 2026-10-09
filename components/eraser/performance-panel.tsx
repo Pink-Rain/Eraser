@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 type Report = {
   startedAt: string
   slowMs: number
-  totals: Array<{ kind: string; count: number; slow: number; averageMs: number; maxMs: number }>
+  totals: Array<{ kind: string; count: number; slow: number; refused?: number; lastMinute?: number; averageMs: number; maxMs: number }>
   slow: Array<{ kind: string; label: string; ms: number; status: string; at: string }>
 }
 
@@ -51,6 +51,8 @@ export function PerformancePanel() {
           <p className="font-semibold">{kindLabels[total.kind] ?? total.kind}</p>
           <p className="text-muted-foreground">{total.count} appel{total.count > 1 ? "s" : ""} · moyenne {total.averageMs} ms · pire {total.maxMs} ms</p>
           <p className={total.slow ? "font-medium text-amber-700" : "text-muted-foreground"}>{total.slow} lent{total.slow > 1 ? "s" : ""}</p>
+          {total.lastMinute !== undefined && <p className="text-muted-foreground">{total.lastMinute} dans la dernière minute</p>}
+          {Boolean(total.refused) && <p className="font-medium text-destructive" title="Google compte son quota par minute pour le compte Eraser, que toutes les installations partagent.">{total.refused} refus de Google (quota partagé dépassé)</p>}
         </div>)}
         {!report.totals.length && <p className="text-sm text-muted-foreground">Aucun appel pour l’instant.</p>}
       </div>

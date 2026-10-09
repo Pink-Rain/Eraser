@@ -20,6 +20,7 @@ import {
   googleSheetsJson,
   readFormattedSheet,
   readRangeFreshWithOffset,
+  cachedSpreadsheetTabs,
   spreadsheetTabs,
   updateRanges,
   updateRowCells,
@@ -152,7 +153,8 @@ async function readClassSpecifics(options: { create?: boolean }): Promise<ClassS
   const generation = cacheGeneration
   const file = await spellsFile()
   if (options.create) await serialized(() => ensureTab(file.id, gaugeTab))
-  const tabs = await spreadsheetTabs(file.id)
+  // Un onglet absent de la copie en mémoire fait relire la liste (il a pu être créé ailleurs).
+  const tabs = await cachedSpreadsheetTabs(file.id, [GAUGES_TAB, FORMS_TAB, DECKS_TAB, CARDS_TAB])
   const gaugeSheet = tabs.find((item) => item.title === GAUGES_TAB)
   const formSheet = tabs.find((item) => item.title === FORMS_TAB)
   const deckSheet = tabs.find((item) => item.title === DECKS_TAB)

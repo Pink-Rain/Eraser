@@ -24,6 +24,7 @@ import {
   softDeleteItem,
   sheetTabRange,
   spreadsheetTabs,
+  cachedSpreadsheetTabs,
   updateFormattedCell,
   updateRange,
 } from "@/lib/google-sheets"
@@ -35,6 +36,8 @@ import type { AccountRecord } from "@/lib/auth-types"
 import { sheetIndexSyncs } from "@/db/schema"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { sheetRangeStartRow } from "@/lib/google-sheet-values"
+import { asBackgroundGoogleWork, QUOTA_ERROR } from "@/lib/google-quota"
+import { markChecked, recentlyChecked } from "@/lib/sheet-checks"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
 import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
@@ -142,6 +145,8 @@ type EffectiveIndex = {
 /** La définition effective de chaque index chargé : lue une fois, puis à chaque changement de schéma. */
 const effectiveIndexes = new Map<WorldIndexKey, EffectiveIndex>()
 const readyWorkbooks = new Set<string>()
+/** Des colonnes vérifiées il y a moins longtemps ne sont pas relues au démarrage (lib/sheet-checks.ts). */
+const WORKBOOK_CHECK_MS = 12 * 60 * 60_000
 
 function trashed(entry: SchemaEntry | undefined) {
   return Boolean(entry && (entry.deletedAt || entry.state === "supprimé"))
@@ -244,8 +249,15 @@ async function workbook(key: WorldIndexKey, options: { refresh?: boolean; strict
     // Les en-têtes d'un index d'entités appartiennent au code de sa feuille (alias compris) :
     // le moteur n'en ajoute aucun, il les lit.
     if (!definition.entity) {
-      const existing = await spreadsheetTabs(effective.spreadsheetId)
-      for (const tab of definition.tabs) await ensureTab(effective.spreadsheetId, key, tab, existing)
+      // Un onglet absent de la copie en mémoire fait relire la liste avant d'être créé.
+      const existing = await cachedSpreadsheetTabs(effective.spreadsheetId, definition.tabs.map((tab) => tab.name))
+      // Tous les onglets sont là et leurs colonnes ont été vérifiées il y a peu (même version
+      // des colonnes attendues) : rien à relire. Sinon, chaque onglet est vérifié.
+      const allThere = definition.tabs.every((tab) => existing.some((candidate) => candidate.title === tab.name))
+      if (!allThere || !(await recentlyChecked(readyKey, WORKBOOK_CHECK_MS))) {
+        for (const tab of definition.tabs) await ensureTab(effective.spreadsheetId, key, tab, existing)
+        await markChecked(readyKey)
+      }
     }
     readyWorkbooks.add(readyKey)
   }
@@ -659,7 +671,8 @@ export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean }
     if (!cached.refreshing) {
       cached.refreshing = true
       const startedAt = Date.now()
-      const fresh = loadWorldIndex(key)
+      // Relecture d'arrière-plan : elle cède la place aux pages quand Google est saturé.
+      const fresh = asBackgroundGoogleWork(() => loadWorldIndex(key))
       fresh.then((data) => {
         // Changé entre-temps (écriture, « Actualiser ») : la nouvelle entrée l'emporte.
         if (worldIndexCache.get(key) !== cached) return
@@ -668,7 +681,11 @@ export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean }
         if ((cached.patchedAt ?? 0) >= startedAt) { cached.refreshing = false; return }
         lastLoaded.set(key, data)
         worldIndexCache.set(key, { expiresAt: Date.now() + cacheLifetime(key), promise: Promise.resolve(data), loadedAt: Date.now() })
-      }, () => { cached.refreshing = false; cached.refreshFailed = true })
+      }, (error) => {
+        cached.refreshing = false
+        // Google saturé : l'index gardé reste servi, la relecture sera retentée plus tard.
+        if (!(error instanceof Error && error.message === QUOTA_ERROR)) cached.refreshFailed = true
+      })
     }
     return cached.promise
   }

@@ -11,6 +11,7 @@ import {
   ensureSheetColumnCount,
   googleSheetsJson,
   spreadsheetTabs,
+  cachedSpreadsheetTabs,
   listClasses,
   readFormattedSheet,
   readNamedColumns,
@@ -373,7 +374,7 @@ async function spellSource(kind: SpellIndexKind, refresh = false) {
 /** Le classeur et l'onglet des sorts (des classes ou des créatures), pour le moteur des index. */
 export async function spellSheetLocation(kind: SpellIndexKind) {
   const { file, candidates } = await spellSource(kind)
-  const tabs = await spreadsheetTabs(file.id)
+  const tabs = await cachedSpreadsheetTabs(file.id, candidates.slice(0, 1))
   const found = candidates.map((candidate) => tabs.find((item) => item.title === candidate)).find(Boolean)
   if (!found) throw new Error("SHEET_TAB_NOT_FOUND")
   return { spreadsheetId: file.id, tabName: found.title, webViewLink: file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit` }
@@ -1418,7 +1419,8 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
   const readAt = new Date().toISOString()
   const { spells: file } = await classWorkbookFiles()
   if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
-  let tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)
+  // La liste des onglets en mémoire suffit quand l'onglet y est (absent, elle est relue).
+  let tab = (await cachedSpreadsheetTabs(file.id, [RANK_BONUS_TAB])).find((item) => item.title === RANK_BONUS_TAB)
   if (!tab && options.create) {
     rankBonusCreation ??= createRankBonusTab(file.id).finally(() => { rankBonusCreation = null })
     await rankBonusCreation

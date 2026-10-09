@@ -62,6 +62,12 @@
 
 ## Google Drive et Google Sheets
 
+- Toutes les installations passent par le même compte Google et partagent son quota Google
+  Sheets (5 joueurs ou plus en séance). Toute requête passe par `googleSheetsFetch` et la
+  porte du quota (`lib/google-quota.ts`) ; une relecture qui n'est pas attendue par une page
+  passe par `asBackgroundGoogleWork`. Ne pas ajouter de relecture périodique ni de cache de
+  moins de quelques minutes sans en mesurer le coût (lectures groupées, `cachedSpreadsheetTabs`,
+  `lib/sheet-checks.ts`).
 - Le compte dédié attendu est `eraser.jdr@gmail.com`.
 - L’URL OAuth locale est
   `http://127.0.0.1:32147/api/admin/google-drive/oauth/callback`.

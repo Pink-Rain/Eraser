@@ -9,6 +9,7 @@
  */
 import { onForgetGoogleData } from "@/lib/data-refresh"
 import {
+  cachedSpreadsheetTabs,
   clearSpreadsheetReadCache,
   googleSheetsJson,
   readRange,
@@ -19,6 +20,7 @@ import {
 } from "@/lib/google-sheets"
 import type { IndexColumnSpec } from "@/lib/index-columns"
 import { foldName, indexColumnKinds } from "@/lib/index-columns"
+import { asBackgroundGoogleWork } from "@/lib/google-quota"
 import { findEntry, SCHEMA_TAB, type SchemaEntry } from "@/lib/index-schema-shared"
 
 const HEADERS = ["Onglet", "Colonne", "Nom d’origine", "Type et réglages (JSON)", "État", "Supprimé le"]
@@ -67,20 +69,23 @@ export function readSchema(spreadsheetId: string, options: { refresh?: boolean }
   if (!options.refresh && cached?.loadedAt && Date.now() - cached.loadedAt < STALE_MS) {
     if (!cached.refreshing) {
       cached.refreshing = true
-      const fresh = loadSchema(spreadsheetId)
+      // Relecture d'arrière-plan : elle cède la place aux pages quand Google est saturé.
+      const fresh = asBackgroundGoogleWork(() => loadSchema(spreadsheetId))
       fresh.then((entries) => { if (cache.get(spreadsheetId) === cached) cache.set(spreadsheetId, { expiresAt: Date.now() + CACHE_MS, promise: Promise.resolve(entries), loadedAt: Date.now() }) }, () => { cached.refreshing = false })
     }
     return cached.promise
   }
-  const promise = loadSchema(spreadsheetId)
+  const promise = loadSchema(spreadsheetId, Boolean(options.refresh))
   const entry: { expiresAt: number; promise: Promise<SchemaEntry[]>; loadedAt?: number } = { expiresAt: Date.now() + CACHE_MS, promise }
   cache.set(spreadsheetId, entry)
   promise.then(() => { entry.loadedAt = Date.now() }, () => { if (cache.get(spreadsheetId) === entry) cache.delete(spreadsheetId) })
   return promise
 }
 
-async function loadSchema(spreadsheetId: string) {
-  const tabs = await spreadsheetTabs(spreadsheetId)
+async function loadSchema(spreadsheetId: string, fresh = false) {
+  // Avant d'écrire, la liste des onglets est relue ; pour afficher, la copie en mémoire suffit
+  // quand l'onglet du schéma y est (absent de la copie, il est cherché dans Google).
+  const tabs = await (fresh ? spreadsheetTabs(spreadsheetId) : cachedSpreadsheetTabs(spreadsheetId, [SCHEMA_TAB]))
   if (!tabs.some((tab) => tab.title === SCHEMA_TAB)) return []
   // Lu directement dans Sheets, sans vider le cache des autres onglets du classeur.
   const { rows } = await readRangeFreshWithOffset(spreadsheetId, sheetTabRange(SCHEMA_TAB, "A2:F"))

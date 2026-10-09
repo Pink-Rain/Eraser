@@ -300,7 +300,10 @@ export async function resolveJdrSheet(key: JdrSheetKey): Promise<JdrSheetRecord 
 // rate-limited so a genuinely missing id doesn't re-read Sheets every time.
 let identityIndexSyncPromise: Promise<unknown> | null = null
 let identityIndexSyncedAt = 0
-const IDENTITY_INDEX_SYNC_TTL_MS = 120_000
+// Cinq minutes : chaque synchronisation relit trois feuilles, sur le quota que toutes les
+// installations partagent. Les pages qui ont besoin du tout dernier état (accès refusé,
+// personnage introuvable) demandent leur propre délai (`maxAgeMs`) ou relisent d'elles-mêmes.
+const IDENTITY_INDEX_SYNC_TTL_MS = 5 * 60_000
 // Une page n'attend pas plus longtemps la resynchronisation : au-delà, elle
 // s'affiche avec l'index local et la synchro se termine en arrière-plan.
 const IDENTITY_INDEX_SYNC_WAIT_MS = 2_500
@@ -335,7 +338,7 @@ async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: numb
  * resynchronisé que s'il était vide ou qu'un identifiant y manquait : un
  * personnage créé chez un joueur restait invisible pour un autre MJ, et un
  * joueur ne voyait jamais la campagne où un MJ l'avait ajouté. Désormais, les
- * lectures qui en dépendent le rafraîchissent au plus une fois par minute.
+ * lectures qui en dépendent le rafraîchissent au plus toutes les cinq minutes.
  */
 function refreshIdentityIndexes() {
   // Déjà lu une fois depuis le démarrage : la page s'affiche avec l'index connu et la
@@ -627,6 +630,7 @@ function cacheRangePromise(cacheKey: string, promise: Promise<string[][]>) {
 }
 
 export function clearSpreadsheetReadCache(spreadsheetId: string) {
+  tabsCache.delete(spreadsheetId)
   const prefix = `${spreadsheetId}:`
   for (const key of rangeReadCache.keys()) {
     if (key.startsWith(prefix)) rangeReadCache.delete(key)
@@ -773,49 +777,122 @@ const LIGHT_TEXT_FORMAT = "bold,italic,underline,strikethrough,link,foregroundCo
 const LIGHT_CELL_FIELDS = `formattedValue,textFormatRuns(startIndex,format(${LIGHT_TEXT_FORMAT})),effectiveFormat.textFormat(${LIGHT_TEXT_FORMAT})`
 const FULL_CELL_FIELDS = "formattedValue,userEnteredValue,textFormatRuns,effectiveFormat(backgroundColor,backgroundColorStyle,textFormat)"
 
+type FormattedGridSheet = {
+  properties?: { sheetId?: number; title?: string }
+  data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
+}
+
+/** Une ou plusieurs zones lues avec leur mise en forme, en une requête. */
+function fetchFormattedGrid(spreadsheetId: string, ranges: string[], light: boolean) {
+  const parameters = new URLSearchParams({
+    includeGridData: "true",
+    fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
+  })
+  for (const range of ranges) parameters.append("ranges", range)
+  return googleSheetsJson<{ sheets?: FormattedGridSheet[] }>(`spreadsheets/${spreadsheetId}?${parameters.toString()}`)
+}
+
+/** Les cases d'un onglet rendu par Google, rangées par ligne et par colonne. */
+function formattedSheetOf(sheet: FormattedGridSheet | undefined): FormattedSheet {
+  const sheetId = sheet?.properties?.sheetId
+  const tabName = sheet?.properties?.title
+  if (sheetId === undefined || !tabName) throw new Error("SHEET_TAB_NOT_FOUND")
+  const rows: FormattedSheetCell[][] = []
+  for (const block of sheet?.data ?? []) {
+    const startRow = block.startRow ?? 0
+    const startColumn = block.startColumn ?? 0
+    for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
+      const rowIndex = startRow + rowOffset
+      rows[rowIndex] ||= []
+      for (const [columnOffset, cell] of (row.values ?? []).entries()) {
+        const value = gridCellValue(cell)
+        const textFormat = cell.effectiveFormat?.textFormat
+        rows[rowIndex][startColumn + columnOffset] = {
+          value,
+          html: richTextHtml(value, cell.textFormatRuns, textFormat),
+          backgroundColor: rgbColorToHex(cell.effectiveFormat?.backgroundColorStyle?.rgbColor || cell.effectiveFormat?.backgroundColor),
+          foregroundColor: rgbColorToHex(textFormat?.foregroundColorStyle?.rgbColor || textFormat?.foregroundColor),
+        }
+      }
+    }
+  }
+  return { sheetId, tabName, rows }
+}
+
+const quotedTab = (name: string) => `'${name.replaceAll("'", "''")}'`
+
+/** Un onglet entier, lu seul (le chemin d'avant les lectures groupées). */
+async function readWholeFormattedTab(spreadsheetId: string, tab: string, light: boolean) {
+  const payload = await fetchFormattedGrid(spreadsheetId, [quotedTab(tab)], light)
+  return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === tab) ?? payload.sheets?.[0])
+}
+
+type FormattedTabRequest = { tab: string; resolve: (sheet: FormattedSheet) => void; reject: (error: unknown) => void }
+const formattedTabBatches = new Map<string, FormattedTabRequest[]>()
+
+/**
+ * Les onglets entiers d'un même classeur demandés au même moment (les onglets d'un index, les
+ * spécificités de classe) partent ensemble : une requête au lieu d'une par onglet. Toutes les
+ * installations partagent le quota de Google ; chaque requête évitée compte.
+ */
+function batchedFormattedTab(spreadsheetId: string, tab: string, light: boolean) {
+  const key = `${spreadsheetId}\u0001${light ? "light" : "full"}`
+  return new Promise<FormattedSheet>((resolve, reject) => {
+    let batch = formattedTabBatches.get(key)
+    if (!batch) {
+      const created: FormattedTabRequest[] = []
+      batch = created
+      formattedTabBatches.set(key, created)
+      setTimeout(() => {
+        formattedTabBatches.delete(key)
+        void sendFormattedTabBatch(spreadsheetId, light, created)
+      }, 0)
+    }
+    batch.push({ tab, resolve, reject })
+  })
+}
+
+async function sendFormattedTabBatch(spreadsheetId: string, light: boolean, requests: FormattedTabRequest[]) {
+  const tabs = [...new Set(requests.map((request) => request.tab))]
+  const alone = (request: FormattedTabRequest) => readWholeFormattedTab(spreadsheetId, request.tab, light).then(request.resolve, request.reject)
+  if (tabs.length === 1) {
+    const reading = readWholeFormattedTab(spreadsheetId, tabs[0], light)
+    for (const request of requests) reading.then(request.resolve, request.reject)
+    return
+  }
+  let payload: { sheets?: FormattedGridSheet[] }
+  try {
+    payload = await fetchFormattedGrid(spreadsheetId, tabs.map(quotedTab), light)
+  } catch (error) {
+    // Un onglet introuvable fait refuser toute la requête (400) : chacun est relu seul, et seul
+    // celui qui manque échoue, comme avant. Toute autre erreur (quota, réseau) vaut pour tous.
+    if (error instanceof Error && /^SHEETS_API_ERROR:400|Unable to parse range/.test(error.message)) for (const request of requests) void alone(request)
+    else for (const request of requests) request.reject(error)
+    return
+  }
+  for (const request of requests) {
+    const sheet = payload.sheets?.find((item) => item.properties?.title === request.tab)
+    if (!sheet) { void alone(request); continue }
+    try {
+      request.resolve(formattedSheetOf(sheet))
+    } catch (error) {
+      request.reject(error)
+    }
+  }
+}
+
 /** `range` (sans l'onglet, ex. « A5:Z5 ») limite la lecture à une zone : une ligne se lit bien plus vite que la feuille. */
 export async function readFormattedSheet(spreadsheetId: string, candidates: string[], options: { light?: boolean; range?: string; ranges?: string[] } = {}): Promise<FormattedSheet> {
+  // Un onglet entier, sans nom de rechange : il peut partir avec les autres onglets du classeur.
+  if (candidates.length === 1 && !options.range && !options.ranges?.length) return batchedFormattedTab(spreadsheetId, candidates[0], Boolean(options.light))
   let lastError: unknown = null
   for (const candidate of candidates) {
     try {
-      const tab = `'${candidate.replaceAll("'", "''")}'`
-      const parameters = new URLSearchParams({
-        includeGridData: "true",
-        fields: `sheets(properties(sheetId,title),data(startRow,startColumn,rowData(values(${options.light ? LIGHT_CELL_FIELDS : FULL_CELL_FIELDS}))))`,
-      })
+      const tab = quotedTab(candidate)
       // Plusieurs zones (« C:C », « H:H »…) : seules ces colonnes d'une feuille très large sont lues.
       const zones = options.ranges?.length ? options.ranges : [options.range ?? ""]
-      for (const zone of zones) parameters.append("ranges", zone ? `${tab}!${zone}` : tab)
-      const payload = await googleSheetsJson<{
-        sheets?: Array<{
-          properties?: { sheetId?: number; title?: string }
-          data?: Array<{ startRow?: number; startColumn?: number; rowData?: Array<{ values?: GoogleGridCell[] }> }>
-        }>
-      }>(`spreadsheets/${spreadsheetId}?${parameters.toString()}`)
-      const sheet = payload.sheets?.find((item) => item.properties?.title === candidate) ?? payload.sheets?.[0]
-      const sheetId = sheet?.properties?.sheetId
-      const tabName = sheet?.properties?.title
-      if (sheetId === undefined || !tabName) throw new Error("SHEET_TAB_NOT_FOUND")
-      const rows: FormattedSheetCell[][] = []
-      for (const block of sheet.data ?? []) {
-        const startRow = block.startRow ?? 0
-        const startColumn = block.startColumn ?? 0
-        for (const [rowOffset, row] of (block.rowData ?? []).entries()) {
-          const rowIndex = startRow + rowOffset
-          rows[rowIndex] ||= []
-          for (const [columnOffset, cell] of (row.values ?? []).entries()) {
-            const value = gridCellValue(cell)
-            const textFormat = cell.effectiveFormat?.textFormat
-            rows[rowIndex][startColumn + columnOffset] = {
-              value,
-              html: richTextHtml(value, cell.textFormatRuns, textFormat),
-              backgroundColor: rgbColorToHex(cell.effectiveFormat?.backgroundColorStyle?.rgbColor || cell.effectiveFormat?.backgroundColor),
-              foregroundColor: rgbColorToHex(textFormat?.foregroundColorStyle?.rgbColor || textFormat?.foregroundColor),
-            }
-          }
-        }
-      }
-      return { sheetId, tabName, rows }
+      const payload = await fetchFormattedGrid(spreadsheetId, zones.map((zone) => zone ? `${tab}!${zone}` : tab), Boolean(options.light))
+      return formattedSheetOf(payload.sheets?.find((item) => item.properties?.title === candidate) ?? payload.sheets?.[0])
     } catch (error) {
       lastError = error
     }
@@ -1034,7 +1111,8 @@ function cachedNamedColumns(spreadsheetId: string, key: string, load: () => Prom
   if (entry?.value && now - entry.loadedAt < RANGE_STALE_MS) {
     if (!entry.refreshing) {
       entry.refreshing = true
-      load().then((value) => {
+      // Relecture d'arrière-plan : elle cède la place aux pages quand Google est saturé.
+      asBackgroundGoogleWork(load).then((value) => {
         if (namedColumnsCache.get(key)?.entry === entry) namedColumnsCache.set(key, { spreadsheetId, entry: { loadedAt: Date.now(), promise: Promise.resolve(value), value } })
       }).catch(() => { entry.refreshing = false })
     }
@@ -4083,13 +4161,42 @@ export async function repairJdrSheet(key: JdrSheetKey) {
   if (!exists) await forgetJdrSheet(key)
 }
 
-export async function spreadsheetTabs(spreadsheetId: string) {
-  const metadata = await googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(
+type SpreadsheetTab = { sheetId?: number; title: string }
+/**
+ * La liste des onglets de chaque classeur, gardée TABS_CACHE_MS. Une écriture d'Eraser qui
+ * change la structure d'un classeur l'oublie (clearSpreadsheetReadCache).
+ */
+const TABS_CACHE_MS = 10 * 60_000
+/** Une liste lue il y a moins longtemps vaut une relecture, même pour dire qu'un onglet manque. */
+const TABS_FRESH_MS = 60_000
+const tabsCache = new Map<string, { expiresAt: number; loadedAt: number; promise: Promise<SpreadsheetTab[]> }>()
+
+/** La liste des onglets relue à l'instant : avant de créer, renommer ou supprimer un onglet. */
+export function spreadsheetTabs(spreadsheetId: string) {
+  const promise = googleSheetsJson<{ sheets?: Array<{ properties?: { sheetId?: number; title?: string } }> }>(
     `spreadsheets/${spreadsheetId}?fields=sheets.properties(sheetId,title)`,
-  )
-  return (metadata.sheets ?? []).flatMap((item) => item.properties?.title
+  ).then((metadata) => (metadata.sheets ?? []).flatMap((item): SpreadsheetTab[] => item.properties?.title
     ? [{ sheetId: item.properties.sheetId, title: item.properties.title }]
-    : [])
+    : []))
+  tabsCache.set(spreadsheetId, { expiresAt: Date.now() + TABS_CACHE_MS, loadedAt: Date.now(), promise })
+  promise.catch(() => { if (tabsCache.get(spreadsheetId)?.promise === promise) tabsCache.delete(spreadsheetId) })
+  return promise
+}
+
+/**
+ * La liste des onglets pour lire : la copie gardée en mémoire (une seule requête pour toutes
+ * les lectures d'une page), sauf si un onglet attendu (`expected`) y manque et qu'elle date
+ * de plus d'une minute. Elle est alors relue : un onglet créé ailleurs entre-temps n'est
+ * jamais tenu pour absent sur la foi d'une vieille copie.
+ */
+export async function cachedSpreadsheetTabs(spreadsheetId: string, expected: readonly string[] = []) {
+  const cached = tabsCache.get(spreadsheetId)
+  if (cached && cached.expiresAt > Date.now()) {
+    const tabs = await cached.promise.catch(() => null)
+    const recent = Date.now() - cached.loadedAt < TABS_FRESH_MS
+    if (tabs && (recent || expected.every((title) => tabs.some((tab) => tab.title === title)))) return tabs
+  }
+  return spreadsheetTabs(spreadsheetId)
 }
 
 function storeTabName(sheet: JdrSheetRecord, tabName: string) {
@@ -4101,7 +4208,8 @@ async function verifyJdrSheetTab(sheet: JdrSheetRecord, definition: StructuredSh
   if (verifiedJdrSheetTabs.has(cacheKey)) return sheet
   let missingTab: Error | null = null
   try {
-    const tabs = await spreadsheetTabs(sheet.spreadsheetId)
+    // La liste gardée en mémoire suffit si l'onglet y est ; sinon elle est relue avant de conclure.
+    const tabs = await cachedSpreadsheetTabs(sheet.spreadsheetId, [definition.tabName])
     if (!tabs.length || tabs.some((tab) => tab.title === definition.tabName)) {
       verifiedJdrSheetTabs.add(cacheKey)
       return sheet.tabName === definition.tabName ? sheet : (await storeTabName(sheet, definition.tabName)) ?? sheet
@@ -6339,7 +6447,12 @@ type InventoryWorkbook = {
 }
 
 let inventoryWorkbookCache: { expiresAt: number; workbook: InventoryWorkbook; includesCatalog: boolean } | null = null
-const INVENTORY_WORKBOOK_CACHE_MS = 60_000
+/**
+ * Toutes les installations partagent le quota de Google : relu chaque minute, l'inventaire
+ * faisait à lui seul la moitié des requêtes d'un joueur en séance. Les écritures d'Eraser le
+ * font relire aussitôt, et un objet reçu d'un autre joueur aussi (`forgetInventoryReads`).
+ */
+const INVENTORY_WORKBOOK_CACHE_MS = 2 * 60_000
 /** Change à chaque écriture : une lecture partie avant elle ne remplit pas le cache après. */
 let inventoryWorkbookVersion = 0
 
@@ -6353,7 +6466,31 @@ function cacheInventoryWorkbook(workbook: InventoryWorkbook, includesCatalog: bo
 /** Après une écriture : la lecture suivante relit la feuille (le cache n'est jamais prolongé). */
 function clearInventoryWorkbookCache() {
   inventoryWorkbookCache = null
+  inventoryTabsRead = null
   inventoryWorkbookVersion += 1
+}
+
+/** Un objet vient d'arriver d'une autre installation : l'inventaire affiché est relu dans Google. */
+export function forgetInventoryReads() {
+  clearInventoryWorkbookCache()
+}
+
+/**
+ * La lecture des onglets d'inventaire, partagée : la fiche demande le résumé puis l'inventaire
+ * complet coup sur coup, et la campagne celui de chacun ; ils relisaient chacun les mêmes
+ * onglets. Une écriture (nouvelle version) la fait relire.
+ */
+let inventoryTabsRead: { key: string; loadedAt: number; promise: Promise<string[][][]> } | null = null
+
+function sharedInventoryTabs(spreadsheetId: string, ranges: string[]) {
+  const key = `${spreadsheetId}\u0001${inventoryWorkbookVersion}\u0001${ranges.join("\u0002")}`
+  const known = inventoryTabsRead
+  if (known && known.key === key && Date.now() - known.loadedAt < INVENTORY_WORKBOOK_CACHE_MS) return known.promise
+  const promise = readInventoryTabs(spreadsheetId, ranges)
+  const entry = { key, loadedAt: Date.now(), promise }
+  inventoryTabsRead = entry
+  promise.catch(() => { if (inventoryTabsRead === entry) inventoryTabsRead = null })
+  return promise
 }
 
 /**
@@ -6575,7 +6712,7 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
   const tabs = ["Types de contenants", inventoryContainerTab, inventoryItemsTab, inventoryContentsTab]
   const ranges = tabs.map(sheetTabAll)
   const [grids, objectIndexTables] = await Promise.all([
-    options.fresh ? readInventoryTabsFresh(sheet.spreadsheetId, ranges) : readInventoryTabs(sheet.spreadsheetId, ranges),
+    options.fresh ? readInventoryTabsFresh(sheet.spreadsheetId, ranges) : sharedInventoryTabs(sheet.spreadsheetId, ranges),
     // Sans le catalogue (lecture rapide), les objets prennent quand même ses colonnes
     // s'il est déjà en mémoire : rien de plus à lire dans Google Sheets.
     includeCatalog
@@ -7932,6 +8069,9 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
 /** « Actualiser » : tout ce qui a été lu dans Google est relu à la prochaine demande. */
 onForgetGoogleData(async () => {
   rangeReadCache.clear()
+  tabsCache.clear()
+  // L'inventaire (et sa lecture partagée) : relu à la prochaine demande.
+  clearInventoryWorkbookCache()
   namedColumnsCache.clear()
   sheetHeaderCache.clear()
   characterColumnsCache = null

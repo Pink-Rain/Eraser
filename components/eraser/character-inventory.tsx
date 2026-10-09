@@ -348,7 +348,8 @@ export function CharacterInventory({ characterId, initialInventory, endpoint, fl
   useEffect(() => {
     if ((initialInventory && !reloads) || controlled) return
     let active = true
-    fetch(`${inventoryEndpoint}?summary=1`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory((current) => keepCatalogFields(payload.inventory!, current)); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
+    // Rechargé pour un objet reçu : relu dans Google, l'autre installation vient d'y écrire.
+    fetch(`${inventoryEndpoint}?summary=1${reloads ? "&reload=1" : ""}`).then(async (response) => ({ response, payload: (await response.json()) as { inventory?: CharacterInventoryRecord; error?: string } })).then(({ response, payload }) => { if (!active) return; if (response.ok && payload.inventory) setOwnInventory((current) => keepCatalogFields(payload.inventory!, current)); else setError(payload.error || "L’inventaire n’a pas pu être chargé.") }).catch(() => { if (active) setError("L’inventaire n’a pas pu être chargé.") }).finally(() => { if (active) setInitialLoading(false) })
     // Le résumé arrive sans le catalogue : on le complète ensuite en tâche de fond,
     // pour les objets rangés avant que leur mise en forme ne soit conservée.
     // Revenu sans le catalogue (Google occupé), il est redemandé quelques secondes plus tard.

@@ -11,7 +11,9 @@ export type SlowCall = { kind: TraceKind; label: string; ms: number; status: str
 const SLOW_MS = 700
 const KEEP = 150
 const slow: SlowCall[] = []
-const totals = new Map<TraceKind, { count: number; slow: number; totalMs: number; maxMs: number }>()
+const totals = new Map<TraceKind, { count: number; slow: number; refused: number; totalMs: number; maxMs: number }>()
+/** L'heure des appels de la dernière minute : Google compte son quota par minute. */
+const recent = new Map<TraceKind, number[]>()
 const startedAt = new Date().toISOString()
 
 /** Les identifiants (classeurs, fichiers) raccourcis : le relevé reste lisible. */
@@ -20,8 +22,14 @@ function shortLabel(label: string) {
 }
 
 export function recordCall(kind: TraceKind, label: string, ms: number, status: string) {
-  const total = totals.get(kind) ?? { count: 0, slow: 0, totalMs: 0, maxMs: 0 }
+  const total = totals.get(kind) ?? { count: 0, slow: 0, refused: 0, totalMs: 0, maxMs: 0 }
   total.count += 1
+  // 429 : Google a refusé faute de quota (partagé par toutes les installations).
+  if (status === "429") total.refused += 1
+  const times = recent.get(kind) ?? []
+  times.push(Date.now())
+  while (times.length && Date.now() - times[0] > 60_000) times.shift()
+  recent.set(kind, times)
   total.totalMs += ms
   total.maxMs = Math.max(total.maxMs, ms)
   if (ms >= SLOW_MS) {
@@ -49,7 +57,11 @@ export function performanceReport() {
   return {
     startedAt,
     slowMs: SLOW_MS,
-    totals: [...totals.entries()].map(([kind, total]) => ({ kind, count: total.count, slow: total.slow, averageMs: total.count ? Math.round(total.totalMs / total.count) : 0, maxMs: Math.round(total.maxMs) })),
+    totals: [...totals.entries()].map(([kind, total]) => ({
+      kind, count: total.count, slow: total.slow, refused: total.refused,
+      lastMinute: (recent.get(kind) ?? []).filter((at) => Date.now() - at <= 60_000).length,
+      averageMs: total.count ? Math.round(total.totalMs / total.count) : 0, maxMs: Math.round(total.maxMs),
+    })),
     slow: [...slow].reverse(),
   }
 }
