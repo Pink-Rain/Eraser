@@ -113,10 +113,8 @@ export type CharacterSheetRecord = CharacterRecord & { values: string[]; headers
 
 export type CampaignMemberRecord = CharacterRecord & {
   people: string
-  /** La vraie classe (case « Classe ») : pour le propriétaire et le MJ seulement. */
+  /** La classe telle qu'elle se montre (cachée : « Aucune classe » ; ou la classe affichée) : seule la fiche montre la vraie. */
   classes: string
-  /** Ce que les autres joueurs voient (classe cachée ou affichée comme une autre). */
-  publicClasses: string
   level: string
   honoraryTitle: string
 }
@@ -5589,7 +5587,7 @@ export async function listCampaignMembers(campaignId: string) {
   }
   const characters = await decorateCharacters(rows.map((row) => row.character_index))
   if (!characters.length) return []
-  const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", publicClasses: "", level: "", honoraryTitle: "" }))
+  const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", level: "", honoraryTitle: "" }))
   const source = await charactersSource()
   if (!source) return fallback()
   // This enrichment (class/level/title columns) is best-effort: the caller
@@ -5612,8 +5610,8 @@ export async function listCampaignMembers(campaignId: string) {
       ...character,
       name: (row && columns.get(row, "Nom personnage")) || character.name,
       people: (row && columns.get(row, "Peuple")) || character.subtitle,
-      classes: row ? columns.get(row, "Classe") : "",
-      publicClasses: row ? publicClassText(columns.get(row, "Classe"), columns.get(row, characterValueHeaders[characterClassChoicesIndex])) : "",
+      // Hors de la fiche, la classe se montre comme le joueur l'a réglée, pour tout le monde.
+      classes: row ? publicClassText(columns.get(row, "Classe"), columns.get(row, characterValueHeaders[characterClassChoicesIndex])) : "",
       level: row ? columns.get(row, "Level") : "",
       honoraryTitle: row ? columns.get(row, "Titre honorifique") : "",
     }
@@ -5689,7 +5687,6 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     campaigns: [{ id: campaign.id, name: campaign.name, accentColor: campaign.accentColor }],
     people: sourceCharacter.subtitle,
     classes: "",
-    publicClasses: "",
     level: "",
     honoraryTitle: "",
   } satisfies CampaignMemberRecord

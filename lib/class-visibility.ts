@@ -4,9 +4,9 @@
  * (vraie classe : Serviteuse de Khim Tay ; affichée : Rôdeur). Rangé dans la case « Sorts
  * de classe choisis JSON », clé `classDisplay` ; tout le reste de la case est gardé.
  *
- * Le propriétaire, le MJ et l'admin voient toujours la vraie classe sur la fiche. Partout où
- * d'autres joueurs peuvent lire la classe (profil, campagne, table de jeu, références), le
- * serveur n'envoie que `publicClassText`.
+ * Seule la fiche montre la vraie classe. Partout ailleurs (profil, accueil, campagne, table
+ * de jeu, références), le serveur n'envoie que `publicClassText`, pour tout le monde :
+ * propriétaire et MJ compris, pour que personne ne se trompe à voix haute.
  *
  * Sans dépendance au serveur.
  */
@@ -19,9 +19,9 @@ export type ClassDisplayMode = "visible" | "hidden" | "as"
 export type ClassDisplay = { mode: ClassDisplayMode; as: string }
 
 export const classDisplayModes: Array<{ value: ClassDisplayMode; label: string; hint: string }> = [
-  { value: "visible", label: "Visible", hint: "Les autres joueurs voient la vraie classe" },
-  { value: "hidden", label: "Cachée", hint: "Les autres joueurs voient « Aucune classe »" },
-  { value: "as", label: "Affichée comme…", hint: "Les autres joueurs voient la classe de ton choix" },
+  { value: "visible", label: "Visible", hint: "La vraie classe s’affiche partout" },
+  { value: "hidden", label: "Cachée", hint: "« Aucune classe » partout hors de la fiche" },
+  { value: "as", label: "Affichée comme…", hint: "La classe de ton choix partout hors de la fiche" },
 ]
 
 function parsedChoices(choicesJson: string): Record<string, unknown> {

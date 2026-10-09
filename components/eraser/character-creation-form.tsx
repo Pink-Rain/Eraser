@@ -2,13 +2,17 @@
 
 import { useEffect, useMemo, useRef, useState, type DragEvent, type FormEvent } from "react"
 import { useRouter } from "next/navigation"
-import { Check, CircleUserRound, ImagePlus, Link2, LoaderCircle, Search, Sparkles, Upload, WandSparkles, X } from "lucide-react"
+import { ArrowLeft, ArrowRight, Check, CircleUserRound, ImagePlus, Link2, LoaderCircle, Search, Sparkles, Upload, WandSparkles, X } from "lucide-react"
 
+import { CharacterCreationStats } from "@/components/eraser/character-creation-stats"
+import { ClassDisplayButton } from "@/components/eraser/class-display-button"
 import { ClassImage } from "@/components/eraser/class-image"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { characterNarrativeStart, characterValueHeaders } from "@/lib/character-sheet-schema"
+import { allRolled, creationStatCells, rebalanceSummary, rollCreationStats, type CreationAdjustments, type CreationRolls } from "@/lib/character-creation-rolls"
+import { characterClassChoicesIndex, characterNarrativeStart, characterValueHeaders } from "@/lib/character-sheet-schema"
+import { withClassDisplay, type ClassDisplay } from "@/lib/class-visibility"
 import { announceCreatedCharacter } from "@/lib/selection-events"
 
 export type CreationClassOption = { id: string; name: string; type: string; imageUrl: string | null; accent: string }
@@ -35,6 +39,15 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
   const [failedPreview, setFailedPreview] = useState("")
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
+  // Deux étapes : identité (1/2), puis dés et rééquilibrage (2/2). Tout reste en mémoire
+  // quand on passe de l'une à l'autre.
+  const [step, setStep] = useState<1 | 2>(1)
+  const [classDisplay, setClassDisplay] = useState<ClassDisplay>({ mode: "visible", as: "" })
+  const [rolls, setRolls] = useState<CreationRolls>({})
+  const [adjustments, setAdjustments] = useState<CreationAdjustments>({})
+  // Les lancers précédents (et leur rééquilibrage), pour revenir en arrière après une relance.
+  const [history, setHistory] = useState<Array<{ rolls: CreationRolls; adjustments: CreationAdjustments }>>([])
+  const rebalance = rebalanceSummary(adjustments)
   // Verrou immédiat contre un double envoi (deux personnages identiques).
   const sending = useRef(false)
 
@@ -68,9 +81,36 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
     pickFile(event.dataTransfer.files?.[0])
   }
 
+  /** Lance les statistiques de `keys` (toutes sans `keys`) ; un dé relancé repart de son résultat, sans écart. */
+  function roll(keys?: string[]) {
+    // Relancer un dé déjà lancé se défait avec la flèche ; un premier lancer, non.
+    const relaunch = Object.keys(rolls).some((key) => !keys || keys.includes(key))
+    if (relaunch) setHistory((current) => [...current, { rolls, adjustments }].slice(-20))
+    setRolls((current) => ({ ...current, ...rollCreationStats(undefined, keys) }))
+    setAdjustments((current) => keys ? Object.fromEntries(Object.entries(current).filter(([key]) => !keys.includes(key))) : {})
+  }
+
+  function undoRoll() {
+    const previous = history.at(-1)
+    if (!previous) return
+    setHistory((current) => current.slice(0, -1))
+    setRolls(previous.rolls)
+    setAdjustments(previous.adjustments)
+  }
+
+  function goTo(next: 1 | 2) {
+    if (next === 2 && !name.trim()) return setError("Le nom du personnage est obligatoire.")
+    setError("")
+    setStep(next)
+    window.scrollTo({ top: 0, behavior: "smooth" })
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!name.trim()) return setError("Le nom du personnage est obligatoire.")
+    if (!name.trim()) { setStep(1); return setError("Le nom du personnage est obligatoire.") }
+    if (step === 1) return goTo(2)
+    if (!allRolled(rolls)) return setError("Lance les dés de chaque statistique.")
+    if (!rebalance.valid) return setError(rebalance.problem)
     if (sending.current) return
     sending.current = true
     setPending(true)
@@ -80,6 +120,8 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
     values[1] = people.trim()
     values[2] = className
     if (avatarMode === "url" && preview) values[portraitIndex] = preview
+    for (const [index, value] of creationStatCells(rolls, adjustments)) values[index] = value
+    if (classDisplay.mode !== "visible") values[characterClassChoicesIndex] = withClassDisplay("", classDisplay)
     try {
       let response: Response
       if (avatarMode === "import" && portraitFile) {
@@ -121,7 +163,12 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
       </div>
 
       <form onSubmit={submit} className="mt-10">
-        <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: selectedClass?.accent ? `${selectedClass.accent}55` : undefined }}>
+        <nav className="mb-4 flex items-center gap-2" aria-label="Étapes de la création">
+          {([[1, "Identité"], [2, "Statistiques"]] as const).map(([number, label]) => <button key={number} type="button" onClick={() => goTo(number)} aria-current={step === number ? "step" : undefined} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1 text-xs font-semibold transition ${step === number ? "border-primary/60 bg-primary/10 text-primary" : "text-muted-foreground hover:border-primary/40 hover:text-foreground"}`}>
+            <span className="tabular-nums">{number}/2</span>{label}
+          </button>)}
+        </nav>
+        <section hidden={step !== 1} className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: selectedClass?.accent ? `${selectedClass.accent}55` : undefined }}>
           <div className="absolute inset-x-0 top-0 h-1 transition-colors" style={{ background: selectedClass?.accent ? `linear-gradient(90deg, ${selectedClass.accent}, ${selectedClass.accent}66 58%, transparent)` : "linear-gradient(90deg, var(--primary), transparent)" }} />
           <div className="grid gap-8 lg:grid-cols-[minmax(0,16rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,18rem)_minmax(0,1fr)]">
             {/* Portrait */}
@@ -196,7 +243,10 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
 
               <div className="grid gap-2">
                 <div className="flex flex-wrap items-end justify-between gap-2">
-                  <Label>Classe{selectedClass && <span className="ml-2 font-display text-base" style={{ color: accent }}>{selectedClass.name}</span>}</Label>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Label>Classe{selectedClass && <span className="ml-2 font-display text-base" style={{ color: accent }}>{selectedClass.name}</span>}</Label>
+                    <ClassDisplayButton value={classDisplay} suggestions={sortedClasses.map((item) => item.name)} onChange={setClassDisplay} />
+                  </div>
                   {classes.length > 8 && (
                     <div className="relative w-full sm:w-56">
                       <Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" />
@@ -236,17 +286,24 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
                 </div>
               </div>
 
-              <p className="text-xs text-muted-foreground">Réussite critique à 5 et échec critique à 96 par défaut, modifiables ensuite sur la fiche.</p>
             </div>
           </div>
         </section>
 
+        {step === 2 && <section className="relative overflow-hidden rounded-[1.75rem] border bg-card/85 p-5 shadow-xl shadow-black/10 sm:p-7" style={{ borderColor: selectedClass?.accent ? `${selectedClass.accent}55` : undefined }}>
+          <div className="absolute inset-x-0 top-0 h-1" style={{ background: selectedClass?.accent ? `linear-gradient(90deg, ${selectedClass.accent}, ${selectedClass.accent}66 58%, transparent)` : "linear-gradient(90deg, var(--primary), transparent)" }} />
+          <CharacterCreationStats rolls={rolls} adjustments={adjustments} canUndo={history.length > 0} accent={accent} onRoll={roll} onUndo={undoRoll} onAdjust={(key, delta) => setAdjustments((current) => ({ ...current, [key]: delta }))} />
+        </section>}
+
         {error && <p className="mt-5 rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-3 text-sm text-destructive" role="alert">{error}</p>}
-        <div className="sticky bottom-4 mt-6 flex justify-end rounded-2xl border bg-background/90 p-3 shadow-lg backdrop-blur">
-          <Button type="submit" size="lg" disabled={pending || !name.trim()}>
-            {pending ? <LoaderCircle className="animate-spin" /> : <WandSparkles />}
-            Créer le personnage
-          </Button>
+        <div className="sticky bottom-4 mt-6 flex items-center justify-end gap-2 rounded-2xl border bg-background/90 p-3 shadow-lg backdrop-blur">
+          {step === 2 && <Button type="button" variant="ghost" size="lg" className="mr-auto" onClick={() => goTo(1)} disabled={pending}><ArrowLeft />Précédent</Button>}
+          {step === 1
+            ? <Button type="submit" size="lg" disabled={!name.trim()}>Suivant<ArrowRight /></Button>
+            : <Button type="submit" size="lg" disabled={pending || !name.trim() || !allRolled(rolls) || !rebalance.valid} title={!allRolled(rolls) ? "Lance d’abord tous les dés" : rebalance.problem || undefined}>
+              {pending ? <LoaderCircle className="animate-spin" /> : <WandSparkles />}
+              Enregistrer
+            </Button>}
         </div>
       </form>
     </div>
