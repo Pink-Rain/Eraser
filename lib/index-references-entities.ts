@@ -10,13 +10,13 @@
  */
 import { getDb } from "@/db"
 import { campaignIndex, characterIndex } from "@/db/schema"
-import { characterBaseHeaders, characterNarrativeHeaders } from "@/lib/character-sheet-schema"
+import { characterBaseHeaders, characterClassChoicesIndex, characterNarrativeHeaders, characterValueHeaders } from "@/lib/character-sheet-schema"
+import { publicClassText } from "@/lib/class-visibility"
 import { CREATURE_SPELLS_TAB, listClassSpells, type ClassSpell, type SpellIndexKind } from "@/lib/class-content"
 import { classImageUrl } from "@/lib/class-images"
 import {
   campaignReferenceTable,
   characterReferenceTable,
-  formatCharacterClasses,
   listIndexedClasses,
   npcReferenceTable,
   resolveJdrSheet,
@@ -163,7 +163,8 @@ const CHARACTER_PUBLIC = folded(["Nom personnage", "Peuple", "Classe", "Level", 
 const CHARACTER_MENU = [...characterBaseHeaders, ...characterNarrativeHeaders].filter((header) => header !== "Nom personnage")
 
 async function characterSource(cited: readonly string[] = []): Promise<EntitySource | null> {
-  const sheet = await characterReferenceTable(["Joueur", ...characterBaseHeaders, ...characterNarrativeHeaders, ...cited])
+  const choicesHeader = characterValueHeaders[characterClassChoicesIndex]
+  const sheet = await characterReferenceTable(["Joueur", ...characterBaseHeaders, ...characterNarrativeHeaders, choicesHeader, ...cited])
   if (!sheet) return null
   const { headers, columns, rows } = sheet
   const classColumn = columns.at("Classe")
@@ -177,8 +178,9 @@ async function characterSource(cited: readonly string[] = []): Promise<EntitySou
     const name = columns.get(values, "Nom personnage").trim()
     if (!id || !name) continue
     const row = sheetRow(headers, values, id, name)
-    // La classe est parfois une liste (JSON) : elle se lit « Mage · Prêtre ».
-    if (classColumn >= 0) { row.values[classColumn] = formatCharacterClasses(row.values[classColumn]); row.html[classColumn] = escapeHtml(row.values[classColumn]) }
+    // La classe est parfois une liste (JSON) : elle se lit « Mage · Prêtre ». Un texte cité est
+    // lu par tous : seule la classe que le personnage montre y figure (cachée : « Aucune classe »).
+    if (classColumn >= 0) { row.values[classColumn] = publicClassText(row.values[classColumn], columns.get(values, choicesHeader)); row.html[classColumn] = escapeHtml(row.values[classColumn]) }
     for (const { at, mode } of listColumns) { row.values[at] = displayedMultipleValue(row.values[at] ?? "", mode); row.html[at] = escapeHtml(row.values[at]) }
     ;(trashed.has(id) ? hidden : listed).push(row)
   }

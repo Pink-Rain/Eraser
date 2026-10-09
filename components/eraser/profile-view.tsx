@@ -1,5 +1,6 @@
 "use client"
 
+import { NO_CLASS } from "@/lib/class-visibility"
 import { useEffect, useMemo, useState } from "react"
 import Link from "next/link"
 import { CircleUserRound, Crown, Map, Plus, Settings2, Sparkles, Trophy, UsersRound, type LucideIcon } from "lucide-react"
@@ -139,7 +140,7 @@ export function ProfileView({ account, characters, campaigns, access }: { accoun
               <div className="h-1 w-full" style={{ backgroundColor: accent }} />
               <div className="p-3">
                 <h3 className="font-display truncate text-base font-semibold">{character.name}</h3>
-                <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine || (summariesLoaded ? "Classe à choisir" : "…")}</p>
+                <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine || (summariesLoaded ? NO_CLASS : "…")}</p>
                 {/* Le titre honorifique choisi remplace le peuple (jamais la liste brute « ["…"] »). */}
                 <p className="min-h-4 truncate text-xs italic text-muted-foreground">{summary?.title || (summariesLoaded ? "" : "…")}</p>
                 <div className="mt-1.5 flex min-h-4 flex-wrap gap-x-2 gap-y-0.5">

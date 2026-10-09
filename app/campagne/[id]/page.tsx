@@ -32,7 +32,14 @@ async function CampaignDashboardData({
     identityUidsForUser(accountUid),
     playerNamesFor(account, listed.map((character) => character.ownerUid)).catch(() => new Map<string, string>()),
   ])
-  const members = listed.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
+  // La classe d'un autre joueur : celle qu'il montre (cachée : « Aucune classe »). Le MJ et
+  // le propriétaire voient la vraie ; la vraie classe n'est jamais envoyée aux autres.
+  const members = listed.map((character) => ({
+    ...character,
+    classes: canManage || ownedBy(character.ownerUid, identities) ? character.classes : character.publicClasses,
+    publicClasses: "",
+    playerName: players.get(character.ownerUid) ?? "",
+  }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
   return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)} userEmail={userEmail} />

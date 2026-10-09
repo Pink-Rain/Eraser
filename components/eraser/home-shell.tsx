@@ -1,5 +1,6 @@
 "use client"
 
+import { NO_CLASS } from "@/lib/class-visibility"
 import { useEffect, useMemo, useState, type FormEvent, type ReactNode } from "react"
 import Link from "next/link"
 import { useRouter } from "next/navigation"
@@ -319,7 +320,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
                 <div className="h-1 w-full" style={{ backgroundColor: accent }} />
                 <div className="p-3">
                   <h3 className="font-display truncate text-base font-semibold">{character.name}</h3>
-                  <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine(character) || (summariesLoaded ? "Classe à choisir" : "…")}</p>
+                  <p className="truncate text-xs font-semibold" style={{ color: accent }}>{classLine(character) || (summariesLoaded ? NO_CLASS : "…")}</p>
                   <p className="min-h-4 truncate text-xs italic text-muted-foreground">{titleLine(character) || (summariesLoaded ? "" : "…")}</p>
                   <div className="mt-1.5 flex min-h-4 flex-wrap gap-x-2 gap-y-0.5">
                     {character.campaigns.length ? character.campaigns.map((campaign) => <span key={campaign.id} className="truncate text-[10px] font-medium" style={{ color: campaign.accentColor }}>{campaign.name}</span>) : <span className="text-[10px] text-muted-foreground/80">Sans campagne</span>}
@@ -336,7 +337,7 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
               <Portrait character={character} className="size-11 rounded-lg" />
               <div className="min-w-0 flex-1">
                 <p className="font-display truncate font-semibold">{character.name}</p>
-                <p className="truncate text-xs text-muted-foreground">{[classLine(character), titleLine(character), character.campaigns.map((campaign) => campaign.name).join(", ") || "Sans campagne"].filter(Boolean).join(" · ")}</p>
+                <p className="truncate text-xs text-muted-foreground">{[classLine(character) || (summariesLoaded ? NO_CLASS : ""), titleLine(character), character.campaigns.map((campaign) => campaign.name).join(", ") || "Sans campagne"].filter(Boolean).join(" · ")}</p>
               </div>
               <ChevronRight className="size-4 shrink-0 text-muted-foreground/60" />
             </button>

@@ -17,6 +17,8 @@ import { RichTextField } from "@/components/eraser/rich-text"
 import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
+import { ClassDisplayButton } from "@/components/eraser/class-display-button"
+import { classDisplayOf, withClassDisplay } from "@/lib/class-visibility"
 import { formulaValues, gaugeContributions, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
 import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, formStateEntriesOf, formStatesOf, withChosenForm, withFormStateEntry, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
@@ -1621,7 +1623,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <div className="mt-6 divide-y border-y">
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
               <div className="xl:col-span-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Peuples</p><MultipleValues label="un peuple" value={values[1]} onCommit={(value) => commit(1, value)} /></div>
-              <div className="xl:col-span-5"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} /></div>
+              <div className="xl:col-span-5"><div className="flex items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><ClassDisplayButton value={classDisplayOf(values[characterClassChoicesIndex] || "")} suggestions={classOptions.map((option) => option.label)} onChange={(display) => void commit(characterClassChoicesIndex, withClassDisplay(latestValues.current[characterClassChoicesIndex] || "", display))} /></div><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} /></div>
               <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={commitLevel} /></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">

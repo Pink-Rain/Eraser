@@ -81,7 +81,7 @@ export function parseSummonsData(raw: unknown): SummonsData {
 }
 
 export const summonFieldKinds: Array<{ kind: SummonFieldKind; long?: boolean; label: string; hint: string }> = [
-  { kind: "life", label: "Points de vie", hint: "Actuels et maximum, avec une jauge" },
+  { kind: "life", label: "Jauge", hint: "Une valeur et son maximum, avec une barre : mana, charges, rage…" },
   { kind: "stats", label: "Caractéristiques", hint: "Un encart vide : principales, secondaires ou libres, au choix" },
   { kind: "spell", label: "Sort", hint: "Écrit à la main : action, distance, charges, compétence" },
   { kind: "text", label: "Champ libre", hint: "Une valeur courte" },
@@ -89,9 +89,9 @@ export const summonFieldKinds: Array<{ kind: SummonFieldKind; long?: boolean; la
 ]
 
 /** Un champ neuf pour l'éditeur ; le bloc de caractéristiques arrive vide, on y ajoute ce qu'on veut. */
-export function newSummonField(kind: SummonFieldKind, options: { long?: boolean } = {}): SummonField {
+export function newSummonField(kind: SummonFieldKind, options: { long?: boolean; label?: string } = {}): SummonField {
   const fieldId = newSummonId()
-  if (kind === "life") return { id: fieldId, kind, label: "Points de vie", current: "10", max: "10" }
+  if (kind === "life") return { id: fieldId, kind, label: options.label ?? "Jauge", current: "10", max: "10" }
   if (kind === "stats") {
     return { id: fieldId, kind, group: "principale", label: "Caractéristiques", stats: [] }
   }
@@ -159,4 +159,11 @@ export function summonLife(field: Extract<SummonField, { kind: "life" }>) {
   return { ratio, down: Number.isFinite(current) && Number.isFinite(max) && max > 0 && current <= 0 }
 }
 
-export const isSummonDown = (summon: Summon) => summon.fields.some((field) => field.kind === "life" && summonLife(field).down)
+/** Une jauge qui compte les points de vie (« Points de vie », « PV », « Vie »…), et pas la mana ou des charges. */
+export const isLifeGauge = (field: Pick<SummonField, "kind" | "label">) => field.kind === "life" && /(^|\s)(vie|pv|hp)(\s|$)/.test(field.label.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim())
+
+/** La jauge des points de vie d'une invocation, s'il y en a une. */
+export const summonLifeField = (summon: Summon) => summon.fields.find((field): field is Extract<SummonField, { kind: "life" }> => isLifeGauge(field))
+
+/** À terre : sa jauge de points de vie est à 0 (une autre jauge vide, mana ou charges, ne compte pas). */
+export const isSummonDown = (summon: Summon) => { const life = summonLifeField(summon); return Boolean(life && summonLife(life).down) }

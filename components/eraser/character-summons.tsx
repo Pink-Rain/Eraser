@@ -1,7 +1,7 @@
 "use client"
 
 import { useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronUp, Copy, Crosshair, Footprints, Heart, LayoutTemplate, ListPlus, Minus, Pencil, Plus, Skull, Sparkles, Trash2, Type, Undo2, WandSparkles, X, Zap } from "lucide-react"
+import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronUp, Copy, Crosshair, Footprints, Gauge, Heart, LayoutTemplate, ListPlus, Minus, Pencil, Plus, Skull, Sparkles, Trash2, Type, Undo2, WandSparkles, X, Zap } from "lucide-react"
 
 import { InlineEdit } from "@/components/eraser/inline-edit"
 import { SuggestInput } from "@/components/eraser/suggest-input"
@@ -16,6 +16,7 @@ import { evaluateRelativeExpression } from "@/lib/math-expression"
 import {
   duplicateSummon,
   groupSummons,
+  isLifeGauge,
   isSummonDown,
   newSummonField,
   newSummonId,
@@ -23,6 +24,7 @@ import {
   summonFieldKinds,
   summonFromTemplate,
   summonLife,
+  summonLifeField,
   SUMMON_MAX_CHARGES,
   type Summon,
   type SummonField,
@@ -45,7 +47,7 @@ function calculate(expression: string, fallback: number) {
 }
 
 function FieldIcon({ field, className = "size-3.5" }: { field: Pick<SummonField, "kind"> & { long?: boolean; group?: string }; className?: string }) {
-  if (field.kind === "life") return <Heart className={className} />
+  if (field.kind === "life") return "label" in field && isLifeGauge(field as Pick<SummonField, "kind" | "label">) ? <Heart className={className} /> : <Gauge className={className} />
   if (field.kind === "stats") return <Sparkles className={className} />
   if (field.kind === "spell") return <WandSparkles className={className} />
   return <Type className={className} />
@@ -60,7 +62,7 @@ export function CharacterSummons({ data, onUpdate, suggestions }: { data: Summon
 
   function createTemplate() {
     const color = summonColors[data.templates.length % summonColors.length]
-    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life"), newSummonField("stats")] } })
+    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life", { label: "Points de vie" }), newSummonField("stats")] } })
   }
 
   function summon(template: SummonTemplate) {
@@ -154,7 +156,7 @@ type CardChange = (change: (summon: Summon) => Summon) => Promise<boolean>
 function SummonCard({ summon, onChange, onEdit, onDuplicate, onDismiss }: { summon: Summon; onChange?: CardChange; onEdit?: () => void; onDuplicate?: () => void; onDismiss?: () => void }) {
   const [collapsed, setCollapsed] = useState(false)
   const down = isSummonDown(summon)
-  const life = summon.fields.find((field): field is Extract<SummonField, { kind: "life" }> => field.kind === "life")
+  const life = summonLifeField(summon) ?? summon.fields.find((field): field is Extract<SummonField, { kind: "life" }> => field.kind === "life")
   const changeField = onChange && ((fieldId: string, change: (field: SummonField) => SummonField) => onChange((current) => ({ ...current, fields: current.fields.map((field) => field.id === fieldId ? change(field) : field) })))
   const live = Boolean(onChange)
 
@@ -251,10 +253,10 @@ function LifeBar({ field, color, compact = false, onChange }: { field: Extract<S
 
   return <div>
     <div className="flex items-center gap-1.5">
-      {!compact && <p className="mr-auto flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground"><Heart className="size-3" />{field.label || "Points de vie"}</p>}
-      {onChange && <button type="button" onClick={() => void step(-1)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label="Retirer un point de vie"><Minus className="size-3" /></button>}
+      {!compact && <p className="mr-auto flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground"><FieldIcon field={field} className="size-3" />{field.label || "Jauge"}</p>}
+      {onChange && <button type="button" onClick={() => void step(-1)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Retirer 1 à ${field.label || "la jauge"}`}><Minus className="size-3" /></button>}
       <span className="inline-flex items-baseline gap-1">{number("current")}<span className="text-xs text-muted-foreground">/</span>{number("max")}</span>
-      {onChange && <button type="button" onClick={() => void step(1)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label="Ajouter un point de vie"><Plus className="size-3" /></button>}
+      {onChange && <button type="button" onClick={() => void step(1)} className="flex size-6 items-center justify-center rounded-md text-muted-foreground hover:bg-muted" aria-label={`Ajouter 1 à ${field.label || "la jauge"}`}><Plus className="size-3" /></button>}
       {compact && <div className="ml-2 h-1.5 flex-1 overflow-hidden rounded-full" style={{ backgroundColor: `${shown}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${ratio}%`, backgroundColor: shown }} /></div>}
     </div>
     {!compact && <div className="mt-1 h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: `${shown}26` }}><div className="h-full rounded-full transition-[width]" style={{ width: `${ratio}%`, backgroundColor: shown }} /></div>}
@@ -356,7 +358,7 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
   </Dialog>
 }
 
-const fieldKindLabel = (field: SummonField) => field.kind === "life" ? "Points de vie" : field.kind === "stats" ? "Caractéristiques" : field.kind === "spell" ? "Sort" : field.long ? "Texte long" : "Champ libre"
+const fieldKindLabel = (field: SummonField) => field.kind === "life" ? "Jauge" : field.kind === "stats" ? "Caractéristiques" : field.kind === "spell" ? "Sort" : field.long ? "Texte long" : "Champ libre"
 
 function FieldEditor({ field, suggestions, first, last, onChange, onMove, onRemove }: { field: SummonField; suggestions: Suggestions; first: boolean; last: boolean; onChange: (change: (field: SummonField) => SummonField) => void; onMove: (by: number) => void; onRemove: () => void }) {
   const characteristicGroups = [{ label: "Principales", items: suggestions.principals }, { label: "Secondaires", items: suggestions.secondaries }]

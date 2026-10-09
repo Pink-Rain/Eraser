@@ -47,6 +47,7 @@ import {
   type GoogleTextFormatRun,
 } from "@/lib/google-sheet-rich-text"
 import { copyNpcPortrait } from "@/lib/npc-portraits"
+import { publicClassText } from "@/lib/class-visibility"
 import { copyToken } from "@/lib/tokens"
 import {
   characterClassChoicesIndex,
@@ -112,7 +113,10 @@ export type CharacterSheetRecord = CharacterRecord & { values: string[]; headers
 
 export type CampaignMemberRecord = CharacterRecord & {
   people: string
+  /** La vraie classe (case « Classe ») : pour le propriétaire et le MJ seulement. */
   classes: string
+  /** Ce que les autres joueurs voient (classe cachée ou affichée comme une autre). */
+  publicClasses: string
   level: string
   honoraryTitle: string
 }
@@ -5243,14 +5247,16 @@ export function formatCharacterClasses(value: string) {
  */
 export async function characterSheetSummaries() {
   const source = await charactersSource()
-  const summaries = new Map<string, { classes: string; level: string; portrait: string; title: string }>()
+  const summaries = new Map<string, { classes: string; publicClasses: string; level: string; portrait: string; title: string }>()
   if (!source) return summaries
-  const { columns, rows } = await readCharacterColumns(source, ["Classe", "Level", "Portrait", "Titre honorifique"])
+  const choicesHeader = characterValueHeaders[characterClassChoicesIndex]
+  const { columns, rows } = await readCharacterColumns(source, ["Classe", "Level", "Portrait", "Titre honorifique", choicesHeader])
   for (const row of rows) {
     const id = columns.get(row, "ID")
     if (!id) continue
     // Le titre honorifique choisi, lisible (la cellule garde la liste en JSON).
-    summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim(), title: displayedMultipleValue(columns.get(row, "Titre honorifique"), "selected") })
+    // `publicClasses` : ce que voient les autres joueurs (classe cachée ou affichée comme une autre).
+    summaries.set(id, { classes: formatCharacterClasses(columns.get(row, "Classe")), publicClasses: publicClassText(columns.get(row, "Classe"), columns.get(row, choicesHeader)), level: columns.get(row, "Level").trim(), portrait: columns.get(row, "Portrait").trim(), title: displayedMultipleValue(columns.get(row, "Titre honorifique"), "selected") })
   }
   return summaries
 }
@@ -5275,8 +5281,9 @@ function tabletopCharacterEntityOf(id: string, cell: (name: string) => string, o
     id,
     kind: "character",
     name: cell("Nom personnage") || "Personnage sans nom",
-    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ».
-    subtitle: [formatCharacterClasses(cell("Classe")), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
+    // Classe et peuple sont parfois des listes (JSON) : lisibles, jamais « ["…"] ». Le pion est
+    // partagé avec toute la table : seule la classe publique y figure (cachée : « Aucune classe »).
+    subtitle: [publicClassText(cell("Classe"), cell(characterValueHeaders[characterClassChoicesIndex])), displayedMultipleValue(cell("Peuple"), "all")].filter(Boolean).join(" · "),
     portrait: cell("Portrait") || `/api/characters/portrait/${encodeURIComponent(id)}`,
     currentHp: tabletopNumber(cell("Vie actuelle"), 0, 0, 99999),
     totalHp: tabletopNumber(cell("Vie totale"), 0, 0, 99999),
@@ -5291,7 +5298,7 @@ export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   const source = await charactersSource()
   if (!source) return []
   const [{ columns, rows }, owners] = await Promise.all([
-    readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait"]),
+    readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait", characterValueHeaders[characterClassChoicesIndex]]),
     // Le joueur de chaque pion (qui peut le contrôler) vient de l'index local, relu frais dans
     // la feuille : une colonne « Joueur » gardée en mémoire à part de la colonne ID pouvait
     // dater d'avant une ligne supprimée ailleurs, et donner le pion d'un voisin.
@@ -5582,7 +5589,7 @@ export async function listCampaignMembers(campaignId: string) {
   }
   const characters = await decorateCharacters(rows.map((row) => row.character_index))
   if (!characters.length) return []
-  const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", level: "", honoraryTitle: "" }))
+  const fallback = () => characters.map((character) => ({ ...character, people: character.subtitle, classes: "", publicClasses: "", level: "", honoraryTitle: "" }))
   const source = await charactersSource()
   if (!source) return fallback()
   // This enrichment (class/level/title columns) is best-effort: the caller
@@ -5592,7 +5599,7 @@ export async function listCampaignMembers(campaignId: string) {
   // reporting an error even though the character had already been added).
   let sheet: NamedSheet
   try {
-    sheet = await readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Level", "Titre honorifique"])
+    sheet = await readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Level", "Titre honorifique", characterValueHeaders[characterClassChoicesIndex]])
   } catch (error) {
     console.error("CAMPAIGN_MEMBERS_ENRICHMENT_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return fallback()
@@ -5606,6 +5613,7 @@ export async function listCampaignMembers(campaignId: string) {
       name: (row && columns.get(row, "Nom personnage")) || character.name,
       people: (row && columns.get(row, "Peuple")) || character.subtitle,
       classes: row ? columns.get(row, "Classe") : "",
+      publicClasses: row ? publicClassText(columns.get(row, "Classe"), columns.get(row, characterValueHeaders[characterClassChoicesIndex])) : "",
       level: row ? columns.get(row, "Level") : "",
       honoraryTitle: row ? columns.get(row, "Titre honorifique") : "",
     }
@@ -5681,6 +5689,7 @@ export async function addCharacterToCampaign(mjUid: string | null, campaignId: s
     campaigns: [{ id: campaign.id, name: campaign.name, accentColor: campaign.accentColor }],
     people: sourceCharacter.subtitle,
     classes: "",
+    publicClasses: "",
     level: "",
     honoraryTitle: "",
   } satisfies CampaignMemberRecord

@@ -1,20 +1,28 @@
-# Eraser 0.1.1-alpha.169 — Les états des formes se jouent
+# Eraser 0.1.1-alpha.170 — Classe cachée, jauges d'invocation
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## États posés par une forme : niveaux et redéclenchement
+## Cacher sa classe, ou en montrer une autre
 
-Un état posé par une forme (mention **Auto**) se joue maintenant comme un état posé à la
-main :
+Sur la fiche, à côté de « Classes », un petit bouton règle ce que **les autres joueurs**
+voient de la classe du personnage :
 
-- Ses boutons de niveau restent : passer au niveau 2 déclenche les effets de ce niveau,
-  recliquer le niveau en cours les redéclenche.
-- Les boutons de dés de ses effets restent aussi.
-- Seul « retirer » est absent : c'est la forme qui le pose et l'enlève.
-- Le niveau choisi et ce que ses effets écrivent dans la fiche sont rangés avec la forme.
-  En changeant de forme, ces écritures sont défaites (sauf les effets dont « Retiré en
-  sortant de l'état » est décoché, comme les dégâts sur les points de vie actuels). Si la
-  nouvelle forme pose le même état, il garde son niveau et ses écritures.
+- **Visible** : la vraie classe.
+- **Cachée** : « Aucune classe ».
+- **Affichée comme…** : la classe de ton choix (vraie classe : Serviteuse de Khim Tay ;
+  affichée : Rôdeur).
 
-Coma et Mort, posés d'après la vie, n'ont qu'un niveau et rien à redéclencher : ils restent
-sans boutons.
+Le propriétaire, le MJ et l'admin voient toujours la vraie classe sur la fiche. Pour les
+autres joueurs, la vraie classe n'est envoyée **nulle part** : carte du personnage dans la
+campagne, profil, pions de la table de jeu, textes qui citent le personnage.
+
+Un personnage sans classe affiche désormais **« Aucune classe »** partout (au lieu de
+« Classe à choisir » ou de rien).
+
+## Invocations
+
+- Un nouveau modèle garde l'encart « Caractéristiques », mais vide.
+- Le champ « Points de vie » d'« Ajouter un champ » s'appelle maintenant **Jauge** (mana,
+  charges, rage…). La jauge mise d'office dans un nouveau modèle s'appelle « Points de vie ».
+- Seule la jauge des points de vie met une invocation à terre : une mana ou des charges à 0
+  ne la font plus tomber.

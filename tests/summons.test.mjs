@@ -99,3 +99,16 @@ test("un seul bloc de caractéristiques, vide au départ", () => {
   const old = summons.parseSummonsData({ templates: [{ id: "t", name: "Loup", fields: [{ id: "f", kind: "stats", group: "secondaire", label: "Caractéristiques secondaires", stats: [{ id: "s", name: "Armure physique", value: "3" }] }] }] });
   assert.equal(old.templates[0].fields[0].stats[0].name, "Armure physique");
 });
+
+test("une jauge libre s’appelle « Jauge » ; seule celle des points de vie met l’invocation à terre", () => {
+  assert.equal(summons.summonFieldKinds.find((kind) => kind.kind === "life").label, "Jauge");
+  assert.equal(summons.newSummonField("life").label, "Jauge");
+  assert.equal(summons.newSummonField("life", { label: "Points de vie" }).label, "Points de vie");
+  const base = { id: "i", templateId: "t", name: "Loup", color: "#fff", fields: [] };
+  const gauge = (label, current) => ({ id: label, kind: "life", label, current, max: "10" });
+  assert.equal(summons.isSummonDown({ ...base, fields: [gauge("Points de vie", "5"), gauge("Mana", "0")] }), false);
+  assert.equal(summons.isSummonDown({ ...base, fields: [gauge("Points de vie", "0"), gauge("Mana", "4")] }), true);
+  assert.equal(summons.isSummonDown({ ...base, fields: [gauge("PV", "0")] }), true);
+  assert.equal(summons.isSummonDown({ ...base, fields: [gauge("Charges", "0")] }), false);
+  assert.equal(summons.summonLifeField({ ...base, fields: [gauge("Mana", "1"), gauge("Vie", "3")] }).label, "Vie");
+});

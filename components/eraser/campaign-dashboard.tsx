@@ -1,5 +1,6 @@
 "use client"
 
+import { NO_CLASS } from "@/lib/class-visibility"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
@@ -246,7 +247,7 @@ export function CampaignDashboard({
               const people = parseListCell(character.people).entries.join(" · ")
               const classes = parseListCell(character.classes).entries.join(" · ")
               const honoraryTitle = parseListCell(character.honoraryTitle).selected
-              const classAndLevel = [classes, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
+              const classAndLevel = [classes || NO_CLASS, character.level ? `Niveau ${character.level}` : ""].filter(Boolean).join(" · ")
               return <article key={character.id} className="group relative grid min-w-0 grid-cols-[6.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md"><div className="relative min-h-36 bg-muted"><div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-10 text-primary/20" /></div><img src={`/api/characters/portrait/${encodeURIComponent(character.id)}`} alt={`Portrait de ${character.name}`} loading="lazy" decoding="async" className="absolute inset-0 size-full object-cover transition duration-300 group-hover:scale-[1.025]" onError={(event) => { event.currentTarget.style.display = "none" }} /></div><div className="min-w-0 p-4 pr-11"><h3 className="font-display text-xl font-semibold leading-tight">{character.name}{character.playerName && <span className="font-sans text-sm font-normal text-muted-foreground"> • {character.playerName}</span>}</h3>{honoraryTitle && <p className="mt-1 text-sm font-medium leading-snug" style={{ color: campaign.accentColor }}>{honoraryTitle}</p>}{classAndLevel && <p className="mt-3 text-sm font-semibold leading-snug text-foreground/80">{classAndLevel}</p>}{people && <p className="mt-1 text-sm leading-snug text-muted-foreground">{people}</p>}</div><div className="absolute right-2 top-2 flex flex-col gap-1">{canOpen && <Button asChild size="icon-sm" variant="ghost" aria-label={`Ouvrir la fiche de ${character.name}`} title="Ouvrir la fiche"><Link href={`/personnage/${encodeURIComponent(character.id)}`} prefetch={false}><ArrowUpRight /></Link></Button>}{canManage && <Button type="button" size="icon-sm" variant="ghost" className="text-destructive hover:bg-destructive/10 hover:text-destructive" aria-label={`Retirer ${character.name} de la campagne`} title="Retirer de la campagne" onClick={() => setRemoveTarget(character)}><Trash2 /></Button>}</div></article>
             }) : <p className="text-sm text-muted-foreground">Aucun personnage dans cette campagne.</p>}
           </div>

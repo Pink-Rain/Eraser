@@ -1,5 +1,7 @@
 "use client"
 
+import { NO_CLASS } from "@/lib/class-visibility"
+import { displayedMultipleValue } from "@/lib/multiple-values"
 import { useState } from "react"
 import { ArrowUpRight, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
 import Link from "next/link"
@@ -39,7 +41,7 @@ function RenameSessionDialog({ session, onClose, onRename }: { session: Campaign
 }
 
 function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pending: boolean; onRemove: () => void }) {
-  const classAndLevel = [member.classes, member.level ? `Niveau ${member.level}` : ""].filter(Boolean).join(" · ")
+  const classAndLevel = [displayedMultipleValue(member.classes, "all") || NO_CLASS, member.level ? `Niveau ${member.level}` : ""].filter(Boolean).join(" · ")
   return <article className="group relative grid min-w-0 grid-cols-[5.5rem_minmax(0,1fr)] overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
     <div className="relative min-h-28 bg-muted">
       <div className="absolute inset-0 grid place-items-center"><CircleUserRound className="size-9 text-primary/20" /></div>
