@@ -865,7 +865,7 @@ app.whenReady().then(async () => {
     // Le statut Discord « Eraser - JDR » : jamais pendant le test d'installation, et un
     // échec (Discord fermé) ne gêne en rien l'ouverture d'Eraser.
     if (!process.env.ERASER_UI_SMOKE_RESULT) {
-      try { discordPresence.startDiscordPresence() } catch (error) { logLine(`[discord] ${error instanceof Error ? error.message : error}`) }
+      try { discordPresence.startDiscordPresence({ log: logLine }) } catch (error) { logLine(`[discord] ${error instanceof Error ? error.message : error}`) }
     }
     await runInstalledUiSmoke(url)
     setTimeout(() => void prepareUpdates(), 10_000)

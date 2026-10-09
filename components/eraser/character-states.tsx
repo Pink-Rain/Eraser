@@ -29,7 +29,7 @@ function stateColor(catalog: StatesCatalog, state: CharacterState, definition: S
 /** Le résultat d'un effet lancé depuis la fiche : réussi ou non, le détail, de quoi annuler. */
 export type StateRollOutcome = { hit: boolean; lines: string[]; undo?: () => void }
 
-export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded, error, onChange, onRoll, disabled = false }: {
+export function CharacterStatesPanel({ states, autoStates = [], autoSources = {}, catalog, loaded, error, onChange, onRoll, disabled = false }: {
   states: CharacterState[]
   /** Coma, Mort : posés d'après la vie, ni retirables ni réglables à la main. */
   autoStates?: CharacterState[]
@@ -40,6 +40,8 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
   /** Lance un effet (jet, dés) et écrit son résultat dans la fiche. */
   /** Lance un effet de cet état et l'écrit dans la fiche ; `state` : ce qui l'a écrit, retiré avec lui. */
   onRoll?: (effect: StateEffect, state: CharacterState) => StateRollOutcome
+  /** D'où vient un état posé tout seul (nom replié → « Posé par Forme : Possédée ») ; à défaut, la vie. */
+  autoSources?: Record<string, string>
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -130,7 +132,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
           <div className="group flex flex-wrap items-center gap-x-2 gap-y-1 rounded-xl border border-l-4 bg-background/50 px-2 py-1.5" style={{ borderLeftColor: color }}>
             <span className="min-w-[min(min-content,100%)] flex-1 basis-16 break-words text-xs font-semibold leading-tight" style={{ color }}>{state.name}</span>
             <span className="ml-auto flex shrink-0 items-center gap-2">
-            {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title="Posé tout seul d’après les points de vie">Auto</span>}
+            {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title={autoSources[foldName(state.name)] ?? "Posé tout seul d’après les points de vie"}>Auto</span>}
             {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
             {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect, state) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
             {!automatic && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>

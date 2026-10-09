@@ -25,6 +25,15 @@ let retryTimer = null
 let stopped = false
 let activity = null
 const startedAt = Date.now()
+/** Le journal d'Eraser (eraser-startup.log) : ce qui se passe avec Discord, pour comprendre un statut absent. */
+let log = () => {}
+/** Le dernier constat écrit, pour ne pas répéter « Discord introuvable » toutes les minutes. */
+let lastNote = ""
+function note(message) {
+  if (message === lastNote) return
+  lastNote = message
+  try { log(`[discord] ${message}`) } catch { /* journal indisponible */ }
+}
 
 function pipePath(index) {
   if (process.platform === "win32") return `\\\\?\\pipe\\discord-ipc-${index}`
@@ -51,8 +60,13 @@ function connectTo(index) {
 
 async function openSocket() {
   for (let index = 0; index < 10; index += 1) {
-    try { return await connectTo(index) } catch { /* canal suivant */ }
+    try {
+      const client = await connectTo(index)
+      note(`connexion au canal discord-ipc-${index}`)
+      return client
+    } catch { /* canal suivant */ }
   }
+  note("Discord introuvable sur cet ordinateur (aucun canal discord-ipc ouvert) : nouvel essai chaque minute")
   return null
 }
 
@@ -87,7 +101,17 @@ async function connect() {
       try { message = JSON.parse(body) } catch { /* trame illisible : ignorée */ }
       if (opcode === 3) { try { client.write(frame(4, message ?? {})) } catch { /* ignoré */ } continue }
       // Discord est prêt : l'activité peut partir.
-      if (message?.evt === "READY") sendActivity()
+      if (message?.evt === "READY") {
+        const user = message.data?.user
+        note(`Discord prêt${user ? ` (compte ${user.global_name || user.username || user.id})` : ""}, envoi du statut « Eraser - JDR »`)
+        sendActivity()
+      } else if (message?.evt === "ERROR") {
+        note(`Discord refuse : ${message.data?.message ?? "erreur sans détail"} (code ${message.data?.code ?? "?"})`)
+      } else if (message?.cmd === "SET_ACTIVITY") {
+        note("statut « Eraser - JDR » accepté par Discord")
+      } else if (opcode === 2) {
+        note(`Discord ferme la connexion : ${message?.message ?? "sans raison donnée"} (code ${message?.code ?? "?"})`)
+      }
     }
   })
   const drop = () => {
@@ -100,9 +124,10 @@ async function connect() {
   try { client.write(frame(0, { v: 1, client_id: DISCORD_CLIENT_ID })) } catch { drop() }
 }
 
-/** Montre « Eraser - JDR » dans le statut Discord tant qu'Eraser est ouvert. */
-function startDiscordPresence() {
+/** Montre « Eraser - JDR » dans le statut Discord tant qu'Eraser est ouvert. `options.log` : le journal d'Eraser. */
+function startDiscordPresence(options = {}) {
   stopped = false
+  if (typeof options.log === "function") log = options.log
   activity = {
     details: "Carnet de campagne",
     timestamps: { start: Math.floor(startedAt / 1000) },

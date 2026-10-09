@@ -1,24 +1,26 @@
-# Eraser 0.1.1-alpha.167 — Tirage mixte, suppression visible, aides générales
+# Eraser 0.1.1-alpha.168 — Des formes qui posent des états
 
-Cette version arrive par la mise à jour sans réinstallation.
+Cette version passe par l'installateur, en mode silencieux : l'enveloppe Windows change
+(journal Discord).
 
-## Deck : tirer au hasard ou choisir
+## Une forme peut poser des états
 
-Nouveau mode de **Tirage** : **« Au hasard ou au choix »**. La fiche montre deux boutons :
-« Piocher » tire une carte au hasard, « Choisir » ouvre la pioche pour prendre la carte
-voulue. La colonne « Tirage » de l'onglet Decks l'écrit « Au hasard ou au choix ».
+Dans l'éditeur de formes, chaque forme a maintenant **« États posés par cette forme »** :
+des états de l'Index des états (niveau 1 ou 2), posés tout seuls tant que la forme est
+active. Ils partent quand on change de forme, et ceux de la nouvelle forme arrivent.
 
-## Supprimer une spécificité
+- Sur la fiche, ils apparaissent dans les États avec la mention **Auto**. Le survol dit
+  quelle forme les pose. Le joueur ne peut ni les retirer ni changer leur niveau à la main.
+- Leurs effets temporaires, couleurs, images et FX s'appliquent comme pour un état posé à
+  la main, et s'ajoutent aux effets propres de la forme.
+- Un état déjà posé à la main reste celui du joueur.
+- Nouvelle colonne **« États »** à droite de l'onglet Formes (« Effrayé », « Effrayé :
+  niveau 2 », un par ligne).
 
-- Pendant la suppression, le bouton affiche « Suppression dans Google Sheets… » et les
-  boutons sont bloqués. Avant, rien ne bougeait pendant que Google travaillait.
-- Si Google ne répond pas en une minute, un message le dit au lieu d'attendre sans fin.
-- Une spécificité déjà retirée à la main dans Google Sheets se supprime sans erreur.
+Les effets de forme acceptent aussi des formules plus longues (jusqu'à 200 caractères).
 
-## Les aides des spécificités
+## Discord : un journal pour comprendre
 
-Les « Comment remplir ? » et les « ? » ne parlent plus d'aucune classe en particulier. Ils
-décrivent tout ce que chaque outil permet (ressource qu'on dépense ou qu'on accumule,
-reflet de la fiche, charges, bonus temporaire, valeur propre à une forme, postures, bonus
-proportionnels, plafonds, cartes à usage unique, familles de cartes…) et comment combiner
-les outils entre eux.
+Eraser note dans son journal (`%APPDATA%/Eraser/logs/eraser-startup.log`, lignes
+`[discord]`) ce qui se passe avec Discord : canal trouvé ou non, compte Discord connecté,
+statut accepté ou refusé, et pourquoi.

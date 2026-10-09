@@ -192,6 +192,9 @@ export const formHelp = {
     <Recipe title="Une ressource qui n’existe que dans une forme">
       <p>Crée la forme, puis une <b>jauge</b> avec cette forme cochée et « Revenir à la valeur de départ en quittant ces formes ».</p>
     </Recipe>
+    <Recipe title="Une forme qui pose un état">
+      <p>Dans « États posés par cette forme », ajoute un état de l’Index des états : il est posé tant que la forme est active, et part au changement de forme. Couleurs, FX et effets de l’état compris.</p>
+    </Recipe>
     <Recipe title="Plusieurs choix indépendants">
       <p>Plusieurs groupes pour la même classe (une posture <b>et</b> un élément, par exemple) : chacun a sa forme active, et leurs effets s’additionnent.</p>
     </Recipe>
@@ -218,6 +221,16 @@ export const formHelp = {
     <p>Les puces <b>« Proportionnel à »</b> transforment le changement que tu viens de taper : <K>2</K>, puis un clic sur une puce, donne <K>{"+{…} * 2"}</K>.</p>
     <p>Une formule lit la fiche <b>avec</b> les jauges qui s’ajoutent à une valeur, mais <b>sans</b> les effets des formes, pour éviter qu’un effet compte sur lui-même.</p>
     <p>Sous le champ, l’exemple calcule l’effet avec les jauges à 3. Une ligne orange : le changement n’est pas compris.</p>
+  </>,
+  states: <>
+    <p>Des états de l’<b>Index des états</b> que la forme <b>pose toute seule</b> tant qu’elle est active. En changeant de forme, ils partent, et ceux de la nouvelle forme arrivent.</p>
+    <ul>
+      <li>Sur la fiche, ils apparaissent dans les États avec la mention <b>Auto</b> : le joueur ne peut ni les retirer ni changer leur niveau à la main.</li>
+      <li>Leurs effets temporaires (+10, =100, ≥1), leurs couleurs, images et FX s’appliquent comme pour un état posé à la main.</li>
+      <li>Pour un état à deux niveaux, choisis <b>niv. 1</b> ou <b>niv. 2</b>.</li>
+      <li>Un état déjà posé à la main reste celui du joueur (avec son niveau à lui).</li>
+    </ul>
+    <p>C’est le moyen de réutiliser un état existant (sa description, ses effets, ses FX) au lieu de recopier ses effets dans la forme. Les deux se cumulent : effets de la forme + effets de ses états.</p>
   </>,
   description: <><p>Ce que fait la forme en plus de ses effets chiffrés : règles, conditions pour en changer, durée… Elle s’affiche au survol du bouton de la forme. <K>{"{"}</K> cite une ligne d’index.</p></>,
 }

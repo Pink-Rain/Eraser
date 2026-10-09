@@ -16,10 +16,12 @@ import { operationLabel, parseValueChange, type ValueOperation } from "@/lib/sta
 export const FORMS_TAB = "Formes"
 
 export type FormEffect = { target: string; change: string }
-export type ClassForm = { id: string; name: string; color: string; isDefault: boolean; effects: FormEffect[]; description: string; order: number }
+/** Un état de l'Index des états posé par la forme tant qu'elle est active, à ce niveau. */
+export type FormStateLink = { name: string; level: 1 | 2 }
+export type ClassForm = { id: string; name: string; color: string; isDefault: boolean; effects: FormEffect[]; states: FormStateLink[]; description: string; order: number }
 export type ClassFormGroup = { id: string; classId: string; className: string; name: string; placement: GaugePlacement; forms: ClassForm[]; order: number }
 
-export const FORM_HEADERS = ["ID", "Groupe ID", "Groupe", "Classe", "Nom", "Couleur", "Par défaut", "Effets", "Description", "Emplacement", "Ordre", "Classe ID"] as const
+export const FORM_HEADERS = ["ID", "Groupe ID", "Groupe", "Classe", "Nom", "Couleur", "Par défaut", "Effets", "Description", "Emplacement", "Ordre", "Classe ID", "États"] as const
 export type FormHeader = (typeof FORM_HEADERS)[number]
 export const FORM_RICH_HEADERS = ["Description"] as const satisfies readonly FormHeader[]
 
@@ -37,6 +39,19 @@ export function parseFormEffects(raw: string): FormEffect[] {
   }).slice(0, 30)
 }
 export const serializeFormEffects = (effects: FormEffect[]) => effects.filter((effect) => effect.target.trim() && effect.change.trim()).map((effect) => `${effect.target.trim()} : ${effect.change.trim()}`).join("\n")
+
+/** « Effrayé », « Effrayé : niveau 2 », un par ligne (ou séparés par « ; »). */
+export function parseFormStates(raw: string): FormStateLink[] {
+  const seen = new Set<string>()
+  return raw.split(/\n|;/).flatMap((line): FormStateLink[] => {
+    const match = line.trim().match(/^(.+?)(?:\s*:\s*(?:niv(?:eau)?\.?\s*)?([12]))?\s*$/i)
+    const name = match?.[1].trim() ?? ""
+    if (!name || seen.has(fold(name))) return []
+    seen.add(fold(name))
+    return [{ name, level: match?.[2] === "2" ? 2 : 1 }]
+  }).slice(0, 12)
+}
+export const serializeFormStates = (states: FormStateLink[]) => states.filter((state) => state.name.trim()).map((state) => state.level === 2 ? `${state.name.trim()} : niveau 2` : state.name.trim()).join("\n")
 
 /** Un changement qui lit la fiche ou une jauge : « +{Folie temporaire} * 2 ». */
 export const isFormulaChange = (change: string) => change.includes("{")
@@ -96,6 +111,7 @@ export function formGroupsFromRows(rows: Array<{ cell: (header: FormHeader) => s
       color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : formColors[group.forms.length % formColors.length],
       isDefault: yes(cell("Par défaut")),
       effects: parseFormEffects(cell("Effets")),
+      states: parseFormStates(cell("États")),
       description: plainTextOf(description) ? description : "",
       order: Number.isFinite(order) ? order : group.forms.length,
     })
@@ -120,6 +136,7 @@ export function formGroupRows(group: ClassFormGroup): Array<Record<FormHeader, s
     "Emplacement": placement,
     "Ordre": String(index),
     "Classe ID": group.classId,
+    "États": serializeFormStates(form.states),
   }))
 }
 
@@ -135,9 +152,10 @@ export function sanitizeFormGroup(raw: unknown, newId: () => string): ClassFormG
     const name = text(form.name).trim()
     if (!name) return []
     const color = text(form.color, 16)
-    const effects = Array.isArray(form.effects) ? form.effects.slice(0, 30).flatMap((effect) => effect && typeof effect === "object" ? [{ target: text((effect as FormEffect).target).trim(), change: text((effect as FormEffect).change, 40).trim() }] : []).filter((effect) => effect.target && effect.change) : []
+    const effects = Array.isArray(form.effects) ? form.effects.slice(0, 30).flatMap((effect) => effect && typeof effect === "object" ? [{ target: text((effect as FormEffect).target).trim(), change: text((effect as FormEffect).change, 200).trim() }] : []).filter((effect) => effect.target && effect.change) : []
     const id = text(form.id, 40)
-    return [{ id: /^FOR-[A-Z0-9]{4,16}$/.test(id) ? id : `FOR-${newId()}`, name, color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : formColors[index % formColors.length], isDefault: form.isDefault === true, effects, description: text(form.description, 20_000), order: index }]
+    const states = parseFormStates(serializeFormStates(Array.isArray(form.states) ? form.states.slice(0, 12).flatMap((state) => state && typeof state === "object" ? [{ name: text((state as FormStateLink).name).replace(/[\n;:]/g, " ").replace(/\s+/g, " ").trim(), level: (state as FormStateLink).level === 2 ? 2 as const : 1 as const }] : []) : []))
+    return [{ id: /^FOR-[A-Z0-9]{4,16}$/.test(id) ? id : `FOR-${newId()}`, name, color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : formColors[index % formColors.length], isDefault: form.isDefault === true, effects, states, description: text(form.description, 20_000), order: index }]
   }) : []
   if (!classId || !forms.length) return null
   if (!forms.some((form) => form.isDefault)) forms[0].isDefault = true
@@ -158,6 +176,22 @@ export function formGroupsOfClass(groups: ClassFormGroup[], classItem: { id: str
 /** La forme active d'un groupe : celle choisie par le joueur, sinon celle par défaut. */
 export function activeForm(group: ClassFormGroup, chosen: string | undefined) {
   return group.forms.find((form) => form.id === chosen) ?? group.forms.find((form) => form.isDefault) ?? group.forms[0]
+}
+
+/**
+ * Les états que posent les formes actives : chacun avec la forme qui le pose (pour la
+ * fiche, « Posé par Forme : Possédée »). Un état cité deux fois garde son plus haut niveau.
+ */
+export function formStatesOf(groups: ClassFormGroup[], chosen: Record<string, string>) {
+  const found = new Map<string, FormStateLink & { source: string }>()
+  for (const group of groups) {
+    const form = activeForm(group, chosen[group.id])
+    for (const state of form?.states ?? []) {
+      const previous = found.get(fold(state.name))
+      if (!previous || previous.level < state.level) found.set(fold(state.name), { ...state, source: `${group.name} : ${form!.name}` })
+    }
+  }
+  return [...found.values()]
 }
 
 /** La forme choisie, d'après la case des sorts choisis de la fiche. */

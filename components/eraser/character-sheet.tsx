@@ -18,7 +18,7 @@ import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/charac
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
 import { formulaValues, gaugeContributions, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
-import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, withChosenForm, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
+import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, formStatesOf, withChosenForm, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
 import { ClassDeckPanel } from "@/components/eraser/class-deck-panel"
 import { cardsOfClass, deckStatesOf, decksOfClass, withDeckState, type DeckState } from "@/lib/class-decks"
@@ -635,6 +635,15 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const specificClasses = useMemo(() => selectedCharacterClasses(values[2] || "", availableClasses), [availableClasses, values])
   const characterFormGroups = useMemo(() => specificClasses.flatMap((item) => formGroupsOfClass(allFormGroups, item)), [allFormGroups, specificClasses])
   const chosenForms = useMemo(() => chosenFormsOf(values[characterClassChoicesIndex] || ""), [values])
+  // Les états que posent les formes actives : posés seuls, comme Coma et Mort, jamais
+  // enregistrés ; ils partent quand la forme change. Un état déjà posé à la main reste le sien.
+  const formStateLinks = useMemo(() => formStatesOf(characterFormGroups, chosenForms), [characterFormGroups, chosenForms])
+  const formStates = useMemo<CharacterState[]>(() => formStateLinks.flatMap((link) => {
+    if (postedStates.some((posted) => foldName(posted.name) === foldName(link.name))) return []
+    const definition = statesCatalog.catalog.states.find((candidate) => foldName(candidate.name) === foldName(link.name))
+    return definition ? [{ id: definition.id, name: definition.name, level: Math.min(link.level, definition.levels) as 1 | 2 }] : []
+  }), [formStateLinks, postedStates, statesCatalog.catalog])
+  const formStateSources = useMemo(() => Object.fromEntries(formStateLinks.map((link) => [foldName(link.name), `Posé par ${link.source}`])), [formStateLinks])
   const characterGauges = useMemo(() => specificClasses.flatMap((item) => gaugesOfClass(allClassGauges, item)), [allClassGauges, specificClasses])
   const gaugeStates = useMemo(() => gaugeStatesOf(values[characterClassChoicesIndex] || ""), [values])
   /** Les valeurs de la fiche telles qu'elles s'affichent avec ces modificateurs, pour les formules. */
@@ -654,7 +663,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     ])
   }, [catalog, layout, modifierTargets, values])
   // Objets et états posés à la main : la base sur laquelle les formes s'ajoutent.
-  const postedIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateContributions(statesCatalog.catalog, postedStates, targetOfName)), [inventory, postedStates, statesCatalog.catalog, targetOfName])
+  const postedIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateContributions(statesCatalog.catalog, [...postedStates, ...formStates], targetOfName)), [formStates, inventory, postedStates, statesCatalog.catalog, targetOfName])
   const activeFormNames = useMemo(() => characterFormGroups.flatMap((group) => activeForm(group, chosenForms[group.id])?.name ?? []), [characterFormGroups, chosenForms])
   /**
    * Les jauges d'abord, les formes ensuite : pas de boucle entre les deux. Une jauge
@@ -682,12 +691,12 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     )
     const named = (name: string) => statesCatalog.catalog.states.find((definition) => foldName(definition.name) === foldName(name))
     const definition = state === "dead" ? named("Mort") : state === "down" ? named("Coma") : undefined
-    const auto: CharacterState[] = definition && !postedStates.some((posted) => foldName(posted.name) === foldName(definition.name)) ? [{ id: definition.id, name: definition.name, level: 1 }] : []
+    const auto: CharacterState[] = definition && ![...postedStates, ...formStates].some((posted) => foldName(posted.name) === foldName(definition.name)) ? [{ id: definition.id, name: definition.name, level: 1 }] : []
     // L'ancien filtre (gris, rouge) reste tant que l'état n'existe pas ou n'a aucun effet.
     const styledByState = Boolean(definition && definition.effects[0].length > 0)
     return { state, auto, styledByState }
-  }, [formChanges, modifierTargets, postedIndex, postedStates, statesCatalog.catalog, values])
-  const characterStates = useMemo(() => [...postedStates, ...autoLife.auto], [autoLife.auto, postedStates])
+  }, [formChanges, formStates, modifierTargets, postedIndex, postedStates, statesCatalog.catalog, values])
+  const characterStates = useMemo(() => [...postedStates, ...formStates, ...autoLife.auto], [autoLife.auto, formStates, postedStates])
   const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, targetOfName), [characterStates, statesCatalog.catalog, targetOfName])
   const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), [...stateChanges, ...formChanges]), [formChanges, inventory, stateChanges])
   // Les objets rangés par la compétence qu'ils utilisent (colonne Compétence de chaque exemplaire).
@@ -1570,7 +1579,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void changePortrait(file) }} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
-        <CharacterStatesPanel states={postedStates} autoStates={autoLife.auto} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
+        <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">

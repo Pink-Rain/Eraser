@@ -9,7 +9,9 @@ import { CardIconField, ClassDeckPanel, DeckCardView } from "@/components/eraser
 import { deckHelp, formHelp, gaugeHelp, HelpButton, specificsOverviewHelp } from "@/components/eraser/class-specifics-help"
 import { cardsOfClass, deckColors, deckDrawModes, decksOfClass, emptyDeck, type ClassDeck, type DeckCard, type DeckState } from "@/lib/class-decks"
 import { SuggestInput } from "@/components/eraser/suggest-input"
-import { emptyFormGroup, formColors, formEffectOperation, formEffectText, formGroupsOfClass, isFormulaChange, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
+import { useStatesCatalog } from "@/components/eraser/index-references"
+import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
+import { emptyFormGroup, formColors, formEffectOperation, formEffectText, formGroupsOfClass, isFormulaChange, type ClassForm, type ClassFormGroup, type FormStateLink } from "@/lib/class-forms"
 import type { CharacterCatalog } from "@/lib/character-catalog"
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -91,8 +93,8 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
   function newFormGroup() {
     const group = emptyFormGroup(classId, className, formGroups.length)
     setEditingForms({ ...group, forms: [
-      { id: "", name: "Forme de base", color: formColors[0], isDefault: true, effects: [], description: "", order: 0 },
-      { id: "", name: "Seconde forme", color: formColors[2], isDefault: false, effects: [], description: "", order: 1 },
+      { id: "", name: "Forme de base", color: formColors[0], isDefault: true, effects: [], states: [], description: "", order: 0 },
+      { id: "", name: "Seconde forme", color: formColors[2], isDefault: false, effects: [], states: [], description: "", order: 1 },
     ] })
   }
 
@@ -403,7 +405,7 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
   const [error, setError] = useState("")
   const setForm = (index: number, patch: Partial<ClassForm>) => setGroup((current) => ({ ...current, forms: current.forms.map((form, position) => position === index ? { ...form, ...patch } : patch.isDefault ? { ...form, isDefault: false } : form) }))
   function addForm() {
-    setGroup((current) => ({ ...current, forms: [...current.forms, { id: "", name: "", color: formColors[current.forms.length % formColors.length], isDefault: false, effects: [], description: "", order: current.forms.length }] }))
+    setGroup((current) => ({ ...current, forms: [...current.forms, { id: "", name: "", color: formColors[current.forms.length % formColors.length], isDefault: false, effects: [], states: [], description: "", order: current.forms.length }] }))
     setKeys((current) => [...current, newFormKey()])
   }
   function removeForm(index: number) {
@@ -481,6 +483,8 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
                 </div>
               </div>
 
+              <FormStatesField value={form.states} color={form.color} onChange={(states) => setForm(index, { states })} />
+
               <div className="grid gap-1.5"><p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">Description <span className="font-normal">(au survol sur la fiche)</span><HelpButton title="Description de la forme">{formHelp.description}</HelpButton></p><RichTextField value={form.description} onCommit={(html) => setForm(index, { description: html })} ariaLabel={`Description de la forme ${index + 1}`} placeholder="Ce que change cette forme… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></div>
             </section>)}
             {group.forms.length < 12 && <Button type="button" variant="outline" size="sm" className="border-dashed" onClick={addForm}><Plus />Ajouter une forme</Button>}
@@ -502,6 +506,50 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
       </div>
     </DialogContent>
   </Dialog>
+}
+
+/**
+ * Les états de l'Index des états qu'une forme pose tant qu'elle est active : une pastille
+ * par état (niveau 1 ou 2, retirer), et « Ajouter un état » qui cherche dans l'index.
+ */
+function FormStatesField({ value, color, onChange }: { value: FormStateLink[]; color: string; onChange: (states: FormStateLink[]) => void }) {
+  const { catalog, loaded, error } = useStatesCatalog()
+  const [open, setOpen] = useState(false)
+  const [query, setQuery] = useState("")
+  const taken = new Set(value.map((state) => fold(state.name)))
+  const shown = catalog.states.filter((state) => !taken.has(fold(state.name)) && (!query.trim() || fold(`${state.name} ${state.type}`).includes(fold(query.trim()))))
+  const byType = [...shown.reduce((map, state) => map.set(state.type || "Autres", [...(map.get(state.type || "Autres") ?? []), state]), new Map<string, typeof shown>()).entries()]
+  const levelsOf = (name: string) => catalog.states.find((state) => fold(state.name) === fold(name))?.levels ?? 2
+  return <div className="space-y-1.5">
+    <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">États posés par cette forme<HelpButton title="États posés par une forme">{formHelp.states}</HelpButton></p>
+    <div className="flex flex-wrap items-center gap-1.5">
+      {value.map((state) => {
+        const known = !loaded || catalog.states.some((item) => fold(item.name) === fold(state.name))
+        return <span key={state.name} className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: `${color}66`, backgroundColor: `${color}12` }} title={known ? undefined : "Cet état n’est pas (ou plus) dans l’Index des états"}>
+          <span className={known ? "font-medium" : "text-amber-500 line-through"}>{state.name}</span>
+          {levelsOf(state.name) === 2 && <span className="flex overflow-hidden rounded-full border" role="group" aria-label={`Niveau de ${state.name}`}>
+            {([1, 2] as const).map((level) => <button key={level} type="button" aria-pressed={state.level === level} onClick={() => onChange(value.map((item) => item.name === state.name ? { ...item, level } : item))} className={`px-1.5 text-[10px] ${state.level === level ? "bg-primary/20 font-semibold text-primary" : "text-muted-foreground hover:bg-muted"}`}>niv. {level}</button>)}
+          </span>}
+          <button type="button" onClick={() => onChange(value.filter((item) => item.name !== state.name))} className="rounded-full text-muted-foreground hover:text-destructive" aria-label={`Ne plus poser ${state.name}`}><X className="size-3" /></button>
+        </span>
+      })}
+      <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
+        <PopoverTrigger asChild><Button type="button" variant="ghost" size="xs" disabled={value.length >= 12}><Plus />Ajouter un état</Button></PopoverTrigger>
+        {open && <PopoverContent align="start" className="w-72 p-2">
+          <div className="relative mb-2"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Chercher un état…" className="h-8 pl-8 text-xs" /></div>
+          <div className="max-h-64 overflow-y-auto">
+            {!loaded && !error && <p className="flex items-center justify-center gap-2 py-4 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Lecture de l’Index des états…</p>}
+            {error && <p className="py-4 text-center text-xs text-destructive">{error}</p>}
+            {loaded && !byType.length && <p className="py-4 text-center text-xs text-muted-foreground">{catalog.states.length ? "Aucun état de ce nom." : "L’Index des états est vide."}</p>}
+            {byType.map(([type, list]) => <div key={type} className="mb-1.5">
+              <p className="px-1.5 pb-0.5 text-[9px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{type}</p>
+              {list.map((state) => <button key={state.id} type="button" onClick={() => { onChange([...value, { name: state.name, level: 1 }]); setOpen(false); setQuery("") }} className="flex w-full items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs hover:bg-muted"><span className="min-w-0 flex-1 truncate font-medium">{state.name}</span>{state.levels === 2 && <span className="text-[9px] text-muted-foreground">2 niv.</span>}</button>)}
+            </div>)}
+          </div>
+        </PopoverContent>}
+      </Popover>
+    </div>
+  </div>
 }
 
 /* ───────────────────────────── Deck ───────────────────────────── */

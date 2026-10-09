@@ -116,3 +116,24 @@ test("La folie temporaire est de la Folie : la jauge s'ajoute à Folie, les form
   const changes = forms.formContributions([group], { [group.id]: group.forms[1].id }, targetOf, total);
   assert.deepEqual(changes.map((change) => [change.target, change.amount]), [["carac:Force", 14]]);
 });
+
+test("Une forme pose des états : colonne « États », et seuls ceux de la forme active comptent", () => {
+  assert.deepEqual(forms.parseFormStates("Effrayé\nRage : niveau 2; Brume : 2\neffrayé\n  "), [{ name: "Effrayé", level: 1 }, { name: "Rage", level: 2 }, { name: "Brume", level: 2 }]);
+  assert.equal(forms.serializeFormStates([{ name: "Effrayé", level: 1 }, { name: "Rage", level: 2 }]), "Effrayé\nRage : niveau 2");
+  const group = forms.sanitizeFormGroup({
+    classId: "CLA-1", className: "Classe", name: "Posture",
+    forms: [
+      { name: "Calme", isDefault: true, effects: [], states: [] },
+      { name: "Furie", effects: [], states: [{ name: "Rage", level: 2 }, { name: "Rage", level: 1 }, { name: "Effrayé", level: 7 }, { name: "Nom; piégé : 2", level: 1 }] },
+    ],
+  }, newId);
+  assert.deepEqual(group.forms[1].states, [{ name: "Rage", level: 2 }, { name: "Effrayé", level: 1 }, { name: "Nom piégé 2", level: 1 }]);
+  const rows = forms.formGroupRows(group);
+  assert.equal(rows[1]["États"], "Rage : niveau 2\nEffrayé\nNom piégé 2");
+  const reread = forms.formGroupsFromRows(rows.map((cells) => ({ cell: (header) => cells[header] ?? "" })));
+  assert.deepEqual(reread[0].forms[1].states, group.forms[1].states);
+  // Forme de départ : aucun état ; forme « Furie » choisie : ses états, avec leur source.
+  assert.deepEqual(forms.formStatesOf([group], {}), []);
+  const active = forms.formStatesOf([group], { [group.id]: group.forms[1].id });
+  assert.deepEqual(active.map((state) => [state.name, state.level, state.source]), [["Rage", 2, "Posture : Furie"], ["Effrayé", 1, "Posture : Furie"], ["Nom piégé 2", 1, "Posture : Furie"]]);
+});
