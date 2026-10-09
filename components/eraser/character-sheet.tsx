@@ -1233,7 +1233,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   const summonSuggestions = useMemo(() => ({
     principals: catalog.characteristics.filter((item) => item.kind === "principale").map((item) => item.name),
-    characteristics: catalog.characteristics.map((item) => item.name),
+    secondaries: catalog.characteristics.filter((item) => item.kind === "secondaire").map((item) => item.name),
     skills: catalog.skills.map((skill) => skill.name),
   }), [catalog])
   const [removingTab, setRemovingTab] = useState<CharacterTab | null>(null)

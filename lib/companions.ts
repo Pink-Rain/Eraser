@@ -25,12 +25,20 @@ export type CompanionStats = {
   charisma: number
 }
 
+/**
+ * Les charges qui restent à ses sorts, par nom de sort replié (sans accents ni majuscules) ;
+ * un sort absent a toutes ses charges. Gardées par le joueur, dans l'onglet : la fiche d'un
+ * PNJ n'est jamais touchée.
+ */
+export type SpellCharges = Record<string, number>
+
 export type NpcCompanion = {
   id: string
   kind: "npc"
   npcId: string
   /** La campagne du PNJ, au moment où il a été pris comme compagnon. */
   campaignId: string
+  spellCharges?: SpellCharges
 }
 
 export type CreatureCompanion = CompanionStats & {
@@ -52,6 +60,7 @@ export type CreatureCompanion = CompanionStats & {
   description: string
   /** Les notes du joueur. */
   notes: string
+  spellCharges?: SpellCharges
 }
 
 export type Companion = NpcCompanion | CreatureCompanion
@@ -76,6 +85,16 @@ function text(value: unknown, limit = COMPANION_TEXT_LIMIT) {
   return typeof value === "string" ? value.slice(0, limit) : ""
 }
 
+/** Les charges restantes enregistrées ; rien (pas même un objet vide) quand aucune n'est dépensée. */
+function parseSpellCharges(raw: unknown): { spellCharges?: SpellCharges } {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return {}
+  const entries = Object.entries(raw as Record<string, unknown>).slice(0, 100).flatMap(([key, value]) => {
+    const count = Math.trunc(Number(value))
+    return key && key.length <= 200 && Number.isFinite(count) ? [[key, Math.max(0, Math.min(5, count))] as const] : []
+  })
+  return entries.length ? { spellCharges: Object.fromEntries(entries) } : {}
+}
+
 /** Les compagnons d'un onglet, tels qu'enregistrés ; une entrée illisible est écartée. */
 export function parseCompanions(raw: unknown): Companion[] {
   if (!Array.isArray(raw)) return []
@@ -88,7 +107,7 @@ export function parseCompanions(raw: unknown): Companion[] {
     seen.add(id)
     if (value.kind === "npc") {
       const npcId = text(value.npcId, 120)
-      return npcId ? [{ id, kind: "npc", npcId, campaignId: text(value.campaignId, 120) }] : []
+      return npcId ? [{ id, kind: "npc", npcId, campaignId: text(value.campaignId, 120), ...parseSpellCharges(value.spellCharges) }] : []
     }
     if (value.kind !== "creature") return []
     const stats = Object.fromEntries(statKeys.map((key) => [key, companionNumber(value[key])])) as CompanionStats
@@ -100,6 +119,7 @@ export function parseCompanions(raw: unknown): Companion[] {
       portrait: text(value.portrait, 2000), creatureType: text(value.creatureType, 200), rank: text(value.rank, 80),
       activeSpells: text(value.activeSpells), passiveSpells: text(value.passiveSpells),
       description: text(value.description, 20_000), notes: text(value.notes),
+      ...parseSpellCharges(value.spellCharges),
     }]
   })
 }

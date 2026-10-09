@@ -17,6 +17,7 @@ import {
   type CreatureCandidate,
   type CreatureCompanion,
   type NpcCandidate,
+  type SpellCharges,
 } from "@/lib/companions"
 import { isImageSource } from "@/lib/index-columns"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
@@ -178,7 +179,7 @@ type SheetFields = CompanionStats & { notes: string; activeSpells: string; passi
  * La mini-fiche d'un compagnon, la même pour un PNJ et une créature : vie, caractéristiques,
  * sorts, notes et sac à dos. Chaque case s'enregistre en la quittant.
  */
-function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, fields, description, spells, onName, onChange, onRemove, nameHint }: {
+function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, fields, description, spells, onName, onChange, onRemove, nameHint, charges, onCharge }: {
   characterId: string
   /** Les sorts que ce compagnon peut prendre (`options`), et tous ceux dont on sait montrer la fiche (`known`). */
   spells: { options: SpellOption[]; known: SpellOption[]; loading: boolean }
@@ -195,6 +196,9 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
   nameHint?: string
   onChange: (changes: Partial<SheetFields>) => Promise<void>
   onRemove: () => void
+  /** Les charges restantes de ses sorts actifs, cliquables. */
+  charges?: SpellCharges
+  onCharge: (spellKey: string, value: number) => void
 }) {
   const [backpackOpen, setBackpackOpen] = useState(false)
   const [backpackMounted, setBackpackMounted] = useState(false)
@@ -244,7 +248,7 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
 
       {/* Les sorts sont choisis dans leurs index : on voit leur fiche (effet, charges, distance). */}
       <div className="grid gap-4 rounded-xl border border-border/55 bg-background/20 p-3">
-        <SpellPicker label="Sorts actifs" icon={<Zap className="size-3.5" style={{ color }} />} value={fields.activeSpells} options={spells.options.filter((spell) => spell.category !== "passif")} known={spells.known} loading={spells.loading} onChange={(value) => void onChange({ activeSpells: value })} />
+        <SpellPicker label="Sorts actifs" icon={<Zap className="size-3.5" style={{ color }} />} value={fields.activeSpells} options={spells.options.filter((spell) => spell.category !== "passif")} known={spells.known} loading={spells.loading} onChange={(value) => void onChange({ activeSpells: value })} charges={charges} onCharge={onCharge} />
         <SpellPicker label="Sorts passifs" icon={<Sparkles className="size-3.5" style={{ color }} />} value={fields.passiveSpells} options={spells.options.filter((spell) => spell.category === "passif")} known={spells.known} loading={spells.loading} onChange={(value) => void onChange({ passiveSpells: value })} />
       </div>
 
@@ -297,6 +301,9 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
   const updateCreature = (companion: CreatureCompanion, changes: Partial<CreatureCompanion>) =>
     onChange((current) => current.map((item) => item.id === companion.id && item.kind === "creature" ? { ...item, ...changes } : item))
   const remove = (id: string) => void onChange((current) => current.filter((item) => item.id !== id))
+  // Les charges d'un sort, gardées sur le compagnon dans l'onglet (PNJ compris : sa fiche n'est pas touchée).
+  const setCharge = (companionId: string, spellKey: string, value: number) =>
+    void onChange((current) => current.map((item) => item.id === companionId ? { ...item, spellCharges: { ...item.spellCharges, [spellKey]: value } } : item))
 
   return <div className="space-y-4">
     <CompanionSearch characterId={characterId} companions={companions} onAdd={add} />
@@ -323,6 +330,8 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
             onName={(name) => updateCreature(companion, { name })}
             onChange={(changes) => updateCreature(companion, changes)}
             onRemove={() => remove(companion.id)}
+            charges={companion.spellCharges}
+            onCharge={(spellKey, value) => setCharge(companion.id, spellKey, value)}
           />
         }
         const npc = npcs[companion.npcId]
@@ -349,6 +358,8 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
           spells={npcSpells}
           onChange={({ notes, ...changes }) => save(npc.id, { ...changes, ...(notes !== undefined ? { playerNotes: notes } : {}) })}
           onRemove={() => remove(companion.id)}
+          charges={companion.spellCharges}
+          onCharge={(spellKey, value) => setCharge(companion.id, spellKey, value)}
         />
       })}
     </div>

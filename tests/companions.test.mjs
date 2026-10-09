@@ -45,6 +45,15 @@ test("Compagnons enregistrés dans les onglets : relus tels quels, les entrées 
   assert.deepEqual(companions.parseCompanions(undefined), []);
 });
 
+test("Charges des sorts d'un compagnon : gardées dans l'onglet, bornées, absentes tant qu'aucune n'est dépensée", () => {
+  const parsed = companions.parseCompanions([
+    { id: "a", kind: "npc", npcId: "PNJ-1", spellCharges: { "morsure": 1, "souffle glace": 9, "": 2, "x": "abc" } },
+    { id: "b", kind: "npc", npcId: "PNJ-2", spellCharges: {} },
+  ]);
+  assert.deepEqual(parsed[0].spellCharges, { "morsure": 1, "souffle glace": 5 });
+  assert.equal("spellCharges" in parsed[1], false);
+});
+
 test("Sac à dos d'une créature compagnon : un propriétaire à part, retrouvé depuis son identifiant", () => {
   const owner = companions.companionInventoryOwnerId("PERSO-1", "cmp-1");
   assert.equal(companions.isCompanionInventoryOwner(owner), true);

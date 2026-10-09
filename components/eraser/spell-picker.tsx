@@ -56,7 +56,7 @@ export function useSpellOptions(sources: SpellIndexKind[], endpoint?: (kind: Spe
 }
 
 /** La fiche d'un sort choisi : tout ce que dit son index, sauf les classes. */
-function SpellCard({ name, spell, showSource, loading, onRemove }: { name: string; spell?: SpellOption; showSource: boolean; loading: boolean; onRemove: () => void }) {
+function SpellCard({ name, spell, showSource, loading, onRemove, chargesLeft, onCharge }: { name: string; spell?: SpellOption; showSource: boolean; loading: boolean; onRemove: () => void; chargesLeft?: number; onCharge?: (value: number) => void }) {
   const accent = spell?.tone.background || "var(--primary)"
   return <article className="relative rounded-xl border bg-card/80 p-3 pl-4 text-sm shadow-xs" style={{ borderLeft: `3px solid ${accent}` }}>
     <button type="button" onClick={onRemove} className="absolute right-2 top-2 rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-destructive" aria-label={`Retirer ${name}`}><X className="size-3.5" /></button>
@@ -64,7 +64,7 @@ function SpellCard({ name, spell, showSource, loading, onRemove }: { name: strin
       <h4 className="font-display text-base font-semibold leading-tight">{spell?.name ?? name}</h4>
       {spell?.type && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ backgroundColor: spell.tone.background, color: spell.tone.foreground }}>{spell.type}</span>}
       {spell && showSource && <span className="text-[10px] uppercase tracking-wider text-muted-foreground">{sourceLabels[spell.source]}</span>}
-      {spell?.category === "actif" && <SpellChargeStars total={spell.charges} accent={accent} />}
+      {spell?.category === "actif" && <SpellChargeStars total={spell.charges} current={onCharge ? chargesLeft ?? spell.charges : undefined} accent={accent} interactive={Boolean(onCharge)} onChange={onCharge} />}
     </header>
     {!spell && (loading
       ? <p className="mt-1 flex items-center gap-1.5 text-xs text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Lecture de l’index des sorts…</p>
@@ -85,7 +85,11 @@ function SpellCard({ name, spell, showSource, loading, onRemove }: { name: strin
  * afficher (un sort déjà choisi dans un autre index garde sa fiche). La feuille garde
  * les noms séparés par des virgules, lisibles directement dans Sheets.
  */
-export function SpellPicker({ label, icon, value, options, known = options, loading, onChange }: { label: string; icon: ReactNode; value: string; options: SpellOption[]; known?: SpellOption[]; loading: boolean; onChange: (value: string) => void }) {
+/**
+ * `charges` / `onCharge` : les étincelles de charge deviennent cliquables (dépenser,
+ * récupérer) ; les charges restantes sont rangées par nom de sort replié (`foldName`).
+ */
+export function SpellPicker({ label, icon, value, options, known = options, loading, onChange, charges, onCharge }: { label: string; icon: ReactNode; value: string; options: SpellOption[]; known?: SpellOption[]; loading: boolean; onChange: (value: string) => void; charges?: Record<string, number>; onCharge?: (spellKey: string, value: number) => void }) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const selected = splitNames(value)
@@ -119,7 +123,7 @@ export function SpellPicker({ label, icon, value, options, known = options, load
     </div>
     {selected.length
       ? <div className="grid gap-2 md:grid-cols-2">
-          {selected.map((name) => <SpellCard key={name} name={name} spell={byName.get(foldName(name))} showSource={mixed} loading={loading && !byName.has(foldName(name))} onRemove={() => onChange(selected.filter((item) => foldName(item) !== foldName(name)).join(", "))} />)}
+          {selected.map((name) => <SpellCard key={name} name={name} spell={byName.get(foldName(name))} showSource={mixed} loading={loading && !byName.has(foldName(name))} onRemove={() => onChange(selected.filter((item) => foldName(item) !== foldName(name)).join(", "))} chargesLeft={charges?.[foldName(name)]} onCharge={onCharge && ((next) => onCharge(foldName(name), next))} />)}
         </div>
       : <p className="rounded-xl border border-dashed px-3 py-3 text-center text-xs text-muted-foreground">Aucun sort pour l’instant.</p>}
   </section>

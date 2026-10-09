@@ -4,6 +4,7 @@ import { useState, type ReactNode } from "react"
 import { ArrowDown, ArrowUp, Check, ChevronDown, ChevronUp, Copy, Crosshair, Footprints, Heart, LayoutTemplate, ListPlus, Minus, Pencil, Plus, Skull, Sparkles, Trash2, Type, Undo2, WandSparkles, X, Zap } from "lucide-react"
 
 import { InlineEdit } from "@/components/eraser/inline-edit"
+import { SuggestInput } from "@/components/eraser/suggest-input"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -32,7 +33,8 @@ import {
 /** Applique un changement à partir des invocations les plus récentes ; `false` si rien n'a pu être enregistré. */
 export type SummonsUpdate = (change: (data: SummonsData) => SummonsData) => Promise<boolean>
 
-type Suggestions = { principals: string[]; characteristics: string[]; skills: string[] }
+/** Les noms proposés : caractéristiques principales et secondaires de l'index, compétences. */
+type Suggestions = { principals: string[]; secondaries: string[]; skills: string[] }
 
 type EditorTarget =
   | { kind: "template"; template: SummonTemplate; isNew: boolean }
@@ -58,7 +60,7 @@ export function CharacterSummons({ data, onUpdate, suggestions }: { data: Summon
 
   function createTemplate() {
     const color = summonColors[data.templates.length % summonColors.length]
-    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life"), newSummonField("stats", { group: "principale", principals: suggestions.principals })] } })
+    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life"), newSummonField("stats", { principals: suggestions.principals })] } })
   }
 
   function summon(template: SummonTemplate) {
@@ -268,7 +270,6 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
   const [fields, setFields] = useState<SummonField[]>(isTemplate ? target.template.fields : target.summon.fields)
   const [saving, setSaving] = useState(false)
   const [confirmDelete, setConfirmDelete] = useState(false)
-  const listId = `summon-${isTemplate ? target.template.id : target.summon.id}`
 
   const patch = (fieldId: string, change: (field: SummonField) => SummonField) => setFields((current) => current.map((field) => field.id === fieldId ? change(field) : field))
   const move = (index: number, by: number) => setFields((current) => {
@@ -288,7 +289,11 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
   }
 
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-    <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-5xl" onInteractOutside={(event) => event.preventDefault()}>
+    <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-5xl" onInteractOutside={(event) => event.preventDefault()} onEscapeKeyDown={(event) => {
+      // Échap dans une liste de propositions ouverte ne ferme que la liste.
+      const focused = document.activeElement
+      if (focused?.getAttribute("role") === "combobox" && focused.getAttribute("aria-expanded") === "true") event.preventDefault()
+    }}>
       <DialogHeader>
         <DialogTitle>{isTemplate ? target.isNew ? "Créer un template d’invocation" : "Modifier le template" : `Modifier ${target.summon.name}`}</DialogTitle>
         <DialogDescription>{isTemplate
@@ -307,13 +312,13 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
 
           <div className="space-y-2">
             {fields.length === 0 && <p className="rounded-xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">Aucun champ pour l’instant : ajoute-en avec les boutons ci-dessous.</p>}
-            {fields.map((field, index) => <FieldEditor key={field.id} field={field} listId={listId} first={index === 0} last={index === fields.length - 1} onChange={(change) => patch(field.id, change)} onMove={(by) => move(index, by)} onRemove={() => setFields((current) => current.filter((item) => item.id !== field.id))} />)}
+            {fields.map((field, index) => <FieldEditor key={field.id} field={field} suggestions={suggestions} first={index === 0} last={index === fields.length - 1} onChange={(change) => patch(field.id, change)} onMove={(by) => move(index, by)} onRemove={() => setFields((current) => current.filter((item) => item.id !== field.id))} />)}
           </div>
 
           <div>
             <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground"><ListPlus className="size-3.5" />Ajouter un champ</p>
             <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-              {summonFieldKinds.map((kind) => <button key={kind.label} type="button" onClick={() => setFields((current) => [...current, newSummonField(kind.kind, { group: kind.group, long: kind.long, principals: suggestions.principals })])} className="flex items-start gap-2 rounded-lg border border-dashed px-2.5 py-2 text-left transition hover:border-primary/50 hover:bg-primary/5">
+              {summonFieldKinds.map((kind) => <button key={kind.label} type="button" onClick={() => setFields((current) => [...current, newSummonField(kind.kind, { long: kind.long, principals: suggestions.principals })])} className="flex items-start gap-2 rounded-lg border border-dashed px-2.5 py-2 text-left transition hover:border-primary/50 hover:bg-primary/5">
                 <span className="mt-0.5 text-muted-foreground"><FieldIcon field={kind} /></span>
                 <span className="min-w-0"><span className="block text-sm font-medium">{kind.label}</span><span className="block text-[11px] text-muted-foreground">{kind.hint}</span></span>
               </button>)}
@@ -327,8 +332,6 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
         </aside>
       </div>
 
-      <datalist id={`${listId}-characteristics`}>{suggestions.characteristics.map((item) => <option key={item} value={item} />)}</datalist>
-      <datalist id={`${listId}-skills`}>{suggestions.skills.map((item) => <option key={item} value={item} />)}</datalist>
 
       <div className="flex flex-wrap items-center gap-2 border-t pt-4">
         {isTemplate && !target.isNew && <Button type="button" variant="ghost" className="text-destructive hover:text-destructive" onClick={() => setConfirmDelete(true)}><Trash2 />Supprimer le template</Button>}
@@ -353,9 +356,10 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
   </Dialog>
 }
 
-const fieldKindLabel = (field: SummonField) => field.kind === "life" ? "Points de vie" : field.kind === "stats" ? field.group === "secondaire" ? "Caractéristiques secondaires" : "Caractéristiques principales" : field.kind === "spell" ? "Sort" : field.long ? "Texte long" : "Champ libre"
+const fieldKindLabel = (field: SummonField) => field.kind === "life" ? "Points de vie" : field.kind === "stats" ? "Caractéristiques" : field.kind === "spell" ? "Sort" : field.long ? "Texte long" : "Champ libre"
 
-function FieldEditor({ field, listId, first, last, onChange, onMove, onRemove }: { field: SummonField; listId: string; first: boolean; last: boolean; onChange: (change: (field: SummonField) => SummonField) => void; onMove: (by: number) => void; onRemove: () => void }) {
+function FieldEditor({ field, suggestions, first, last, onChange, onMove, onRemove }: { field: SummonField; suggestions: Suggestions; first: boolean; last: boolean; onChange: (change: (field: SummonField) => SummonField) => void; onMove: (by: number) => void; onRemove: () => void }) {
+  const characteristicGroups = [{ label: "Principales", items: suggestions.principals }, { label: "Secondaires", items: suggestions.secondaries }]
   return <div className="rounded-xl border border-border/60 bg-background/30 p-2.5">
     <div className="flex items-center gap-2">
       <span className="flex size-7 shrink-0 items-center justify-center rounded-md bg-muted text-muted-foreground" title={fieldKindLabel(field)}><FieldIcon field={field} /></span>
@@ -374,7 +378,7 @@ function FieldEditor({ field, listId, first, last, onChange, onMove, onRemove }:
 
       {field.kind === "stats" && <div className="space-y-1.5">
         {field.stats.map((stat) => <div key={stat.id} className="flex items-center gap-1.5">
-          <Input list={`${listId}-characteristics`} value={stat.name} onChange={(event) => onChange((current) => current.kind === "stats" ? { ...current, stats: current.stats.map((item) => item.id === stat.id ? { ...item, name: event.target.value } : item) } : current)} placeholder="Caractéristique (liste ou libre)" aria-label="Nom de la caractéristique" className="h-8 min-w-0 flex-1" />
+          <SuggestInput className="flex-1" groups={characteristicGroups} value={stat.name} onChange={(name) => onChange((current) => current.kind === "stats" ? { ...current, stats: current.stats.map((item) => item.id === stat.id ? { ...item, name } : item) } : current)} placeholder="Caractéristique (liste ou libre)" aria-label="Nom de la caractéristique" />
           <Input value={stat.value} onChange={(event) => onChange((current) => current.kind === "stats" ? { ...current, stats: current.stats.map((item) => item.id === stat.id ? { ...item, value: event.target.value } : item) } : current)} placeholder="0" aria-label={`Valeur de ${stat.name || "la caractéristique"}`} className="h-8 w-20 tabular-nums" />
           <Button type="button" variant="ghost" size="icon-xs" className="hover:text-destructive" onClick={() => onChange((current) => current.kind === "stats" ? { ...current, stats: current.stats.filter((item) => item.id !== stat.id) } : current)} aria-label={`Retirer ${stat.name || "la caractéristique"}`}><X /></Button>
         </div>)}
@@ -392,7 +396,7 @@ function FieldEditor({ field, listId, first, last, onChange, onMove, onRemove }:
         <div className="grid gap-2 sm:grid-cols-2">
           {field.action !== undefined && <label className="grid gap-1 text-xs text-muted-foreground">Action<Input value={field.action} onChange={(event) => onChange((current) => current.kind === "spell" ? { ...current, action: event.target.value } : current)} placeholder="Principale, bonus, réaction…" className="h-8" /></label>}
           {field.distance !== undefined && <label className="grid gap-1 text-xs text-muted-foreground">Distance<Input value={field.distance} onChange={(event) => onChange((current) => current.kind === "spell" ? { ...current, distance: event.target.value } : current)} placeholder="Contact, 10 m…" className="h-8" /></label>}
-          {field.skill !== undefined && <label className="grid gap-1 text-xs text-muted-foreground">Compétence<Input list={`${listId}-skills`} value={field.skill} onChange={(event) => onChange((current) => current.kind === "spell" ? { ...current, skill: event.target.value } : current)} placeholder="Liste ou libre" className="h-8" /></label>}
+          {field.skill !== undefined && <div className="grid gap-1 text-xs text-muted-foreground">Compétence<SuggestInput groups={[{ items: suggestions.skills }]} value={field.skill} onChange={(skill) => onChange((current) => current.kind === "spell" ? { ...current, skill } : current)} placeholder="Liste ou libre" aria-label="Compétence du sort" /></div>}
           {field.charges ? <div className="grid gap-1 text-xs text-muted-foreground">Charges<div className="flex h-8 items-center gap-2"><Button type="button" variant="ghost" size="icon-xs" disabled={field.charges <= 1} onClick={() => onChange((current) => current.kind === "spell" && current.charges ? { ...current, charges: current.charges - 1, chargesLeft: Math.min(current.chargesLeft ?? current.charges, current.charges - 1) } : current)} aria-label="Une charge de moins"><Minus /></Button><SpellChargeStars total={field.charges} current={field.charges} accent="currentColor" className="text-primary" /><Button type="button" variant="ghost" size="icon-xs" disabled={field.charges >= SUMMON_MAX_CHARGES} onClick={() => onChange((current) => current.kind === "spell" && current.charges ? { ...current, charges: current.charges + 1, chargesLeft: current.charges + 1 } : current)} aria-label="Une charge de plus"><Plus /></Button></div></div> : null}
         </div>
         <Textarea value={field.description} onChange={(event) => onChange((current) => current.kind === "spell" ? { ...current, description: event.target.value } : current)} placeholder="Effet du sort, dégâts, conditions…" aria-label="Description du sort" className="min-h-16 text-sm" />
