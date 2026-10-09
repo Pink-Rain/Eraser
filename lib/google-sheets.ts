@@ -34,6 +34,8 @@ import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
+import { acquireSheetsSlot, asBackgroundGoogleWork, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
+import { sharedClassCatalog } from "@/lib/class-catalog-share"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
@@ -306,7 +308,10 @@ const IDENTITY_INDEX_RETRY_MS = 20_000
 async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: number } = {}) {
   if (Date.now() - identityIndexSyncedAt < (options.maxAgeMs ?? IDENTITY_INDEX_SYNC_TTL_MS)) return
   if (!identityIndexSyncPromise) {
-    identityIndexSyncPromise = syncExistingIdentityIndexes()
+    // Une relecture de routine (la page n'attend pas) passe en arrière-plan : quand Google
+    // est saturé, elle cède la place aux pages et sera retentée dans 20 s.
+    const routine = identityIndexSyncedAt > 0 && options.waitMs === 0
+    identityIndexSyncPromise = (routine ? asBackgroundGoogleWork(() => syncExistingIdentityIndexes()) : syncExistingIdentityIndexes())
       .then(() => { identityIndexSyncedAt = Date.now() })
       .catch((error) => {
         console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -470,9 +475,12 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
   const repeatable = repeatableRequest(path, init)
   let response: Response | null = null
   let renewed = false
-  // 429 : Google compte par minute ; on lui laisse jusqu'à une demi-minute (1, 2, 4, 8, 16 s)
-  // plutôt que d'abandonner au bout de 6 s. Le reste : trois essais.
+  // 429 : le quota du compte Google, commun à toutes les installations, est épuisé. La
+  // requête attend la pause commune (google-quota.ts) au lieu de se relancer seule ; une
+  // page n'attend pas plus de 45 s, l'arrière-plan abandonne aussitôt. Le reste : trois essais.
+  const deadline = Date.now() + 45_000
   for (let attempt = 0; ; attempt += 1) {
+    const release = await acquireSheetsSlot({ deadline })
     try {
       response = await traced("sheets", label, () => googleOAuthAuthorizedFetch(url, init), (reply) => String(reply.status))
     } catch (error) {
@@ -488,6 +496,8 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
         await wait(500 * 2 ** attempt)
         continue
       }
+    } finally {
+      release()
     }
     // 401 : le jeton n'est plus valable (renouvelé ailleurs, expiré) ; Google n'a rien fait.
     if (response.status === 401 && !renewed) {
@@ -498,7 +508,12 @@ async function googleSheetsFetch(path: string, init?: RequestInit) {
     // 429 : Google a refusé sans rien faire. Une erreur 5xx, elle, peut arriver après coup :
     // rejouer un ajout ou une suppression de ligne l'aurait fait deux fois (ligne suivante
     // supprimée, ligne ajoutée en double).
-    if (response.status === 429 && attempt < 5) { await wait(1_000 * 2 ** attempt + Math.random() * 400); continue }
+    if (response.status === 429) {
+      noteQuotaRefusal(response.headers.get("retry-after"))
+      if (attempt < 8) continue
+      break
+    }
+    if (response.ok) noteQuotaSuccess()
     if ([500, 502, 503, 504].includes(response.status) && repeatable && attempt < 2) { await wait(250 * (attempt + 1)); continue }
     break
   }
@@ -574,7 +589,7 @@ function staleRange(cacheKey: string, refresh: () => Promise<string[][]>) {
   if (!cached.value || cached.refreshFailed || Date.now() - (cached.loadedAt ?? 0) > RANGE_STALE_MS) return null
   if (!cached.refreshing) {
     cached.refreshing = true
-    refresh().then((rows) => {
+    asBackgroundGoogleWork(refresh).then((rows) => {
       // Un classeur vidé entre-temps (écriture) : on ne remet pas l'ancienne entrée.
       if (rangeReadCache.get(cacheKey) !== cached) return
       rangeReadCache.set(cacheKey, { expiresAt: Date.now() + RANGE_CACHE_MS, promise: Promise.resolve(rows), value: rows, loadedAt: Date.now() })
@@ -2500,7 +2515,9 @@ export async function findCharacterForAccount(account: { uid: string; role: stri
       : getCharacterForUser(account.uid, id)
   const found = await lookup(false).catch(() => null)
   if (found) return found
-  await syncExistingIdentityIndexes().catch((error) => console.error("CHARACTER_LOOKUP_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+  // La synchronisation commune (déjà en cours ou faite à l'instant : pas de seconde lecture
+  // des trois feuilles en parallèle, sur le quota Google commun à tous les joueurs).
+  await ensureIdentityIndexes({ maxAgeMs: 15_000 })
   return lookup(true).catch(() => null)
 }
 
@@ -2621,11 +2638,17 @@ async function loadClassesFromGoogle(options: { light?: boolean } = {}) {
 
 let classIndexRefreshPromise: Promise<(typeof classIndex.$inferSelect)[]> | null = null
 
-function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[], options: { light?: boolean } = {}) {
+/**
+ * `shared` : les classes viennent de la copie du serveur partagé, pas de Google. Elles
+ * remplissent l'index d'une installation neuve sans compter comme une synchronisation :
+ * la lecture de Google suit, en arrière-plan.
+ */
+function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[], options: { light?: boolean; shared?: ClassRecord[] } = {}) {
   if (classIndexRefreshPromise) return classIndexRefreshPromise
   classIndexRefreshPromise = (async () => {
     const db = getDb()
-    const classes = await loadClassesFromGoogle(options)
+    const classes = options.shared ?? await loadClassesFromGoogle(options)
+    if (options.shared) options = { ...options, light: true }
     let rows = currentRows
     if (classes.length) {
       const updatedAt = new Date().toISOString()
@@ -2766,19 +2789,20 @@ export async function listClasses() {
   const shouldRefresh = !rows.length || !Number.isFinite(syncedAt) || Date.now() - syncedAt > 10 * 60_000
   if (shouldRefresh) {
     if (!rows.length) {
-      // Rien en mémoire (installation neuve) : une seule lecture de la feuille suffit à
-      // montrer les classes ; la lecture complète (colonnes, images) suit en arrière-plan.
+      // Rien en mémoire (installation neuve) : la copie du serveur partagé, sans toucher au
+      // quota Google commun à tous les joueurs ; sinon, une seule lecture de la feuille. La
+      // lecture complète (colonnes, images) suit en arrière-plan, quand Google a de la place.
       // Un échec ici n'est pas changé en liste vide : la page dit pourquoi.
+      const shared = await sharedClassCatalog()
       try {
-        rows = await refreshClassIndex(rows, { light: true })
+        rows = await refreshClassIndex(rows, shared ? { shared: shared.classes } : { light: true })
       } catch (error) {
         console.error("CLASS_INDEX_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
         throw error
       }
-      runInBackground(refreshClassIndex(rows), "CLASS_INDEX_REFRESH_FAILED")
-    } else {
-      runInBackground(refreshClassIndex(rows), "CLASS_INDEX_REFRESH_FAILED")
     }
+    const current = rows
+    runInBackground(asBackgroundGoogleWork(() => refreshClassIndex(current)), "CLASS_INDEX_REFRESH_FAILED")
   }
   return classRecordsFromIndex(rows)
 }
@@ -3851,6 +3875,8 @@ export async function syncExistingIdentityIndexes() {
     characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh: true }).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
     relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh: true }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
   ])
+  // Rien n'a pu être lu (Google saturé) : ce n'est pas une synchronisation, elle sera retentée.
+  if (!campaignSheet && !characterSheet && !relationSheet && (campaignSource || characterSource || relationSource)) throw new Error("IDENTITY_SYNC_NOTHING_READ")
   const campaignRows = campaignSheet?.rows ?? []
   const characterRows = characterSheet?.rows ?? []
   const relationLinks = relationSheet

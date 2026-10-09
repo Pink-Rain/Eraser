@@ -10,6 +10,7 @@
  *   mises en forme : gras, couleurs, références « {index:ligne} » en liens.
  */
 import { classWorkbookFiles } from "@/lib/class-content"
+import { asBackgroundGoogleWork } from "@/lib/google-quota"
 import {
   appendRows,
   clearSpreadsheetReadCache,
@@ -43,6 +44,7 @@ const quoteTab = (tabName: string) => `'${tabName.replace(/'/g, "''")}'`
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
 
 let cache: { expiresAt: number; table: ClassSpecificsTable } | null = null
+let cacheGeneration = 0
 /** Les écritures passent une à une : deux lignes créées coup sur coup ne prennent pas la même place. */
 let queue: Promise<unknown> = Promise.resolve()
 const headersReady = new Set<string>()
@@ -125,7 +127,28 @@ function tableUrl(file: { id: string; webViewLink?: string | null }, sheetId?: n
  * « Jauges » est créé s'il manque ; « Formes » l'est à la première forme enregistrée.
  */
 export async function listClassSpecifics(options: { create?: boolean; refresh?: boolean } = {}): Promise<ClassSpecificsTable> {
-  if (!options.refresh && cache && cache.expiresAt > Date.now() && (cache.table.exists || !options.create)) return cache.table
+  if (!options.refresh && cache && (cache.table.exists || !options.create)) {
+    if (cache.expiresAt > Date.now()) return cache.table
+    // Périmé depuis peu : servi tout de suite (chaque fiche ouverte relisait quatre onglets
+    // entiers dans Google, sur le quota commun à tous les joueurs) et relu en arrière-plan.
+    if (cache.expiresAt + SPECIFICS_STALE_MS > Date.now()) {
+      if (!backgroundRefresh) {
+        backgroundRefresh = asBackgroundGoogleWork(() => readClassSpecifics({}))
+          .catch((error) => { console.error("CLASS_SPECIFICS_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR") })
+          .finally(() => { backgroundRefresh = null })
+      }
+      return cache.table
+    }
+  }
+  return readClassSpecifics(options)
+}
+
+const SPECIFICS_FRESH_MS = 3 * 60_000
+const SPECIFICS_STALE_MS = 30 * 60_000
+let backgroundRefresh: Promise<unknown> | null = null
+
+async function readClassSpecifics(options: { create?: boolean }): Promise<ClassSpecificsTable> {
+  const generation = cacheGeneration
   const file = await spellsFile()
   if (options.create) await serialized(() => ensureTab(file.id, gaugeTab))
   const tabs = await spreadsheetTabs(file.id)
@@ -150,7 +173,8 @@ export async function listClassSpecifics(options: { create?: boolean; refresh?: 
     cardsSheetUrl: tableUrl(file, cardSheet?.sheetId),
     exists: Boolean(gaugeSheet),
   }
-  cache = { expiresAt: Date.now() + 60_000, table }
+  // Une écriture faite pendant la lecture a déjà rangé la version à jour : on ne l'écrase pas.
+  if (generation === cacheGeneration) cache = { expiresAt: Date.now() + SPECIFICS_FRESH_MS, table }
   return table
 }
 
@@ -163,7 +187,8 @@ export const listClassGauges = listClassSpecifics
  */
 function remember(table: ClassSpecificsTable, change: (table: ClassSpecificsTable) => ClassSpecificsTable) {
   const next = change(table)
-  cache = { expiresAt: Date.now() + 60_000, table: next }
+  cacheGeneration += 1
+  cache = { expiresAt: Date.now() + SPECIFICS_FRESH_MS, table: next }
   return next
 }
 

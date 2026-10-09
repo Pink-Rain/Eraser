@@ -1,3 +1,5 @@
+import { asBackgroundGoogleWork } from "@/lib/google-quota"
+
 /**
  * Cache mémoire « périmé pendant qu'on revalide » : une valeur récente est servie
  * telle quelle ; une valeur plus ancienne est servie tout de suite pendant qu'une
@@ -31,11 +33,17 @@ export function staleWhileRevalidate<T>(options: { freshMs: number; maxStaleMs: 
         const age = Date.now() - entry.loadedAt
         if (age < options.freshMs) return entry.value
         if (age < options.maxStaleMs) {
-          load(key, loader).catch((error) => console.error("STALE_CACHE_REFRESH_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+          // Relecture d'arrière-plan : elle cède la place aux pages quand Google est saturé.
+          asBackgroundGoogleWork(() => load(key, loader)).catch((error) => console.error("STALE_CACHE_REFRESH_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR"))
           return entry.value
         }
       }
       return load(key, loader)
+    },
+    /** Une valeur déjà lue (même périmée) est en mémoire pour cette clé. */
+    has(key: string) {
+      const entry = entries.get(key)
+      return entry?.value !== undefined && Date.now() - entry.loadedAt < options.maxStaleMs
     },
     invalidate() {
       generation += 1

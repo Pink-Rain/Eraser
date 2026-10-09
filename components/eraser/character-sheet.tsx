@@ -599,6 +599,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const [classCatalogError, setClassCatalogError] = useState("")
   // « Réessayer » relance la lecture des classes (après une coupure de Google Sheets).
   const [classCatalogAttempt, setClassCatalogAttempt] = useState(0)
+  const classCatalogAutoRetries = useRef(0)
+  const [classCatalogRetrying, setClassCatalogRetrying] = useState(false)
   const [portraitPending, setPortraitPending] = useState(false)
   const [narrativeExpanded, setNarrativeExpanded] = useState(true)
   const [mechanicsExpanded, setMechanicsExpanded] = useState(true)
@@ -1306,6 +1308,16 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   useEffect(() => {
     if (!loadClassCatalog) return
     let cancelled = false
+    let retry = 0
+    // Google saturé (quota commun à tous les joueurs) : la fiche réessaie d'elle-même, sans
+    // insister (trois fois, espacées), plutôt que de laisser le joueur cliquer en boucle.
+    const retryLater = () => {
+      if (cancelled) return
+      setClassCatalogRetrying(classCatalogAutoRetries.current < 3)
+      if (classCatalogAutoRetries.current >= 3) return
+      classCatalogAutoRetries.current += 1
+      retry = window.setTimeout(() => setClassCatalogAttempt((attempt) => attempt + 1), 20_000 * classCatalogAutoRetries.current)
+    }
     async function load() {
       if (!knownClassCatalog) setClassCatalogLoading(true)
       setClassCatalogError("")
@@ -1319,22 +1331,32 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       try {
         // Jamais d'attente sans fin : le service local répond en 25 s au plus ; au-delà, « Réessayer ».
         const response = await fetch("/api/classes/catalog", { cache: "no-store", signal: AbortSignal.timeout(45_000) })
-        const payload = await response.json() as { classes?: ClassRecord[]; spells?: ClassSpell[]; error?: string }
+        const payload = await response.json() as { classes?: ClassRecord[]; spells?: ClassSpell[]; error?: string; warning?: string }
         if (!response.ok || !payload.classes || !payload.spells) throw new Error(payload.error || "Catalogue indisponible")
-        knownClassCatalog = { classes: payload.classes, spells: payload.spells }
+        // Classes sans leurs sorts (Google momentanément saturé) : montrées, mais pas retenues,
+        // et les sorts sont redemandés un peu plus tard.
+        if (payload.warning) retryLater()
+        else {
+          knownClassCatalog = { classes: payload.classes, spells: payload.spells }
+          classCatalogAutoRetries.current = 0
+          if (!cancelled) setClassCatalogRetrying(false)
+        }
         if (!cancelled) {
           setAvailableClasses(payload.classes)
           setAvailableClassSpells(payload.spells)
         }
       } catch (error) {
         // Déjà connus : la fiche garde ceux lus avant plutôt que d'afficher une erreur.
-        if (!cancelled && !knownClassCatalog) setClassCatalogError(error instanceof Error && error.name === "TimeoutError" ? "Le service local d’Eraser n’a pas donné les classes à temps." : error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
+        if (!cancelled && !knownClassCatalog) {
+          setClassCatalogError(error instanceof Error && error.name === "TimeoutError" ? "Le service local d’Eraser n’a pas donné les classes à temps." : error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
+          retryLater()
+        }
       } finally {
         if (!cancelled) setClassCatalogLoading(false)
       }
     }
     void load()
-    return () => { cancelled = true }
+    return () => { cancelled = true; window.clearTimeout(retry) }
   }, [loadClassCatalog, classCatalogAttempt])
 
   useEffect(() => {
@@ -1635,7 +1657,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
               <div className="xl:col-span-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Peuples</p><MultipleValues label="un peuple" value={values[1]} onCommit={(value) => commit(1, value)} /></div>
               <div className="xl:col-span-5"><div className="flex items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><ClassDisplayButton value={classDisplayOf(values[characterClassChoicesIndex] || "")} suggestions={classOptions.map((option) => option.label)} onChange={(display) => void commit(characterClassChoicesIndex, withClassDisplay(latestValues.current[characterClassChoicesIndex] || "", display))} /></div><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} />{!classOptions.length && (classCatalogLoading
                 ? <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Lecture des classes…</p>
-                : <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{classCatalogError || "Aucune classe n’a pu être lue."} <button type="button" onClick={() => { knownClassCatalog = null; setClassCatalogAttempt((attempt) => attempt + 1) }} className="font-semibold underline underline-offset-2">Réessayer</button></p>)}</div>
+                : <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{classCatalogError || "Aucune classe n’a pu être lue."} <button type="button" onClick={() => { knownClassCatalog = null; classCatalogAutoRetries.current = 0; setClassCatalogAttempt((attempt) => attempt + 1) }} className="font-semibold underline underline-offset-2">Réessayer</button>{classCatalogRetrying && <span className="text-muted-foreground"> (nouvel essai automatique dans quelques secondes)</span>}</p>)}</div>
               <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={commitLevel} /></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">

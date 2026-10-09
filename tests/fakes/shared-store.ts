@@ -19,6 +19,11 @@ export async function writeSharedRecord(scope: string, key: string, value: strin
   store.records.set(scope, records)
 }
 
+export async function readSharedRecord(scope: string, key: string) {
+  const record = store.records.get(scope)?.get(key)
+  return record ? { scope, key, ...record } : null
+}
+
 export async function deleteSharedRecord(scope: string, key: string) {
   store.records.get(scope)?.delete(key)
 }

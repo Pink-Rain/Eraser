@@ -31,6 +31,9 @@ import { characterClassChoicesIndex, characterSheetHeaders, characterValueHeader
 import { characterSheetAliases } from "@/lib/character-sheet-map"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import { staleWhileRevalidate } from "@/lib/stale-cache"
+import { runInBackground } from "@/lib/background-work"
+import { shareClassCatalog, sharedClassCatalog } from "@/lib/class-catalog-share"
+import { asBackgroundGoogleWork } from "@/lib/google-quota"
 import { parseRankBonusRows, rankOfCell, RANK_BONUS_HEADERS, RANK_BONUS_MAX_RANK, RANK_BONUS_RANK_HEADER, RANK_BONUS_TAB, type RankBonus, type RankBonusTable } from "@/lib/rank-bonuses"
 import {
   classSpellActionKind,
@@ -295,11 +298,13 @@ function editablePresentationColumns(presentation: ClassPresentation) {
 /**
  * Les pages de classe relisaient à chaque clic les deux classeurs entiers avec leur
  * mise en forme : plusieurs secondes d'écran vide. Les lectures sont gardées en
- * mémoire (servies aussitôt, relues en arrière-plan après une minute) et oubliées
+ * mémoire (servies aussitôt, relues en arrière-plan après trois minutes) et oubliées
  * dès qu'Eraser modifie un sort ou une présentation.
  */
-const presentationCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassPresentations>>>({ freshMs: 60_000, maxStaleMs: 30 * 60_000 })
-const spellListCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassSpells>>>({ freshMs: 60_000, maxStaleMs: 30 * 60_000 })
+// Trois minutes : chaque relecture coûte une lecture complète sur le quota Google commun à
+// toutes les installations ; les écritures d'Eraser vident ces caches aussitôt.
+const presentationCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassPresentations>>>({ freshMs: 3 * 60_000, maxStaleMs: 30 * 60_000 })
+const spellListCache = staleWhileRevalidate<Awaited<ReturnType<typeof loadClassSpells>>>({ freshMs: 3 * 60_000, maxStaleMs: 30 * 60_000 })
 
 /** `keepSpellTabs` : après une écriture réussie, l'onglet des sorts n'a pas changé de place. */
 export function invalidateClassContentCaches(options: { keepSpellTabs?: boolean } = {}) {
@@ -533,19 +538,51 @@ export async function listClassSpells(refresh = false, kind: SpellIndexKind = "c
   return spellListCache.get(kind, () => loadClassSpells(refresh, kind), { refresh })
 }
 
+/** Les sorts des classes sont déjà en mémoire sur cette installation (lus dans Google). */
+export function classSpellsInMemory(kind: SpellIndexKind = "classes") {
+  return spellListCache.has(kind)
+}
+
+/**
+ * Les classes et leurs sorts pour les afficher (fiche, Règles), jamais pour écrire. Pas
+ * encore lus sur cette installation : la copie du serveur partagé, aussitôt, et Google est
+ * relu derrière quand il a de la place. Google refuse (quota commun épuisé) : la copie
+ * partagée aussi, plutôt qu'une page sans classes.
+ */
+export async function classSpellsForDisplay(): Promise<{ classes: ClassRecord[]; spells: ClassSpell[]; file?: ClassWorkbookFile }> {
+  if (!classSpellsInMemory()) {
+    const shared = await sharedClassCatalog()
+    if (shared) {
+      runInBackground(asBackgroundGoogleWork(() => listClassSpells()), "CLASS_SPELLS_BACKGROUND_READ_FAILED")
+      return shared
+    }
+  }
+  try {
+    return await listClassSpells()
+  } catch (error) {
+    const shared = await sharedClassCatalog()
+    if (shared) return shared
+    throw error
+  }
+}
+
 async function loadClassSpells(refresh = false, kind: SpellIndexKind = "classes") {
+  const readAt = new Date().toISOString()
   const workbook = await spellWorkbook(refresh, kind)
   // Aucune page ne reçoit la désignation par position d'un sort sans ID : une fiche la
   // retiendrait, et elle glisse dès qu'une ligne est ajoutée ou supprimée au-dessus.
   // Seulement dans une vraie colonne « ID » : trouvée par approximation (« Druide » contient
   // « id »), elle recevrait des ID par-dessus ses rangs.
   if (exactSpellIdColumn(workbook) && workbook.rows.some((row) => needsSpellId(workbook, row))) await giveSpellIds(workbook, kind)
-  return {
+  const loaded = {
     file: workbook.file,
     headers: workbook.headers,
     classes: workbook.classes,
     spells: workbook.rows.flatMap((row, index) => parseSpell(workbook, row, workbook.cells?.[index] ?? [], index + 2) ?? []),
   }
+  // Les autres installations (un joueur sur un PC neuf) les reçoivent sans relire Google.
+  if (kind === "classes") runInBackground(shareClassCatalog({ classes: loaded.classes, spells: loaded.spells.filter((spell) => !spell.id.startsWith("LIGNE-")), readAt }), "SHARED_CLASS_CATALOG_WRITE_FAILED")
+  return loaded
 }
 
 /** Une ligne qui est un sort (titre, texte ou classe) sans ID réel. */
@@ -671,12 +708,13 @@ export async function getClassContent(classId: string): Promise<ClassContent | n
   const classes = await listClasses()
   const characterClass = classes.find((item) => item.id === classId)
   if (!characterClass) return null
-  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([listClassPresentations(), listClassSpells(), listRankBonuses()])
+  const [presentationsResult, spellsResult, bonusResult] = await Promise.allSettled([listClassPresentations(), classSpellsForDisplay(), listRankBonuses()])
   const presentations = presentationsResult.status === "fulfilled" ? presentationsResult.value : null
   const spellData = spellsResult.status === "fulfilled" ? spellsResult.value : null
   const presentation = presentations?.presentations.find((item) => item.classId === classId) ?? null
   const spells = spellData?.spells.filter((spell) => classId in spell.classRanks).sort((left, right) => left.classRanks[classId] - right.classRanks[classId] || left.name.localeCompare(right.name, "fr")) ?? []
-  const supplements = spellData ? await cartomancerCards(characterClass, spellData.file) : []
+  // Le classeur des sorts n'est connu qu'après une lecture de Google (pas avec la copie partagée).
+  const supplements = spellData?.file ? await cartomancerCards(characterClass, spellData.file) : []
   return {
     characterClass,
     presentation,
@@ -1301,6 +1339,8 @@ export function mergeClassSpells(keep: SpellTarget, removed: SpellTarget[], draf
 export { RANK_BONUS_TAB }
 export type { RankBonus, RankBonusTable }
 
+/** Relus au plus toutes les trois minutes (les écritures d'Eraser, elles, sont visibles aussitôt). */
+const RANK_BONUS_FRESH_MS = 3 * 60_000
 /** `matrix` : les cases lues (ligne 0 = ligne 1 de Sheets), pour recalculer le tableau après une écriture sans tout relire. */
 let rankBonusCache: { expiresAt: number; table: RankBonusTable; matrix?: string[][] } | null = null
 let rankBonusCreation: Promise<void> | null = null
@@ -1366,8 +1406,8 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
       if (rankBonusCache.expiresAt > Date.now()) return rankBonusCache.table
       // Déjà lus une fois : servis tout de suite, relus en arrière-plan.
       const stale = rankBonusCache.table
-      rankBonusCache = { ...rankBonusCache, expiresAt: Date.now() + 60_000 }
-      listRankBonuses({ refresh: true }).catch((error) => console.error("RANK_BONUSES_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
+      rankBonusCache = { ...rankBonusCache, expiresAt: Date.now() + RANK_BONUS_FRESH_MS }
+      asBackgroundGoogleWork(() => listRankBonuses({ refresh: true })).catch((error) => console.error("RANK_BONUSES_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"))
       return stale
     }
   }
@@ -1382,7 +1422,7 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
   const base = file.webViewLink || `https://docs.google.com/spreadsheets/d/${file.id}/edit`
   if (!tab) {
     const table = { bonuses: [], headers: [], sheetUrl: base, exists: false }
-    rankBonusCache = { expiresAt: Date.now() + 60_000, table }
+    rankBonusCache = { expiresAt: Date.now() + RANK_BONUS_FRESH_MS, table }
     return table
   }
   let fresh = Boolean(options.refresh)
@@ -1402,7 +1442,7 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
   })() : await readRange(file.id, range)
   const matrix = rows.map((row) => row.map((cell) => String(cell ?? "")))
   const table = rankBonusTableOf(matrix, tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`)
-  rankBonusCache = { expiresAt: Date.now() + 60_000, table, matrix }
+  rankBonusCache = { expiresAt: Date.now() + RANK_BONUS_FRESH_MS, table, matrix }
   return table
 }
 
@@ -1481,7 +1521,7 @@ export async function saveRankBonusCells(changes: RankBonusCellChange[]) {
     line[cell.column] = cell.value
   }
   const table = rankBonusTableOf(matrix, cached.table.sheetUrl)
-  rankBonusCache = { expiresAt: Date.now() + 60_000, table, matrix }
+  rankBonusCache = { expiresAt: Date.now() + RANK_BONUS_FRESH_MS, table, matrix }
   return table
 }
 

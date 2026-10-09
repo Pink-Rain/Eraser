@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
-import { listClassSpells } from "@/lib/class-content"
+import { sharedClassCatalog } from "@/lib/class-catalog-share"
+import { classSpellsForDisplay } from "@/lib/class-content"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { listClasses } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -17,16 +18,23 @@ export async function GET(request: Request) {
       return NextResponse.json({ classes: await withTimeBudget(listClasses(), 25_000, "CLASSES_READ_TIMEOUT") })
     } catch (error) {
       console.error("CHARACTER_CLASS_LIST_LOAD_FAILED", codeOf(error))
+      const shared = await sharedClassCatalog()
+      if (shared) return NextResponse.json({ classes: shared.classes })
       return NextResponse.json({ error: googleFailureMessage(codeOf(error)) || `Les classes n’ont pas pu être lues dans Google Sheets (${codeOf(error)}).` }, { status: 503 })
     }
   }
   try {
-    const data = await withTimeBudget(listClassSpells(), 25_000, "CLASSES_READ_TIMEOUT")
+    // Une installation qui n'a encore jamais lu les sorts (PC neuf d'un joueur) prend la copie
+    // du serveur partagé : une requête, hors du quota Google commun à toutes les installations.
+    const data = await withTimeBudget(classSpellsForDisplay(), 25_000, "CLASSES_READ_TIMEOUT")
     // Une fiche retient l'ID des sorts choisis : un sort encore sans ID (désigné par sa
     // place, « LIGNE-n », qui glisse) n'est pas proposé tant qu'il n'en a pas reçu un.
     return NextResponse.json({ classes: data.classes, spells: data.spells.filter((spell) => !spell.id.startsWith("LIGNE-")) })
   } catch (error) {
     console.error("CHARACTER_CLASS_CATALOG_LOAD_FAILED", codeOf(error))
+    // Google refuse ou traîne : la dernière copie partagée vaut mieux qu'une fiche sans classes.
+    const shared = await sharedClassCatalog()
+    if (shared) return NextResponse.json({ classes: shared.classes, spells: shared.spells })
     // Les sorts sont illisibles : la fiche peut tout de même choisir une classe.
     try {
       const classes = await withTimeBudget(listClasses(), 15_000, "CLASSES_READ_TIMEOUT")

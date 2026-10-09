@@ -15,11 +15,18 @@ export function sharedStoreAvailable() {
   return Boolean(remoteAccountsConfig(env))
 }
 
+/**
+ * La dernière session vue dans une requête : le travail d'arrière-plan (après la réponse,
+ * quand les cookies ne sont plus lisibles) s'en sert, comme le jeton Google.
+ */
+let lastSessionToken: string | undefined
+
 async function call(path: string, init: { method: "GET" | "POST" | "DELETE"; body?: unknown }) {
   const config = remoteAccountsConfig(env)
   if (!config) return null
-  const token = await currentAuthToken().catch(() => undefined)
-  return remoteAccountsFetch(config, path, { ...init, token })
+  const own = await currentAuthToken().catch(() => undefined)
+  if (own) lastSessionToken = own
+  return remoteAccountsFetch(config, path, { ...init, token: own ?? lastSessionToken })
 }
 
 function scopePath(scope: string, key: string) {

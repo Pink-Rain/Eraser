@@ -8,7 +8,8 @@ import { ClassCard } from "@/components/eraser/class-card"
 import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { Button } from "@/components/ui/button"
-import { listClassPresentations, listClassSpells, listRankBonuses } from "@/lib/class-content"
+import { classSpellsForDisplay, listClassPresentations, listRankBonuses } from "@/lib/class-content"
+import { asBackgroundGoogleWork } from "@/lib/google-quota"
 import { runInBackground } from "@/lib/background-work"
 import { classImageUrl } from "@/lib/class-images"
 import { classSpellState } from "@/lib/class-spell-utils"
@@ -25,13 +26,14 @@ async function ClassesIndexData({ canSampleAccents, showErrorDetail }: { canSamp
   let loadError = false
   let loadErrorDetail = ""
   // Préchargés pendant qu'on choisit : ouvrir une classe est alors immédiat.
-  runInBackground(listClassPresentations(), "CLASS_PRESENTATIONS_WARMUP_FAILED")
-  runInBackground(listRankBonuses(), "RANK_BONUSES_WARMUP_FAILED")
+  // En arrière-plan : quand Google est saturé, ces lectures cèdent la place aux pages.
+  runInBackground(asBackgroundGoogleWork(() => listClassPresentations()), "CLASS_PRESENTATIONS_WARMUP_FAILED")
+  runInBackground(asBackgroundGoogleWork(() => listRankBonuses()), "RANK_BONUSES_WARMUP_FAILED")
   try {
     // La finition se calcule sur les sorts réellement liés (3 par rang, 21 rangs) ;
     // la colonne « Finition » de la feuille ne sert plus que si les sorts sont
     // momentanément illisibles.
-    const [loaded, spellData] = await Promise.all([listClasses(), listClassSpells().catch((error) => {
+    const [loaded, spellData] = await Promise.all([listClasses(), classSpellsForDisplay().catch((error) => {
       console.error("CLASS_COMPLETION_SPELLS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return null
     })])

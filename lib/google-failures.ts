@@ -10,7 +10,8 @@ export function googleFailureMessage(code: string) {
   if (code === "NOT_AUTHENTICATED" || /^REMOTE_ACCOUNTS_ERROR_/.test(code)) return "Le serveur partagé d’Eraser n’a pas donné l’accès à Google (session expirée ou serveur injoignable). Recommence ; si cela continue, déconnecte-toi puis reconnecte-toi."
   if (code === "GOOGLE_DRIVE_NOT_AUTHORIZED") return "Google Drive n’est pas relié à Eraser : un administrateur doit le relier dans Administration → Google Drive."
   const google = code.match(/^SHEETS_API_ERROR:(\d+)(?::([\s\S]*))?$/)
-  if (google?.[1] === "429") return "Google Sheets refuse : trop de modifications d’un coup (une demi-minute d’attente n’a pas suffi). Attends une minute puis recommence."
+  // Toutes les installations lisent Google avec le même compte : son quota par minute est commun.
+  if (google?.[1] === "429") return "Google Sheets est saturé pour le moment : toutes les installations d’Eraser partagent le même compte Google et son quota de la minute est atteint. Rien n’est perdu ; recommence dans une minute."
   if (google?.[1] === "401" || google?.[1] === "403") return `Google a refusé l’accès à la feuille (${google[1]}). Vérifie dans Administration → Google Drive que le compte relié y a toujours accès.`
   if (google) return `Google Sheets a refusé la modification (${google[1]}${google[2] ? ` : ${google[2].slice(0, 300)}` : ""}).`
   if (code === "CLASSES_READ_TIMEOUT") return "Google Sheets met trop de temps à donner les classes à cet ordinateur. Réessaie dans une minute : la lecture continue en arrière-plan et sera prête au prochain essai."
