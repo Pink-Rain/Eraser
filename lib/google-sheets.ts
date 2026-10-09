@@ -50,6 +50,7 @@ import { copyNpcPortrait } from "@/lib/npc-portraits"
 import { copyToken } from "@/lib/tokens"
 import {
   characterClassChoicesIndex,
+  characterCustomTabsIndex,
   characterSheetHeaders,
   characterSecondaryCalculatedFields,
   characterSecondaryCalculationValueIndex,
@@ -77,6 +78,7 @@ import {
 } from "@/lib/inventory-schema"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
+import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
@@ -6136,6 +6138,21 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   return character
 }
 
+/**
+ * Les compagnons d'une fiche (ses onglets Compagnon). `fresh` relit la ligne dans la feuille
+ * (un compagnon ajouté à l'instant, ou sur un autre poste) ; sinon la fiche lue il y a moins
+ * de 30 secondes suffit. L'accès à la fiche est vérifié par l'appelant.
+ */
+export async function getCharacterCompanions(id: string, fresh = false) {
+  const cached = characterSheetCache.get(id)
+  if (!fresh && cached && cached.expiresAt > Date.now()) return companionsOfTabs(cached.character.values[characterCustomTabsIndex] ?? "")
+  const source = await charactersSource()
+  if (!source) return []
+  await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
+  const current = await readCharacterRow(source, id)
+  return current ? companionsOfTabs(current.values[characterCustomTabsIndex] ?? "") : []
+}
+
 function hasBrokenTotals(values: readonly string[]) {
   return characterSecondaryCalculatedFields.some((field) => isGoogleSheetsCalculationError(values[field.valueIndex]))
 }
@@ -7468,7 +7485,8 @@ export type InventoryTransferMoved = { name: string; quantity: number; targetId:
 export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character", onMoved?: (moved: InventoryTransferMoved) => void, expected?: InventorySlotExpectation) {
   // Une feuille des PNJ illisible à l'instant arrête le transfert : un PNJ n'est jamais pris
   // pour un personnage (il recevait alors les cinq contenants d'un personnage).
-  const targetMode: InventoryOwnerMode = !isCampaignInventoryOwner(targetId) && await getNpcById(targetId) ? "npc" : "character"
+  // Le sac à dos d'une créature compagnon se range comme celui d'un PNJ (un seul sac).
+  const targetMode: InventoryOwnerMode = isCompanionInventoryOwner(targetId) || (!isCampaignInventoryOwner(targetId) && await getNpcById(targetId)) ? "npc" : "character"
   return withInventoryLock(async () => {
     await inventoryStorageFor(sourceId, true, sourceMode)
     // Relu sous le verrou, sans cache : la case visée est vide maintenant, pas il y a une minute.

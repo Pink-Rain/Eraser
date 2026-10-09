@@ -164,6 +164,24 @@ test("Une feuille des PNJ illisible arrête le transfert : le destinataire n'est
   assert.deepEqual(rowsOf(inventory, "Contenants personnages").filter((row) => row["ID personnage"] === "PNJ-1"), []);
 });
 
+test("Créature compagnon : un seul sac à dos à elle, l'objet donné par son personnage y arrive", async () => {
+  const { inventory } = await linkInventory();
+  const corde = await characterWith("PERSO-A", "Corde de Lina");
+  const owner = "COMPAGNON:PERSO-A:cmp-1";
+  await sheets.transferCharacterInventoryItem("PERSO-A", corde.id, owner);
+  // Rangée comme un PNJ : un sac à dos, jamais les cinq contenants d'un personnage.
+  const containers = rowsOf(inventory, "Contenants personnages").filter((row) => row["ID personnage"] === owner && !row["Supprimé le"]);
+  assert.deepEqual(containers.map((row) => row["Nom personnalisé"]), ["Sac à dos"]);
+  assert.deepEqual(occupied(inventory, owner).map((row) => row["Nom personnalisé"]), ["Corde de Lina"]);
+  assert.deepEqual(occupied(inventory, "PERSO-A"), []);
+  // Et elle la rend à son personnage.
+  const backpack = await sheets.getNpcBackpackInventory(owner);
+  const slot = backpack.containers.flatMap((container) => container.slots).find((candidate) => candidate.item?.name === "Corde de Lina");
+  await sheets.transferCharacterInventoryItem(owner, slot.id, "PERSO-A", "npc");
+  assert.deepEqual(occupied(inventory, owner), []);
+  assert.deepEqual(occupied(inventory, "PERSO-A").map((row) => row["Nom personnalisé"]), ["Corde de Lina"]);
+});
+
 test("Le sac d'un PNJ : réuni une fois, sans doubler l'ancien inventaire ni toucher à « Équipé »", async () => {
   const { inventory } = await linkInventory({ npcs: [{ "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor", "Inventaire JSON (archive)": JSON.stringify([{ name: "Gourde", quantity: 2 }]) }] });
   // Un PNJ pris pour un personnage : cinq contenants, une arme équipée dans le rangement d'armes.

@@ -85,9 +85,13 @@ import type { StateEffect } from "@/lib/character-states"
 import type { StateRollOutcome } from "@/components/eraser/character-states"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 import { parseListCell, serializeListCell } from "@/lib/multiple-values"
+import { parseCompanions, type Companion } from "@/lib/companions"
 import { playItemEquipped, playItemUnequipped, preloadSounds } from "@/lib/sounds"
 
 const CharacterInventory = dynamic(() => import("@/components/eraser/character-inventory").then((module) => module.CharacterInventory), {
+  loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
+})
+const CharacterCompanions = dynamic(() => import("@/components/eraser/character-companions").then((module) => module.CharacterCompanions), {
   loading: () => <div className="grid min-h-32 place-items-center"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>,
 })
 const CharacterRelations = dynamic(() => import("@/components/eraser/character-relations").then((module) => module.CharacterRelations), {
@@ -95,7 +99,7 @@ const CharacterRelations = dynamic(() => import("@/components/eraser/character-r
 })
 
 type CharacterTabType = "competences" | "inventaire" | "classe" | "journal" | "invocation" | "compagnon"
-type CharacterTab = { id: string; type: CharacterTabType; label: string; removable: boolean }
+type CharacterTab = { id: string; type: CharacterTabType; label: string; removable: boolean; companions?: Companion[] }
 
 const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
   { type: "competences", label: "Compétences" }, { type: "inventaire", label: "Inventaire" },
@@ -114,8 +118,9 @@ function parseCharacterTabs(value: string): CharacterTab[] {
   try {
     const parsed = JSON.parse(value)
     if (!Array.isArray(parsed)) return []
+    // Les compagnons d'un onglet Compagnon restent avec lui : réécrire les onglets ne les efface pas.
     return parsed.flatMap((tab) => tab && typeof tab.id === "string" && tabTypes.some((candidate) => candidate.type === tab.type)
-      ? [{ id: tab.id, type: tab.type as CharacterTabType, label: typeof tab.label === "string" && tab.label.trim() ? tab.label.trim() : tabTypes.find((candidate) => candidate.type === tab.type)?.label || "Onglet", removable: true }]
+      ? [{ id: tab.id, type: tab.type as CharacterTabType, label: typeof tab.label === "string" && tab.label.trim() ? tab.label.trim() : tabTypes.find((candidate) => candidate.type === tab.type)?.label || "Onglet", removable: true, ...(tab.type === "compagnon" ? { companions: parseCompanions(tab.companions) } : {}) }]
       : [])
   } catch { return [] }
 }
@@ -1200,8 +1205,15 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     await commitTabs
   }
 
+  /** Les compagnons d'un onglet Compagnon, réécrits dans la case des onglets à partir de sa dernière version. */
+  function updateTabCompanions(tabId: string, update: (current: Companion[]) => Companion[]) {
+    const tabs = parseCharacterTabs(latestValues.current[characterCustomTabsIndex] || "")
+    const next = tabs.map((tab) => tab.id === tabId ? { ...tab, companions: update(tab.companions ?? []) } : tab)
+    return commit(characterCustomTabsIndex, JSON.stringify(next))
+  }
+
   async function removeCharacterTab(id: string) {
-    const nextTabs = customTabs.filter((tab) => tab.id !== id)
+    const nextTabs = parseCharacterTabs(latestValues.current[characterCustomTabsIndex] || "").filter((tab) => tab.id !== id)
     if (activeTab === id) setActiveTab("base-competences")
     await commit(characterCustomTabsIndex, JSON.stringify(nextTabs))
   }
@@ -1370,6 +1382,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
     if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
+    if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }

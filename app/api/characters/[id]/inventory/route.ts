@@ -13,6 +13,7 @@ import {
   getCharacterInventory,
   getCharacterInventorySummary,
   listCharacterRelations,
+  getCharacterCompanions,
   listInventoryTransferTargets,
   moveCharacterInventoryItem,
   setCharacterInventoryCurrency,
@@ -25,6 +26,7 @@ import {
 } from "@/lib/google-sheets"
 import { INVENTORY_CHANGED_MESSAGE, inventorySlotExpectation } from "@/lib/inventory-schema"
 import { transferWithNotification } from "@/lib/item-notifications"
+import { companionInventoryOwnerId } from "@/lib/companions"
 import { authorizedAccount } from "@/lib/server-auth"
 
 async function authorizedCharacter(id: string) {
@@ -47,10 +49,18 @@ async function transferTargets(authorization: NonNullable<Awaited<ReturnType<typ
         relatedNpcIds: new Set((await listCharacterRelations(authorization.character.id)).filter((relation) => relation.targetKind === "npc").map((relation) => relation.targetId)),
       }
     : undefined
-  const groups = await Promise.all((await transferableCampaignIds(authorization)).map((campaignId) =>
-    listInventoryTransferTargets(campaignId, authorization.character.id, playerVisibility),
-  ))
-  return [...new Map(groups.flat().map((target) => [target.id, target])).values()]
+  const campaignIds = await transferableCampaignIds(authorization)
+  const [groups, companions] = await Promise.all([
+    Promise.all(campaignIds.map((campaignId) => listInventoryTransferTargets(campaignId, authorization.character.id, playerVisibility))),
+    // Ses créatures compagnons (leur sac à dos est propre au personnage) ; ses PNJ compagnons
+    // sont déjà proposés avec ceux de la campagne.
+    getCharacterCompanions(authorization.character.id).catch(() => []),
+  ])
+  const creatures = companions.flatMap((companion) => companion.kind === "creature" ? [{
+    id: companionInventoryOwnerId(authorization.character.id, companion.id), name: companion.name, kind: "npc" as const,
+    campaignId: campaignIds[0] ?? "", campaignName: "Compagnon",
+  }] : [])
+  return [...new Map([...creatures, ...groups.flat()].map((target) => [target.id, target])).values()]
 }
 
 export async function GET(request: Request, { params }: { params: Promise<{ id: string }> }) {
