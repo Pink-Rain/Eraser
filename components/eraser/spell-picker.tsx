@@ -23,16 +23,22 @@ const sourceLabels: Record<SpellIndexKind, string> = { classes: "Classe", creatu
 // choisis, relus derrière.
 const knownSpellOptions = new Map<string, SpellOption[]>()
 
-export function useSpellOptions(sources: SpellIndexKind[]) {
-  const key = sources.join(",")
+/**
+ * `endpoint` : où lire les sorts d'un index (par défaut, la route des MJ). La fiche d'un
+ * personnage passe la sienne : un joueur lit les sorts de ses compagnons sans être MJ.
+ */
+export function useSpellOptions(sources: SpellIndexKind[], endpoint?: (kind: SpellIndexKind) => string) {
+  const base = endpoint ? endpoint("classes") : ""
+  const key = `${sources.join(",")}${base ? `@${base}` : ""}`
   const [state, setState] = useState<{ key: string; options: SpellOption[]; fresh: boolean } | null>(() => {
     const known = knownSpellOptions.get(key)
     return known ? { key, options: known, fresh: false } : null
   })
   useEffect(() => {
     let alive = true
-    const kinds = key.split(",").filter(Boolean) as SpellIndexKind[]
-    Promise.all(kinds.map((kind) => fetch(`/api/resources/class-index?index=${kind}`)
+    const kinds = key.split("@")[0].split(",").filter(Boolean) as SpellIndexKind[]
+    const url = (kind: SpellIndexKind) => endpoint ? endpoint(kind) : `/api/resources/class-index?index=${kind}`
+    Promise.all(kinds.map((kind) => fetch(url(kind))
       .then((response) => response.json() as Promise<{ data?: { spells?: Omit<SpellOption, "source">[] } }>)
       .then((payload) => (payload.data?.spells ?? []).filter((spell) => spell.name).map((spell) => ({ ...spell, source: kind })))
       .catch(() => [] as SpellOption[])))
@@ -42,6 +48,8 @@ export function useSpellOptions(sources: SpellIndexKind[]) {
         if (alive) setState({ key, options, fresh: true })
       })
     return () => { alive = false }
+  // `endpoint` change à chaque rendu ; `key` porte sa valeur.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [key])
   const shown = state?.key === key ? state.options : knownSpellOptions.get(key) ?? []
   return { options: shown, loading: !(state?.key === key && state.fresh) }

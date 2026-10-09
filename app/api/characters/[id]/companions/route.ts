@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { authorizedCompanionCharacter, companionCandidates, companionNpc, npcForViewer } from "@/lib/companion-access"
 import { COMPANION_TEXT_LIMIT, companionNumber } from "@/lib/companions"
+import { listClassSpells } from "@/lib/class-content"
 import { saveNpc } from "@/lib/google-sheets"
 import type { CampaignNpcRecord } from "@/lib/shop-schema"
 
@@ -17,6 +18,16 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
   const url = new URL(request.url)
   try {
     if (url.searchParams.get("candidates") === "1") return NextResponse.json(await companionCandidates(access))
+    // Les sorts que les compagnons peuvent apprendre, en lecture : « Sorts des créatures »
+    // (créatures et PNJ) et « Sorts des classes » (PNJ). Même forme que la route des MJ.
+    const spellIndex = url.searchParams.get("spells")
+    if (spellIndex === "classes" || spellIndex === "creatures") {
+      const { spells } = await listClassSpells(false, spellIndex)
+      return NextResponse.json({ data: { spells: spells.map((spell) => ({
+        id: spell.id, name: spell.name, category: spell.category, type: spell.type, effect: spell.effect, effectHtml: spell.effectHtml,
+        description: spell.description, descriptionHtml: spell.descriptionHtml, skills: spell.skills, distance: spell.distance, charges: spell.charges, tone: spell.tone,
+      })) } })
+    }
     const ids = [...new Set((url.searchParams.get("npcs") || "").split(",").map((value) => value.trim()).filter(Boolean))].slice(0, 30)
     const npcs = await Promise.all(ids.map(async (npcId) => {
       const npc = await companionNpc(access, npcId)

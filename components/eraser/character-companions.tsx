@@ -1,13 +1,14 @@
 "use client"
 
 import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
-import { Backpack, ChevronDown, Heart, LoaderCircle, PawPrint, Plus, Search, Trash2, UserRound, WandSparkles, X } from "lucide-react"
+import { Backpack, ChevronDown, Heart, LoaderCircle, PawPrint, Plus, Search, Sparkles, Trash2, UserRound, X, Zap } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { CharacterInventory } from "@/components/eraser/character-inventory"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { InlineEdit } from "@/components/eraser/inline-edit"
+import { SpellPicker, useSpellOptions, type SpellOption } from "@/components/eraser/spell-picker"
 import { characteristicColor, characteristicOrder, npcCharacteristicKeys } from "@/lib/characteristics"
 import {
   creatureCompanionFrom,
@@ -177,8 +178,10 @@ type SheetFields = CompanionStats & { notes: string; activeSpells: string; passi
  * La mini-fiche d'un compagnon, la même pour un PNJ et une créature : vie, caractéristiques,
  * sorts, notes et sac à dos. Chaque case s'enregistre en la quittant.
  */
-function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, fields, description, onName, onChange, onRemove, nameHint }: {
+function CompanionSheet({ characterId, companionId, color, kindLabel, name, subtitle, portrait, fields, description, spells, onName, onChange, onRemove, nameHint }: {
   characterId: string
+  /** Les sorts que ce compagnon peut prendre (`options`), et tous ceux dont on sait montrer la fiche (`known`). */
+  spells: { options: SpellOption[]; known: SpellOption[]; loading: boolean }
   companionId: string
   color: string
   kindLabel: string
@@ -239,9 +242,10 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
         })}
       </div>
 
-      <div className="grid gap-2 sm:grid-cols-2">
-        <SpellField label="Sorts actifs" value={fields.activeSpells} color={color} onCommit={(value) => onChange({ activeSpells: value })} />
-        <SpellField label="Sorts passifs" value={fields.passiveSpells} color={color} onCommit={(value) => onChange({ passiveSpells: value })} />
+      {/* Les sorts sont choisis dans leurs index : on voit leur fiche (effet, charges, distance). */}
+      <div className="grid gap-4 rounded-xl border border-border/55 bg-background/20 p-3">
+        <SpellPicker label="Sorts actifs" icon={<Zap className="size-3.5" style={{ color }} />} value={fields.activeSpells} options={spells.options.filter((spell) => spell.category !== "passif")} known={spells.known} loading={spells.loading} onChange={(value) => void onChange({ activeSpells: value })} />
+        <SpellPicker label="Sorts passifs" icon={<Sparkles className="size-3.5" style={{ color }} />} value={fields.passiveSpells} options={spells.options.filter((spell) => spell.category === "passif")} known={spells.known} loading={spells.loading} onChange={(value) => void onChange({ passiveSpells: value })} />
       </div>
 
       <div className="rounded-xl border border-border/55 bg-background/20 px-3 py-2">
@@ -268,18 +272,6 @@ function CompanionSheet({ characterId, companionId, color, kindLabel, name, subt
   </article>
 }
 
-function SpellField({ label, value, color, onCommit }: { label: string; value: string; color: string; onCommit: (value: string) => Promise<void> }) {
-  const names = value.split(/[,;\n]/).map((item) => item.trim()).filter(Boolean)
-  return <div className="rounded-xl border border-border/55 bg-background/20 px-3 py-2">
-    <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground"><WandSparkles className="size-3" />{label}</p>
-    <InlineEdit multiline label={label} value={value} onCommit={onCommit}>
-      {names.length
-        ? <span className="flex flex-wrap gap-1">{names.map((spell, index) => <span key={`${spell}:${index}`} className="rounded-full border px-2 py-0.5 text-xs" style={{ borderColor: `${color}55`, backgroundColor: `${color}12` }}>{spell}</span>)}</span>
-        : <span className="text-sm text-muted-foreground/55">Aucun — double-cliquer pour en écrire (séparés par des virgules)</span>}
-    </InlineEdit>
-  </div>
-}
-
 /**
  * L'onglet Compagnon : des PNJ de la campagne et des créatures que le joueur contrôle comme
  * des personnages secondaires. `onChange` enregistre la liste dans l'onglet de la fiche.
@@ -287,6 +279,11 @@ function SpellField({ label, value, color, onCommit }: { label: string; value: s
 export function CharacterCompanions({ characterId, companions, onChange }: { characterId: string; companions: Companion[]; onChange: (update: (current: Companion[]) => Companion[]) => Promise<void> }) {
   const npcIds = useMemo(() => companions.flatMap((companion) => companion.kind === "npc" ? [companion.npcId] : []), [companions])
   const { npcs, loading, error, save } = useCompanionNpcs(characterId, npcIds)
+  // Les deux index de sorts, lus une fois pour l'onglet : une créature n'a accès qu'aux
+  // « Sorts des créatures », un PNJ à ceux des créatures et des classes.
+  const allSpells = useSpellOptions(["classes", "creatures"], (kind) => `/api/characters/${encodeURIComponent(characterId)}/companions?spells=${kind}`)
+  const creatureSpells = useMemo(() => ({ options: allSpells.options.filter((spell) => spell.source === "creatures"), known: allSpells.options, loading: allSpells.loading }), [allSpells.options, allSpells.loading])
+  const npcSpells = useMemo(() => ({ options: allSpells.options, known: allSpells.options, loading: allSpells.loading }), [allSpells.options, allSpells.loading])
 
   function add(pick: Pick, name: string) {
     const id = crypto.randomUUID()
@@ -322,6 +319,7 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
             portrait={companion.portrait}
             fields={companion}
             description={companion.description}
+            spells={creatureSpells}
             onName={(name) => updateCreature(companion, { name })}
             onChange={(changes) => updateCreature(companion, changes)}
             onRemove={() => remove(companion.id)}
@@ -348,6 +346,7 @@ export function CharacterCompanions({ characterId, companions, onChange }: { cha
             notes: npc.playerNotes, activeSpells: npc.activeSpells ?? "", passiveSpells: npc.passiveSpells ?? "",
           }}
           description={npc.lore}
+          spells={npcSpells}
           onChange={({ notes, ...changes }) => save(npc.id, { ...changes, ...(notes !== undefined ? { playerNotes: notes } : {}) })}
           onRemove={() => remove(companion.id)}
         />
