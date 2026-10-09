@@ -1,6 +1,6 @@
 "use client"
 
-import { useMemo, useRef, useState, type ReactNode } from "react"
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { Braces, Check, ExternalLink, Gauge, Layers, LoaderCircle, Pencil, Plus, Search, Spade, Trash2, X } from "lucide-react"
 
 import { ClassGaugeView, publishGauges, useClassGauges, type ClassGaugeTable } from "@/components/eraser/class-gauges"
@@ -10,7 +10,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Input } from "@/components/ui/input"
-import { Textarea } from "@/components/ui/textarea"
+import { RichTextField } from "@/components/eraser/rich-text"
 import {
   emptyGauge,
   evaluateFormula,
@@ -27,7 +27,11 @@ import {
   type ClassGauge,
   type FormulaValues,
   type GaugeState,
+  type GaugeThreshold,
 } from "@/lib/class-specifics"
+
+let keyCounter = 0
+const newSummonKey = () => `seuil-${(keyCounter += 1)}`
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
 
@@ -190,6 +194,11 @@ function FormulaField({ value, onChange, groups, sample, placeholder, ariaLabel 
 
 function GaugeEditor({ initial, catalogGroups, sample, onClose, onSaved }: { initial: ClassGauge; catalogGroups: Array<{ label: string; items: string[] }>; sample: FormulaValues; onClose: () => void; onSaved: () => void }) {
   const [gauge, setGauge] = useState(initial)
+  // Le texte mis en forme s'enregistre en quittant son champ : « Enregistrer » lit la toute dernière version.
+  const latest = useRef(gauge)
+  useEffect(() => { latest.current = gauge }, [gauge])
+  // Chaque seuil garde sa clé : son champ mis en forme ne passe pas à un autre quand on en retire un.
+  const [thresholdKeys, setThresholdKeys] = useState(() => initial.thresholds.map(() => newSummonKey()))
   const [state, setState] = useState<GaugeState>({})
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
@@ -197,10 +206,21 @@ function GaugeEditor({ initial, catalogGroups, sample, onClose, onSaved }: { ini
   const withSelf = [{ label: "Cette jauge", items: ["Minimum", "Maximum"] }, ...catalogGroups]
   const resolved = resolveGauge({ ...gauge, name: gauge.name.trim() || "Nouvelle jauge" }, sample, state)
 
+  const setThreshold = (index: number, patch: Partial<GaugeThreshold>) => setGauge((current) => ({ ...current, thresholds: current.thresholds.map((item, position) => position === index ? { ...item, ...patch } : item) }))
+  function addThreshold() {
+    setGauge((current) => ({ ...current, thresholds: [...current.thresholds, { value: "", label: "" }] }))
+    setThresholdKeys((current) => [...current, newSummonKey()])
+  }
+  function removeThreshold(index: number) {
+    setGauge((current) => ({ ...current, thresholds: current.thresholds.filter((_, position) => position !== index) }))
+    setThresholdKeys((current) => current.filter((_, position) => position !== index))
+  }
+
   async function save() {
-    if (!gauge.name.trim()) { setError("Donne un nom à la jauge."); return }
+    const current = latest.current
+    if (!current.name.trim()) { setError("Donne un nom à la jauge."); return }
     setSaving(true); setError("")
-    try { await postSpecifics({ action: "save-gauge", gauge: { ...gauge, name: gauge.name.trim() } }); onSaved() } catch (reason) { setError(reason instanceof Error ? reason.message : "La jauge n’a pas pu être enregistrée.") }
+    try { await postSpecifics({ action: "save-gauge", gauge: { ...current, name: current.name.trim() } }); onSaved() } catch (reason) { setError(reason instanceof Error ? reason.message : "La jauge n’a pas pu être enregistrée.") }
     setSaving(false)
   }
 
@@ -238,24 +258,28 @@ function GaugeEditor({ initial, catalogGroups, sample, onClose, onSaved }: { ini
           <Field label="Emplacement sur la fiche"><Choice value={gauge.placement} options={gaugePlacements} onChange={(value) => set("placement", value)} /></Field>
           <Field label="Affichage"><Choice value={gauge.display} options={gaugeDisplays} onChange={(value) => set("display", value)} /></Field>
 
-          <Field label="Seuils" hint="des repères nommés sur la jauge (facultatif)">
-            <div className="space-y-1.5">
-              {gauge.thresholds.map((threshold, index) => <div key={index} className="flex items-start gap-1.5">
-                <div className="w-48 shrink-0"><Input value={threshold.value} onChange={(event) => set("thresholds", gauge.thresholds.map((item, position) => position === index ? { ...item, value: event.target.value } : item))} placeholder="50 ou {Maximum} / 2" aria-label="Valeur du seuil" className="h-8 font-mono text-sm" /></div>
-                <Input value={threshold.label} onChange={(event) => set("thresholds", gauge.thresholds.map((item, position) => position === index ? { ...item, label: event.target.value } : item))} placeholder="Nom affiché : Frénésie…" aria-label="Nom du seuil" className="h-8 min-w-0 flex-1" />
-                <Button type="button" variant="ghost" size="icon-sm" onClick={() => set("thresholds", gauge.thresholds.filter((_, position) => position !== index))} aria-label="Retirer ce seuil"><X /></Button>
+          <Field label="Seuils" hint="des repères sur la jauge ; leur texte s’affiche au survol (facultatif)">
+            <div className="space-y-2">
+              {gauge.thresholds.map((threshold, index) => <div key={thresholdKeys[index]} className="space-y-1.5 rounded-xl border border-border/60 bg-background/30 p-2">
+                <div className="flex items-center gap-1.5">
+                  <span className="text-xs text-muted-foreground">À partir de</span>
+                  <Input value={threshold.value} onChange={(event) => setThreshold(index, { value: event.target.value })} placeholder="50 ou {Maximum} * 50%" aria-label="Valeur du seuil" className="h-8 w-56 font-mono text-sm" />
+                  <span className="ml-auto" />
+                  <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeThreshold(index)} aria-label="Retirer ce seuil"><X /></Button>
+                </div>
+                <RichTextField value={threshold.label} onCommit={(html) => setThreshold(index, { label: html })} ariaLabel="Texte du seuil" placeholder="Frénésie : inflige 10 points de dégâts… (« { » pour citer un index)" minHeight="min-h-9" />
               </div>)}
-              {gauge.thresholds.length < 12 && <Button type="button" variant="ghost" size="xs" onClick={() => set("thresholds", [...gauge.thresholds, { value: "", label: "" }])}><Plus />Ajouter un seuil</Button>}
+              {gauge.thresholds.length < 12 && <Button type="button" variant="ghost" size="xs" onClick={addThreshold}><Plus />Ajouter un seuil</Button>}
             </div>
           </Field>
 
-          <Field label="Description" hint="affichée au survol sur la fiche"><Textarea value={gauge.description} onChange={(event) => set("description", event.target.value)} placeholder="Comment elle se remplit, ce qu’elle permet…" className="min-h-16 text-sm" /></Field>
+          <Field label="Description" hint="affichée au survol sur la fiche"><RichTextField value={gauge.description} onCommit={(html) => set("description", html)} ariaLabel="Description de la jauge" placeholder="Comment elle se remplit, ce qu’elle permet… (« { » pour citer un index)" toolbar="always" /></Field>
         </div>
 
         <aside className="min-w-0 space-y-2 lg:sticky lg:top-0 lg:self-start">
           <p className="text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Aperçu</p>
           <ClassGaugeView resolved={resolved} showErrors onCurrent={(value) => setState((current) => ({ ...current, current: value }))} onMax={(value) => setState((current) => ({ ...current, max: value }))} onReset={() => setState((current) => ({ ...current, current: undefined }))} />
-          {gauge.placement === "vie" && <div className="rounded-xl border p-3"><p className="mb-1 text-[10px] text-muted-foreground">Sous la barre de vie :</p><ClassGaugeView resolved={resolved} compact /></div>}
+          {gauge.placement === "vie" && <div><p className="mb-1 text-[10px] text-muted-foreground">Sous la barre de vie (seuil au survol) :</p><ClassGaugeView resolved={resolved} compact /></div>}
           <p className="text-[11px] leading-5 text-muted-foreground">Avec une fiche d’exemple : vie 60 / 100, niveau 5, caractéristiques et compétences à 50. Les boutons de l’aperçu se testent sans rien enregistrer.</p>
         </aside>
       </div>

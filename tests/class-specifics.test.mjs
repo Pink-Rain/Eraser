@@ -83,3 +83,31 @@ test("Les jauges d'une classe : par identifiant, sinon par nom", () => {
   ];
   assert.deepEqual(specifics.gaugesOfClass(gauges, { id: "CLA-1", name: "Berserker" }).map((gauge) => gauge.id), ["B", "A"]);
 });
+
+test("Seuils et description mis en forme : gras, couleur et références gardés, une ligne par seuil", () => {
+  const reference = '<a href="/reference/states/ETA-1">Hémorragie</a>';
+  const thresholds = [
+    { value: "{Maximum} * 50%", label: `Inflige <strong>10</strong> points de dégâts et applique 1 niveau ${reference}` },
+    { value: "80", label: "<p>Carnage</p><ul><li>sur deux lignes</li></ul>" },
+    { value: "90", label: "" },
+  ];
+  const html = specifics.gaugeThresholdsHtml(thresholds);
+  const parsed = specifics.parseGaugeThresholdsHtml(html);
+  assert.deepEqual(parsed.map((item) => item.value), ["{Maximum} * 50%", "80", "90"]);
+  assert.equal(parsed[0].label, `Inflige <strong>10</strong> points de dégâts et applique 1 niveau ${reference}`);
+  assert.equal(specifics.plainTextOf(parsed[1].label), "Carnage sur deux lignes");
+  assert.equal(parsed[2].label, "");
+  // Relu depuis Sheets : un même gras peut couvrir deux lignes ; chaque ligne garde le sien.
+  const fromSheets = '<strong>50 : Rage<br />75 : </strong><span style="color:#b3261e">Fureur &amp; sang</span>';
+  const lines = specifics.parseGaugeThresholdsHtml(fromSheets);
+  assert.deepEqual(lines.map((item) => item.value), ["50", "75"]);
+  assert.equal(lines[0].label, "<strong>Rage</strong>");
+  assert.equal(lines[1].label, '<strong></strong><span style="color:#b3261e">Fureur &amp; sang</span>');
+  // L'ancien texte simple reste lu.
+  assert.deepEqual(specifics.parseGaugeThresholds("50 : Frénésie\n75"), [{ value: "50", label: "Frénésie" }, { value: "75", label: "" }]);
+  // La description reçue de l'éditeur garde sa mise en forme ; vide, elle ne vaut rien.
+  const gauge = specifics.sanitizeGauge({ id: "JAU-1", name: "Rage", classId: "CLA-1", description: "<p>Monte <em>vite</em></p>", thresholds });
+  assert.equal(gauge.description, "<p>Monte <em>vite</em></p>");
+  assert.equal(gauge.thresholds[1].label, "Carnage sur deux lignes");
+  assert.equal(specifics.sanitizeGauge({ id: "JAU-1", name: "Rage", description: "<p><br></p>" }).description, "");
+});

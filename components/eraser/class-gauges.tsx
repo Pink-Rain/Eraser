@@ -1,11 +1,13 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useEffect, useState, type ReactElement } from "react"
 import { Check, Minus, Plus, RotateCcw, TriangleAlert } from "lucide-react"
 
+import { IndexRichText } from "@/components/eraser/index-references"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
+import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
-import { GAUGE_MAX_PIPS, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
+import { GAUGE_MAX_PIPS, plainTextOf, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
 export type ClassGaugeTable = { gauges: ClassGauge[]; sheetUrl: string; exists: boolean; canEdit?: boolean }
@@ -97,7 +99,7 @@ export function ClassGaugeView({ resolved, compact = false, onCurrent, onMax, on
 
   const bar = <div className="relative h-2 overflow-visible rounded-full" style={{ backgroundColor: `${color}26` }}>
     <div className="h-full rounded-full transition-[width]" style={{ width: `${resolved.ratio}%`, backgroundColor: color }} />
-    {resolved.thresholds.map((threshold, index) => <span key={index} className="absolute -top-0.5 h-3 w-0.5 -translate-x-1/2 rounded-full bg-foreground/45" style={{ left: `${threshold.ratio}%` }} title={threshold.label ? `${threshold.label} (${threshold.value})` : String(threshold.value)} />)}
+    {resolved.thresholds.map((threshold, index) => <span key={index} className="absolute -top-0.5 h-3 w-0.5 -translate-x-1/2 rounded-full bg-foreground/45" style={{ left: `${threshold.ratio}%` }} title={threshold.label ? `${plainTextOf(threshold.label)} (${threshold.value})` : String(threshold.value)} />)}
   </div>
 
   const pipRow = usePips && <div className="flex flex-wrap gap-1" role={canCurrent ? "group" : "img"} aria-label={`${gauge.name} : ${resolved.current} sur ${resolved.max}`}>
@@ -113,25 +115,39 @@ export function ClassGaugeView({ resolved, compact = false, onCurrent, onMax, on
 
   const problem = showErrors && resolved.errors.length > 0 && <p className="mt-1 flex items-start gap-1 text-[11px] text-amber-500"><TriangleAlert className="mt-0.5 size-3 shrink-0" />{resolved.errors.join(" · ")}</p>
 
-  if (compact) return <div className="w-full" title={gauge.description || undefined}>
+  // Au survol, partout : le seuil atteint et la description, mis en forme (références cliquables).
+  const description = plainTextOf(gauge.description) ? gauge.description : ""
+  const hover = (trigger: ReactElement) => !description && !reached ? trigger : <HoverCard openDelay={150} closeDelay={100}>
+    <HoverCardTrigger asChild>{trigger}</HoverCardTrigger>
+    <HoverCardContent side="top" align="start" collisionPadding={12} className="max-h-[min(28rem,70vh)] w-80 space-y-2 overflow-y-auto rounded-xl p-3 text-left text-xs leading-5" style={{ borderColor: `${color}66` }}>
+      <p className="flex items-baseline justify-between gap-2"><span className="font-display text-sm font-semibold" style={{ color }}>{gauge.name}</span><span className="tabular-nums text-muted-foreground">{resolved.current} / {resolved.max}</span></p>
+      {reached && <div className="rounded-lg px-2 py-1.5" style={{ backgroundColor: `${color}14` }}>
+        <p className="text-[10px] font-semibold uppercase tracking-[.14em]" style={{ color }}>Seuil atteint · {reached.value}</p>
+        <IndexRichText html={reached.label} className="mt-0.5" />
+      </div>}
+      {description && <IndexRichText html={description} />}
+    </HoverCardContent>
+  </HoverCard>
+
+  // Sous la barre de vie : la même carte, ses couleurs et son style, en plus serré ; le seuil atteint est au survol.
+  if (compact) return hover(<div className="w-full rounded-xl px-3 py-2 shadow-sm" style={{ backgroundColor: `${color}14`, borderTop: `2px solid ${color}` }}>
     <div className="flex items-center gap-2">
       <span className="min-w-0 truncate text-[9px] font-semibold uppercase tracking-[.16em]" style={{ color }}>{gauge.name}</span>
-      {reached && <span className="truncate rounded-full px-1.5 text-[9px] font-semibold" style={{ backgroundColor: `${color}22`, color }}>{reached.label}</span>}
       <span className="ml-auto">{controls}</span>
     </div>
-    {gauge.display === "barre" && <div className="mt-1">{bar}</div>}
-    {pipRow && <div className="mt-1">{pipRow}</div>}
+    {gauge.display === "barre" && <div className="mt-1.5">{bar}</div>}
+    {pipRow && <div className="mt-1.5">{pipRow}</div>}
     {problem}
-  </div>
+  </div>)
 
-  return <div className="flex min-h-20 flex-col justify-between gap-2 rounded-xl px-3 py-2.5 shadow-sm" style={{ backgroundColor: `${color}14`, borderTop: `2px solid ${color}` }} title={gauge.description || undefined}>
+  return hover(<div className="flex min-h-20 flex-col justify-between gap-2 rounded-xl px-3 py-2.5 shadow-sm" style={{ backgroundColor: `${color}14`, borderTop: `2px solid ${color}` }}>
     <div className="flex flex-wrap items-center gap-2">
       <p className="text-[9px] font-semibold uppercase tracking-[.16em]" style={{ color }}>{gauge.name}</p>
-      {reached && <span className="rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: `${color}22`, color }}>{reached.label}</span>}
+      {reached && <span className="max-w-[14rem] truncate rounded-full px-2 py-0.5 text-[10px] font-semibold" style={{ backgroundColor: `${color}22`, color }}>{plainTextOf(reached.label)}</span>}
       <span className="ml-auto">{controls}</span>
     </div>
     {gauge.display === "barre" && bar}
     {pipRow}
     {problem}
-  </div>
+  </div>)
 }

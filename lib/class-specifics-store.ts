@@ -5,7 +5,8 @@
  *   ajoutée à droite, une colonne ajoutée à la main est gardée telle quelle.
  * - Une jauge est retrouvée par son ID (colonne « ID ») juste avant chaque écriture : une
  *   ligne déplacée ou supprimée dans Sheets entre-temps n'est jamais écrasée par erreur.
- * - Seules les cases connues d'une jauge sont écrites.
+ * - Seules les cases connues d'une jauge sont écrites. Seuils et Description sont des cases
+ *   mises en forme (gras, couleurs, références « {index:ligne} » en liens).
  */
 import { classWorkbookFiles } from "@/lib/class-content"
 import {
@@ -14,11 +15,14 @@ import {
   columnName,
   ensureSheetColumnCount,
   googleSheetsJson,
+  readFormattedSheet,
   readRangeFreshWithOffset,
   spreadsheetTabs,
   updateRanges,
+  updateRowCells,
+  type RowCellWrite,
 } from "@/lib/google-sheets"
-import { GAUGE_HEADERS, GAUGES_TAB, gaugeCells, gaugeFromCells, type ClassGauge, type GaugeHeader } from "@/lib/class-specifics"
+import { GAUGE_HEADERS, GAUGE_RICH_HEADERS, GAUGES_TAB, gaugeCells, gaugeFromCells, plainTextOf, type ClassGauge, type GaugeHeader } from "@/lib/class-specifics"
 
 export type ClassGaugeTable = { gauges: ClassGauge[]; sheetUrl: string; exists: boolean }
 
@@ -101,43 +105,69 @@ export async function listClassGauges(options: { create?: boolean; refresh?: boo
     cache = { expiresAt: Date.now() + 60_000, table }
     return table
   }
-  const { lines, cellOf } = await readGaugeTab(file.id)
-  const gauges = lines.flatMap(({ row }) => gaugeFromCells(cellOf(row)) ?? [])
+  // Lecture mise en forme : Seuils et Description gardent gras, couleurs et références.
+  const sheet = await readFormattedSheet(file.id, [GAUGES_TAB])
+  const headers = (sheet.rows[0] ?? []).map((cell) => String(cell?.value ?? "").trim())
+  const at = (header: GaugeHeader) => headers.findIndex((candidate) => fold(candidate) === fold(header))
+  const gauges = sheet.rows.slice(1).flatMap((row) => gaugeFromCells(
+    (header) => { const index = at(header); return index < 0 ? "" : String(row?.[index]?.value ?? "") },
+    (header) => { const index = at(header); return index < 0 ? "" : String(row?.[index]?.html || "") },
+  ) ?? [])
   const table = { gauges, sheetUrl: tableUrl(file, tab.sheetId), exists: true }
   cache = { expiresAt: Date.now() + 60_000, table }
   return table
 }
 
+const isRich = (header: GaugeHeader) => (GAUGE_RICH_HEADERS as readonly string[]).includes(header)
+
+/**
+ * Le tableau après une écriture, recalculé à partir de ce qui vient d'être écrit : une
+ * relecture tout de suite après pourrait encore rendre l'ancienne version.
+ */
+function remember(table: ClassGaugeTable, change: (gauges: ClassGauge[]) => ClassGauge[]) {
+  const next = { ...table, exists: true, gauges: change(table.gauges) }
+  cache = { expiresAt: Date.now() + 60_000, table: next }
+  return next
+}
+
 /** Crée ou met à jour une jauge (retrouvée par son ID). */
 export async function saveClassGauge(gauge: ClassGauge) {
   const file = await spellsFile()
+  const before = cache?.table.exists ? cache.table : await listClassGauges({ create: true })
   await serialized(async () => {
     await ensureGaugeTab(file.id)
-    const { headers, column, lines, cellOf } = await readGaugeTab(file.id)
-    const matches = lines.filter(({ row }) => cellOf(row)("ID").trim() === gauge.id)
+    const tab = (await spreadsheetTabs(file.id)).find((item) => item.title === GAUGES_TAB)
+    if (tab?.sheetId === undefined) throw new Error("SHEET_TAB_NOT_FOUND")
+    const findRows = async () => {
+      const { headers, column, lines, cellOf } = await readGaugeTab(file.id)
+      return { headers, column, matches: lines.filter(({ row }) => cellOf(row)("ID").trim() === gauge.id) }
+    }
+    let { headers, column, matches } = await findRows()
     if (matches.length > 1) throw new Error("CLASS_GAUGE_DUPLICATE")
     const cells = gaugeCells(gauge)
-    if (matches.length === 1) {
-      const rowNumber = matches[0].rowNumber
-      const writes = GAUGE_HEADERS.flatMap((header) => {
-        const index = column.get(header)
-        return index === undefined ? [] : [{ range: `${quoteTab(GAUGES_TAB)}!${columnName(index + 1)}${rowNumber}`, values: [[cells[header]]] }]
-      })
-      await updateRanges(file.id, writes, { valueInputOption: "RAW" })
-    } else {
+    if (!matches.length) {
+      // Une nouvelle ligne : son texte d'abord, puis ses cases mises en forme, à leur place relue.
       const row = Array.from({ length: Math.max(headers.length, ...[...column.values()].map((index) => index + 1)) }, () => "")
-      for (const header of GAUGE_HEADERS) { const index = column.get(header); if (index !== undefined) row[index] = cells[header] }
+      for (const header of GAUGE_HEADERS) { const index = column.get(header); if (index !== undefined) row[index] = isRich(header) ? plainTextOf(cells[header]) : cells[header] }
       await appendRows(file.id, `${quoteTab(GAUGES_TAB)}!A:A`, [row], { valueInputOption: "RAW" })
+      ;({ headers, column, matches } = await findRows())
+      if (matches.length !== 1) throw new Error("CLASS_GAUGE_NOT_FOUND")
     }
+    const writes: RowCellWrite[] = GAUGE_HEADERS.flatMap((header) => {
+      const index = column.get(header)
+      if (index === undefined) return []
+      return [isRich(header) ? { column: index, html: cells[header] } : { column: index, value: cells[header] }]
+    })
+    await updateRowCells({ spreadsheetId: file.id, sheetId: tab.sheetId, rowNumber: matches[0].rowNumber, cells: writes })
     clearSpreadsheetReadCache(file.id)
   })
-  cache = null
-  return listClassGauges({ refresh: true })
+  return remember(before, (gauges) => gauges.some((item) => item.id === gauge.id) ? gauges.map((item) => item.id === gauge.id ? gauge : item) : [...gauges, gauge])
 }
 
 /** Supprime la ligne d'une jauge, retrouvée par son ID juste avant. */
 export async function deleteClassGauge(id: string) {
   const file = await spellsFile()
+  const before = cache?.table.exists ? cache.table : await listClassGauges()
   await serialized(async () => {
     const tab = (await spreadsheetTabs(file.id)).find((item) => item.title === GAUGES_TAB)
     if (!tab || tab.sheetId === undefined) throw new Error("CLASS_GAUGE_NOT_FOUND")
@@ -150,6 +180,5 @@ export async function deleteClassGauge(id: string) {
     })
     clearSpreadsheetReadCache(file.id)
   })
-  cache = null
-  return listClassGauges({ refresh: true })
+  return remember(before, (gauges) => gauges.filter((item) => item.id !== id))
 }

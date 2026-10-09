@@ -93,25 +93,120 @@ function choice<T extends string>(options: Array<{ value: T; label: string }>, r
 }
 const yes = (raw: string) => ["oui", "vrai", "true", "x", "1", "yes"].includes(fold(raw))
 
-/** « 50 : Frénésie », une par ligne (ou séparées par « ; »). */
-export function parseGaugeThresholds(raw: string): GaugeThreshold[] {
-  return raw.split(/\n|;/).flatMap((line) => {
-    const match = line.match(/^\s*([^:]+?)\s*:\s*(.*)$/)
-    if (match) return match[1].trim() ? [{ value: match[1].trim(), label: match[2].trim() }] : []
-    return line.trim() ? [{ value: line.trim(), label: "" }] : []
+/* ─────────────────────── Texte mis en forme (HTML) ─────────────────────── */
+
+const escapeHtml = (text: string) => text.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
+const decodeHtml = (text: string) => text.replace(/&nbsp;/gi, " ").replace(/&lt;/gi, "<").replace(/&gt;/gi, ">").replace(/&quot;/gi, '"').replace(/&#39;/gi, "'").replace(/&amp;/gi, "&")
+const tagName = (token: string) => token.match(/^<\/?\s*([a-z0-9]+)/i)?.[1]?.toLowerCase() ?? ""
+const blockTags = new Set(["p", "div", "li", "h2", "h3", "ul", "ol"])
+
+/** Le texte brut d'un contenu mis en forme (les retours à la ligne deviennent « \n »). */
+export function plainTextOf(html: string) {
+  return decodeHtml(String(html ?? "").replace(/<br\s*\/?>/gi, "\n").replace(/<\/(?:p|div|li|h2|h3)>/gi, "\n").replace(/<[^>]+>/g, "")).replace(/\n{3,}/g, "\n\n").trim()
+}
+
+/**
+ * Un texte mis en forme sur une seule ligne : titres, listes et retours à la ligne
+ * deviennent des espaces, gras, couleurs et liens (références « { ») restent.
+ */
+export function inlineRichText(html: string) {
+  return String(html ?? "")
+    .replace(/<br\s*\/?>|<\/?(?:p|div|li|h2|h3|ul|ol|hr)\b[^>]*>/gi, " ")
+    .replace(/<input\b[^>]*>/gi, "")
+    .replace(/\s*\n\s*/g, " ")
+    .replace(/(?:&nbsp;|\s){2,}/g, " ")
+    .trim()
+}
+
+/**
+ * Les lignes d'un contenu mis en forme, chacune gardant ses mises en forme : une balise
+ * ouverte avant un retour à la ligne est refermée en fin de ligne et rouverte sur la
+ * suivante (la lecture d'une case Sheets met un <br /> dans un même gras).
+ */
+export function richTextLines(html: string) {
+  const lines: string[] = []
+  const open: string[] = []
+  let current = ""
+  const end = () => {
+    lines.push(current + [...open].reverse().map((token) => `</${tagName(token)}>`).join(""))
+    current = open.join("")
+  }
+  for (const token of String(html ?? "").split(/(<[^>]+>)/g).filter(Boolean)) {
+    if (!token.startsWith("<")) {
+      const parts = token.split("\n")
+      parts.forEach((part, index) => { if (index) end(); current += part })
+      continue
+    }
+    const tag = tagName(token)
+    if (tag === "br" || tag === "hr") { end(); continue }
+    if (blockTags.has(tag)) { if (/^<\//.test(token)) end(); continue }
+    if (/^<\//.test(token)) {
+      const index = open.map(tagName).lastIndexOf(tag)
+      if (index >= 0) open.splice(index, 1)
+      current += token
+      continue
+    }
+    if (/\/>$/.test(token)) { current += token; continue }
+    open.push(token)
+    current += token
+  }
+  end()
+  return lines.filter((line) => plainTextOf(line))
+}
+
+/** Le contenu sans ses `count` premiers caractères de texte (les balises sont gardées). */
+function dropLeadingText(html: string, count: number) {
+  let remaining = count
+  return html.split(/(<[^>]+>)/g).filter(Boolean).map((token) => {
+    if (token.startsWith("<") || remaining <= 0) return token
+    const text = decodeHtml(token)
+    const kept = text.slice(remaining)
+    remaining -= text.length - kept.length
+    return escapeHtml(kept)
+  }).join("").replace(/^(\s|&nbsp;)+/, "")
+}
+
+/**
+ * Les seuils, lus dans leur case : « 50 : Frénésie », un par ligne. Le nom peut être mis en
+ * forme (gras, couleur, référence « {index:ligne} ») ; la valeur reste du texte.
+ */
+export function parseGaugeThresholdsHtml(html: string): GaugeThreshold[] {
+  return richTextLines(html).flatMap((line) => {
+    const text = plainTextOf(line)
+    const match = text.match(/^\s*([^:]+?)\s*:\s*/)
+    if (!match) return text.trim() ? [{ value: text.trim(), label: "" }] : []
+    return match[1].trim() ? [{ value: match[1].trim(), label: dropLeadingText(line, match[0].length).trim() }] : []
   }).slice(0, 12)
 }
-export const serializeGaugeThresholds = (thresholds: GaugeThreshold[]) => thresholds.filter((item) => item.value.trim()).map((item) => item.label.trim() ? `${item.value.trim()} : ${item.label.trim()}` : item.value.trim()).join("\n")
+
+/** Les seuils tels qu'ils s'écrivent dans leur case : une ligne par seuil, le nom mis en forme. */
+export function gaugeThresholdsHtml(thresholds: GaugeThreshold[]) {
+  return thresholds.filter((item) => item.value.trim()).map((item) => {
+    const label = inlineRichText(item.label)
+    return plainTextOf(label) ? `${escapeHtml(item.value.trim())} : ${label}` : escapeHtml(item.value.trim())
+  }).join("<br>")
+}
+
+/** « 50 : Frénésie », une par ligne (texte simple). */
+export const parseGaugeThresholds = (raw: string) => parseGaugeThresholdsHtml(escapeHtml(raw))
 
 export function emptyGauge(classId: string, className: string, id: string, order = 0): ClassGauge {
   return { id, classId, className, name: "", color: gaugeColors[0], placement: "vie", display: "barre", min: "0", maxMode: "fixe", max: "100", currentMode: "joueur", current: "0", step: 1, resetButton: true, thresholds: [], description: "", order }
 }
 
-/** Une ligne de l'onglet « Jauges » (cases par en-tête) ; null sans identifiant ni nom. */
-export function gaugeFromCells(cell: (header: GaugeHeader) => string): ClassGauge | null {
+/** Les colonnes dont la case est mise en forme (lue et écrite en HTML). */
+export const GAUGE_RICH_HEADERS = ["Seuils", "Description"] as const satisfies readonly GaugeHeader[]
+
+/**
+ * Une ligne de l'onglet « Jauges » ; null sans identifiant ni nom. `cell` : le texte de
+ * chaque case ; `rich` : le contenu mis en forme des cases Seuils et Description (à défaut,
+ * leur texte).
+ */
+export function gaugeFromCells(cell: (header: GaugeHeader) => string, rich?: (header: (typeof GAUGE_RICH_HEADERS)[number]) => string): ClassGauge | null {
   const id = cell("ID").trim()
   const name = cell("Nom").trim()
   if (!id || !name) return null
+  const html = (header: (typeof GAUGE_RICH_HEADERS)[number]) => rich?.(header) ?? escapeHtml(cell(header)).replace(/\n/g, "<br>")
   const color = cell("Couleur").trim()
   const step = Number.parseFloat(cell("Pas").replace(",", "."))
   const order = Number.parseFloat(cell("Ordre").replace(",", "."))
@@ -129,13 +224,16 @@ export function gaugeFromCells(cell: (header: GaugeHeader) => string): ClassGaug
     current: cell("Valeur actuelle").trim(),
     step: Number.isFinite(step) && step > 0 ? step : 1,
     resetButton: cell("Remise à zéro").trim() ? yes(cell("Remise à zéro")) : true,
-    thresholds: parseGaugeThresholds(cell("Seuils")),
-    description: cell("Description"),
+    thresholds: parseGaugeThresholdsHtml(html("Seuils")),
+    description: plainTextOf(html("Description")) ? html("Description") : "",
     order: Number.isFinite(order) ? order : 0,
   }
 }
 
-/** Les cases d'une jauge, par en-tête, telles qu'elles s'écrivent dans la feuille. */
+/**
+ * Les cases d'une jauge, par en-tête, telles qu'elles s'écrivent dans la feuille. Seuils et
+ * Description sont du contenu mis en forme (HTML), écrit comme une case formatée.
+ */
 export function gaugeCells(gauge: ClassGauge): Record<GaugeHeader, string> {
   return {
     "ID": gauge.id,
@@ -151,8 +249,8 @@ export function gaugeCells(gauge: ClassGauge): Record<GaugeHeader, string> {
     "Valeur actuelle": gauge.current.trim(),
     "Pas": String(gauge.step),
     "Remise à zéro": gauge.resetButton ? "Oui" : "Non",
-    "Seuils": serializeGaugeThresholds(gauge.thresholds),
-    "Description": gauge.description,
+    "Seuils": gaugeThresholdsHtml(gauge.thresholds),
+    "Description": plainTextOf(gauge.description) ? gauge.description : "",
     "Ordre": String(gauge.order),
     "Classe ID": gauge.classId,
   }
@@ -163,13 +261,10 @@ export function sanitizeGauge(raw: unknown): ClassGauge | null {
   if (!raw || typeof raw !== "object") return null
   const value = raw as Record<string, unknown>
   const text = (key: string, limit = 400) => typeof value[key] === "string" ? (value[key] as string).slice(0, limit) : typeof value[key] === "number" ? String(value[key]) : ""
-  const thresholds = Array.isArray(value.thresholds) ? value.thresholds.flatMap((item) => item && typeof item === "object" ? [{ value: String((item as GaugeThreshold).value ?? "").slice(0, 200), label: String((item as GaugeThreshold).label ?? "").slice(0, 200) }] : []).slice(0, 12) : []
-  return gaugeFromCells((header) => {
-    if (header === "Seuils") return serializeGaugeThresholds(thresholds)
-    const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId" }
-    if (header === "Remise à zéro") return value.resetButton === false ? "Non" : "Oui"
-    return text(key[header], header === "Description" ? 4000 : 400)
-  })
+  const thresholds: GaugeThreshold[] = Array.isArray(value.thresholds) ? value.thresholds.flatMap((item) => item && typeof item === "object" ? [{ value: String((item as GaugeThreshold).value ?? "").slice(0, 200), label: inlineRichText(String((item as GaugeThreshold).label ?? "")).slice(0, 4000) }] : []).slice(0, 12) : []
+  const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId" }
+  const gauge = gaugeFromCells((header) => header === "Remise à zéro" ? (value.resetButton === false ? "Non" : "Oui") : text(key[header]), (header) => header === "Seuils" ? "" : text("description", 20_000))
+  return gauge && { ...gauge, thresholds: thresholds.filter((item) => item.value.trim()) }
 }
 
 /** Les jauges d'une classe, dans leur ordre ; retrouvées par l'identifiant, sinon par le nom de la classe. */
