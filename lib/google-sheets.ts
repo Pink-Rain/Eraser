@@ -2561,7 +2561,12 @@ async function loadClassesFromGoogle() {
   })
   const { rows } = read
   const hasImageColumn = columns.at("Image") >= 0
-  const imageNotes = hasImageColumn ? await readClassImageNotes(source.spreadsheetId, tabName, columns) : new Map<string, string>()
+  // Les notes ne servent qu'aux images : leur échec ne doit jamais vider la liste des classes
+  // (une installation sans classes en cache n'en montrait alors plus aucune).
+  const imageNotes = hasImageColumn ? await readClassImageNotes(source.spreadsheetId, tabName, columns).catch((error) => {
+    console.error("CLASS_IMAGE_NOTES_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return new Map<string, string>()
+  }) : new Map<string, string>()
   // Les images posées dans les cases sont lues par position, juste après la feuille.
   let nativeImageUrls: string[] = []
   if (hasImageColumn) try {

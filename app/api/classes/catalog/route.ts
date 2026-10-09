@@ -1,7 +1,11 @@
 import { NextResponse } from "next/server"
 
 import { listClassSpells } from "@/lib/class-content"
+import { googleFailureMessage } from "@/lib/google-failures"
+import { listClasses } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+
+const codeOf = (error: unknown) => error instanceof Error ? error.message : "UNKNOWN_ERROR"
 
 export async function GET() {
   if (!await authorizedAccount(["admin", "mj", "joueur"])) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
@@ -11,7 +15,15 @@ export async function GET() {
     // place, « LIGNE-n », qui glisse) n'est pas proposé tant qu'il n'en a pas reçu un.
     return NextResponse.json({ classes: data.classes, spells: data.spells.filter((spell) => !spell.id.startsWith("LIGNE-")) })
   } catch (error) {
-    console.error("CHARACTER_CLASS_CATALOG_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return NextResponse.json({ error: "Les classes et leurs sorts sont momentanément indisponibles." }, { status: 503 })
+    console.error("CHARACTER_CLASS_CATALOG_LOAD_FAILED", codeOf(error))
+    // Les sorts sont illisibles : la fiche peut tout de même choisir une classe.
+    try {
+      const classes = await listClasses()
+      if (classes.length) return NextResponse.json({ classes, spells: [], warning: "Les sorts de classe sont momentanément indisponibles." })
+    } catch (fallback) {
+      console.error("CHARACTER_CLASS_LIST_FALLBACK_FAILED", codeOf(fallback))
+    }
+    const reason = googleFailureMessage(codeOf(error))
+    return NextResponse.json({ error: reason || `Les classes et leurs sorts n’ont pas pu être lus dans Google Sheets (${codeOf(error)}).` }, { status: 503 })
   }
 }

@@ -26,7 +26,7 @@ function normalized(value: string) {
   return value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").trim()
 }
 
-export function CharacterCreationForm({ classes, peoples }: { classes: CreationClassOption[]; peoples: string[] }) {
+export function CharacterCreationForm({ classes, classesError = "", peoples }: { classes: CreationClassOption[]; classesError?: string; peoples: string[] }) {
   const router = useRouter()
   const [name, setName] = useState("")
   const [people, setPeople] = useState("")
@@ -283,6 +283,7 @@ export function CharacterCreationForm({ classes, peoples }: { classes: CreationC
                     )
                   })}
                   {!visibleClasses.length && classes.length > 0 && <p className="col-span-full py-6 text-center text-xs text-muted-foreground">Aucune classe ne correspond.</p>}
+                  {!classes.length && <p className="col-span-full rounded-xl border border-amber-400/40 bg-amber-50/60 px-3 py-3 text-xs leading-5 text-amber-900 dark:bg-amber-950/30 dark:text-amber-200">{classesError || "Aucune classe n’a pu être lue."} <button type="button" onClick={() => router.refresh()} className="font-semibold underline underline-offset-2">Réessayer</button> <span className="text-muted-foreground">La classe peut aussi se choisir plus tard, sur la fiche.</span></p>}
                 </div>
               </div>
 

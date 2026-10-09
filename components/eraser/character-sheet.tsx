@@ -597,6 +597,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const [availableClassSpells, setAvailableClassSpells] = useState(() => loadClassCatalog && knownClassCatalog ? knownClassCatalog.spells : classSpells)
   const [classCatalogLoading, setClassCatalogLoading] = useState(loadClassCatalog && !knownClassCatalog)
   const [classCatalogError, setClassCatalogError] = useState("")
+  // « Réessayer » relance la lecture des classes (après une coupure de Google Sheets).
+  const [classCatalogAttempt, setClassCatalogAttempt] = useState(0)
   const [portraitPending, setPortraitPending] = useState(false)
   const [narrativeExpanded, setNarrativeExpanded] = useState(true)
   const [mechanicsExpanded, setMechanicsExpanded] = useState(true)
@@ -1325,7 +1327,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     }
     void load()
     return () => { cancelled = true }
-  }, [loadClassCatalog])
+  }, [loadClassCatalog, classCatalogAttempt])
 
   useEffect(() => {
     const restore = window.setTimeout(() => {
@@ -1623,7 +1625,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <div className="mt-6 divide-y border-y">
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
               <div className="xl:col-span-4"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Peuples</p><MultipleValues label="un peuple" value={values[1]} onCommit={(value) => commit(1, value)} /></div>
-              <div className="xl:col-span-5"><div className="flex items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><ClassDisplayButton value={classDisplayOf(values[characterClassChoicesIndex] || "")} suggestions={classOptions.map((option) => option.label)} onChange={(display) => void commit(characterClassChoicesIndex, withClassDisplay(latestValues.current[characterClassChoicesIndex] || "", display))} /></div><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} /></div>
+              <div className="xl:col-span-5"><div className="flex items-center gap-2"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Classes</p><ClassDisplayButton value={classDisplayOf(values[characterClassChoicesIndex] || "")} suggestions={classOptions.map((option) => option.label)} onChange={(display) => void commit(characterClassChoicesIndex, withClassDisplay(latestValues.current[characterClassChoicesIndex] || "", display))} /></div><MultipleValues label="une classe" value={values[2]} options={classOptions} onCommit={(value) => commit(2, value)} />{!classOptions.length && (classCatalogLoading
+                ? <p className="mt-1 flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Lecture des classes…</p>
+                : <p className="mt-1 text-[11px] text-amber-600 dark:text-amber-400">{classCatalogError || "Aucune classe n’a pu être lue."} <button type="button" onClick={() => { knownClassCatalog = null; setClassCatalogAttempt((attempt) => attempt + 1) }} className="font-semibold underline underline-offset-2">Réessayer</button></p>)}</div>
               <div className="xl:col-span-3"><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Level</p><Stepper label="Level" value={values[3]} onCommit={commitLevel} /></div>
             </div>
             <div className="grid gap-x-8 gap-y-4 py-4 sm:grid-cols-2 xl:grid-cols-12">
