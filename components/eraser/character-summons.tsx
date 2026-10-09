@@ -60,7 +60,7 @@ export function CharacterSummons({ data, onUpdate, suggestions }: { data: Summon
 
   function createTemplate() {
     const color = summonColors[data.templates.length % summonColors.length]
-    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life"), newSummonField("stats", { principals: suggestions.principals })] } })
+    setEditor({ kind: "template", isNew: true, template: { id: newSummonId(), name: "", color, fields: [newSummonField("life"), newSummonField("stats")] } })
   }
 
   function summon(template: SummonTemplate) {
@@ -318,7 +318,7 @@ function SummonEditor({ target, suggestions, usedBy, onClose, onSave, onDeleteTe
           <div>
             <p className="mb-1.5 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground"><ListPlus className="size-3.5" />Ajouter un champ</p>
             <div className="grid gap-1.5 sm:grid-cols-2 xl:grid-cols-3">
-              {summonFieldKinds.map((kind) => <button key={kind.label} type="button" onClick={() => setFields((current) => [...current, newSummonField(kind.kind, { long: kind.long, principals: suggestions.principals })])} className="flex items-start gap-2 rounded-lg border border-dashed px-2.5 py-2 text-left transition hover:border-primary/50 hover:bg-primary/5">
+              {summonFieldKinds.map((kind) => <button key={kind.label} type="button" onClick={() => setFields((current) => [...current, newSummonField(kind.kind, { long: kind.long })])} className="flex items-start gap-2 rounded-lg border border-dashed px-2.5 py-2 text-left transition hover:border-primary/50 hover:bg-primary/5">
                 <span className="mt-0.5 text-muted-foreground"><FieldIcon field={kind} /></span>
                 <span className="min-w-0"><span className="block text-sm font-medium">{kind.label}</span><span className="block text-[11px] text-muted-foreground">{kind.hint}</span></span>
               </button>)}

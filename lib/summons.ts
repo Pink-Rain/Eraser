@@ -82,18 +82,18 @@ export function parseSummonsData(raw: unknown): SummonsData {
 
 export const summonFieldKinds: Array<{ kind: SummonFieldKind; long?: boolean; label: string; hint: string }> = [
   { kind: "life", label: "Points de vie", hint: "Actuels et maximum, avec une jauge" },
-  { kind: "stats", label: "Caractéristiques", hint: "Principales pré-remplies ; secondaires ou libres à ajouter" },
+  { kind: "stats", label: "Caractéristiques", hint: "Un encart vide : principales, secondaires ou libres, au choix" },
   { kind: "spell", label: "Sort", hint: "Écrit à la main : action, distance, charges, compétence" },
   { kind: "text", label: "Champ libre", hint: "Une valeur courte" },
   { kind: "text", long: true, label: "Texte long", hint: "Description, comportement, notes" },
 ]
 
-/** Un champ neuf pour l'éditeur ; le bloc de caractéristiques arrive avec les principales de l'index. */
-export function newSummonField(kind: SummonFieldKind, options: { long?: boolean; principals?: string[] } = {}): SummonField {
+/** Un champ neuf pour l'éditeur ; le bloc de caractéristiques arrive vide, on y ajoute ce qu'on veut. */
+export function newSummonField(kind: SummonFieldKind, options: { long?: boolean } = {}): SummonField {
   const fieldId = newSummonId()
   if (kind === "life") return { id: fieldId, kind, label: "Points de vie", current: "10", max: "10" }
   if (kind === "stats") {
-    return { id: fieldId, kind, group: "principale", label: "Caractéristiques", stats: (options.principals ?? []).map((name) => ({ id: newSummonId(), name, value: "0" })) }
+    return { id: fieldId, kind, group: "principale", label: "Caractéristiques", stats: [] }
   }
   if (kind === "spell") return { id: fieldId, kind, label: "Nouveau sort", description: "", action: "", distance: "" }
   return { id: fieldId, kind: "text", label: options.long ? "Description" : "Champ libre", value: "", ...(options.long ? { long: true } : {}) }

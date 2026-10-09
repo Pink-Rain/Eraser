@@ -90,10 +90,10 @@ test("une invocation à 0 point de vie est vaincue", () => {
   assert.equal(summons.summonLife({ id: "l", kind: "life", label: "", current: "", max: "" }).down, false);
 });
 
-test("un seul bloc de caractéristiques, pré-rempli avec les principales de l’index", () => {
-  const field = summons.newSummonField("stats", { principals: ["Force", "Dextérité"] });
+test("un seul bloc de caractéristiques, vide au départ", () => {
+  const field = summons.newSummonField("stats");
   assert.equal(field.label, "Caractéristiques");
-  assert.deepEqual(field.stats.map((stat) => [stat.name, stat.value]), [["Force", "0"], ["Dextérité", "0"]]);
+  assert.deepEqual(field.stats, []);
   assert.equal(summons.summonFieldKinds.filter((kind) => kind.kind === "stats").length, 1);
   // Un bloc « secondaires » d’un premier template reste lu tel quel.
   const old = summons.parseSummonsData({ templates: [{ id: "t", name: "Loup", fields: [{ id: "f", kind: "stats", group: "secondaire", label: "Caractéristiques secondaires", stats: [{ id: "s", name: "Armure physique", value: "3" }] }] }] });
