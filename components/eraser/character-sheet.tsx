@@ -14,6 +14,8 @@ import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
+import { parseSummonsData, type SummonsData } from "@/lib/summons"
 
 import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
@@ -99,7 +101,8 @@ const CharacterRelations = dynamic(() => import("@/components/eraser/character-r
 })
 
 type CharacterTabType = "competences" | "inventaire" | "classe" | "journal" | "invocation" | "compagnon"
-type CharacterTab = { id: string; type: CharacterTabType; label: string; removable: boolean; companions?: Companion[] }
+/** `summons` : templates et invocations d’un onglet Invocation (voir lib/summons). */
+type CharacterTab = { id: string; type: CharacterTabType; label: string; removable: boolean; companions?: Companion[]; summons?: SummonsData }
 
 const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
   { type: "competences", label: "Compétences" }, { type: "inventaire", label: "Inventaire" },
@@ -118,9 +121,9 @@ function parseCharacterTabs(value: string): CharacterTab[] {
   try {
     const parsed = JSON.parse(value)
     if (!Array.isArray(parsed)) return []
-    // Les compagnons d'un onglet Compagnon restent avec lui : réécrire les onglets ne les efface pas.
+    // Les compagnons et les invocations restent avec leur onglet : réécrire les onglets ne les efface pas.
     return parsed.flatMap((tab) => tab && typeof tab.id === "string" && tabTypes.some((candidate) => candidate.type === tab.type)
-      ? [{ id: tab.id, type: tab.type as CharacterTabType, label: typeof tab.label === "string" && tab.label.trim() ? tab.label.trim() : tabTypes.find((candidate) => candidate.type === tab.type)?.label || "Onglet", removable: true, ...(tab.type === "compagnon" ? { companions: parseCompanions(tab.companions) } : {}) }]
+      ? [{ id: tab.id, type: tab.type as CharacterTabType, label: typeof tab.label === "string" && tab.label.trim() ? tab.label.trim() : tabTypes.find((candidate) => candidate.type === tab.type)?.label || "Onglet", removable: true, ...(tab.type === "compagnon" ? { companions: parseCompanions(tab.companions) } : {}), ...(tab.type === "invocation" ? { summons: parseSummonsData(tab.summons) } : {}) }]
       : [])
   } catch { return [] }
 }
@@ -604,7 +607,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
    */
   const pendingChanges = useRef(new Map<number, PendingChange>())
   const persistQueue = useRef(Promise.resolve())
-  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict" | "rejected">("idle")
+  const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error" | "conflict" | "rejected" | "too-large">("idle")
   // Ce que le serveur a refusé (nom vide, image trop lourde) : dit tel quel, le reste continue.
   const [rejection, setRejection] = useState("")
   // Un portrait pas encore envoyé (Google injoignable) : « Réessayer » le renvoie.
@@ -1212,6 +1215,37 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return commit(characterCustomTabsIndex, JSON.stringify(next))
   }
 
+  /**
+   * Les invocations d’un onglet, à partir de la fiche la plus récente : deux clics rapides
+   * (− − sur la vie) partent chacun du précédent. Google coupe une case au-delà de 50 000
+   * caractères, ce qui casserait tout le JSON des onglets : au-delà, rien n’est écrit.
+   */
+  const updateSummons = (tabId: string): SummonsUpdate => async (change) => {
+    const tabs = parseCharacterTabs(latestValues.current[characterCustomTabsIndex] || "")
+    const tab = tabs.find((candidate) => candidate.id === tabId)
+    if (!tab) return false
+    const nextSummons: SummonsData = change(parseSummonsData(tab.summons))
+    const serialized = JSON.stringify(tabs.map((candidate) => candidate.id === tabId ? { ...candidate, summons: nextSummons } : candidate))
+    if (serialized.length > 48_000) { setSaveState("too-large"); return false }
+    await commit(characterCustomTabsIndex, serialized)
+    return true
+  }
+
+  const summonSuggestions = useMemo(() => ({
+    principals: catalog.characteristics.filter((item) => item.kind === "principale").map((item) => item.name),
+    characteristics: catalog.characteristics.map((item) => item.name),
+    skills: catalog.skills.map((skill) => skill.name),
+  }), [catalog])
+  const [removingTab, setRemovingTab] = useState<CharacterTab | null>(null)
+
+  /** Un onglet Invocation ou Compagnon garni demande confirmation : son contenu partirait avec lui. */
+  function askRemoveCharacterTab(tab: CharacterTab) {
+    const data = parseSummonsData(tab.summons)
+    const filled = tab.type === "invocation" ? data.templates.length + data.summons.length > 0 : tab.type === "compagnon" && (tab.companions?.length ?? 0) > 0
+    if (filled) setRemovingTab(tab)
+    else void removeCharacterTab(tab.id)
+  }
+
   async function removeCharacterTab(id: string) {
     const nextTabs = parseCharacterTabs(latestValues.current[characterCustomTabsIndex] || "").filter((tab) => tab.id !== id)
     if (activeTab === id) setActiveTab("base-competences")
@@ -1384,6 +1418,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
     if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
+    if (tab.type === "invocation") return <CharacterSummons data={parseSummonsData(tab.summons)} onUpdate={updateSummons(tab.id)} suggestions={summonSuggestions} />
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }
 
@@ -1461,18 +1496,19 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     <Tabs value={activeCharacterTab.id} onValueChange={setActiveTab} className="mt-9 rounded-2xl border border-[#74664f3d] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.018))] p-2 shadow-sm">
       <div className="overflow-hidden">
         <TabsList variant="line" className="h-auto w-full min-w-0 flex-wrap justify-start bg-transparent">
-          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span className="relative">{tab.label}{tab.type === "classe" && pendingChoiceCount > 0 && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title={pendingChoiceCount > 1 ? `${pendingChoiceCount} nouveaux sorts à choisir` : "Un nouveau sort à choisir"} />}{tab.type === "inventaire" && hasNewItems && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title="Nouvel objet reçu" />}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); void removeCharacterTab(tab.id) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); void removeCharacterTab(tab.id) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
+          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span className="relative">{tab.label}{tab.type === "classe" && pendingChoiceCount > 0 && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title={pendingChoiceCount > 1 ? `${pendingChoiceCount} nouveaux sorts à choisir` : "Un nouveau sort à choisir"} />}{tab.type === "inventaire" && hasNewItems && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title="Nouvel objet reçu" />}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); askRemoveCharacterTab(tab) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); askRemoveCharacterTab(tab) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAddingTab(true)} aria-label="Ajouter un onglet" title="Ajouter un onglet"><Plus /></Button>
         </TabsList>
       </div>
       <TabsContent value={activeCharacterTab.id} forceMount className="mt-2 rounded-xl p-2 sm:p-3">{renderTabContent(activeCharacterTab)}</TabsContent>
     </Tabs>
 
-    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" || saveState === "conflict" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
+    {saveState !== "idle" && <div className={`fixed bottom-5 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-full border px-3 py-1.5 text-xs shadow-lg backdrop-blur ${saveState === "error" || saveState === "conflict" || saveState === "too-large" ? "border-destructive/40 bg-destructive/10 text-destructive" : "bg-card/90 text-muted-foreground"}`} role="status" aria-live="polite">
       {saveState === "saving" && <><LoaderCircle className="size-3.5 animate-spin" />Enregistrement…</>}
       {saveState === "saved" && <><Check className="size-3.5 text-emerald-600" />Enregistré</>}
       {saveState === "error" && <><X className="size-3.5" />Pas encore enregistré : Google ne répond pas.<button type="button" className="font-semibold underline" onClick={() => { setSaveState("saving"); void flush() }}>Réessayer</button></>}
       {saveState === "rejected" && <><X className="size-3.5" />Pas enregistré : {rejection}<button type="button" className="font-semibold underline" onClick={() => setSaveState("idle")}>Fermer</button></>}
+      {saveState === "too-large" && <><X className="size-3.5" />Pas enregistré : les onglets de cette fiche sont trop remplis. Renvoie une invocation ou raccourcis un texte.<button type="button" className="font-semibold underline" onClick={() => setSaveState("idle")}>OK</button></>}
       {saveState === "conflict" && <><X className="size-3.5" />{conflictHeaders.length ? `La fiche a changé ailleurs entre-temps. Pas enregistré : ${conflictHeaders.join(", ")}. Recommence sur la fiche à jour.` : "La fiche a changé entre-temps : actualise puis recommence."}</>}
     </div>}
 
@@ -1517,6 +1553,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <Button type="button" variant="outline" onClick={() => setLevelDrop(null)}>Annuler</Button>
           <Button type="button" variant="destructive" onClick={confirmLevelDrop}><Minus />Retirer et descendre</Button>
         </div>
+      </DialogContent>
+    </Dialog>
+
+    <Dialog open={Boolean(removingTab)} onOpenChange={(open) => { if (!open) setRemovingTab(null) }}>
+      <DialogContent>
+        <DialogHeader><DialogTitle>Retirer l’onglet « {removingTab?.label} » ?</DialogTitle></DialogHeader>
+        <p className="text-sm text-muted-foreground">{removingTab?.type === "compagnon" ? "Ses compagnons disparaîtront de la fiche avec lui." : "Ses templates et ses invocations disparaîtront de la fiche avec lui."}</p>
+        <div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={() => setRemovingTab(null)}>Garder</Button><Button type="button" variant="destructive" onClick={() => { const tab = removingTab; setRemovingTab(null); if (tab) void removeCharacterTab(tab.id) }}>Retirer l’onglet</Button></div>
       </DialogContent>
     </Dialog>
 
