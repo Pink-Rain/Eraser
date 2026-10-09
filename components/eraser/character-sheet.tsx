@@ -31,7 +31,7 @@ import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
 import { CharacterStatesPanel, useStatesCatalog } from "@/components/eraser/character-states"
 import { FxOverlay, PageFxOverlay, PortraitFx, pageImageFxClass, portraitImageFxClass, stateFxOf } from "@/components/eraser/portrait-fx"
 import { applyRule, hasRule, ruleLabel, type ModifierRule } from "@/lib/state-change"
-import { portraitLayers, stateContributions, type CharacterState } from "@/lib/character-states"
+import { portraitLayers, stateContributions, withoutStateWrites, withStateWrites, writesToRevert, type CharacterState, type StateWrite } from "@/lib/character-states"
 import { SpellChargeStars } from "@/components/eraser/spell-charges"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -573,6 +573,10 @@ const wholeJsonCells = new Set([characterClassChoicesIndex, characterCustomTabsI
 // Les classes et sorts lus par la dernière fiche ouverte (gardés d'une fiche à l'autre).
 let knownClassCatalog: { classes: ClassRecord[]; spells: ClassSpell[] } | null = null
 
+
+/** L'identifiant d'un lancer d'effet d'état (pour retirer ses écritures à « Annuler »). */
+let stateWriteCounter = 0
+const nextStateWriteId = () => `w${Date.now().toString(36)}${(stateWriteCounter += 1).toString(36)}`
 export function CharacterSheet({ initialCharacter, catalog: initialCatalog = builtinCharacterCatalog, classes, classSpells, initialInventory, loadClassCatalog = false }: { initialCharacter: CharacterSheetRecord; catalog?: CharacterCatalog; classes: ClassRecord[]; classSpells: ClassSpell[]; initialInventory?: CharacterInventoryRecord; loadClassCatalog?: boolean }) {
   const [character, setCharacter] = useState(initialCharacter)
   const [values, setValues] = useState(initialCharacter.values)
@@ -1107,7 +1111,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
    * modificateurs, le résultat est écrit dans la fiche : ce sont des dégâts. « Annuler »
    * remet les valeurs d'avant.
    */
-  function rollStateEffect(effect: StateEffect): StateRollOutcome {
+  function rollStateEffect(effect: StateEffect, state?: CharacterState): StateRollOutcome {
     const lines: string[] = []
     let hit = true
     try {
@@ -1117,7 +1121,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         lines.push(`${effect.roll.dice} → ${rolled.total}${effect.roll.range ? ` (${rangeLabel(effect.roll.range)}) : ${hit ? "réussi" : "raté"}` : ""}`)
       }
       const operation = effect.operation
-      const changes: Array<{ index: number; before: string; label: string }> = []
+      const changes: Array<{ index: number; before: string; label: string; delta: number }> = []
       if (hit && operation) {
         let amount = operation.kind === "add" ? operation.amount : 0
         if (operation.kind === "roll") {
@@ -1136,8 +1140,9 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           let after = operation.kind === "set" ? operation.value : operation.kind === "min" ? Math.max(base, operation.value) : operation.kind === "max" ? Math.min(base, operation.value) : base + amount
           // Le plancher de la vie actuelle (« ≥1 ») vaut aussi pour un lancer.
           if (index === 9) after = applyRule(after, { min: currentLifeRule?.min, max: currentLifeRule?.max })
-          changes.push({ index, before, label: `${name} ${base} → ${Math.round(after * 100) / 100}` })
-          void commit(index, String(Math.round(after * 100) / 100))
+          const written = Math.round(after * 100) / 100
+          changes.push({ index, before, label: `${name} ${base} → ${written}`, delta: Math.round((written - base) * 100) / 100 })
+          void commit(index, String(written))
         }
       }
       // Rien n'a été écrit : on dit pourquoi plutôt que de laisser croire que ça a marché.
@@ -1147,14 +1152,42 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       } else if (hit && operation && !changes.length) {
         lines.push(effect.targets.length ? `Rien n’est appliqué : « ${effect.targets.join(", ")} » n’est pas une valeur que la fiche peut écrire.` : "Rien n’est appliqué : l’effet n’a pas de cible.")
       }
-      return { hit, lines: [...lines, ...changes.map((change) => change.label)], undo: changes.length ? () => { for (const change of changes) void commit(change.index, change.before) } : undefined }
+      // Ce que l'état a écrit est noté avec lui : il le retire en partant (« Retiré en sortant de l'état »).
+      const writeId = nextStateWriteId()
+      const writes: StateWrite[] = changes.flatMap((change) => change.delta ? [{ id: writeId, effect: effect.name, cell: change.index, delta: change.delta }] : [])
+      if (state && writes.length) commitStates(withStateWrites(statesNow(), state.name, writes))
+      return { hit, lines: [...lines, ...changes.map((change) => change.label)], undo: changes.length ? () => {
+        for (const change of changes) void commit(change.index, change.before)
+        if (state && writes.length) commitStates(withoutStateWrites(statesNow(), writeId))
+      } : undefined }
     } catch {
       return { hit: false, lines: ["Ces dés n’ont pas pu être lancés : vérifier l’écriture dans l’Index des états."] }
     }
   }
 
-  function updateStates(next: CharacterState[]) {
+  /** Les états posés tels qu'enregistrés à l'instant (avec ce que chacun a écrit). */
+  const statesNow = () => parseClassChoices(latestValues.current[characterClassChoicesIndex] || "").states
+  function commitStates(next: CharacterState[]) {
     void commit(characterClassChoicesIndex, JSON.stringify({ ...parseClassChoices(latestValues.current[characterClassChoicesIndex] || ""), states: next }))
+  }
+
+  /**
+   * Les états changés depuis la fiche. Un état retiré emporte ce que ses effets ont écrit
+   * (dés, effet redéclenché) quand « Retiré en sortant de l'état » est coché : les dégâts
+   * sur la vie actuelle, décochés, restent.
+   */
+  function updateStates(next: CharacterState[]) {
+    const previous = statesNow()
+    const kept = new Set(next.map((state) => foldName(state.name)))
+    for (const { cell, delta } of writesToRevert(statesCatalog.catalog, previous.filter((state) => !kept.has(foldName(state.name))))) {
+      void commit(cell, String(Math.round((sheetNumber(latestValues.current[cell] ?? "") - delta) * 100) / 100))
+    }
+    // Ce qui a été écrit depuis le dernier affichage reste noté sur les états gardés.
+    const writtenOf = new Map(previous.map((state) => [foldName(state.name), state.written]))
+    commitStates(next.map((state) => {
+      const written = writtenOf.get(foldName(state.name))
+      return written?.length ? { ...state, written } : state
+    }))
   }
 
   function updateSpellCharges(spell: ClassSpell, count: number) {

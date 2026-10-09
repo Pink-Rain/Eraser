@@ -24,6 +24,7 @@ import {
   EFFECT_APPLY_OPTIONS,
   EFFECT_PAGE_HEADER,
   EFFECT_PAGE_LEGACY_HEADERS,
+  EFFECT_RESET_HEADER,
   EFFECT_RETRIGGER_HEADER,
   EFFECT_ROLL_HEADER,
   EFFECTS_TAB,
@@ -49,6 +50,11 @@ export type StateEffect = {
    * quand l'état est posé ou monte à ce niveau, et à chaque reclic sur le niveau en cours.
    */
   retrigger: boolean
+  /**
+   * « Retiré en sortant de l'état » (cochée ou vide) : ce que l'effet a écrit dans la fiche
+   * (dés, effet redéclenché) est retiré quand l'état part. Décochée : ça reste (dégâts).
+   */
+  resetOnExit: boolean
   image: string
   /** Où sa couleur s'applique (colonne « Couleur appliquée à ») ; nulle part si rien n'est choisi. */
   apply: EffectTargets
@@ -79,8 +85,14 @@ export type StateDefinition = {
 
 export type StatesCatalog = { states: StateDefinition[]; effects: StateEffect[] }
 
-/** Un état posé sur un personnage : son nom (et son identifiant) et le niveau atteint. */
-export type CharacterState = { id: string; name: string; level: 1 | 2 }
+/**
+ * Ce qu'un effet de l'état a écrit dans la fiche (un dé lancé, un effet redéclenché) : la
+ * case et l'écart, pour le retirer quand l'état part. `id` : un lancer (son « Annuler »).
+ */
+export type StateWrite = { id: string; effect: string; cell: number; delta: number }
+
+/** Un état posé sur un personnage : son nom (et son identifiant), le niveau atteint, et ce qu'il a écrit. */
+export type CharacterState = { id: string; name: string; level: 1 | 2; written?: StateWrite[] }
 
 type Table = { tabName: string; headers: string[]; rows: Array<{ values: string[]; html: string[] }> }
 type Columns = Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
@@ -127,7 +139,7 @@ export function parseStatesCatalog(tables: Table[], columns: Columns): StatesCat
     if (!name) return []
     const changeText = read(row, [EFFECT_CHANGE_HEADER])
     const operation = parseValueChange(changeText)
-    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: operation?.kind === "add" ? operation.amount : null, changeText, operation, roll: parseRoll(read(row, [EFFECT_ROLL_HEADER])), retrigger: isCheckedValue(read(row, [EFFECT_RETRIGGER_HEADER, "Redéclencher", "Redéclancher l'effet"])), image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
+    return [{ name, targets: splitNames(read(row, [EFFECT_TARGET_HEADER])), color: read(row, [EFFECT_COLOR_HEADER]), change: operation?.kind === "add" ? operation.amount : null, changeText, operation, roll: parseRoll(read(row, [EFFECT_ROLL_HEADER])), retrigger: isCheckedValue(read(row, [EFFECT_RETRIGGER_HEADER, "Redéclencher", "Redéclancher l'effet"])), resetOnExit: isCheckedValue(read(row, [EFFECT_RESET_HEADER]), true), image: read(row, [EFFECT_IMAGE_HEADER]), apply: effectApply(read(row, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])), fxApply: effectApply(read(row, [EFFECT_FX_APPLY_HEADER])), fx: parseStateFx(read(row, [EFFECT_FX_HEADER])) }]
   }) : []
   // La colonne Jauge de l'onglet États donne l'icône (et sa couleur) des niveaux.
   const gaugeColumn = (columns[statesTable?.tabName ?? ""] ?? []).find((column) => column.spec.kind === "gauge")
@@ -171,8 +183,53 @@ export function parseCharacterStates(value: unknown): CharacterState[] {
     const id = typeof source.id === "string" ? source.id.trim().slice(0, 80) : ""
     if (!name || seen.has(foldName(name))) return []
     seen.add(foldName(name))
-    return [{ id: id || `etat:${foldName(name)}`, name, level: source.level === 2 ? 2 as const : 1 as const }]
+    const written = parseStateWrites(source.written)
+    return [{ id: id || `etat:${foldName(name)}`, name, level: source.level === 2 ? 2 as const : 1 as const, ...(written.length ? { written } : {}) }]
   }).slice(0, 40)
+}
+
+function parseStateWrites(value: unknown): StateWrite[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((entry) => {
+    if (!entry || typeof entry !== "object") return []
+    const source = entry as Record<string, unknown>
+    const cell = typeof source.cell === "number" && Number.isInteger(source.cell) && source.cell >= 0 ? source.cell : -1
+    const delta = typeof source.delta === "number" && Number.isFinite(source.delta) ? source.delta : 0
+    if (cell < 0 || !delta) return []
+    return [{ id: typeof source.id === "string" ? source.id.slice(0, 40) : "", effect: typeof source.effect === "string" ? source.effect.slice(0, 120) : "", cell, delta }]
+  }).slice(-80)
+}
+
+/** Les états avec ce qu'un lancer vient d'écrire pour l'un d'eux (retrouvé par son nom). */
+export function withStateWrites(states: CharacterState[], stateName: string, writes: StateWrite[]): CharacterState[] {
+  if (!writes.length) return states
+  return states.map((state) => foldName(state.name) === foldName(stateName) ? { ...state, written: [...(state.written ?? []), ...writes].slice(-80) } : state)
+}
+
+/** Les états sans les écritures d'un lancer annulé (« Annuler »). */
+export function withoutStateWrites(states: CharacterState[], writeId: string): CharacterState[] {
+  return states.map((state) => {
+    if (!state.written?.some((write) => write.id === writeId)) return state
+    const written = state.written.filter((write) => write.id !== writeId)
+    return written.length ? { ...state, written } : { id: state.id, name: state.name, level: state.level }
+  })
+}
+
+/**
+ * Ce qu'il faut retirer de la fiche quand ces états partent : l'écart total par case, pour
+ * les effets dont « Retiré en sortant de l'état » est coché (ou vide). Un effet qui n'est
+ * plus dans l'index ne retire rien : on ne touche pas à ce qu'on ne sait plus lire.
+ */
+export function writesToRevert(catalog: StatesCatalog, removed: CharacterState[]) {
+  const totals = new Map<number, number>()
+  for (const state of removed) {
+    for (const write of state.written ?? []) {
+      const effect = catalog.effects.find((candidate) => foldName(candidate.name) === foldName(write.effect))
+      if (!effect?.resetOnExit) continue
+      totals.set(write.cell, (totals.get(write.cell) ?? 0) + write.delta)
+    }
+  }
+  return [...totals.entries()].filter(([, delta]) => Math.abs(delta) > 1e-9).map(([cell, delta]) => ({ cell, delta: Math.round(delta * 100) / 100 }))
 }
 
 /** La définition d'un état posé (par identifiant, puis par nom). */

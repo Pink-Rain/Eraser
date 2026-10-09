@@ -160,3 +160,40 @@ test("changement de valeur : +, -, =, bornes et dés ; jets lancés depuis la fi
   // « Redéclencher l'effet » coché : jamais temporaire (absent ci-dessus), déclenché à la demande.
   assert.deepEqual(states.triggeredEffectsOf(catalog, { id: "T1", name: "Test", level: 1 }).map((effect) => effect.name), ["Brûlure"]);
 });
+
+test("un état retiré emporte ce que ses effets ont écrit, sauf ce qui est décoché (dégâts sur la vie)", async () => {
+  const defs = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const effects = {
+    tabName: "Effets",
+    headers: ["Nom", "Cible", "Changement de valeur", "Redéclencher l'effet", "Retiré en sortant de l'état"],
+    rows: [
+      row(["Faiblesse", "Force", "-1d10", "Oui", "Oui"]),
+      row(["Brûlure", "Points de vie actuels", "-1d6", "Oui", "Non"]),
+      // Case vide (effet ajouté après coup) : cochée.
+      row(["Lenteur", "Dextérité", "-5", "Oui", ""]),
+    ],
+  };
+  const catalog = states.parseStatesCatalog([tables[0], effects], columns);
+  assert.deepEqual(catalog.effects.map((effect) => [effect.name, effect.resetOnExit]), [["Faiblesse", true], ["Brûlure", false], ["Lenteur", true]]);
+  // Ce que chaque lancer a écrit est noté sur l'état, et relu tel quel depuis la fiche.
+  let posted = [{ id: "ETA-1", name: "Poison", level: 1 }, { id: "ETA-2", name: "Effrayé", level: 1 }];
+  posted = states.withStateWrites(posted, "poison", [{ id: "w1", effect: "Faiblesse", cell: 20, delta: -7 }, { id: "w1", effect: "Brûlure", cell: 9, delta: -4 }]);
+  posted = states.withStateWrites(posted, "Poison", [{ id: "w2", effect: "Faiblesse", cell: 20, delta: -3 }, { id: "w2", effect: "Lenteur", cell: 21, delta: -5 }]);
+  posted = states.parseCharacterStates(JSON.parse(JSON.stringify(posted)));
+  assert.equal(posted[0].written.length, 4);
+  assert.equal(posted[1].written, undefined);
+  // Retiré : Force +10 (deux lancers), Dextérité +5 ; la vie ne remonte pas.
+  assert.deepEqual(states.writesToRevert(catalog, [posted[0]]), [{ cell: 20, delta: -10 }, { cell: 21, delta: -5 }]);
+  // « Annuler » sur un lancer : il n'est plus à retirer.
+  const undone = states.withoutStateWrites(posted, "w2");
+  assert.deepEqual(states.writesToRevert(catalog, [undone[0]]), [{ cell: 20, delta: -7 }]);
+  assert.deepEqual(states.withoutStateWrites(undone, "w1")[0], { id: "ETA-1", name: "Poison", level: 1 });
+  // Un effet disparu de l'index ne retire rien.
+  assert.deepEqual(states.writesToRevert(catalog, [{ id: "x", name: "X", level: 1, written: [{ id: "w", effect: "Inconnu", cell: 3, delta: 2 }] }]), []);
+  // La colonne ajoutée aux index existants : cochée, sauf les effets sur la vie actuelle.
+  assert.equal(defs.effectResetDefault("Force, Dextérité"), "Oui");
+  assert.equal(defs.effectResetDefault("Points de vie actuels"), "Non");
+  assert.equal(defs.effectResetDefault("<b>Points de vie actuels</b>, Force"), "Non");
+  assert.equal(defs.effectResetDefault(""), "Oui");
+  assert.ok(defs.worldIndexColumnFills.states.some((fill) => fill.column === "Retiré en sortant de l'état"));
+});

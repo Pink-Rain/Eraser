@@ -38,7 +38,8 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
   error: string
   onChange: (states: CharacterState[]) => void
   /** Lance un effet (jet, dés) et écrit son résultat dans la fiche. */
-  onRoll?: (effect: StateEffect) => StateRollOutcome
+  /** Lance un effet de cet état et l'écrit dans la fiche ; `state` : ce qui l'a écrit, retiré avec lui. */
+  onRoll?: (effect: StateEffect, state: CharacterState) => StateRollOutcome
   disabled?: boolean
 }) {
   const [open, setOpen] = useState(false)
@@ -62,7 +63,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
     if (!onRoll) return
     const effects = triggeredEffectsOf(catalog, { ...state, level })
     if (!effects.length) return
-    const results = effects.map((effect) => ({ effect, outcome: onRoll(effect) }))
+    const results = effects.map((effect) => ({ effect, outcome: onRoll(effect, state) }))
     const undos = results.flatMap((result) => result.outcome.undo ? [result.outcome.undo] : [])
     const outcome: StateRollOutcome = {
       hit: results.some((result) => result.outcome.hit),
@@ -131,7 +132,7 @@ export function CharacterStatesPanel({ states, autoStates = [], catalog, loaded,
             <span className="ml-auto flex shrink-0 items-center gap-2">
             {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title="Posé tout seul d’après les points de vie">Auto</span>}
             {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
-            {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
+            {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect, state) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
             {!automatic && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
               {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => chooseLevel(state, level, (index + 1) as 1 | 2)} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={index + 1 === level && retriggers ? `Niveau ${index + 1} : recliquer redéclenche l’effet` : `Niveau ${index + 1}`}>
                 <IndexIconGlyph icon={definition?.gauge.icon || "clock"} emoji={definition?.gauge.emoji} filled={index < level} stroke={definition?.gauge.strokeColor} className="size-4" />

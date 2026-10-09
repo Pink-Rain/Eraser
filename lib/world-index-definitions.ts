@@ -75,6 +75,13 @@ export const WEAPON_MODIFIER_ICON_HEADER = "Icône"
 export const EFFECT_ROLL_HEADER = "Jet"
 /** Case à cocher : l'effet s'écrit pour de bon à chaque fois qu'il est déclenché. */
 export const EFFECT_RETRIGGER_HEADER = "Redéclencher l'effet"
+/**
+ * Case à cocher (vide : cochée) : ce que l'effet a écrit dans la fiche (dés, effet
+ * redéclenché) est retiré quand l'état part. Décochée pour les dégâts et soins sur les
+ * points de vie actuels, qui restent.
+ */
+export const EFFECT_RESET_HEADER = "Retiré en sortant de l'état"
+export const EFFECT_RESET_DESCRIPTION = "Cochée (ou vide) : quand l'état est retiré de la fiche, ce que cet effet y a écrit (dés lancés, effet redéclenché) est retiré aussi. Décochée : ça reste, comme des dégâts ou un soin sur les points de vie actuels. Les effets temporaires (+10, =100, ≥1 sans dés) partent toujours avec l'état."
 export const EFFECT_RETRIGGER_DESCRIPTION = "Cochée : l'effet n'est plus temporaire. Il s'écrit pour de bon dans la fiche (des dégâts, un soin), comme un dé : quand l'état est posé ou monte à ce niveau, puis à chaque nouveau clic sur le niveau en cours. Avec des dés ou un Jet, ils sont lancés à ces moments-là."
 
 /** Comment écrire ces deux colonnes : la description proposée d'office (modifiable dans « Modifier »). */
@@ -349,8 +356,8 @@ const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldInde
       {
         name: EFFECTS_TAB,
         itemLabel: "un effet",
-        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER, EFFECT_ROLL_HEADER, EFFECT_RETRIGGER_HEADER],
-        widths: [240, 320, 130, 190, 160, 130, 220, 220, 220, 170],
+        headers: ["Nom", EFFECT_TARGET_HEADER, EFFECT_COLOR_HEADER, EFFECT_CHANGE_HEADER, EFFECT_IMAGE_HEADER, ID_HEADER, EFFECT_PAGE_HEADER, EFFECT_FX_HEADER, EFFECT_FX_APPLY_HEADER, EFFECT_ROLL_HEADER, EFFECT_RETRIGGER_HEADER, EFFECT_RESET_HEADER],
+        widths: [240, 320, 130, 190, 160, 130, 220, 220, 220, 170, 170, 200],
         idPrefix: "EFF",
         renamedHeaders: EFFECT_PAGE_LEGACY_HEADERS.map((legacy) => [legacy, EFFECT_PAGE_HEADER] as [string, string]),
       },
@@ -500,6 +507,14 @@ export const worldIndexSeeds: Partial<Record<BuiltinWorldIndexKey, () => Record<
  */
 export const worldIndexColumnFills: Partial<Record<BuiltinWorldIndexKey, Array<{ tab: string; column: string; valueFor: (row: Record<string, string>) => string }>>> = {
   skills: [{ tab: CHARACTERISTICS_TAB, column: CATALOG_COLOR_HEADER, valueFor: (row) => builtinCharacteristicColor(row[CATALOG_KEY_HEADER] ?? "") }],
+  // Cochée pour tous les effets, sauf ceux qui visent les points de vie actuels (dégâts, soins).
+  states: [{ tab: EFFECTS_TAB, column: EFFECT_RESET_HEADER, valueFor: (row) => effectResetDefault(row[EFFECT_TARGET_HEADER] ?? "") }],
+}
+
+/** La case « Retiré en sortant de l'état » d'un effet existant : « Non » s'il vise les points de vie actuels. */
+export function effectResetDefault(targets: string) {
+  if (!targets.replace(/<[^>]+>/g, "").trim()) return "Oui"
+  return splitNames(targets.replace(/<[^>]+>/g, "")).some((name) => foldName(name) === foldName(CURRENT_LIFE_TARGET)) ? "Non" : "Oui"
 }
 
 /**
@@ -573,6 +588,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
   if (index === "states") {
     if (tab === EFFECTS_TAB && [EFFECT_TARGET_HEADER, EFFECT_CHANGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique l’effet d’un état posé aux cibles : +10 / -30 ajoutent, =100 remplace, ≥1 / ≤50 bornent, tant que l’état est posé. Des dés (-1d20+20 : retire le total de 1d20+20) se lancent depuis la fiche.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_RETRIGGER_HEADER)) reasons.push("La fiche de personnage écrit l’effet coché pour de bon quand l’état est posé, monte à ce niveau ou qu’on reclique sur le niveau en cours.")
+    if (tab === EFFECTS_TAB && folded === foldName(EFFECT_RESET_HEADER)) reasons.push("La fiche de personnage retire ce que l’effet a écrit (dés, effet redéclenché) quand l’état est retiré, si la case est cochée ou vide.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_ROLL_HEADER)) reasons.push("Le jet lancé depuis la fiche (« 1d20 16-20 ») : dans la plage, le changement de valeur s’applique ; vide, l’effet n’a pas de jet.")
     if (tab === EFFECTS_TAB && [EFFECT_COLOR_HEADER, EFFECT_IMAGE_HEADER].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage teinte le portrait de cette couleur (ou y pose cette image) tant que l’effet est en vigueur.")
     if (tab === EFFECTS_TAB && [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique la couleur de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
@@ -725,6 +741,7 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
       if (isHeader(header, [EFFECT_CHANGE_HEADER])) return { kind: "rich", description: EFFECT_CHANGE_DESCRIPTION }
       if (isHeader(header, [EFFECT_ROLL_HEADER])) return { kind: "rich", description: EFFECT_ROLL_DESCRIPTION }
       if (isHeader(header, [EFFECT_RETRIGGER_HEADER, "Redéclencher", "Redéclancher l'effet"])) return { kind: "checkbox", description: EFFECT_RETRIGGER_DESCRIPTION }
+      if (isHeader(header, [EFFECT_RESET_HEADER])) return { kind: "checkbox", emptyChecked: true, description: EFFECT_RESET_DESCRIPTION }
       if (isHeader(header, [EFFECT_IMAGE_HEADER])) return { kind: "file", file: { accept: "image" } }
       if (isHeader(header, [EFFECT_PAGE_HEADER, ...EFFECT_PAGE_LEGACY_HEADERS])) return { kind: "choice", multiple: true, options: EFFECT_APPLY_OPTIONS.map((value) => ({ value })) }
       if (isHeader(header, [EFFECT_FX_HEADER])) return { kind: "choice", multiple: true, options: stateFxList.map((fx) => ({ value: fx.value })) }
