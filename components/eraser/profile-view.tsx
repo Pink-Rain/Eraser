@@ -83,7 +83,7 @@ export function ProfileView({ account, characters, campaigns, access }: { accoun
   // Les campagnes menées, puis celles où joue l'un de ses personnages.
   const played = useMemo(() => {
     const led = new Set(campaigns.map((campaign) => campaign.id))
-    const seen = new globalThis.Map<string, { id: string; name: string; accentColor: string; characters: string[] }>()
+    const seen = new globalThis.Map<string, { id: string; name: string; accentColor: string; bannerUrl?: string; characters: string[] }>()
     for (const character of characters) for (const campaign of character.campaigns) {
       if (led.has(campaign.id)) continue
       const entry = seen.get(campaign.id) ?? { ...campaign, characters: [] }
@@ -165,7 +165,7 @@ export function ProfileView({ account, characters, campaigns, access }: { accoun
             </div>
           </CardLink>)}
           {played.map((campaign) => <CardLink key={campaign.id} href={canOpenCampaign(campaign.id) ? `/campagne/${encodeURIComponent(campaign.id)}` : null} label={campaign.name} className="flex flex-col overflow-hidden rounded-2xl border bg-background/40" style={{ borderColor: `${campaign.accentColor}55` }}>
-            <div className="flex aspect-[16/6] w-full items-center justify-center" style={{ background: `linear-gradient(135deg, ${campaign.accentColor}33, ${campaign.accentColor}0d)`, color: campaign.accentColor }}><Map className="size-6 opacity-60" /></div>
+            <div className="relative flex aspect-[16/6] w-full items-center justify-center overflow-hidden" style={{ background: `linear-gradient(135deg, ${campaign.accentColor}33, ${campaign.accentColor}0d)`, color: campaign.accentColor }}><Map className="size-6 opacity-60" /><QuietImage src={campaign.bannerUrl ?? ""} /></div>
             <div className="h-1 w-full" style={{ backgroundColor: campaign.accentColor }} />
             <div className="flex flex-1 flex-col p-3.5">
               <div className="flex items-center gap-2"><h3 className="font-display min-w-0 flex-1 truncate text-lg font-semibold" style={{ color: campaign.accentColor }}>{campaign.name}</h3><span className="inline-flex shrink-0 items-center gap-1 rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wider" style={{ borderColor: `${campaign.accentColor}55`, color: campaign.accentColor }}><UsersRound className="size-3" />Joueur</span></div>

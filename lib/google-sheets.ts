@@ -95,7 +95,8 @@ export type CharacterRecord = {
   name: string
   subtitle: string
   updatedAt: string
-  campaigns: Array<{ id: string; name: string; accentColor: string }>
+  /** Les campagnes du personnage, avec leur bannière (vue aussi par les joueurs sur la page de campagne). */
+  campaigns: Array<{ id: string; name: string; accentColor: string; bannerUrl?: string }>
   /** Classes lues dans la fiche (« Samouraï · Oracle »), quand elles sont connues. */
   classes?: string
   /** Rang du personnage, quand il est connu. */
@@ -2409,13 +2410,14 @@ async function decorateCharacters<T extends { id: string; ownerUid: string; name
     id: campaignIndex.id,
     name: campaignIndex.name,
     accentColor: campaignIndex.accentColor,
+    bannerUrl: campaignIndex.bannerUrl,
   }).from(campaignCharacters)
     .innerJoin(campaignIndex, eq(campaignCharacters.campaignId, campaignIndex.id))
     .where(and(inArray(campaignCharacters.characterId, characters.map((item) => item.id)), isNull(campaignIndex.deletedAt)))
   return characters.map<CharacterRecord>((character) => ({
     id: character.id, ownerUid: character.ownerUid, name: character.name,
     subtitle: character.subtitle, updatedAt: character.updatedAt,
-    campaigns: links.filter((link) => link.characterId === character.id).map(({ id, name, accentColor }) => ({ id, name, accentColor })),
+    campaigns: links.filter((link) => link.characterId === character.id).map(({ id, name, accentColor, bannerUrl }) => ({ id, name, accentColor, ...(bannerUrl ? { bannerUrl } : {}) })),
   }))
 }
 
