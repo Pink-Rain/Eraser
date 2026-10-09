@@ -2,37 +2,84 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { Fragment, useEffect, useMemo, useRef, useState } from "react"
-import { ArrowLeft, BookOpen, ChevronRight, FileText, LoaderCircle, Search, Volume1, Volume2, VolumeX } from "lucide-react"
+import { Fragment, useEffect, useMemo, useRef, useState, type ReactNode } from "react"
+import { BookOpen, ChevronRight, FileText, Folder, LoaderCircle, Search, Volume1, Volume2, VolumeX } from "lucide-react"
 
 import { loadLinkTargets } from "@/components/eraser/rich-text"
 import { Dialog, DialogContent, DialogTitle } from "@/components/ui/dialog"
+import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuSub, DropdownMenuSubContent, DropdownMenuSubTrigger, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import type { AppLinkTarget } from "@/lib/app-links"
-import { breadcrumbsFor } from "@/lib/breadcrumbs"
+import { breadcrumbsFor, childrenOf, sectionsOf } from "@/lib/breadcrumbs"
 import { playVolumePreview, setSoundsEnabled, setSoundVolume, SOUND_VOLUME_EVENT, soundsEnabled, soundVolume } from "@/lib/sounds"
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").trim()
 
+type CrumbMenuItem = { label: string; href?: string; children?: Array<{ label: string; href: string }> }
+
 /**
- * Le fil d'Ariane de la barre du haut : retour à la page précédente, puis Eraser (l'accueil),
- * les pages au-dessus de celle affichée (cliquables), et son titre.
+ * Le « › » entre deux étapes, comme dans l'explorateur de Windows : il ouvre la liste de
+ * ce que contient l'étape à sa gauche. `trigger` : remplace le chevron (une étape sans page).
+ */
+function CrumbMenu({ items, current, label, trigger }: { items: CrumbMenuItem[]; current: string; label: string; trigger?: (open: boolean) => ReactNode }) {
+  const router = useRouter()
+  const [open, setOpen] = useState(false)
+  if (!items.length) return trigger ? <>{trigger(false)}</> : <ChevronRight className="size-3.5 shrink-0 opacity-40" aria-hidden />
+  const go = (href: string) => { setOpen(false); router.push(href) }
+  const isCurrent = (href?: string) => Boolean(href) && href!.split(/[?#]/)[0] === current
+  return <DropdownMenu open={open} onOpenChange={setOpen}>
+    <DropdownMenuTrigger asChild>
+      {trigger ? trigger(open) : <button type="button" className="flex size-6 shrink-0 items-center justify-center rounded-md text-muted-foreground transition hover:bg-muted hover:text-foreground data-[state=open]:bg-muted" aria-label={`Contenu de ${label}`} title={`Contenu de ${label}`}><ChevronRight className={`size-3.5 transition-transform ${open ? "rotate-90" : ""}`} /></button>}
+    </DropdownMenuTrigger>
+    <DropdownMenuContent align="start" className="max-h-[min(28rem,70vh)] w-64 overflow-y-auto">
+      {items.map((item) => item.children?.length
+        ? <DropdownMenuSub key={`${item.label}:${item.href ?? ""}`}>
+          <DropdownMenuSubTrigger className="gap-2"><Folder className="size-3.5 text-muted-foreground" />{item.label}</DropdownMenuSubTrigger>
+          <DropdownMenuSubContent className="max-h-[min(28rem,70vh)] w-64 overflow-y-auto">
+            {item.href && <><DropdownMenuItem onSelect={() => go(item.href!)} className="gap-2 font-medium"><FileText className="size-3.5 text-muted-foreground" />Ouvrir {item.label}</DropdownMenuItem><DropdownMenuSeparator /></>}
+            {item.children.map((child) => <DropdownMenuItem key={child.href} onSelect={() => go(child.href)} className={`gap-2 ${isCurrent(child.href) ? "font-semibold text-primary" : ""}`}><FileText className="size-3.5 text-muted-foreground" /><span className="truncate">{child.label}</span></DropdownMenuItem>)}
+          </DropdownMenuSubContent>
+        </DropdownMenuSub>
+        : item.href ? <DropdownMenuItem key={item.href} onSelect={() => go(item.href!)} className={`gap-2 ${isCurrent(item.href) ? "font-semibold text-primary" : ""}`}><FileText className="size-3.5 text-muted-foreground" /><span className="truncate">{item.label}</span></DropdownMenuItem> : null)}
+    </DropdownMenuContent>
+  </DropdownMenu>
+}
+
+/**
+ * Le fil d'Ariane de la barre du haut, façon explorateur de Windows : Eraser (l'accueil),
+ * les étapes au-dessus de la page (toutes cliquables : une étape sans page ouvre son
+ * contenu), puis la page. Chaque « › » liste le contenu de l'étape à sa gauche, seulement
+ * ce à quoi le compte a accès.
  */
 export function ShellBreadcrumb({ pathname, current, campaignName }: { pathname: string; current: string; campaignName: (id: string) => string | undefined }) {
-  const router = useRouter()
-  const crumbs = breadcrumbsFor(pathname, campaignName)
-  const home = pathname === "/"
-  const link = "truncate rounded-md px-1 py-0.5 transition hover:bg-muted hover:text-foreground"
-  return <nav aria-label="Fil d’Ariane" className="flex min-w-0 items-center gap-1 text-sm text-muted-foreground">
-    <button type="button" onClick={() => router.back()} className="flex size-7 shrink-0 items-center justify-center rounded-md transition hover:bg-muted hover:text-foreground" aria-label="Revenir à la page précédente" title="Revenir à la page précédente (Alt + ←)"><ArrowLeft className="size-4" /></button>
+  const [targets, setTargets] = useState<AppLinkTarget[]>([])
+  useEffect(() => {
+    let alive = true
+    void loadLinkTargets().then((next) => { if (alive) setTargets(next) })
+    return () => { alive = false }
+  }, [])
+  const path = pathname.split(/[?#]/)[0]
+  const crumbs = breadcrumbsFor(path, campaignName)
+  const sections = useMemo(() => sectionsOf(targets), [targets])
+  const home = path === "/"
+  const link = "truncate rounded-md px-1.5 py-0.5 transition hover:bg-muted hover:text-foreground"
+  const here = childrenOf(path, targets)
+  return <nav aria-label="Fil d’Ariane" className="flex min-w-0 items-center gap-0.5 text-sm text-muted-foreground">
     {home
-      ? <span className="flex shrink-0 items-center gap-1.5 px-1 text-foreground"><BookOpen className="size-4" />Eraser</span>
+      ? <span className="flex shrink-0 items-center gap-1.5 px-1.5 text-foreground"><BookOpen className="size-4" />Eraser</span>
       : <Link href="/" prefetch={false} className={`flex shrink-0 items-center gap-1.5 ${link}`} title="Accueil"><BookOpen className="size-4" />Eraser</Link>}
-    {crumbs.map((crumb, index) => <Fragment key={`${crumb.label}:${index}`}>
-      <ChevronRight className="size-3.5 shrink-0 opacity-50" aria-hidden />
-      {crumb.href ? <Link href={crumb.href} prefetch={false} className={`min-w-0 max-w-48 ${link}`}>{crumb.label}</Link> : <span className="min-w-0 max-w-48 truncate px-1">{crumb.label}</span>}
-    </Fragment>)}
-    {!home && <><ChevronRight className="size-3.5 shrink-0 opacity-50" aria-hidden /><span className="min-w-0 truncate px-1 text-foreground" aria-current="page">{current}</span></>}
+    <CrumbMenu label="Eraser" current={path} items={sections} />
+    {crumbs.map((crumb) => {
+      const children = childrenOf(crumb.path, targets)
+      return <Fragment key={crumb.path}>
+        {crumb.href
+          ? <Link href={crumb.href} prefetch={false} className={`min-w-0 max-w-48 ${link}`}>{crumb.label}</Link>
+          : <CrumbMenu label={crumb.label} current={path} items={children} trigger={(open) => <button type="button" className={`min-w-0 max-w-48 ${link} ${open ? "bg-muted text-foreground" : ""}`} title={`Contenu de ${crumb.label}`}>{crumb.label}</button>} />}
+        <CrumbMenu label={crumb.label} current={path} items={children} />
+      </Fragment>
+    })}
+    {!home && <span className="min-w-0 truncate px-1.5 text-foreground" aria-current="page">{current}</span>}
+    {!home && here.length > 0 && <CrumbMenu label={current} current={path} items={here} />}
   </nav>
 }
 
