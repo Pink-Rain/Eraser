@@ -225,9 +225,10 @@ export const formHelp = {
   states: <>
     <p>Des états de l’<b>Index des états</b> que la forme <b>pose toute seule</b> tant qu’elle est active. En changeant de forme, ils partent, et ceux de la nouvelle forme arrivent.</p>
     <ul>
-      <li>Sur la fiche, ils apparaissent dans les États avec la mention <b>Auto</b> : le joueur ne peut ni les retirer ni changer leur niveau à la main.</li>
+      <li>Sur la fiche, ils apparaissent dans les États avec la mention <b>Auto</b> : le joueur ne peut pas les retirer, mais il peut changer leur niveau et recliquer pour redéclencher leurs effets, comme pour un état posé à la main.</li>
+      <li>En quittant la forme, ce que leurs effets ont écrit dans la fiche (dés, effets redéclenchés) est défait, sauf pour les effets dont « Retiré en sortant de l’état » est décoché.</li>
       <li>Leurs effets temporaires (+10, =100, ≥1), leurs couleurs, images et FX s’appliquent comme pour un état posé à la main.</li>
-      <li>Pour un état à deux niveaux, choisis <b>niv. 1</b> ou <b>niv. 2</b>.</li>
+      <li>Pour un état à deux niveaux, choisis le niveau de départ : <b>niv. 1</b> ou <b>niv. 2</b>.</li>
       <li>Un état déjà posé à la main reste celui du joueur (avec son niveau à lui).</li>
     </ul>
     <p>C’est le moyen de réutiliser un état existant (sa description, ses effets, ses FX) au lieu de recopier ses effets dans la forme. Les deux se cumulent : effets de la forme + effets de ses états.</p>

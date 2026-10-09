@@ -12,6 +12,7 @@
  */
 import { evaluateFormula, gaugePlacements, inlineRichText, plainTextOf, type FormulaValues, type GaugePlacement } from "@/lib/class-specifics"
 import { operationLabel, parseValueChange, type ValueOperation } from "@/lib/state-change"
+import type { StateWrite } from "@/lib/character-states"
 
 export const FORMS_TAB = "Formes"
 
@@ -183,15 +184,70 @@ export function activeForm(group: ClassFormGroup, chosen: string | undefined) {
  * fiche, « Posé par Forme : Possédée »). Un état cité deux fois garde son plus haut niveau.
  */
 export function formStatesOf(groups: ClassFormGroup[], chosen: Record<string, string>) {
-  const found = new Map<string, FormStateLink & { source: string }>()
+  const found = new Map<string, FormStateLink & { source: string; groupId: string }>()
   for (const group of groups) {
     const form = activeForm(group, chosen[group.id])
     for (const state of form?.states ?? []) {
       const previous = found.get(fold(state.name))
-      if (!previous || previous.level < state.level) found.set(fold(state.name), { ...state, source: `${group.name} : ${form!.name}` })
+      if (!previous || previous.level < state.level) found.set(fold(state.name), { ...state, source: `${group.name} : ${form!.name}`, groupId: group.id })
     }
   }
   return [...found.values()]
+}
+
+/**
+ * Ce que le joueur a fait d'un état posé par une forme : le niveau choisi (sinon celui de
+ * la forme) et ce que ses effets ont écrit dans la fiche (pour le défaire en quittant la
+ * forme). Rangé avec la forme : `specifics[groupe].states[nom replié]`.
+ */
+export type FormStateEntry = { level?: 1 | 2; written?: StateWrite[] }
+
+function parseFormStateEntry(raw: unknown): FormStateEntry {
+  if (!raw || typeof raw !== "object") return {}
+  const value = raw as Record<string, unknown>
+  const written = Array.isArray(value.written) ? value.written.flatMap((item): StateWrite[] => {
+    if (!item || typeof item !== "object") return []
+    const write = item as Record<string, unknown>
+    const cell = typeof write.cell === "number" && Number.isInteger(write.cell) && write.cell >= 0 ? write.cell : -1
+    const delta = typeof write.delta === "number" && Number.isFinite(write.delta) ? write.delta : 0
+    return cell >= 0 && delta ? [{ id: typeof write.id === "string" ? write.id.slice(0, 40) : "", effect: typeof write.effect === "string" ? write.effect.slice(0, 120) : "", cell, delta }] : []
+  }).slice(-80) : []
+  return { ...(value.level === 1 || value.level === 2 ? { level: value.level } : {}), ...(written.length ? { written } : {}) }
+}
+
+/** Les états posés par les formes, par groupe puis par nom replié, d'après la case des sorts choisis. */
+export function formStateEntriesOf(choicesJson: string): Record<string, Record<string, FormStateEntry>> {
+  try {
+    const parsed = JSON.parse(choicesJson || "{}") as { specifics?: Record<string, unknown> }
+    const specifics = parsed?.specifics && typeof parsed.specifics === "object" ? parsed.specifics : {}
+    return Object.fromEntries(Object.entries(specifics).flatMap(([id, raw]) => {
+      const states = raw && typeof raw === "object" ? (raw as { states?: unknown }).states : undefined
+      if (!states || typeof states !== "object" || Array.isArray(states)) return []
+      return [[id, Object.fromEntries(Object.entries(states as Record<string, unknown>).map(([name, entry]) => [name, parseFormStateEntry(entry)]))]]
+    }))
+  } catch {
+    return {}
+  }
+}
+
+/** La case des sorts choisis après un changement sur un état posé par une forme (niveau, écritures). */
+export function withFormStateEntry(choicesJson: string, groupId: string, stateName: string, update: (entry: FormStateEntry) => FormStateEntry) {
+  let parsed: Record<string, unknown> = {}
+  try {
+    const value = JSON.parse(choicesJson || "{}") as unknown
+    if (value && typeof value === "object" && !Array.isArray(value)) parsed = value as Record<string, unknown>
+  } catch { /* case vide ou illisible : on part de rien */ }
+  const specifics = parsed.specifics && typeof parsed.specifics === "object" && !Array.isArray(parsed.specifics) ? { ...(parsed.specifics as Record<string, unknown>) } : {}
+  const group = specifics[groupId] && typeof specifics[groupId] === "object" ? { ...(specifics[groupId] as Record<string, unknown>) } : {}
+  const states = group.states && typeof group.states === "object" && !Array.isArray(group.states) ? { ...(group.states as Record<string, unknown>) } : {}
+  const key = fold(stateName)
+  const next = update(parseFormStateEntry(states[key]))
+  if (next.level || next.written?.length) states[key] = { ...(next.level ? { level: next.level } : {}), ...(next.written?.length ? { written: next.written } : {}) }
+  else delete states[key]
+  if (Object.keys(states).length) group.states = states
+  else delete group.states
+  specifics[groupId] = group
+  return JSON.stringify({ ...parsed, specifics })
 }
 
 /** La forme choisie, d'après la case des sorts choisis de la fiche. */
@@ -209,7 +265,7 @@ export function chosenFormsOf(choicesJson: string): Record<string, string> {
  * La case des sorts choisis après un changement de forme. `resetGauges` : les jauges à
  * remettre à leur valeur de départ (liées à la forme quittée). Tout le reste est gardé.
  */
-export function withChosenForm(choicesJson: string, groupId: string, formId: string, resetGauges: string[] = []) {
+export function withChosenForm(choicesJson: string, groupId: string, formId: string, resetGauges: string[] = [], keepStates?: string[]) {
   let parsed: Record<string, unknown> = {}
   try {
     const value = JSON.parse(choicesJson || "{}") as unknown
@@ -217,7 +273,16 @@ export function withChosenForm(choicesJson: string, groupId: string, formId: str
   } catch { /* case vide ou illisible : on part de rien */ }
   const specifics = parsed.specifics && typeof parsed.specifics === "object" && !Array.isArray(parsed.specifics) ? { ...(parsed.specifics as Record<string, unknown>) } : {}
   const previous = specifics[groupId] && typeof specifics[groupId] === "object" ? specifics[groupId] as Record<string, unknown> : {}
-  specifics[groupId] = { ...previous, form: formId }
+  const next: Record<string, unknown> = { ...previous, form: formId }
+  // Les états de l'ancienne forme partent avec leur niveau et leurs écritures ; ceux que la
+  // nouvelle forme pose aussi (`keepStates`, noms) gardent les leurs.
+  if (keepStates && previous.form !== formId && next.states && typeof next.states === "object") {
+    const kept = new Set(keepStates.map(fold))
+    const states = Object.fromEntries(Object.entries(next.states as Record<string, unknown>).filter(([name]) => kept.has(name)))
+    if (Object.keys(states).length) next.states = states
+    else delete next.states
+  }
+  specifics[groupId] = next
   for (const gaugeId of resetGauges) delete specifics[gaugeId]
   return JSON.stringify({ ...parsed, specifics })
 }

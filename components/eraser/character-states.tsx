@@ -29,10 +29,16 @@ function stateColor(catalog: StatesCatalog, state: CharacterState, definition: S
 /** Le résultat d'un effet lancé depuis la fiche : réussi ou non, le détail, de quoi annuler. */
 export type StateRollOutcome = { hit: boolean; lines: string[]; undo?: () => void }
 
-export function CharacterStatesPanel({ states, autoStates = [], autoSources = {}, catalog, loaded, error, onChange, onRoll, disabled = false }: {
+export function CharacterStatesPanel({ states, autoStates = [], autoSources = {}, onAutoLevel, catalog, loaded, error, onChange, onRoll, disabled = false }: {
   states: CharacterState[]
-  /** Coma, Mort : posés d'après la vie, ni retirables ni réglables à la main. */
+  /**
+   * Posés tout seuls (par la vie : Coma, Mort ; par une forme active) : jamais retirables à
+   * la main. Leurs niveaux restent réglables (`onAutoLevel`) et leurs effets à redéclencher
+   * se relancent d'un clic, comme pour un état posé à la main.
+   */
   autoStates?: CharacterState[]
+  /** Change le niveau d'un état posé tout seul ; absent (ou false) : son niveau est figé. */
+  onAutoLevel?: (state: CharacterState, level: 1 | 2) => boolean
   catalog: StatesCatalog
   loaded: boolean
   error: string
@@ -87,7 +93,8 @@ export function CharacterStatesPanel({ states, autoStates = [], autoSources = {}
   /** Choisir un niveau : monter déclenche ses effets, recliquer le niveau en cours les redéclenche. */
   function chooseLevel(state: CharacterState, current: 1 | 2, next: 1 | 2) {
     if (next === current) { trigger(state, current); return }
-    onChange(states.map((candidate) => candidate === state ? { ...candidate, level: next } : candidate))
+    if (autoStates.includes(state)) { if (!onAutoLevel?.(state, next)) return }
+    else onChange(states.map((candidate) => candidate === state ? { ...candidate, level: next } : candidate))
     if (next > current) trigger(state, next)
   }
 
@@ -135,7 +142,7 @@ export function CharacterStatesPanel({ states, autoStates = [], autoSources = {}
             {automatic && <span className="shrink-0 rounded-full bg-muted px-1.5 py-0.5 text-[9px] font-semibold uppercase tracking-wider text-muted-foreground" title={autoSources[foldName(state.name)] ?? "Posé tout seul d’après les points de vie"}>Auto</span>}
             {/* Un bouton par effet à lancer (jet, dés) : le résultat s'écrit dans la fiche. */}
             {rolled.map((effect) => <button key={effect.name} type="button" disabled={disabled} onClick={() => setOutcomes((current) => ({ ...current, [state.name]: { effect: effect.name, outcome: onRoll!(effect, state) } }))} className="inline-flex shrink-0 items-center gap-0.5 rounded-md border px-1 py-0.5 text-[10px] font-semibold transition hover:bg-muted disabled:opacity-50" style={{ color, borderColor: `${color}55` }} title={`Lancer : ${effect.name}${effect.roll ? ` (${effect.roll.dice})` : ""}`} aria-label={`Lancer ${effect.name}`}><Dices className="size-3" />{rolled.length > 1 ? effect.name : effect.roll?.dice ?? ""}</button>)}
-            {!automatic && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
+            {(!automatic || levels > 1 || retriggers) && <span className="flex items-center gap-0.5" style={{ color }} role="group" aria-label={`Niveau de ${state.name} : ${level} sur ${levels}`}>
               {Array.from({ length: levels }, (_, index) => <button key={index} type="button" disabled={disabled} onClick={() => chooseLevel(state, level, (index + 1) as 1 | 2)} className={cn("inline-flex rounded-sm p-0.5 transition hover:scale-110", index < level ? "opacity-100" : "opacity-30 hover:opacity-60")} aria-label={`Niveau ${index + 1}`} title={index + 1 === level && retriggers ? `Niveau ${index + 1} : recliquer redéclenche l’effet` : `Niveau ${index + 1}`}>
                 <IndexIconGlyph icon={definition?.gauge.icon || "clock"} emoji={definition?.gauge.emoji} filled={index < level} stroke={definition?.gauge.strokeColor} className="size-4" />
               </button>)}

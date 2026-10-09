@@ -137,3 +137,23 @@ test("Une forme pose des états : colonne « États », et seuls ceux de la form
   const active = forms.formStatesOf([group], { [group.id]: group.forms[1].id });
   assert.deepEqual(active.map((state) => [state.name, state.level, state.source]), [["Rage", 2, "Posture : Furie"], ["Effrayé", 1, "Posture : Furie"], ["Nom piégé 2", 1, "Posture : Furie"]]);
 });
+
+test("Un état posé par une forme garde le niveau choisi et ses écritures, oubliés en quittant la forme", () => {
+  const start = JSON.stringify({ choices: { "CLA-1": { 1: "S1" } }, specifics: { "FGR-1": { form: "FOR-2" } } });
+  let value = forms.withFormStateEntry(start, "FGR-1", "Folie", (entry) => ({ ...entry, level: 2 }));
+  value = forms.withFormStateEntry(value, "FGR-1", "folie", (entry) => ({ ...entry, written: [...(entry.written ?? []), { id: "w1", effect: "Démence", cell: 20, delta: -5 }] }));
+  value = forms.withFormStateEntry(value, "FGR-1", "Rage", (entry) => ({ ...entry, level: 1 }));
+  assert.deepEqual(forms.formStateEntriesOf(value), { "FGR-1": { folie: { level: 2, written: [{ id: "w1", effect: "Démence", cell: 20, delta: -5 }] }, rage: { level: 1 } } });
+  assert.deepEqual(JSON.parse(value).choices, { "CLA-1": { 1: "S1" } });
+  // « Annuler » : l'écriture part, le niveau reste.
+  const undone = forms.withFormStateEntry(value, "FGR-1", "Folie", (entry) => ({ ...entry, written: (entry.written ?? []).filter((write) => write.id !== "w1") }));
+  assert.deepEqual(forms.formStateEntriesOf(undone)["FGR-1"].folie, { level: 2 });
+  // Même forme rechoisie : rien ne change. Autre forme qui pose aussi Rage : Rage reste, Folie part.
+  assert.deepEqual(forms.formStateEntriesOf(forms.withChosenForm(value, "FGR-1", "FOR-2", [], ["Rage"]))["FGR-1"], forms.formStateEntriesOf(value)["FGR-1"]);
+  const changed = forms.withChosenForm(value, "FGR-1", "FOR-1", [], ["Rage"]);
+  assert.deepEqual(forms.formStateEntriesOf(changed), { "FGR-1": { rage: { level: 1 } } });
+  assert.deepEqual(forms.formStateEntriesOf(forms.withChosenForm(value, "FGR-1", "FOR-1", [], [])), {});
+  assert.equal(forms.chosenFormsOf(changed)["FGR-1"], "FOR-1");
+  // Un niveau et des écritures vides : l'entrée disparaît.
+  assert.deepEqual(forms.formStateEntriesOf(forms.withFormStateEntry(start, "FGR-1", "X", () => ({}))), {});
+});

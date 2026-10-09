@@ -18,7 +18,7 @@ import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/charac
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
 import { formulaValues, gaugeContributions, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
-import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, formStatesOf, withChosenForm, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
+import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, formStateEntriesOf, formStatesOf, withChosenForm, withFormStateEntry, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
 import { ClassDeckPanel } from "@/components/eraser/class-deck-panel"
 import { cardsOfClass, deckStatesOf, decksOfClass, withDeckState, type DeckState } from "@/lib/class-decks"
@@ -638,11 +638,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Les états que posent les formes actives : posés seuls, comme Coma et Mort, jamais
   // enregistrés ; ils partent quand la forme change. Un état déjà posé à la main reste le sien.
   const formStateLinks = useMemo(() => formStatesOf(characterFormGroups, chosenForms), [characterFormGroups, chosenForms])
+  // Le niveau choisi par le joueur et ce que leurs effets ont écrit, rangés avec la forme.
+  const formStateEntries = useMemo(() => formStateEntriesOf(values[characterClassChoicesIndex] || ""), [values])
   const formStates = useMemo<CharacterState[]>(() => formStateLinks.flatMap((link) => {
     if (postedStates.some((posted) => foldName(posted.name) === foldName(link.name))) return []
     const definition = statesCatalog.catalog.states.find((candidate) => foldName(candidate.name) === foldName(link.name))
-    return definition ? [{ id: definition.id, name: definition.name, level: Math.min(link.level, definition.levels) as 1 | 2 }] : []
-  }), [formStateLinks, postedStates, statesCatalog.catalog])
+    if (!definition) return []
+    const entry = formStateEntries[link.groupId]?.[foldName(link.name)] ?? {}
+    return [{ id: definition.id, name: definition.name, level: Math.min(entry.level ?? link.level, definition.levels) as 1 | 2, ...(entry.written?.length ? { written: entry.written } : {}) }]
+  }), [formStateEntries, formStateLinks, postedStates, statesCatalog.catalog])
+  /** Le groupe de formes qui pose cet état (nom), s'il n'est pas posé à la main. */
+  const formStateGroupOf = (name: string) => formStates.some((state) => foldName(state.name) === foldName(name)) ? formStateLinks.find((link) => foldName(link.name) === foldName(name))?.groupId : undefined
   const formStateSources = useMemo(() => Object.fromEntries(formStateLinks.map((link) => [foldName(link.name), `Posé par ${link.source}`])), [formStateLinks])
   const characterGauges = useMemo(() => specificClasses.flatMap((item) => gaugesOfClass(allClassGauges, item)), [allClassGauges, specificClasses])
   const gaugeStates = useMemo(() => gaugeStatesOf(values[characterClassChoicesIndex] || ""), [values])
@@ -938,7 +944,21 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   function chooseForm(group: ClassFormGroup, form: ClassForm) {
     const previous = activeForm(group, chosenForms[group.id])
     const reset = characterGauges.filter((gauge) => gauge.resetOnLeave && previous && gaugeVisibleIn(gauge, [previous.name]) && !gaugeVisibleIn(gauge, [form.name])).map((gauge) => gauge.id)
-    void commit(characterClassChoicesIndex, withChosenForm(latestValues.current[characterClassChoicesIndex] || "", group.id, form.id, reset))
+    // Les états que la forme quittée posait partent : ce que leurs effets ont écrit est
+    // défait (« Retiré en sortant de l'état »), sauf s'ils sont aussi posés par la nouvelle.
+    const staying = new Set(form.states.map((state) => foldName(state.name)))
+    const leaving = formStates.filter((state) => !staying.has(foldName(state.name)) && formStateLinks.some((link) => link.groupId === group.id && foldName(link.name) === foldName(state.name)))
+    for (const { cell, delta } of writesToRevert(statesCatalog.catalog, leaving)) {
+      void commit(cell, String(Math.round((sheetNumber(latestValues.current[cell] ?? "") - delta) * 100) / 100))
+    }
+    void commit(characterClassChoicesIndex, withChosenForm(latestValues.current[characterClassChoicesIndex] || "", group.id, form.id, reset, form.states.map((state) => state.name)))
+  }
+  /** Le niveau d'un état posé par une forme, choisi par le joueur ; false pour Coma et Mort (figés). */
+  function setFormStateLevel(state: CharacterState, level: 1 | 2) {
+    const groupId = formStateGroupOf(state.name)
+    if (!groupId) return false
+    void commit(characterClassChoicesIndex, withFormStateEntry(latestValues.current[characterClassChoicesIndex] || "", groupId, state.name, (entry) => ({ ...entry, level })))
+    return true
   }
   // Les decks des classes du personnage, avec leurs cartes (onglet « Cartes »).
   const characterDecks = useMemo(() => specificClasses.flatMap((item) => decksOfClass(allDecks, item).map((deck) => ({ deck, cards: cardsOfClass(allDeckCards, item.name) }))), [allDeckCards, allDecks, specificClasses])
@@ -1164,10 +1184,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       // Ce que l'état a écrit est noté avec lui : il le retire en partant (« Retiré en sortant de l'état »).
       const writeId = nextStateWriteId()
       const writes: StateWrite[] = changes.flatMap((change) => change.delta ? [{ id: writeId, effect: effect.name, cell: change.index, delta: change.delta }] : [])
-      if (state && writes.length) commitStates(withStateWrites(statesNow(), state.name, writes))
+      // Un état posé par une forme range ses écritures avec la forme : défaites en la quittant.
+      const formGroup = state ? formStateGroupOf(state.name) : undefined
+      const recordWrites = (add: boolean) => {
+        if (!state || !writes.length) return
+        if (formGroup) void commit(characterClassChoicesIndex, withFormStateEntry(latestValues.current[characterClassChoicesIndex] || "", formGroup, state.name, (entry) => ({ ...entry, written: add ? [...(entry.written ?? []), ...writes].slice(-80) : (entry.written ?? []).filter((write) => write.id !== writeId) })))
+        else commitStates(add ? withStateWrites(statesNow(), state.name, writes) : withoutStateWrites(statesNow(), writeId))
+      }
+      recordWrites(true)
       return { hit, lines: [...lines, ...changes.map((change) => change.label)], undo: changes.length ? () => {
         for (const change of changes) void commit(change.index, change.before)
-        if (state && writes.length) commitStates(withoutStateWrites(statesNow(), writeId))
+        recordWrites(false)
       } : undefined }
     } catch {
       return { hit: false, lines: ["Ces dés n’ont pas pu être lancés : vérifier l’écriture dans l’Index des états."] }
@@ -1579,7 +1606,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
           <input type="file" accept="image/*" className="sr-only" onChange={(event) => { const file = event.target.files?.[0]; event.target.value = ""; void changePortrait(file) }} />
         </label>
         <TokenButton kind="character" ownerId={character.id} name={values[0] || character.name} source={values[characterNarrativeStart + 1] || ""} style={{ kind: "character" }} disabledReason={values[characterNarrativeStart + 1] ? "" : "Ajoute d’abord un portrait"} />
-        <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
+        <CharacterStatesPanel states={postedStates} autoStates={[...formStates, ...autoLife.auto]} autoSources={formStateSources} onAutoLevel={setFormStateLevel} catalog={statesCatalog.catalog} loaded={statesCatalog.loaded} error={statesCatalog.error} onChange={updateStates} onRoll={rollStateEffect} />
         </div>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-start justify-between gap-3">
