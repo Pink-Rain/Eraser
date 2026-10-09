@@ -1,18 +1,20 @@
-# Eraser 0.1.1-alpha.173 — Les classes ne disparaissent plus en silence
+# Eraser 0.1.1-alpha.174 — Plus de « Lecture des classes… » sans fin
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Joueurs qui ne voyaient aucune classe
+## Les classes ne font plus attendre indéfiniment
 
-Chaque installation garde en mémoire la liste des classes lue dans Google Sheets. Sur une
-installation neuve, si cette première lecture échouait, la création de personnage et la
-fiche n'affichaient **aucune classe, sans rien dire**.
+- **Une limite de temps** : la fiche et la création de personnage n'attendent plus jamais
+  sans fin la liste des classes. Au-delà de 25 secondes, elles disent que Google Sheets
+  traîne et proposent **Réessayer**. La lecture continue derrière et sera prête au
+  prochain essai.
+- **La synchronisation des images de classes est réservée à l'administrateur.** Elle
+  parcourt tout le Drive et réécrit la feuille des classes. Lancée depuis le PC neuf d'un
+  joueur, elle consommait le quota Google commun à toutes les installations, et ralentissait
+  la lecture des classes.
 
-- **La liste ne dépend plus des images** : une erreur en lisant les notes d'images des
-  classes (qui ne servent qu'aux illustrations) vidait toute la liste. Elle est maintenant
-  ignorée, et les classes s'affichent quand même.
-- **La fiche peut choisir une classe même si les sorts sont illisibles** : le choix de
-  classe ne dépend plus de la lecture des sorts de classe.
-- **Plus de liste vide muette** : la création et la fiche disent pourquoi les classes
-  manquent (réseau, accès Google, feuille introuvable…), avec un bouton **Réessayer**.
-  La raison exacte est aussi écrite dans `%APPDATA%/Eraser/logs/eraser-startup.log`.
+## Création de personnage : une vraie raison en cas d'échec
+
+« Le personnage n'a pas pu être créé » dit maintenant pourquoi : la raison donnée par
+Google, le code de l'erreur, ou que le service local d'Eraser n'a pas répondu. Le détail est
+aussi écrit dans `%APPDATA%/Eraser/logs/eraser-startup.log` (lignes `CHARACTER_CREATE_FAILED`).

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server"
 import { saveCharacterPortrait } from "@/lib/character-portraits"
 import { characterNarrativeStart } from "@/lib/character-sheet-schema"
 import { createCharacterForUser } from "@/lib/google-sheets"
+import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
 
 function isStringList(value: unknown): value is string[] {
@@ -36,13 +37,15 @@ export async function POST(request: Request) {
     return NextResponse.json({ ok: true, character })
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
+    console.error("CHARACTER_CREATE_FAILED", code || "UNKNOWN_ERROR")
     const message = code === "INVALID_CHARACTER_NAME"
       ? "Le nom du personnage est obligatoire."
       : code === "INVALID_PORTRAIT"
         ? "Choisis une image de moins de 10 Mo."
         : code.includes("GOOGLE_DRIVE_NOT_AUTHORIZED")
           ? "Le compte Google du site doit être reconnecté."
-          : "Le personnage n’a pas pu être enregistré."
+          // La raison exacte (réseau, accès Google, feuille…), et le code pour comprendre le reste.
+          : googleFailureMessage(code) || `Le personnage n’a pas pu être enregistré dans Google Sheets (${code || "erreur inconnue"}).`
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

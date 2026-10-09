@@ -4,13 +4,14 @@ import { listClassSpells } from "@/lib/class-content"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { listClasses } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+import { withTimeBudget } from "@/lib/time-budget"
 
 const codeOf = (error: unknown) => error instanceof Error ? error.message : "UNKNOWN_ERROR"
 
 export async function GET() {
   if (!await authorizedAccount(["admin", "mj", "joueur"])) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const data = await listClassSpells()
+    const data = await withTimeBudget(listClassSpells(), 25_000, "CLASSES_READ_TIMEOUT")
     // Une fiche retient l'ID des sorts choisis : un sort encore sans ID (désigné par sa
     // place, « LIGNE-n », qui glisse) n'est pas proposé tant qu'il n'en a pas reçu un.
     return NextResponse.json({ classes: data.classes, spells: data.spells.filter((spell) => !spell.id.startsWith("LIGNE-")) })
@@ -18,7 +19,7 @@ export async function GET() {
     console.error("CHARACTER_CLASS_CATALOG_LOAD_FAILED", codeOf(error))
     // Les sorts sont illisibles : la fiche peut tout de même choisir une classe.
     try {
-      const classes = await listClasses()
+      const classes = await withTimeBudget(listClasses(), 15_000, "CLASSES_READ_TIMEOUT")
       if (classes.length) return NextResponse.json({ classes, spells: [], warning: "Les sorts de classe sont momentanément indisponibles." })
     } catch (fallback) {
       console.error("CHARACTER_CLASS_LIST_FALLBACK_FAILED", codeOf(fallback))

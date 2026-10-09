@@ -132,20 +132,21 @@ export function CharacterCreationForm({ classes, classesError = "", peoples }: {
       } else {
         response = await fetch("/api/characters", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ values }) })
       }
-      const payload = (await response.json()) as { error?: string; character?: { id: string } }
+      // Une réponse illisible (service local arrêté, page d'erreur) dit au moins son code.
+      const payload = (await response.json().catch(() => ({}))) as { error?: string; character?: { id: string } }
       if (!response.ok || !payload.character) {
         sending.current = false
         setPending(false)
-        return setError(payload.error || "Le personnage n’a pas pu être créé.")
+        return setError(payload.error || `Le personnage n’a pas pu être créé (réponse ${response.status} du service local d’Eraser).`)
       }
       // Le personnage devient la sélection du menu, puis sa fiche s’ouvre ; le bouton
       // reste en attente jusque-là.
       announceCreatedCharacter({ id: payload.character.id, ownerUid: "", name: values[0], subtitle: values[1], updatedAt: new Date().toISOString(), campaigns: [] })
       router.push(`/personnage/${encodeURIComponent(payload.character.id)}`)
-    } catch {
+    } catch (reason) {
       sending.current = false
       setPending(false)
-      setError("Le personnage n’a pas pu être créé.")
+      setError(`Le personnage n’a pas pu être créé : le service local d’Eraser n’a pas répondu (${reason instanceof Error ? reason.message : "connexion coupée"}). Réessaie ; si cela continue, redémarre Eraser.`)
     }
   }
 

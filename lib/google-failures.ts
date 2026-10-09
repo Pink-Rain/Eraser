@@ -13,6 +13,7 @@ export function googleFailureMessage(code: string) {
   if (google?.[1] === "429") return "Google Sheets refuse : trop de modifications d’un coup (une demi-minute d’attente n’a pas suffi). Attends une minute puis recommence."
   if (google?.[1] === "401" || google?.[1] === "403") return `Google a refusé l’accès à la feuille (${google[1]}). Vérifie dans Administration → Google Drive que le compte relié y a toujours accès.`
   if (google) return `Google Sheets a refusé la modification (${google[1]}${google[2] ? ` : ${google[2].slice(0, 300)}` : ""}).`
+  if (code === "CLASSES_READ_TIMEOUT") return "Google Sheets met trop de temps à donner les classes à cet ordinateur. Réessaie dans une minute : la lecture continue en arrière-plan et sera prête au prochain essai."
   if (code === "CLASSES_SHEET_NOT_LINKED") return "La feuille des classes est introuvable dans le Drive d’Eraser depuis cet ordinateur (recherche par son nom). Réessaie dans une minute ; si cela continue, un administrateur peut cliquer sur « Relier mes feuilles existantes » dans Administration → Google Drive."
   const tab = code.match(/^JDR_SHEET_TAB_MISSING:(.+)$/)
   if (tab) return `L’onglet « ${tab[1]} » est introuvable dans sa feuille Google Sheets : a-t-il été renommé ?`

@@ -5,6 +5,7 @@ import { DeferredPageLoading } from "@/components/eraser/deferred-content-loadin
 import { CharacterCreationForm, type CreationClassOption } from "@/components/eraser/character-creation-form"
 import { classImageUrl } from "@/lib/class-images"
 import { googleFailureMessage } from "@/lib/google-failures"
+import { withTimeBudget } from "@/lib/time-budget"
 import { listClasses, listClassOptions } from "@/lib/google-sheets"
 import { isNameColumn } from "@/lib/world-index-definitions"
 import { getWorldIndex } from "@/lib/world-indexes"
@@ -13,7 +14,7 @@ export const dynamic = "force-dynamic"
 
 async function creationClasses(): Promise<{ classes: CreationClassOption[]; error: string }> {
   try {
-    return { classes: (await listClasses()).map((item) => ({ id: item.id, name: item.name, type: item.type, imageUrl: classImageUrl(item.image), accent: item.accentDark })), error: "" }
+    return { classes: (await withTimeBudget(listClasses(), 25_000, "CLASSES_READ_TIMEOUT")).map((item) => ({ id: item.id, name: item.name, type: item.type, imageUrl: classImageUrl(item.image), accent: item.accentDark })), error: "" }
   } catch (error) {
     // Sans la feuille des classes, le formulaire reste utilisable avec l’index local ; s'il
     // est vide (installation neuve), la raison s'affiche au lieu d'une liste vide muette.

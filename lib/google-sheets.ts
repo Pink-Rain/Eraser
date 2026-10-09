@@ -2748,7 +2748,11 @@ export async function listClasses() {
   // after this request has already responded — see warmGoogleOAuthAccessToken)
   // can reuse the cached token instead of failing to authenticate.
   await warmGoogleOAuthAccessToken()
-  runInBackground(ensureClassImagesSynced(), "CLASS_IMAGE_AUTO_SYNC_FAILED")
+  // La synchronisation des images parcourt tout le Drive et réécrit la feuille partagée : seul
+  // un administrateur la lance. Depuis le PC neuf d'un joueur, elle consommait le quota Google
+  // commun à toutes les installations et ralentissait la lecture des classes de tout le monde.
+  const viewer = await import("@/lib/server-auth").then(({ currentViewAccount }) => currentViewAccount()).catch(() => null)
+  if (viewer?.accountRole === "admin") runInBackground(ensureClassImagesSynced(), "CLASS_IMAGE_AUTO_SYNC_FAILED")
   let rows = await db.select().from(classIndex).orderBy(classIndex.name)
   const [sync] = await db.select().from(sheetIndexSyncs).where(eq(sheetIndexSyncs.key, "classes:global")).limit(1)
   const syncedAt = sync ? Date.parse(sync.syncedAt) : 0

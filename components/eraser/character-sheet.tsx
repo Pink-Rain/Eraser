@@ -1310,7 +1310,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       if (!knownClassCatalog) setClassCatalogLoading(true)
       setClassCatalogError("")
       try {
-        const response = await fetch("/api/classes/catalog", { cache: "no-store" })
+        // Jamais d'attente sans fin : le service local répond en 25 s au plus ; au-delà, « Réessayer ».
+        const response = await fetch("/api/classes/catalog", { cache: "no-store", signal: AbortSignal.timeout(45_000) })
         const payload = await response.json() as { classes?: ClassRecord[]; spells?: ClassSpell[]; error?: string }
         if (!response.ok || !payload.classes || !payload.spells) throw new Error(payload.error || "Catalogue indisponible")
         knownClassCatalog = { classes: payload.classes, spells: payload.spells }
@@ -1320,7 +1321,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         }
       } catch (error) {
         // Déjà connus : la fiche garde ceux lus avant plutôt que d'afficher une erreur.
-        if (!cancelled && !knownClassCatalog) setClassCatalogError(error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
+        if (!cancelled && !knownClassCatalog) setClassCatalogError(error instanceof Error && error.name === "TimeoutError" ? "Le service local d’Eraser n’a pas donné les classes à temps." : error instanceof Error ? error.message : "Les classes et leurs sorts sont indisponibles.")
       } finally {
         if (!cancelled) setClassCatalogLoading(false)
       }
