@@ -15,7 +15,8 @@ import { gaugePlacements, plainTextOf, type GaugePlacement } from "@/lib/class-s
 export const DECKS_TAB = "Decks"
 export const CARDS_TAB = "Cartes"
 
-export type DeckDrawMode = "hasard" | "choix"
+/** « les-deux » : « Piocher » au hasard et « Choisir » dans la pioche, au gré du joueur. */
+export type DeckDrawMode = "hasard" | "choix" | "les-deux"
 export type ClassDeck = { id: string; classId: string; className: string; name: string; color: string; placement: GaugePlacement; handLimit: number; drawMode: DeckDrawMode; description: string; order: number }
 /** `number` : la colonne « Carte », l'identifiant de la carte dans sa classe. */
 /**
@@ -36,7 +37,15 @@ export const CARD_RICH_HEADERS = ["Effet"] as const satisfies readonly CardHeade
 export const deckDrawModes: Array<{ value: DeckDrawMode; label: string; hint: string }> = [
   { value: "hasard", label: "Au hasard", hint: "« Piocher » tire une carte au hasard" },
   { value: "choix", label: "Au choix", hint: "Le joueur choisit la carte à piocher" },
+  { value: "les-deux", label: "Au hasard ou au choix", hint: "Deux boutons : « Piocher » au hasard, « Choisir » dans la pioche" },
 ]
+
+/** La case « Tirage » écrite à la main (« Au choix », « les deux », « hasard ou choix »…) retrouve son mode. */
+function drawModeOf(raw: string): DeckDrawMode {
+  const text = fold(raw)
+  if (text.includes("deux") || (text.includes("hasard") && text.includes("choix"))) return "les-deux"
+  return text.startsWith("au choix") || text === "choix" ? "choix" : "hasard"
+}
 export const deckColors = ["#6b4c9a", "#b9504e", "#285f8f", "#315b55", "#b7791f", "#7d7f86"]
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
@@ -65,7 +74,7 @@ export function deckFromCells(cell: (header: DeckHeader) => string, rich?: (head
     color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : deckColors[0],
     placement: gaugePlacements.find((option) => fold(option.label) === placementText || option.value === placementText)?.value ?? "sorts",
     handLimit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 99) : 0,
-    drawMode: fold(cell("Tirage")).startsWith("au choix") || fold(cell("Tirage")) === "choix" ? "choix" : "hasard",
+    drawMode: drawModeOf(cell("Tirage")),
     description: plainTextOf(description) ? description : "",
     order: Number.isFinite(order) ? order : 0,
   }
@@ -118,7 +127,7 @@ export function sanitizeDeck(raw: unknown, newId: () => string): { deck: ClassDe
     color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : deckColors[0],
     placement: gaugePlacements.some((option) => option.value === deckRaw.placement) ? deckRaw.placement as GaugePlacement : "sorts",
     handLimit: Number.isFinite(limit) && limit > 0 ? Math.min(limit, 99) : 0,
-    drawMode: deckRaw.drawMode === "choix" ? "choix" : "hasard",
+    drawMode: deckRaw.drawMode === "choix" || deckRaw.drawMode === "les-deux" ? deckRaw.drawMode : "hasard",
     description: text(deckRaw.description, 20_000),
     order: typeof deckRaw.order === "number" && Number.isFinite(deckRaw.order) ? deckRaw.order : 0,
   }

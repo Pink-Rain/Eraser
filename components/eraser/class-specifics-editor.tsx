@@ -50,7 +50,17 @@ const specificKinds: Array<{ key: string; label: string; hint: string; icon: Rea
 ]
 
 async function postSpecifics(body: unknown) {
-  const response = await fetch("/api/classes/specifics", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
+  // Google peut être lent : au-delà d'une minute, on le dit plutôt que d'attendre sans fin.
+  const controller = new AbortController()
+  const timer = window.setTimeout(() => controller.abort(), 60_000)
+  let response: Response
+  try {
+    response = await fetch("/api/classes/specifics", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body), signal: controller.signal })
+  } catch {
+    throw new Error(controller.signal.aborted ? "Google Sheets ne répond pas. Réessaie dans un instant." : "Eraser n’a pas pu joindre son service local. Réessaie dans un instant.")
+  } finally {
+    window.clearTimeout(timer)
+  }
   const payload = (await response.json().catch(() => ({}))) as ClassGaugeTable & { error?: string }
   if (!response.ok) throw new Error(payload.error || "La spécificité n’a pas pu être enregistrée.")
   publishGauges(payload)
@@ -76,6 +86,7 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
   const [editingDeck, setEditingDeck] = useState<ClassDeck | null>(null)
   const [removing, setRemoving] = useState<{ kind: "gauge" | "forms" | "deck"; id: string; name: string } | null>(null)
   const [removeError, setRemoveError] = useState("")
+  const [deleting, setDeleting] = useState(false)
 
   function newFormGroup() {
     const group = emptyFormGroup(classId, className, formGroups.length)
@@ -91,8 +102,10 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
   }
 
   async function remove(target: { kind: "gauge" | "forms" | "deck"; id: string }) {
-    setRemoveError("")
+    if (deleting) return
+    setRemoveError(""); setDeleting(true)
     try { await postSpecifics({ action: target.kind === "gauge" ? "delete-gauge" : target.kind === "deck" ? "delete-deck" : "delete-form-group", id: target.id }); setRemoving(null) } catch (reason) { setRemoveError(reason instanceof Error ? reason.message : "La spécificité n’a pas pu être supprimée.") }
+    setDeleting(false)
   }
 
   return <div className="space-y-3">
@@ -162,7 +175,7 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
     {editingDeck && <DeckEditor key={editingDeck.id || "new"} initial={editingDeck} initialCards={cards} onClose={() => setEditingDeck(null)} onSaved={() => setEditingDeck(null)} />}
     {editingForms && <FormGroupEditor key={editingForms.id || "new"} initial={editingForms} targetGroups={effectTargetGroups(catalog)} gaugeNames={[...new Set(gauges.flatMap((gauge) => gauge.addTo.trim() ? [gauge.name, gauge.addTo.trim()] : [gauge.name]))]} sample={sample} onClose={() => setEditingForms(null)} onSaved={() => setEditingForms(null)} />}
 
-    <AlertDialog open={Boolean(removing)} onOpenChange={(open) => { if (!open) setRemoving(null) }}>
+    <AlertDialog open={Boolean(removing)} onOpenChange={(open) => { if (!open && !deleting) setRemoving(null) }}>
       <AlertDialogContent>
         <AlertDialogHeader>
           <AlertDialogTitle>Supprimer {removing?.kind === "forms" ? "les formes" : removing?.kind === "deck" ? "le deck" : "la jauge"} « {removing?.name} » ?</AlertDialogTitle>
@@ -170,8 +183,8 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
         </AlertDialogHeader>
         {removeError && <p className="text-sm text-destructive">{removeError}</p>}
         <AlertDialogFooter>
-          <AlertDialogCancel>Garder</AlertDialogCancel>
-          <AlertDialogAction variant="destructive" onClick={(event) => { event.preventDefault(); if (removing) void remove(removing) }}>Supprimer</AlertDialogAction>
+          <AlertDialogCancel disabled={deleting}>Garder</AlertDialogCancel>
+          <AlertDialogAction variant="destructive" disabled={deleting} onClick={(event) => { event.preventDefault(); if (removing) void remove(removing) }}>{deleting ? <><LoaderCircle className="animate-spin" />Suppression dans Google Sheets…</> : "Supprimer"}</AlertDialogAction>
         </AlertDialogFooter>
       </AlertDialogContent>
     </AlertDialog>
@@ -303,7 +316,7 @@ function GaugeEditor({ initial, catalogGroups, targetGroups, sample, formNames, 
           </div>}
 
           <Field label="S’ajoute à" hint="facultatif : la valeur de la jauge compte dans cette caractéristique" help={gaugeHelp.addTo}>
-            <SuggestInput groups={targetGroups} value={gauge.addTo} onChange={(value) => set("addTo", value)} placeholder="Aucune (ex. : Folie pour une folie temporaire)" aria-label="Caractéristique à laquelle la jauge s’ajoute" />
+            <SuggestInput groups={targetGroups} value={gauge.addTo} onChange={(value) => set("addTo", value)} placeholder="Aucune : la jauge ne change rien sur la fiche" aria-label="Caractéristique à laquelle la jauge s’ajoute" />
             {gauge.addTo.trim() && <p className="text-[11px] text-muted-foreground">Sur la fiche : {gauge.addTo.trim()} + la valeur de « {gauge.name.trim() || "cette jauge"} »{gauge.forms.length ? `, seulement en ${gauge.forms.join(", ")}` : ""}. Tout ce qui lit {`{${gauge.addTo.trim()}}`} compte les deux.</p>}
           </Field>
 

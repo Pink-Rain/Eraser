@@ -1,23 +1,24 @@
-# Eraser 0.1.1-alpha.166 — Les états partent avec ce qu'ils ont fait
+# Eraser 0.1.1-alpha.167 — Tirage mixte, suppression visible, aides générales
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Retirer un état retire ce qu'il a écrit
+## Deck : tirer au hasard ou choisir
 
-Les effets temporaires d'un état (+10, =100, ≥1) partaient déjà avec lui. Ceux qui
-s'écrivent dans la fiche (dés lancés, « Redéclencher l'effet ») restaient. Désormais :
+Nouveau mode de **Tirage** : **« Au hasard ou au choix »**. La fiche montre deux boutons :
+« Piocher » tire une carte au hasard, « Choisir » ouvre la pioche pour prendre la carte
+voulue. La colonne « Tirage » de l'onglet Decks l'écrit « Au hasard ou au choix ».
 
-- La fiche note, sur chaque état posé, ce que ses effets y ont écrit.
-- Quand l'état est retiré, ces écritures sont retirées, sauf pour les effets dont la
-  nouvelle case **« Retiré en sortant de l'état »** est décochée.
-- « Annuler » sur un lancer le retire aussi de ce qui sera défait.
+## Supprimer une spécificité
 
-## Nouvelle colonne dans l'Index des états, onglet Effets
+- Pendant la suppression, le bouton affiche « Suppression dans Google Sheets… » et les
+  boutons sont bloqués. Avant, rien ne bougeait pendant que Google travaillait.
+- Si Google ne répond pas en une minute, un message le dit au lieu d'attendre sans fin.
+- Une spécificité déjà retirée à la main dans Google Sheets se supprime sans erreur.
 
-**« Retiré en sortant de l'état »**, une case à cocher ajoutée à droite. Elle est remplie
-une seule fois : cochée pour tous les effets, **décochée pour ceux qui visent les points de
-vie actuels** (dégâts et soins restent). Une case vide compte comme cochée. Décoche-la pour
-toute autre exception.
+## Les aides des spécificités
 
-Les états posés avant cette version n'ont rien de noté. Leurs écritures passées restent ;
-tout ce qu'ils écrivent à partir de maintenant sera retiré.
+Les « Comment remplir ? » et les « ? » ne parlent plus d'aucune classe en particulier. Ils
+décrivent tout ce que chaque outil permet (ressource qu'on dépense ou qu'on accumule,
+reflet de la fiche, charges, bonus temporaire, valeur propre à une forme, postures, bonus
+proportionnels, plafonds, cartes à usage unique, familles de cartes…) et comment combiner
+les outils entre eux.

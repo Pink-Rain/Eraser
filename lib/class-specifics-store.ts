@@ -232,8 +232,9 @@ export async function deleteClassGauge(id: string) {
   await serialized(async () => {
     const { lines, cellOf } = await readTabFresh(file.id, gaugeTab)
     const matches = lines.filter(({ row }) => cellOf(row)("ID").trim() === id)
-    if (matches.length !== 1) throw new Error(matches.length ? "CLASS_SPECIFIC_DUPLICATE" : "CLASS_SPECIFIC_NOT_FOUND")
-    await writeRows(file.id, gaugeTab, [], [id])
+    if (matches.length > 1) throw new Error("CLASS_SPECIFIC_DUPLICATE")
+    // Déjà absente de la feuille (retirée dans Sheets) : il ne reste qu'à l'oublier ici.
+    if (matches.length) await writeRows(file.id, gaugeTab, [], [id])
   })
   return remember(before, (table) => ({ ...table, gauges: table.gauges.filter((item) => item.id !== id) }))
 }
@@ -255,8 +256,7 @@ export async function deleteClassFormGroup(groupId: string) {
   await serialized(async () => {
     const { lines, cellOf } = await readTabFresh(file.id, formTab)
     const ids = lines.filter(({ row }) => cellOf(row)("Groupe ID").trim() === groupId).map(({ row }) => cellOf(row)("ID").trim()).filter(Boolean)
-    if (!ids.length) throw new Error("CLASS_SPECIFIC_NOT_FOUND")
-    await writeRows(file.id, formTab, [], ids)
+    if (ids.length) await writeRows(file.id, formTab, [], ids)
   })
   return remember(before, (table) => ({ ...table, formGroups: table.formGroups.filter((item) => item.id !== groupId) }))
 }
@@ -288,8 +288,9 @@ export async function deleteClassDeck(deckId: string) {
   const before = cache ? cache.table : await listClassSpecifics()
   await serialized(async () => {
     const { lines, cellOf } = await readTabFresh(file.id, deckTab)
-    if (lines.filter(({ row }) => cellOf(row)("ID").trim() === deckId).length !== 1) throw new Error("CLASS_SPECIFIC_NOT_FOUND")
-    await writeRows(file.id, deckTab, [], [deckId])
+    const matches = lines.filter(({ row }) => cellOf(row)("ID").trim() === deckId).length
+    if (matches > 1) throw new Error("CLASS_SPECIFIC_DUPLICATE")
+    if (matches) await writeRows(file.id, deckTab, [], [deckId])
   })
   return remember(before, (table) => ({ ...table, decks: table.decks.filter((item) => item.id !== deckId) }))
 }

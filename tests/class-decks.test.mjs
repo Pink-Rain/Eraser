@@ -41,6 +41,13 @@ test("Un deck reçu de l'éditeur : réglages sûrs, numéros donnés aux nouvel
   const result = decks.sanitizeDeck({ deck: { classId: "CLA-9", className: "Cartomancien·ne", name: "Tarot", handLimit: 5, drawMode: "choix", placement: "bandeau" }, cards: [{ number: "1", name: "L'Ermite" }, { number: "", name: "Nouvelle" }, { number: "1", name: "Doublon" }, { name: "  " }] }, () => `X${(counter += 1)}YZW`);
   assert.match(result.deck.id, /^DCK-/);
   assert.deepEqual([result.deck.handLimit, result.deck.drawMode, result.deck.placement], [5, "choix", "bandeau"]);
+  // Tirage « au hasard ou au choix » : gardé par l'éditeur, écrit et relu dans la feuille.
+  const both = decks.sanitizeDeck({ deck: { classId: "CLA-9", className: "C", drawMode: "les-deux" }, cards: [] }, () => "BOTH1");
+  assert.equal(both.deck.drawMode, "les-deux");
+  assert.equal(decks.deckCells(both.deck)["Tirage"], "Au hasard ou au choix");
+  const tirage = (text) => decks.deckFromCells((header) => ({ ID: "DCK-1", Nom: "Tarot", Tirage: text })[header] ?? "").drawMode;
+  assert.deepEqual(["Au hasard ou au choix", "les deux", "Hasard / choix", "Au choix", "choix", "Au hasard", ""].map(tirage), ["les-deux", "les-deux", "les-deux", "choix", "choix", "hasard", "hasard"]);
+  assert.equal(decks.sanitizeDeck({ deck: { classId: "CLA-9", className: "C", drawMode: "n'importe" }, cards: [] }, () => "X1").deck.drawMode, "hasard");
   assert.deepEqual(result.cards.map((card) => [card.number, card.name]), [["1", "L'Ermite"], ["2", "Nouvelle"], ["3", "Doublon"]]);
   assert.equal(decks.sanitizeDeck({ deck: { className: "X" } }, () => "A"), null);
   const cells = decks.deckCells(result.deck);

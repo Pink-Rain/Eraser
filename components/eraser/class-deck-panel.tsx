@@ -111,15 +111,16 @@ export function ClassDeckPanel({ deck, cards, state, onChange }: { deck: ClassDe
       <p className="flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[.16em]" style={{ color }}><Layers className="size-3" />{deck.name}</p>
       <span className="text-[11px] text-muted-foreground">Pioche {piles.draw.length} · Main {piles.hand.length}{deck.handLimit ? `/${deck.handLimit}` : ""} · Défausse {piles.discard.length}{piles.removed.length ? ` · Retirées ${piles.removed.length}` : ""}</span>
       {live && <div className="ml-auto flex items-center gap-1">
-        {deck.drawMode === "choix"
-          ? <Popover open={choosing} onOpenChange={setChoosing}>
-            <PopoverTrigger asChild><Button type="button" size="sm" disabled={!piles.draw.length || full} style={{ backgroundColor: color }} title={full ? "La main est pleine" : undefined}><Hand />Piocher</Button></PopoverTrigger>
+        {deck.drawMode !== "choix" && <Button type="button" size="sm" disabled={!piles.draw.length || full} onClick={draw} style={{ backgroundColor: color }} title={full ? "La main est pleine" : !piles.draw.length ? "La pioche est vide" : "Tirer une carte au hasard"}><Shuffle />Piocher</Button>}
+        {deck.drawMode !== "hasard" && <Popover open={choosing} onOpenChange={setChoosing}>
+            <PopoverTrigger asChild>{deck.drawMode === "choix"
+              ? <Button type="button" size="sm" disabled={!piles.draw.length || full} style={{ backgroundColor: color }} title={full ? "La main est pleine" : undefined}><Hand />Piocher</Button>
+              : <Button type="button" size="sm" variant="outline" disabled={!piles.draw.length || full} style={{ borderColor: `${color}88`, color }} title={full ? "La main est pleine" : "Prendre la carte de son choix dans la pioche"}><Hand />Choisir</Button>}</PopoverTrigger>
             <PopoverContent align="end" className="max-h-80 w-72 overflow-y-auto p-1.5">
               <p className="px-2 pb-1 pt-1 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Choisir une carte de la pioche</p>
               {piles.draw.map((card) => <button key={card.number} type="button" onClick={() => { move(card, "hand"); setChoosing(false) }} className="flex w-full items-center gap-2 rounded-md px-2 py-1.5 text-left text-sm hover:bg-muted"><span style={{ color: card.color || color }}><CardIcon icon={card.icon || card.illustration} className="size-4 text-sm" /></span><span className="truncate">{card.name}</span><span className="ml-auto text-[10px] text-muted-foreground">n° {card.number}</span></button>)}
             </PopoverContent>
-          </Popover>
-          : <Button type="button" size="sm" disabled={!piles.draw.length || full} onClick={draw} style={{ backgroundColor: color }} title={full ? "La main est pleine" : !piles.draw.length ? "La pioche est vide" : "Tirer une carte au hasard"}><Shuffle />Piocher</Button>}
+          </Popover>}
         <DropdownMenu>
           <DropdownMenuTrigger asChild><Button type="button" variant="ghost" size="icon-sm" aria-label="Autres actions du deck"><MoreHorizontal /></Button></DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-72">
