@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server"
 
+import { sharedRankBonuses } from "@/lib/class-catalog-share"
 import { addRankBonusRow, listRankBonuses, saveRankBonusCells } from "@/lib/class-content"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
@@ -18,7 +19,12 @@ export async function GET(request: Request) {
     return NextResponse.json({ ...table, canEdit: canCreate })
   } catch (error) {
     console.error("RANK_BONUSES_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    return NextResponse.json({ error: "Les bonus de rang n’ont pas pu être chargés depuis Google Sheets." }, { status: 503 })
+    // Google refuse (quota commun à toutes les installations) : la dernière copie partagée
+    // suffit pour proposer les bonus au passage de niveau. Elle ne sert jamais à écrire.
+    const shared = await sharedRankBonuses()
+    if (shared) return NextResponse.json({ ...shared, canEdit: false })
+    const reason = googleFailureMessage(error instanceof Error ? error.message : "")
+    return NextResponse.json({ error: reason || "Les bonus de rang n’ont pas pu être chargés depuis Google Sheets." }, { status: 503 })
   }
 }
 

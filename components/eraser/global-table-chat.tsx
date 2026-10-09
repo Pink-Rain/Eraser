@@ -171,6 +171,9 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       queueMicrotask(() => { setActivities([]); setMembers([]); setAccounts([]) })
       return
     }
+    // L'historique se lit dans Google Sheets (tout l'onglet Journal) : comme le salon en
+    // direct, il attend que la page affichée soit chargée, ou qu'on ouvre le chat.
+    if (!warm) return
     let cancelled = false
     void fetch(`/api/campaign-chat?pageLinked=${encodeURIComponent(campaignId)}`)
       .then((response) => responseJson<{ activities: TabletopActivityRecord[]; members: ChatMember[]; accounts?: ChatAccount[]; me?: ChatAccount }>(response))
@@ -188,7 +191,7 @@ export function GlobalTableChat({ user }: { user: ChatUser }) {
       })
       .catch(() => { if (!cancelled) showNotice("Ce salon n’a pas pu être chargé.") })
     return () => { cancelled = true }
-  }, [campaignId, markSeen, showNotice])
+  }, [campaignId, markSeen, showNotice, warm])
 
   useEffect(() => {
     if (!roomId || !warm || hideOnThisPage) return

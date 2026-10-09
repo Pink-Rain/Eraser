@@ -45,27 +45,41 @@ export function RankBonusLine({ bonus, accent, className = "", taken = false }: 
 let knownRankBonuses: RankBonus[] | null = null
 let pendingRankBonuses: Promise<RankBonus[] | null> | null = null
 
-function fetchRankBonuses() {
-  pendingRankBonuses ??= fetch("/api/classes/rank-bonuses", { cache: "no-store" })
+function fetchRankBonuses(retry = false) {
+  if (retry) pendingRankBonuses = null
+  if (pendingRankBonuses) return pendingRankBonuses
+  const request: Promise<RankBonus[] | null> = fetch("/api/classes/rank-bonuses", { cache: "no-store" })
     .then(async (response) => response.ok ? ((await response.json()) as { bonuses?: RankBonus[] }).bonuses ?? null : null)
     .catch(() => null)
-    .finally(() => { window.setTimeout(() => { pendingRankBonuses = null }, 30_000) })
-  return pendingRankBonuses
+    // Un échec n'est pas gardé : le prochain appel redemande.
+    .then((result) => { if (!result && pendingRankBonuses === request) pendingRankBonuses = null; return result })
+  pendingRankBonuses = request
+  window.setTimeout(() => { if (pendingRankBonuses === request) pendingRankBonuses = null }, 30_000)
+  return request
 }
 
-/** Les bonus de rang, communs à toutes les classes. Sans réseau, aucun. */
+/**
+ * Les bonus de rang, communs à toutes les classes. Pas encore lus (Google saturé, réseau
+ * coupé) : redemandés d'eux-mêmes, trois fois, espacés ; sinon un passage de niveau ne
+ * proposait aucun bonus.
+ */
 export function useRankBonuses() {
   const [bonuses, setBonuses] = useState<RankBonus[]>(() => knownRankBonuses ?? [])
   const [loaded, setLoaded] = useState(knownRankBonuses !== null)
   useEffect(() => {
     let active = true
-    void fetchRankBonuses().then((result) => {
-      if (result) knownRankBonuses = result
-      if (!active) return
-      if (result) setBonuses(result)
-      setLoaded(true)
-    })
-    return () => { active = false }
+    let timer = 0
+    const load = (attempt: number) => {
+      void fetchRankBonuses(attempt > 0).then((result) => {
+        if (result) knownRankBonuses = result
+        if (!active) return
+        if (result) setBonuses(result)
+        setLoaded(true)
+        if (!result && knownRankBonuses === null && attempt < 3) timer = window.setTimeout(() => load(attempt + 1), 15_000 * (attempt + 1))
+      })
+    }
+    load(0)
+    return () => { active = false; window.clearTimeout(timer) }
   }, [])
   return { bonuses, loaded }
 }

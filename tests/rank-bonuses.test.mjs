@@ -100,6 +100,22 @@ test("Passage de rang : les bonus de chaque rang atteint sont proposés une seul
   assert.equal(kept.states.length, 1);
 });
 
+test("Sans classe : chaque niveau gagné propose ses bonus de rang, et les capacités ajoutées à la main restent", () => {
+  const list = bonuses.parseRankBonusRows([headers, row(1, { "Cible 1": "Rapidité", "Valeur 1": "5" }), row(2, { "Cible 1": "Force", "Valeur 1": "1" })]).bonuses;
+  const spells = [{ id: "S1", classRanks: { "CLA-1": 0 } }, { id: "S2", classRanks: { "CLA-1": 1 } }, { id: "S3", classRanks: {} }];
+  let value = "";
+  // Niveau 2 sans classe : les bonus des rangs 1 et 2, sans aucun sort de classe à choisir.
+  let steps = progression.pendingRankSteps([], spells, 2, value, list);
+  assert.deepEqual(steps.map((step) => [step.rank, Boolean(step.choice), Boolean(step.bonus)]), [[1, false, true], [2, false, true]]);
+  assert.ok(steps.every((step) => step.accent));
+  // Aucun sort de classe n'est acquis d'office ; une capacité ajoutée à la main, si.
+  assert.deepEqual(progression.knownSpellsForCharacter([], spells, 2, value).map((spell) => spell.id), []);
+  value = JSON.stringify({ extras: ["S3", "S2"] });
+  assert.deepEqual(progression.knownSpellsForCharacter([], spells, 2, value).map((spell) => spell.id).sort(), ["S2", "S3"]);
+  value = progression.takeRankBonus(value, 1, { applied: [{ target: "Rapidité", amount: 5 }] });
+  assert.deepEqual(progression.pendingRankSteps([], spells, 2, value, list).map((step) => step.rank), [2]);
+});
+
 test("Passage de rang : il reste à choisir, répartir et chercher avant d'obtenir les bonus", () => {
   const [bonus] = bonuses.parseRankBonusRows([headers, row(3, { "Cible 1": "Force", "Valeur 1": "2", "Cible 2": "Caractéristique", "Valeur 2": "10", "Choix": "1", "Sort sur mesure": "TRUE" })]).bonuses;
   const empty = { slots: [], spread: {}, spell: null };

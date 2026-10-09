@@ -65,3 +65,21 @@ test("un joueur sur un PC neuf voit les classes et leurs sorts sans lire Google"
     session.account = { uid: "admin-test", email: "", displayName: "Admin", status: "actif", role: "admin", accountRole: "admin" };
   }
 });
+
+test("les bonus de rang restent proposés quand Google refuse : copie partagée, jamais modifiable", async () => {
+  const { shareRankBonuses } = share;
+  const table = { bonuses: [{ rank: 1, bonuses: [{ slot: 1, target: "Rapidité", value: "5", amount: 5 }], choose: 0, customSpell: false, other: "", entries: [] }], headers: ["Rang", "Cible 1", "Valeur 1"], sheetUrl: "", exists: true };
+  await shareRankBonuses(table, new Date().toISOString());
+  // Aucun classeur des sorts relié : la lecture Google échoue.
+  const route = await vite.ssrLoadModule("/app/api/classes/rank-bonuses/route.ts");
+  session.account = { uid: "joueur-1", email: "", displayName: "Lina", status: "actif", role: "joueur", accountRole: "joueur" };
+  try {
+    const response = await route.GET(new Request("http://localhost/api/classes/rank-bonuses"));
+    assert.equal(response.status, 200);
+    const body = await response.json();
+    assert.equal(body.bonuses[0].rank, 1);
+    assert.equal(body.canEdit, false);
+  } finally {
+    session.account = { uid: "admin-test", email: "", displayName: "Admin", status: "actif", role: "admin", accountRole: "admin" };
+  }
+});

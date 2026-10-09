@@ -32,7 +32,7 @@ import { characterSheetAliases } from "@/lib/character-sheet-map"
 import { normalizeClassLabel } from "@/lib/class-utils"
 import { staleWhileRevalidate } from "@/lib/stale-cache"
 import { runInBackground } from "@/lib/background-work"
-import { shareClassCatalog, sharedClassCatalog } from "@/lib/class-catalog-share"
+import { shareClassCatalog, sharedClassCatalog, shareRankBonuses } from "@/lib/class-catalog-share"
 import { asBackgroundGoogleWork } from "@/lib/google-quota"
 import { parseRankBonusRows, rankOfCell, RANK_BONUS_HEADERS, RANK_BONUS_MAX_RANK, RANK_BONUS_RANK_HEADER, RANK_BONUS_TAB, type RankBonus, type RankBonusTable } from "@/lib/rank-bonuses"
 import {
@@ -1411,6 +1411,7 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
       return stale
     }
   }
+  const readAt = new Date().toISOString()
   const { spells: file } = await classWorkbookFiles()
   if (!file) throw new Error("CLASS_SPELLS_SHEET_NOT_FOUND")
   let tab = (await spreadsheetTabs(file.id)).find((item) => item.title === RANK_BONUS_TAB)
@@ -1443,6 +1444,8 @@ export async function listRankBonuses(options: { create?: boolean; refresh?: boo
   const matrix = rows.map((row) => row.map((cell) => String(cell ?? "")))
   const table = rankBonusTableOf(matrix, tab.sheetId === undefined ? base : `https://docs.google.com/spreadsheets/d/${file.id}/edit#gid=${tab.sheetId}`)
   rankBonusCache = { expiresAt: Date.now() + RANK_BONUS_FRESH_MS, table, matrix }
+  // Les autres installations les reçoivent même quand Google leur refuse la lecture.
+  runInBackground(shareRankBonuses(table, readAt), "SHARED_RANK_BONUSES_WRITE_FAILED")
   return table
 }
 
@@ -1522,6 +1525,7 @@ export async function saveRankBonusCells(changes: RankBonusCellChange[]) {
   }
   const table = rankBonusTableOf(matrix, cached.table.sheetUrl)
   rankBonusCache = { expiresAt: Date.now() + RANK_BONUS_FRESH_MS, table, matrix }
+  runInBackground(shareRankBonuses(table, new Date().toISOString()), "SHARED_RANK_BONUSES_WRITE_FAILED")
   return table
 }
 
