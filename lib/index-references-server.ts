@@ -4,6 +4,7 @@
  * case, pour l'affichage. Une ligne est retrouvée par son identifiant : renommée, elle
  * reste la même ligne. Lire ne crée jamais de classeur.
  */
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import { listObjectIndexTablesForDisplay, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { foldName, isIdHeader, normalizeSpec, objectColumnSpec } from "@/lib/index-columns"
@@ -275,3 +276,6 @@ function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden
     sections,
   }
 }
+
+// « Actualiser » : la liste des références « { » est reconstruite.
+onForgetGoogleData(() => { catalogCache = null })

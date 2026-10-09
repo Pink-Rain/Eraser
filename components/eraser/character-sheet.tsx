@@ -27,6 +27,7 @@ import { cardsOfClass, deckStatesOf, decksOfClass, withDeckState, type DeckState
 
 import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
+import { BEFORE_HARD_REFRESH_EVENT, type BeforeHardRefreshDetail } from "@/components/eraser/app-tabs"
 import { SpellChoiceDialog, type RankBonusSelection } from "@/components/eraser/spell-choice-dialog"
 import { useRankBonuses } from "@/components/eraser/rank-bonus"
 import { isAnyCharacteristicTarget, isMovementTarget } from "@/lib/rank-bonuses"
@@ -902,6 +903,16 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     setPortraitPending(true); await flush(file); setPortraitPending(false)
   }
 
+  // « Actualiser » attend que les cases en cours partent vers Google avant de recharger.
+  const flushRef = useRef(flush)
+  useEffect(() => { flushRef.current = flush })
+  useEffect(() => {
+    function finishSaving(event: Event) {
+      if (pendingChanges.current.size) (event as CustomEvent<BeforeHardRefreshDetail>).detail.waitFor(flushRef.current())
+    }
+    window.addEventListener(BEFORE_HARD_REFRESH_EVENT, finishSaving)
+    return () => window.removeEventListener(BEFORE_HARD_REFRESH_EVENT, finishSaving)
+  }, [])
   // Quitter la page avec des cases pas encore enregistrées : le navigateur prévient.
   useEffect(() => {
     function warn(event: BeforeUnloadEvent) {

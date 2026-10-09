@@ -7,6 +7,7 @@
  * Il n'est créé qu'à la première modification faite dans « Modifier » : un classeur
  * qu'on n'a jamais modifié reste tel quel.
  */
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import {
   clearSpreadsheetReadCache,
   googleSheetsJson,
@@ -158,3 +159,5 @@ export function upsertEntry(entries: SchemaEntry[], tab: string, column: string,
   return entries
 }
 
+// « Actualiser » : les réglages de colonnes sont relus dans Google.
+onForgetGoogleData(() => { cache.clear() })

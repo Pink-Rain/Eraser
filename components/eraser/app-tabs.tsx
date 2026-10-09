@@ -1,6 +1,6 @@
 "use client"
 
-import { createContext, startTransition, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react"
+import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type CSSProperties, type DragEvent, type ReactNode } from "react"
 import { useRouter } from "next/navigation"
 import { ArrowLeft, ArrowRight, Plus, RotateCw, X } from "lucide-react"
 
@@ -63,28 +63,29 @@ export function replaceAppUrl(href: string | URL, { record = true }: { record?: 
   window.dispatchEvent(new CustomEvent(URL_CHANGE_EVENT, { detail: { record } }))
 }
 
-type VinextWindow = Window & {
-  __VINEXT_RSC_NAVIGATE__?: (href: string, redirectDepth?: number, kind?: string, historyUpdateMode?: unknown, previousNextUrl?: unknown, programmaticTransition?: boolean) => Promise<unknown>
-  __VINEXT_CLEAR_NAV_CACHES__?: () => void
-}
+/**
+ * Avant une actualisation complète, les pages qui enregistrent encore quelque chose (une
+ * fiche dont une case part vers Google) le terminent : sinon le rechargement l'aurait
+ * bloqué ou interrompu. Elles s'inscrivent avec `event.detail.waitFor(promesse)`.
+ */
+export const BEFORE_HARD_REFRESH_EVENT = "eraser:before-hard-refresh"
+export type BeforeHardRefreshDetail = { waitFor: (promise: Promise<unknown>) => void }
+
+const pause = (ms: number) => new Promise<void>((resolve) => window.setTimeout(resolve, ms))
 
 /**
- * Actualise la page sans la vider : les données sont relues et remplacées en place
- * (comme `router.refresh()`, dont on attend ici la fin pour arrêter l'icône). Si le
- * routeur ne le permet pas, ou si l'actualisation échoue, on recharge la fenêtre.
+ * Actualise vraiment : le serveur local oublie ce qu'il a gardé de Google Sheets, puis la
+ * fenêtre entière se recharge et relit tout (les onglets ouverts restent, ils vivent dans
+ * le sessionStorage). Avant, « Actualiser » ne redemandait que la page et pouvait resservir
+ * les données gardées en mémoire.
  */
-async function softRefresh() {
-  const vinext = window as VinextWindow
-  const navigateRsc = vinext.__VINEXT_RSC_NAVIGATE__
-  if (typeof navigateRsc !== "function") { window.location.reload(); return }
-  try {
-    vinext.__VINEXT_CLEAR_NAV_CACHES__?.()
-    await new Promise<void>((resolve, reject) => {
-      startTransition(() => { navigateRsc(window.location.href, 0, "refresh", undefined, undefined, true).then(() => resolve(), reject) })
-    })
-  } catch {
-    window.location.reload()
-  }
+async function hardRefresh() {
+  const pending: Promise<unknown>[] = []
+  const detail: BeforeHardRefreshDetail = { waitFor: (promise) => { pending.push(promise) } }
+  window.dispatchEvent(new CustomEvent<BeforeHardRefreshDetail>(BEFORE_HARD_REFRESH_EVENT, { detail }))
+  await Promise.race([Promise.allSettled(pending), pause(10_000)])
+  await Promise.race([fetch("/api/refresh", { method: "POST", cache: "no-store" }).catch(() => undefined), pause(5_000)])
+  window.location.reload()
 }
 
 function navigate(router: ReturnType<typeof useRouter>, href: string) {
@@ -314,8 +315,8 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
   const [refreshing, setRefreshing] = useState(false)
   const reload = useCallback(() => {
     setRefreshing(true)
-    // Garde-fou : l'icône ne tourne jamais indéfiniment, même si la réponse se perd.
-    void Promise.race([softRefresh(), new Promise((resolve) => window.setTimeout(resolve, 30_000))]).finally(() => setRefreshing(false))
+    // Garde-fou : si le rechargement n'a pas lieu (fiche qui refuse de quitter), l'icône s'arrête.
+    void Promise.race([hardRefresh(), pause(30_000)]).finally(() => setRefreshing(false))
   }, [])
 
   // Un onglet déposé depuis une autre fenêtre ailleurs que sur la barre : il s'ajoute à la fin.
@@ -361,8 +362,7 @@ export function AppTabsProvider({ pathname, label, children }: { pathname: strin
       if (!isDesktop()) return
       if (event.altKey && event.key === "ArrowLeft") { event.preventDefault(); back() }
       else if (event.altKey && event.key === "ArrowRight") { event.preventDefault(); forward() }
-      // Ctrl+F5 recharge toute la fenêtre (en cas de souci) ; F5 actualise sans rien vider.
-      else if (event.key === "F5" && event.ctrlKey) { event.preventDefault(); window.location.reload() }
+      // F5 (et Ctrl+F5) : actualisation complète, comme le bouton.
       else if (event.key === "F5") { event.preventDefault(); reload() }
       else if (event.ctrlKey && (event.key === "w" || event.key === "W")) { event.preventDefault(); close(stateRef.current.activeId) }
       else if (event.ctrlKey && (event.key === "t" || event.key === "T")) { event.preventDefault(); open("/", "Accueil", { focus: true }) }
@@ -435,7 +435,7 @@ export function AppNavButtons() {
   return <div className="flex shrink-0 items-center gap-0.5" style={noDragStyle} onMouseDown={(event) => event.stopPropagation()}>
     <button type="button" className={navButton} disabled={!value.canGoBack} onClick={value.back} aria-label="Page précédente" title="Page précédente (Alt+←)"><ArrowLeft className="size-4" /></button>
     <button type="button" className={navButton} disabled={!value.canGoForward} onClick={value.forward} aria-label="Page suivante" title="Page suivante (Alt+→)"><ArrowRight className="size-4" /></button>
-    <button type="button" className={navButton} onClick={value.reload} disabled={value.refreshing} aria-busy={value.refreshing} aria-label="Actualiser" title="Actualiser (F5) — Ctrl+F5 recharge toute la fenêtre"><RotateCw className={`size-3.5 ${value.refreshing ? "animate-spin" : ""}`} /></button>
+    <button type="button" className={navButton} onClick={value.reload} disabled={value.refreshing} aria-busy={value.refreshing} aria-label="Actualiser" title="Actualiser (F5) : relit toutes les données dans Google"><RotateCw className={`size-3.5 ${value.refreshing ? "animate-spin" : ""}`} /></button>
   </div>
 }
 

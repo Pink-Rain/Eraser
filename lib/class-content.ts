@@ -34,6 +34,7 @@ import { staleWhileRevalidate } from "@/lib/stale-cache"
 import { runInBackground } from "@/lib/background-work"
 import { shareClassCatalog, sharedClassCatalog, shareRankBonuses } from "@/lib/class-catalog-share"
 import { asBackgroundGoogleWork } from "@/lib/google-quota"
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import { parseRankBonusRows, rankOfCell, RANK_BONUS_HEADERS, RANK_BONUS_MAX_RANK, RANK_BONUS_RANK_HEADER, RANK_BONUS_TAB, type RankBonus, type RankBonusTable } from "@/lib/rank-bonuses"
 import {
   classSpellActionKind,
@@ -538,6 +539,8 @@ export async function listClassSpells(refresh = false, kind: SpellIndexKind = "c
   return spellListCache.get(kind, () => loadClassSpells(refresh, kind), { refresh })
 }
 
+let googleFirstUntil = 0
+
 /** Les sorts des classes sont déjà en mémoire sur cette installation (lus dans Google). */
 export function classSpellsInMemory(kind: SpellIndexKind = "classes") {
   return spellListCache.has(kind)
@@ -550,7 +553,8 @@ export function classSpellsInMemory(kind: SpellIndexKind = "classes") {
  * partagée aussi, plutôt qu'une page sans classes.
  */
 export async function classSpellsForDisplay(): Promise<{ classes: ClassRecord[]; spells: ClassSpell[]; file?: ClassWorkbookFile }> {
-  if (!classSpellsInMemory()) {
+  // Juste après « Actualiser », c'est Google qu'on veut relire (la copie partagée reste le repli).
+  if (!classSpellsInMemory() && Date.now() > googleFirstUntil) {
     const shared = await sharedClassCatalog()
     if (shared) {
       runInBackground(asBackgroundGoogleWork(() => listClassSpells()), "CLASS_SPELLS_BACKGROUND_READ_FAILED")
@@ -1562,3 +1566,9 @@ export async function addRankBonusRow() {
   rankBonusCache = null
   return listRankBonuses({ refresh: true })
 }
+
+// « Actualiser » : sorts, présentations et bonus de rang relus dans Google.
+onForgetGoogleData(() => {
+  invalidateClassContentCaches()
+  googleFirstUntil = Date.now() + 60_000
+})

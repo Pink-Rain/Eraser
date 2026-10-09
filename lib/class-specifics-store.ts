@@ -11,6 +11,7 @@
  */
 import { classWorkbookFiles } from "@/lib/class-content"
 import { asBackgroundGoogleWork } from "@/lib/google-quota"
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import {
   appendRows,
   clearSpreadsheetReadCache,
@@ -319,3 +320,9 @@ export async function deleteClassDeck(deckId: string) {
   })
   return remember(before, (table) => ({ ...table, decks: table.decks.filter((item) => item.id !== deckId) }))
 }
+
+// « Actualiser » : jauges, formes, decks et cartes relus dans Google.
+onForgetGoogleData(() => {
+  cache = null
+  cacheGeneration += 1
+})

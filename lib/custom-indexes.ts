@@ -7,6 +7,7 @@
  * Règle du projet : un classeur n'est jamais recréé s'il existe déjà sous ce nom dans
  * le Drive. Il est relié, et ses onglets sont gardés.
  */
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import { createGoogleSpreadsheet, driveFileMetadata, findGoogleSpreadsheetByName, trashDriveFile } from "@/lib/google-drive"
 import { appendRows, canonicalRow, canonicalRows, clearSpreadsheetReadCache, columnName, ensureNamedColumns, googleSheetsJson, namedAppendRange, namedRowWrites, readNamedSheet, sheetTabRange, spreadsheetTabs, updateRange, updateRanges } from "@/lib/google-sheets"
 import { foldName, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
@@ -226,3 +227,6 @@ export async function createCustomIndex(input: { title: string; description: str
   registryCache = null
   return { entry, linked: Boolean(linked) }
 }
+
+// « Actualiser » : la liste des index créés depuis Eraser est relue dans Google.
+onForgetGoogleData(() => { registryCache = null })

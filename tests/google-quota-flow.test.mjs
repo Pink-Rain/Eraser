@@ -90,3 +90,15 @@ test("chaque installation se présente à Google sous son propre identifiant de 
   const call = google.world.calls.find((item) => item.url.includes("quota-user"));
   assert.match(call.url, /[?&]quotaUser=eraser-[a-z0-9]{8,32}(&|$)/);
 });
+
+test("« Actualiser » fait relire Google : une case changée ailleurs apparaît aussitôt", async () => {
+  google.addSpreadsheet("actualiser", [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Aldor"]] }]);
+  assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor"]]);
+  // Modifiée directement dans Google Sheets : la lecture suivante sort encore de la mémoire.
+  google.grid("actualiser", "Feuille")[1][1] = "Aldor le Vieux";
+  assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor"]]);
+  const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
+  const response = await refresh.POST();
+  assert.equal(response.status, 200);
+  assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor le Vieux"]]);
+});

@@ -36,6 +36,7 @@ import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSh
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
 import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
 import { sharedClassCatalog } from "@/lib/class-catalog-share"
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
@@ -7927,3 +7928,17 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
   }
 }
 
+
+/** « Actualiser » : tout ce qui a été lu dans Google est relu à la prochaine demande. */
+onForgetGoogleData(async () => {
+  rangeReadCache.clear()
+  namedColumnsCache.clear()
+  sheetHeaderCache.clear()
+  characterColumnsCache = null
+  characterSheetCache.clear()
+  clearObjectIndexTableCache()
+  // Personnages et campagnes : resynchronisés en arrière-plan (la page n'attend pas).
+  if (identityIndexSyncedAt) identityIndexSyncedAt = 1
+  // Les classes : relues dans Google à la prochaine demande, sans vider la liste connue.
+  await forgetClassIndexSync()
+})

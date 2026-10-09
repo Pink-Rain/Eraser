@@ -1,3 +1,4 @@
+import { onForgetGoogleData } from "@/lib/data-refresh"
 import { AsyncLocalStorage } from "node:async_hooks"
 
 import {
@@ -1977,3 +1978,6 @@ export function purgeWorldIndexTrash(key: WorldIndexKey, tab: string, column: st
     }
   })
 }
+
+// « Actualiser » : les index sont relus dans Google (le dernier lu reste le repli en cas d'échec).
+onForgetGoogleData(() => { worldIndexCache.clear() })
