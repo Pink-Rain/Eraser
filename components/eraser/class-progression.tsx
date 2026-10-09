@@ -47,6 +47,11 @@ export type CharacterClassChoices = {
    * n'a pas pris de niveau depuis. `taken` : par rang, ce qui a été ajouté à la fiche.
    */
   rankBonuses: { from: number | null; taken: Record<string, RankBonusTaken> }
+  /**
+   * L'état de jeu des spécificités de classe (jauges…), par identifiant de spécificité ;
+   * lu et vérifié par lib/class-specifics.
+   */
+  specifics?: Record<string, unknown>
 }
 
 /** Ce qu'un rang a ajouté à la fiche : les valeurs écrites, et le sort sur mesure choisi. */
@@ -81,10 +86,17 @@ function parseSpellEdits(value: unknown): CharacterClassChoices["edits"] {
   }))
 }
 
+/**
+ * Lit la case. Ce que cette version ne connaît pas (clés ajoutées par une version plus
+ * récente) est gardé tel quel : chaque réécriture part de `...state` et le renvoie, rien
+ * n'est effacé en passant.
+ */
 export function parseClassChoices(value: string): CharacterClassChoices {
   try {
     const parsed = JSON.parse(value) as Partial<CharacterClassChoices>
+    const kept = parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : {}
     return {
+      ...kept,
       choices: parsed && typeof parsed.choices === "object" && parsed.choices ? parsed.choices as CharacterClassChoices["choices"] : {},
       charges: parsed && typeof parsed.charges === "object" && parsed.charges ? parsed.charges as CharacterClassChoices["charges"] : {},
       extras: parsed && Array.isArray(parsed.extras) ? parsed.extras.filter((item): item is string => typeof item === "string") : [],
@@ -93,6 +105,7 @@ export function parseClassChoices(value: string): CharacterClassChoices {
       removed: parsed && Array.isArray(parsed.removed) ? parsed.removed.filter((item): item is string => typeof item === "string") : [],
       states: parseCharacterStates(parsed?.states),
       rankBonuses: parseRankBonusState(parsed?.rankBonuses),
+      ...(kept.specifics && typeof kept.specifics === "object" && !Array.isArray(kept.specifics) ? { specifics: kept.specifics as Record<string, unknown> } : {}),
     }
   } catch {
     return { choices: {}, charges: {}, extras: [], order: [], edits: {}, removed: [], states: [], rankBonuses: { from: null, taken: {} } }

@@ -16,6 +16,8 @@ import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
+import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
+import { formulaValues, gaugesOfClass, gaugeStatesOf, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
 
 import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
@@ -859,6 +861,31 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const assignedClasses = useMemo(() => selectedCharacterClasses(characterClassValue, availableClasses), [characterClassValue, availableClasses])
   const classChoicesValue = values[characterClassChoicesIndex] || ""
   const classChoiceState = parseClassChoices(classChoicesValue)
+
+  // Spécificités de classe : les jauges des classes du personnage. Une formule lit les
+  // valeurs de la fiche telles qu'elles s'affichent (objets et états compris).
+  const { gauges: allClassGauges } = useClassGauges()
+  const characterGauges = useMemo(() => assignedClasses.flatMap((item) => gaugesOfClass(allClassGauges, item)), [allClassGauges, assignedClasses])
+  const gaugeValues = useMemo(() => {
+    if (!characterGauges.length) return formulaValues([])
+    const shown = (index: number) => index < 0 ? Number.NaN : sheetNumber(totalWithModifier(values[index], modifiersByValueIndex.get(index)?.total || 0, "0", modifiersByValueIndex.get(index)?.rule))
+    return formulaValues([
+      ...catalog.characteristics.map((item) => [item.name, shown(layout.index(item.key))] as [string, number]),
+      ...catalog.skills.map((skill) => [skill.name, shown(layout.index(skill.key, "Total de stats"))] as [string, number]),
+      ["Niveau", characterLevel],
+      ["Points de vie actuels", sheetNumber(totalWithModifier(values[9], modifierTotalFor(modifierIndex, CURRENT_LIFE_TARGET_ID), "0", modifierRuleFor(modifierIndex, CURRENT_LIFE_TARGET_ID)))],
+      ["Points de vie max", shown(10)],
+    ])
+  }, [catalog, characterGauges.length, characterLevel, layout, modifierIndex, modifiersByValueIndex, values])
+  const gaugeStates = useMemo(() => gaugeStatesOf(classChoicesValue), [classChoicesValue])
+  const resolvedGauges = useMemo(() => characterGauges.map((gauge) => resolveGauge(gauge, gaugeValues, gaugeStates[gauge.id])), [characterGauges, gaugeStates, gaugeValues])
+  // Ce que le joueur change part de la dernière version de la case : rien d'autre n'y est touché.
+  const setGaugeState = (gaugeId: string, patch: Parameters<typeof withGaugeState>[2]) => void commit(characterClassChoicesIndex, withGaugeState(latestValues.current[characterClassChoicesIndex] || "", gaugeId, patch))
+  const gaugeView = (resolved: ResolvedGauge, compact = false) => <ClassGaugeView key={resolved.gauge.id} resolved={resolved} compact={compact}
+    onCurrent={(value) => setGaugeState(resolved.gauge.id, { current: value })}
+    onMax={(value) => setGaugeState(resolved.gauge.id, { max: value })}
+    onReset={() => setGaugeState(resolved.gauge.id, { current: undefined })} />
+  const gaugesAt = (placement: ClassGauge["placement"]) => resolvedGauges.filter((resolved) => resolved.gauge.placement === placement)
   // Recomputing this per keystroke was the most expensive step in the render (it
   // scans every known spell against every skill row via linkedAbilities below).
   const knownClassSpells = useMemo(
@@ -1279,7 +1306,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; return [<div key={item.key} className="relative rounded-xl xl:col-span-3 xl:row-span-2"><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} /><ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell></div>] }
+    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; const lifeGauges = gaugesAt("vie"); const lifeCard = <ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell>; return [<div key={item.key} className={`relative rounded-xl xl:col-span-3 xl:row-span-2 ${lifeGauges.length ? "flex flex-col gap-1.5" : ""}`}><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} />{lifeGauges.length ? <><div className="min-h-0 flex-1">{lifeCard}</div><div className="space-y-2 rounded-xl px-3 py-2 shadow-sm" style={{ backgroundColor: `${lifeColor}10` }}>{lifeGauges.map((resolved) => gaugeView(resolved, true))}</div></> : lifeCard}</div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
     if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-3"><CalculatedSecondaryCard fieldIndex={21} label={item.name} help={secondaryHelp(item.key)} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
@@ -1415,7 +1442,11 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     if (tab.type === "inventaire") return inventoryLoading
       ? <div className="grid min-h-32 place-items-center rounded-2xl border border-dashed"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
       : <CharacterInventory characterId={character.id} inventory={inventory} onInventoryChange={setInventory} />
-    if (tab.type === "classe") return <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
+    if (tab.type === "classe") {
+      const progression = <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
+      const spellGauges = gaugesAt("sorts")
+      return spellGauges.length ? <div className="space-y-4"><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{spellGauges.map((resolved) => gaugeView(resolved))}</div>{progression}</div> : progression
+    }
     if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     if (tab.type === "invocation") return <CharacterSummons data={parseSummonsData(tab.summons)} onUpdate={updateSummons(tab.id)} suggestions={summonSuggestions} />
@@ -1492,6 +1523,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     </section>
 
     {secondaryCharacteristics && <div className="mt-6">{secondaryCharacteristics}</div>}
+    {gaugesAt("bandeau").length > 0 && <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{gaugesAt("bandeau").map((resolved) => gaugeView(resolved))}</div>}
 
     <Tabs value={activeCharacterTab.id} onValueChange={setActiveTab} className="mt-9 rounded-2xl border border-[#74664f3d] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.018))] p-2 shadow-sm">
       <div className="overflow-hidden">

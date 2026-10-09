@@ -177,7 +177,7 @@ function spreadsheetFromDriveFile(file: DriveFile): ClassWorkbookFile | null {
   return null
 }
 
-async function classWorkbookFiles(refresh = false) {
+export async function classWorkbookFiles(refresh = false) {
   if (!refresh && workbookFilesCache && workbookFilesCache.expiresAt > Date.now()) return workbookFilesCache
   const folder = await findDriveFolderByName("Classe")
   const files = folder ? (await listDriveFolderFiles(folder.id)).flatMap((file) => spreadsheetFromDriveFile(file) ?? []) : []

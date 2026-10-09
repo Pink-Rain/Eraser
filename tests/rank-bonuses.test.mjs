@@ -134,3 +134,18 @@ test("Perte de niveau : les sorts et bonus des rangs perdus sont oubliés, et re
   // Descendre sans rien perdre ne change rien.
   assert.equal(progression.dropRanksAbove(dropped, 1), dropped);
 });
+
+test("Case des sorts choisis : ce qu'une version ne connaît pas survit à chaque réécriture", () => {
+  const start = JSON.stringify({ choices: {}, specifics: { "JAU-1": { current: 12 } }, futur: { deck: ["C1", "C2"] } });
+  assert.deepEqual(progression.parseClassChoices(start).specifics, { "JAU-1": { current: 12 } });
+  let value = progression.chooseClassSpell(start, "CLA-1", 1, "S1");
+  value = progression.takeRankBonus(value, 1, { applied: [] });
+  value = progression.dropRanksAbove(progression.chooseClassSpell(value, "CLA-1", 2, "S2"), 1);
+  const parsed = JSON.parse(value);
+  assert.deepEqual(parsed.specifics, { "JAU-1": { current: 12 } });
+  assert.deepEqual(parsed.futur, { deck: ["C1", "C2"] });
+  assert.equal(parsed.choices["CLA-1"]["1"], "S1");
+  // Une case illisible ou un tableau ne donnent rien d'inventé.
+  assert.equal(progression.parseClassChoices("[1,2]").specifics, undefined);
+  assert.equal("0" in progression.parseClassChoices("[1,2]"), false);
+});
