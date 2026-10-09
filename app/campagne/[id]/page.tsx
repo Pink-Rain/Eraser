@@ -23,19 +23,29 @@ async function CampaignDashboardData({
 }) {
   const accountUid = account.uid
   const userEmail = account.email
-  const [listed, groupNpcs] = await Promise.all([
-    listCampaignMembers(campaign.id),
-    listNpcs(campaign.id).then((npcs) => npcs.filter((npc) => npc.inPlayerGroup)),
+  // Chaque partie de la page se lit à part : quand Google refuse une lecture (tous les
+  // joueurs ouvrent la campagne en même temps), seule cette partie le dit, au lieu de
+  // « Impossible d'afficher cette page » pour tout le monde sauf un.
+  const [listed, npcRead] = await Promise.all([
+    listCampaignMembers(campaign.id).catch((error) => {
+      console.error("CAMPAIGN_MEMBERS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return []
+    }),
+    listNpcs(campaign.id).then((npcs) => ({ npcs: npcs.filter((npc) => npc.inPlayerGroup), unavailable: false }), (error) => {
+      console.error("CAMPAIGN_GROUP_NPCS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return { npcs: [], unavailable: true }
+    }),
   ])
+  const { npcs: groupNpcs, unavailable: npcsUnavailable } = npcRead
   // Le joueur de chaque personnage, pour sa carte (« • Nom du joueur »).
   const [identities, players] = await Promise.all([
-    identityUidsForUser(accountUid),
+    identityUidsForUser(accountUid).catch(() => [accountUid]),
     playerNamesFor(account, listed.map((character) => character.ownerUid)).catch(() => new Map<string, string>()),
   ])
   const members = listed.map((character) => ({ ...character, playerName: players.get(character.ownerUid) ?? "" }))
   // Les joueurs ne voient ni les notes MJ ni la note de fond du PNJ.
   const visibleNpcs = canManage ? groupNpcs : groupNpcs.map((npc) => ({ ...npc, gmNotes: "", lore: "" }))
-  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} canManage={canManage} ownedCharacterIds={members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)} userEmail={userEmail} />
+  return <CampaignDashboard initialCampaign={campaign} initialMembers={members} initialGroupNpcs={visibleNpcs} npcsUnavailable={npcsUnavailable} canManage={canManage} ownedCharacterIds={members.filter((character) => ownedBy(character.ownerUid, identities)).map((character) => character.id)} userEmail={userEmail} />
 }
 
 export default async function CampaignDashboardPage({ params }: { params: Promise<{ id: string }> }) {

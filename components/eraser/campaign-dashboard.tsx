@@ -47,11 +47,13 @@ function DeferredCampaignInventory({ campaignId, readOnly }: { campaignId: strin
 }
 
 export function CampaignDashboard({
-  initialCampaign, initialMembers, initialGroupNpcs, canManage, ownedCharacterIds, userEmail,
+  initialCampaign, initialMembers, initialGroupNpcs, npcsUnavailable = false, canManage, ownedCharacterIds, userEmail,
 }: {
   initialCampaign: CampaignRecord
   initialMembers: CampaignMemberRecord[]
   initialGroupNpcs: CampaignNpcRecord[]
+  /** Les PNJ du groupe n'ont pas pu être lus (Google occupé) : la carte le dit et réessaie. */
+  npcsUnavailable?: boolean
   canManage: boolean
   ownedCharacterIds: string[]
   userEmail: string
@@ -268,7 +270,7 @@ export function CampaignDashboard({
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">
-          <GroupNpcs campaignId={campaign.id} initialNpcs={initialGroupNpcs} canManage={canManage} />
+          <GroupNpcs key={npcsUnavailable ? "indisponibles" : "lus"} campaignId={campaign.id} initialNpcs={initialGroupNpcs} unavailable={npcsUnavailable} canManage={canManage} />
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">

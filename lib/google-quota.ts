@@ -51,7 +51,9 @@ export function noteQuotaRefusal(retryAfter?: string | null) {
   const pause = Number.isFinite(hinted) && hinted > 0
     ? Math.min(MAX_PAUSE_MS, hinted * 1_000)
     : Math.min(MAX_PAUSE_MS, FIRST_PAUSE_MS * 2 ** (refusals - 1))
-  pausedUntil = Math.max(pausedUntil, Date.now() + pause + Math.random() * 1_500)
+  // Un écart au hasard (jusqu'à la moitié de la pause) : les installations refusées au même
+  // moment ne reviennent pas toutes ensemble, ce qui les ferait refuser encore.
+  pausedUntil = Math.max(pausedUntil, Date.now() + pause * (1 + Math.random() * 0.5))
 }
 
 export function noteQuotaSuccess() {
@@ -101,4 +103,34 @@ export async function acquireSheetsSlot(options: { deadline: number }) {
       pump()
     }
   }
+}
+
+/**
+ * L'identifiant de cette installation pour Google (`quotaUser`). Sans lui, Google compte
+ * toutes les requêtes du compte commun ensemble : un seul quota d'environ 60 lectures par
+ * minute pour tout le groupe. Avec lui, chaque installation est comptée à part (dans la
+ * limite du projet). Aléatoire, sans rien de personnel ; gardé dans le dossier de données
+ * de l'installation pour rester le même d'un démarrage à l'autre. Si Google l'ignorait,
+ * rien ne changerait.
+ */
+let quotaUserPromise: Promise<string> | null = null
+
+export function googleQuotaUser() {
+  quotaUserPromise ??= (async () => {
+    const fresh = `eraser-${crypto.randomUUID().replace(/-/g, "").slice(0, 24)}`
+    const root = process.env.ERASER_DESKTOP_DATA_DIR
+    if (!root) return fresh
+    try {
+      const { readFile, writeFile } = await import("node:fs/promises")
+      const { join } = await import("node:path")
+      const file = join(root, "google-quota-user.txt")
+      const stored = (await readFile(file, "utf8").catch(() => "")).trim()
+      if (/^eraser-[a-z0-9]{8,32}$/.test(stored)) return stored
+      await writeFile(file, fresh, "utf8").catch(() => undefined)
+      return fresh
+    } catch {
+      return fresh
+    }
+  })()
+  return quotaUserPromise
 }

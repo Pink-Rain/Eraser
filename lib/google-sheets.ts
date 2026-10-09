@@ -34,7 +34,7 @@ import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
-import { acquireSheetsSlot, asBackgroundGoogleWork, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
+import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
 import { sharedClassCatalog } from "@/lib/class-catalog-share"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
@@ -470,7 +470,8 @@ function networkFailureOf(error: unknown) {
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
 async function googleSheetsFetch(path: string, init?: RequestInit) {
-  const url = `https://sheets.googleapis.com/v4/${path}`
+  // `quotaUser` : chaque installation comptée à part par Google (voir google-quota.ts).
+  const url = `https://sheets.googleapis.com/v4/${path}${path.includes("?") ? "&" : "?"}quotaUser=${await googleQuotaUser()}`
   const label = `${init?.method ?? "GET"} ${path}`
   const repeatable = repeatableRequest(path, init)
   let response: Response | null = null

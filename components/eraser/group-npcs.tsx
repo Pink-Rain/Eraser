@@ -1,6 +1,7 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { ChevronDown, LoaderCircle, Pencil, Plus, Search, UserRound, UserRoundMinus, X } from "lucide-react"
 
 import { NpcBackpack, NpcForm, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
@@ -66,7 +67,15 @@ function GroupNpcCard({ npc, canManage, pending, onEdit, onRemove }: { npc: Camp
  * leur sac à dos : c'est le seul inventaire de PNJ qu'ils voient et modifient.
  * Le MJ y modifie aussi la fiche, et choisit qui fait partie du groupe.
  */
-export function GroupNpcs({ campaignId, initialNpcs, canManage }: { campaignId: string; initialNpcs: CampaignNpcRecord[]; canManage: boolean }) {
+export function GroupNpcs({ campaignId, initialNpcs, canManage, unavailable = false }: { campaignId: string; initialNpcs: CampaignNpcRecord[]; canManage: boolean; unavailable?: boolean }) {
+  const router = useRouter()
+  // Lecture refusée par Google (toute la table ouvre la page en même temps) : la page est
+  // relue d'elle-même un peu plus tard, une fois ; « Réessayer » le fait tout de suite.
+  useEffect(() => {
+    if (!unavailable) return
+    const timer = window.setTimeout(() => router.refresh(), 15_000)
+    return () => window.clearTimeout(timer)
+  }, [router, unavailable])
   const [npcs, setNpcs] = useState(initialNpcs)
   const [editing, setEditing] = useState<CampaignNpcRecord | null>(null)
   const [picking, setPicking] = useState(false)
@@ -124,7 +133,8 @@ export function GroupNpcs({ campaignId, initialNpcs, canManage }: { campaignId: 
       </div>
     </div>}
     {error && <p className="mt-3 text-sm text-destructive">{error}</p>}
-    {npcs.length
+    {unavailable && !npcs.length ? <p className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Google Sheets est très sollicité : les PNJ du groupe arrivent dans un instant. <button type="button" className="font-semibold text-foreground underline underline-offset-2" onClick={() => router.refresh()}>Réessayer</button></p>
+      : npcs.length
       ? <div className="mt-6 grid items-start gap-4 md:grid-cols-2 xl:grid-cols-3">{npcs.map((npc) => <GroupNpcCard key={npc.id} npc={npc} canManage={canManage} pending={pending} onEdit={() => setEditing(npc)} onRemove={() => void run(async () => { const [saved] = await persistNpcs("remove-from-group", campaignId, [npc]); replace(saved) })} />)}</div>
       : <p className="mt-4 text-sm text-muted-foreground">Aucun PNJ ne voyage avec le groupe pour l’instant.</p>}
     {canManage && <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>

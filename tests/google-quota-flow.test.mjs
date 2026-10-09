@@ -83,3 +83,10 @@ test("les bonus de rang restent proposés quand Google refuse : copie partagée,
     session.account = { uid: "admin-test", email: "", displayName: "Admin", status: "actif", role: "admin", accountRole: "admin" };
   }
 });
+
+test("chaque installation se présente à Google sous son propre identifiant de quota", async () => {
+  google.addSpreadsheet("quota-user", [{ title: "Feuille", grid: [["ID"], ["1"]] }]);
+  await sheets.readRange("quota-user", "Feuille!A1:A2");
+  const call = google.world.calls.find((item) => item.url.includes("quota-user"));
+  assert.match(call.url, /[?&]quotaUser=eraser-[a-z0-9]{8,32}(&|$)/);
+});
