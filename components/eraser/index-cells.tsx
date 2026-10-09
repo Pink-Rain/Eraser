@@ -44,6 +44,7 @@ import type { FormulaDisplay } from "@/lib/index-formula"
 import { arrangeLayout, type IndexLayout } from "@/lib/index-layouts"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
+import { soundVolume } from "@/lib/sounds"
 
 /*
  * Le moteur de cellules de tous les index. Chaque type de colonne (lib/index-columns.ts)
@@ -838,7 +839,7 @@ function FilesEditor({ files, accept, multiple, disabled = false, onChange }: { 
             <a href={item} target="_blank" rel="noreferrer" className="min-w-0 flex-1 truncate text-xs hover:underline">{info.name}</a>
             <Button type="button" variant="ghost" size="icon-sm" disabled={disabled} onClick={() => onChange(files.filter((_, position) => position !== index))} aria-label={`Retirer ${info.name}`}><X /></Button>
           </div>
-          {info.family === "audio" && <audio controls preload="none" src={item} className="h-8 w-full" />}
+          {info.family === "audio" && <audio ref={(node) => { if (node) node.volume = soundVolume() }} controls preload="none" src={item} className="h-8 w-full" />}
           {info.family === "video" && <video controls preload="none" src={item} className="max-h-40 w-full rounded" />}
         </li>
       })}

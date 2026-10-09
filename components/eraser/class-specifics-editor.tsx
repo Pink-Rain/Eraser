@@ -267,7 +267,7 @@ function GaugeEditor({ initial, catalogGroups, sample, onClose, onSaved }: { ini
                   <span className="ml-auto" />
                   <Button type="button" variant="ghost" size="icon-sm" onClick={() => removeThreshold(index)} aria-label="Retirer ce seuil"><X /></Button>
                 </div>
-                <RichTextField value={threshold.label} onCommit={(html) => setThreshold(index, { label: html })} ariaLabel="Texte du seuil" placeholder="Frénésie : inflige 10 points de dégâts… (« { » pour citer un index)" minHeight="min-h-9" />
+                <RichTextField value={threshold.label} onCommit={(html) => setThreshold(index, { label: html })} ariaLabel="Texte du seuil" placeholder="Frénésie : inflige 10 points de dégâts… (« { » pour citer un index)" minHeight="min-h-9" toolbar="always" />
               </div>)}
               {gauge.thresholds.length < 12 && <Button type="button" variant="ghost" size="xs" onClick={addThreshold}><Plus />Ajouter un seuil</Button>}
             </div>

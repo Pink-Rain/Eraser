@@ -238,7 +238,7 @@ function commandActive(name: "bold" | "italic" | "underline" | "strikeThrough") 
 /** Les pages liables, chargées une fois puis gardées deux minutes pour tous les éditeurs. */
 let linkTargets: { at: number; promise: Promise<AppLinkTarget[]> } | null = null
 
-function loadLinkTargets() {
+export function loadLinkTargets() {
   if (linkTargets && Date.now() - linkTargets.at < 120_000) return linkTargets.promise
   const promise = fetch("/api/link-targets")
     .then((response) => response.ok ? response.json() as Promise<{ targets?: AppLinkTarget[] }> : { targets: [] })

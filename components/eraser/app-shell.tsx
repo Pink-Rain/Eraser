@@ -76,6 +76,7 @@ import { cn } from "@/lib/utils"
 // Seul le numéro de version est gardé (import nommé d'un JSON) : c'est celui du serveur
 // qui tourne, donc aussi d'une mise à jour reçue sans réinstallation.
 import { version as appVersion } from "@/package.json"
+import { PageSearch, ShellBreadcrumb, VolumeControl } from "@/components/eraser/shell-nav"
 
 const AdminTodoMenu = dynamic(() => import("@/components/eraser/admin-todo-menu").then((module) => module.AdminTodoMenu))
 const GlobalTableChat = dynamic(() => import("@/components/eraser/global-table-chat").then((module) => module.GlobalTableChat), { ssr: false })
@@ -756,15 +757,15 @@ export function AppShell({
       <SidebarInset className="h-svh min-h-svh min-w-0 w-0 flex-1 overflow-hidden">
         <header className="z-50 flex h-14 shrink-0 items-center gap-3 border-b bg-background/95 px-4 shadow-sm backdrop-blur md:px-7">
           <SidebarTrigger aria-label="Afficher ou masquer la navigation" />
-          <div className="flex min-w-0 items-center gap-2 text-sm text-muted-foreground">
-            <BookOpen className="size-4 shrink-0" />
-            <span>Eraser</span>
-            <span aria-hidden="true">/</span>
-            <span className="truncate text-foreground">{pendingPage?.title || currentPageLabel}</span>
+          {/* Le fil d'Ariane suit la page qui s'ouvre dès le clic, puis celle affichée. */}
+          <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />
+          <div className="ml-auto flex shrink-0 items-center gap-2">
+            <PageSearch />
+            <VolumeControl />
+            <Badge variant="outline" className="hidden shrink-0 border-primary/20 bg-primary/5 sm:inline-flex">
+              {roleViewLabels[viewRole]}
+            </Badge>
           </div>
-          <Badge variant="outline" className="ml-auto shrink-0 border-primary/20 bg-primary/5">
-            {roleViewLabels[viewRole]}
-          </Badge>
         </header>
         {/* `--eraser-viewport` : la hauteur visible de ce bloc (l’écran moins l’en-tête), pour
             les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
