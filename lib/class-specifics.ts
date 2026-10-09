@@ -49,6 +49,10 @@ export type ClassGauge = {
   thresholds: GaugeThreshold[]
   description: string
   order: number
+  /** Les formes (par nom) où la jauge s'affiche ; vide : toujours. */
+  forms: string[]
+  /** En quittant ces formes, la valeur du joueur revient à sa valeur de départ. */
+  resetOnLeave: boolean
 }
 
 export const gaugePlacements: Array<{ value: GaugePlacement; label: string; hint: string }> = [
@@ -80,6 +84,7 @@ export const GAUGE_HEADERS = [
   "ID", "Classe", "Nom", "Couleur", "Emplacement", "Affichage", "Minimum",
   "Maximum (type)", "Maximum", "Valeur actuelle (type)", "Valeur actuelle",
   "Pas", "Remise à zéro", "Seuils", "Description", "Ordre", "Classe ID",
+  "Formes", "Remise à zéro en quittant la forme",
 ] as const
 export type GaugeHeader = (typeof GAUGE_HEADERS)[number]
 
@@ -191,7 +196,7 @@ export function gaugeThresholdsHtml(thresholds: GaugeThreshold[]) {
 export const parseGaugeThresholds = (raw: string) => parseGaugeThresholdsHtml(escapeHtml(raw))
 
 export function emptyGauge(classId: string, className: string, id: string, order = 0): ClassGauge {
-  return { id, classId, className, name: "", color: gaugeColors[0], placement: "vie", display: "barre", min: "0", maxMode: "fixe", max: "100", currentMode: "joueur", current: "0", step: 1, resetButton: true, thresholds: [], description: "", order }
+  return { id, classId, className, name: "", color: gaugeColors[0], placement: "vie", display: "barre", min: "0", maxMode: "fixe", max: "100", currentMode: "joueur", current: "0", step: 1, resetButton: true, thresholds: [], description: "", order, forms: [], resetOnLeave: false }
 }
 
 /** Les colonnes dont la case est mise en forme (lue et écrite en HTML). */
@@ -227,6 +232,8 @@ export function gaugeFromCells(cell: (header: GaugeHeader) => string, rich?: (he
     thresholds: parseGaugeThresholdsHtml(html("Seuils")),
     description: plainTextOf(html("Description")) ? html("Description") : "",
     order: Number.isFinite(order) ? order : 0,
+    forms: cell("Formes").split(/\n|;|,/).map((name) => name.trim()).filter(Boolean).slice(0, 12),
+    resetOnLeave: yes(cell("Remise à zéro en quittant la forme")),
   }
 }
 
@@ -253,6 +260,8 @@ export function gaugeCells(gauge: ClassGauge): Record<GaugeHeader, string> {
     "Description": plainTextOf(gauge.description) ? gauge.description : "",
     "Ordre": String(gauge.order),
     "Classe ID": gauge.classId,
+    "Formes": gauge.forms.join("\n"),
+    "Remise à zéro en quittant la forme": gauge.resetOnLeave ? "Oui" : "",
   }
 }
 
@@ -262,14 +271,22 @@ export function sanitizeGauge(raw: unknown): ClassGauge | null {
   const value = raw as Record<string, unknown>
   const text = (key: string, limit = 400) => typeof value[key] === "string" ? (value[key] as string).slice(0, limit) : typeof value[key] === "number" ? String(value[key]) : ""
   const thresholds: GaugeThreshold[] = Array.isArray(value.thresholds) ? value.thresholds.flatMap((item) => item && typeof item === "object" ? [{ value: String((item as GaugeThreshold).value ?? "").slice(0, 200), label: inlineRichText(String((item as GaugeThreshold).label ?? "")).slice(0, 4000) }] : []).slice(0, 12) : []
-  const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId" }
-  const gauge = gaugeFromCells((header) => header === "Remise à zéro" ? (value.resetButton === false ? "Non" : "Oui") : text(key[header]), (header) => header === "Seuils" ? "" : text("description", 20_000))
+  const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId", "Formes": "forms", "Remise à zéro en quittant la forme": "resetOnLeave" }
+  const forms = Array.isArray(value.forms) ? value.forms.flatMap((name) => typeof name === "string" && name.trim() ? [name.trim().slice(0, 200)] : []).slice(0, 12) : []
+  const gauge = gaugeFromCells((header) => header === "Remise à zéro" ? (value.resetButton === false ? "Non" : "Oui") : header === "Formes" ? forms.join("\n") : header === "Remise à zéro en quittant la forme" ? (value.resetOnLeave === true ? "Oui" : "") : text(key[header]), (header) => header === "Seuils" ? "" : text("description", 20_000))
   return gauge && { ...gauge, thresholds: thresholds.filter((item) => item.value.trim()) }
 }
 
 /** Les jauges d'une classe, dans leur ordre ; retrouvées par l'identifiant, sinon par le nom de la classe. */
 export function gaugesOfClass(gauges: ClassGauge[], classItem: { id: string; name: string }) {
   return gauges.filter((gauge) => gauge.classId ? gauge.classId === classItem.id : fold(gauge.className) === fold(classItem.name)).sort((a, b) => a.order - b.order || a.name.localeCompare(b.name, "fr"))
+}
+
+/** La jauge s'affiche-t-elle avec ces formes actives (noms) ? Sans formes choisies : toujours. */
+export function gaugeVisibleIn(gauge: ClassGauge, activeFormNames: string[]) {
+  if (!gauge.forms.length) return true
+  const active = new Set(activeFormNames.map(fold))
+  return gauge.forms.some((name) => active.has(fold(name)))
 }
 
 /* ─────────────────────────────── Formules ─────────────────────────────── */

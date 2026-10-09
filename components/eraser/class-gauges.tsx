@@ -8,9 +8,10 @@ import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import { Input } from "@/components/ui/input"
 import { GAUGE_MAX_PIPS, plainTextOf, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
+import type { ClassFormGroup } from "@/lib/class-forms"
 import { evaluateRelativeExpression } from "@/lib/math-expression"
 
-export type ClassGaugeTable = { gauges: ClassGauge[]; sheetUrl: string; exists: boolean; canEdit?: boolean }
+export type ClassGaugeTable = { gauges: ClassGauge[]; formGroups?: ClassFormGroup[]; sheetUrl: string; formsSheetUrl?: string; exists: boolean; canEdit?: boolean }
 
 // Les jauges déjà lues : une fiche rouverte les montre aussitôt, relues derrière.
 let known: ClassGaugeTable | null = null
@@ -51,7 +52,7 @@ export function useClassGauges(create = false) {
       .catch((reason: unknown) => { if (alive) setError(reason instanceof Error ? reason.message : "Les spécificités de classe n’ont pas pu être chargées.") })
     return () => { alive = false; listeners.delete(listener) }
   }, [create])
-  return { table, gauges: table?.gauges ?? [], loading: !table && !error, error }
+  return { table, gauges: table?.gauges ?? [], formGroups: table?.formGroups ?? [], loading: !table && !error, error }
 }
 
 function nextValue(typed: string, current: number) {

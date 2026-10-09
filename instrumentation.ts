@@ -15,18 +15,28 @@ function describe(reason: unknown) {
   try { return typeof reason === "string" ? reason : JSON.stringify(reason) } catch { return String(reason) }
 }
 
-export function register() {
+/**
+ * Posé dès le chargement du serveur (ce fichier est importé au démarrage, avant toute
+ * requête), puis vérifié de nouveau par `register()` : aucune fenêtre au lancement.
+ */
+function installSafetyNet() {
   if (typeof process === "undefined" || typeof process.on !== "function") return
   const proc = process as typeof process & { [SAFETY_NET]?: true }
   if (proc[SAFETY_NET]) return
   proc[SAFETY_NET] = true
-  for (const event of ["uncaughtException", "unhandledRejection"] as const) {
-    for (const listener of process.listeners(event)) process.removeListener(event, listener as (...args: unknown[]) => void)
-  }
+  // Le gestionnaire de vinext relance l'erreur (et ferme le service) : il est remplacé.
+  process.removeAllListeners("uncaughtException")
+  process.removeAllListeners("unhandledRejection")
   process.on("uncaughtException", (error) => {
     console.error(`[eraser] Erreur non rattrapée, le service continue : ${describe(error)}`)
   })
   process.on("unhandledRejection", (reason) => {
     console.error(`[eraser] Promesse rejetée sans traitement, le service continue : ${describe(reason)}`)
   })
+}
+
+installSafetyNet()
+
+export function register() {
+  installSafetyNet()
 }

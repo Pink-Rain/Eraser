@@ -6,6 +6,7 @@ const { appendFileSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSy
 const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 const hotUpdate = require("./hot-update.cjs")
+const discordPresence = require("./discord-presence.cjs")
 
 const LOCAL_PORT = 32147
 const PERSISTENT_PARTITION = "persist:eraser"
@@ -220,14 +221,11 @@ async function startServer() {
   serverProcess.once("error", (error) => logLine(`[service:error] ${error.stack || error}`))
   serverProcess.stdout.on("data", (chunk) => logLine(`[service] ${String(chunk).trimEnd()}`))
   serverProcess.stderr.on("data", (chunk) => logLine(`[service:error] ${String(chunk).trimEnd()}`))
+  const child = serverProcess
   serverProcess.once("exit", (code) => {
     logLine(`Le service local s’est arrêté avec le code ${code ?? "inconnu"}.`)
-    if (code && windows.size && !restartingServer) {
-      void dialog.showErrorBox(
-        "Eraser s’est arrêté",
-        `Le service local s’est fermé (code ${code}).\n\nJournal : ${startupLogPath}`,
-      )
-    }
+    // Un service remplacé entre-temps (mise à jour, redémarrage) n'est pas une panne.
+    if (code && windows.size && !restartingServer && !quitting && serverProcess === child) void recoverFromCrash(code)
   })
   const url = `http://127.0.0.1:${port}`
   const status = await waitForServer(url)
@@ -265,6 +263,44 @@ async function startServerSafely() {
     } finally {
       restartingServer = false
     }
+  }
+}
+
+// Redémarrages automatiques récents : au-delà de trois en cinq minutes, on prévient au lieu de boucler.
+let crashRestarts = []
+// Eraser se ferme : l'arrêt du service est voulu, il n'est pas relancé.
+let quitting = false
+
+/**
+ * Le service local s'est arrêté tout seul : il est relancé et chaque fenêtre recharge sa
+ * page, sans rien demander. La fenêtre d'erreur n'apparaît que si la relance échoue, ou
+ * si les arrêts se répètent.
+ */
+async function recoverFromCrash(code) {
+  const now = Date.now()
+  crashRestarts = crashRestarts.filter((at) => now - at < 5 * 60_000)
+  if (crashRestarts.length >= 3) {
+    dialog.showErrorBox("Eraser s’est arrêté", `Le service local s’est fermé plusieurs fois (code ${code}).\n\nJournal : ${startupLogPath}`)
+    return
+  }
+  crashRestarts.push(now)
+  logLine(`Redémarrage automatique du service local (code ${code}).`)
+  const open = liveWindows()
+  const current = new Map(open.map((win) => [win, win.webContents.getURL()]))
+  restartingServer = true
+  try {
+    const url = await startServerSafely()
+    serverUrl = url
+    await Promise.all(liveWindows().map((win) => {
+      const address = current.get(win) || url
+      return win.loadURL(address.startsWith(url) ? address : url).catch(() => undefined)
+    }))
+    logLine("Le service local a redémarré.")
+  } catch (error) {
+    logLine(`[service:error] Le redémarrage a échoué : ${error instanceof Error ? error.message : error}`)
+    dialog.showErrorBox("Eraser s’est arrêté", `Le service local s’est fermé (code ${code}) et n’a pas pu redémarrer.\n\nJournal : ${startupLogPath}`)
+  } finally {
+    restartingServer = false
   }
 }
 
@@ -826,6 +862,11 @@ app.whenReady().then(async () => {
     const url = await startServerSafely()
     serverUrl = url
     await createWindow(url)
+    // Le statut Discord « Eraser - JDR » : jamais pendant le test d'installation, et un
+    // échec (Discord fermé) ne gêne en rien l'ouverture d'Eraser.
+    if (!process.env.ERASER_UI_SMOKE_RESULT) {
+      try { discordPresence.startDiscordPresence() } catch (error) { logLine(`[discord] ${error instanceof Error ? error.message : error}`) }
+    }
     await runInstalledUiSmoke(url)
     setTimeout(() => void prepareUpdates(), 10_000)
     setInterval(() => void prepareUpdates(), UPDATE_CHECK_INTERVAL_MS)
@@ -843,5 +884,7 @@ app.whenReady().then(async () => {
 
 app.on("window-all-closed", () => app.quit())
 app.on("before-quit", () => {
+  quitting = true
+  try { discordPresence.stopDiscordPresence() } catch { /* Discord déjà parti */ }
   if (serverProcess && !serverProcess.killed) serverProcess.kill()
 })
