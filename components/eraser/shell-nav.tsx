@@ -53,10 +53,11 @@ function CrumbMenu({ items, current, label, trigger }: { items: CrumbMenuItem[];
  */
 export function ShellBreadcrumb({ pathname, current, campaignName }: { pathname: string; current: string; campaignName: (id: string) => string | undefined }) {
   const [targets, setTargets] = useState<AppLinkTarget[]>([])
+  // Après le contenu de la page : les menus du fil d'Ariane ne lui prennent jamais sa place.
   useEffect(() => {
     let alive = true
-    void loadLinkTargets().then((next) => { if (alive) setTargets(next) })
-    return () => { alive = false }
+    const timer = window.setTimeout(() => { void loadLinkTargets().then((next) => { if (alive) setTargets(next) }) }, 1500)
+    return () => { alive = false; window.clearTimeout(timer) }
   }, [])
   const path = pathname.split(/[?#]/)[0]
   const crumbs = breadcrumbsFor(path, campaignName)

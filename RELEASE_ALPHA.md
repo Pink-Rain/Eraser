@@ -1,20 +1,24 @@
-# Eraser 0.1.1-alpha.174 — Plus de « Lecture des classes… » sans fin
+# Eraser 0.1.1-alpha.175 — Plus rapide, et les classes tout de suite
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Les classes ne font plus attendre indéfiniment
+## L'application était ralentie à chaque page
 
-- **Une limite de temps** : la fiche et la création de personnage n'attendent plus jamais
-  sans fin la liste des classes. Au-delà de 25 secondes, elles disent que Google Sheets
-  traîne et proposent **Réessayer**. La lecture continue derrière et sera prête au
-  prochain essai.
-- **La synchronisation des images de classes est réservée à l'administrateur.** Elle
-  parcourt tout le Drive et réécrit la feuille des classes. Lancée depuis le PC neuf d'un
-  joueur, elle consommait le quota Google commun à toutes les installations, et ralentissait
-  la lecture des classes.
+Le fil d'Ariane, en haut de chaque page, chargeait la liste des pages accessibles. Pour un
+administrateur, cela relisait toutes les fiches de personnages avec leurs classes, y compris
+la colonne JSON des sorts choisis, la plus lourde de la feuille. Pour un joueur dont
+l'installation ne connaissait encore aucune classe, cela lançait une lecture complète des
+classes dans Google Sheets.
 
-## Création de personnage : une vraie raison en cas d'échec
+- Cette liste ne lit plus que ce que l'installation a déjà en mémoire : plus aucune lecture
+  Google ni des fiches à chaque page.
+- Elle se charge après le contenu de la page, et ne passe plus jamais devant.
 
-« Le personnage n'a pas pu être créé » dit maintenant pourquoi : la raison donnée par
-Google, le code de l'erreur, ou que le service local d'Eraser n'a pas répondu. Le détail est
-aussi écrit dans `%APPDATA%/Eraser/logs/eraser-startup.log` (lignes `CHARACTER_CREATE_FAILED`).
+## Les classes pour les joueurs qui n'en voyaient aucune
+
+- **Une seule lecture suffit** : une installation qui ne connaît encore aucune classe
+  n'attend plus la lecture complète (vérification des colonnes, notes et images posées dans
+  les cases). Une lecture simple de la feuille affiche la liste, et le reste suit en
+  arrière-plan.
+- **Sur la fiche, le choix de classe n'attend plus les sorts** : la liste des classes arrive
+  d'abord, les sorts ensuite.

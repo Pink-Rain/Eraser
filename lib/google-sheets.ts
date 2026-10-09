@@ -2544,7 +2544,13 @@ async function readClassImageNotes(spreadsheetId: string, tabName: string, colum
   return notes
 }
 
-async function loadClassesFromGoogle() {
+/**
+ * Les classes lues dans la feuille. `light` : une seule lecture (ID, nom, type, couleurs,
+ * image écrite dans la case), sans vérifier les colonnes ni chercher les images posées dans
+ * les cases : c'est ce qu'une installation sans classes en mémoire attend pour afficher la
+ * liste tout de suite ; la lecture complète suit en arrière-plan.
+ */
+async function loadClassesFromGoogle(options: { light?: boolean } = {}) {
   const source = await classesSource()
   // Returning [] here would surface as "aucune classe" instead of telling the
   // admin the sheet simply isn't reachable from this installation.
@@ -2555,12 +2561,12 @@ async function loadClassesFromGoogle() {
   const read = await readClassSheet(source, { fresh: true })
   // Les colonnes absentes (couleurs d'accent…) sont ajoutées à droite ; rien n'est déplacé.
   // Une lecture ne dépend pas de cet ajout : en cas d'échec, les colonnes présentes suffisent.
-  const columns = await ensureNamedColumns(source.spreadsheetId, tabName, read.columns).catch((error) => {
+  const columns = options.light ? read.columns : await ensureNamedColumns(source.spreadsheetId, tabName, read.columns).catch((error) => {
     console.error("CLASS_COLUMNS_CHECK_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return read.columns
   })
   const { rows } = read
-  const hasImageColumn = columns.at("Image") >= 0
+  const hasImageColumn = !options.light && columns.at("Image") >= 0
   // Les notes ne servent qu'aux images : leur échec ne doit jamais vider la liste des classes
   // (une installation sans classes en cache n'en montrait alors plus aucune).
   const imageNotes = hasImageColumn ? await readClassImageNotes(source.spreadsheetId, tabName, columns).catch((error) => {
@@ -2615,11 +2621,11 @@ async function loadClassesFromGoogle() {
 
 let classIndexRefreshPromise: Promise<(typeof classIndex.$inferSelect)[]> | null = null
 
-function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[]) {
+function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[], options: { light?: boolean } = {}) {
   if (classIndexRefreshPromise) return classIndexRefreshPromise
   classIndexRefreshPromise = (async () => {
     const db = getDb()
-    const classes = await loadClassesFromGoogle()
+    const classes = await loadClassesFromGoogle(options)
     let rows = currentRows
     if (classes.length) {
       const updatedAt = new Date().toISOString()
@@ -2631,7 +2637,7 @@ function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[]) {
         if (existing
           && existing.type === item.type
           && existing.name === item.name
-          && existing.image === item.image
+          && (options.light || existing.image === item.image)
           && existing.keywordsJson === keywordsJson
           && existing.difficulty === item.difficulty
           && existing.completion === item.completion
@@ -2661,7 +2667,8 @@ function refreshClassIndex(currentRows: (typeof classIndex.$inferSelect)[]) {
         changed = true
         await db.delete(classIndex).where(inArray(classIndex.id, stale))
       }
-      await db.insert(sheetIndexSyncs).values({ key: "classes:global", syncedAt: updatedAt }).onConflictDoUpdate({
+      // Une lecture légère (sans images) ne compte pas comme une synchronisation : la complète suit.
+      if (!options.light) await db.insert(sheetIndexSyncs).values({ key: "classes:global", syncedAt: updatedAt }).onConflictDoUpdate({
         target: sheetIndexSyncs.key,
         set: { syncedAt: updatedAt },
       })
@@ -2758,19 +2765,19 @@ export async function listClasses() {
   const syncedAt = sync ? Date.parse(sync.syncedAt) : 0
   const shouldRefresh = !rows.length || !Number.isFinite(syncedAt) || Date.now() - syncedAt > 10 * 60_000
   if (shouldRefresh) {
-    const refresh = refreshClassIndex(rows)
     if (!rows.length) {
-      // Nothing cached yet: a failed refresh here must not be swallowed into an
-      // empty list, or the page shows "no classes yet" instead of the real
-      // "Sheets is unavailable" message (see app/regles/classes/page.tsx).
+      // Rien en mémoire (installation neuve) : une seule lecture de la feuille suffit à
+      // montrer les classes ; la lecture complète (colonnes, images) suit en arrière-plan.
+      // Un échec ici n'est pas changé en liste vide : la page dit pourquoi.
       try {
-        rows = await refresh
+        rows = await refreshClassIndex(rows, { light: true })
       } catch (error) {
         console.error("CLASS_INDEX_REFRESH_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
         throw error
       }
+      runInBackground(refreshClassIndex(rows), "CLASS_INDEX_REFRESH_FAILED")
     } else {
-      runInBackground(refresh, "CLASS_INDEX_REFRESH_FAILED")
+      runInBackground(refreshClassIndex(rows), "CLASS_INDEX_REFRESH_FAILED")
     }
   }
   return classRecordsFromIndex(rows)
@@ -2780,6 +2787,11 @@ export async function listClassOptions() {
   const rows = await getDb().select({ id: classIndex.id, name: classIndex.name }).from(classIndex).orderBy(classIndex.name)
   if (rows.length) return rows
   return (await listClasses()).map(({ id, name }) => ({ id, name }))
+}
+
+/** Les classes déjà en mémoire sur cette installation, sans jamais interroger Google (menus, liens). */
+export async function listCachedClassOptions() {
+  return getDb().select({ id: classIndex.id, name: classIndex.name }).from(classIndex).orderBy(classIndex.name)
 }
 
 const CLASS_IMAGES_FOLDER = "Images Classe"
@@ -5444,7 +5456,9 @@ export async function listAllCharactersForAdmin(sessionToken?: string) {
       .where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500),
     accountLookup(sessionToken),
   ])
-  const decorated = await withCharacterClasses(await decorateCharacters(listedInSheets("characters", rows.map((row) => row.character))))
+  // Ni les liens ni les index n'affichent la classe : pas de lecture des fiches ici (elle se
+  // faisait à chaque page, depuis le fil d'Ariane, et ralentissait toute l'application).
+  const decorated = await decorateCharacters(listedInSheets("characters", rows.map((row) => row.character)))
   return decorated.map((character) => ({ ...character, ...ownerLabels(character.ownerUid, owners) }))
 }
 

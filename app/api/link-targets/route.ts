@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import type { AppLinkTarget } from "@/lib/app-links"
-import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listCampaignsForMj, listCharactersForUser, listClassOptions } from "@/lib/google-sheets"
+import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listCampaignsForMj, listCachedClassOptions, listCharactersForUser } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
 
@@ -14,7 +14,8 @@ export async function GET() {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const manager = account.role === "admin" || account.role === "mj"
   const [classes, campaigns, characters] = await Promise.all([
-    listClassOptions().catch(() => []),
+    // Les classes déjà connues de cette installation : ce menu n'interroge jamais Google.
+    listCachedClassOptions().catch(() => []),
     account.role === "admin" ? listAllCampaignsForAdmin().catch(() => []) : account.role === "mj" ? listCampaignsForMj(account.uid).catch(() => []) : Promise.resolve([]),
     account.role === "admin" ? listAllCharactersForAdmin().catch(() => []) : listCharactersForUser(account.uid).catch(() => []),
   ])

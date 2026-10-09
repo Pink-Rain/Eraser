@@ -1309,6 +1309,13 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     async function load() {
       if (!knownClassCatalog) setClassCatalogLoading(true)
       setClassCatalogError("")
+      // D'abord la liste des classes seule (rapide) : le choix de classe n'attend pas les sorts.
+      if (!knownClassCatalog) {
+        void fetch("/api/classes/catalog?only=classes", { cache: "no-store", signal: AbortSignal.timeout(45_000) })
+          .then(async (response) => response.ok ? (await response.json() as { classes?: ClassRecord[] }).classes ?? [] : [])
+          .then((classes) => { if (!cancelled && classes.length && !knownClassCatalog) setAvailableClasses(classes) })
+          .catch(() => { /* la lecture complète, juste après, dira ce qui ne va pas */ })
+      }
       try {
         // Jamais d'attente sans fin : le service local répond en 25 s au plus ; au-delà, « Réessayer ».
         const response = await fetch("/api/classes/catalog", { cache: "no-store", signal: AbortSignal.timeout(45_000) })

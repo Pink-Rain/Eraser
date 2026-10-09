@@ -8,8 +8,18 @@ import { withTimeBudget } from "@/lib/time-budget"
 
 const codeOf = (error: unknown) => error instanceof Error ? error.message : "UNKNOWN_ERROR"
 
-export async function GET() {
+export async function GET(request: Request) {
   if (!await authorizedAccount(["admin", "mj", "joueur"])) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  // `?only=classes` : la liste des classes seule, sans attendre la lecture (lourde) des sorts ;
+  // la fiche s'en sert pour proposer le choix de classe tout de suite.
+  if (new URL(request.url).searchParams.get("only") === "classes") {
+    try {
+      return NextResponse.json({ classes: await withTimeBudget(listClasses(), 25_000, "CLASSES_READ_TIMEOUT") })
+    } catch (error) {
+      console.error("CHARACTER_CLASS_LIST_LOAD_FAILED", codeOf(error))
+      return NextResponse.json({ error: googleFailureMessage(codeOf(error)) || `Les classes n’ont pas pu être lues dans Google Sheets (${codeOf(error)}).` }, { status: 503 })
+    }
+  }
   try {
     const data = await withTimeBudget(listClassSpells(), 25_000, "CLASSES_READ_TIMEOUT")
     // Une fiche retient l'ID des sorts choisis : un sort encore sans ID (désigné par sa
