@@ -18,13 +18,18 @@ export const CARDS_TAB = "Cartes"
 export type DeckDrawMode = "hasard" | "choix"
 export type ClassDeck = { id: string; classId: string; className: string; name: string; color: string; placement: GaugePlacement; handLimit: number; drawMode: DeckDrawMode; description: string; order: number }
 /** `number` : la colonne « Carte », l'identifiant de la carte dans sa classe. */
-export type DeckCard = { number: string; name: string; effect: string; icon: string; className: string }
+/**
+ * `icon` : le petit dessin sous le numéro, dans le coin (colonne « Icone ») ;
+ * `illustration` : le visuel au centre de la carte (colonne « Illustration »). Chacun est le
+ * nom d'une icône d'Eraser, un émoji ou l'adresse d'une image.
+ */
+export type DeckCard = { number: string; name: string; effect: string; icon: string; illustration: string; className: string; /** Vide : la couleur du deck. */ color: string }
 export type DeckState = { hand: string[]; discard: string[]; removed: string[] }
 
 export const DECK_HEADERS = ["ID", "Classe", "Nom", "Couleur", "Emplacement", "Main maximum", "Tirage", "Description", "Ordre", "Classe ID"] as const
 export type DeckHeader = (typeof DECK_HEADERS)[number]
 export const DECK_RICH_HEADERS = ["Description"] as const satisfies readonly DeckHeader[]
-export const CARD_HEADERS = ["Carte", "Nom", "Effet", "Icone", "Classe"] as const
+export const CARD_HEADERS = ["Carte", "Nom", "Effet", "Icone", "Classe", "Couleur", "Illustration"] as const
 export type CardHeader = (typeof CARD_HEADERS)[number]
 export const CARD_RICH_HEADERS = ["Effet"] as const satisfies readonly CardHeader[]
 
@@ -86,11 +91,12 @@ export function cardFromCells(cell: (header: CardHeader) => string, rich?: (head
   const name = cell("Nom").trim()
   if (!number || !name) return null
   const effect = rich?.("Effet") ?? escapeHtml(cell("Effet")).replace(/\n/g, "<br>")
-  return { number, name, effect: plainTextOf(effect) ? effect : "", icon: cell("Icone").trim(), className: cell("Classe").trim() }
+  const color = cell("Couleur").trim()
+  return { number, name, effect: plainTextOf(effect) ? effect : "", icon: cell("Icone").trim(), illustration: cell("Illustration").trim(), className: cell("Classe").trim(), color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : "" }
 }
 
 export function cardCells(card: DeckCard): Record<CardHeader, string> {
-  return { "Carte": card.number, "Nom": card.name.trim(), "Effet": plainTextOf(card.effect) ? card.effect : "", "Icone": card.icon.trim(), "Classe": card.className }
+  return { "Carte": card.number, "Nom": card.name.trim(), "Effet": plainTextOf(card.effect) ? card.effect : "", "Icone": card.icon.trim(), "Classe": card.className, "Couleur": card.color, "Illustration": card.illustration.trim() }
 }
 
 /** Un deck et ses cartes reçus de l'éditeur, ramenés à des valeurs sûres. Les cartes sans numéro en reçoivent un. */
@@ -127,7 +133,8 @@ export function sanitizeDeck(raw: unknown, newId: () => string): { deck: ClassDe
     let number = text(card.number, 20).trim()
     if (!number || used.has(number)) number = String(next++)
     used.add(number)
-    return [{ number, name, effect: text(card.effect, 20_000), icon: text(card.icon, 2000).trim(), className }]
+    const color = text(card.color, 16).trim()
+    return [{ number, name, effect: text(card.effect, 20_000), icon: text(card.icon, 2000).trim(), illustration: text(card.illustration, 2000).trim(), className, color: /^#[0-9a-f]{3,8}$/i.test(color) ? color : "" }]
   })
   return { deck, cards }
 }

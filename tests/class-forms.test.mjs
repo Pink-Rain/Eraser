@@ -94,3 +94,25 @@ test("Effet proportionnel à une jauge : « pour chaque point de folie, +2 en Fo
   assert.equal(forms.formEffectText("+{Folie temporaire} * 2"), "+{Folie temporaire} × 2");
   assert.deepEqual(forms.formEffectOperation("+10"), { kind: "add", amount: 10 });
 });
+
+test("La folie temporaire est de la Folie : la jauge s'ajoute à Folie, les formes lisent le total", () => {
+  const gauge = { ...specifics.emptyGauge("CLA-1", "Adepte", "JAU-1"), name: "Folie temporaire", max: "10", current: "0", forms: ["Possédée"], resetOnLeave: true, addTo: "Folie" };
+  const cells = specifics.gaugeCells(gauge);
+  assert.equal(cells["S'ajoute à"], "Folie");
+  assert.deepEqual(specifics.gaugeFromCells((header) => cells[header]), gauge);
+  assert.equal(specifics.sanitizeGauge({ ...gauge }).addTo, "Folie");
+  const targetOf = (name) => ({ Folie: "carac:Folie", Force: "carac:Force" })[name] ?? null;
+  const base = specifics.formulaValues([["Folie", 4]]);
+  const states = { "JAU-1": { current: 3 } };
+  // Hors de sa forme, la jauge n'ajoute rien ; dans sa forme, Folie +3.
+  assert.deepEqual(specifics.gaugeContributions([gauge], states, base, ["Humaine"], targetOf), []);
+  const added = specifics.gaugeContributions([gauge], states, base, ["Possédée"], targetOf);
+  assert.deepEqual(added.map((change) => [change.target, change.amount, change.label]), [["carac:Folie", 3, "+3"]]);
+  assert.deepEqual(specifics.gaugeContributions([{ ...gauge, addTo: "" }], states, base, ["Possédée"], targetOf), []);
+  assert.deepEqual(specifics.gaugeContributions([gauge], {}, base, ["Possédée"], targetOf), []);
+  // Un effet « +{Folie} * 2 » lit la Folie avec la temporaire : (4 + 3) × 2.
+  const group = forms.sanitizeFormGroup({ classId: "CLA-1", className: "Adepte", name: "Forme", forms: [{ name: "Humaine", isDefault: true, effects: [] }, { name: "Possédée", effects: [{ target: "Force", change: "+{Folie} * 2" }] }] }, newId);
+  const total = specifics.formulaValues([["Folie", 4 + added[0].amount]]);
+  const changes = forms.formContributions([group], { [group.id]: group.forms[1].id }, targetOf, total);
+  assert.deepEqual(changes.map((change) => [change.target, change.amount]), [["carac:Force", 14]]);
+});

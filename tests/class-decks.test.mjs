@@ -23,7 +23,16 @@ test("Les cartes de l'onglet Cartes existant se relisent, par classe", () => {
   const mine = decks.cardsOfClass(cards, "cartomancien·ne");
   assert.deepEqual(mine.map((card) => card.number), ["1", "2"]);
   assert.equal(mine[1].effect, "Lancez un 1d6 :<br>1 - Immobilisé");
-  assert.deepEqual(decks.cardCells(mine[0]), { "Carte": "1", "Nom": "L'Ermite (Carreau)", "Effet": "Invisible trois tours.", "Icone": "", "Classe": "Cartomancien·ne" });
+  assert.deepEqual(decks.cardCells(mine[0]), { "Carte": "1", "Nom": "L'Ermite (Carreau)", "Effet": "Invisible trois tours.", "Icone": "", "Classe": "Cartomancien·ne", "Couleur": "", "Illustration": "" });
+  // Deux images : l'icône du coin (« Icone ») et l'illustration du centre (« Illustration »).
+  const drawn = decks.cardFromCells((header) => ({ Carte: "4", Nom: "La mort", Icone: "spade", Illustration: "https://exemple.fr/mort.png" })[header] ?? "");
+  assert.deepEqual([drawn.icon, drawn.illustration], ["spade", "https://exemple.fr/mort.png"]);
+  assert.equal(decks.cardCells(drawn)["Illustration"], "https://exemple.fr/mort.png");
+  // La colonne « Couleur » : une couleur propre à la carte, sinon celle du deck (vide).
+  const colored = decks.cardFromCells((header) => ({ Carte: "2", Nom: "La force (Coeur)", Couleur: "#b9504e" })[header] ?? "");
+  assert.equal(colored.color, "#b9504e");
+  assert.equal(decks.cardCells(colored)["Couleur"], "#b9504e");
+  assert.equal(decks.cardFromCells((header) => ({ Carte: "3", Nom: "X", Couleur: "rouge" })[header] ?? "").color, "");
   assert.equal(decks.cardKey("Cartomancien·ne", " 2 "), decks.cardKey("cartomancien·ne", "2"));
 });
 

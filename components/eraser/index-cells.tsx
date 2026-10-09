@@ -486,7 +486,7 @@ export async function uploadIndexImage(file: File, previous = "") {
 }
 
 /** Import, adresse collée, retrait : le même éditeur pour le tableau et la fiche. */
-function ImageEditor({ value, onChange, onFile, upload: uploader = uploadIndexImage, disabled = false, preview, alt }: { value: string; onChange: (value: string) => void; onFile?: (file: File) => void; upload?: (file: File, previous: string) => Promise<string>; disabled?: boolean; preview?: string; alt: string }) {
+export function ImageEditor({ value, onChange, onFile, upload: uploader = uploadIndexImage, disabled = false, preview, alt }: { value: string; onChange: (value: string) => void; onFile?: (file: File) => void; upload?: (file: File, previous: string) => Promise<string>; disabled?: boolean; preview?: string; alt: string }) {
   const [uploading, setUploading] = useState(false)
   const [error, setError] = useState("")
   const [url, setUrl] = useState(value)

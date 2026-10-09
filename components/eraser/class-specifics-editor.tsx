@@ -5,7 +5,8 @@ import { Braces, Check, ExternalLink, Gauge, Layers, LoaderCircle, Pencil, Plus,
 
 import { ClassGaugeView, publishGauges, useClassGauges, type ClassGaugeTable } from "@/components/eraser/class-gauges"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
-import { ClassDeckPanel, DeckCardView } from "@/components/eraser/class-deck-panel"
+import { CardIconField, ClassDeckPanel, DeckCardView } from "@/components/eraser/class-deck-panel"
+import { deckHelp, formHelp, gaugeHelp, HelpButton, specificsOverviewHelp } from "@/components/eraser/class-specifics-help"
 import { cardsOfClass, deckColors, deckDrawModes, decksOfClass, emptyDeck, type ClassDeck, type DeckCard, type DeckState } from "@/lib/class-decks"
 import { SuggestInput } from "@/components/eraser/suggest-input"
 import { emptyFormGroup, formColors, formEffectOperation, formEffectText, formGroupsOfClass, isFormulaChange, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
@@ -97,6 +98,7 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
   return <div className="space-y-3">
     <div className="flex flex-wrap items-center gap-2">
       <p className="max-w-2xl text-sm text-muted-foreground">Les règles propres à {className} : chaque spécificité apparaît sur la fiche des personnages de cette classe.</p>
+      <HelpButton guide title="Les spécificités de classe">{specificsOverviewHelp}</HelpButton>
       <span className="ml-auto" />
       {table?.exists && <a href={table.sheetUrl} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground"><ExternalLink className="size-3.5" />Onglet « Jauges »</a>}
       <DropdownMenu>
@@ -151,14 +153,14 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
             <Button type="button" variant="ghost" size="icon-xs" className="hover:text-destructive" onClick={() => { setRemoveError(""); setRemoving({ kind: "gauge", id: gauge.id, name: gauge.name }) }} aria-label={`Supprimer ${gauge.name}`}><Trash2 /></Button>
           </div>
           <ClassGaugeView resolved={resolved} showErrors />
-          <p className="text-[11px] text-muted-foreground">{gaugePlacements.find((item) => item.value === gauge.placement)?.label} · {gaugeMaxModes.find((item) => item.value === gauge.maxMode)?.label.toLowerCase()} · {gauge.currentMode === "formule" ? "valeur calculée" : "tenue par le joueur"}{gauge.forms.length ? ` · seulement en ${gauge.forms.join(", ")}` : ""}</p>
+          <p className="text-[11px] text-muted-foreground">{gaugePlacements.find((item) => item.value === gauge.placement)?.label} · {gaugeMaxModes.find((item) => item.value === gauge.maxMode)?.label.toLowerCase()} · {gauge.currentMode === "formule" ? "valeur calculée" : "tenue par le joueur"}{gauge.forms.length ? ` · seulement en ${gauge.forms.join(", ")}` : ""}{gauge.addTo ? ` · s’ajoute à ${gauge.addTo}` : ""}</p>
         </article>
       })}
     </div>}
 
-    {editing && <GaugeEditor key={editing.id || "new"} initial={editing} catalogGroups={formulaNameGroups(catalog)} sample={sample} formNames={formNames} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
+    {editing && <GaugeEditor key={editing.id || "new"} initial={editing} catalogGroups={formulaNameGroups(catalog)} targetGroups={effectTargetGroups(catalog).filter((group) => group.label !== "Vie")} sample={sample} formNames={formNames} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
     {editingDeck && <DeckEditor key={editingDeck.id || "new"} initial={editingDeck} initialCards={cards} onClose={() => setEditingDeck(null)} onSaved={() => setEditingDeck(null)} />}
-    {editingForms && <FormGroupEditor key={editingForms.id || "new"} initial={editingForms} targetGroups={effectTargetGroups(catalog)} gaugeNames={gauges.map((gauge) => gauge.name)} sample={sample} onClose={() => setEditingForms(null)} onSaved={() => setEditingForms(null)} />}
+    {editingForms && <FormGroupEditor key={editingForms.id || "new"} initial={editingForms} targetGroups={effectTargetGroups(catalog)} gaugeNames={[...new Set(gauges.flatMap((gauge) => gauge.addTo.trim() ? [gauge.name, gauge.addTo.trim()] : [gauge.name]))]} sample={sample} onClose={() => setEditingForms(null)} onSaved={() => setEditingForms(null)} />}
 
     <AlertDialog open={Boolean(removing)} onOpenChange={(open) => { if (!open) setRemoving(null) }}>
       <AlertDialogContent>
@@ -187,9 +189,9 @@ function Choice<T extends string>({ value, options, onChange }: { value: T; opti
   </div>
 }
 
-function Field({ label, hint, children }: { label: string; hint?: string; children: ReactNode }) {
+function Field({ label, hint, help, children }: { label: string; hint?: string; help?: ReactNode; children: ReactNode }) {
   return <div className="grid gap-1.5">
-    <p className="text-sm font-medium">{label}{hint && <span className="ml-2 text-xs font-normal text-muted-foreground">{hint}</span>}</p>
+    <p className="flex flex-wrap items-center gap-x-1 text-sm font-medium">{label}{help && <HelpButton title={label}>{help}</HelpButton>}{hint && <span className="ml-1 text-xs font-normal text-muted-foreground">{hint}</span>}</p>
     {children}
   </div>
 }
@@ -238,7 +240,7 @@ function FormulaField({ value, onChange, groups, sample, placeholder, ariaLabel 
   </div>
 }
 
-function GaugeEditor({ initial, catalogGroups, sample, formNames, onClose, onSaved }: { initial: ClassGauge; catalogGroups: Array<{ label: string; items: string[] }>; sample: FormulaValues; formNames: string[]; onClose: () => void; onSaved: () => void }) {
+function GaugeEditor({ initial, catalogGroups, targetGroups, sample, formNames, onClose, onSaved }: { initial: ClassGauge; catalogGroups: Array<{ label: string; items: string[] }>; targetGroups: Array<{ label: string; items: string[] }>; sample: FormulaValues; formNames: string[]; onClose: () => void; onSaved: () => void }) {
   const [gauge, setGauge] = useState(initial)
   // Le texte mis en forme s'enregistre en quittant son champ : « Enregistrer » lit la toute dernière version.
   const latest = useRef(gauge)
@@ -275,6 +277,7 @@ function GaugeEditor({ initial, catalogGroups, sample, formNames, onClose, onSav
       <DialogHeader>
         <DialogTitle>{initial.id ? `Modifier la jauge « ${initial.name} »` : `Nouvelle jauge — ${initial.className}`}</DialogTitle>
         <DialogDescription>Une barre, des pastilles ou un nombre, reliés à la fiche ou tenus par le joueur. Elle s’enregistre dans l’onglet « Jauges » de « Sorts de classe ».</DialogDescription>
+        <div><HelpButton guide title="Régler une jauge">{gaugeHelp.guide}</HelpButton></div>
       </DialogHeader>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
@@ -284,27 +287,32 @@ function GaugeEditor({ initial, catalogGroups, sample, formNames, onClose, onSav
             <Field label="Couleur"><div className="flex h-9 flex-wrap items-center gap-1">{gaugeColors.map((swatch) => <button key={swatch} type="button" onClick={() => set("color", swatch)} className={`size-6 rounded-full transition ${gauge.color === swatch ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "opacity-70 hover:opacity-100"}`} style={{ backgroundColor: swatch }} aria-label={`Couleur ${swatch}`} aria-pressed={gauge.color === swatch} />)}<input type="color" value={/^#[0-9a-f]{6}$/i.test(gauge.color) ? gauge.color : "#c0392b"} onChange={(event) => set("color", event.target.value)} className="size-7 cursor-pointer rounded-full border-0 bg-transparent p-0" aria-label="Autre couleur" /></div></Field>
           </div>
 
-          <Field label="Maximum"><Choice value={gauge.maxMode} options={gaugeMaxModes} onChange={(value) => set("maxMode", value)} />
+          <Field label="Maximum" help={gaugeHelp.max}><Choice value={gauge.maxMode} options={gaugeMaxModes} onChange={(value) => set("maxMode", value)} />
             <FormulaField value={gauge.max} onChange={(value) => set("max", value)} groups={catalogGroups} sample={sample} ariaLabel="Maximum" placeholder={gauge.maxMode === "formule" ? "{Points de vie max}" : gauge.maxMode === "joueur" ? "Maximum de départ : 10" : "100"} />
             {gauge.maxMode === "joueur" && <p className="text-[11px] text-muted-foreground">Le maximum de départ ; le joueur le change ensuite sur sa fiche.</p>}
           </Field>
 
-          <Field label="Valeur actuelle"><Choice value={gauge.currentMode} options={gaugeCurrentModes} onChange={(value) => set("currentMode", value)} />
+          <Field label="Valeur actuelle" help={gaugeHelp.current}><Choice value={gauge.currentMode} options={gaugeCurrentModes} onChange={(value) => set("currentMode", value)} />
             <FormulaField value={gauge.current} onChange={(value) => set("current", value)} groups={withSelf} sample={formulaValues([...sample.entries(), ["Minimum", resolved.min], ["Maximum", resolved.max]])} ariaLabel={gauge.currentMode === "formule" ? "Formule de la valeur actuelle" : "Valeur de départ"} placeholder={gauge.currentMode === "formule" ? "{Points de vie max} - {Points de vie actuels}" : "Valeur de départ : 0, ou {Maximum} pour pleine"} />
             <p className="text-[11px] text-muted-foreground">{gauge.currentMode === "formule" ? "Calculée à chaque changement de la fiche ; le joueur ne la modifie pas." : "La valeur d’un nouveau personnage, et celle du bouton de remise à zéro."}</p>
           </Field>
 
           {gauge.currentMode === "joueur" && <div className="grid gap-3 sm:grid-cols-2">
-            <Field label="Pas des boutons − / +"><Input type="number" min={0.01} step="any" value={gauge.step} onChange={(event) => set("step", Math.max(0.01, Number(event.target.value) || 1))} className="h-9 w-28" /></Field>
-            <Field label="Remise à zéro"><label className="flex h-9 items-center gap-2 text-sm"><input type="checkbox" checked={gauge.resetButton} onChange={(event) => set("resetButton", event.target.checked)} className="size-4 accent-primary" />Un bouton remet la valeur de départ</label></Field>
+            <Field label="Pas des boutons − / +" help={gaugeHelp.step}><Input type="number" min={0.01} step="any" value={gauge.step} onChange={(event) => set("step", Math.max(0.01, Number(event.target.value) || 1))} className="h-9 w-28" /></Field>
+            <Field label="Remise à zéro" help={gaugeHelp.step}><label className="flex h-9 items-center gap-2 text-sm"><input type="checkbox" checked={gauge.resetButton} onChange={(event) => set("resetButton", event.target.checked)} className="size-4 accent-primary" />Un bouton remet la valeur de départ</label></Field>
           </div>}
 
-          <Field label="Minimum" hint="0 si vide"><FormulaField value={gauge.min} onChange={(value) => set("min", value)} groups={catalogGroups} sample={sample} ariaLabel="Minimum" placeholder="0" /></Field>
+          <Field label="S’ajoute à" hint="facultatif : la valeur de la jauge compte dans cette caractéristique" help={gaugeHelp.addTo}>
+            <SuggestInput groups={targetGroups} value={gauge.addTo} onChange={(value) => set("addTo", value)} placeholder="Aucune (ex. : Folie pour une folie temporaire)" aria-label="Caractéristique à laquelle la jauge s’ajoute" />
+            {gauge.addTo.trim() && <p className="text-[11px] text-muted-foreground">Sur la fiche : {gauge.addTo.trim()} + la valeur de « {gauge.name.trim() || "cette jauge"} »{gauge.forms.length ? `, seulement en ${gauge.forms.join(", ")}` : ""}. Tout ce qui lit {`{${gauge.addTo.trim()}}`} compte les deux.</p>}
+          </Field>
 
-          <Field label="Emplacement sur la fiche"><Choice value={gauge.placement} options={gaugePlacements} onChange={(value) => set("placement", value)} /></Field>
-          <Field label="Affichage"><Choice value={gauge.display} options={gaugeDisplays} onChange={(value) => set("display", value)} /></Field>
+          <Field label="Minimum" hint="0 si vide" help={gaugeHelp.min}><FormulaField value={gauge.min} onChange={(value) => set("min", value)} groups={catalogGroups} sample={sample} ariaLabel="Minimum" placeholder="0" /></Field>
 
-          <Field label="Seuils" hint="des repères sur la jauge ; leur texte s’affiche au survol (facultatif)">
+          <Field label="Emplacement sur la fiche" help={gaugeHelp.placement}><Choice value={gauge.placement} options={gaugePlacements} onChange={(value) => set("placement", value)} /></Field>
+          <Field label="Affichage" help={gaugeHelp.display}><Choice value={gauge.display} options={gaugeDisplays} onChange={(value) => set("display", value)} /></Field>
+
+          <Field label="Seuils" hint="des repères sur la jauge ; leur texte s’affiche au survol (facultatif)" help={gaugeHelp.thresholds}>
             <div className="space-y-2">
               {gauge.thresholds.map((threshold, index) => <div key={thresholdKeys[index]} className="space-y-1.5 rounded-xl border border-border/60 bg-background/30 p-2">
                 <div className="flex items-center gap-1.5">
@@ -319,7 +327,7 @@ function GaugeEditor({ initial, catalogGroups, sample, formNames, onClose, onSav
             </div>
           </Field>
 
-          {(formNames.length > 0 || gauge.forms.length > 0) && <Field label="Formes" hint="la jauge ne s’affiche que dans les formes cochées (aucune : toujours)">
+          {(formNames.length > 0 || gauge.forms.length > 0) && <Field label="Formes" hint="la jauge ne s’affiche que dans les formes cochées (aucune : toujours)" help={gaugeHelp.forms}>
             <div className="flex flex-wrap gap-1.5">
               {[...new Set([...formNames, ...gauge.forms])].map((name) => {
                 const on = gauge.forms.some((item) => fold(item) === fold(name))
@@ -329,7 +337,7 @@ function GaugeEditor({ initial, catalogGroups, sample, formNames, onClose, onSav
             {gauge.forms.length > 0 && <label className="flex items-center gap-2 text-sm"><input type="checkbox" checked={gauge.resetOnLeave} onChange={(event) => set("resetOnLeave", event.target.checked)} className="size-4 accent-primary" />Revenir à la valeur de départ en quittant ces formes</label>}
           </Field>}
 
-          <Field label="Description" hint="affichée au survol sur la fiche"><RichTextField value={gauge.description} onCommit={(html) => set("description", html)} ariaLabel="Description de la jauge" placeholder="Comment elle se remplit, ce qu’elle permet… (« { » pour citer un index)" toolbar="always" /></Field>
+          <Field label="Description" hint="affichée au survol sur la fiche" help={gaugeHelp.description}><RichTextField value={gauge.description} onCommit={(html) => set("description", html)} ariaLabel="Description de la jauge" placeholder="Comment elle se remplit, ce qu’elle permet… (« { » pour citer un index)" toolbar="always" /></Field>
         </div>
 
         <aside className="min-w-0 space-y-2 lg:sticky lg:top-0 lg:self-start">
@@ -418,14 +426,16 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
       <DialogHeader>
         <DialogTitle>{initial.id ? `Modifier « ${initial.name} »` : `Nouvelles formes — ${initial.className}`}</DialogTitle>
         <DialogDescription>Une seule forme est active à la fois. Ses effets changent la fiche tant qu’elle est active, sans toucher aux valeurs de base. Elles s’enregistrent dans l’onglet « Formes » de « Sorts de classe ».</DialogDescription>
+        <div><HelpButton guide title="Régler des formes">{formHelp.guide}</HelpButton></div>
       </DialogHeader>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_20rem]">
         <div className="min-w-0 space-y-5">
-          <Field label="Nom du groupe" hint="affiché sur la fiche"><Input autoFocus={!initial.id} value={group.name} onChange={(event) => setGroup((current) => ({ ...current, name: event.target.value }))} placeholder="Forme, Posture, Aspect…" /></Field>
-          <Field label="Emplacement sur la fiche"><Choice value={group.placement} options={gaugePlacements} onChange={(value) => setGroup((current) => ({ ...current, placement: value }))} /></Field>
+          <Field label="Nom du groupe" hint="affiché sur la fiche" help={formHelp.groupName}><Input autoFocus={!initial.id} value={group.name} onChange={(event) => setGroup((current) => ({ ...current, name: event.target.value }))} placeholder="Forme, Posture, Aspect…" /></Field>
+          <Field label="Emplacement sur la fiche" help={formHelp.placement}><Choice value={group.placement} options={gaugePlacements} onChange={(value) => setGroup((current) => ({ ...current, placement: value }))} /></Field>
 
           <div className="space-y-3">
+            <p className="flex items-center gap-1 text-sm font-medium">Les formes<HelpButton title="Les formes">{formHelp.forms}</HelpButton></p>
             {group.forms.map((form, index) => <section key={keys[index]} className="space-y-3 rounded-2xl border p-3" style={{ borderColor: `${form.color}55`, borderTop: `3px solid ${form.color}` }}>
               <div className="flex flex-wrap items-center gap-2">
                 <Input value={form.name} onChange={(event) => setForm(index, { name: event.target.value })} placeholder={`Nom de la forme ${index + 1}`} aria-label={`Nom de la forme ${index + 1}`} className="h-9 min-w-40 flex-1 font-medium" />
@@ -437,7 +447,7 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
               </div>
 
               <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Effets tant que la forme est active</p>
+                <p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">Effets tant que la forme est active<HelpButton title="Les effets d’une forme">{formHelp.effects}</HelpButton></p>
                 {form.effects.map((effect, effectIndex) => {
                   const valid = !effect.change.trim() || Boolean(formEffectOperation(effect.change, effectSample))
                   return <div key={effectIndex} className="flex items-start gap-1.5">
@@ -458,7 +468,7 @@ function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, o
                 </div>
               </div>
 
-              <div className="grid gap-1.5"><p className="text-xs font-medium text-muted-foreground">Description <span className="font-normal">(au survol sur la fiche)</span></p><RichTextField value={form.description} onCommit={(html) => setForm(index, { description: html })} ariaLabel={`Description de la forme ${index + 1}`} placeholder="Ce que change cette forme… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></div>
+              <div className="grid gap-1.5"><p className="flex items-center gap-1 text-xs font-medium text-muted-foreground">Description <span className="font-normal">(au survol sur la fiche)</span><HelpButton title="Description de la forme">{formHelp.description}</HelpButton></p><RichTextField value={form.description} onCommit={(html) => setForm(index, { description: html })} ariaLabel={`Description de la forme ${index + 1}`} placeholder="Ce que change cette forme… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></div>
             </section>)}
             {group.forms.length < 12 && <Button type="button" variant="outline" size="sm" className="border-dashed" onClick={addForm}><Plus />Ajouter une forme</Button>}
           </div>
@@ -500,7 +510,7 @@ function DeckEditor({ initial, initialCards, onClose, onSaved }: { initial: Clas
   const setCard = (index: number, patch: Partial<DeckCard>) => setCards((current) => current.map((card, position) => position === index ? { ...card, ...patch } : card))
   function addCard() {
     const next = Math.max(0, ...cards.map((card) => Math.trunc(Number(card.number)) || 0)) + 1
-    setCards((current) => [...current, { number: String(next), name: "", effect: "", icon: "", className: initial.className }])
+    setCards((current) => [...current, { number: String(next), name: "", effect: "", icon: "", illustration: "", className: initial.className, color: "" }])
     setKeys((current) => [...current, newCardKey()])
   }
   function removeCard(index: number) {
@@ -523,6 +533,7 @@ function DeckEditor({ initial, initialCards, onClose, onSaved }: { initial: Clas
       <DialogHeader>
         <DialogTitle>{initial.id ? `Modifier « ${initial.name} »` : `Nouveau deck — ${initial.className}`}</DialogTitle>
         <DialogDescription>Le réglage du deck va dans l’onglet « Decks », ses cartes dans l’onglet « Cartes » de « Sorts de classe » (celles déjà écrites pour {initial.className} sont reprises).</DialogDescription>
+        <div><HelpButton guide title="Régler un deck">{deckHelp.guide}</HelpButton></div>
       </DialogHeader>
 
       <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -531,21 +542,28 @@ function DeckEditor({ initial, initialCards, onClose, onSaved }: { initial: Clas
             <Field label="Nom du deck"><Input autoFocus={!initial.id} value={deck.name} onChange={(event) => setDeck((current) => ({ ...current, name: event.target.value }))} placeholder="Tarot, Deck du destin…" /></Field>
             <Field label="Couleur"><div className="flex h-9 items-center gap-1">{deckColors.map((swatch) => <button key={swatch} type="button" onClick={() => setDeck((current) => ({ ...current, color: swatch }))} className={`size-6 rounded-full transition ${deck.color === swatch ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "opacity-70 hover:opacity-100"}`} style={{ backgroundColor: swatch }} aria-label={`Couleur ${swatch}`} aria-pressed={deck.color === swatch} />)}</div></Field>
           </div>
-          <Field label="Tirage"><Choice value={deck.drawMode} options={deckDrawModes} onChange={(value) => setDeck((current) => ({ ...current, drawMode: value }))} /></Field>
-          <Field label="Main maximum" hint="vide ou 0 : sans limite"><Input type="number" min={0} max={99} value={deck.handLimit || ""} onChange={(event) => setDeck((current) => ({ ...current, handLimit: Math.max(0, Math.min(99, Math.trunc(Number(event.target.value) || 0))) }))} className="h-9 w-28" /></Field>
-          <Field label="Emplacement sur la fiche"><Choice value={deck.placement} options={gaugePlacements} onChange={(value) => setDeck((current) => ({ ...current, placement: value }))} /></Field>
-          <Field label="Règles du deck" hint="affichées sous le deck (facultatif)"><RichTextField value={deck.description} onCommit={(html) => setDeck((current) => ({ ...current, description: html }))} ariaLabel="Règles du deck" placeholder="Comment on pioche, ce qui se passe à la défausse… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></Field>
+          <Field label="Tirage" help={deckHelp.draw}><Choice value={deck.drawMode} options={deckDrawModes} onChange={(value) => setDeck((current) => ({ ...current, drawMode: value }))} /></Field>
+          <Field label="Main maximum" hint="vide ou 0 : sans limite" help={deckHelp.handLimit}><Input type="number" min={0} max={99} value={deck.handLimit || ""} onChange={(event) => setDeck((current) => ({ ...current, handLimit: Math.max(0, Math.min(99, Math.trunc(Number(event.target.value) || 0))) }))} className="h-9 w-28" /></Field>
+          <Field label="Emplacement sur la fiche" help={deckHelp.placement}><Choice value={deck.placement} options={gaugePlacements} onChange={(value) => setDeck((current) => ({ ...current, placement: value }))} /></Field>
+          <Field label="Règles du deck" hint="affichées sous le deck (facultatif)" help={deckHelp.rules}><RichTextField value={deck.description} onCommit={(html) => setDeck((current) => ({ ...current, description: html }))} ariaLabel="Règles du deck" placeholder="Comment on pioche, ce qui se passe à la défausse… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></Field>
 
           <div className="space-y-2">
-            <p className="text-sm font-medium">Cartes <span className="text-xs font-normal text-muted-foreground">({named.length})</span></p>
-            {cards.map((card, index) => <section key={keys[index]} className="grid gap-2 rounded-xl border p-2.5 sm:grid-cols-[auto_minmax(0,1fr)]" style={{ borderColor: `${deck.color}40` }}>
+            <p className="flex items-center gap-1 text-sm font-medium">Cartes <span className="text-xs font-normal text-muted-foreground">({named.length})</span><HelpButton title="Les cartes">{deckHelp.cards}</HelpButton></p>
+            {cards.map((card, index) => <section key={keys[index]} className="grid gap-2 rounded-xl border p-2.5 sm:grid-cols-[auto_minmax(0,1fr)]" style={{ borderColor: `${card.color || deck.color}40` }}>
               <DeckCardView small card={{ ...card, name: card.name || "Sans nom" }} color={deck.color} />
               <div className="min-w-0 space-y-1.5">
                 <div className="flex items-center gap-1.5">
                   <span className="w-10 shrink-0 text-center text-xs tabular-nums text-muted-foreground">n° {card.number}</span>
                   <Input value={card.name} onChange={(event) => setCard(index, { name: event.target.value })} placeholder="Nom de la carte : La mort (Pique)" aria-label={`Nom de la carte ${card.number}`} className="h-8 min-w-0 flex-1 font-medium" />
-                  <Input value={card.icon} onChange={(event) => setCard(index, { icon: event.target.value })} placeholder="Icône : ♠ ou adresse d’image" aria-label={`Icône de la carte ${card.number}`} className="h-8 w-44" />
+                  <CardIconField value={card.icon} onChange={(icon) => setCard(index, { icon })} label={`Icône de la carte ${card.number}`} text="Icône du coin" />
+                  <CardIconField value={card.illustration} onChange={(illustration) => setCard(index, { illustration })} label={`Illustration de la carte ${card.number}`} text="Illustration" />
                   <Button type="button" variant="ghost" size="icon-sm" className="hover:text-destructive" onClick={() => removeCard(index)} aria-label={`Retirer la carte ${card.number}`}><X /></Button>
+                </div>
+                <div className="flex flex-wrap items-center gap-1" role="group" aria-label={`Couleur de la carte ${card.number}`}>
+                  <span className="mr-1 text-[11px] text-muted-foreground">Couleur</span>
+                  <button type="button" onClick={() => setCard(index, { color: "" })} aria-pressed={!card.color} className={`rounded-full border px-2 py-0.5 text-[10px] transition ${!card.color ? "border-primary/60 bg-primary/10 text-primary" : "text-muted-foreground hover:border-primary/40"}`} title="La couleur du deck">celle du deck</button>
+                  {[...deckColors, ...formColors].filter((swatch, position, list) => list.indexOf(swatch) === position).map((swatch) => <button key={swatch} type="button" onClick={() => setCard(index, { color: swatch })} className={`size-5 rounded-full transition ${card.color === swatch ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "opacity-70 hover:opacity-100"}`} style={{ backgroundColor: swatch }} aria-label={`Couleur ${swatch}`} aria-pressed={card.color === swatch} />)}
+                  <input type="color" value={/^#[0-9a-f]{6}$/i.test(card.color) ? card.color : deck.color} onChange={(event) => setCard(index, { color: event.target.value })} className="size-6 cursor-pointer rounded-full border-0 bg-transparent p-0" aria-label={`Autre couleur pour la carte ${card.number}`} />
                 </div>
                 <RichTextField value={card.effect} onCommit={(html) => setCard(index, { effect: html })} ariaLabel={`Effet de la carte ${card.number}`} placeholder="Effet de la carte (« { » pour citer un index)" minHeight="min-h-12" toolbar="always" />
               </div>

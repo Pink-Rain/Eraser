@@ -53,6 +53,11 @@ export type ClassGauge = {
   forms: string[]
   /** En quittant ces formes, la valeur du joueur revient à sa valeur de départ. */
   resetOnLeave: boolean
+  /**
+   * Une caractéristique ou compétence de la fiche à laquelle la valeur de la jauge s'ajoute
+   * (« Folie temporaire » → « Folie ») ; vide : la jauge ne change rien sur la fiche.
+   */
+  addTo: string
 }
 
 export const gaugePlacements: Array<{ value: GaugePlacement; label: string; hint: string }> = [
@@ -84,7 +89,7 @@ export const GAUGE_HEADERS = [
   "ID", "Classe", "Nom", "Couleur", "Emplacement", "Affichage", "Minimum",
   "Maximum (type)", "Maximum", "Valeur actuelle (type)", "Valeur actuelle",
   "Pas", "Remise à zéro", "Seuils", "Description", "Ordre", "Classe ID",
-  "Formes", "Remise à zéro en quittant la forme",
+  "Formes", "Remise à zéro en quittant la forme", "S'ajoute à",
 ] as const
 export type GaugeHeader = (typeof GAUGE_HEADERS)[number]
 
@@ -196,7 +201,7 @@ export function gaugeThresholdsHtml(thresholds: GaugeThreshold[]) {
 export const parseGaugeThresholds = (raw: string) => parseGaugeThresholdsHtml(escapeHtml(raw))
 
 export function emptyGauge(classId: string, className: string, id: string, order = 0): ClassGauge {
-  return { id, classId, className, name: "", color: gaugeColors[0], placement: "vie", display: "barre", min: "0", maxMode: "fixe", max: "100", currentMode: "joueur", current: "0", step: 1, resetButton: true, thresholds: [], description: "", order, forms: [], resetOnLeave: false }
+  return { id, classId, className, name: "", color: gaugeColors[0], placement: "vie", display: "barre", min: "0", maxMode: "fixe", max: "100", currentMode: "joueur", current: "0", step: 1, resetButton: true, thresholds: [], description: "", order, forms: [], resetOnLeave: false, addTo: "" }
 }
 
 /** Les colonnes dont la case est mise en forme (lue et écrite en HTML). */
@@ -234,6 +239,7 @@ export function gaugeFromCells(cell: (header: GaugeHeader) => string, rich?: (he
     order: Number.isFinite(order) ? order : 0,
     forms: cell("Formes").split(/\n|;|,/).map((name) => name.trim()).filter(Boolean).slice(0, 12),
     resetOnLeave: yes(cell("Remise à zéro en quittant la forme")),
+    addTo: cell("S'ajoute à").trim(),
   }
 }
 
@@ -262,6 +268,7 @@ export function gaugeCells(gauge: ClassGauge): Record<GaugeHeader, string> {
     "Classe ID": gauge.classId,
     "Formes": gauge.forms.join("\n"),
     "Remise à zéro en quittant la forme": gauge.resetOnLeave ? "Oui" : "",
+    "S'ajoute à": gauge.addTo.trim(),
   }
 }
 
@@ -271,7 +278,7 @@ export function sanitizeGauge(raw: unknown): ClassGauge | null {
   const value = raw as Record<string, unknown>
   const text = (key: string, limit = 400) => typeof value[key] === "string" ? (value[key] as string).slice(0, limit) : typeof value[key] === "number" ? String(value[key]) : ""
   const thresholds: GaugeThreshold[] = Array.isArray(value.thresholds) ? value.thresholds.flatMap((item) => item && typeof item === "object" ? [{ value: String((item as GaugeThreshold).value ?? "").slice(0, 200), label: inlineRichText(String((item as GaugeThreshold).label ?? "")).slice(0, 4000) }] : []).slice(0, 12) : []
-  const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId", "Formes": "forms", "Remise à zéro en quittant la forme": "resetOnLeave" }
+  const key: Record<GaugeHeader, string> = { "ID": "id", "Classe": "className", "Nom": "name", "Couleur": "color", "Emplacement": "placement", "Affichage": "display", "Minimum": "min", "Maximum (type)": "maxMode", "Maximum": "max", "Valeur actuelle (type)": "currentMode", "Valeur actuelle": "current", "Pas": "step", "Remise à zéro": "resetButton", "Seuils": "thresholds", "Description": "description", "Ordre": "order", "Classe ID": "classId", "Formes": "forms", "Remise à zéro en quittant la forme": "resetOnLeave", "S'ajoute à": "addTo" }
   const forms = Array.isArray(value.forms) ? value.forms.flatMap((name) => typeof name === "string" && name.trim() ? [name.trim().slice(0, 200)] : []).slice(0, 12) : []
   const gauge = gaugeFromCells((header) => header === "Remise à zéro" ? (value.resetButton === false ? "Non" : "Oui") : header === "Formes" ? forms.join("\n") : header === "Remise à zéro en quittant la forme" ? (value.resetOnLeave === true ? "Oui" : "") : text(key[header]), (header) => header === "Seuils" ? "" : text("description", 20_000))
   return gauge && { ...gauge, thresholds: thresholds.filter((item) => item.value.trim()) }
@@ -418,6 +425,22 @@ export function resolveGauge(gauge: ClassGauge, values: FormulaValues, state: Ga
     return [{ value: result.value, label: threshold.label, ratio: ratioOf(result.value) }]
   })
   return { gauge, min: round(min), max: round(max), current: round(current), editableCurrent: gauge.currentMode === "joueur", editableMax: gauge.maxMode === "joueur", start: round(start), ratio: ratioOf(current), thresholds, errors }
+}
+
+/**
+ * Ce que les jauges « S'ajoute à » changent sur la fiche, comme un état : la valeur de la
+ * jauge s'ajoute à sa caractéristique (« Folie temporaire » 3 → Folie +3). Une jauge cachée
+ * (hors de ses formes) n'ajoute rien. `values` : la fiche sans ces ajouts, pour ne pas
+ * tourner en rond si la jauge lit la valeur qu'elle change.
+ */
+export function gaugeContributions(gauges: ClassGauge[], states: Record<string, GaugeState>, values: FormulaValues, activeFormNames: string[], targetOf: (name: string) => string | null) {
+  return gauges.flatMap((gauge) => {
+    if (!gauge.addTo.trim() || !gaugeVisibleIn(gauge, activeFormNames)) return []
+    const target = targetOf(gauge.addTo)
+    const amount = resolveGauge(gauge, values, states[gauge.id]).current
+    if (!target || !amount) return []
+    return [{ state: gauge.name, level: 1 as const, effect: gauge.name, target, amount, label: `${amount > 0 ? "+" : ""}${amount}`, color: gauge.color, fx: [] }]
+  })
 }
 
 /**

@@ -17,7 +17,7 @@ import { RichTextField } from "@/components/eraser/rich-text"
 import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
-import { formulaValues, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
+import { formulaValues, gaugeContributions, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
 import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, withChosenForm, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
 import { ClassDeckPanel } from "@/components/eraser/class-deck-panel"
@@ -651,19 +651,22 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   }, [catalog, layout, modifierTargets, values])
   // Objets et états posés à la main : la base sur laquelle les formes s'ajoutent.
   const postedIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateContributions(statesCatalog.catalog, postedStates, targetOfName)), [inventory, postedStates, statesCatalog.catalog, targetOfName])
+  const activeFormNames = useMemo(() => characterFormGroups.flatMap((group) => activeForm(group, chosenForms[group.id])?.name ?? []), [characterFormGroups, chosenForms])
   /**
-   * Ce qu'un effet de forme peut lire (« +{Folie temporaire} * 2 ») : la fiche sans les
-   * formes, et la valeur de chaque jauge. Les jauges d'abord, les formes ensuite : pas de
-   * boucle entre les deux.
+   * Les jauges d'abord, les formes ensuite : pas de boucle entre les deux. Une jauge
+   * « S'ajoute à » compte dans sa caractéristique (la folie temporaire est de la Folie) ;
+   * un effet de forme lit la fiche avec ces ajouts (« +{Folie} * 2 » compte les deux) et la
+   * valeur de chaque jauge (« +{Folie temporaire} * 2 »).
    */
+  const gaugeBaseValues = useMemo(() => characterGauges.length ? sheetFormulaValues(postedIndex) : formulaValues([]), [characterGauges.length, postedIndex, sheetFormulaValues])
+  const gaugeChanges = useMemo(() => gaugeContributions(characterGauges, gaugeStates, gaugeBaseValues, activeFormNames, targetOfName), [activeFormNames, characterGauges, gaugeBaseValues, gaugeStates, targetOfName])
   const formFormulaValues = useMemo(() => {
     if (!characterFormGroups.length) return formulaValues([])
-    const base = sheetFormulaValues(postedIndex)
-    const gaugesNow = formulaValues(characterGauges.map((gauge) => [gauge.name, resolveGauge(gauge, base, gaugeStates[gauge.id]).current]))
+    const base = sheetFormulaValues(withStateModifiers(postedIndex, gaugeChanges))
+    const gaugesNow = formulaValues(characterGauges.map((gauge) => [gauge.name, resolveGauge(gauge, gaugeBaseValues, gaugeStates[gauge.id]).current]))
     return new Map([...base, ...gaugesNow])
-  }, [characterFormGroups.length, characterGauges, gaugeStates, postedIndex, sheetFormulaValues])
-  const formChanges = useMemo(() => formContributions(characterFormGroups, chosenForms, targetOfName, formFormulaValues), [characterFormGroups, chosenForms, formFormulaValues, targetOfName])
-  const activeFormNames = useMemo(() => characterFormGroups.flatMap((group) => activeForm(group, chosenForms[group.id])?.name ?? []), [characterFormGroups, chosenForms])
+  }, [characterFormGroups.length, characterGauges, gaugeBaseValues, gaugeChanges, gaugeStates, postedIndex, sheetFormulaValues])
+  const formChanges = useMemo(() => [...gaugeChanges, ...formContributions(characterFormGroups, chosenForms, targetOfName, formFormulaValues)], [characterFormGroups, chosenForms, formFormulaValues, gaugeChanges, targetOfName])
   // Coma et Mort se posent seuls, d'après la vie (avec les états posés à la main), et partent
   // quand elle remonte. Ils ne sont pas enregistrés dans la fiche.
   const autoLife = useMemo(() => {
