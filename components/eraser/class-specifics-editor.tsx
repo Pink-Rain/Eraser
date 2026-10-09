@@ -5,8 +5,10 @@ import { Braces, Check, ExternalLink, Gauge, Layers, LoaderCircle, Pencil, Plus,
 
 import { ClassGaugeView, publishGauges, useClassGauges, type ClassGaugeTable } from "@/components/eraser/class-gauges"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
+import { ClassDeckPanel, DeckCardView } from "@/components/eraser/class-deck-panel"
+import { cardsOfClass, deckColors, deckDrawModes, decksOfClass, emptyDeck, type ClassDeck, type DeckCard, type DeckState } from "@/lib/class-decks"
 import { SuggestInput } from "@/components/eraser/suggest-input"
-import { emptyFormGroup, formColors, formEffectOperation, formGroupsOfClass, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
+import { emptyFormGroup, formColors, formEffectOperation, formEffectText, formGroupsOfClass, isFormulaChange, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import type { CharacterCatalog } from "@/lib/character-catalog"
 import { useCharacterCatalog } from "@/components/eraser/use-character-catalog"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
@@ -39,11 +41,11 @@ const newSummonKey = () => `seuil-${(keyCounter += 1)}`
 
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
 
-/** Les sortes de spécificités : jauge et formes ; le deck arrive. */
+/** Les sortes de spécificités : jauge, formes et deck. */
 const specificKinds: Array<{ key: string; label: string; hint: string; icon: ReactNode; ready: boolean }> = [
   { key: "jauge", label: "Jauge", hint: "Rage, mana, concentration : une barre reliée à la fiche ou tenue par le joueur", icon: <Gauge className="size-4" />, ready: true },
   { key: "formes", label: "Formes", hint: "Plusieurs formes, une active à la fois, chacune avec ses effets temporaires sur la fiche", icon: <Layers className="size-4" />, ready: true },
-  { key: "deck", label: "Deck", hint: "Bientôt : des cartes à tirer, défausser, retirer", icon: <Spade className="size-4" />, ready: false },
+  { key: "deck", label: "Deck", hint: "Des cartes à piocher, défausser, retirer (onglet « Cartes »)", icon: <Spade className="size-4" />, ready: true },
 ]
 
 async function postSpecifics(body: unknown) {
@@ -60,7 +62,7 @@ async function postSpecifics(body: unknown) {
  * dans le classeur « Sorts de classe ».
  */
 export function ClassSpecificsEditor({ classId, className, accent }: { classId: string; className: string; accent: string }) {
-  const { table, loading, error } = useClassGauges(true)
+  const { table, loading, error, decks: allDecks, cards: allCards } = useClassGauges(true)
   const catalog = useCharacterCatalog()
   const gauges = useMemo(() => gaugesOfClass(table?.gauges ?? [], { id: classId, name: className }), [table, classId, className])
   const formGroups = useMemo(() => formGroupsOfClass(table?.formGroups ?? [], { id: classId, name: className }), [table, classId, className])
@@ -68,7 +70,10 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
   const sample = useMemo(() => sampleFormulaValues(catalog), [catalog])
   const [editing, setEditing] = useState<ClassGauge | null>(null)
   const [editingForms, setEditingForms] = useState<ClassFormGroup | null>(null)
-  const [removing, setRemoving] = useState<{ kind: "gauge" | "forms"; id: string; name: string } | null>(null)
+  const decks = useMemo(() => decksOfClass(allDecks, { id: classId, name: className }), [allDecks, classId, className])
+  const cards = useMemo(() => cardsOfClass(allCards, className), [allCards, className])
+  const [editingDeck, setEditingDeck] = useState<ClassDeck | null>(null)
+  const [removing, setRemoving] = useState<{ kind: "gauge" | "forms" | "deck"; id: string; name: string } | null>(null)
   const [removeError, setRemoveError] = useState("")
 
   function newFormGroup() {
@@ -84,9 +89,9 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
     setEditing({ ...gauge, color: accent && /^#[0-9a-f]{6}$/i.test(accent) ? accent : gauge.color })
   }
 
-  async function remove(target: { kind: "gauge" | "forms"; id: string }) {
+  async function remove(target: { kind: "gauge" | "forms" | "deck"; id: string }) {
     setRemoveError("")
-    try { await postSpecifics({ action: target.kind === "gauge" ? "delete-gauge" : "delete-form-group", id: target.id }); setRemoving(null) } catch (reason) { setRemoveError(reason instanceof Error ? reason.message : "La spécificité n’a pas pu être supprimée.") }
+    try { await postSpecifics({ action: target.kind === "gauge" ? "delete-gauge" : target.kind === "deck" ? "delete-deck" : "delete-form-group", id: target.id }); setRemoving(null) } catch (reason) { setRemoveError(reason instanceof Error ? reason.message : "La spécificité n’a pas pu être supprimée.") }
   }
 
   return <div className="space-y-3">
@@ -99,7 +104,7 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
         <DropdownMenuContent align="end" className="w-80">
           <DropdownMenuLabel>Outils</DropdownMenuLabel>
           <DropdownMenuSeparator />
-          {specificKinds.map((kind) => <DropdownMenuItem key={kind.key} disabled={!kind.ready} onSelect={() => { if (kind.key === "jauge") newGauge(); if (kind.key === "formes") newFormGroup() }} className="items-start gap-2 py-2">
+          {specificKinds.map((kind) => <DropdownMenuItem key={kind.key} disabled={!kind.ready} onSelect={() => { if (kind.key === "jauge") newGauge(); if (kind.key === "formes") newFormGroup(); if (kind.key === "deck") setEditingDeck({ ...emptyDeck(classId, className, decks.length), color: accent && /^#[0-9a-f]{6}$/i.test(accent) ? accent : deckColors[0] }) }} className="items-start gap-2 py-2">
             <span className="mt-0.5 text-muted-foreground">{kind.icon}</span>
             <span className="min-w-0"><span className="block font-medium">{kind.label}</span><span className="block text-xs text-muted-foreground">{kind.hint}</span></span>
           </DropdownMenuItem>)}
@@ -109,7 +114,18 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
 
     {error && <p className="rounded-xl border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
     {loading && <p className="flex items-center gap-2 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Lecture des spécificités…</p>}
-    {!loading && !error && !gauges.length && !formGroups.length && <p className="rounded-2xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">Aucune spécificité pour l’instant. « Ajouter une spécificité » propose les outils disponibles.</p>}
+    {!loading && !error && !gauges.length && !formGroups.length && !decks.length && <p className="rounded-2xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">Aucune spécificité pour l’instant. « Ajouter une spécificité » propose les outils disponibles.</p>}
+
+    {decks.map((deck) => <article key={deck.id} className="space-y-2 rounded-2xl border bg-background/30 p-3" style={{ borderColor: `${deck.color}40` }}>
+      <div className="flex items-center gap-2">
+        <Spade className="size-4" style={{ color: deck.color }} />
+        <h4 className="min-w-0 flex-1 truncate font-display text-base font-semibold">{deck.name}<span className="ml-2 text-xs font-normal text-muted-foreground">{cards.length} carte{cards.length > 1 ? "s" : ""}</span></h4>
+        <Button type="button" variant="ghost" size="icon-xs" onClick={() => setEditingDeck(deck)} aria-label={`Modifier ${deck.name}`}><Pencil /></Button>
+        <Button type="button" variant="ghost" size="icon-xs" className="hover:text-destructive" onClick={() => { setRemoveError(""); setRemoving({ kind: "deck", id: deck.id, name: deck.name }) }} aria-label={`Supprimer ${deck.name}`}><Trash2 /></Button>
+      </div>
+      <div className="flex flex-wrap gap-2">{cards.slice(0, 12).map((card) => <DeckCardView key={card.number} small card={card} color={deck.color} />)}{cards.length > 12 && <span className="self-center text-xs text-muted-foreground">+{cards.length - 12}</span>}</div>
+      <p className="text-[11px] text-muted-foreground">{gaugePlacements.find((item) => item.value === deck.placement)?.label} · tirage {deckDrawModes.find((item) => item.value === deck.drawMode)?.label.toLowerCase()}{deck.handLimit ? ` · main de ${deck.handLimit} cartes au plus` : ""}</p>
+    </article>)}
 
     {formGroups.length > 0 && <div className="grid gap-3 md:grid-cols-2">
       {formGroups.map((group) => <article key={group.id} className="space-y-2 rounded-2xl border bg-background/30 p-3" style={{ borderColor: `${(group.forms.find((form) => form.isDefault) ?? group.forms[0])?.color ?? "#7d7f86"}40` }}>
@@ -141,13 +157,14 @@ export function ClassSpecificsEditor({ classId, className, accent }: { classId: 
     </div>}
 
     {editing && <GaugeEditor key={editing.id || "new"} initial={editing} catalogGroups={formulaNameGroups(catalog)} sample={sample} formNames={formNames} onClose={() => setEditing(null)} onSaved={() => setEditing(null)} />}
-    {editingForms && <FormGroupEditor key={editingForms.id || "new"} initial={editingForms} targetGroups={effectTargetGroups(catalog)} onClose={() => setEditingForms(null)} onSaved={() => setEditingForms(null)} />}
+    {editingDeck && <DeckEditor key={editingDeck.id || "new"} initial={editingDeck} initialCards={cards} onClose={() => setEditingDeck(null)} onSaved={() => setEditingDeck(null)} />}
+    {editingForms && <FormGroupEditor key={editingForms.id || "new"} initial={editingForms} targetGroups={effectTargetGroups(catalog)} gaugeNames={gauges.map((gauge) => gauge.name)} sample={sample} onClose={() => setEditingForms(null)} onSaved={() => setEditingForms(null)} />}
 
     <AlertDialog open={Boolean(removing)} onOpenChange={(open) => { if (!open) setRemoving(null) }}>
       <AlertDialogContent>
         <AlertDialogHeader>
-          <AlertDialogTitle>Supprimer {removing?.kind === "forms" ? "les formes" : "la jauge"} « {removing?.name} » ?</AlertDialogTitle>
-          <AlertDialogDescription>{removing?.kind === "forms" ? `Leurs lignes sont retirées de l’onglet « Formes » et elles disparaissent des fiches des personnages de ${className}.` : `Sa ligne est retirée de l’onglet « Jauges » et elle disparaît des fiches des personnages de ${className}.`}</AlertDialogDescription>
+          <AlertDialogTitle>Supprimer {removing?.kind === "forms" ? "les formes" : removing?.kind === "deck" ? "le deck" : "la jauge"} « {removing?.name} » ?</AlertDialogTitle>
+          <AlertDialogDescription>{removing?.kind === "forms" ? `Leurs lignes sont retirées de l’onglet « Formes » et elles disparaissent des fiches des personnages de ${className}.` : removing?.kind === "deck" ? `Le deck disparaît des fiches des personnages de ${className}. Ses cartes restent dans l’onglet « Cartes ».` : `Sa ligne est retirée de l’onglet « Jauges » et elle disparaît des fiches des personnages de ${className}.`}</AlertDialogDescription>
         </AlertDialogHeader>
         {removeError && <p className="text-sm text-destructive">{removeError}</p>}
         <AlertDialogFooter>
@@ -350,7 +367,11 @@ function effectTargetGroups(catalog: CharacterCatalog) {
 let formKeyCounter = 0
 const newFormKey = () => `forme-${(formKeyCounter += 1)}`
 
-function FormGroupEditor({ initial, targetGroups, onClose, onSaved }: { initial: ClassFormGroup; targetGroups: Array<{ label: string; items: string[] }>; onClose: () => void; onSaved: () => void }) {
+function FormGroupEditor({ initial, targetGroups, gaugeNames, sample, onClose, onSaved }: { initial: ClassFormGroup; targetGroups: Array<{ label: string; items: string[] }>; gaugeNames: string[]; sample: FormulaValues; onClose: () => void; onSaved: () => void }) {
+  // Les formules d'effet se vérifient avec la fiche d'exemple, et chaque jauge de la classe à 3.
+  const effectSample = useMemo(() => new Map([...sample, ...formulaValues(gaugeNames.map((name) => [name, 3]))]), [gaugeNames, sample])
+  // Le dernier champ « changement » touché : les valeurs proposées s'y insèrent.
+  const lastChange = useRef<{ form: number; effect: number; input: HTMLInputElement | null } | null>(null)
   const [group, setGroup] = useState(initial)
   const latest = useRef(group)
   useEffect(() => { latest.current = group }, [group])
@@ -418,14 +439,23 @@ function FormGroupEditor({ initial, targetGroups, onClose, onSaved }: { initial:
               <div className="space-y-1.5">
                 <p className="text-xs font-medium text-muted-foreground">Effets tant que la forme est active</p>
                 {form.effects.map((effect, effectIndex) => {
-                  const valid = !effect.change.trim() || Boolean(formEffectOperation(effect.change))
+                  const valid = !effect.change.trim() || Boolean(formEffectOperation(effect.change, effectSample))
                   return <div key={effectIndex} className="flex items-start gap-1.5">
                     <SuggestInput className="flex-1" groups={targetGroups} value={effect.target} onChange={(target) => setEffect(index, effectIndex, { target })} placeholder="Caractéristique ou compétence" aria-label="Cible de l’effet" />
-                    <div className="w-28 shrink-0"><Input value={effect.change} onChange={(event) => setEffect(index, effectIndex, { change: event.target.value })} placeholder="+10, -5, =0, ≥5" aria-label="Changement" aria-invalid={!valid} className="h-8 font-mono text-sm" />{!valid && <p className="mt-0.5 text-[10px] text-amber-500">+x, -x, =x, ≥x ou ≤x</p>}</div>
+                    <div className="w-56 shrink-0"><Input value={effect.change} onFocus={(event) => { lastChange.current = { form: index, effect: effectIndex, input: event.currentTarget } }} onChange={(event) => setEffect(index, effectIndex, { change: event.target.value })} placeholder="+10, -5, ≥5, +{Jauge} * 2" aria-label="Changement" aria-invalid={!valid} className="h-8 font-mono text-sm" />{!valid ? <p className="mt-0.5 text-[10px] text-amber-500">+x, -x, =x, ≥x, ≤x, ou une formule avec {"{…}"}</p> : isFormulaChange(effect.change) && <p className="mt-0.5 text-[10px] text-muted-foreground">Exemple (jauges à 3) : {formEffectText(effect.change, effectSample)}</p>}</div>
                     <Button type="button" variant="ghost" size="icon-sm" onClick={() => setGroup((current) => ({ ...current, forms: current.forms.map((item, position) => position === index ? { ...item, effects: item.effects.filter((_, at) => at !== effectIndex) } : item) }))} aria-label="Retirer l’effet"><X /></Button>
                   </div>
                 })}
-                <Button type="button" variant="ghost" size="xs" onClick={() => setGroup((current) => ({ ...current, forms: current.forms.map((item, position) => position === index ? { ...item, effects: [...item.effects, { target: "", change: "" }] } : item) }))}><Plus />Ajouter un effet</Button>
+                <div className="flex flex-wrap items-center gap-1.5">
+                  <Button type="button" variant="ghost" size="xs" onClick={() => setGroup((current) => ({ ...current, forms: current.forms.map((item, position) => position === index ? { ...item, effects: [...item.effects, { target: "", change: "" }] } : item) }))}><Plus />Ajouter un effet</Button>
+                  {form.effects.length > 0 && gaugeNames.length > 0 && <span className="flex flex-wrap items-center gap-1 text-[11px] text-muted-foreground">Proportionnel à :{gaugeNames.map((name) => <button key={name} type="button" onMouseDown={(event) => event.preventDefault()} onClick={() => {
+                    // « +{Jauge} * 1 » dans le dernier changement touché de cette forme (sinon le dernier effet).
+                    const target = lastChange.current?.form === index ? lastChange.current.effect : form.effects.length - 1
+                    const currentText = form.effects[target]?.change.trim() ?? ""
+                    setEffect(index, target, { change: currentText && !isFormulaChange(currentText) && /^[+-]?\d/.test(currentText) ? `${currentText.startsWith("-") ? "-" : "+"}{${name}} * ${currentText.replace(/^[+-]/, "")}` : `${currentText}${currentText ? " " : "+"}{${name}}` })
+                    lastChange.current?.input?.focus()
+                  }} className="rounded-full border px-2 py-0.5 font-mono hover:border-primary/50 hover:bg-primary/10" title={`Insérer {${name}} dans le changement`}>{`{${name}}`}</button>)}</span>}
+                </div>
               </div>
 
               <div className="grid gap-1.5"><p className="text-xs font-medium text-muted-foreground">Description <span className="font-normal">(au survol sur la fiche)</span></p><RichTextField value={form.description} onCommit={(html) => setForm(index, { description: html })} ariaLabel={`Description de la forme ${index + 1}`} placeholder="Ce que change cette forme… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></div>
@@ -446,6 +476,97 @@ function FormGroupEditor({ initial, targetGroups, onClose, onSaved }: { initial:
         <span className="ml-auto" />
         <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
         <Button type="button" onClick={() => void save()} disabled={saving}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer les formes</Button>
+      </div>
+    </DialogContent>
+  </Dialog>
+}
+
+/* ───────────────────────────── Deck ───────────────────────────── */
+
+let cardKeyCounter = 0
+const newCardKey = () => `carte-${(cardKeyCounter += 1)}`
+
+function DeckEditor({ initial, initialCards, onClose, onSaved }: { initial: ClassDeck; initialCards: DeckCard[]; onClose: () => void; onSaved: () => void }) {
+  const [deck, setDeck] = useState(initial)
+  const [cards, setCards] = useState(initialCards)
+  const latest = useRef({ deck, cards })
+  useEffect(() => { latest.current = { deck, cards } }, [deck, cards])
+  // Chaque carte garde sa clé : son effet mis en forme ne passe pas à une autre quand on en retire une.
+  const [keys, setKeys] = useState(() => initialCards.map(() => newCardKey()))
+  const [removed, setRemoved] = useState<string[]>([])
+  const [preview, setPreview] = useState<DeckState>({ hand: [], discard: [], removed: [] })
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+  const setCard = (index: number, patch: Partial<DeckCard>) => setCards((current) => current.map((card, position) => position === index ? { ...card, ...patch } : card))
+  function addCard() {
+    const next = Math.max(0, ...cards.map((card) => Math.trunc(Number(card.number)) || 0)) + 1
+    setCards((current) => [...current, { number: String(next), name: "", effect: "", icon: "", className: initial.className }])
+    setKeys((current) => [...current, newCardKey()])
+  }
+  function removeCard(index: number) {
+    const card = cards[index]
+    if (card && initialCards.some((item) => item.number === card.number)) setRemoved((current) => [...current, card.number])
+    setCards((current) => current.filter((_, position) => position !== index))
+    setKeys((current) => current.filter((_, position) => position !== index))
+  }
+
+  async function save() {
+    const current = latest.current
+    setSaving(true); setError("")
+    try { await postSpecifics({ action: "save-deck", deck: current.deck, cards: current.cards.filter((card) => card.name.trim()), removedCards: removed }); onSaved() } catch (reason) { setError(reason instanceof Error ? reason.message : "Le deck n’a pas pu être enregistré.") }
+    setSaving(false)
+  }
+
+  const named = cards.filter((card) => card.name.trim())
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent className="max-h-[calc(100dvh-2rem)] overflow-y-auto sm:max-w-6xl" onInteractOutside={(event) => event.preventDefault()}>
+      <DialogHeader>
+        <DialogTitle>{initial.id ? `Modifier « ${initial.name} »` : `Nouveau deck — ${initial.className}`}</DialogTitle>
+        <DialogDescription>Le réglage du deck va dans l’onglet « Decks », ses cartes dans l’onglet « Cartes » de « Sorts de classe » (celles déjà écrites pour {initial.className} sont reprises).</DialogDescription>
+      </DialogHeader>
+
+      <div className="grid gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
+        <div className="min-w-0 space-y-5">
+          <div className="grid gap-3 sm:grid-cols-[minmax(0,1fr)_auto]">
+            <Field label="Nom du deck"><Input autoFocus={!initial.id} value={deck.name} onChange={(event) => setDeck((current) => ({ ...current, name: event.target.value }))} placeholder="Tarot, Deck du destin…" /></Field>
+            <Field label="Couleur"><div className="flex h-9 items-center gap-1">{deckColors.map((swatch) => <button key={swatch} type="button" onClick={() => setDeck((current) => ({ ...current, color: swatch }))} className={`size-6 rounded-full transition ${deck.color === swatch ? "ring-2 ring-foreground ring-offset-2 ring-offset-background" : "opacity-70 hover:opacity-100"}`} style={{ backgroundColor: swatch }} aria-label={`Couleur ${swatch}`} aria-pressed={deck.color === swatch} />)}</div></Field>
+          </div>
+          <Field label="Tirage"><Choice value={deck.drawMode} options={deckDrawModes} onChange={(value) => setDeck((current) => ({ ...current, drawMode: value }))} /></Field>
+          <Field label="Main maximum" hint="vide ou 0 : sans limite"><Input type="number" min={0} max={99} value={deck.handLimit || ""} onChange={(event) => setDeck((current) => ({ ...current, handLimit: Math.max(0, Math.min(99, Math.trunc(Number(event.target.value) || 0))) }))} className="h-9 w-28" /></Field>
+          <Field label="Emplacement sur la fiche"><Choice value={deck.placement} options={gaugePlacements} onChange={(value) => setDeck((current) => ({ ...current, placement: value }))} /></Field>
+          <Field label="Règles du deck" hint="affichées sous le deck (facultatif)"><RichTextField value={deck.description} onCommit={(html) => setDeck((current) => ({ ...current, description: html }))} ariaLabel="Règles du deck" placeholder="Comment on pioche, ce qui se passe à la défausse… (« { » pour citer un index)" minHeight="min-h-14" toolbar="always" /></Field>
+
+          <div className="space-y-2">
+            <p className="text-sm font-medium">Cartes <span className="text-xs font-normal text-muted-foreground">({named.length})</span></p>
+            {cards.map((card, index) => <section key={keys[index]} className="grid gap-2 rounded-xl border p-2.5 sm:grid-cols-[auto_minmax(0,1fr)]" style={{ borderColor: `${deck.color}40` }}>
+              <DeckCardView small card={{ ...card, name: card.name || "Sans nom" }} color={deck.color} />
+              <div className="min-w-0 space-y-1.5">
+                <div className="flex items-center gap-1.5">
+                  <span className="w-10 shrink-0 text-center text-xs tabular-nums text-muted-foreground">n° {card.number}</span>
+                  <Input value={card.name} onChange={(event) => setCard(index, { name: event.target.value })} placeholder="Nom de la carte : La mort (Pique)" aria-label={`Nom de la carte ${card.number}`} className="h-8 min-w-0 flex-1 font-medium" />
+                  <Input value={card.icon} onChange={(event) => setCard(index, { icon: event.target.value })} placeholder="Icône : ♠ ou adresse d’image" aria-label={`Icône de la carte ${card.number}`} className="h-8 w-44" />
+                  <Button type="button" variant="ghost" size="icon-sm" className="hover:text-destructive" onClick={() => removeCard(index)} aria-label={`Retirer la carte ${card.number}`}><X /></Button>
+                </div>
+                <RichTextField value={card.effect} onCommit={(html) => setCard(index, { effect: html })} ariaLabel={`Effet de la carte ${card.number}`} placeholder="Effet de la carte (« { » pour citer un index)" minHeight="min-h-12" toolbar="always" />
+              </div>
+            </section>)}
+            <Button type="button" variant="outline" size="sm" className="border-dashed" onClick={addCard}><Plus />Ajouter une carte</Button>
+            {removed.length > 0 && <p className="text-[11px] text-amber-500">{removed.length} carte{removed.length > 1 ? "s" : ""} retirée{removed.length > 1 ? "s" : ""} : supprimée{removed.length > 1 ? "s" : ""} de l’onglet « Cartes » à l’enregistrement.</p>}
+          </div>
+        </div>
+
+        <aside className="min-w-0 space-y-2 lg:sticky lg:top-0 lg:self-start">
+          <p className="text-[11px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Aperçu</p>
+          <ClassDeckPanel deck={{ ...deck, name: deck.name.trim() || "Deck" }} cards={named} state={preview} onChange={setPreview} />
+          <p className="text-[11px] leading-5 text-muted-foreground">Pioche, défausse et retire pour essayer ; rien n’est enregistré tant que tu n’as pas cliqué sur « Enregistrer ».</p>
+        </aside>
+      </div>
+
+      <div className="flex flex-wrap items-center gap-2 border-t pt-4">
+        {error && <p className="text-sm text-destructive">{error}</p>}
+        <span className="ml-auto" />
+        <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
+        <Button type="button" onClick={() => void save()} disabled={saving || !deck.name.trim()}>{saving ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer le deck</Button>
       </div>
     </DialogContent>
   </Dialog>

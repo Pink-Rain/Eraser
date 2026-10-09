@@ -10,7 +10,7 @@
  *
  * Sans dépendance au serveur.
  */
-import { gaugePlacements, inlineRichText, plainTextOf, type GaugePlacement } from "@/lib/class-specifics"
+import { evaluateFormula, gaugePlacements, inlineRichText, plainTextOf, type FormulaValues, type GaugePlacement } from "@/lib/class-specifics"
 import { operationLabel, parseValueChange, type ValueOperation } from "@/lib/state-change"
 
 export const FORMS_TAB = "Formes"
@@ -38,10 +38,36 @@ export function parseFormEffects(raw: string): FormEffect[] {
 }
 export const serializeFormEffects = (effects: FormEffect[]) => effects.filter((effect) => effect.target.trim() && effect.change.trim()).map((effect) => `${effect.target.trim()} : ${effect.change.trim()}`).join("\n")
 
-/** Ce que fait le changement d'un effet : ajout, « = », plancher, plafond ; null s'il est illisible (ou des dés). */
-export function formEffectOperation(change: string): ValueOperation | null {
-  const operation = parseValueChange(change)
-  return operation && operation.kind !== "roll" ? operation : null
+/** Un changement qui lit la fiche ou une jauge : « +{Folie temporaire} * 2 ». */
+export const isFormulaChange = (change: string) => change.includes("{")
+
+/**
+ * Ce que fait le changement d'un effet : ajout, « = », plancher, plafond ; null s'il est
+ * illisible (ou des dés). Une formule (« +{Folie temporaire} * 2 », « ≥{Niveau} ») est
+ * calculée avec `values` (valeurs de la fiche et des jauges) ; sans elles, null.
+ */
+export function formEffectOperation(change: string, values?: FormulaValues): ValueOperation | null {
+  if (!isFormulaChange(change)) {
+    const operation = parseValueChange(change)
+    return operation && operation.kind !== "roll" ? operation : null
+  }
+  const match = change.trim().match(/^(=|≥|>=|≤|<=|\+|-)?\s*(.+)$/)
+  if (!match || !values) return null
+  const result = evaluateFormula(match[2], values)
+  if (!result.ok) return null
+  const operator = match[1] ?? "+"
+  if (operator === "=") return { kind: "set", value: result.value }
+  if (operator === "≥" || operator === ">=") return { kind: "min", value: result.value }
+  if (operator === "≤" || operator === "<=") return { kind: "max", value: result.value }
+  return { kind: "add", amount: operator === "-" ? -result.value : result.value }
+}
+
+/** Le changement tel qu'on le lit : « +10 », ou la formule telle qu'écrite (« +{Folie temporaire} × 2 »). */
+export function formEffectText(change: string, values?: FormulaValues) {
+  const operation = formEffectOperation(change, values)
+  if (!isFormulaChange(change)) return operation ? operationLabel(operation) : change
+  const written = change.trim().replace(/\*/g, "×")
+  return operation ? `${written} (${operationLabel(operation)})` : written
 }
 
 export function emptyFormGroup(classId: string, className: string, order = 0): ClassFormGroup {
@@ -166,12 +192,12 @@ export function withChosenForm(choicesJson: string, groupId: string, formId: str
  * Ce que les formes actives changent sur la fiche, comme des états : un changement par
  * effet et par cible. `targetOf` traduit un nom (« Force ») en cible de la fiche.
  */
-export function formContributions(groups: ClassFormGroup[], chosen: Record<string, string>, targetOf: (name: string) => string | null) {
+export function formContributions(groups: ClassFormGroup[], chosen: Record<string, string>, targetOf: (name: string) => string | null, values?: FormulaValues) {
   return groups.flatMap((group) => {
     const form = activeForm(group, chosen[group.id])
     if (!form) return []
     return form.effects.flatMap((effect) => {
-      const operation = formEffectOperation(effect.change)
+      const operation = formEffectOperation(effect.change, values)
       const target = targetOf(effect.target)
       if (!operation || !target) return []
       return [{
@@ -181,7 +207,7 @@ export function formContributions(groups: ClassFormGroup[], chosen: Record<strin
         target,
         amount: operation.kind === "add" ? operation.amount : 0,
         operation: operation.kind === "add" ? undefined : operation,
-        label: operationLabel(operation),
+        label: isFormulaChange(effect.change) ? formEffectText(effect.change, values) : operationLabel(operation),
         color: form.color,
         fx: [],
       }]

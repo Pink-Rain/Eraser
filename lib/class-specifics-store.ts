@@ -25,14 +25,19 @@ import {
 } from "@/lib/google-sheets"
 import { GAUGE_HEADERS, GAUGE_RICH_HEADERS, GAUGES_TAB, gaugeCells, gaugeFromCells, plainTextOf, type ClassGauge } from "@/lib/class-specifics"
 import { FORM_HEADERS, FORM_RICH_HEADERS, FORMS_TAB, formGroupRows, formGroupsFromRows, type ClassFormGroup } from "@/lib/class-forms"
+import { CARD_HEADERS, CARD_RICH_HEADERS, CARDS_TAB, cardCells, cardFromCells, cardKey, DECK_HEADERS, DECK_RICH_HEADERS, DECKS_TAB, deckCells, deckFromCells, type ClassDeck, type DeckCard } from "@/lib/class-decks"
 
-export type ClassSpecificsTable = { gauges: ClassGauge[]; formGroups: ClassFormGroup[]; sheetUrl: string; formsSheetUrl: string; exists: boolean }
+export type ClassSpecificsTable = { gauges: ClassGauge[]; formGroups: ClassFormGroup[]; decks: ClassDeck[]; cards: DeckCard[]; sheetUrl: string; formsSheetUrl: string; decksSheetUrl: string; cardsSheetUrl: string; exists: boolean }
 /** Nom d'origine, gardé pour les appels existants. */
 export type ClassGaugeTable = ClassSpecificsTable
 
-type TabSpec = { name: string; headers: readonly string[]; rich: readonly string[]; frozenColumns: number; label: string }
-const gaugeTab: TabSpec = { name: GAUGES_TAB, headers: GAUGE_HEADERS, rich: GAUGE_RICH_HEADERS, frozenColumns: 3, label: "GAUGES" }
-const formTab: TabSpec = { name: FORMS_TAB, headers: FORM_HEADERS, rich: FORM_RICH_HEADERS, frozenColumns: 5, label: "FORMS" }
+/** `key` : ce qui identifie une ligne (son ID ; pour une carte, sa classe et son numéro). */
+type TabSpec = { name: string; headers: readonly string[]; rich: readonly string[]; frozenColumns: number; label: string; key: (cell: (header: string) => string) => string }
+const byId = (cell: (header: string) => string) => cell("ID").trim()
+const gaugeTab: TabSpec = { name: GAUGES_TAB, headers: GAUGE_HEADERS, rich: GAUGE_RICH_HEADERS, frozenColumns: 3, label: "GAUGES", key: byId }
+const formTab: TabSpec = { name: FORMS_TAB, headers: FORM_HEADERS, rich: FORM_RICH_HEADERS, frozenColumns: 5, label: "FORMS", key: byId }
+const deckTab: TabSpec = { name: DECKS_TAB, headers: DECK_HEADERS, rich: DECK_RICH_HEADERS, frozenColumns: 3, label: "DECKS", key: byId }
+const cardTab: TabSpec = { name: CARDS_TAB, headers: CARD_HEADERS, rich: CARD_RICH_HEADERS, frozenColumns: 2, label: "CARDS", key: (cell) => cell("Carte").trim() ? cardKey(cell("Classe"), cell("Carte")) : "" }
 
 const quoteTab = (tabName: string) => `'${tabName.replace(/'/g, "''")}'`
 const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").replace(/\s+/g, " ").trim().toLocaleLowerCase("fr")
@@ -126,12 +131,23 @@ export async function listClassSpecifics(options: { create?: boolean; refresh?: 
   const tabs = await spreadsheetTabs(file.id)
   const gaugeSheet = tabs.find((item) => item.title === GAUGES_TAB)
   const formSheet = tabs.find((item) => item.title === FORMS_TAB)
-  const [gaugeRows, formRows] = await Promise.all([readTabFormatted(file.id, gaugeTab, Boolean(gaugeSheet)), readTabFormatted(file.id, formTab, Boolean(formSheet))])
+  const deckSheet = tabs.find((item) => item.title === DECKS_TAB)
+  const cardSheet = tabs.find((item) => item.title === CARDS_TAB)
+  const [gaugeRows, formRows, deckRows, cardRows] = await Promise.all([
+    readTabFormatted(file.id, gaugeTab, Boolean(gaugeSheet)),
+    readTabFormatted(file.id, formTab, Boolean(formSheet)),
+    readTabFormatted(file.id, deckTab, Boolean(deckSheet)),
+    readTabFormatted(file.id, cardTab, Boolean(cardSheet)),
+  ])
   const table: ClassSpecificsTable = {
     gauges: (gaugeRows ?? []).flatMap((row) => gaugeFromCells(row.cell as never, row.rich as never) ?? []),
     formGroups: formGroupsFromRows((formRows ?? []) as never),
+    decks: (deckRows ?? []).flatMap((row) => deckFromCells(row.cell as never, row.rich as never) ?? []),
+    cards: (cardRows ?? []).flatMap((row) => cardFromCells(row.cell as never, row.rich as never) ?? []),
     sheetUrl: tableUrl(file, gaugeSheet?.sheetId),
     formsSheetUrl: tableUrl(file, formSheet?.sheetId),
+    decksSheetUrl: tableUrl(file, deckSheet?.sheetId),
+    cardsSheetUrl: tableUrl(file, cardSheet?.sheetId),
     exists: Boolean(gaugeSheet),
   }
   cache = { expiresAt: Date.now() + 60_000, table }
@@ -162,9 +178,11 @@ async function writeRows(fileId: string, spec: TabSpec, rows: Array<Record<strin
   const sheetId = tab.sheetId
   const isRich = (header: string) => spec.rich.includes(header)
   // Les lignes retirées d'abord, de la plus basse à la plus haute : les autres ne bougent pas avant d'être relues.
+  const keyOfLine = (cell: (header: string) => string) => spec.key(cell)
+  const keyOfRow = (cells: Record<string, string>) => spec.key((header) => cells[header] ?? "")
   if (remove.length) {
     const { lines, cellOf } = await readTabFresh(fileId, spec)
-    const doomed = lines.filter(({ row }) => remove.includes(cellOf(row)("ID").trim())).map((line) => line.rowNumber).sort((a, b) => b - a)
+    const doomed = lines.filter(({ row }) => remove.includes(keyOfLine(cellOf(row)))).map((line) => line.rowNumber).sort((a, b) => b - a)
     if (doomed.length) {
       await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: doomed.map((rowNumber) => ({ deleteDimension: { range: { sheetId, dimension: "ROWS", startIndex: rowNumber - 1, endIndex: rowNumber } } })) }) })
       clearSpreadsheetReadCache(fileId)
@@ -172,9 +190,9 @@ async function writeRows(fileId: string, spec: TabSpec, rows: Array<Record<strin
   }
   if (!rows.length) return
   let { headers, column, lines, cellOf } = await readTabFresh(fileId, spec)
-  const idsIn = () => new Map(lines.map(({ row, rowNumber }) => [cellOf(row)("ID").trim(), rowNumber]))
-  for (const row of rows) if (lines.filter((line) => cellOf(line.row)("ID").trim() === row.ID).length > 1) throw new Error("CLASS_SPECIFIC_DUPLICATE")
-  const missing = rows.filter((row) => !idsIn().has(row.ID))
+  const idsIn = () => new Map(lines.map(({ row, rowNumber }) => [keyOfLine(cellOf(row)), rowNumber]))
+  for (const row of rows) if (lines.filter((line) => keyOfLine(cellOf(line.row)) === keyOfRow(row)).length > 1) throw new Error("CLASS_SPECIFIC_DUPLICATE")
+  const missing = rows.filter((row) => !idsIn().has(keyOfRow(row)))
   if (missing.length) {
     // Les nouvelles lignes : leur texte d'abord, puis leurs cases mises en forme, à leur place relue.
     const width = Math.max(headers.length, ...[...column.values()].map((index) => index + 1))
@@ -187,7 +205,7 @@ async function writeRows(fileId: string, spec: TabSpec, rows: Array<Record<strin
   }
   const rowOf = idsIn()
   for (const cells of rows) {
-    const rowNumber = rowOf.get(cells.ID)
+    const rowNumber = rowOf.get(keyOfRow(cells))
     if (!rowNumber) throw new Error("CLASS_SPECIFIC_NOT_FOUND")
     const writes: RowCellWrite[] = spec.headers.flatMap((header) => {
       const index = column.get(header)
@@ -241,4 +259,37 @@ export async function deleteClassFormGroup(groupId: string) {
     await writeRows(file.id, formTab, [], ids)
   })
   return remember(before, (table) => ({ ...table, formGroups: table.formGroups.filter((item) => item.id !== groupId) }))
+}
+
+/**
+ * Crée ou met à jour un deck et ses cartes : la ligne du deck (onglet « Decks ») et les
+ * lignes de ses cartes (onglet « Cartes », retrouvées par classe et numéro). `removedCards` :
+ * les numéros des cartes retirées par le MJ, supprimées de l'onglet.
+ */
+export async function saveClassDeck(deck: ClassDeck, cards: DeckCard[], removedCards: string[]) {
+  const file = await spellsFile()
+  const before = cache ? cache.table : await listClassSpecifics()
+  const removed = removedCards.filter((number) => !cards.some((card) => card.number === number)).map((number) => cardKey(deck.className, number))
+  await serialized(async () => {
+    await writeRows(file.id, deckTab, [deckCells(deck)])
+    await writeRows(file.id, cardTab, cards.map(cardCells), removed)
+  })
+  const sameClass = (card: DeckCard) => cardKey(card.className, "") === cardKey(deck.className, "")
+  return remember(before, (table) => ({
+    ...table,
+    decks: table.decks.some((item) => item.id === deck.id) ? table.decks.map((item) => item.id === deck.id ? deck : item) : [...table.decks, deck],
+    cards: [...table.cards.filter((card) => !sameClass(card) || (!cards.some((item) => item.number === card.number) && !removedCards.includes(card.number))), ...cards],
+  }))
+}
+
+/** Supprime le réglage d'un deck ; ses cartes restent dans l'onglet « Cartes ». */
+export async function deleteClassDeck(deckId: string) {
+  const file = await spellsFile()
+  const before = cache ? cache.table : await listClassSpecifics()
+  await serialized(async () => {
+    const { lines, cellOf } = await readTabFresh(file.id, deckTab)
+    if (lines.filter(({ row }) => cellOf(row)("ID").trim() === deckId).length !== 1) throw new Error("CLASS_SPECIFIC_NOT_FOUND")
+    await writeRows(file.id, deckTab, [], [deckId])
+  })
+  return remember(before, (table) => ({ ...table, decks: table.decks.filter((item) => item.id !== deckId) }))
 }

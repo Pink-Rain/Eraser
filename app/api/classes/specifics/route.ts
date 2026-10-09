@@ -1,8 +1,9 @@
 import { NextResponse } from "next/server"
 
+import { sanitizeDeck } from "@/lib/class-decks"
 import { sanitizeFormGroup } from "@/lib/class-forms"
 import { sanitizeGauge } from "@/lib/class-specifics"
-import { deleteClassFormGroup, deleteClassGauge, listClassSpecifics, saveClassFormGroup, saveClassGauge } from "@/lib/class-specifics-store"
+import { deleteClassDeck, deleteClassFormGroup, deleteClassGauge, listClassSpecifics, saveClassDeck, saveClassFormGroup, saveClassGauge } from "@/lib/class-specifics-store"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -29,17 +30,29 @@ export async function GET(request: Request) {
  * est donné à une nouvelle) ; { action: "delete-gauge", id } la supprime.
  * { action: "save-form-group", group } / { action: "delete-form-group", id } : un groupe de
  * formes (une ligne par forme dans l'onglet « Formes »).
+ * { action: "save-deck", deck, cards, removedCards } / { action: "delete-deck", id } : un deck
+ * (onglet « Decks ») et ses cartes (onglet « Cartes »).
  */
 export async function POST(request: Request) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: unknown; gauge?: unknown; group?: unknown; id?: unknown }
+    const body = (await request.json()) as { action?: unknown; gauge?: unknown; group?: unknown; id?: unknown; deck?: unknown; cards?: unknown; removedCards?: unknown }
     const newId = () => crypto.randomUUID().replace(/-/g, "").slice(0, 8).toUpperCase()
     if (body.action === "save-form-group") {
       const group = sanitizeFormGroup(body.group, newId)
       if (!group) throw new Error("CLASS_FORMS_INVALID")
       return NextResponse.json({ ...(await saveClassFormGroup(group)), canEdit: true, saved: group.id })
+    }
+    if (body.action === "save-deck") {
+      const result = sanitizeDeck({ deck: body.deck, cards: body.cards }, newId)
+      if (!result) throw new Error("CLASS_DECK_INVALID")
+      const removed = Array.isArray(body.removedCards) ? body.removedCards.filter((item): item is string => typeof item === "string").slice(0, 200) : []
+      return NextResponse.json({ ...(await saveClassDeck(result.deck, result.cards, removed)), canEdit: true, saved: result.deck.id })
+    }
+    if (body.action === "delete-deck") {
+      if (typeof body.id !== "string" || !body.id.trim()) throw new Error("CLASS_DECK_INVALID")
+      return NextResponse.json({ ...(await deleteClassDeck(body.id.trim())), canEdit: true })
     }
     if (body.action === "delete-form-group") {
       if (typeof body.id !== "string" || !body.id.trim()) throw new Error("CLASS_FORMS_INVALID")
@@ -61,6 +74,7 @@ export async function POST(request: Request) {
     console.error("CLASS_SPECIFICS_SAVE_FAILED", code)
     const message = code === "CLASS_GAUGE_INVALID" ? "Cette jauge n’a pas de nom ou de classe."
       : code === "CLASS_FORMS_INVALID" ? "Ces formes n’ont pas de classe, ou aucune forme nommée."
+      : code === "CLASS_DECK_INVALID" ? "Ce deck n’a pas de classe."
       : code === "CLASS_SPECIFIC_DUPLICATE" ? "Plusieurs lignes portent le même ID dans l’onglet des spécificités : corrige-les dans Google Sheets."
       : code === "CLASS_SPECIFIC_NOT_FOUND" ? "Cette spécificité n’est plus dans son onglet de Google Sheets."
       : code === "CLASS_GAUGE_DUPLICATE" ? "Plusieurs lignes de l’onglet « Jauges » portent cet ID : corrige-les dans Google Sheets."

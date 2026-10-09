@@ -4,14 +4,18 @@ import { Check, Layers } from "lucide-react"
 
 import { IndexRichText } from "@/components/eraser/index-references"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
-import { activeForm, formEffectOperation, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
-import { operationLabel } from "@/lib/state-change"
+import { activeForm, formEffectOperation, formEffectText, isFormulaChange, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
+import type { FormulaValues } from "@/lib/class-specifics"
 
-/** Les effets d'une forme, lisibles : « Force +10 », « Armure physique ≥5 ». */
-export function FormEffectsList({ form, className = "" }: { form: ClassForm; className?: string }) {
+/**
+ * Les effets d'une forme, lisibles : « Force +10 », « Armure physique ≥5 », « Force
+ * +{Folie temporaire} × 2 (+6) ». `values` : de quoi calculer les formules (la fiche).
+ */
+export function FormEffectsList({ form, values, className = "" }: { form: ClassForm; values?: FormulaValues; className?: string }) {
   const effects = form.effects.flatMap((effect) => {
-    const operation = formEffectOperation(effect.change)
-    return operation ? [{ target: effect.target, label: operationLabel(operation), negative: operation.kind === "add" && operation.amount < 0 }] : []
+    const operation = formEffectOperation(effect.change, values)
+    if (!operation && !isFormulaChange(effect.change)) return []
+    return [{ target: effect.target, label: formEffectText(effect.change, values), negative: Boolean(operation && operation.kind === "add" && operation.amount < 0) }]
   })
   if (!effects.length) return null
   return <div className={`flex flex-wrap gap-1 ${className}`}>
@@ -26,7 +30,7 @@ export function FormEffectsList({ form, className = "" }: { form: ClassForm; cla
  * active à sa couleur. Au survol d'une forme : ses effets et sa description. `onChoose`
  * absent : en lecture (aperçu).
  */
-export function ClassFormSwitcher({ group, chosen, onChoose, compact = false }: { group: ClassFormGroup; chosen?: string; onChoose?: (form: ClassForm) => void; compact?: boolean }) {
+export function ClassFormSwitcher({ group, chosen, onChoose, compact = false, values }: { group: ClassFormGroup; chosen?: string; onChoose?: (form: ClassForm) => void; compact?: boolean; values?: FormulaValues }) {
   const current = activeForm(group, chosen)
   if (!current) return null
   const color = current.color
@@ -50,13 +54,13 @@ export function ClassFormSwitcher({ group, chosen, onChoose, compact = false }: 
             <HoverCardTrigger asChild>{button}</HoverCardTrigger>
             <HoverCardContent side="top" align="end" collisionPadding={12} className="max-h-[min(28rem,70vh)] w-80 space-y-2 overflow-y-auto rounded-xl p-3 text-xs leading-5" style={{ borderColor: `${form.color}66` }}>
               <p className="font-display text-sm font-semibold" style={{ color: form.color }}>{form.name}{active && <span className="ml-2 text-[10px] font-normal uppercase tracking-[.14em] text-muted-foreground">active</span>}</p>
-              <FormEffectsList form={form} />
+              <FormEffectsList form={form} values={values} />
               {form.description && <IndexRichText html={form.description} />}
             </HoverCardContent>
           </HoverCard> : <span key={form.id}>{button}</span>
         })}
       </div>
     </div>
-    {!compact && current.effects.length > 0 && <FormEffectsList form={current} className="mt-2" />}
+    {!compact && current.effects.length > 0 && <FormEffectsList form={current} values={values} className="mt-2" />}
   </div>
 }

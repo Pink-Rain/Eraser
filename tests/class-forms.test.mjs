@@ -75,3 +75,22 @@ test("Une jauge liée à des formes ne s'affiche que dans celles-ci", () => {
   assert.equal(cells["Remise à zéro en quittant la forme"], "Oui");
   assert.deepEqual(specifics.gaugeFromCells((header) => cells[header]), gauge);
 });
+
+test("Effet proportionnel à une jauge : « pour chaque point de folie, +2 en Force »", () => {
+  const group = forms.sanitizeFormGroup({
+    classId: "CLA-1", className: "Adepte", name: "Forme",
+    forms: [
+      { name: "Humaine", isDefault: true, effects: [] },
+      { name: "Possédée", effects: [{ target: "Force", change: "+{Folie temporaire} * 2" }, { target: "Discrétion", change: "-{folie temporaire}" }, { target: "Armure physique", change: "≥{Niveau}" }, { target: "Charisme", change: "+{Inconnue}" }] },
+    ],
+  }, newId);
+  const targetOf = (name) => ({ Force: "carac:Force", "Discrétion": "comp:Discretion", "Armure physique": "armure-physique", Charisme: "carac:Charisme" })[name] ?? null;
+  const values = specifics.formulaValues([["Folie temporaire", 3], ["Niveau", 5]]);
+  const changes = forms.formContributions([group], { [group.id]: group.forms[1].id }, targetOf, values);
+  assert.deepEqual(changes.map((change) => [change.target, change.amount, change.operation?.kind ?? null]), [["carac:Force", 6, null], ["comp:Discretion", -3, null], ["armure-physique", 0, "min"]]);
+  assert.equal(changes[0].label, "+{Folie temporaire} × 2 (+6)");
+  // Sans valeurs (aperçu), une formule ne change rien mais reste lisible.
+  assert.equal(forms.formEffectOperation("+{Folie temporaire} * 2"), null);
+  assert.equal(forms.formEffectText("+{Folie temporaire} * 2"), "+{Folie temporaire} × 2");
+  assert.deepEqual(forms.formEffectOperation("+10"), { kind: "add", amount: 10 });
+});

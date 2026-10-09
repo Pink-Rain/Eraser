@@ -20,6 +20,8 @@ import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges
 import { formulaValues, gaugesOfClass, gaugeStatesOf, gaugeVisibleIn, resolveGauge, withGaugeState, type ClassGauge, type ResolvedGauge } from "@/lib/class-specifics"
 import { activeForm, chosenFormsOf, formContributions, formGroupsOfClass, withChosenForm, type ClassForm, type ClassFormGroup } from "@/lib/class-forms"
 import { ClassFormSwitcher } from "@/components/eraser/class-form-switcher"
+import { ClassDeckPanel } from "@/components/eraser/class-deck-panel"
+import { cardsOfClass, deckStatesOf, decksOfClass, withDeckState, type DeckState } from "@/lib/class-decks"
 
 import { Button } from "@/components/ui/button"
 import { chooseClassSpell, ClassProgression, dropRanksAbove, knownSpellsForCharacter, newSpellsKey, parseClassChoices, pendingRankSteps, rankLossOf, selectedCharacterClasses, takeRankBonus, type RankBonusTaken, type RankLoss } from "@/components/eraser/class-progression"
@@ -625,16 +627,47 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const targetOfName = useCallback((name: string) => modifierTargetIdForName(catalog, name), [catalog])
   // Spécificités de classe (jauges, formes) des classes du personnage. Les formes actives
   // changent la fiche comme des états : leurs effets passent par les mêmes modificateurs.
-  const { gauges: allClassGauges, formGroups: allFormGroups } = useClassGauges()
+  const { gauges: allClassGauges, formGroups: allFormGroups, decks: allDecks, cards: allDeckCards } = useClassGauges()
   const specificClasses = useMemo(() => selectedCharacterClasses(values[2] || "", availableClasses), [availableClasses, values])
   const characterFormGroups = useMemo(() => specificClasses.flatMap((item) => formGroupsOfClass(allFormGroups, item)), [allFormGroups, specificClasses])
   const chosenForms = useMemo(() => chosenFormsOf(values[characterClassChoicesIndex] || ""), [values])
-  const formChanges = useMemo(() => formContributions(characterFormGroups, chosenForms, targetOfName), [characterFormGroups, chosenForms, targetOfName])
+  const characterGauges = useMemo(() => specificClasses.flatMap((item) => gaugesOfClass(allClassGauges, item)), [allClassGauges, specificClasses])
+  const gaugeStates = useMemo(() => gaugeStatesOf(values[characterClassChoicesIndex] || ""), [values])
+  /** Les valeurs de la fiche telles qu'elles s'affichent avec ces modificateurs, pour les formules. */
+  const sheetFormulaValues = useCallback((index: ReturnType<typeof indexInventoryModifiers>) => {
+    const targetAt = new Map(modifierTargets.filter((target) => target.valueIndex >= 0).map((target) => [target.valueIndex, target.id]))
+    const shown = (cell: number) => {
+      if (cell < 0) return Number.NaN
+      const id = targetAt.get(cell)
+      return sheetNumber(totalWithModifier(values[cell], id ? modifierTotalFor(index, id) : 0, "0", id ? modifierRuleFor(index, id) : undefined))
+    }
+    return formulaValues([
+      ...catalog.characteristics.map((item) => [item.name, shown(layout.index(item.key))] as [string, number]),
+      ...catalog.skills.map((skill) => [skill.name, shown(layout.index(skill.key, "Total de stats"))] as [string, number]),
+      ["Niveau", Math.max(0, Math.trunc(Number(values[3]) || 0))],
+      ["Points de vie actuels", sheetNumber(totalWithModifier(values[9], modifierTotalFor(index, CURRENT_LIFE_TARGET_ID), "0", modifierRuleFor(index, CURRENT_LIFE_TARGET_ID)))],
+      ["Points de vie max", shown(10)],
+    ])
+  }, [catalog, layout, modifierTargets, values])
+  // Objets et états posés à la main : la base sur laquelle les formes s'ajoutent.
+  const postedIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), stateContributions(statesCatalog.catalog, postedStates, targetOfName)), [inventory, postedStates, statesCatalog.catalog, targetOfName])
+  /**
+   * Ce qu'un effet de forme peut lire (« +{Folie temporaire} * 2 ») : la fiche sans les
+   * formes, et la valeur de chaque jauge. Les jauges d'abord, les formes ensuite : pas de
+   * boucle entre les deux.
+   */
+  const formFormulaValues = useMemo(() => {
+    if (!characterFormGroups.length) return formulaValues([])
+    const base = sheetFormulaValues(postedIndex)
+    const gaugesNow = formulaValues(characterGauges.map((gauge) => [gauge.name, resolveGauge(gauge, base, gaugeStates[gauge.id]).current]))
+    return new Map([...base, ...gaugesNow])
+  }, [characterFormGroups.length, characterGauges, gaugeStates, postedIndex, sheetFormulaValues])
+  const formChanges = useMemo(() => formContributions(characterFormGroups, chosenForms, targetOfName, formFormulaValues), [characterFormGroups, chosenForms, formFormulaValues, targetOfName])
   const activeFormNames = useMemo(() => characterFormGroups.flatMap((group) => activeForm(group, chosenForms[group.id])?.name ?? []), [characterFormGroups, chosenForms])
   // Coma et Mort se posent seuls, d'après la vie (avec les états posés à la main), et partent
   // quand elle remonte. Ils ne sont pas enregistrés dans la fiche.
   const autoLife = useMemo(() => {
-    const posted = withStateModifiers(indexInventoryModifiers(inventory?.containers || []), [...stateContributions(statesCatalog.catalog, postedStates, targetOfName), ...formChanges])
+    const posted = withStateModifiers(postedIndex, formChanges)
     const generalId = modifierTargets.find((target) => target.valueIndex === 10)?.id ?? ""
     const state = characterLifeState(
       totalWithModifier(values[9], modifierTotalFor(posted, CURRENT_LIFE_TARGET_ID), "", modifierRuleFor(posted, CURRENT_LIFE_TARGET_ID)),
@@ -646,7 +679,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     // L'ancien filtre (gris, rouge) reste tant que l'état n'existe pas ou n'a aucun effet.
     const styledByState = Boolean(definition && definition.effects[0].length > 0)
     return { state, auto, styledByState }
-  }, [formChanges, inventory, modifierTargets, postedStates, statesCatalog.catalog, targetOfName, values])
+  }, [formChanges, modifierTargets, postedIndex, postedStates, statesCatalog.catalog, values])
   const characterStates = useMemo(() => [...postedStates, ...autoLife.auto], [autoLife.auto, postedStates])
   const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, targetOfName), [characterStates, statesCatalog.catalog, targetOfName])
   const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), [...stateChanges, ...formChanges]), [formChanges, inventory, stateChanges])
@@ -874,19 +907,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   // Spécificités de classe : les jauges des classes du personnage. Une formule lit les
   // valeurs de la fiche telles qu'elles s'affichent (objets et états compris).
-  const characterGauges = useMemo(() => assignedClasses.flatMap((item) => gaugesOfClass(allClassGauges, item)), [allClassGauges, assignedClasses])
-  const gaugeValues = useMemo(() => {
-    if (!characterGauges.length) return formulaValues([])
-    const shown = (index: number) => index < 0 ? Number.NaN : sheetNumber(totalWithModifier(values[index], modifiersByValueIndex.get(index)?.total || 0, "0", modifiersByValueIndex.get(index)?.rule))
-    return formulaValues([
-      ...catalog.characteristics.map((item) => [item.name, shown(layout.index(item.key))] as [string, number]),
-      ...catalog.skills.map((skill) => [skill.name, shown(layout.index(skill.key, "Total de stats"))] as [string, number]),
-      ["Niveau", characterLevel],
-      ["Points de vie actuels", sheetNumber(totalWithModifier(values[9], modifierTotalFor(modifierIndex, CURRENT_LIFE_TARGET_ID), "0", modifierRuleFor(modifierIndex, CURRENT_LIFE_TARGET_ID)))],
-      ["Points de vie max", shown(10)],
-    ])
-  }, [catalog, characterGauges.length, characterLevel, layout, modifierIndex, modifiersByValueIndex, values])
-  const gaugeStates = useMemo(() => gaugeStatesOf(classChoicesValue), [classChoicesValue])
+  // Les jauges affichées lisent la fiche avec tout : objets, états et formes actives.
+  const gaugeValues = useMemo(() => characterGauges.length ? sheetFormulaValues(modifierIndex) : formulaValues([]), [characterGauges.length, modifierIndex, sheetFormulaValues])
   const resolvedGauges = useMemo(() => characterGauges.map((gauge) => resolveGauge(gauge, gaugeValues, gaugeStates[gauge.id])), [characterGauges, gaugeStates, gaugeValues])
   // Ce que le joueur change part de la dernière version de la case : rien d'autre n'y est touché.
   const setGaugeState = (gaugeId: string, patch: Parameters<typeof withGaugeState>[2]) => void commit(characterClassChoicesIndex, withGaugeState(latestValues.current[characterClassChoicesIndex] || "", gaugeId, patch))
@@ -902,7 +924,17 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     const reset = characterGauges.filter((gauge) => gauge.resetOnLeave && previous && gaugeVisibleIn(gauge, [previous.name]) && !gaugeVisibleIn(gauge, [form.name])).map((gauge) => gauge.id)
     void commit(characterClassChoicesIndex, withChosenForm(latestValues.current[characterClassChoicesIndex] || "", group.id, form.id, reset))
   }
-  const formsAt = (placement: ClassGauge["placement"], compact = false) => characterFormGroups.filter((group) => group.placement === placement).map((group) => <ClassFormSwitcher key={group.id} group={group} chosen={chosenForms[group.id]} compact={compact} onChoose={(form) => chooseForm(group, form)} />)
+  // Les decks des classes du personnage, avec leurs cartes (onglet « Cartes »).
+  const characterDecks = useMemo(() => specificClasses.flatMap((item) => decksOfClass(allDecks, item).map((deck) => ({ deck, cards: cardsOfClass(allDeckCards, item.name) }))), [allDeckCards, allDecks, specificClasses])
+  const deckStates = useMemo(() => deckStatesOf(values[characterClassChoicesIndex] || ""), [values])
+  /** Une carte déplacée : la case des sorts choisis repart de sa dernière version. */
+  const commitRef = useRef(commit)
+  useEffect(() => { commitRef.current = commit })
+  const setDeckState = useCallback((deckId: string, state: DeckState) => {
+    void commitRef.current(characterClassChoicesIndex, withDeckState(latestValues.current[characterClassChoicesIndex] || "", deckId, state))
+  }, [])
+  const decksAt = (placement: ClassGauge["placement"]) => characterDecks.filter(({ deck }) => deck.placement === placement).map(({ deck, cards }) => <ClassDeckPanel key={deck.id} deck={deck} cards={cards} state={deckStates[deck.id] ?? { hand: [], discard: [], removed: [] }} onChange={(state) => setDeckState(deck.id, state)} />)
+  const formsAt = (placement: ClassGauge["placement"], compact = false) => characterFormGroups.filter((group) => group.placement === placement).map((group) => <ClassFormSwitcher key={group.id} group={group} chosen={chosenForms[group.id]} compact={compact} values={formFormulaValues} onChoose={(form) => chooseForm(group, form)} />)
   // Recomputing this per keystroke was the most expensive step in the render (it
   // scans every known spell against every skill row via linkedAbilities below).
   const knownClassSpells = useMemo(
@@ -1323,7 +1355,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const secondaryTiles = secondaries.flatMap((item) => {
     const index = layout.index(item.key)
     if (index < 0) return []
-    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; const lifeGauges = gaugesAt("vie"); const lifeForms = formsAt("vie", true); const lifeExtras = lifeGauges.length + lifeForms.length; const lifeCard = <ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell>; return [<div key={item.key} className={`relative rounded-xl xl:col-span-3 xl:row-span-2 ${lifeExtras ? "flex flex-col gap-1.5" : ""}`}><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} />{lifeExtras ? <><div className="min-h-0 flex-1">{lifeCard}</div><div className="space-y-1.5">{lifeForms}{lifeGauges.map((resolved) => gaugeView(resolved, true))}</div></> : lifeCard}</div>] }
+    if (item.key === "Vie totale") { const lifeColor = stateTint(linkedForValue(10)) || stateTint(currentLifeItems) || item.color || "#6e9ee8"; const lifeGauges = gaugesAt("vie"); const lifeForms = formsAt("vie", true); const lifeDecks = decksAt("vie"); const lifeExtras = lifeGauges.length + lifeForms.length + lifeDecks.length; const lifeCard = <ModifierHoverShell items={[...currentLifeItems, ...linkedForValue(10)]} toggle={slotToggle} title={item.name} color={lifeColor} total={totalWithModifier(values[10], modifierForValue(10), "0", ruleForValue(10))}><LifePool label={item.name} help={secondaryHelp(item.key)} color={lifeColor} current={values[9]} total={values[10]} commit={commit} modifier={modifierForValue(10)} rule={ruleForValue(10)} currentModifier={currentLifeModifier} currentRule={currentLifeRule} /></ModifierHoverShell>; return [<div key={item.key} className={`relative rounded-xl xl:col-span-3 xl:row-span-2 ${lifeExtras ? "flex flex-col gap-1.5" : ""}`}><FxOverlay fx={stateFxOf([...linkedForValue(10), ...currentLifeItems])} />{lifeExtras ? <><div className="min-h-0 flex-1">{lifeCard}</div><div className="space-y-1.5">{lifeForms}{lifeGauges.map((resolved) => gaugeView(resolved, true))}{lifeDecks}</div></> : lifeCard}</div>] }
     if (item.key === "Classe sociale") return [listTile(item.key, item.name, index, socialClasses, item.color || "#75a9c8")]
     if (item.key === "Alignement") return [listTile(item.key, item.name, index, alignments, item.color || "#c37998")]
     if (item.key === "Rapidité") return [<div key={item.key} className="xl:col-span-3"><CalculatedSecondaryCard fieldIndex={21} label={item.name} help={secondaryHelp(item.key)} color={item.color || "#e8aa62"} values={values} commit={commit} modifier={modifierForValue(21)} rule={ruleForValue(21)} linkedItems={linkedForValue(21)} toggle={slotToggle} /></div>]
@@ -1463,7 +1495,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       const progression = <ClassProgression classes={assignedClasses} spells={availableClassSpells} level={currentLevel} characterLevel={characterLevel} value={classChoicesValue} onCommit={(value) => commit(characterClassChoicesIndex, value)} loading={classCatalogLoading} error={classCatalogError} ownerId={character.id} onOpenChoice={() => setSpellChoiceOpen(true)} onSpellRemoved={() => setSpellChoiceWanted(true)} />
       const spellGauges = gaugesAt("sorts")
       const spellForms = formsAt("sorts")
-      return spellGauges.length || spellForms.length ? <div className="space-y-4"><div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{spellForms}{spellGauges.map((resolved) => gaugeView(resolved))}</div>{progression}</div> : progression
+      const spellDecks = decksAt("sorts")
+      return spellGauges.length || spellForms.length || spellDecks.length ? <div className="space-y-4">{(spellGauges.length > 0 || spellForms.length > 0) && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{spellForms}{spellGauges.map((resolved) => gaugeView(resolved))}</div>}{spellDecks}{progression}</div> : progression
     }
     if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
     if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
@@ -1542,6 +1575,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
     {secondaryCharacteristics && <div className="mt-6">{secondaryCharacteristics}</div>}
     {(gaugesAt("bandeau").length > 0 || formsAt("bandeau").length > 0) && <div className="mt-2 grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{formsAt("bandeau")}{gaugesAt("bandeau").map((resolved) => gaugeView(resolved))}</div>}
+    {decksAt("bandeau").length > 0 && <div className="mt-2 space-y-2">{decksAt("bandeau")}</div>}
 
     <Tabs value={activeCharacterTab.id} onValueChange={setActiveTab} className="mt-9 rounded-2xl border border-[#74664f3d] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.018))] p-2 shadow-sm">
       <div className="overflow-hidden">
