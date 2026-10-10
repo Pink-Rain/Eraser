@@ -8067,18 +8067,22 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
 
 
 /** « Actualiser » : tout ce qui a été lu dans Google est relu à la prochaine demande. */
-onForgetGoogleData(async () => {
+onForgetGoogleData(async (scope) => {
+  // Ce qui change pendant une partie : toujours relu.
   rangeReadCache.clear()
-  tabsCache.clear()
   // L'inventaire (et sa lecture partagée) : relu à la prochaine demande.
   clearInventoryWorkbookCache()
   namedColumnsCache.clear()
   sheetHeaderCache.clear()
   characterColumnsCache = null
   characterSheetCache.clear()
-  clearObjectIndexTableCache()
   // Personnages et campagnes : resynchronisés en arrière-plan (la page n'attend pas).
   if (identityIndexSyncedAt) identityIndexSyncedAt = 1
+  // Les références (onglets des classeurs, catalogue des objets, classes) : seulement pour
+  // l'administrateur et le MJ ; chez un joueur, elles se relisent d'elles-mêmes.
+  if (scope !== "all") return
+  tabsCache.clear()
+  clearObjectIndexTableCache()
   // Les classes : relues dans Google à la prochaine demande, sans vider la liste connue.
   await forgetClassIndexSync()
 })

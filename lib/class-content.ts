@@ -1569,8 +1569,9 @@ export async function addRankBonusRow() {
   return listRankBonuses({ refresh: true })
 }
 
-// « Actualiser » : sorts, présentations et bonus de rang relus dans Google.
-onForgetGoogleData(() => {
+// « Actualiser » (administrateur, MJ) : sorts, présentations et bonus de rang relus dans Google.
+onForgetGoogleData((scope) => {
+  if (scope !== "all") return
   invalidateClassContentCaches()
   googleFirstUntil = Date.now() + 60_000
 })

@@ -435,7 +435,7 @@ export function AppNavButtons() {
   return <div className="flex shrink-0 items-center gap-0.5" style={noDragStyle} onMouseDown={(event) => event.stopPropagation()}>
     <button type="button" className={navButton} disabled={!value.canGoBack} onClick={value.back} aria-label="Page précédente" title="Page précédente (Alt+←)"><ArrowLeft className="size-4" /></button>
     <button type="button" className={navButton} disabled={!value.canGoForward} onClick={value.forward} aria-label="Page suivante" title="Page suivante (Alt+→)"><ArrowRight className="size-4" /></button>
-    <button type="button" className={navButton} onClick={value.reload} disabled={value.refreshing} aria-busy={value.refreshing} aria-label="Actualiser" title="Actualiser (F5) : relit toutes les données dans Google"><RotateCw className={`size-3.5 ${value.refreshing ? "animate-spin" : ""}`} /></button>
+    <button type="button" className={navButton} onClick={value.reload} disabled={value.refreshing} aria-busy={value.refreshing} aria-label="Actualiser" title="Actualiser (F5) : relit les données dans Google"><RotateCw className={`size-3.5 ${value.refreshing ? "animate-spin" : ""}`} /></button>
   </div>
 }
 

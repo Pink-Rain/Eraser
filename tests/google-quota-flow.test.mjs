@@ -102,3 +102,34 @@ test("« Actualiser » fait relire Google : une case changée ailleurs apparaît
   assert.equal(response.status, 200);
   assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor le Vieux"]]);
 });
+
+test("« Actualiser » d'un joueur : la partie est relue, les réglages des index restent en mémoire", async () => {
+  // Cinq joueurs qui actualisent en même temps pour voir ce que le MJ vient d'ajouter ne
+  // relisent pas toutes les règles : seulement ce qui change pendant une partie.
+  const { SCHEMA_TAB } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+  const schema = await vite.ssrLoadModule("/lib/index-schema.ts");
+  google.addSpreadsheet("partie", [
+    { title: "Feuille", grid: [["ID", "PV"], ["1", "10"]] },
+    { title: SCHEMA_TAB, grid: [["Onglet", "Colonne", "Origine", "Type", "État", "Supprimé le"], ["Feuille", "PV", "", "", "", ""]] },
+  ]);
+  await sheets.readRange("partie", "Feuille!A1:B2");
+  assert.equal((await schema.readSchema("partie")).length, 1);
+  google.grid("partie", "Feuille")[1][1] = "7";
+  const before = google.world.calls.length;
+  const previous = session.account;
+  session.account = { ...previous, uid: "joueur-test", role: "joueur", accountRole: "joueur" };
+  try {
+    const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
+    assert.equal((await refresh.POST()).status, 200);
+  } finally {
+    session.account = previous;
+  }
+  assert.deepEqual(await sheets.readRange("partie", "Feuille!A1:B2"), [["ID", "PV"], ["1", "7"]]);
+  assert.equal((await schema.readSchema("partie")).length, 1);
+  assert.equal(google.world.calls.length - before, 1, "les réglages des index ont été relus pour un joueur");
+  // L'administrateur, lui, relit tout (il modifie parfois les règles directement dans Google).
+  const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
+  await refresh.POST();
+  await schema.readSchema("partie");
+  assert.ok(google.world.calls.length - before > 1);
+});

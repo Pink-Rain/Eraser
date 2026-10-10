@@ -228,5 +228,5 @@ export async function createCustomIndex(input: { title: string; description: str
   return { entry, linked: Boolean(linked) }
 }
 
-// « Actualiser » : la liste des index créés depuis Eraser est relue dans Google.
-onForgetGoogleData(() => { registryCache = null })
+// « Actualiser » (administrateur, MJ) : la liste des index créés depuis Eraser est relue dans Google.
+onForgetGoogleData((scope) => { if (scope === "all") registryCache = null })

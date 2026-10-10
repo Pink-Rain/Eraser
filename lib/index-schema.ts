@@ -164,5 +164,5 @@ export function upsertEntry(entries: SchemaEntry[], tab: string, column: string,
   return entries
 }
 
-// « Actualiser » : les réglages de colonnes sont relus dans Google.
-onForgetGoogleData(() => { cache.clear() })
+// « Actualiser » (administrateur, MJ) : les réglages de colonnes sont relus dans Google.
+onForgetGoogleData((scope) => { if (scope === "all") cache.clear() })

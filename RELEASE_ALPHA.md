@@ -1,41 +1,29 @@
-# Eraser 0.1.1-alpha.180 — Presque trois fois moins de requêtes Google par joueur
+# Eraser 0.1.1-alpha.181 — Tout le monde actualise en même temps
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Pourquoi c'était lent à cinq
+## Cinq joueurs sur la même page au même moment
 
-Toutes les installations d'Eraser utilisent le même compte Google, et Google limite le nombre
-de requêtes par minute. Les versions 176 à 178 font patienter les requêtes ensemble quand
-Google refuse, donnent à chaque installation son propre identifiant de quota et partagent la
-liste des classes. Restait la quantité : mesurée sur une copie complète des feuilles, avec un
-joueur qui navigue entre sa fiche et la campagne :
+Testé avec cinq installations séparées, une par joueur, qui partagent un seul quota Google
+(le cas le plus défavorable) :
 
-| Situation | alpha.179 | alpha.180 |
+| Situation | Avant | Maintenant |
 |---|---|---|
-| Un joueur en séance | 12,5 requêtes / minute | 4,6 requêtes / minute |
-| Nouvelle installation (accueil, création, fiche, campagne) | 71 requêtes | 52 requêtes |
-| Relancer Eraser | 54 requêtes | 28 requêtes |
+| Les cinq passent de leur fiche à la campagne en même temps | 20 requêtes, aucun refus | inchangé |
+| Les cinq actualisent la campagne (F5) en même temps | 50 requêtes, aucun refus | inchangé |
+| Les cinq actualisent leur fiche (F5) en même temps | 65 requêtes, 5 refus de Google | **49 requêtes, aucun refus** |
 
-## Ce qui change
+Dans tous les cas, la page s'affiche en environ une seconde.
 
-- **Inventaire.** Il faisait à lui seul la moitié des requêtes : chaque fiche ouverte le
-  relisait deux fois. Il est maintenant lu une seule fois et gardé deux minutes. Un objet reçu
-  d'un autre joueur le fait relire aussitôt, et il apparaît tout de suite.
-- **Index (caractéristiques, états, peuples…).** Leurs onglets sont lus en une seule requête.
-  La liste des onglets n'est plus redemandée trois fois de suite, et les colonnes ne sont plus
-  revérifiées à chaque démarrage (une fois toutes les 12 h, ou quand une version en attend
-  de nouvelles).
-- **Spécificités de classe.** Les quatre onglets (jauges, formes, decks, cartes) sont lus en
-  une seule requête.
-- **Personnages et campagnes des autres installations.** Ils sont resynchronisés toutes les
-  5 minutes au lieu de 2. Les pages qui ont besoin du tout dernier état relisent toujours
-  d'elles-mêmes.
-- **Création de personnage.** Si Google est saturé, la liste des classes est redemandée toute
-  seule, toutes les 15 secondes, sans avoir à cliquer sur « Réessayer ».
+## « Actualiser » d'un joueur relit ce qui change pendant la partie
 
-## Pour l'administrateur
+Quand un joueur actualise (bouton ou F5), Eraser relit tout ce qui bouge pendant une partie :
+fiches, inventaires, campagne, personnages, PNJ.
 
-Dans **Administration → Google Drive**, section « Lenteurs », s'affichent maintenant :
+Les règles (classes, sorts, spécificités de classe, bonus de rang, index et leurs réglages)
+restent en mémoire et se mettent à jour d'elles-mêmes au bout de quelques minutes. Cinq
+joueurs qui actualisent ensemble, pour voir ce que le MJ vient d'ajouter, ne relisent donc
+plus toutes les règles en même temps.
 
-- le nombre de requêtes Google faites par cet ordinateur dans la dernière minute ;
-- le nombre de refus de Google, s'il y en a eu.
+L'administrateur et le MJ, eux, relisent toujours tout en actualisant : ce sont eux qui
+modifient les règles, parfois directement dans Google Sheets.

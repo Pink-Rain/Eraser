@@ -1997,4 +1997,9 @@ export function purgeWorldIndexTrash(key: WorldIndexKey, tab: string, column: st
 }
 
 // « Actualiser » : les index sont relus dans Google (le dernier lu reste le repli en cas d'échec).
-onForgetGoogleData(() => { worldIndexCache.clear() })
+// Pour un joueur, seulement les index d'entités (personnages, campagnes, PNJ…) : ils changent
+// pendant la partie ; les autres se relisent d'eux-mêmes au bout de quelques minutes.
+onForgetGoogleData((scope) => {
+  if (scope === "all") worldIndexCache.clear()
+  else for (const key of [...worldIndexCache.keys()]) if (isEntityWorldIndexKey(key)) worldIndexCache.delete(key)
+})
