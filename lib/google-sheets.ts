@@ -37,6 +37,8 @@ import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAcc
 import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
 import { sharedClassCatalog } from "@/lib/class-catalog-share"
 import { onForgetGoogleData } from "@/lib/data-refresh"
+import { freshAfter, mustReread } from "@/lib/request-freshness"
+import { markSpreadsheetChanged, sharedReadsActive, sharedSheetRead } from "@/lib/shared-reads"
 import { traced } from "@/lib/perf-trace"
 import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { listAccounts } from "@/lib/site-auth"
@@ -309,13 +311,20 @@ const IDENTITY_INDEX_SYNC_TTL_MS = 5 * 60_000
 const IDENTITY_INDEX_SYNC_WAIT_MS = 2_500
 const IDENTITY_INDEX_RETRY_MS = 20_000
 
-async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: number } = {}) {
+/**
+ * `exact` : l'état de Google à l'instant (un personnage introuvable, un accès à vérifier).
+ * Sinon, les feuilles peuvent venir de la copie partagée d'une autre installation (moins de
+ * 45 s, invalidée par toute écriture d'Eraser) : cinq installations qui démarrent ensemble
+ * ne relisent pas chacune les trois feuilles (lib/shared-reads.ts).
+ */
+async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: number; exact?: boolean } = {}) {
   if (Date.now() - identityIndexSyncedAt < (options.maxAgeMs ?? IDENTITY_INDEX_SYNC_TTL_MS)) return
   if (!identityIndexSyncPromise) {
     // Une relecture de routine (la page n'attend pas) passe en arrière-plan : quand Google
     // est saturé, elle cède la place aux pages et sera retentée dans 20 s.
     const routine = identityIndexSyncedAt > 0 && options.waitMs === 0
-    identityIndexSyncPromise = (routine ? asBackgroundGoogleWork(() => syncExistingIdentityIndexes()) : syncExistingIdentityIndexes())
+    const sync = () => syncExistingIdentityIndexes({ fresh: Boolean(options.exact) })
+    identityIndexSyncPromise = (routine ? asBackgroundGoogleWork(sync) : sync())
       .then(() => { identityIndexSyncedAt = Date.now() })
       .catch((error) => {
         console.error("IDENTITY_INDEX_SYNC_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -340,7 +349,11 @@ async function ensureIdentityIndexes(options: { maxAgeMs?: number; waitMs?: numb
  * joueur ne voyait jamais la campagne où un MJ l'avait ajouté. Désormais, les
  * lectures qui en dépendent le rafraîchissent au plus toutes les cinq minutes.
  */
-function refreshIdentityIndexes() {
+async function refreshIdentityIndexes() {
+  // « Actualiser » : resynchronisé pour la page rechargée (elle attend un peu, comme au
+  // premier chargement), si la dernière synchronisation date d'avant le clic.
+  const after = await freshAfter()
+  if (after && identityIndexSyncedAt < after) return ensureIdentityIndexes({ maxAgeMs: Date.now() - after, waitMs: IDENTITY_INDEX_SYNC_WAIT_MS })
   // Déjà lu une fois depuis le démarrage : la page s'affiche avec l'index connu et la
   // relecture se fait en arrière-plan (les accès refusés relisent d'eux-mêmes au besoin).
   return ensureIdentityIndexes({ waitMs: identityIndexSyncedAt ? 0 : IDENTITY_INDEX_SYNC_WAIT_MS })
@@ -456,6 +469,8 @@ function announceSpreadsheetWrite(path: string, method: string) {
   if (method === "GET" || /batchGet|getByDataFilter/i.test(path)) return
   const spreadsheetId = path.match(/^spreadsheets\/([^/:?]+)/)?.[1]
   if (!spreadsheetId) return
+  // Les copies partagées de ce classeur (lib/shared-reads.ts) ne servent plus, pour aucune installation.
+  void markSpreadsheetChanged(spreadsheetId)
   for (const listener of spreadsheetWriteListeners) {
     try { listener(spreadsheetId) } catch { /* un auditeur en échec n'empêche pas l'écriture */ }
   }
@@ -473,7 +488,19 @@ function networkFailureOf(error: unknown) {
 
 const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
 
+/**
+ * Une requête à Google Sheets. Une lecture simple (GET) est partagée avec les autres
+ * installations (lib/shared-reads.ts) : la copie récente d'une autre, ou une seule lecture
+ * de Google pour toutes celles qui la demandent au même moment.
+ */
 async function googleSheetsFetch(path: string, init?: RequestInit) {
+  const spreadsheetId = path.match(/^spreadsheets\/([^/:?]+)/)?.[1]
+  if ((init?.method ?? "GET").toUpperCase() !== "GET" || !spreadsheetId || !sharedReadsActive()) return googleSheetsFetchDirect(path, init)
+  const text = await sharedSheetRead(spreadsheetId, path, async () => (await googleSheetsFetchDirect(path, init)).text())
+  return new Response(text, { status: 200, headers: { "content-type": "application/json" } })
+}
+
+async function googleSheetsFetchDirect(path: string, init?: RequestInit) {
   // `quotaUser` : chaque installation comptée à part par Google (voir google-quota.ts).
   const url = `https://sheets.googleapis.com/v4/${path}${path.includes("?") ? "&" : "?"}quotaUser=${await googleQuotaUser()}`
   const label = `${init?.method ?? "GET"} ${path}`
@@ -584,7 +611,7 @@ const RANGE_CACHE_MS = 180_000
  * en retard.
  */
 const RANGE_STALE_MS = 30 * 60_000
-type RangeCacheEntry = { expiresAt: number; promise: Promise<string[][]>; value?: string[][]; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean }
+type RangeCacheEntry = { expiresAt: number; promise: Promise<string[][]>; value?: string[][]; loadedAt?: number; refreshing?: boolean; refreshFailed?: boolean; /** Quand la lecture a été lancée : « Actualiser » relit ce qui date d'avant. */ startedAt: number }
 const rangeReadCache = new Map<string, RangeCacheEntry>()
 
 /** La valeur à rendre sans attendre (et la relecture lancée), ou null s'il faut lire Google. */
@@ -594,10 +621,11 @@ function staleRange(cacheKey: string, refresh: () => Promise<string[][]>) {
   if (!cached.value || cached.refreshFailed || Date.now() - (cached.loadedAt ?? 0) > RANGE_STALE_MS) return null
   if (!cached.refreshing) {
     cached.refreshing = true
+    const startedAt = Date.now()
     asBackgroundGoogleWork(refresh).then((rows) => {
       // Un classeur vidé entre-temps (écriture) : on ne remet pas l'ancienne entrée.
       if (rangeReadCache.get(cacheKey) !== cached) return
-      rangeReadCache.set(cacheKey, { expiresAt: Date.now() + RANGE_CACHE_MS, promise: Promise.resolve(rows), value: rows, loadedAt: Date.now() })
+      rangeReadCache.set(cacheKey, { expiresAt: Date.now() + RANGE_CACHE_MS, promise: Promise.resolve(rows), value: rows, loadedAt: Date.now(), startedAt })
     }, () => { cached.refreshing = false; cached.refreshFailed = true })
   }
   return Promise.resolve(cached.value)
@@ -623,7 +651,7 @@ function cacheRangePromise(cacheKey: string, promise: Promise<string[][]>) {
     const oldestKey = rangeReadCache.keys().next().value
     if (oldestKey) rangeReadCache.delete(oldestKey)
   }
-  const entry: RangeCacheEntry = { expiresAt: Date.now() + RANGE_CACHE_MS, promise }
+  const entry: RangeCacheEntry = { expiresAt: Date.now() + RANGE_CACHE_MS, promise, startedAt: Date.now() }
   rangeReadCache.set(cacheKey, entry)
   promise.then((rows) => { entry.value = rows; entry.loadedAt = Date.now() }, () => { if (rangeReadCache.get(cacheKey) === entry) rangeReadCache.delete(cacheKey) })
   return promise
@@ -659,8 +687,10 @@ export async function readRange(
 ) {
   const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
   const cached = rangeReadCache.get(cacheKey)
-  if (cached && cached.expiresAt > Date.now()) return touchRange(cacheKey, cached)
   const load = () => fetchRange(spreadsheetId, range, valueRenderOption)
+  // « Actualiser » : une plage lue avant le clic est relue pour la page rechargée.
+  if (cached && await mustReread(cached.startedAt)) return cacheRangePromise(cacheKey, load())
+  if (cached && cached.expiresAt > Date.now()) return touchRange(cacheKey, cached)
   return staleRange(cacheKey, load) ?? cacheRangePromise(cacheKey, load())
 }
 
@@ -716,12 +746,18 @@ async function readRanges(
 ) {
   const results: Array<Promise<string[][]>> = Array(ranges.length)
   const missing: Array<{ range: string; index: number; cacheKey: string }> = []
+  // « Actualiser » : ce qui a été lu avant le clic est relu pour la page rechargée.
+  const after = await freshAfter()
   ranges.forEach((range, index) => {
     const cacheKey = rangeCacheKey(spreadsheetId, range, valueRenderOption)
-    const cached = rangeReadCache.get(cacheKey)
-    const stale = cached && cached.expiresAt > Date.now() ? null : staleRange(cacheKey, () => fetchRange(spreadsheetId, range, valueRenderOption))
-    if (cached && cached.expiresAt > Date.now()) results[index] = touchRange(cacheKey, cached)
-    else if (stale) results[index] = stale
+    const found = rangeReadCache.get(cacheKey)
+    const usable = found && found.startedAt >= after ? found : undefined
+    if (usable && usable.expiresAt > Date.now()) {
+      results[index] = touchRange(cacheKey, usable)
+      return
+    }
+    const stale = usable ? staleRange(cacheKey, () => fetchRange(spreadsheetId, range, valueRenderOption)) : null
+    if (stale) results[index] = stale
     else missing.push({ range, index, cacheKey })
   })
   if (missing.length) {
@@ -1104,16 +1140,19 @@ type NamedColumnsEntry = { loadedAt: number; promise: Promise<NamedSheet>; value
 const namedColumnsCache = new Map<string, { spreadsheetId: string; entry: NamedColumnsEntry }>()
 
 /** Comme les plages : gardé RANGE_CACHE_MS, puis rendu aussitôt et relu en arrière-plan jusqu'à RANGE_STALE_MS. */
-function cachedNamedColumns(spreadsheetId: string, key: string, load: () => Promise<NamedSheet>) {
+async function cachedNamedColumns(spreadsheetId: string, key: string, load: () => Promise<NamedSheet>) {
   const now = Date.now()
-  const entry = namedColumnsCache.get(key)?.entry
+  const found = namedColumnsCache.get(key)?.entry
+  // « Actualiser » : lu avant le clic, relu pour la page rechargée.
+  const entry = found && !(await mustReread(found.loadedAt)) ? found : undefined
   if (entry && now - entry.loadedAt < RANGE_CACHE_MS) return entry.promise
   if (entry?.value && now - entry.loadedAt < RANGE_STALE_MS) {
     if (!entry.refreshing) {
       entry.refreshing = true
+      const startedAt = Date.now()
       // Relecture d'arrière-plan : elle cède la place aux pages quand Google est saturé.
       asBackgroundGoogleWork(load).then((value) => {
-        if (namedColumnsCache.get(key)?.entry === entry) namedColumnsCache.set(key, { spreadsheetId, entry: { loadedAt: Date.now(), promise: Promise.resolve(value), value } })
+        if (namedColumnsCache.get(key)?.entry === entry) namedColumnsCache.set(key, { spreadsheetId, entry: { loadedAt: startedAt, promise: Promise.resolve(value), value } })
       }).catch(() => { entry.refreshing = false })
     }
     return Promise.resolve(entry.value)
@@ -2597,7 +2636,7 @@ export async function findCharacterForAccount(account: { uid: string; role: stri
   if (found) return found
   // La synchronisation commune (déjà en cours ou faite à l'instant : pas de seconde lecture
   // des trois feuilles en parallèle, sur le quota Google commun à tous les joueurs).
-  await ensureIdentityIndexes({ maxAgeMs: 15_000 })
+  await ensureIdentityIndexes({ maxAgeMs: 15_000, exact: true })
   return lookup(true).catch(() => null)
 }
 
@@ -3941,7 +3980,8 @@ function identityColumnUsable(kind: string, sheet: NamedSheet, rows: readonly st
  * This never writes to Google Sheets; it lets the desktop account recognize data
  * created by the live site without changing that site's identifiers.
  */
-export async function syncExistingIdentityIndexes() {
+export async function syncExistingIdentityIndexes(options: { fresh?: boolean } = { fresh: true }) {
+  const fresh = options.fresh !== false
   const [campaignSource, characterSource, relationSource] = await Promise.all([
     campaignsSource(),
     charactersSource(),
@@ -3951,9 +3991,9 @@ export async function syncExistingIdentityIndexes() {
   const empty: NamedSheet | null = null
   // Chaque feuille est lue par le nom de ses colonnes : les déplacer dans Sheets ne change rien.
   const [campaignSheet, characterSheet, relationSheet] = await Promise.all([
-    campaignSource ? readNamedSheet(campaignSource.spreadsheetId, campaignSource.tabName, campaignSheetHeaders, { fresh: true }).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
-    characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh: true }).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
-    relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh: true }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    campaignSource ? readNamedSheet(campaignSource.spreadsheetId, campaignSource.tabName, campaignSheetHeaders, { fresh }).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh }).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
   ])
   // Rien n'a pu être lu (Google saturé) : ce n'est pas une synchronisation, elle sera retentée.
   if (!campaignSheet && !characterSheet && !relationSheet && (campaignSource || characterSource || relationSource)) throw new Error("IDENTITY_SYNC_NOTHING_READ")
@@ -5805,7 +5845,7 @@ export async function listAvailableCampaignCharacters() {
   // Le MJ ouvre la liste pour y trouver un personnage qui vient souvent d'être
   // créé ailleurs : on relit les feuilles partagées à chaque ouverture (sauf
   // si une relecture date de quelques secondes).
-  await ensureIdentityIndexes({ maxAgeMs: 5_000 })
+  await ensureIdentityIndexes({ maxAgeMs: 5_000, exact: true })
   const rows = await getDb().select().from(characterIndex).where(isNull(characterIndex.deletedAt)).orderBy(characterIndex.name).limit(500)
   // Le choix d'un personnage à ajouter : jamais une ligne illisible (nom = identifiant),
   // même quand la dernière relecture des feuilles a échoué.
@@ -6295,13 +6335,14 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
   if (!indexed) return null
   if (!source) return null
   const cached = characterSheetCache.get(id)
-  if (cached && cached.expiresAt > Date.now()) return { ...cached.character, ...indexed, name: cached.character.name, subtitle: cached.character.subtitle }
+  // Gardée 30 s ; « Actualiser » relit une fiche lue avant le clic.
+  if (cached && cached.expiresAt > Date.now() && !(await mustReread(cached.expiresAt - CHARACTER_SHEET_CACHE_MS))) return { ...cached.character, ...indexed, name: cached.character.name, subtitle: cached.character.subtitle }
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
   let current = await readCharacterRow(source, id)
   if (!current) return null
   if (hasBrokenTotals(current.values)) current = await repairCharacterFormulas(source, current, id)
   const character = characterSheetRecord(indexed, current)
-  characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
+  characterSheetCache.set(id, { expiresAt: Date.now() + CHARACTER_SHEET_CACHE_MS, character })
   return character
 }
 
@@ -6312,7 +6353,7 @@ export async function getCharacterSheet(accountUid: string | null, id: string) {
  */
 export async function getCharacterCompanions(id: string, fresh = false) {
   const cached = characterSheetCache.get(id)
-  if (!fresh && cached && cached.expiresAt > Date.now()) return companionsOfTabs(cached.character.values[characterCustomTabsIndex] ?? "")
+  if (!fresh && cached && cached.expiresAt > Date.now() && !(await mustReread(cached.expiresAt - CHARACTER_SHEET_CACHE_MS))) return companionsOfTabs(cached.character.values[characterCustomTabsIndex] ?? "")
   const source = await charactersSource()
   if (!source) return []
   await ensureCharacterSheetSchema(source.spreadsheetId, source.tabName)
@@ -6367,7 +6408,7 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
     // sur la même fiche) : l'enregistrer effacerait ce que l'autre vient d'y mettre.
     if (layout.headers[change.index] !== change.header || (change.before !== undefined && (current.values[change.index] ?? "") !== change.before)) {
       const character = characterSheetRecord(existing, current)
-      characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
+      characterSheetCache.set(id, { expiresAt: Date.now() + CHARACTER_SHEET_CACHE_MS, character })
       throw new CharacterSheetChangedError(character)
     }
     // Chaque valeur va dans sa colonne, retrouvée par son nom ; une colonne calculée par la
@@ -6391,7 +6432,7 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   const nextName = values[0]?.trim() || existing.name
   await getDb().update(characterIndex).set({ name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
   const character = { ...existing, name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt, values, headers: written.layout.headers } satisfies CharacterSheetRecord
-  characterSheetCache.set(id, { expiresAt: Date.now() + 30_000, character })
+  characterSheetCache.set(id, { expiresAt: Date.now() + CHARACTER_SHEET_CACHE_MS, character })
   return character
 }
 
@@ -6457,6 +6498,7 @@ const INVENTORY_WORKBOOK_CACHE_MS = 2 * 60_000
 let inventoryWorkbookVersion = 0
 
 const characterSheetCache = new Map<string, { expiresAt: number; character: CharacterSheetRecord }>()
+const CHARACTER_SHEET_CACHE_MS = 30_000
 
 function cacheInventoryWorkbook(workbook: InventoryWorkbook, includesCatalog: boolean, version: number) {
   if (version !== inventoryWorkbookVersion) return
@@ -6482,10 +6524,10 @@ export function forgetInventoryReads() {
  */
 let inventoryTabsRead: { key: string; loadedAt: number; promise: Promise<string[][][]> } | null = null
 
-function sharedInventoryTabs(spreadsheetId: string, ranges: string[]) {
+async function sharedInventoryTabs(spreadsheetId: string, ranges: string[]) {
   const key = `${spreadsheetId}\u0001${inventoryWorkbookVersion}\u0001${ranges.join("\u0002")}`
   const known = inventoryTabsRead
-  if (known && known.key === key && Date.now() - known.loadedAt < INVENTORY_WORKBOOK_CACHE_MS) return known.promise
+  if (known && known.key === key && Date.now() - known.loadedAt < INVENTORY_WORKBOOK_CACHE_MS && !(await mustReread(known.loadedAt))) return known.promise
   const promise = readInventoryTabs(spreadsheetId, ranges)
   const entry = { key, loadedAt: Date.now(), promise }
   inventoryTabsRead = entry
@@ -6702,7 +6744,9 @@ async function readInventoryWorkbook(includeCatalog = true, options: InventoryRe
   const sheet = await ensureJdrSheet("inventory")
   if (!sheet) throw new Error("INVENTORY_SHEET_UNAVAILABLE")
   const cached = inventoryWorkbookCache
-  if (!options.fresh && cached && cached.expiresAt > Date.now() && cached.workbook.spreadsheetId === sheet.spreadsheetId && (!includeCatalog || cached.includesCatalog)) {
+  // « Actualiser » : un inventaire lu avant le clic est relu pour la page rechargée.
+  if (!options.fresh && cached && cached.expiresAt > Date.now() && cached.workbook.spreadsheetId === sheet.spreadsheetId && (!includeCatalog || cached.includesCatalog)
+    && !(await mustReread(cached.expiresAt - INVENTORY_WORKBOOK_CACHE_MS))) {
     return cached.workbook
   }
   const version = inventoryWorkbookVersion
@@ -8067,20 +8111,9 @@ export async function permanentlyDeleteItem(kind: "todo" | "character" | "campai
 
 
 /** « Actualiser » : tout ce qui a été lu dans Google est relu à la prochaine demande. */
-onForgetGoogleData(async (scope) => {
-  // Ce qui change pendant une partie : toujours relu.
-  rangeReadCache.clear()
-  // L'inventaire (et sa lecture partagée) : relu à la prochaine demande.
-  clearInventoryWorkbookCache()
-  namedColumnsCache.clear()
-  sheetHeaderCache.clear()
-  characterColumnsCache = null
-  characterSheetCache.clear()
-  // Personnages et campagnes : resynchronisés en arrière-plan (la page n'attend pas).
-  if (identityIndexSyncedAt) identityIndexSyncedAt = 1
-  // Les références (onglets des classeurs, catalogue des objets, classes) : seulement pour
-  // l'administrateur et le MJ ; chez un joueur, elles se relisent d'elles-mêmes.
-  if (scope !== "all") return
+onForgetGoogleData(async () => {
+  // Ce que la page affiche est relu par lib/request-freshness.ts ; ici, les règles et la
+  // structure des classeurs (onglets, catalogue des objets, classes).
   tabsCache.clear()
   clearObjectIndexTableCache()
   // Les classes : relues dans Google à la prochaine demande, sans vider la liste connue.

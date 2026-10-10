@@ -1570,8 +1570,7 @@ export async function addRankBonusRow() {
 }
 
 // « Actualiser » (administrateur, MJ) : sorts, présentations et bonus de rang relus dans Google.
-onForgetGoogleData((scope) => {
-  if (scope !== "all") return
+onForgetGoogleData(() => {
   invalidateClassContentCaches()
   googleFirstUntil = Date.now() + 60_000
 })

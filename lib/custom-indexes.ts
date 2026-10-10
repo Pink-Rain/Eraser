@@ -229,4 +229,4 @@ export async function createCustomIndex(input: { title: string; description: str
 }
 
 // « Actualiser » (administrateur, MJ) : la liste des index créés depuis Eraser est relue dans Google.
-onForgetGoogleData((scope) => { if (scope === "all") registryCache = null })
+onForgetGoogleData(() => { registryCache = null })

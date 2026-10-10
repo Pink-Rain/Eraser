@@ -38,6 +38,7 @@ import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { sheetRangeStartRow } from "@/lib/google-sheet-values"
 import { asBackgroundGoogleWork, QUOTA_ERROR } from "@/lib/google-quota"
 import { markChecked, recentlyChecked } from "@/lib/sheet-checks"
+import { mustReread } from "@/lib/request-freshness"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
 import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
@@ -145,8 +146,13 @@ type EffectiveIndex = {
 /** La définition effective de chaque index chargé : lue une fois, puis à chaque changement de schéma. */
 const effectiveIndexes = new Map<WorldIndexKey, EffectiveIndex>()
 const readyWorkbooks = new Set<string>()
-/** Des colonnes vérifiées il y a moins longtemps ne sont pas relues au démarrage (lib/sheet-checks.ts). */
-const WORKBOOK_CHECK_MS = 12 * 60 * 60_000
+/**
+ * Des colonnes vérifiées il y a moins longtemps ne sont pas relues au démarrage
+ * (lib/sheet-checks.ts). Une semaine : vérifiées à chaque séance (une par jour), les cinq
+ * installations relisaient ensemble l'en-tête de chaque onglet en début de partie. Une
+ * version qui attend d'autres colonnes, ou un onglet disparu, fait vérifier aussitôt.
+ */
+const WORKBOOK_CHECK_MS = 7 * 24 * 60 * 60_000
 
 function trashed(entry: SchemaEntry | undefined) {
   return Boolean(entry && (entry.deletedAt || entry.state === "supprimé"))
@@ -662,7 +668,11 @@ const worldIndexCache = new Map<WorldIndexKey, WorldIndexCacheEntry>()
 
 const lastLoaded = new Map<WorldIndexKey, WorldIndexData>()
 
-export function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
+export async function getWorldIndex(key: WorldIndexKey, options: { refresh?: boolean } = {}): Promise<WorldIndexData> {
+  // « Actualiser » : un index de personnages, campagnes ou PNJ (il change pendant la partie)
+  // lu avant le clic est relu pour la page rechargée. Les autres index sont des règles : ils
+  // sont relus quand l'administrateur ou le MJ actualise (lib/data-refresh.ts).
+  if (!options.refresh && isEntityWorldIndexKey(key) && await mustReread(worldIndexCache.get(key)?.loadedAt ?? Date.now())) options = { ...options, refresh: true }
   const cached = worldIndexCache.get(key)
   if (!options.refresh && cached && cached.expiresAt > Date.now()) return cached.promise
   // Passé quelques minutes, l'index gardé est rendu tout de suite et relu en arrière-plan
@@ -1996,10 +2006,6 @@ export function purgeWorldIndexTrash(key: WorldIndexKey, tab: string, column: st
   })
 }
 
-// « Actualiser » : les index sont relus dans Google (le dernier lu reste le repli en cas d'échec).
-// Pour un joueur, seulement les index d'entités (personnages, campagnes, PNJ…) : ils changent
-// pendant la partie ; les autres se relisent d'eux-mêmes au bout de quelques minutes.
-onForgetGoogleData((scope) => {
-  if (scope === "all") worldIndexCache.clear()
-  else for (const key of [...worldIndexCache.keys()]) if (isEntityWorldIndexKey(key)) worldIndexCache.delete(key)
-})
+// « Actualiser » (administrateur, MJ) : les index sont relus dans Google (le dernier lu reste le
+// repli en cas d'échec).
+onForgetGoogleData(() => { worldIndexCache.clear() })

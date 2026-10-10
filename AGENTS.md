@@ -68,6 +68,13 @@
   passe par `asBackgroundGoogleWork`. Ne pas ajouter de relecture périodique ni de cache de
   moins de quelques minutes sans en mesurer le coût (lectures groupées, `cachedSpreadsheetTabs`,
   `lib/sheet-checks.ts`).
+- Les lectures GET de Google Sheets sont partagées entre installations par le Worker
+  (`lib/shared-reads.ts`) : une seule lit Google, les autres reprennent sa copie. Toute écriture
+  passe par `announceSpreadsheetWrite`, qui rend les copies du classeur inutilisables. Une
+  lecture qui décide d'une écriture reste une lecture fraîche (POST), jamais partagée.
+- « Actualiser » (F5) pose le cookie `eraser-fresh` (`lib/request-freshness.ts`) : un cache
+  de page vérifie `mustReread`/`freshAfter` au lieu d'être vidé en entier. Seuls l'admin et
+  le MJ oublient aussi les règles (`forgetGoogleData`).
 - Le compte dédié attendu est `eraser.jdr@gmail.com`.
 - L’URL OAuth locale est
   `http://127.0.0.1:32147/api/admin/google-drive/oauth/callback`.

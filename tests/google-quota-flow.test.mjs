@@ -91,45 +91,60 @@ test("chaque installation se présente à Google sous son propre identifiant de 
   assert.match(call.url, /[?&]quotaUser=eraser-[a-z0-9]{8,32}(&|$)/);
 });
 
+/** Le rechargement de la page après « Actualiser » : l'instant du clic, posé en cookie par la route. */
+async function actualiser() {
+  const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
+  const response = await refresh.POST();
+  assert.equal(response.status, 200);
+  const after = Number(/eraser-fresh=(\d+)/.exec(response.headers.get("set-cookie") ?? "")?.[1]);
+  assert.ok(after > 0, "la route ne pose pas l'instant du clic");
+  const { runWithFreshness } = await vite.ssrLoadModule("/lib/request-freshness.ts");
+  return (run) => runWithFreshness(after, run);
+}
+
 test("« Actualiser » fait relire Google : une case changée ailleurs apparaît aussitôt", async () => {
   google.addSpreadsheet("actualiser", [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Aldor"]] }]);
   assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor"]]);
   // Modifiée directement dans Google Sheets : la lecture suivante sort encore de la mémoire.
   google.grid("actualiser", "Feuille")[1][1] = "Aldor le Vieux";
   assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor"]]);
-  const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
-  const response = await refresh.POST();
-  assert.equal(response.status, 200);
-  assert.deepEqual(await sheets.readRange("actualiser", "Feuille!A1:B2"), [["ID", "Nom"], ["1", "Aldor le Vieux"]]);
+  const reload = await actualiser();
+  assert.deepEqual(await reload(() => sheets.readRange("actualiser", "Feuille!A1:B2")), [["ID", "Nom"], ["1", "Aldor le Vieux"]]);
 });
 
-test("« Actualiser » d'un joueur : la partie est relue, les réglages des index restent en mémoire", async () => {
+test("« Actualiser » relit la page affichée, pas le reste ; le joueur garde les règles", async () => {
   // Cinq joueurs qui actualisent en même temps pour voir ce que le MJ vient d'ajouter ne
-  // relisent pas toutes les règles : seulement ce qui change pendant une partie.
+  // relisent que leur page : ni les autres pages, ni les règles.
   const { SCHEMA_TAB } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
   const schema = await vite.ssrLoadModule("/lib/index-schema.ts");
   google.addSpreadsheet("partie", [
     { title: "Feuille", grid: [["ID", "PV"], ["1", "10"]] },
+    { title: "Autre page", grid: [["ID", "Or"], ["1", "5"]] },
     { title: SCHEMA_TAB, grid: [["Onglet", "Colonne", "Origine", "Type", "État", "Supprimé le"], ["Feuille", "PV", "", "", "", ""]] },
   ]);
   await sheets.readRange("partie", "Feuille!A1:B2");
+  await sheets.readRange("partie", "'Autre page'!A1:B2");
   assert.equal((await schema.readSchema("partie")).length, 1);
   google.grid("partie", "Feuille")[1][1] = "7";
   const before = google.world.calls.length;
   const previous = session.account;
   session.account = { ...previous, uid: "joueur-test", role: "joueur", accountRole: "joueur" };
+  let reload;
   try {
-    const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
-    assert.equal((await refresh.POST()).status, 200);
+    reload = await actualiser();
   } finally {
     session.account = previous;
   }
-  assert.deepEqual(await sheets.readRange("partie", "Feuille!A1:B2"), [["ID", "PV"], ["1", "7"]]);
+  // La page rechargée relit ce qu'elle affiche, une seule fois même si elle le demande deux fois.
+  assert.deepEqual(await reload(() => sheets.readRange("partie", "Feuille!A1:B2")), [["ID", "PV"], ["1", "7"]]);
+  assert.deepEqual(await reload(() => sheets.readRange("partie", "Feuille!A1:B2")), [["ID", "PV"], ["1", "7"]]);
+  assert.equal(google.world.calls.length - before, 1);
+  // Une autre page, ouverte plus tard sans actualiser, et les réglages des index : en mémoire.
+  await sheets.readRange("partie", "'Autre page'!A1:B2");
   assert.equal((await schema.readSchema("partie")).length, 1);
-  assert.equal(google.world.calls.length - before, 1, "les réglages des index ont été relus pour un joueur");
-  // L'administrateur, lui, relit tout (il modifie parfois les règles directement dans Google).
-  const refresh = await vite.ssrLoadModule("/app/api/refresh/route.ts");
-  await refresh.POST();
+  assert.equal(google.world.calls.length - before, 1, "« Actualiser » d'un joueur a relu autre chose que sa page");
+  // L'administrateur, lui, relit aussi les règles (il les modifie parfois directement dans Google).
+  await actualiser();
   await schema.readSchema("partie");
   assert.ok(google.world.calls.length - before > 1);
 });

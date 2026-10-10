@@ -324,8 +324,7 @@ export async function deleteClassDeck(deckId: string) {
 }
 
 // « Actualiser » (administrateur, MJ) : jauges, formes, decks et cartes relus dans Google.
-onForgetGoogleData((scope) => {
-  if (scope !== "all") return
+onForgetGoogleData(() => {
   cache = null
   cacheGeneration += 1
 })

@@ -33,6 +33,9 @@ export async function remoteAccountsFetch(
     requestBody = JSON.stringify(init.body)
   }
   // Un serveur partagé qui ne répond plus ne fige pas l'application : 15 s au plus.
+  // Le signal empêche aussi vinext de resservir la même réponse GET pendant tout le rendu
+  // d'une page : lib/shared-reads.ts relit plusieurs fois le même enregistrement en attendant
+  // la copie d'une autre installation, et ne la verrait jamais arriver.
   const response = await traced("partagé", `${init.method} ${path}`, () => fetch(`${config.baseUrl}${path}`, {
     method: init.method,
     headers,
