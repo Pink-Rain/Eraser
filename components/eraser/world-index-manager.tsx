@@ -15,6 +15,8 @@ import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
+import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { groupRowsBy } from "@/lib/index-view-layouts"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
@@ -30,7 +32,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, computeRollup, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
@@ -1138,6 +1140,17 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
   // eslint-disable-next-line react-hooks/exhaustive-deps -- une ligne réécrite depuis sa fiche redessine ses cartes
   }), [locate, specOf, valueOf, rowVersions])
+  // La présentation de l'onglet-fenêtre ouvert (liste, kanban, calendrier…), réglée dans « Modifier la vue ».
+  const viewLayout = activeView?.layout ?? null
+  const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
+  const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
+  // Cartes rangées en sections : les lignes de chaque valeur de la colonne choisie.
+  const cardGroups = useMemo(() => {
+    const groupBy = viewLayout?.kind === "cards" ? viewLayout.groupBy : undefined
+    // eslint-disable-next-line react-hooks/refs -- les sections lisent les cases comme le tableau les montre
+    return groupBy ? groupRowsBy(displayedRows, (row) => valueOf(row.key, groupBy)) : null
+  }, [displayedRows, valueOf, viewLayout])
+  const layoutOptionsOf = useCallback((header: string) => (table ? specOf(table.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })), [specOf, table])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -1361,8 +1374,24 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
       />}
 
-      {table && display === "cards" ? (shownCard
-        ? <IndexCardGrid
+      {table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexViewLayout
+        layout={viewLayout}
+        rows={displayedRows.map((row) => row.key)}
+        headers={layoutHeaders}
+        nameOf={layoutNameOf}
+        valueOf={valueOf}
+        optionsOf={layoutOptionsOf}
+        onOpen={openRow}
+        onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
+        empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
+      /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
+        ? viewLayout?.groupBy
+          // Cartes rangées en sections : une grille par valeur de la colonne choisie.
+          ? <div className="space-y-6">{(cardGroups ?? []).map((group) => <section key={group.name || "*"} className="space-y-2">
+            <p className="flex items-center justify-between border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] text-primary/80"><span>{group.name || "Sans valeur"}</span><span className="text-muted-foreground">{group.rows.length}</span></p>
+            <IndexCardGrid card={shownCard} cardOf={spanning ? cardOf : undefined} rows={group.rows} rowSource={cardRow} onOpen={openRow} hrefOf={rowHref} empty="" />
+          </section>)}</div>
+          : <IndexCardGrid
           card={shownCard}
           cardOf={spanning ? cardOf : undefined}
           rows={displayedRows}

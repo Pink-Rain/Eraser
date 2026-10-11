@@ -2,13 +2,14 @@
  * Les pages de la section « Index » (anciennement « Ressources »). Les adresses
  * restent sous /ressources pour que les liens existants continuent de fonctionner.
  */
-export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-classes" | "sorts-creatures" | "etats" | "armes-modificateurs" | "caracteristiques" | "succes" | "vocabulaire"
+export type IndexPageKey = "campagnes" | "classes" | "creatures" | "langues" | "lieux" | "objets" | "peuples" | "personnages" | "pnjs" | "religions" | "sorts-classes" | "sorts-creatures" | "etats" | "armes-modificateurs" | "caracteristiques" | "succes" | "vocabulaire" | "calendriers"
 
 export type IndexPage = { key: IndexPageKey; href: string; label: string; description: string }
 
 export const indexHomeHref = "/ressources"
 
 export const indexPages: IndexPage[] = ([
+  { key: "calendriers", href: "/ressources/index-des-calendriers", label: "Calendriers", description: "Les calendriers du monde : mois, saisons, jours de la semaine." },
   { key: "campagnes", href: "/ressources/index-des-campagnes", label: "Campagnes", description: "Toutes les campagnes, leurs MJ et leurs joueurs." },
   { key: "etats", href: "/ressources/index-des-etats", label: "États", description: "Les états et altérations, leurs effets et leur durée." },
   { key: "armes-modificateurs", href: "/ressources/armes-modificateurs", label: "Armes - Modificateurs", description: "Runes, matériaux et attributs des armes, rangés par type." },

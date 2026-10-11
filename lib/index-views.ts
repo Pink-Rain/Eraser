@@ -8,6 +8,7 @@
  * et les tests s'en servent.
  */
 import { classSpellCategory } from "@/lib/class-spell-utils"
+import type { ViewLayout } from "@/lib/index-view-layouts"
 
 export type ViewOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas" | "commence" | "vide" | "non-vide" | "superieur" | "inferieur" | "categorie-sort"
 
@@ -26,6 +27,8 @@ export type IndexView = {
   position: number
   /** Prévu par Eraser (défini dans le code, jamais écrit) : il ne se modifie ni ne se supprime. */
   builtin?: boolean
+  /** Sa présentation (liste, kanban, calendrier…) ; absente : le tableau. */
+  layout?: ViewLayout
 }
 
 export const ALL_SOURCES = "*"

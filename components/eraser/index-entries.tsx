@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from "react"
-import { Activity, BookText, Church, CircleUserRound, Drama, Flame, Gauge, Hammer, Hexagon, Languages, LibraryBig, Map, MapPin, Package, PawPrint, Sparkles, Swords, Trophy, Users, type LucideIcon } from "lucide-react"
+import { Activity, BookText, CalendarDays, Church, CircleUserRound, Drama, Flame, Gauge, Hammer, Hexagon, Languages, LibraryBig, Map, MapPin, Package, PawPrint, Sparkles, Swords, Trophy, Users, type LucideIcon } from "lucide-react"
 
 import { arrangeIndexDirectory, emptyIndexDirectoryLayout, parseIndexDirectoryLayout, type IndexDirectoryLayout } from "@/lib/index-directory"
 import { indexPages, type IndexPageKey } from "@/lib/index-pages"
@@ -24,6 +24,7 @@ export const indexPageIcons: Record<IndexPageKey, LucideIcon> = {
   caracteristiques: Gauge,
   succes: Trophy,
   vocabulaire: BookText,
+  calendriers: CalendarDays,
 }
 
 /** Un index de la page Index : ceux d'Eraser, le créateur de classe, et ceux créés depuis « Nouvel index ». */

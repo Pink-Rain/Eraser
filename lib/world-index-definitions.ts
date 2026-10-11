@@ -4,6 +4,7 @@
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
 import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
+import { CALENDAR_COLOR_HEADER, CALENDAR_DAYS_HEADER, CALENDAR_DESCRIPTION_HEADER, CALENDAR_ERA_HEADER, CALENDAR_HEADER, CALENDAR_MONTHS_TAB, CALENDAR_ORDER_HEADER, CALENDAR_SEASON_HEADER, CALENDAR_SEASONS_TAB, CALENDAR_WEEKDAYS_TAB, CALENDARS_TAB } from "@/lib/calendars"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
 import {
@@ -110,7 +111,7 @@ export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
  */
 export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells" | "rank-bonuses"
 
-export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | "vocabulary" | EntityWorldIndexKey
+export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | "vocabulary" | "calendars" | EntityWorldIndexKey
 
 /** Un index du monde : prévu par Eraser, ou créé depuis « Nouvel index » (« perso-… »). */
 export type WorldIndexKey = BuiltinWorldIndexKey | `perso-${string}`
@@ -401,6 +402,20 @@ const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldInde
     // La feuille de la page Règles › Vocabulaire, reliée telle quelle : son « Titre » devient
     // « Nom » (en-tête seul, valeurs intactes), et un « ID » masqué est ajouté à droite.
     tabs: [{ name: "Vocabulaire", itemLabel: "un mot", headers: ["Nom", "Contenu", ID_HEADER], widths: [260, 640, 130], idPrefix: "VOC", renamedHeaders: [["Titre", "Nom"]] }],
+  },
+  // Les calendriers du monde : leurs mois (nombre de jours, saison), leurs saisons et les jours
+  // de leur semaine. La vue Calendrier du moteur des index place les dates dans l'un d'eux.
+  calendars: {
+    key: "calendars",
+    sheetName: "Index des calendriers",
+    title: "Calendriers",
+    path: "/ressources/index-des-calendriers",
+    tabs: [
+      { name: CALENDARS_TAB, itemLabel: "un calendrier", headers: ["Nom", CALENDAR_ERA_HEADER, CALENDAR_DESCRIPTION_HEADER, ID_HEADER], widths: [240, 120, 480, 130], idPrefix: "CAL" },
+      { name: CALENDAR_MONTHS_TAB, itemLabel: "un mois", headers: ["Nom", CALENDAR_HEADER, CALENDAR_ORDER_HEADER, CALENDAR_DAYS_HEADER, CALENDAR_SEASON_HEADER, ID_HEADER], widths: [220, 220, 90, 140, 200, 130], idPrefix: "MOI" },
+      { name: CALENDAR_SEASONS_TAB, itemLabel: "une saison", headers: ["Nom", CALENDAR_HEADER, CALENDAR_ORDER_HEADER, CALENDAR_COLOR_HEADER, ID_HEADER], widths: [220, 220, 90, 130, 130], idPrefix: "SAI" },
+      { name: CALENDAR_WEEKDAYS_TAB, itemLabel: "un jour", headers: ["Nom", CALENDAR_HEADER, CALENDAR_ORDER_HEADER, ID_HEADER], widths: [220, 220, 90, 130], idPrefix: "JOU" },
+    ],
   },
 }
 
@@ -738,6 +753,15 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   // Une colonne liée de départ : son lien est un réglage comme un autre (« Modifier » le montre).
   const link = defaultLinkOf(index, tab, header)
   if (link) return { kind: "linked", also: ["rich"], link: { ...link } }
+  if (index === "calendars") {
+    // Chaque mois, saison ou jour appartient à un calendrier ; un mois à une saison du même index.
+    if (isHeader(header, [CALENDAR_HEADER])) return { kind: "linked-choice", source: { index: "calendars", tab: CALENDARS_TAB, onlyTab: true } }
+    if (isHeader(header, [CALENDAR_SEASON_HEADER])) return { kind: "linked-choice", source: { index: "calendars", tab: CALENDAR_SEASONS_TAB, onlyTab: true } }
+    if (isHeader(header, [CALENDAR_ORDER_HEADER])) return { kind: "number", description: "La place dans l’année ou dans la semaine : 1, 2, 3…" }
+    if (isHeader(header, [CALENDAR_DAYS_HEADER])) return { kind: "number", description: "Les jours de ce mois (30 si vide)." }
+    if (isHeader(header, [CALENDAR_COLOR_HEADER])) return { kind: "color" }
+    return { kind: "rich" }
+  }
   if (index === "achievements") {
     if (tab === OBTAINED_TAB) {
       // Un succès obtenu est nommé par son succès (l'onglet n'a pas de colonne Nom).

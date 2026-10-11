@@ -48,7 +48,7 @@ export async function POST(request: Request) {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: ViewCondition[]; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
+    const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: ViewCondition[]; layout?: unknown; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
       const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover) }))
@@ -100,7 +100,7 @@ export async function POST(request: Request) {
       }
     }
     if (body.action === "save-view") {
-      const id = await saveIndexView({ id: body.id, index: String(body.index ?? ""), name: String(body.name ?? ""), source: String(body.source ?? "*"), match: body.match === "une" ? "une" : "toutes", conditions: Array.isArray(body.conditions) ? body.conditions : [] })
+      const id = await saveIndexView({ id: body.id, index: String(body.index ?? ""), name: String(body.name ?? ""), source: String(body.source ?? "*"), match: body.match === "une" ? "une" : "toutes", conditions: Array.isArray(body.conditions) ? body.conditions : [], layout: body.layout })
       return NextResponse.json({ id, views: await listIndexViews(String(body.index ?? "")) })
     }
     if (body.action === "delete-view" && body.id) {

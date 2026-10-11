@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { Filter, LoaderCircle, Plus, Trash2, X } from "lucide-react"
+import { CalendarDays, Columns3, Filter, Gauge, LayoutGrid, LayoutList, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -12,6 +12,76 @@ import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type Vie
 import type { IndexLayout, LayoutKind, LayoutPreset, TabLayouts } from "@/lib/index-layouts"
 import type { CardPreset, CardTemplate, TabCards } from "@/lib/index-cards"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
+import { Checkbox } from "@/components/ui/checkbox"
+import { loadWorldIndexData } from "@/components/eraser/index-cells"
+import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
+import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type ViewLayout, type ViewLayoutKind } from "@/lib/index-view-layouts"
+
+const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge }
+
+/** Les noms des calendriers de l'Index des calendriers (le calendrier réel en tête). */
+function useCalendarNames(active: boolean) {
+  const [names, setNames] = useState<string[]>([REAL_CALENDAR])
+  useEffect(() => {
+    if (!active) return
+    let alive = true
+    void loadWorldIndexData("calendars").then((data) => { if (alive) setNames([REAL_CALENDAR, ...calendarsFromTables(data?.tables ?? []).map((calendar) => calendar.name)]) })
+    return () => { alive = false }
+  }, [active])
+  return names
+}
+
+/**
+ * La présentation d'une vue : tableau, cartes, liste (compacte, repliable), kanban,
+ * maître-détail, calendrier, tableau de bord ; et ses sections. Elle s'enregistre avec la vue.
+ */
+function LayoutSettings({ layout, columns, onChange }: { layout: ViewLayout; columns: string[]; onChange: (layout: ViewLayout) => void }) {
+  const set = (changes: Partial<ViewLayout>) => onChange({ ...layout, ...changes })
+  const calendars = useCalendarNames(layout.kind === "calendar")
+  const columnSelect = (value: string | undefined, onPick: (value: string | undefined) => void, label: string, none = "Aucune") => <label className="grid gap-1 text-xs font-semibold">{label}<NativeSelect value={value ?? ""} onChange={(event) => onPick(event.target.value || undefined)} className="h-9 text-sm"><NativeSelectOption value="">{none}</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect></label>
+  const fields = layout.fields ?? []
+  const toggleField = (column: string) => set({ fields: fields.includes(column) ? fields.filter((field) => field !== column) : [...fields, column].slice(0, 4) })
+  const tiles = layout.tiles ?? [{ kind: "count" }]
+  const setTile = (position: number, tile: DashboardTile | null) => set({ tiles: tiles.flatMap((item, index) => index === position ? tile ? [tile] : [] : [item]) })
+  return <div className="grid gap-3 rounded-xl border bg-card/60 p-3">
+    <p className="text-sm font-medium">Présentation</p>
+    <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="Présentation">
+      {viewLayoutKinds.map((kind) => { const Icon = layoutIcons[kind.value]; return <button key={kind.value} type="button" role="radio" aria-checked={layout.kind === kind.value} title={kind.hint} onClick={() => set({ kind: kind.value })} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-colors ${layout.kind === kind.value ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"}`}><Icon className="size-4 shrink-0" />{kind.label}</button> })}
+    </div>
+    <p className="text-xs text-muted-foreground">{viewLayoutKinds.find((kind) => kind.value === layout.kind)?.hint}</p>
+    {["list", "cards", "master-detail"].includes(layout.kind) && <div className="grid gap-2 sm:grid-cols-2">
+      {columnSelect(layout.groupBy, (groupBy) => set({ groupBy }), "Ranger en sections par", "Pas de sections")}
+      {layout.groupBy && <div className="grid content-end gap-1.5 text-xs">
+        <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.collapsible)} onCheckedChange={(checked) => set({ collapsible: checked === true || undefined, collapsed: checked === true ? layout.collapsed : undefined })} />Sections repliables</label>
+        {layout.collapsible && <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.collapsed)} onCheckedChange={(checked) => set({ collapsed: checked === true || undefined })} />Repliées à l’ouverture</label>}
+      </div>}
+    </div>}
+    {layout.kind === "list" && <div className="flex flex-wrap gap-x-4 gap-y-1.5 text-xs">
+      <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.compact)} onCheckedChange={(checked) => set({ compact: checked === true || undefined })} />Compacte (une ligne par élément)</label>
+      {!layout.compact && !layout.groupBy && <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.collapsible)} onCheckedChange={(checked) => set({ collapsible: checked === true || undefined })} />Lignes repliables (déplier montre tout)</label>}
+      {!layout.compact && layout.groupBy && <span className="text-muted-foreground">Avec des sections, les lignes se déplient si les sections sont repliables.</span>}
+    </div>}
+    {layout.kind === "kanban" && columnSelect(layout.kanbanColumn, (kanbanColumn) => set({ kanbanColumn }), "Une colonne du kanban par valeur de", "Choisir…")}
+    {layout.kind === "calendar" && <div className="grid gap-2 sm:grid-cols-2">
+      {columnSelect(layout.dateColumn, (dateColumn) => set({ dateColumn }), "Colonne de la date", "Choisir…")}
+      <label className="grid gap-1 text-xs font-semibold">Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} onChange={(event) => set({ calendar: event.target.value })} className="h-9 text-sm">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
+      <p className="text-xs text-muted-foreground sm:col-span-2">Les calendriers (mois, saisons, jours de la semaine) se créent dans l’Index des calendriers.</p>
+    </div>}
+    {["list", "kanban", "master-detail"].includes(layout.kind) && <div className="grid gap-1.5">
+      <span className="text-xs font-semibold">Montrer sous le nom (4 au plus)</span>
+      <div className="flex flex-wrap gap-1">{columns.map((column) => <button key={column} type="button" aria-pressed={fields.includes(column)} onClick={() => toggleField(column)} className={`rounded-full border px-2 py-0.5 text-xs ${fields.includes(column) ? "border-primary bg-primary/10 font-semibold text-primary" : "hover:bg-muted"}`}>{column}</button>)}</div>
+    </div>}
+    {layout.kind === "dashboard" && <div className="grid gap-2">
+      {tiles.map((tile, position) => { const needsColumn = dashboardTileKinds.find((kind) => kind.value === tile.kind)?.needsColumn; return <div key={position} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_minmax(0,1fr)_2rem] items-center gap-2">
+        <NativeSelect value={tile.kind} onChange={(event) => setTile(position, { ...tile, kind: event.target.value as DashboardTile["kind"] })} aria-label="Tuile" className="h-9 text-sm">{dashboardTileKinds.map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}</NativeSelectOption>)}</NativeSelect>
+        {needsColumn ? <NativeSelect value={tile.column ?? ""} onChange={(event) => setTile(position, { ...tile, column: event.target.value || undefined })} aria-label="Colonne" className="h-9 text-sm"><NativeSelectOption value="">Colonne…</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect> : <span />}
+        <Input value={tile.label ?? ""} onChange={(event) => setTile(position, { ...tile, label: event.target.value || undefined })} placeholder="Titre (facultatif)" aria-label="Titre de la tuile" className="h-9" />
+        <button type="button" onClick={() => setTile(position, null)} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la tuile"><X className="size-3.5" /></button>
+      </div> })}
+      <div><Button type="button" variant="ghost" size="sm" onClick={() => set({ tiles: [...tiles, { kind: "breakdown", column: columns[0] }] })}><Plus />Ajouter une tuile</Button></div>
+    </div>}
+  </div>
+}
 
 type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[] }
 
@@ -130,6 +200,7 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
   const [match, setMatch] = useState<IndexView["match"]>(view?.match ?? "toutes")
   const columns = columnsOf(source)
   const [conditions, setConditions] = useState<ViewCondition[]>(() => view?.conditions.length ? view.conditions : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
+  const [layout, setLayout] = useState<ViewLayout>(() => view?.layout ?? { kind: "table" })
   const [pending, setPending] = useState("")
   const [error, setError] = useState("")
 
@@ -140,7 +211,7 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
   async function save() {
     setPending("save"); setError("")
     try {
-      await onSave({ id: view?.id, index, name, source, match, conditions: conditions.filter((condition) => condition.column) })
+      await onSave({ id: view?.id, index, name, source, match, conditions: conditions.filter((condition) => condition.column), layout: cleanViewLayout(layout) })
       onOpenChange(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "L’onglet-fenêtre n’a pas pu être enregistré.")
@@ -158,8 +229,8 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
   return <Dialog open={open} onOpenChange={onOpenChange}>
     <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl">
       <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><Filter className="size-4 text-primary" />{view ? "Modifier l’onglet-fenêtre" : "Nouvel onglet-fenêtre"}</DialogTitle>
-        <DialogDescription>Un onglet qui réaffiche les lignes existantes répondant aux conditions. Rien n’est copié : une case modifiée ici l’est dans son onglet d’origine.</DialogDescription>
+        <DialogTitle className="flex items-center gap-2"><Filter className="size-4 text-primary" />{view ? "Modifier la vue" : "Nouvelle vue"}</DialogTitle>
+        <DialogDescription>Un onglet-fenêtre : les lignes qui remplissent les conditions, présentées comme tu veux. Rien n’est copié : une case modifiée ici l’est dans son onglet d’origine.</DialogDescription>
       </DialogHeader>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-1.5 text-sm font-medium">Nom de l’onglet<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Runes, Armes légendaires…" autoFocus /></label>
@@ -195,6 +266,7 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
         {!conditions.length && <p className="text-xs text-muted-foreground">Sans condition, la fenêtre montre toutes les lignes de la source.</p>}
         {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
       </div>
+      <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {view && onDelete && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}

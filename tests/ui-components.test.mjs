@@ -231,6 +231,45 @@ test("Emplacements des items : liste liée à Environnement et Magasin, « - » 
   assert.match(html, /Introuvable : Forêt ordinaire/);
 });
 
+test("Calendriers et présentations de vue : dates du monde, sections, tableau de bord, réglages propres", async () => {
+  const calendars = await vite.ssrLoadModule("/lib/calendars.ts");
+  const layouts = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  const tables = [
+    { tabName: "Calendriers", headers: ["Nom", "Ère", "Description", "ID"], rows: [{ values: ["Calendrier d’Ysmir", "AR", "", "CAL-1"] }] },
+    { tabName: "Mois", headers: ["Nom", "Calendrier", "Ordre", "Nombre de jours", "Saison", "ID"], rows: [
+      { values: ["Givrelune", "Calendrier d’Ysmir", "2", "20", "Hiver", "M2"] },
+      { values: ["Petit Brumaire", "Calendrier d’Ysmir", "3", "", "Hiver", "M3"] },
+      { values: ["Brumaire", "Calendrier d’Ysmir", "1", "28", "Automne", "M1"] },
+    ] },
+    { tabName: "Saisons", headers: ["Nom", "Calendrier", "Ordre", "Couleur", "ID"], rows: [{ values: ["Automne", "Calendrier d’Ysmir", "1", "#b45309", "S1"] }, { values: ["Hiver", "Calendrier d’Ysmir", "2", "#2563eb", "S2"] }] },
+    { tabName: "Jours de la semaine", headers: ["Nom", "Calendrier", "Ordre", "ID"], rows: ["Lun", "Mar", "Mer", "Jeu", "Ven"].map((name, index) => ({ values: [name, "Calendrier d’Ysmir", String(index + 1), `J${index}`] })) },
+  ];
+  const [ysmir] = calendars.calendarsFromTables(tables);
+  assert.deepEqual(ysmir.months.map((month) => [month.name, month.days]), [["Brumaire", 28], ["Givrelune", 20], ["Petit Brumaire", 30]]);
+  assert.deepEqual(ysmir.seasons.map((season) => [season.name, season.months]), [["Automne", 1], ["Hiver", 2]]);
+  assert.equal(ysmir.weekdays.length, 5);
+  assert.deepEqual(calendars.parseCalendarDate("12 Petit Brumaire 1023", ysmir), { year: 1023, month: 2, day: 12 });
+  assert.deepEqual(calendars.parseCalendarDate("<b>3 Brumaire 1023</b>", ysmir), { year: 1023, month: 0, day: 3 });
+  assert.deepEqual(calendars.parseCalendarDate("1023-2-20", ysmir), { year: 1023, month: 1, day: 20 });
+  assert.equal(calendars.parseCalendarDate("25 Givrelune 1023", ysmir), null);
+  assert.equal(calendars.formatCalendarDate({ year: 1023, month: 1, day: 4 }, ysmir), "4 Givrelune 1023 AR");
+  // Une année de 78 jours, semaine de 5 : le 1er Brumaire de l'an 2 tombe 78 jours après celui de l'an 1.
+  assert.equal(calendars.firstWeekdayOf(ysmir, 2, 0), 78 % 5);
+  assert.equal(calendars.firstWeekdayOf(calendars.realCalendar, 2026, 9), 3); // 1er octobre 2026 : un jeudi (lundi = 0)
+  assert.deepEqual(calendars.parseCalendarDate("29 février 2024", calendars.realCalendar), { year: 2024, month: 1, day: 29 });
+  assert.equal(calendars.parseCalendarDate("29 février 2023", calendars.realCalendar), null);
+
+  assert.equal(layouts.cleanViewLayout({ kind: "table" }), undefined);
+  assert.deepEqual(layouts.cleanViewLayout({ kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E"], evil: "x" }), { kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D"] });
+  assert.equal(layouts.cleanViewLayout({ kind: "inconnu" }), undefined);
+  assert.equal(layouts.parseViewLayout("pas du json"), undefined);
+  const rows = [{ t: "Arme", p: "10 PO" }, { t: "Arme, Rune", p: "1 250,5 PO" }, { t: "", p: "abc" }];
+  assert.deepEqual(layouts.groupRowsBy(rows, (row) => row.t).map((group) => [group.name, group.rows.length]), [["Arme", 2], ["Rune", 1], ["", 1]]);
+  assert.equal(layouts.dashboardTileValue({ kind: "sum", column: "p" }, rows, (row, column) => row[column]).number, 1260.5);
+  assert.equal(layouts.dashboardTileValue({ kind: "count" }, rows, () => "").number, 3);
+  assert.deepEqual(layouts.dashboardTileValue({ kind: "breakdown", column: "t" }, rows, (row, column) => row[column]).breakdown[0], { name: "Arme", count: 2 });
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
