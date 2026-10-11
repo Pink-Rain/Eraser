@@ -15,7 +15,43 @@ export { cellNumber }
 export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
 
 export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown"
-export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string }
+export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string; /** Couleur de la tuile (#hex). */ color?: string; /** Tuile large (deux places). */ wide?: boolean }
+
+/**
+ * L'apparence des éléments d'une vue (Modifier › Liste, Kanban…) : comme l'atelier des
+ * cartes, mais pour la vue elle-même. Tout est facultatif : absent, la vue garde son
+ * apparence d'avant.
+ */
+export type ViewLook = {
+  /** Espacement des éléments. */
+  density?: "compact" | "normal" | "airy"
+  /** Éléments encadrés un par un, ou lignes séparées d'un trait. */
+  surface?: "boxed" | "plain"
+  /** Comment la couleur (« Couleur des lignes selon ») marque un élément. */
+  accent?: "border" | "tint" | "dot" | "title" | "none"
+  /** Le nom : police et taille. */
+  titleFont?: "display" | "sans"
+  titleSize?: "sm" | "md" | "lg"
+  /** Les colonnes montrées sous le nom. */
+  fieldStyle?: "inline" | "labels" | "pills" | "stacked"
+  /** L'image à côté du nom. */
+  imageShape?: "square" | "rounded" | "circle"
+  imageSize?: "sm" | "md" | "lg"
+  /** Kanban : colonnes sobres, teintées, ou à en-tête coloré. */
+  laneStyle?: "plain" | "tinted" | "header"
+  /** Calendrier : grille du mois ou agenda (liste par date) ; style des entrées. */
+  calendarMode?: "month" | "agenda"
+  entryStyle?: "pill" | "dot" | "bar"
+  /** Tableau de bord : tuiles sobres, à liseré de couleur, ou teintées. */
+  tileStyle?: "plain" | "accent" | "tinted"
+  /** Galerie : le nom posé sur l'image ou dessous. */
+  caption?: "overlay" | "below"
+  /** Codex : image à côté ou en bannière ; lettrine au premier paragraphe. */
+  codexImage?: "side" | "banner"
+  dropCap?: boolean
+  /** Maître-détail : largeur de la liste. */
+  masterWidth?: "narrow" | "normal" | "wide"
+}
 
 export type ViewLayout = {
   kind: ViewLayoutKind
@@ -74,6 +110,8 @@ export type ViewLayout = {
   timelineSide?: "alternate" | "right"
   /** Codex : le sommaire à côté des fiches. */
   showToc?: boolean
+  /** L'apparence des éléments (Modifier › la vue › Apparence). */
+  look?: ViewLook
 }
 
 /** La valeur d'`itemCard` qui veut dire « la carte par défaut de l'onglet ». */
@@ -115,6 +153,36 @@ const kinds = new Set<string>([...viewLayoutKinds.map((kind) => kind.value), "st
 const tileKinds = new Set<string>(dashboardTileKinds.map((kind) => kind.value))
 const text = (value: unknown, max = 120) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : ""
 
+const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
+  density: ["compact", "normal", "airy"],
+  surface: ["boxed", "plain"],
+  accent: ["border", "tint", "dot", "title", "none"],
+  titleFont: ["display", "sans"],
+  titleSize: ["sm", "md", "lg"],
+  fieldStyle: ["inline", "labels", "pills", "stacked"],
+  imageShape: ["square", "rounded", "circle"],
+  imageSize: ["sm", "md", "lg"],
+  laneStyle: ["plain", "tinted", "header"],
+  calendarMode: ["month", "agenda"],
+  entryStyle: ["pill", "dot", "bar"],
+  tileStyle: ["plain", "accent", "tinted"],
+  caption: ["overlay", "below"],
+  codexImage: ["side", "banner"],
+  dropCap: [true],
+  masterWidth: ["narrow", "normal", "wide"],
+}
+
+/** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */
+export function cleanViewLook(value: unknown): ViewLook | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined
+  const raw = value as Record<string, unknown>
+  const look: Record<string, unknown> = {}
+  for (const [key, allowed] of Object.entries(lookChoices)) if (allowed.includes(raw[key])) look[key] = raw[key]
+  return Object.keys(look).length ? look as ViewLook : undefined
+}
+
+const isHexColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+
 /** Une présentation propre (champs connus, longueurs bornées) ; `undefined` pour le tableau simple. */
 export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (!value || typeof value !== "object") return undefined
@@ -138,7 +206,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
     if (!tile || typeof tile !== "object") return []
     const entry = tile as Record<string, unknown>
     if (!tileKinds.has(String(entry.kind))) return []
-    return [{ kind: entry.kind as DashboardTileKind, ...(text(entry.column) ? { column: text(entry.column) } : {}), ...(text(entry.label, 60) ? { label: text(entry.label, 60) } : {}) }]
+    return [{ kind: entry.kind as DashboardTileKind, ...(text(entry.column) ? { column: text(entry.column) } : {}), ...(text(entry.label, 60) ? { label: text(entry.label, 60) } : {}), ...(isHexColor(entry.color) ? { color: entry.color } : {}), ...(entry.wide === true ? { wide: true } : {}) }]
   }).slice(0, 12) : []
   if (tiles.length) layout.tiles = tiles
   if (text(raw.sortBy)) layout.sortBy = text(raw.sortBy)
@@ -160,6 +228,8 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.captionOnHover === true) layout.captionOnHover = true
   if (raw.timelineSide === "alternate" || raw.timelineSide === "right") layout.timelineSide = raw.timelineSide
   if (raw.showToc === true) layout.showToc = true
+  const look = cleanViewLook(raw.look)
+  if (look) layout.look = look
   return layout.kind === "table" && !layout.groupBy ? undefined : layout
 }
 
@@ -285,6 +355,16 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:timeline-cards", name: "Chronologie de cartes", builtin: true, layout: { kind: "timeline", timelineSide: "right", itemCard: DEFAULT_ITEM_CARD } },
   { id: "eraser:tree-folded", name: "Arbre replié", builtin: true, layout: { kind: "tree", collapsed: true } },
   { id: "eraser:codex-toc", name: "Codex avec sommaire", builtin: true, layout: { kind: "codex", showToc: true } },
+  { id: "eraser:list-bestiary", name: "Bestiaire (portraits ronds, pastilles)", builtin: true, layout: { kind: "list", look: { surface: "boxed", density: "airy", imageShape: "circle", imageSize: "lg", titleSize: "lg", fieldStyle: "pills", accent: "tint" } } },
+  { id: "eraser:list-ledger", name: "Registre (lignes fines, libellés)", builtin: true, layout: { kind: "list", look: { surface: "plain", density: "compact", titleFont: "sans", titleSize: "sm", fieldStyle: "labels", accent: "dot" } } },
+  { id: "eraser:kanban-headers", name: "Kanban à en-têtes colorés", builtin: true, layout: { kind: "kanban", hideEmpty: true, look: { laneStyle: "header", fieldStyle: "pills", imageShape: "rounded" } } },
+  { id: "eraser:kanban-tinted", name: "Kanban teinté", builtin: true, layout: { kind: "kanban", look: { laneStyle: "tinted", surface: "boxed", accent: "border", density: "compact" } } },
+  { id: "eraser:calendar-agenda", name: "Agenda", builtin: true, layout: { kind: "calendar", look: { calendarMode: "agenda", entryStyle: "bar" } } },
+  { id: "eraser:calendar-dots", name: "Calendrier à pastilles", builtin: true, layout: { kind: "calendar", look: { entryStyle: "dot" } } },
+  { id: "eraser:dashboard-tinted", name: "Tableau de bord teinté", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }], look: { tileStyle: "tinted" } } },
+  { id: "eraser:gallery-captions", name: "Galerie légendée", builtin: true, layout: { kind: "gallery", galleryShape: "square", look: { caption: "below", fieldStyle: "pills" } } },
+  { id: "eraser:codex-book", name: "Livre illustré", builtin: true, layout: { kind: "codex", showToc: true, look: { codexImage: "banner", dropCap: true } } },
+  { id: "eraser:master-wide", name: "Maître-détail, liste large", builtin: true, layout: { kind: "master-detail", look: { masterWidth: "wide", imageShape: "circle", fieldStyle: "stacked" } } },
 ]
 
 export function cleanViewPreset(value: unknown): ViewPreset | null {

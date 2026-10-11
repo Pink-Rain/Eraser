@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import type { StatDefinition } from "@/lib/index-stats"
-import { cleanViewLayout, dashboardTileKinds, DEFAULT_ITEM_CARD, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
+import { cleanViewLayout, dashboardTileKinds, DEFAULT_ITEM_CARD, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
 
 export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
 
@@ -31,6 +31,77 @@ function useCalendarNames(active: boolean) {
   }, [active])
   return names
 }
+
+
+/** Un choix parmi quelques boutons (comme l'atelier des cartes). */
+function Choice<T extends string>({ label, value, choices, onPick, hint }: { label: string; value: T; choices: Array<[T, string]>; onPick: (value: T) => void; hint?: string }) {
+  return <div className="grid min-w-0 gap-1 text-xs font-semibold">
+    <span>{label}{hint && <span className="font-normal text-muted-foreground"> · {hint}</span>}</span>
+    <span className="inline-flex max-w-full flex-wrap gap-0.5 justify-self-start rounded-lg border bg-muted/30 p-0.5" role="radiogroup" aria-label={label}>
+      {choices.map(([key, text]) => <button key={key} type="button" role="radio" aria-checked={value === key} onClick={() => onPick(key)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${value === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{text}</button>)}
+    </span>
+  </div>
+}
+
+const lookKinds = {
+  // Ce que chaque vue sait régler dans « Apparence ».
+  density: ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"],
+  surface: ["list", "kanban", "master-detail", "calendar", "timeline", "tree"],
+  accent: ["list", "kanban", "master-detail", "calendar", "gallery", "timeline", "tree", "codex"],
+  title: ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"],
+  fields: ["list", "kanban", "master-detail", "calendar", "gallery", "timeline", "tree", "codex"],
+  image: ["list", "kanban", "master-detail", "calendar", "gallery", "timeline", "tree", "codex"],
+} as const
+
+/**
+ * « Apparence » d'une vue : l'atelier de création de la vue elle-même (densité, éléments
+ * encadrés ou en lignes, couleur, nom, colonnes, images) et ses réglages propres.
+ */
+function LookSettings({ layout, onChange }: { layout: ViewLayout; onChange: (layout: ViewLayout) => void }) {
+  const look = layout.look ?? {}
+  const kind = layout.kind
+  const set = (changes: Partial<ViewLook>) => {
+    const next: ViewLook = { ...look, ...changes }
+    for (const key of Object.keys(next) as Array<keyof ViewLook>) if (next[key] === undefined) delete next[key]
+    onChange({ ...layout, look: Object.keys(next).length ? next : undefined })
+  }
+  const has = (group: keyof typeof lookKinds) => (lookKinds[group] as readonly string[]).includes(kind)
+  const agenda = kind === "calendar" && look.calendarMode === "agenda"
+  // Le calendrier en grille n'a pas d'éléments à mettre en page : seulement ses entrées.
+  const items = kind !== "calendar" || agenda
+  return <div className="grid gap-3 rounded-xl border bg-gradient-to-b from-primary/[0.04] to-transparent p-3">
+    <div className="flex flex-wrap items-baseline justify-between gap-2"><p className="text-sm font-medium">Apparence</p>{layout.look && <button type="button" onClick={() => onChange({ ...layout, look: undefined })} className="text-xs text-muted-foreground underline-offset-4 hover:text-foreground hover:underline">Apparence d’office</button>}</div>
+    {kind === "kanban" && <Choice label="Colonnes du kanban" value={look.laneStyle ?? "plain"} choices={[["plain", "Sobres"], ["tinted", "Teintées"], ["header", "En-tête coloré"]]} onPick={(laneStyle) => set({ laneStyle: laneStyle === "plain" ? undefined : laneStyle })} />}
+    {kind === "calendar" && <div className="grid gap-3 sm:grid-cols-2">
+      <Choice label="Affichage" value={look.calendarMode ?? "month"} choices={[["month", "Grille du mois"], ["agenda", "Agenda"]]} onPick={(calendarMode) => set({ calendarMode: calendarMode === "month" ? undefined : calendarMode })} />
+      {!agenda && <Choice label="Entrées" value={look.entryStyle ?? "pill"} choices={[["pill", "Pastille"], ["dot", "Point"], ["bar", "Barre"]]} onPick={(entryStyle) => set({ entryStyle: entryStyle === "pill" ? undefined : entryStyle })} />}
+    </div>}
+    {kind === "dashboard" && <Choice label="Tuiles" value={look.tileStyle ?? "plain"} choices={[["plain", "Sobres"], ["accent", "Liseré de couleur"], ["tinted", "Teintées"]]} onPick={(tileStyle) => set({ tileStyle: tileStyle === "plain" ? undefined : tileStyle })} hint="la couleur de chaque tuile se choisit plus haut" />}
+    {kind === "gallery" && <Choice label="Nom de l’image" value={look.caption ?? "overlay"} choices={[["overlay", "Posé sur l’image"], ["below", "Dessous"]]} onPick={(caption) => set({ caption: caption === "overlay" ? undefined : caption })} />}
+    {kind === "codex" && <div className="grid gap-3 sm:grid-cols-2">
+      <Choice label="Image de la fiche" value={look.codexImage ?? "side"} choices={[["side", "Dans l’encadré"], ["banner", "En bannière"]]} onPick={(codexImage) => set({ codexImage: codexImage === "side" ? undefined : codexImage })} />
+      <label className="flex items-center gap-2 self-end pb-1.5 text-xs"><Checkbox checked={Boolean(look.dropCap)} onCheckedChange={(checked) => set({ dropCap: checked === true || undefined })} />Lettrine au premier paragraphe</label>
+    </div>}
+    {kind === "master-detail" && <Choice label="Largeur de la liste" value={look.masterWidth ?? "normal"} choices={[["narrow", "Étroite"], ["normal", "Normale"], ["wide", "Large"]]} onPick={(masterWidth) => set({ masterWidth: masterWidth === "normal" ? undefined : masterWidth })} />}
+    <div className="grid gap-3 sm:grid-cols-2">
+      {has("density") && <Choice label="Densité" value={look.density ?? "normal"} choices={[["compact", "Serrée"], ["normal", "Normale"], ["airy", "Aérée"]]} onPick={(density) => set({ density: density === "normal" ? undefined : density })} />}
+      {has("surface") && items && <Choice label="Éléments" value={look.surface ?? (kind === "list" || kind === "tree" ? "plain" : "boxed")} choices={[["boxed", "Encadrés"], ["plain", "En lignes"]]} onPick={(surface) => set({ surface })} />}
+    </div>
+    {has("accent") && <Choice label="La couleur marque l’élément par" value={look.accent ?? "border"} choices={[["border", "Un liseré"], ["tint", "Un fond teinté"], ["dot", "Une pastille"], ["title", "Le nom"], ["none", "Rien"]]} onPick={(accent) => set({ accent: accent === "border" ? undefined : accent })} hint={layout.colorBy ? `selon « ${layout.colorBy} »` : "choisis « Couleur des lignes selon » plus bas"} />}
+    {has("title") && <div className="grid gap-3 sm:grid-cols-2">
+      <Choice label={kind === "dashboard" ? "Chiffres : police" : "Nom : police"} value={look.titleFont ?? (kind === "dashboard" || kind === "codex" || kind === "gallery" ? "display" : "sans")} choices={[["display", "Titre (serif)"], ["sans", "Texte"]]} onPick={(titleFont) => set({ titleFont })} />
+      <Choice label={kind === "dashboard" ? "Chiffres : taille" : "Nom : taille"} value={look.titleSize ?? (kind === "codex" || kind === "dashboard" ? "md" : "sm")} choices={[["sm", "S"], ["md", "M"], ["lg", "L"]]} onPick={(titleSize) => set({ titleSize })} />
+    </div>}
+    {has("fields") && items && <Choice label="Colonnes sous le nom" value={look.fieldStyle ?? "inline"} choices={[["inline", "Texte « Champ : valeur »"], ["labels", "Libellés au-dessus"], ["pills", "Pastilles colorées"], ["stacked", "Valeurs empilées"]]} onPick={(fieldStyle) => set({ fieldStyle: fieldStyle === "inline" ? undefined : fieldStyle })} hint={kind === "codex" ? "dans l’encadré" : undefined} />}
+    {has("image") && items && <div className="grid gap-3 sm:grid-cols-2">
+      <Choice label="Images : forme" value={look.imageShape ?? "rounded"} choices={[["square", "Carrée"], ["rounded", "Arrondie"], ["circle", "Ronde"]]} onPick={(imageShape) => set({ imageShape: imageShape === "rounded" ? undefined : imageShape })} />
+      {kind !== "gallery" && kind !== "codex" && <Choice label="Images : taille" value={look.imageSize ?? (kind === "master-detail" || kind === "tree" ? "sm" : "md")} choices={[["sm", "S"], ["md", "M"], ["lg", "L"]]} onPick={(imageSize) => set({ imageSize })} />}
+    </div>}
+    {layout.itemCard && ["list", "kanban", "master-detail", "timeline"].includes(kind) && <p className="text-[11px] leading-4 text-muted-foreground">Les éléments sont dessinés par une carte : leur intérieur se règle dans « Modifier › Cartes ». L’apparence règle le reste de la vue.</p>}
+  </div>
+}
+
+const tilePalette = ["#682522", "#3b5c8a", "#0f7a65", "#8d6618", "#7652b8", "#c84d8c", "#2a95c2", "#5a9418"]
 
 /**
  * La présentation d'une vue : tableau, cartes, liste (compacte, repliable), kanban,
@@ -112,9 +183,16 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false, c
         {needsColumn ? <NativeSelect value={tile.column ?? ""} onChange={(event) => setTile(position, { ...tile, column: event.target.value || undefined })} aria-label="Colonne" className="h-9 text-sm"><NativeSelectOption value="">Colonne…</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect> : <span />}
         <Input value={tile.label ?? ""} onChange={(event) => setTile(position, { ...tile, label: event.target.value || undefined })} placeholder="Titre (facultatif)" aria-label="Titre de la tuile" className="h-9" />
         <button type="button" onClick={() => setTile(position, null)} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la tuile"><X className="size-3.5" /></button>
+        <div className="col-span-4 -mt-1 flex flex-wrap items-center gap-1 pb-1 text-[11px] text-muted-foreground">
+          <span className="mr-1">Couleur</span>
+          <button type="button" aria-pressed={!tile.color} onClick={() => setTile(position, { ...tile, color: undefined })} className={`h-5 rounded-full border px-1.5 ${!tile.color ? "border-primary text-foreground" : ""}`}>Aucune</button>
+          {tilePalette.map((color) => <button key={color} type="button" aria-label={`Couleur ${color}`} aria-pressed={tile.color === color} onClick={() => setTile(position, { ...tile, color })} className={`size-5 rounded-full border ${tile.color === color ? "ring-2 ring-primary ring-offset-1" : ""}`} style={{ backgroundColor: color }} />)}
+          <label className="ml-3 flex items-center gap-1.5"><Checkbox checked={Boolean(tile.wide)} onCheckedChange={(checked) => setTile(position, { ...tile, wide: checked === true || undefined })} />Tuile large</label>
+        </div>
       </div> })}
       <div><Button type="button" variant="ghost" size="sm" onClick={() => set({ tiles: [...tiles, { kind: "breakdown", column: columns[0] }] })}><Plus />Ajouter une tuile</Button></div>
     </div>}
+    {layout.kind !== "stats" && layout.kind !== "table" && layout.kind !== "cards" && <LookSettings layout={layout} onChange={onChange} />}
     {layout.kind !== "stats" && layout.kind !== "table" && layout.kind !== "cards" && <div className="grid gap-2 border-t pt-3 sm:grid-cols-2">
       <p className="text-sm font-medium sm:col-span-2">Affichage</p>
       {layout.kind !== "dashboard" && <>
