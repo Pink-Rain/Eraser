@@ -18,7 +18,7 @@ import type { EditorMode } from "@/components/eraser/index-editor"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
-import type { StatDefinition } from "@/lib/index-stats"
+import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { groupRowsBy, isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
@@ -244,6 +244,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Le hasard des formules reste le même jusqu'à « Actualiser ».
   const [seed, setSeed] = useState(() => `${indexKey}:${Date.now()}`)
   const [sheetError, setSheetError] = useState("")
+  const [statSheetRows, setStatSheetRows] = useState<string[] | null>(null)
   const [guideOpen, setGuideOpen] = useState(false)
   // Un lien « ?q=… » (bouton « Ouvrir la ligne liée ») ouvre l'index filtré sur ce nom.
   useEffect(() => {
@@ -1182,12 +1183,18 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
     return (owner ? specOf(owner.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))
   }, [specOf, tables])
+  // « Forêt - Ville » : une liste à choix multiple séparée par un tiret compte chaque lieu à part.
+  const statSeparatorOf = useCallback((header: string) => {
+    const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
+    const spec = owner ? specOf(owner.tabName, header) : null
+    return spec?.multiple ? spec.listSeparator : undefined
+  }, [specOf, tables])
   // Les statistiques de l'index, et celles qu'un onglet stat de l'alpha 197 gardait encore.
   const indexStats = useMemo(() => {
     const seen = new Set<string>()
     return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
   }, [settings.stats, settings.views])
-  const saveStats = useCallback(async (stats: StatDefinition[]) => { await settings.saveStats(stats) }, [settings])
+  const saveStats = useCallback(async (stats: StatDefinition[], groups?: StatColumnGroup[]) => { await settings.saveStats(stats, groups) }, [settings])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -1268,7 +1275,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     setRowVersions((current) => ({ ...current, [rowKey]: (current[rowKey] ?? 0) + 1 }))
   }
   // Précédente, « Aller à… », Suivante : les lignes du tableau, dans l'ordre affiché.
-  const sheetNavigation = { rows: displayedRows.map((row) => row.key), labelOf: nameOf, onGo: (rowKey: string) => { setSheetError(""); setDetails(rowKey) } }
+  // Une fiche ouverte depuis « Modifier › Stats » passe d'une ligne concernée à l'autre.
+  const sheetNavigation = { rows: statSheetRows ?? displayedRows.map((row) => row.key), labelOf: nameOf, onGo: (rowKey: string) => { setSheetError(""); setDetails(rowKey) } }
 
   // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
   const weightColumns = table ? (data?.columns[table.tabName] ?? []).filter((column) => ["number", "gauge", "formula", "rollup"].includes(column.spec.kind)).map((column) => column.header) : []
@@ -1394,7 +1402,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
-        statsPanel={<IndexStats stats={indexStats} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} onOpen={() => undefined} canEdit={!busy} onSave={saveStats} />}
+        statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
         initialMode={editorMode}
         initialTab={table?.tabName}
       />}
@@ -1422,6 +1430,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       {table && statsView ? <IndexStats
         key={statsView.id}
         stats={indexStats}
+        groups={settings.statGroups}
+        separatorOf={statSeparatorOf}
         pinnedOnly
         rows={statRowKeys}
         columns={statHeaders}
@@ -1524,7 +1534,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         error={sheetError}
         navigation={sheetNavigation}
         onSave={saveSheet}
-        onClose={() => { setDetails(null); setSheetError("") }}
+        onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null) }}
       />}
       {viewDialog && <IndexViewDialog
         open

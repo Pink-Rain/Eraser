@@ -15,7 +15,7 @@ import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
-import type { StatDefinition } from "@/lib/index-stats"
+import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
 
 export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
@@ -103,9 +103,9 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
   </div>
 }
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[] }
 
-const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [] }
+const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [] }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -128,7 +128,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [] }
         known.set(index, next)
         setSettings(next)
       })
@@ -190,10 +190,10 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "save-presentations", index, changes })
     if (payload.presentations) update({ presentations: payload.presentations })
   }, [index, update])
-  /** Les statistiques de cet index (Modifier › Stats), enregistrées toutes ensemble. */
-  const saveStats = useCallback(async (stats: StatDefinition[]) => {
-    const payload = await postSettings({ action: "save-stats", index, stats })
-    if (payload.stats) update({ stats: payload.stats })
+  /** Les statistiques de cet index (Modifier › Stats), enregistrées toutes ensemble, et ses colonnes regroupées si elles sont données. */
+  const saveStats = useCallback(async (stats: StatDefinition[], groups?: StatColumnGroup[]) => {
+    const payload = await postSettings({ action: "save-stats", index, stats, ...(groups ? { groups } : {}) })
+    if (payload.stats) update({ stats: payload.stats, ...(payload.statGroups ? { statGroups: payload.statGroups } : {}) })
   }, [index, update])
   /** Les presets de vues, communs à tous les index. */
   const saveViewPreset = useCallback(async (preset: { id?: string; name: string; layout: ViewLayout }) => {

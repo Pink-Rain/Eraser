@@ -174,3 +174,250 @@ test("épinglées en tête, identifiants neufs", () => {
   assert.match(id, /^st-[0-9a-z]{6}$/);
   assert.notEqual(id, "st-000000");
 });
+
+/* ---------- Statistiques enrichies (maquette validée) et colonnes regroupées ---------- */
+
+// L'Index des items : rareté et emplacement, principal et secondaire.
+const items = [
+  { tab: "Objets", Nom: "Canot", Type: "Transport", Prix: "2 PO", "Rareté principale": "Commun", "Emplacement principal": "Bateau", "Rareté secondaire": "Rare", "Emplacement secondaire": "Marché ordinaire" },
+  { tab: "Objets", Nom: "Poêle", Type: "Utilitaire", Prix: "5 PC", "Rareté principale": "Très commun", "Emplacement principal": "Donjon, Ville", "Rareté secondaire": "Commun", "Emplacement secondaire": "Jungle" },
+  { tab: "Objets", Nom: "Miroir", Type: "Décoratif", Prix: "1 PO", "Rareté principale": "Rare", "Emplacement principal": "Maison", "Rareté secondaire": "", "Emplacement secondaire": "" },
+  { tab: "Armes", Nom: "Dague", Type: "Arme", Prix: "50 PC", "Rareté principale": "Très commun", "Emplacement principal": "Armurier", "Rareté secondaire": "Rare", "Emplacement secondaire": "Donjon" },
+  { tab: "Armes", Nom: "Encre", Type: "Arme", Prix: "", "Rareté principale": "", "Emplacement principal": "", "Rareté secondaire": "", "Emplacement secondaire": "" },
+];
+const rarityOrder = ["Très commun", "Commun", "Très peu commun", "Rare", "Très rare", "Ultime"];
+const itemOrder = (column) => /^Rareté/.test(column) ? rarityOrder : [];
+const rarity = { id: "g-rar", name: "Rareté (P+S)", columns: ["Rareté principale", "Rareté secondaire"] };
+const place = { id: "g-emp", name: "Emplacement (P+S)", columns: ["Emplacement principal", "Emplacement secondaire"] };
+const env = { valueOf, tabOf, orderOf: itemOrder, groups: [rarity, place] };
+const counts = (prepared, column) => stats.groupStatRows(prepared.units, prepared.valueOf, column, { order: prepared.orderOf(column) }).map((group) => [stats.statKeyLabel(group), group.rows.length]);
+
+test("une ancienne statistique se relit à l'identique ; les nouveaux réglages sont gardés et bornés", () => {
+  const old = { id: "st-old", title: "Raretés", measure: "count", by: ["Rareté"], cols: ["Type"], form: "table", top: 6, percent: "row" };
+  assert.deepEqual(stats.cleanStat(old), old);
+  const fresh = stats.cleanStat({
+    id: "st-new", title: "Nouvelle", measure: "count", by: ["Type"], cols: ["Rareté principale"], blocks: [["Rareté secondaire", "Type"], [], ["Emplacement principal"], ["Nom"]], form: "table", top: 4, percent: "parent",
+    where: [{ column: "Attributs", operator: "contient", value: "Poison", or: [{ column: "Attributs", operator: "contient", value: "Saignante" }, { column: "x", operator: "bidon", value: "" }] }, { column: "Rareté principale", operator: "au-moins", value: "Rare" }],
+    joined: true, once: true, compare: "rest", goal: 12, hist: { field: "Prix" }, colors: { mode: "value", hue: "#ABCDEF", ramp: "rouge", values: { Rare: "#285f8f", Commun: "pas une couleur" } }, evil: 1,
+  });
+  assert.deepEqual(fresh, {
+    id: "st-new", title: "Nouvelle", measure: "count", by: ["Type"], cols: ["Rareté principale"], blocks: [["Rareté secondaire"], ["Emplacement principal"]], form: "table", top: 4,
+    where: [{ column: "Attributs", operator: "contient", value: "Poison", or: [{ column: "Attributs", operator: "contient", value: "Saignante" }] }, { column: "Rareté principale", operator: "au-moins", value: "Rare" }],
+    joined: true, once: true, colors: { mode: "value", hue: "#abcdef", values: { Rare: "#285f8f" } },
+  });
+  // « % du parent » : seulement avec deux niveaux de lignes ; la comparaison : seulement tuile, barres, colonnes.
+  assert.equal(fresh.percent, undefined);
+  assert.equal(stats.cleanStat({ id: "p", by: ["Type", "Nom"], form: "table", percent: "parent" }).percent, "parent");
+  // Chaque forme garde ses propres réglages.
+  assert.deepEqual(stats.cleanStat({ id: "h", by: [], form: "histogram", hist: { field: "Prix", bins: 8, scale: "log" }, goal: 3 }).hist, { field: "Prix", bins: 8, scale: "log" });
+  assert.equal(stats.cleanStat({ id: "h", by: [], form: "histogram", hist: { field: "Prix", bins: 7, scale: "?" } }).hist.bins, 6);
+  assert.equal(stats.cleanStat({ id: "g", by: [], form: "gauge", goal: 50 }).goal, 50);
+  assert.equal(stats.cleanStat({ id: "g", by: [], form: "gauge", goal: -1 }).goal, undefined);
+  assert.deepEqual(stats.cleanStat({ id: "s", by: ["Type"], form: "scatter", scatter: { x: "Prix", y: "Valeur" } }).scatter, { x: "Prix", y: "Valeur" });
+  const compared = stats.cleanStat({ id: "c", by: ["Type"], form: "bars", compare: "filter", compareWhere: [{ column: "Onglet", operator: "est", value: "Armes" }] });
+  assert.deepEqual([compared.compare, compared.compareWhere], ["filter", [{ column: "Onglet", operator: "est", value: "Armes" }]]);
+  assert.equal(stats.cleanStat({ id: "c", by: ["Type"], form: "bars", compare: "filter", compareWhere: [] }).compare, undefined);
+  assert.equal(stats.cleanStat({ id: "c", by: ["Type"], form: "ranking", compare: "rest" }).compare, undefined);
+  // Les anciennes statistiques gardées dans un onglet stat (alpha 197) aussi.
+  assert.deepEqual(layouts.cleanViewLayout({ kind: "stats", stats: [old] }).stats, [old]);
+});
+
+test("l'enregistrement d'un index : les anciennes entrées sans groupes se lisent, les groupes se nettoient", () => {
+  const old = { stats: [{ id: "a", title: "A", measure: "count", by: [], form: "number" }] };
+  assert.deepEqual(stats.cleanStatsRecord(old), { stats: old.stats, groups: [] });
+  assert.deepEqual(stats.cleanStatsRecord(null), { stats: [], groups: [] });
+  const groups = stats.cleanColumnGroups([
+    { id: "g-1", name: " Rareté  (P+S) ", columns: ["Rareté principale", "Rareté secondaire", "rareté principale"] },
+    { id: "g-1", name: "Rareté (P+S)", columns: ["A", "B"] },
+    { id: "!!", columns: ["Emplacement principal", "Emplacement secondaire", "groupe:g-1"] },
+    { id: "g-3", name: "Seul", columns: ["A"] },
+    "abîmé",
+  ]);
+  assert.deepEqual(groups, [
+    { id: "g-1", name: "Rareté (P+S)", columns: ["Rareté principale", "Rareté secondaire"] },
+    { id: "g-1-2", name: "Rareté (P+S) 2", columns: ["A", "B"] },
+    { id: "g-3", name: "Emplacement (P+S)", columns: ["Emplacement principal", "Emplacement secondaire"] },
+  ]);
+});
+
+test("familles de colonnes jumelles : principale/secondaire, P./S., 1/2/3", () => {
+  const columns = ["Nom", "Type", "Sous-type", "Rareté principale", "Emplacement principal", "Rareté secondaire", "Emplacement secondaire", "Dégâts P.", "Dégâts S.", "Attaque 1", "Attaque 2", "Attaque 3", "Effets"];
+  assert.deepEqual(stats.columnFamilies(columns), [
+    { name: "Rareté (P+S)", columns: ["Rareté principale", "Rareté secondaire"] },
+    { name: "Emplacement (P+S)", columns: ["Emplacement principal", "Emplacement secondaire"] },
+    { name: "Dégâts (P+S)", columns: ["Dégâts P.", "Dégâts S."] },
+    { name: "Attaque (1+2+3)", columns: ["Attaque 1", "Attaque 2", "Attaque 3"] },
+  ]);
+  assert.deepEqual(stats.suggestColumnGroups(columns, [rarity]).map((family) => family.name), ["Emplacement (P+S)", "Dégâts (P+S)", "Attaque (1+2+3)"]);
+  assert.deepEqual(stats.memberLabels(["Rareté principale", "Rareté secondaire"]), ["principale", "secondaire"]);
+  assert.deepEqual(stats.memberLabels(["Dégâts P.", "Dégâts S."]), ["P.", "S."]);
+  assert.deepEqual(stats.memberLabels(["Force", "Agilité"]), ["Force", "Agilité"]);
+  assert.equal(stats.defaultGroupName(["Force", "Agilité"]), "Force + Agilité");
+  assert.equal(stats.statColumnLabel([rarity], "groupe:g-rar"), "Rareté (P+S)");
+  assert.equal(stats.statColumnLabel([rarity], stats.RANK_COLUMN), "Rang dans le groupe");
+  assert.equal(stats.statColumnLabel([], "groupe:g-x"), "Groupe supprimé");
+});
+
+test("un groupe compte un emplacement par colonne remplie ; une ligne vide compte une fois", () => {
+  const stat = { id: "x", title: "", measure: "count", by: ["groupe:g-rar"], form: "bars" };
+  const prepared = stats.prepareStat(stat, items, env);
+  assert.equal(prepared.size, 2);
+  // Canot (C+R), Poêle (TC+C), Miroir (R), Dague (TC+R), Encre (rien : une fois, sans valeur).
+  assert.equal(prepared.units.length, 8);
+  assert.deepEqual(counts(prepared, "groupe:g-rar"), [["Très commun", 2], ["Commun", 2], ["Rare", 3], ["Sans valeur", 1]]);
+  assert.equal(stats.unitRows(prepared.units).length, 5);
+  assert.deepEqual(counts(prepared, stats.RANK_COLUMN), [["principale", 5], ["secondaire", 3]]);
+  // « Une seule fois par valeur » : des lignes, chacune dans chacune de ses raretés.
+  const once = stats.prepareStat({ ...stat, once: true }, items, env);
+  assert.equal(once.size, 0);
+  assert.deepEqual(counts(once, "groupe:g-rar"), [["Très commun", 2], ["Commun", 2], ["Rare", 3], ["Sans valeur", 1]]);
+  const twice = items.concat([{ tab: "Objets", Nom: "Double", "Rareté principale": "Rare", "Rareté secondaire": "Rare" }]);
+  assert.deepEqual(counts(stats.prepareStat(stat, twice, env), "groupe:g-rar").find(([label]) => label === "Rare"), ["Rare", 5]);
+  assert.deepEqual(counts(stats.prepareStat({ ...stat, once: true }, twice, env), "groupe:g-rar").find(([label]) => label === "Rare"), ["Rare", 4]);
+});
+
+test("deux groupes de même taille s'alignent rang par rang (rareté P avec emplacement P)", () => {
+  const stat = { id: "x", title: "", measure: "count", by: ["groupe:g-rar"], cols: ["groupe:g-emp"], form: "cross", top: 0 };
+  const prepared = stats.prepareStat(stat, items, env);
+  const table = stats.statTable(stat, prepared.units, prepared.valueOf, { orderOf: prepared.orderOf });
+  const cell = (row, column) => { const node = table.total.children.find((entry) => entry.label === row); const index = table.leaves.findIndex((labels) => labels[0] === column); return node.cells[index].value; };
+  // Rare : Canot (secondaire → Marché ordinaire), Miroir (principal → Maison), Dague (secondaire → Donjon).
+  assert.equal(cell("Rare", "Marché ordinaire"), 1);
+  assert.equal(cell("Rare", "Maison"), 1);
+  assert.equal(cell("Rare", "Donjon"), 1);
+  assert.equal(cell("Rare", "Bateau"), null);
+  // Très commun : Poêle (principal → Donjon, Ville), Dague (principal → Armurier).
+  assert.equal(cell("Très commun", "Donjon"), 1);
+  assert.equal(cell("Très commun", "Ville"), 1);
+  assert.equal(cell("Très commun", "Armurier"), 1);
+});
+
+test("conditions : « ou », ordre des listes, groupes (une colonne suffit, ou rang par rang)", () => {
+  const either = { column: "Type", operator: "est", value: "Arme", or: [{ column: "Type", operator: "est", value: "Transport" }] };
+  assert.deepEqual(stats.statRows({ where: [either] }, items, valueOf).map((row) => row.Nom), ["Canot", "Dague", "Encre"]);
+  assert.deepEqual(stats.statRows({ where: [either, { column: "Prix", operator: "non-vide", value: "" }] }, items, valueOf).map((row) => row.Nom), ["Canot", "Dague"]);
+  assert.deepEqual(stats.statRows({ where: [{ column: "Rareté principale", operator: "au-moins", value: "Commun" }] }, items, valueOf, undefined, itemOrder).map((row) => row.Nom), ["Canot", "Miroir"]);
+  assert.deepEqual(stats.statRows({ where: [{ column: "Rareté principale", operator: "au-plus", value: "Commun" }] }, items, valueOf, undefined, itemOrder).map((row) => row.Nom), ["Canot", "Poêle", "Dague"]);
+  assert.deepEqual(stats.statRows({ where: [{ column: "Rareté principale", operator: "superieur", value: "Commun" }] }, items, valueOf, undefined, itemOrder).map((row) => row.Nom), ["Miroir"]);
+  assert.equal(stats.matchStatCondition({ column: "Prix", operator: "au-moins", value: "2" }, "2 PO"), true);
+  assert.equal(stats.matchStatCondition({ column: "Prix", operator: "au-plus", value: "1,5" }, "2 PO"), false);
+  // Une condition sur un groupe, compté par lignes : vraie si une de ses colonnes la remplit.
+  const any = stats.prepareStat({ id: "x", title: "", measure: "count", by: ["Type"], where: [{ column: "groupe:g-rar", operator: "est", value: "Rare" }], form: "bars" }, items, env);
+  assert.deepEqual(stats.unitRows(any.units).map((row) => row.Nom), ["Canot", "Miroir", "Dague"]);
+  // … et rang par rang quand la statistique compte des emplacements de ce groupe.
+  const slots = stats.prepareStat({ id: "x", title: "", measure: "count", by: ["groupe:g-emp"], where: [{ column: "groupe:g-rar", operator: "est", value: "Rare" }], form: "bars" }, items, env);
+  assert.deepEqual(counts(slots, "groupe:g-emp").map(([label]) => label), ["Donjon", "Maison", "Marché ordinaire"]);
+});
+
+test("comparé au reste de l'index, ou à d'autres lignes", () => {
+  const stat = { id: "x", title: "", measure: "count", by: [], where: [{ column: "Type", operator: "est", value: "Arme" }], form: "number", compare: "rest" };
+  const rest = stats.prepareStat(stat, items, env);
+  assert.deepEqual([rest.units.length, rest.other.length], [2, 3]);
+  const other = stats.prepareStat({ ...stat, compare: "filter", compareWhere: [{ column: "Prix", operator: "contient", value: "PO" }] }, items, env);
+  assert.deepEqual(other.other.map((unit) => unit.row.Nom), ["Canot", "Miroir"]);
+  assert.equal(stats.prepareStat({ ...stat, compare: undefined }, items, env).other, null);
+  assert.equal(stats.autoStatTitle(stat), "Nombre de lignes · Type est « Arme » · contre le reste");
+});
+
+test("histogramme : tranches rondes, paliers ×10, dernière tranche fermée", () => {
+  assert.equal(stats.niceStep(100, 6), 20);
+  assert.equal(stats.niceStep(7, 4), 2);
+  const linear = stats.histogramBins([0, 5, 10, 25, 40], 4, "auto");
+  assert.equal(linear.log, false);
+  assert.deepEqual(linear.bins.map((bin) => [bin.from, bin.to]), [[0, 10], [10, 20], [20, 30], [30, 40], [40, 50]]);
+  const log = stats.histogramBins([0, 1, 3, 40, 900, 5000], 8, "auto");
+  assert.equal(stats.histogramBins([0, 1, 3, 40, 900, 5000], 6, "auto").bins.length, 5);
+  assert.equal(log.log, true);
+  assert.deepEqual(log.bins.map((bin) => bin.zero ? "0" : `${bin.from}-${bin.to}`), ["0", "1-3", "3-10", "10-30", "30-100", "100-300", "300-1000", "1000-3000", "3000-10000"]);
+  const values = [{ Prix: "1 PO" }, { Prix: "2 PO" }, { Prix: "4 PO" }, { Prix: "" }];
+  const histogram = stats.statHistogram(values, valueOf, "Prix", 3, "lin");
+  assert.deepEqual([histogram.withValue, histogram.without], [3, 1]);
+  assert.equal(histogram.bins.reduce((total, bin) => total + bin.rows.length, 0), 3);
+  assert.equal(stats.statHistogram([{ Prix: "10" }, { Prix: "20" }], valueOf, "Prix", 2, "lin").bins.at(-1).rows.length, 1);
+});
+
+test("formes permises : chaque forme dit ce qu'il faut changer", () => {
+  const base = { measure: "count", by: [], form: "number" };
+  const one = { ...base, by: ["Type"] };
+  const cross = { ...base, by: ["Type"], cols: ["Rareté"] };
+  const ok = (stat, form, context) => stats.formProblem(stat, form, context) === "";
+  assert.ok(ok(base, "gauge") && ok(base, "histogram") && ok(base, "number"));
+  assert.ok(!ok(one, "gauge") && !ok(one, "histogram"));
+  assert.ok(ok(one, "bars") && ok(one, "columns") && ok(one, "ranking") && ok(one, "donut") && ok(one, "treemap") && ok(one, "scatter") && ok(one, "table"));
+  assert.ok(!ok(one, "columns", { distinct: 17 }));
+  assert.ok(!ok(one, "scatter", { slots: true }) && !ok(base, "scatter", { numeric: 1 }));
+  assert.ok(!ok({ ...one, compare: "rest" }, "donut"));
+  assert.ok(ok({ ...base, by: ["Type", "Sous-type"] }, "treemap") && !ok({ ...base, by: ["A", "B", "C"] }, "treemap"));
+  assert.ok(ok(cross, "stacked") && ok(cross, "stacked100") && ok(cross, "grouped") && ok(cross, "cross") && ok(cross, "sankey") && ok(cross, "table"));
+  assert.ok(!ok({ ...cross, measure: "average", field: "Prix" }, "stacked") && ok({ ...cross, measure: "average", field: "Prix" }, "grouped"));
+  assert.ok(ok({ ...base, by: ["Type", "Rareté"] }, "sankey") && !ok({ ...base, by: ["Type", "Rareté"] }, "cross"));
+  assert.ok(!ok({ ...cross, blocks: [["Lieu"]] }, "cross") && ok({ ...cross, blocks: [["Lieu"]] }, "table"));
+  assert.ok(!ok(one, "stacked") && !ok(cross, "bars"));
+  // L'ajustement : comparaison et blocs suivent la forme.
+  const fitted = stats.fitForm({ id: "a", title: "", measure: "count", by: ["Type"], form: "donut", compare: "rest" });
+  assert.equal(fitted.form, "bars");
+  assert.equal(stats.fitForm({ id: "a", title: "", measure: "count", by: ["Type"], form: "ranking", compare: "rest" }).compare, undefined);
+  assert.deepEqual(stats.fitForm({ id: "a", title: "", measure: "count", by: ["Type"], cols: [], blocks: [["Lieu"]], form: "table" }).cols, ["Lieu"]);
+  assert.equal(stats.fitForm({ id: "a", title: "", measure: "count", by: ["Type"], cols: ["Rareté"], form: "sankey" }).top, 6);
+  assert.deepEqual(stats.percentChoices({ measure: "count", form: "table", by: ["A", "B"] }).map((choice) => choice.value), ["none", "total", "row", "column", "parent"]);
+  assert.deepEqual(stats.percentChoices({ measure: "count", form: "columns" }).map((choice) => choice.value), ["none", "total"]);
+});
+
+test("tableau à niveaux : blocs côte à côte, groupe de colonnes replié en sous-total", () => {
+  const stat = { measure: "count", by: ["Type"], cols: ["Rareté principale", "Emplacement principal"], blocks: [["Rareté secondaire"]], top: 0 };
+  const table = stats.statTable(stat, items, valueOf, { orderOf: itemOrder });
+  assert.equal(table.blocks.length, 2);
+  assert.deepEqual(table.blocks.map((block) => block.columns), [["Rareté principale", "Emplacement principal"], ["Rareté secondaire"]]);
+  assert.equal(table.leafInfo.filter((leaf) => leaf.block === 1).length, table.blocks[1].width);
+  assert.ok(table.headers[0].some((header) => header.block === 1 && header.leaf));
+  const closed = stats.statTable(stat, items, valueOf, { orderOf: itemOrder, closed: (block, key) => block === 0 && key === "très commun" });
+  const folded = closed.headers[0].find((header) => header.key === "très commun");
+  assert.deepEqual([folded.closed, folded.leaf, folded.span], [true, true, 1]);
+  const index = closed.leafInfo.findIndex((leaf) => leaf.closed);
+  assert.equal(closed.total.cells[index].value, 2);
+});
+
+test("mosaïque et nuage de points", () => {
+  const boxes = stats.squarify([{ value: 6 }, { value: 3 }, { value: 1 }], 0, 0, 100, 50);
+  assert.equal(boxes.length, 3);
+  assert.ok(Math.abs(boxes.reduce((total, box) => total + box.w * box.h, 0) - 5000) < 1e-6);
+  const points = stats.statScatter([{ a: "1", b: "2" }, { a: "1", b: "2" }, { a: "3", b: "" }, { a: "4", b: "5" }], valueOf, "a", "b");
+  assert.deepEqual(points.map((point) => [point.x, point.y, point.rows.length]), [[1, 2, 2], [4, 5, 1]]);
+  assert.equal(stats.scatterAxis([1, 5000]).log, true);
+  assert.equal(stats.scatterAxis([1, 50]).log, false);
+});
+
+test("chaque forme se dessine (page serveur), groupes compris", async () => {
+  const { default: React } = await import("react");
+  const { renderToStaticMarkup } = await import("react-dom/server");
+  const { IndexStats } = await vite.ssrLoadModule("/components/eraser/index-stats.tsx");
+  const keys = items.map((_, index) => String(index));
+  const props = (stat) => ({
+    stats: [{ ...stat, id: "st-1", title: "Essai", pinned: true }], groups: [rarity, place], rows: keys,
+    columns: ["Nom", "Type", "Prix", "Rareté principale", "Emplacement principal", "Rareté secondaire", "Emplacement secondaire", "Onglet"], tabs: ["Objets", "Armes"],
+    valueOf: (key, column) => column === "Onglet" ? items[Number(key)].tab : items[Number(key)][column] ?? "", tabOf: (key) => items[Number(key)].tab, nameOf: (key) => items[Number(key)].Nom,
+    optionsOf: (column) => itemOrder(column).map((value) => ({ value })), canEdit: true, onSave: async () => {}, onOpen: () => {},
+  });
+  const forms = [
+    { form: "number", by: [] }, { form: "number", by: [], compare: "rest", where: [{ column: "Type", operator: "est", value: "Arme" }] }, { form: "gauge", by: [], goal: 10 },
+    { form: "bars", by: ["groupe:g-rar"] }, { form: "bars", by: ["Type"], compare: "rest", where: [{ column: "Onglet", operator: "est", value: "Armes" }] }, { form: "columns", by: ["Rareté principale"] }, { form: "ranking", by: ["Type"] },
+    { form: "donut", by: ["groupe:g-emp"] }, { form: "treemap", by: ["Type", "Rareté principale"] }, { form: "stacked", by: ["Type"], cols: ["groupe:g-rar"] },
+    { form: "stacked100", by: ["Type"], cols: ["Rareté principale"] }, { form: "grouped", by: ["Type"], cols: ["Rareté principale"] }, { form: "sankey", by: ["groupe:g-rar"], cols: ["groupe:g-emp"] },
+    { form: "cross", by: ["groupe:g-rar"], cols: ["groupe:g-emp"], percent: "row" }, { form: "table", by: ["Type", "Nom"], cols: ["groupe:g-rar", stats.RANK_COLUMN], blocks: [["Emplacement principal"]], percent: "parent" },
+    { form: "histogram", by: [], hist: { field: "Prix", bins: 4, scale: "auto" } }, { form: "scatter", by: ["Type"], scatter: { x: "Prix", y: "Prix" } },
+  ];
+  for (const entry of forms) {
+    const stat = stats.cleanStat({ measure: "count", ...entry, id: "st-1" });
+    assert.equal(stat.form, entry.form, `forme gardée : ${entry.form}`);
+    const html = renderToStaticMarkup(React.createElement(IndexStats, props(stat)));
+    assert.match(html, /Constructeur de statistique/, entry.form);
+    const pinned = renderToStaticMarkup(React.createElement(IndexStats, { ...props(stat), pinnedOnly: true, canEdit: false }));
+    assert.match(pinned, /Statistiques épinglées/, entry.form);
+  }
+  // Les emplacements se disent dans la phrase ; « fusionner » propose le groupe.
+  const grouped = renderToStaticMarkup(React.createElement(IndexStats, props(stats.cleanStat({ id: "st-1", measure: "count", by: ["groupe:g-rar"], form: "bars" }))));
+  assert.match(grouped, /les emplacements/);
+  assert.match(grouped, /Colonnes regroupées/);
+  const twins = renderToStaticMarkup(React.createElement(IndexStats, props(stats.cleanStat({ id: "st-1", measure: "count", by: ["Type"], cols: ["Rareté principale"], blocks: [["Rareté secondaire"]], form: "table" }))));
+  assert.match(twins, /fusionner principale et secondaire/);
+});

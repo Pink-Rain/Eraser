@@ -652,3 +652,31 @@ a[href^="/reference/"] {
   cursor: default;
   user-select: all;
 }
+
+/* Statistiques : les marques cliquables des graphiques (SVG), au survol, au clavier et choisies. */
+.stat-hit {
+  cursor: pointer;
+  outline: none;
+}
+.stat-hit:hover .stat-mark,
+.stat-hit:focus-visible .stat-mark {
+  filter: brightness(1.08) saturate(1.1);
+  stroke: var(--foreground);
+  stroke-width: 1.5;
+}
+.stat-hit:focus-visible .stat-mark {
+  stroke-width: 2.5;
+  stroke-dasharray: 4 2;
+}
+.stat-hit[aria-pressed="true"] .stat-mark {
+  stroke: var(--foreground);
+  stroke-width: 2.5;
+}
+.stat-link .stat-mark {
+  transition: fill-opacity 0.12s;
+}
+.stat-link:hover .stat-mark,
+.stat-link:focus-visible .stat-mark,
+.stat-link[aria-pressed="true"] .stat-mark {
+  fill-opacity: 0.75;
+}
