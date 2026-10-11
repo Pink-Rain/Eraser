@@ -30,3 +30,19 @@ test("Une alerte relevée n'est effacée qu'une fois montrée", async () => {
   await notifications.acknowledgeItemNotifications("joueuse-1", [first.id]);
   assert.deepEqual(await notifications.listItemNotifications("joueuse-1", "PERSO-1"), []);
 });
+
+test("Une page envoyée arrive chez chaque compte choisi (pas chez l'expéditeur), jamais une adresse externe", async () => {
+  const sent = await notifications.sharePageWith({ uid: "mj-1", displayName: "Le MJ" }, ["joueuse-1", "mj-1", "joueuse-1", "joueur-2"], { href: "/campagne/CAM-1/dossier", title: "Dossier · Test", note: "Regarde ça" });
+  assert.equal(sent, 2);
+  const [page] = await notifications.listItemNotifications("joueuse-1");
+  assert.equal(page.kind, "page");
+  assert.equal(page.href, "/campagne/CAM-1/dossier");
+  assert.equal(page.note, "Regarde ça");
+  // Une page n'attend pas l'ouverture d'une fiche de personnage.
+  assert.deepEqual(await notifications.listItemNotifications("joueuse-1", "PERSO-1"), []);
+  assert.deepEqual(await notifications.listItemNotifications("mj-1"), []);
+  for (const href of ["https://exemple.com", "//exemple.com/x", "/api/account", "javascript:alert(1)", "/a b"]) {
+    assert.equal(notifications.isSharedPageHref(href), false, href);
+    await assert.rejects(() => notifications.sharePageWith({ uid: "mj-1", displayName: "Le MJ" }, ["joueuse-1"], { href, title: "", note: "" }), /INVALID_PAGE/);
+  }
+});

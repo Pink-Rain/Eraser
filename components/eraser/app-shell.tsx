@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { installNavigationCacheGuard } from "@/lib/navigation-cache"
 import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
+import { SharePageButton } from "@/components/eraser/share-page"
 import { rememberScroll } from "@/lib/scroll-memory"
 import Link from "next/link"
 import dynamic from "next/dynamic"
@@ -803,6 +804,7 @@ export function AppShell({
           <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <PageSearch />
+            <SharePageButton title={currentPageLabel} />
             <VolumeControl />
             <Badge variant="outline" className="hidden shrink-0 border-primary/20 bg-primary/5 sm:inline-flex">
               {roleViewLabels[viewRole]}

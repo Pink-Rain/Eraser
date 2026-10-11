@@ -1,7 +1,8 @@
 "use client"
 
 import { useEffect, useRef, useState } from "react"
-import { Gift, X } from "lucide-react"
+import { useRouter } from "next/navigation"
+import { ExternalLink, Gift, Link2, X } from "lucide-react"
 
 import type { ItemNotification } from "@/lib/item-notifications"
 import { playItemReceived } from "@/lib/sounds"
@@ -61,6 +62,7 @@ const VISIBLE_MS = 12_000
  * les annonce dans une petite carte, au-dessus du bouton du chat.
  */
 export function ItemNotifications() {
+  const router = useRouter()
   const [shown, setShown] = useState<ItemNotification[]>([])
 
   // Les objets reçus par un personnage, relevés par sa fiche à son ouverture.
@@ -122,7 +124,8 @@ export function ItemNotifications() {
     }
   }, [])
 
-  const oldest = shown[0]?.id
+  // Un objet reçu s'efface seul ; une page envoyée attend qu'on l'ouvre ou qu'on la ferme.
+  const oldest = shown.find((notification) => notification.kind !== "page")?.id
   useEffect(() => {
     if (!oldest) return
     const timer = window.setTimeout(() => setShown((current) => current.filter((item) => item.id !== oldest)), VISIBLE_MS)
@@ -132,7 +135,17 @@ export function ItemNotifications() {
   if (!shown.length) return null
   return (
     <div className="pointer-events-none fixed bottom-20 right-4 z-50 flex w-[min(20rem,calc(100vw-2rem))] flex-col gap-2" aria-live="polite">
-      {shown.map((notification) => (
+      {shown.map((notification) => notification.kind === "page" ? (
+        <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/25 bg-popover/95 p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] backdrop-blur animate-in fade-in slide-in-from-bottom-2">
+          <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Link2 className="size-4" /></span>
+          <div className="min-w-0 flex-1 text-sm leading-5">
+            <p><b className="font-semibold">{notification.senderName}</b> vous envoie une page{notification.title ? <> : <b className="font-semibold">{notification.title}</b></> : ""}</p>
+            {notification.note && <p className="mt-1 whitespace-pre-wrap rounded-lg bg-muted/50 px-2 py-1 text-xs italic text-muted-foreground">« {notification.note} »</p>}
+            <button type="button" onClick={() => { setShown((current) => current.filter((item) => item.id !== notification.id)); if (notification.href) router.push(notification.href) }} className="mt-2 inline-flex items-center gap-1.5 rounded-lg bg-primary px-2.5 py-1 text-xs font-semibold text-primary-foreground hover:bg-primary/90"><ExternalLink className="size-3.5" />Ouvrir la page</button>
+          </div>
+          <button type="button" onClick={() => setShown((current) => current.filter((item) => item.id !== notification.id))} className="-mr-1 -mt-1 flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground" aria-label="Fermer"><X className="size-3.5" /></button>
+        </div>
+      ) : (
         <div key={notification.id} role="status" className="pointer-events-auto flex items-start gap-3 rounded-2xl border border-primary/20 bg-popover/95 p-3 text-popover-foreground shadow-[0_18px_45px_rgb(67_50_31/0.18)] backdrop-blur animate-in fade-in slide-in-from-bottom-2">
           <span className="mt-0.5 flex size-8 shrink-0 items-center justify-center rounded-xl bg-primary/10 text-primary"><Gift className="size-4" /></span>
           <div className="min-w-0 flex-1 text-sm leading-5">

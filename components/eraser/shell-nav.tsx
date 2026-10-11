@@ -84,6 +84,13 @@ export function ShellBreadcrumb({ pathname, current, campaignName }: { pathname:
   </nav>
 }
 
+/** Le chemin d'un lien d'Eraser collé (« http://127.0.0.1:32147/campagne/… »), sinon « ». */
+export function pastedPagePath(text: string) {
+  const match = text.trim().match(/^https?:\/\/(?:127\.0\.0\.1|localhost)(?::\d+)?(\/[^\s]*)$/i)
+  if (!match || /^\/api(\/|$)/i.test(match[1]) || match[1].startsWith("//")) return ""
+  return match[1]
+}
+
 /**
  * Chercher une page : seulement celles auxquelles le compte a accès (la liste vient du
  * serveur, filtrée par rôle : un joueur y trouve ses personnages et ses campagnes, pas
@@ -113,6 +120,9 @@ export function PageSearch() {
   }, [open])
 
   const matches = useMemo(() => {
+    // Un lien d'Eraser collé (« Copier le lien » d'une autre installation) : sa page, ici.
+    const pasted = pastedPagePath(query)
+    if (pasted) return [{ href: pasted, label: "Ouvrir ce lien", group: "Lien collé", hint: pasted }]
     const words = fold(query).split(/\s+/).filter(Boolean)
     return (targets ?? []).filter((target) => {
       const text = fold(`${target.label} ${target.group} ${target.hint ?? ""}`)
@@ -153,13 +163,13 @@ export function PageSearch() {
               else if (event.key === "ArrowUp") { event.preventDefault(); move(-1) }
               else if (event.key === "Enter" && matches[active]) { event.preventDefault(); go(matches[active]) }
             }}
-            placeholder="Une page, un personnage, une campagne, un index…"
+            placeholder="Une page, un personnage, un index… ou un lien d’Eraser collé"
             className="h-12 min-w-0 flex-1 bg-transparent text-sm outline-none"
             aria-label="Chercher une page"
           />
         </div>
         <div ref={list} className="max-h-[min(26rem,60vh)] overflow-y-auto p-1.5" role="listbox">
-          {targets === null && <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Chargement des pages…</p>}
+          {targets === null && !pastedPagePath(query) && <p className="flex items-center justify-center gap-2 py-8 text-sm text-muted-foreground"><LoaderCircle className="size-4 animate-spin" />Chargement des pages…</p>}
           {targets !== null && !matches.length && <p className="py-8 text-center text-sm text-muted-foreground">Aucune page ne correspond.</p>}
           {matches.map((target, index) => {
             const header = target.group !== matches[index - 1]?.group ? target.group : ""

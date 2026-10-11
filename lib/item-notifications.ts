@@ -13,6 +13,12 @@ import { ownersOf } from "@/lib/ownership"
  */
 export type ItemNotification = {
   id: string
+  /** « item » : un objet reçu ; « page » : une page de l'app envoyée par quelqu'un. */
+  kind?: "item" | "page"
+  /** Une page envoyée : son adresse dans l'app, son titre et le petit mot qui l'accompagne. */
+  href?: string
+  title?: string
+  note?: string
   senderName: string
   itemName: string
   quantity: number
@@ -95,10 +101,43 @@ export async function transferWithNotification<T>(sender: AuthorizedUser, run: (
   return result
 }
 
+/** Une adresse de page de l'app (« /campagne/… »), jamais une adresse externe ni une route d'API. */
+export function isSharedPageHref(href: string) {
+  return /^\/(?!\/)[^\s\\]{0,499}$/.test(href) && !/^\/api(\/|$)/i.test(href)
+}
+
+/**
+ * « X vous envoie une page » : la page arrive en notification dans l'app de chaque compte
+ * choisi (par le serveur partagé, comme les objets reçus) ; un clic l'ouvre dans l'app.
+ * Rend le nombre de comptes prévenus.
+ */
+export async function sharePageWith(sender: AuthorizedUser, uids: readonly string[], page: { href: string; title: string; note: string }) {
+  if (!sharedStoreAvailable()) throw new Error("SHARED_STORE_UNAVAILABLE")
+  if (!isSharedPageHref(page.href)) throw new Error("INVALID_PAGE")
+  const recipients = [...new Set(uids)].filter((uid) => uid && uid !== sender.uid).slice(0, 30)
+  const createdAt = new Date().toISOString()
+  await Promise.all(recipients.map((uid) => {
+    const notification: ItemNotification = {
+      id: crypto.randomUUID(), kind: "page", href: page.href, title: page.title.slice(0, 120), note: page.note.slice(0, 280),
+      senderName: chatAuthorName(sender), itemName: "", quantity: 0, targetId: "", targetLabel: "", targetKind: "", slotId: "", createdAt,
+    }
+    return writeSharedRecord(scopeFor(uid), notification.id, JSON.stringify(notification))
+  }))
+  return recipients.length
+}
+
 function parse(value: string): ItemNotification | null {
   try {
     const parsed = JSON.parse(value) as Partial<ItemNotification>
     if (typeof parsed.id !== "string" || typeof parsed.itemName !== "string") return null
+    if (parsed.kind === "page") {
+      if (typeof parsed.href !== "string" || !isSharedPageHref(parsed.href)) return null
+      return {
+        id: parsed.id, kind: "page", href: parsed.href, title: typeof parsed.title === "string" ? parsed.title : "", note: typeof parsed.note === "string" ? parsed.note : "",
+        senderName: typeof parsed.senderName === "string" ? parsed.senderName : "Quelqu’un", itemName: "", quantity: 0, targetId: "", targetLabel: "", targetKind: "", slotId: "",
+        createdAt: typeof parsed.createdAt === "string" ? parsed.createdAt : "",
+      }
+    }
     return {
       id: parsed.id,
       senderName: typeof parsed.senderName === "string" ? parsed.senderName : "Quelqu’un",
