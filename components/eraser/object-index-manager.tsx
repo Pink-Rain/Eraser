@@ -170,7 +170,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     const seen = new Set<string>()
     return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
   }, [settings.stats, settings.views])
-  const statsProps = { stats: indexStats, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, onOpen: () => undefined, onSave: settings.saveStats }
+  // « Forêt - Ville » (Emplacement principal, secondaire) : chaque lieu compte à part.
+  const statSeparatorOf = useCallback((header: string) => {
+    const table = tables.find((candidate) => objectHeaderIndex(candidate.headers, header) >= 0)
+    const spec = table ? specIn(table, header, schemas) : null
+    return spec?.multiple ? spec.listSeparator : undefined
+  }, [schemas, tables])
+  // Les lignes concernées ne s'ouvrent pas ici : la fiche d'un item dépend du tableau affiché.
+  const statsProps = { stats: indexStats, groups: settings.statGroups, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, separatorOf: statSeparatorOf, onSave: settings.saveStats }
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
   // « {Prix} » écrit dans une description : le menu « { » propose les colonnes de l'objet.
   const selectedTab = selected?.tabName
