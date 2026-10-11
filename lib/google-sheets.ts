@@ -600,7 +600,8 @@ function forgetAfterStructureChange(path: string, init?: RequestInit) {
   characterColumnsCache = null
   // L'inventaire et le catalogue des objets gardés en mémoire portent des numéros de ligne.
   if (spreadsheetId && inventoryWorkbookCache?.workbook.spreadsheetId === spreadsheetId) clearInventoryWorkbookCache()
-  if (spreadsheetId && objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) clearObjectIndexTableCache()
+  // Un classeur d'objets : lui seul sera relu, pas tout le dossier « Objets ».
+  if (spreadsheetId && objectIndexTableCache?.tables.some((table) => table.fileId === spreadsheetId)) markObjectIndexFileChanged(spreadsheetId)
 }
 
 export async function googleSheetsJson<T>(path: string, init?: RequestInit) {
@@ -1543,12 +1544,91 @@ let lastGoodObjectIndexTables: ObjectIndexTable[] | null = null
 /** Une seule lecture à la fois : l'inventaire, les magasins et l'index la partagent. */
 let objectIndexTablesRequest: Promise<ObjectIndexTable[]> | null = null
 
+/**
+ * Les classeurs d'objets modifiés par Eraser depuis la dernière lecture (ligne ajoutée,
+ * insérée, dupliquée, déplacée ou supprimée). Ces opérations vidaient tout le catalogue :
+ * la lecture suivante relisait chaque classeur du dossier « Objets », grilles complètes,
+ * pour une seule ligne. Désormais seuls les classeurs marqués sont relus, les autres
+ * repris tels quels (voir `reloadStaleObjectIndexFiles`).
+ */
+const staleObjectIndexFiles = new Set<string>()
+
 export function listObjectIndexTables(): Promise<ObjectIndexTable[]> {
-  if (objectIndexTableCache && objectIndexTableCache.expiresAt > Date.now()) return Promise.resolve(objectIndexTableCache.tables)
+  const cache = objectIndexTableCache
+  const fresh = cache && cache.expiresAt > Date.now()
+  if (fresh && !staleObjectIndexFiles.size) return Promise.resolve(cache.tables)
   if (!objectIndexTablesRequest) {
-    objectIndexTablesRequest = loadObjectIndexTables().finally(() => { objectIndexTablesRequest = null })
+    const partial = fresh && !fallbackObjectIndexTables.has(cache.tables)
+    objectIndexTablesRequest = (partial ? reloadStaleObjectIndexFiles(cache) : loadObjectIndexTables()).finally(() => { objectIndexTablesRequest = null })
   }
   return objectIndexTablesRequest
+}
+
+/**
+ * Un classeur d'objets vient d'être modifié par Eraser : lui seul sera relu. Sans catalogue
+ * à jour en mémoire (expiré, de secours, ou sans ce classeur), tout est relu, comme avant.
+ * L'inventaire (qui cite les objets par leur ID et en prend les colonnes) est relu aussi.
+ */
+function markObjectIndexFileChanged(fileId: string) {
+  const cache = objectIndexTableCache
+  if (!cache || cache.expiresAt <= Date.now() || fallbackObjectIndexTables.has(cache.tables) || !cache.tables.some((table) => table.fileId === fileId)) {
+    clearObjectIndexTableCache()
+    return
+  }
+  staleObjectIndexFiles.add(fileId)
+  // Une lecture lancée avant l'écriture ne doit pas servir après elle.
+  objectIndexTablesRequest = null
+  objectIndexTablesVersion += 1
+  clearInventoryWorkbookCache()
+}
+
+/** Un tableau tel que lu dans Sheets, avant `fillMissingObjectIndexHeaders` (en-têtes repris retirés). */
+function unfilledObjectIndexTable(table: ObjectIndexTable): ObjectIndexTable {
+  if (table.borrowedHeaders === undefined) return table
+  const borrowed = new Set(table.borrowedHeaders)
+  return { ...table, headers: table.headers.map((header, index) => borrowed.has(index) ? `Colonne ${index + 1}` : header), borrowedHeaders: undefined }
+}
+
+const objectIndexHeaderSignature = (tables: ObjectIndexTable[]) => tables.map((table) => JSON.stringify([table.sheetId, table.tabName, table.headers])).sort().join("\n")
+
+/**
+ * Relit les seuls classeurs marqués et les remet dans le catalogue gardé en mémoire. Le
+ * résultat est celui d'une relecture complète : les en-têtes manquants sont repris des
+ * autres index sur l'ensemble, et si un classeur relu a changé d'onglets ou d'en-têtes
+ * (ce qui pourrait changer les en-têtes repris par les autres), tout est relu. Une relecture
+ * en échec repart aussi d'une relecture complète, jamais d'un mélange d'ancien et de neuf.
+ */
+async function reloadStaleObjectIndexFiles(cache: { expiresAt: number; tables: ObjectIndexTable[] }): Promise<ObjectIndexTable[]> {
+  const version = objectIndexTablesVersion
+  const stale = new Set(staleObjectIndexFiles)
+  const files = [...stale].flatMap((fileId) => {
+    const known = cache.tables.find((table) => table.fileId === fileId)
+    return known ? [{ id: fileId, name: known.fileName, webViewLink: known.webViewLink }] : []
+  })
+  if (files.length !== stale.size) return loadObjectIndexTables()
+  let reread: ObjectIndexTable[][]
+  try {
+    reread = await Promise.all(files.map(readObjectIndexSpreadsheetWithRetry))
+  } catch (error) {
+    console.error("OBJECT_INDEX_PARTIAL_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return loadObjectIndexTables()
+  }
+  const sameShape = files.every((file, index) => objectIndexHeaderSignature(reread[index]) === objectIndexHeaderSignature(cache.tables.filter((table) => table.fileId === file.id).map(unfilledObjectIndexTable)))
+  if (!sameShape) return loadObjectIndexTables()
+  const kept = cache.tables.filter((table) => !stale.has(table.fileId)).map(unfilledObjectIndexTable)
+  const tables = fillMissingObjectIndexHeaders([...kept, ...reread.flat()])
+  tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
+  // Les autres classeurs ont reçu leurs ID à leur dernière lecture ; seuls ceux relus sont vérifiés.
+  await freezeObjectIndexRowIds(tables.filter((table) => stale.has(table.fileId)))
+  if (version === objectIndexTablesVersion) {
+    objectIndexTableCache = { expiresAt: cache.expiresAt, tables }
+    for (const fileId of stale) staleObjectIndexFiles.delete(fileId)
+    lastGoodObjectIndexTables = tables
+  }
+  scheduleObjectIndexHeaderRepair(tables)
+  scheduleObjectIndexIconSync(tables)
+  if (tables.some(needsObjectCombatHeaders)) scheduleObjectCombatColumns(tables)
+  return tables
 }
 
 /** Quand le catalogue a été lu en entier pour la dernière fois. */
@@ -1559,11 +1639,13 @@ const OBJECT_INDEX_STALE_MS = 30 * 60_000
  * Le catalogue pour l'affichage (page de l'index, inventaires, magasins, références) :
  * un catalogue expiré depuis moins de 30 minutes est rendu tout de suite et relu en
  * arrière-plan, au lieu de faire attendre la relecture de tous les classeurs. Une écriture
- * d'Eraser vide le catalogue : elle n'est jamais suivie d'une copie périmée. Les écritures
- * (numéros de ligne, colonnes) passent par `listObjectIndexTables`, toujours exact.
+ * d'Eraser vide le catalogue ou en marque le classeur : elle n'est jamais suivie d'une copie
+ * périmée. Les écritures (numéros de ligne, colonnes) passent par `listObjectIndexTables`,
+ * toujours exact.
  */
 export function listObjectIndexTablesForDisplay(): Promise<ObjectIndexTable[]> {
   const cache = objectIndexTableCache
+  if (staleObjectIndexFiles.size) return listObjectIndexTables()
   if (cache && cache.expiresAt > Date.now()) return Promise.resolve(cache.tables)
   if (cache && Date.now() - objectIndexLoadedAt < OBJECT_INDEX_STALE_MS) {
     listObjectIndexTables().catch(() => undefined)
@@ -1609,7 +1691,7 @@ async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
   // vide (les objets des inventaires perdraient leurs colonnes). Relu dans une minute.
   if (firstError && lastGoodObjectIndexTables) {
     fallbackObjectIndexTables.add(lastGoodObjectIndexTables)
-    if (version === objectIndexTablesVersion) objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }
+    if (version === objectIndexTablesVersion) { objectIndexTableCache = { expiresAt: Date.now() + 60_000, tables: lastGoodObjectIndexTables }; staleObjectIndexFiles.clear() }
     return lastGoodObjectIndexTables
   }
   const tables = fillMissingObjectIndexHeaders(results.flatMap((result) => result.tables))
@@ -1617,7 +1699,7 @@ async function loadObjectIndexTables(): Promise<ObjectIndexTable[]> {
   tables.sort((left, right) => left.fileName.localeCompare(right.fileName, "fr") || left.tabName.localeCompare(right.tabName, "fr"))
   // Avant d'être servi, chaque objet nommé a un vrai ID dans sa colonne ID.
   await freezeObjectIndexRowIds(tables)
-  if (version === objectIndexTablesVersion) objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }
+  if (version === objectIndexTablesVersion) { objectIndexTableCache = { expiresAt: Date.now() + OBJECT_INDEX_CACHE_MS, tables }; staleObjectIndexFiles.clear() }
   if (!firstError) { lastGoodObjectIndexTables = tables; objectIndexLoadedAt = Date.now() }
   scheduleObjectIndexHeaderRepair(tables)
   // Les icônes et les colonnes de combat se placent d'après la ligne 1 relue au moment
@@ -1814,6 +1896,8 @@ function lastFilledRow(rows: Array<Array<{ value: string } | undefined> | undefi
 
 export function clearObjectIndexTableCache() {
   objectIndexTableCache = null
+  // Tout sera relu : les classeurs marqués n'ont plus à l'être à part.
+  staleObjectIndexFiles.clear()
   // Une lecture lancée avant une écriture ne doit pas servir après elle.
   objectIndexTablesRequest = null
   objectIndexTablesVersion += 1
@@ -2051,7 +2135,7 @@ export async function addObjectIndexRow(fileId: string, tabName: string) {
   const width = Math.max(1, layout.headers.length, table.headers.length)
   const values = Array.from({ length: width }, (_, index) => index === layout.idColumn ? crypto.randomUUID() : "")
   await appendRows(fileId, sheetTabRange(tabName, `A:${columnName(width)}`), [values])
-  clearObjectIndexTableCache()
+  markObjectIndexFileChanged(fileId)
 }
 
 /**
@@ -2099,7 +2183,7 @@ export async function updateObjectIndexCell(fileId: string, tabName: string, tar
         : candidate),
     }
     clearInventoryWorkbookCache()
-  } else clearObjectIndexTableCache()
+  } else markObjectIndexFileChanged(fileId)
 }
 
 /** De nouveaux identifiants dans la colonne ID de `count` lignes, à partir de la ligne `start` + 1. */
@@ -2127,7 +2211,7 @@ export async function insertObjectIndexRow(fileId: string, tabName: string, anch
   const requests: unknown[] = [{ insertDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: after, endIndex: after + rows }, inheritFromBefore: after > 1 } }]
   if (layout.idColumn >= 0) requests.push(objectIndexIdCells(table.sheetId, after, rows, layout.idColumn))
   await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-  clearObjectIndexTableCache()
+  markObjectIndexFileChanged(fileId)
 }
 
 /** Ce qu'envoie le formulaire « Ajouter un objet » : chaque valeur avec son en-tête, dans l'ordre des colonnes. */
@@ -2165,7 +2249,7 @@ export async function addObjectIndexRowWithValues(fileId: string, tabName: strin
   if (Number.isInteger(rowNumber) && rowNumber > 1) {
     for (const cell of formatted) await updateFormattedCell({ spreadsheetId: fileId, sheetId: table.sheetId, rowNumber, column: cell.column, html: cell.html })
   }
-  clearObjectIndexTableCache()
+  markObjectIndexFileChanged(fileId)
 }
 
 /**
@@ -2185,7 +2269,7 @@ export async function duplicateObjectIndexRows(fileId: string, tabName: string, 
     ...(layout.idColumn >= 0 ? [objectIndexIdCells(table.sheetId, row, 1, layout.idColumn)] : []),
   ])
   await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
-  clearObjectIndexTableCache()
+  markObjectIndexFileChanged(fileId)
 }
 
 /**
@@ -2196,8 +2280,9 @@ export async function duplicateObjectIndexRows(fileId: string, tabName: string, 
  */
 export async function moveObjectIndexRow(fileId: string, tabName: string, ref: ObjectIndexRowRef, targetFileId: string, targetTabName: string) {
   if (fileId === targetFileId && tabName === targetTabName) return
-  // Relu dans Google : la ligne déplacée est celle de la feuille, pas une copie d'il y a cinq minutes.
-  clearObjectIndexTableCache()
+  // Relu dans Google : la ligne déplacée est celle de la feuille, pas une copie d'il y a cinq
+  // minutes. Seul le classeur de départ est relu (l'arrivée relit sa ligne 1 elle-même).
+  markObjectIndexFileChanged(fileId)
   const source = await validatedObjectIndexTable(fileId, tabName)
   const target = await validatedObjectIndexTable(targetFileId, targetTabName)
   const layout = await freshObjectIndexLayout(source)
@@ -2235,7 +2320,7 @@ export async function deleteObjectIndexRows(fileId: string, tabName: string, ref
     method: "POST",
     body: JSON.stringify({ requests: [...new Set(rows)].sort((left, right) => right - left).map((row) => ({ deleteDimension: { range: { sheetId: table.sheetId, dimension: "ROWS", startIndex: row - 1, endIndex: row } } })) }),
   })
-  clearObjectIndexTableCache()
+  markObjectIndexFileChanged(fileId)
 }
 
 export async function deleteGoogleSheetRow(spreadsheetId: string, tabName: string, rowNumber: number, knownSheetId?: number) {

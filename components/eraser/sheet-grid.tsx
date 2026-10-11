@@ -518,8 +518,11 @@ export function SheetGrid({
   const shownRows = rows.length > shownCount ? rows.slice(0, shownCount) : rows
   // Une ligne disparue (suppression, filtre, tri) sort de la sélection d'elle-même :
   // elle est recalculée à l'affichage plutôt que corrigée après coup.
-  const selection = useMemo(() => rawSelection.filter((key) => rowKeys.includes(key)), [rawSelection, rowKeys])
-  const indexOfRow = useCallback((key: string) => rowKeys.indexOf(key), [rowKeys])
+  // La position de chaque ligne, calculée une fois : `includes`/`indexOf` sur toutes les
+  // lignes, pour chaque ligne sélectionnée ou triée, rendaient ces calculs quadratiques.
+  const rowIndexes = useMemo(() => new globalThis.Map(rowKeys.map((key, index) => [key, index] as const)), [rowKeys])
+  const selection = useMemo(() => rawSelection.filter((key) => rowIndexes.has(key)), [rawSelection, rowIndexes])
+  const indexOfRow = useCallback((key: string) => rowIndexes.get(key) ?? -1, [rowIndexes])
 
   const defaultWidths = useMemo(() => Object.fromEntries(columns.map((column) => [column.key, column.width] as const)), [columns])
   const columnWidth = (key: string) => preview.columns[key] ?? layout.columnWidths[key] ?? defaultWidths[key] ?? 200
@@ -626,15 +629,24 @@ export function SheetGrid({
     event.preventDefault(); event.stopPropagation()
     const startX = event.clientX
     const startWidth = columnWidth(key)
+    const startTotal = totalWidth
     let latest = startWidth
+    // Pendant le geste, la largeur est écrite directement sur la colonne et le tableau :
+    // React n'est prévenu qu'au relâchement, au lieu de redessiner toute la grille à chaque
+    // pixel. React écrit ensuite les mêmes valeurs (elles viennent de la mise en page).
+    const table = event.currentTarget.closest("table")
+    const col = Array.from(table?.querySelectorAll<HTMLTableColElement>("col[data-column-key]") ?? []).find((element) => element.dataset.columnKey === key)
     const move = (pointerEvent: PointerEvent) => {
       latest = clampTableColumnWidth(startWidth + pointerEvent.clientX - startX, minimum, maximum)
-      setPreview((current) => ({ ...current, columns: { ...current.columns, [key]: latest } }))
+      if (table && col) {
+        col.style.width = `${latest}px`
+        table.style.width = `${startTotal - startWidth + latest}px`
+      } else setPreview((current) => ({ ...current, columns: { ...current.columns, [key]: latest } }))
     }
     const finish = () => {
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish)
       setLayout({ ...layout, columnWidths: { ...layout.columnWidths, [key]: latest } })
-      setPreview((current) => { const next = { ...current.columns }; delete next[key]; return { ...current, columns: next } })
+      setPreview((current) => { if (!(key in current.columns)) return current; const next = { ...current.columns }; delete next[key]; return { ...current, columns: next } })
     }
     window.addEventListener("pointermove", move); window.addEventListener("pointerup", finish); window.addEventListener("pointercancel", finish)
   }
@@ -644,12 +656,20 @@ export function SheetGrid({
     const startY = event.clientY
     const startHeight = rowHeight(key) ?? element?.getBoundingClientRect().height ?? 48
     let latest = startHeight
+    // Un seul rendu par image pendant le geste, quel que soit le nombre d'événements reçus.
+    let frame = 0
     const move = (pointerEvent: PointerEvent) => {
       latest = clampTableRowHeight(startHeight + pointerEvent.clientY - startY)
-      setPreview((current) => ({ ...current, rows: { ...current.rows, [key]: latest } }))
+      if (frame) return
+      frame = window.requestAnimationFrame(() => {
+        frame = 0
+        setPreview((current) => current.rows[key] === latest ? current : { ...current, rows: { ...current.rows, [key]: latest } })
+      })
     }
     const finish = () => {
       window.removeEventListener("pointermove", move); window.removeEventListener("pointerup", finish); window.removeEventListener("pointercancel", finish)
+      if (frame) window.cancelAnimationFrame(frame)
+      frame = 0
       setLayout({ ...layout, rowHeights: { ...layout.rowHeights, [key]: latest } })
       setPreview((current) => { const next = { ...current.rows }; delete next[key]; return { ...current, rows: next } })
     }
@@ -759,7 +779,7 @@ export function SheetGrid({
       <table key={layoutKey} className="border-separate border-spacing-0 text-sm" style={{ tableLayout: "fixed", width: totalWidth, minWidth: "100%" }}>
         <colgroup>
           <col style={{ width: HANDLE_WIDTH }} />
-          {columns.map((column) => <col key={column.key} style={{ width: columnWidth(column.key) }} />)}
+          {columns.map((column) => <col key={column.key} data-column-key={column.key} style={{ width: columnWidth(column.key) }} />)}
         </colgroup>
         <thead>
           <tr>

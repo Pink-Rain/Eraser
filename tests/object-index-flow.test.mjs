@@ -240,3 +240,57 @@ test("« Modifier » : une colonne sans en-tête (« Colonne 3 ») reçoit le no
   await objectSchema.applyObjectSchemaOperations(id, [{ op: "rename", tab: "Objets", header: "Colonne 3", to: "Notes" }]);
   assert.equal(google.grid(id, "Objets")[0][2], "Notes");
 });
+
+// ---- Une ligne ajoutée ou supprimée ne fait relire que son classeur ----
+
+/** Les lectures de grille (includeGridData) d'un classeur : une relecture complète de ses tableaux. */
+const gridReads = (id) => google.world.calls.filter((call) => call.method === "GET" && call.url.includes(`/spreadsheets/${id}?`) && call.url.includes("includeGridData")).length;
+
+test("Ajouter ou supprimer une ligne ne relit que le classeur touché, le reste vient de la mémoire", async () => {
+  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
+  const other = objectsFile([{ title: "Potions", grid: [["ID", "Nom", "Type"], ["POT-1", "Élixir", "Potion"]] }]);
+  await sheets.listObjectIndexTables();
+  google.world.calls.length = 0;
+  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Prix", "7"]]);
+  const tables = await sheets.listObjectIndexTablesForDisplay();
+  const armesTable = tables.find((table) => table.fileId === touched);
+  assert.ok(armesTable.rows.some((row) => row.values.includes("Lance")), "la ligne ajoutée n'est pas dans le catalogue");
+  assert.ok(tables.some((table) => table.fileId === other && table.rows.length === 1), "l'autre classeur a disparu du catalogue");
+  assert.equal(gridReads(other), 0, "l'autre classeur a été relu pour une ligne ajoutée ailleurs");
+  assert.equal(gridReads(touched), 1);
+  // Supprimer : même chose, et la ligne disparaît aussitôt de l'affichage.
+  const lance = armesTable.rows.find((row) => row.values.includes("Lance"));
+  google.world.calls.length = 0;
+  await sheets.deleteObjectIndexRows(touched, "Armes", [{ id: "ARM-4", rowNumber: lance.rowNumber, name: "Lance" }]);
+  const after = await sheets.listObjectIndexTablesForDisplay();
+  assert.ok(!after.find((table) => table.fileId === touched).rows.some((row) => row.values.includes("Lance")));
+  assert.equal(gridReads(other), 0);
+});
+
+test("Un classeur relu dont les en-têtes ont changé fait tout relire (en-têtes repris des autres)", async () => {
+  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
+  const other = objectsFile([{ title: "Potions", grid: [["ID", "Nom", "Type"], ["POT-1", "Élixir", "Potion"]] }]);
+  await sheets.listObjectIndexTables();
+  // Ailleurs, dans Sheets : une colonne est renommée dans le classeur touché, et l'autre change.
+  google.grid(touched, "Armes")[0][3] = "Coût";
+  google.grid(other, "Potions")[1][1] = "Élixir de vie";
+  google.world.calls.length = 0;
+  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Coût", "7"]]);
+  const tables = await sheets.listObjectIndexTables();
+  assert.equal(tables.find((table) => table.fileId === touched).headers[3], "Coût");
+  assert.equal(tables.find((table) => table.fileId === other).rows[0].values[1], "Élixir de vie");
+  assert.equal(gridReads(other), 1);
+});
+
+test("Une écriture faite pendant la relecture partielle n'est pas masquée par elle", async () => {
+  const touched = objectsFile([{ title: "Armes", grid: armes() }]);
+  await sheets.listObjectIndexTables();
+  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-4"], ["Nom", "Lance"], ["Type", "Arme"], ["Prix", "7"]]);
+  // La relecture part ; pendant qu'elle lit, une autre ligne est ajoutée par Eraser.
+  const reading = sheets.listObjectIndexTables();
+  await sheets.addObjectIndexRowWithValues(touched, "Armes", [["ID", "ARM-5"], ["Nom", "Masse"], ["Type", "Arme"], ["Prix", "9"]]);
+  await reading;
+  const tables = await sheets.listObjectIndexTablesForDisplay();
+  const names = tables.find((table) => table.fileId === touched).rows.map((row) => row.values[1]);
+  assert.ok(names.includes("Lance") && names.includes("Masse"), names.join(", "));
+});

@@ -82,6 +82,11 @@ function LayoutToggle({ value, onChange }: { value: "grid" | "list"; onChange: (
   )
 }
 
+/** La liste arrive après la page (app/layout.tsx ne l'attend plus) : pas encore « aucun ». */
+function ListLoading() {
+  return <div className="grid min-h-40 place-items-center" role="status" aria-label="Chargement"><LoaderCircle className="size-5 animate-spin text-muted-foreground" /></div>
+}
+
 function EmptyState({ icon: Icon, children }: { icon: LucideIcon; children: ReactNode }) {
   return (
     <div className="flex flex-col items-center gap-2 rounded-2xl border border-dashed px-6 py-12 text-center text-sm text-muted-foreground">
@@ -177,7 +182,7 @@ function CampaignBanner({ campaign, className }: { campaign: CampaignRecord; cla
   )
 }
 
-function CampaignColumn({ campaigns }: { campaigns: CampaignRecord[] }) {
+function CampaignColumn({ campaigns, loading }: { campaigns: CampaignRecord[]; loading: boolean }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
   const [sort, setSort] = useState("recent")
@@ -200,7 +205,9 @@ function CampaignColumn({ campaigns }: { campaigns: CampaignRecord[] }) {
         </NativeSelect>
         <LayoutToggle value={layout} onChange={setLayout} />
       </Toolbar>
-      {!campaigns.length ? (
+      {!campaigns.length && loading ? (
+        <ListLoading />
+      ) : !campaigns.length ? (
         <EmptyState icon={Map}>Aucune campagne pour l’instant.<Button asChild size="sm" variant="outline" className="mt-2"><Link href="/creation-de-campagne" prefetch={false}><Plus />Créer la première</Link></Button></EmptyState>
       ) : !visible.length ? (
         <EmptyState icon={Search}>Aucune campagne ne correspond.</EmptyState>
@@ -248,7 +255,7 @@ function Portrait({ character, className }: { character: CharacterRecord; classN
   )
 }
 
-function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
+function CharacterColumn({ characters, loading }: { characters: CharacterRecord[]; loading: boolean }) {
   const router = useRouter()
   const [search, setSearch] = useState("")
   const [campaignFilter, setCampaignFilter] = useState("all")
@@ -306,7 +313,9 @@ function CharacterColumn({ characters }: { characters: CharacterRecord[] }) {
         </NativeSelect>
         <LayoutToggle value={layout} onChange={setLayout} />
       </Toolbar>
-      {!characters.length ? (
+      {!characters.length && loading ? (
+        <ListLoading />
+      ) : !characters.length ? (
         <EmptyState icon={CircleUserRound}>Aucun personnage pour l’instant.<Button asChild size="sm" variant="outline" className="mt-2"><Link href="/creation-de-personnage" prefetch={false}><Plus />Créer le premier</Link></Button></EmptyState>
       ) : !visible.length ? (
         <EmptyState icon={Search}>Aucun personnage ne correspond.</EmptyState>
@@ -516,7 +525,7 @@ function TodoColumn() {
 // ---------- Page ----------
 
 export function HomeShell() {
-  const { characters, campaigns, viewRole, user } = useShellData()
+  const { characters, campaigns, listsLoaded, viewRole, user } = useShellData()
   const firstName = (user.displayName || user.email.split("@")[0]).trim()
   return (
     <PageLabel label="Accueil">
@@ -528,7 +537,7 @@ export function HomeShell() {
           <h1 className="font-display text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">Bonjour, <span className="text-primary">{firstName}</span></h1>
         </header>
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">
-          {viewRole === "mj" ? <CampaignColumn campaigns={campaigns} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} />}
+          {viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} loading={!listsLoaded} />}
           <SideColumn withIndex={viewRole !== "joueur"} withTools={viewRole === "admin"} />
         </div>
         <HomeAchievements viewRole={viewRole} />

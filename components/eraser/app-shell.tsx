@@ -17,6 +17,7 @@ import {
   FlaskConical,
   Home,
   LibraryBig,
+  LoaderCircle,
   Map,
   Plus,
   Search,
@@ -69,6 +70,7 @@ import { AccountAvatar, AccountDialog } from "@/components/eraser/account-dialog
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
 import { PendingPage, usePendingPage } from "@/components/eraser/page-transition"
 import { useIndexDirectoryLayout, useIndexEntries, useIndexStars } from "@/components/eraser/index-entries"
+import { useStoredText } from "@/hooks/use-persistent-state"
 import { indexDirectoryOrder } from "@/lib/index-directory"
 import { indexHomeHref } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
@@ -90,7 +92,7 @@ function sameList(left: unknown[], right: unknown[]) {
   return left === right || (left.length === right.length && JSON.stringify(left) === JSON.stringify(right))
 }
 
-const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void; /** La campagne choisie dans le menu (vue MJ). */ selectedCampaignId: string | null } | null>(null)
+const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; /** Faux tant que les listes n'ont jamais répondu (elles arrivent après la page). */ listsLoaded: boolean; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void; /** La campagne choisie dans le menu (vue MJ). */ selectedCampaignId: string | null } | null>(null)
 
 /**
  * Nomme la page (en-tête et onglet). Un PageLabel imbriqué l'emporte sur celui qui
@@ -224,8 +226,9 @@ export function AppShell({
   children,
 }: {
   user: ShellUser
-  characters: CharacterRecord[]
-  campaigns: CampaignRecord[]
+  /** Listes de la barre latérale, encore en vol : la coque ne les attend jamais (app/layout.tsx). */
+  characters: CharacterRecord[] | Promise<CharacterRecord[]>
+  campaigns: CampaignRecord[] | Promise<CampaignRecord[]>
   todos: AdminTodoRecord[]
   initialViewRole: SiteRole
   pageLabel: string
@@ -248,16 +251,31 @@ export function AppShell({
   const characterStorageKey = `eraser-character:${user.email}`
   const campaignStorageKey = `eraser-campaign:${user.email}`
   const [viewRole, setViewRole] = useState<SiteRole>(initialViewRole)
-  const [selectedCharacterId, setSelectedCharacterId] = useState<string | null>(null)
-  const [selectedCampaignId, setSelectedCampaignId] = useState<string | null>(null)
-  const [visibleCharacters, setVisibleCharacters] = useState(characters)
-  const [visibleCampaigns, setVisibleCampaigns] = useState(campaigns)
+  // Le personnage et la campagne retenus sont lus dans le stockage dès le premier rendu
+  // client, et non plus recopiés dans un état par un minuteur après peinture.
+  const [selectedCharacterId, setSelectedCharacterId] = useStoredText(characterStorageKey)
+  const [selectedCampaignId, setSelectedCampaignId] = useStoredText(campaignStorageKey)
+  const [visibleCharacters, setVisibleCharacters] = useState<CharacterRecord[]>(() => Array.isArray(characters) ? characters : [])
+  const [visibleCampaigns, setVisibleCampaigns] = useState<CampaignRecord[]>(() => Array.isArray(campaigns) ? campaigns : [])
+  // Tant que les listes n'ont jamais répondu, la barre latérale et l'accueil disent qu'elles
+  // arrivent, au lieu d'annoncer « aucun personnage ».
+  const [listsLoaded, setListsLoaded] = useState(() => Array.isArray(characters) && Array.isArray(campaigns))
   const [visibleTodos, setVisibleTodos] = useState(todos)
+  // Un choix retenu qui n'est plus dans la liste (supprimé, autre compte) ne sélectionne rien.
+  const selectedCharacter = useMemo(
+    () => visibleCharacters.find((character) => character.id === selectedCharacterId) ?? null,
+    [visibleCharacters, selectedCharacterId],
+  )
+  const selectedCampaign = useMemo(
+    () => visibleCampaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null,
+    [visibleCampaigns, selectedCampaignId],
+  )
+  const selectedCampaignInList = selectedCampaign?.id ?? null
   // Le compte ne change pas d'une page à l'autre : le même objet, tant que ses champs sont les mêmes.
   const { uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole } = user
   const shellUser = useMemo<ShellUser>(() => ({ uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole }), [userDisplayName, userEmail, userRole, userUid])
   // Les pages qui lisent ces données ne se redessinent que si elles changent vraiment.
-  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user: shellUser, avatarVersion, openAccount, selectedCampaignId }), [avatarVersion, openAccount, selectedCampaignId, shellUser, viewRole, visibleCampaigns, visibleCharacters])
+  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, listsLoaded, viewRole, user: shellUser, avatarVersion, openAccount, selectedCampaignId: selectedCampaignInList }), [avatarVersion, listsLoaded, openAccount, selectedCampaignInList, shellUser, viewRole, visibleCampaigns, visibleCharacters])
   // Au clic, la page de destination s'affiche aussitôt, sans ses données ; le titre d'un
   // personnage ou d'une campagne est déjà connu ici.
   const pendingPage = usePendingPage((to) => {
@@ -304,16 +322,21 @@ export function AppShell({
     return () => document.removeEventListener("click", openAppLink)
   }, [router])
 
-  // Chaque clic renvoie la liste du serveur (un nouveau tableau, souvent identique) : elle
-  // n'est reprise que si elle a changé, sinon toute l'enveloppe se redessinait à chaque page.
+  // Chaque clic renvoie la liste du serveur (un nouveau tableau, souvent identique, encore en
+  // vol) : elle n'est reprise que si elle a changé, sinon toute l'enveloppe se redessinait à
+  // chaque page. Pendant qu'elle arrive, la barre latérale garde la précédente.
+  // Les tâches ne sont plus recopiées ici : la coque reçoit toujours une liste vide, qui
+  // effaçait à chaque navigation celle chargée depuis le menu du compte.
   useEffect(() => {
-    const timer = window.setTimeout(() => {
-      setVisibleCharacters((current) => sameList(current, characters) ? current : characters)
-      setVisibleCampaigns((current) => sameList(current, campaigns) ? current : campaigns)
-      setVisibleTodos((current) => sameList(current, todos) ? current : todos)
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [campaigns, characters, todos])
+    let active = true
+    void Promise.all([characters, campaigns]).then(([nextCharacters, nextCampaigns]) => {
+      if (!active) return
+      setVisibleCharacters((current) => sameList(current, nextCharacters) ? current : nextCharacters)
+      setVisibleCampaigns((current) => sameList(current, nextCampaigns) ? current : nextCampaigns)
+      setListsLoaded(true)
+    })
+    return () => { active = false }
+  }, [campaigns, characters])
 
   useEffect(() => {
     if (!accountMenuOpen || viewRole !== "admin" || user.role !== "admin" || todosLoaded || todosLoadingRef.current) return
@@ -333,14 +356,12 @@ export function AppShell({
       const campaign = (event as CustomEvent<CampaignRecord>).detail
       if (!campaign?.id) return
       setVisibleCampaigns((current) => current.some((item) => item.id === campaign.id) ? current : [campaign, ...current])
-      window.localStorage.setItem(campaignStorageKey, campaign.id)
       setSelectedCampaignId(campaign.id)
     }
     function characterCreated(event: Event) {
       const character = (event as CustomEvent<CharacterRecord>).detail
       if (!character?.id) return
       setVisibleCharacters((current) => current.some((item) => item.id === character.id) ? current : [character, ...current])
-      window.localStorage.setItem(characterStorageKey, character.id)
       setSelectedCharacterId(character.id)
     }
     window.addEventListener(campaignCreatedEvent, campaignCreated)
@@ -349,27 +370,19 @@ export function AppShell({
       window.removeEventListener(campaignCreatedEvent, campaignCreated)
       window.removeEventListener(characterCreatedEvent, characterCreated)
     }
-  }, [campaignStorageKey, characterStorageKey])
+  }, [setSelectedCampaignId, setSelectedCharacterId])
 
   // Ouvrir la fiche d'un de ses personnages ou le tableau de bord d'une de ses
   // campagnes (depuis l'accueil, un index, un lien) le sélectionne aussi.
   useEffect(() => {
+    // Le choix est écrit dans le stockage (qui prévient la coque) seulement s'il change.
     const characterMatch = pathname.match(/^\/personnage\/([^/]+)/)
     const campaignMatch = pathname.match(/^\/campagne\/([^/]+)/)
-    const timer = window.setTimeout(() => {
-      const characterId = characterMatch ? decodeURIComponent(characterMatch[1]) : ""
-      if (characterId && visibleCharacters.some((item) => item.id === characterId)) {
-        window.localStorage.setItem(characterStorageKey, characterId)
-        setSelectedCharacterId(characterId)
-      }
-      const campaignId = campaignMatch ? decodeURIComponent(campaignMatch[1]) : ""
-      if (campaignId && visibleCampaigns.some((item) => item.id === campaignId)) {
-        window.localStorage.setItem(campaignStorageKey, campaignId)
-        setSelectedCampaignId(campaignId)
-      }
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [campaignStorageKey, characterStorageKey, pathname, visibleCampaigns, visibleCharacters])
+    const characterId = characterMatch ? decodeURIComponent(characterMatch[1]) : ""
+    if (characterId && visibleCharacters.some((item) => item.id === characterId)) setSelectedCharacterId(characterId)
+    const campaignId = campaignMatch ? decodeURIComponent(campaignMatch[1]) : ""
+    if (campaignId && visibleCampaigns.some((item) => item.id === campaignId)) setSelectedCampaignId(campaignId)
+  }, [pathname, setSelectedCampaignId, setSelectedCharacterId, visibleCampaigns, visibleCharacters])
 
   useEffect(() => {
     function updateCampaign(event: Event) {
@@ -380,29 +393,6 @@ export function AppShell({
     window.addEventListener("eraser:campaign-updated", updateCampaign)
     return () => window.removeEventListener("eraser:campaign-updated", updateCampaign)
   }, [])
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      const savedCharacter = window.localStorage.getItem(characterStorageKey)
-      if (savedCharacter && visibleCharacters.some((character) => character.id === savedCharacter)) {
-        setSelectedCharacterId(savedCharacter)
-      }
-      const savedCampaign = window.localStorage.getItem(campaignStorageKey)
-      if (savedCampaign && visibleCampaigns.some((campaign) => campaign.id === savedCampaign)) {
-        setSelectedCampaignId(savedCampaign)
-      }
-    }, 0)
-    return () => window.clearTimeout(timer)
-  }, [campaignStorageKey, characterStorageKey, visibleCampaigns, visibleCharacters])
-
-  const selectedCharacter = useMemo(
-    () => visibleCharacters.find((character) => character.id === selectedCharacterId) ?? null,
-    [visibleCharacters, selectedCharacterId],
-  )
-  const selectedCampaign = useMemo(
-    () => visibleCampaigns.find((campaign) => campaign.id === selectedCampaignId) ?? null,
-    [visibleCampaigns, selectedCampaignId],
-  )
 
   async function changeView(nextRole: SiteRole) {
     if (!allowedRoleViews[user.role].includes(nextRole)) return
@@ -416,28 +406,18 @@ export function AppShell({
     window.location.assign("/")
   }
 
-  function selectCharacter(characterId: string) {
-    window.localStorage.setItem(characterStorageKey, characterId)
-    setSelectedCharacterId(characterId)
-  }
-
-  function selectCampaign(campaignId: string) {
-    window.localStorage.setItem(campaignStorageKey, campaignId)
-    setSelectedCampaignId(campaignId)
-  }
+  // Choisir enregistre : le stockage prévient la coque.
+  const selectCharacter = setSelectedCharacterId
+  const selectCampaign = setSelectedCampaignId
 
   async function deleteItem(kind: "character" | "campaign", id: string) {
     const response = await fetch("/api/items/delete", {
       method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ kind, id }),
     })
     if (!response.ok) return
-    if (kind === "character") {
-      setVisibleCharacters((current) => current.filter((item) => item.id !== id))
-      if (selectedCharacterId === id) setSelectedCharacterId(null)
-    } else {
-      setVisibleCampaigns((current) => current.filter((item) => item.id !== id))
-      if (selectedCampaignId === id) setSelectedCampaignId(null)
-    }
+    // Retiré de la liste, il n'est plus sélectionné (le choix retenu ne désigne plus rien).
+    if (kind === "character") setVisibleCharacters((current) => current.filter((item) => item.id !== id))
+    else setVisibleCampaigns((current) => current.filter((item) => item.id !== id))
   }
 
   const viewControls = user.role !== "joueur" && (
@@ -557,6 +537,11 @@ export function AppShell({
                       <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-xs" onClick={(event) => event.stopPropagation()} aria-label="Supprimer la campagne"><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Mettre cette campagne à la corbeille ?</AlertDialogTitle><AlertDialogDescription>Ses données pourront être restaurées par un administrateur.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={() => deleteItem("campaign", campaign.id)}>Mettre à la corbeille</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>
                     </div>
                   ))
+                ) : !listsLoaded && (viewRole === "mj" || !visibleCharacters.length) ? (
+                  <div className="flex items-center justify-center gap-2 px-3 py-6 text-sm text-muted-foreground" role="status">
+                    <LoaderCircle className="size-4 animate-spin" />
+                    {viewRole === "mj" ? "Chargement des campagnes…" : "Chargement des personnages…"}
+                  </div>
                 ) : viewRole === "mj" ? (
                   <div className="px-3 py-6 text-center text-sm text-muted-foreground">
                     <Map className="mx-auto mb-2 size-7 opacity-60" />

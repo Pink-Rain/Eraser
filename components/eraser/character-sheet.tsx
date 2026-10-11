@@ -12,6 +12,7 @@ import { showItemNotifications, unseenItemNotifications, useInventoryReceived } 
 import type { ItemNotification } from "@/lib/item-notifications"
 import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
 import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
+import { usePersistentState } from "@/hooks/use-persistent-state"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -126,6 +127,11 @@ const tabTypes: Array<{ type: CharacterTabType; label: string }> = [
 const addableTabTypes = tabTypes.filter((tab) => tab.type === "invocation" || tab.type === "compagnon")
 
 const baseCharacterTabs: CharacterTab[] = tabTypes.slice(0, 4).map((tab) => ({ ...tab, id: `base-${tab.type}`, removable: false }))
+
+/** Ce que la fiche retient sur ce poste (localStorage) ; un onglet disparu retombe sur le premier. */
+type SheetViewState = { activeTab?: string; narrativeExpanded?: boolean; mechanicsExpanded?: boolean }
+const defaultSheetView: SheetViewState = {}
+const isSheetViewState = (value: unknown): value is SheetViewState => typeof value === "object" && value !== null && !Array.isArray(value)
 
 
 function parseCharacterTabs(value: string): CharacterTab[] {
@@ -670,10 +676,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const classCatalogAutoRetries = useRef(0)
   const [classCatalogRetrying, setClassCatalogRetrying] = useState(false)
   const [portraitPending, setPortraitPending] = useState(false)
-  const [narrativeExpanded, setNarrativeExpanded] = useState(true)
-  const [mechanicsExpanded, setMechanicsExpanded] = useState(true)
-  const [activeTab, setActiveTab] = useState("base-competences")
-  const [viewStateReady, setViewStateReady] = useState(false)
+  // L'onglet ouvert et les sections dépliées, retenus sur ce poste pour chaque fiche. Lus
+  // dès le premier rendu client (et non plus après peinture dans un minuteur, qui faisait
+  // redessiner toute la fiche et sauter d'onglet) ; le format enregistré ne change pas.
+  const [sheetView, setSheetView] = usePersistentState<SheetViewState>(`eraser:character-sheet:${character.id}:view`, defaultSheetView, isSheetViewState)
+  const activeTab = typeof sheetView.activeTab === "string" && sheetView.activeTab ? sheetView.activeTab : "base-competences"
+  const narrativeExpanded = typeof sheetView.narrativeExpanded === "boolean" ? sheetView.narrativeExpanded : true
+  const mechanicsExpanded = typeof sheetView.mechanicsExpanded === "boolean" ? sheetView.mechanicsExpanded : true
+  const setActiveTab = (id: string) => setSheetView({ activeTab: id, narrativeExpanded, mechanicsExpanded })
   const [addingTab, setAddingTab] = useState(false)
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
   // L’inventaire vit ici : l’onglet Compétences a besoin des items équipés et de leurs liens.
@@ -1438,26 +1448,6 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return () => { cancelled = true; window.clearTimeout(retry) }
   }, [loadClassCatalog, classCatalogAttempt])
 
-  useEffect(() => {
-    const restore = window.setTimeout(() => {
-      try {
-        const stored = JSON.parse(localStorage.getItem(`eraser:character-sheet:${character.id}:view`) || "{}") as { activeTab?: string; narrativeExpanded?: boolean; mechanicsExpanded?: boolean }
-        if (stored.activeTab && characterTabs.some((tab) => tab.id === stored.activeTab)) setActiveTab(stored.activeTab)
-        if (typeof stored.narrativeExpanded === "boolean") setNarrativeExpanded(stored.narrativeExpanded)
-        if (typeof stored.mechanicsExpanded === "boolean") setMechanicsExpanded(stored.mechanicsExpanded)
-      } catch { /* état local absent ou ancien */ }
-      setViewStateReady(true)
-    }, 0)
-    return () => window.clearTimeout(restore)
-  // Les onglets personnalisés sont déjà présents au premier rendu de la fiche.
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [character.id])
-
-  useEffect(() => {
-    if (!viewStateReady) return
-    localStorage.setItem(`eraser:character-sheet:${character.id}:view`, JSON.stringify({ activeTab, narrativeExpanded, mechanicsExpanded }))
-  }, [activeTab, character.id, mechanicsExpanded, narrativeExpanded, viewStateReady])
-
   async function addCharacterTab() {
     const definition = tabTypes.find((tab) => tab.type === newTabType)
     if (!definition) return
@@ -1751,7 +1741,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
             </div>
           </div>
           <div className="mt-5">
-            <button type="button" onClick={() => setNarrativeExpanded((current) => !current)} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[.18em] text-muted-foreground hover:text-foreground" aria-expanded={narrativeExpanded}>
+            <button type="button" onClick={() => setSheetView({ activeTab, narrativeExpanded: !narrativeExpanded, mechanicsExpanded })} className="flex w-full items-center justify-between border-y border-border/55 px-1 py-2 text-left text-[10px] font-semibold uppercase tracking-[.18em] text-muted-foreground hover:text-foreground" aria-expanded={narrativeExpanded}>
               <span>But · Personnalité · Histoire</span>
               {narrativeExpanded ? <ChevronUp className="size-4" /> : <ChevronDown className="size-4" />}
             </button>
