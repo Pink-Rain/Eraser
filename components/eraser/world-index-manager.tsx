@@ -18,7 +18,7 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatDefinition } from "@/lib/index-stats"
-import { groupRowsBy } from "@/lib/index-view-layouts"
+import { groupRowsBy, isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
@@ -1142,7 +1142,15 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // eslint-disable-next-line react-hooks/exhaustive-deps -- une ligne réécrite depuis sa fiche redessine ses cartes
   }), [locate, specOf, valueOf, rowVersions])
   // La présentation de l'onglet-fenêtre ouvert (liste, kanban, calendrier…), réglée dans « Modifier la vue ».
-  const viewLayout = activeView?.layout ?? null
+  // Une vue choisie par l'onglet-fenêtre (liste, kanban…) part des réglages de « Modifier › Vues »
+  // pour cet onglet ; ce que l'onglet-fenêtre règle lui-même passe par-dessus.
+  const viewLayout = useMemo(() => {
+    const own = activeView?.layout ?? null
+    if (!own || !table || !isPresentationKind(own.kind)) return own
+    const base = presentationFor(settings.presentations, table.tabName, own.kind)
+    const set = Object.fromEntries(Object.entries(own).filter(([, value]) => value !== undefined && !(Array.isArray(value) && !value.length)))
+    return { ...base, ...set, kind: own.kind } as ViewLayout
+  }, [activeView, settings.presentations, table])
   const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
   const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
   // Cartes rangées en sections : les lignes de chaque valeur de la colonne choisie.
@@ -1372,6 +1380,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         cardsIndex={indexKey}
         cards={settings.cards}
         onSaveCards={settings.saveCards}
+        presentations={settings.presentations}
+        onSavePresentations={settings.savePresentations}
+        viewPresets={settings.viewPresets}
+        onSaveViewPreset={settings.saveViewPreset}
+        onDeleteViewPreset={settings.deleteViewPreset}
+        previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
         initialMode={editorMode}
         initialTab={table?.tabName}
       />}

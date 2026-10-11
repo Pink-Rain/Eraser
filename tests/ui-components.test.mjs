@@ -1442,3 +1442,28 @@ test("Notes de session : nettoyage, droits, « Mon perso » et quêtes en boucle
   assert.deepEqual(done.steps.map((step) => step.id), ["C", "D"]);
   assert.equal(done.done, true);
 });
+
+test("Modifier › Vues : réglages par onglet, presets adaptés aux colonnes, tri et nouvelles tuiles", async () => {
+  const views = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  // Un réglage inconnu, une vue « table » ou « stats » ne passent pas ; le kind suit la clé.
+  const parsed = views.parseTabPresentations(JSON.stringify({ kanban: { kind: "list", kanbanColumn: "État", laneWidth: "wide", pirate: 1 }, table: { kind: "table" }, stats: { kind: "stats" }, list: { compact: true, listColumns: 7 } }));
+  assert.deepEqual(parsed, { kanban: { kind: "kanban", kanbanColumn: "État", laneWidth: "wide" }, list: { kind: "list", compact: true } });
+  assert.deepEqual(views.presentationFor({ "Créatures ": parsed }, "créatures", "kanban").kanbanColumn, "État");
+  assert.deepEqual(views.presentationFor({}, "Lieux", "calendar"), { kind: "calendar" });
+  // Un preset d'un autre index : ses colonnes absentes sont retirées, le reste est gardé.
+  const fitted = views.fitLayoutToColumns({ kind: "list", groupBy: "Rareté", sortBy: "Prix", fields: ["Prix", "Poids"], compact: true, tiles: [{ kind: "sum", column: "Poids" }] }, ["Nom", "prix", "Type"]);
+  assert.deepEqual(fitted, { kind: "list", compact: true, fields: ["prix"], sortBy: "prix" });
+  // Tri : nombres comme des nombres, cases vides à la fin, ordre décroissant.
+  const rows = [{ p: "10 PO" }, { p: "" }, { p: "2 PO" }, { p: "100 PO" }];
+  assert.deepEqual(views.sortLayoutRows(rows, { sortBy: "p" }, (row) => row.p).map((row) => row.p), ["2 PO", "10 PO", "100 PO", ""]);
+  assert.deepEqual(views.sortLayoutRows(rows, { sortBy: "p", sortDesc: true }, (row) => row.p).map((row) => row.p).slice(0, 3), ["100 PO", "10 PO", "2 PO"]);
+  const value = (row) => row.p;
+  assert.equal(views.dashboardTileValue({ kind: "max", column: "p" }, rows, value).number, 100);
+  assert.equal(views.dashboardTileValue({ kind: "min", column: "p" }, rows, value).number, 2);
+  assert.equal(views.dashboardTileValue({ kind: "filled", column: "p" }, rows, value).number, 3);
+  // Un preset : nom et vue réglable obligatoires.
+  assert.equal(views.cleanViewPreset({ name: "", layout: { kind: "list" } }), null);
+  assert.equal(views.cleanViewPreset({ name: "Stats", layout: { kind: "stats" } }), null);
+  assert.equal(views.cleanViewPreset({ name: "Mon kanban", layout: { kind: "kanban", laneWidth: "narrow" } }).layout.laneWidth, "narrow");
+  assert.ok(views.builtinViewPresets.every((preset) => views.cleanViewPreset(preset)));
+});

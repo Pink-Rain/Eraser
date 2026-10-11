@@ -1,13 +1,14 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LayoutList, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { LayoutPresetBar, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { IndexCardEditor } from "@/components/eraser/index-card-editor"
+import { IndexViewsEditor } from "@/components/eraser/index-views-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -49,6 +50,7 @@ import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout,
 import { builtinLayoutFor, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { cardId, renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
+import type { TabPresentations, ViewLayout, ViewPreset } from "@/lib/index-view-layouts"
 import {
   alignColumns,
   canonicalObjectHeader,
@@ -819,7 +821,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -849,7 +851,18 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Enregistre les cartes changées (`null` : retour aux cartes d'Eraser). Absent : pas d'onglet « Cartes ». */
   onSaveCards?: (changes: Array<{ tab: string; cards: TabCards | null }>) => Promise<void>
   /** Ce que l'éditeur ouvre d'abord (« Cartes » depuis la vue en cartes). */
-  initialMode?: "columns" | LayoutKind | "cards"
+  initialMode?: "columns" | LayoutKind | "cards" | "views"
+  /** Les vues réglées (liste, kanban…), par onglet ; `onSavePresentations` absent : pas d'onglet « Vues ». */
+  presentations?: Record<string, TabPresentations>
+  onSavePresentations?: (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => Promise<void>
+  /** Les presets de vues, communs à tous les index. */
+  viewPresets?: ViewPreset[]
+  onSaveViewPreset?: (preset: { name: string; layout: ViewLayout }) => Promise<unknown>
+  onDeleteViewPreset?: (id: string) => Promise<unknown>
+  /** Des lignes de chaque onglet (en-tête → valeur) pour l'aperçu des vues. */
+  previewRows?: Record<string, Array<Record<string, string>>>
+  /** Les choix d'une colonne liste d'un onglet (couleurs des sections, du kanban). */
+  optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
   /** L'onglet ouvert d'abord (son nom). */
   initialTab?: string
 }) {
@@ -883,7 +896,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)), [tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
-  const [mode, setMode] = useState<"columns" | LayoutKind | "cards">(() => initialMode === "cards" && !onSaveCards ? "columns" : initialMode)
+  const [mode, setMode] = useState<"columns" | LayoutKind | "cards" | "views">(() => (initialMode === "cards" && !onSaveCards) || (initialMode === "views" && !onSavePresentations) ? "columns" : initialMode)
   // Les mises en page touchées, par onglet (identifiant du brouillon) ; `null` : automatique.
   const [layoutDrafts, setLayoutDrafts] = useState<Record<string, Partial<Record<LayoutKind, IndexLayout | null>>>>({})
   const [layoutSaving, setLayoutSaving] = useState(false)
@@ -963,7 +976,39 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     return [...retired, { tab: name, cards: next }]
   }), [cardDrafts, cards, cardsIndex, model.key, tabs])
 
+  // Les vues touchées, par onglet (identifiant du brouillon).
+  const [presentationDrafts, setPresentationDrafts] = useState<Record<string, TabPresentations>>({})
+  const presentationsEnabled = Boolean(onSavePresentations) && !readOnly
+  const savedPresentationsOf = (name: string) => Object.entries(presentations).find(([tabName]) => foldName(tabName) === foldName(name))?.[1] ?? {}
+  const presentationsOf = (draft: DraftTab) => presentationDrafts[draft.id] ?? savedPresentationsOf(draft.original ?? draft.name.trim())
+  /** Ce qu'il faut écrire : les vues touchées, et celles qui suivent un onglet ou des colonnes renommés. */
+  const presentationChanges = useMemo(() => tabs.flatMap((draft): Array<{ tab: string; presentations: TabPresentations | null }> => {
+    const name = draft.name.trim()
+    if (draft.removed || !name) return []
+    const saved = draft.original ? savedPresentationsOf(draft.original) : {}
+    const touched = draft.id in presentationDrafts
+    const renamed = Boolean(draft.original) && name !== draft.original
+    const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
+    if (!touched && !renamed && !renames.size) return []
+    const rename = (value?: string) => value ? renames.get(foldName(value)) ?? value : value
+    const base = touched ? presentationDrafts[draft.id] : saved
+    const next: TabPresentations = Object.fromEntries(Object.entries(base).map(([kind, layout]) => [kind, { ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })) }]))
+    if (!renamed && JSON.stringify(next) === JSON.stringify(saved)) return []
+    const retired = renamed && Object.keys(saved).length ? [{ tab: draft.original!, presentations: null }] : []
+    return [...retired, { tab: name, presentations: Object.keys(next).length ? next : null }]
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `presentations` est lu par savedPresentationsOf
+  }), [presentationDrafts, presentations, tabs])
+
   async function submit() {
+    if (presentationChanges.length && onSavePresentations) {
+      setLayoutSaving(true); setLayoutError("")
+      try { await onSavePresentations(presentationChanges) } catch (reason) {
+        setLayoutError(reason instanceof Error ? reason.message : "Les vues n’ont pas pu être enregistrées.")
+        setLayoutSaving(false)
+        return
+      }
+      setLayoutSaving(false)
+    }
     if (cardChanges.length && onSaveCards) {
       setLayoutSaving(true); setLayoutError("")
       try { await onSaveCards(cardChanges) } catch (reason) {
@@ -1079,8 +1124,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
           </div>
           <span className="flex flex-wrap items-center gap-2">
-            {(layoutsEnabled || cardsEnabled) && <span className="inline-flex rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Mise en page de la fiche"], ["hover", MessageSquareQuote, "Survol « { » d’une ligne"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : [])] as const).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+            {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Mise en page de la fiche"], ["hover", MessageSquareQuote, "Survol « { » d’une ligne"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? [["views", LayoutList, "Vues"]] as const : [])] as const).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
             <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />Guide « ? »</Button>
           </span>
@@ -1122,6 +1167,24 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </div>}
           {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
+
+        {mode === "views" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            Les <b className="text-foreground">vues</b> de « {tab.name} » : liste, kanban, maître-détail, calendrier, tableau de bord. Un onglet-fenêtre qui en choisit une la montre avec ces réglages. Gardées dans Eraser, pour tout le monde ; les presets servent dans tous les index.
+          </div>
+          <IndexViewsEditor
+            key={tab.id}
+            tabName={tab.name}
+            columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
+            rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
+            value={presentationsOf(tab)}
+            onChange={(next) => setPresentationDrafts((current) => ({ ...current, [tab.id]: next }))}
+            presets={viewPresets}
+            onSavePreset={onSaveViewPreset}
+            onDeletePreset={onDeleteViewPreset}
+            optionsOf={optionsOf ? (header) => optionsOf(tab.original ?? tab.name.trim(), header) : undefined}
+          />
+        </section>}
 
         {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
@@ -1265,18 +1328,20 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         {layoutError && <p className="mb-1 text-destructive">{layoutError}</p>}
         <div className="flex items-center gap-2">
           <Settings2 className="size-3.5 shrink-0" />
-          <span className="font-semibold">{operations.length + layoutChanges.length + cardChanges.length
+          <span className="font-semibold">{operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length
             ? [
               operations.length ? `${operations.length} changement${operations.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "",
               // Les mises en page sont des réglages d'Eraser : gardées sur son serveur partagé, pas dans Sheets.
               layoutChanges.length ? `${layoutChanges.length} mise${layoutChanges.length > 1 ? "s" : ""} en page à enregistrer dans Eraser (pour tout le monde)` : "",
+              presentationChanges.length ? `Vues de ${presentationChanges.filter((change) => change.presentations).length || presentationChanges.length} onglet(s) à enregistrer dans Eraser (pour tout le monde)` : "",
               cardChanges.length ? (() => { const count = cardChanges.filter((change) => change.cards).length || cardChanges.length; return `Cartes de ${count} onglet${count > 1 ? "s" : ""} à enregistrer dans Eraser (pour tout le monde)` })() : "",
             ].filter(Boolean).join(" · ")
             : "Aucun changement pour l’instant"}</span>
-          {operations.length + layoutChanges.length + cardChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
+          {operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
         </div>
         {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">
           {operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}
+          {presentationChanges.map((change, index) => <li key={`views-${index}`}>• Vues de « {change.tab} » (dans Eraser) : {change.presentations ? Object.keys(change.presentations).length + " réglée(s)" : "réglages d’office"}</li>)}
           {cardChanges.map((change, index) => <li key={`cards-${index}`}>• Cartes de « {change.tab} » (dans Eraser) : {change.cards ? `${change.cards.cards.length} carte${change.cards.cards.length > 1 ? "s" : ""}` : "retour aux cartes d’Eraser"}</li>)}
           {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » (dans Eraser) : {!change.form && !change.hover ? "affichage automatique" : [change.form ? "fiche personnalisée" : "fiche automatique", change.hover ? "survol personnalisé" : "survol automatique"].join(", ")}</li>)}
         </ul>}
@@ -1299,7 +1364,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </span>
         <span className="flex gap-2">
         <Button type="button" variant="outline" onClick={onClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
-        {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
+        {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length || presentationChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
         </span>
       </DialogFooter>
       {guide && <IndexGuide open section={guide} onClose={() => setGuide(null)} />}

@@ -15,9 +15,9 @@ import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
-import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type ViewLayout, type ViewLayoutKind } from "@/lib/index-view-layouts"
+import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
 
-const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
+export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
 
 /** Les noms des calendriers de l'Index des calendriers (le calendrier réel en tête). */
 function useCalendarNames(active: boolean) {
@@ -35,7 +35,7 @@ function useCalendarNames(active: boolean) {
  * La présentation d'une vue : tableau, cartes, liste (compacte, repliable), kanban,
  * maître-détail, calendrier, tableau de bord ; et ses sections. Elle s'enregistre avec la vue.
  */
-function LayoutSettings({ layout, columns, onChange }: { layout: ViewLayout; columns: string[]; onChange: (layout: ViewLayout) => void }) {
+export function LayoutSettings({ layout, columns, onChange, fixedKind = false }: { layout: ViewLayout; columns: string[]; onChange: (layout: ViewLayout) => void; /** Modifier › Vues : la présentation est déjà choisie, seuls ses réglages se montrent. */ fixedKind?: boolean }) {
   const set = (changes: Partial<ViewLayout>) => onChange({ ...layout, ...changes })
   const calendars = useCalendarNames(layout.kind === "calendar")
   const columnSelect = (value: string | undefined, onPick: (value: string | undefined) => void, label: string, none = "Aucune") => <label className="grid gap-1 text-xs font-semibold">{label}<NativeSelect value={value ?? ""} onChange={(event) => onPick(event.target.value || undefined)} className="h-9 text-sm"><NativeSelectOption value="">{none}</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect></label>
@@ -44,10 +44,10 @@ function LayoutSettings({ layout, columns, onChange }: { layout: ViewLayout; col
   const tiles = layout.tiles ?? [{ kind: "count" }]
   const setTile = (position: number, tile: DashboardTile | null) => set({ tiles: tiles.flatMap((item, index) => index === position ? tile ? [tile] : [] : [item]) })
   return <div className="grid gap-3 rounded-xl border bg-card/60 p-3">
-    <p className="text-sm font-medium">Présentation</p>
+    {!fixedKind && <><p className="text-sm font-medium">Présentation</p>
     <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="Présentation">
       {viewLayoutKinds.map((kind) => { const Icon = layoutIcons[kind.value]; return <button key={kind.value} type="button" role="radio" aria-checked={layout.kind === kind.value} title={kind.hint} onClick={() => set({ kind: kind.value })} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-colors ${layout.kind === kind.value ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"}`}><Icon className="size-4 shrink-0" />{kind.label}</button> })}
-    </div>
+    </div></>}
     <p className="text-xs text-muted-foreground">{viewLayoutKinds.find((kind) => kind.value === layout.kind)?.hint}</p>
     {["list", "cards", "master-detail"].includes(layout.kind) && <div className="grid gap-2 sm:grid-cols-2">
       {columnSelect(layout.groupBy, (groupBy) => set({ groupBy }), "Ranger en sections par", "Pas de sections")}
@@ -80,12 +80,31 @@ function LayoutSettings({ layout, columns, onChange }: { layout: ViewLayout; col
       </div> })}
       <div><Button type="button" variant="ghost" size="sm" onClick={() => set({ tiles: [...tiles, { kind: "breakdown", column: columns[0] }] })}><Plus />Ajouter une tuile</Button></div>
     </div>}
+    {layout.kind !== "stats" && layout.kind !== "table" && layout.kind !== "cards" && <div className="grid gap-2 border-t pt-3 sm:grid-cols-2">
+      <p className="text-sm font-medium sm:col-span-2">Affichage</p>
+      {layout.kind !== "dashboard" && <>
+        {columnSelect(layout.sortBy, (sortBy) => set({ sortBy, sortDesc: sortBy ? layout.sortDesc : undefined }), "Trier par", "Ordre de la feuille")}
+        {layout.sortBy ? <label className="flex items-center gap-2 self-end pb-2 text-xs"><Checkbox checked={Boolean(layout.sortDesc)} onCheckedChange={(checked) => set({ sortDesc: checked === true || undefined })} />Ordre décroissant</label> : <span />}
+        {columnSelect(layout.colorBy, (colorBy) => set({ colorBy }), "Couleur des lignes selon", "Aucune")}
+        {columnSelect(layout.imageColumn, (imageColumn) => set({ imageColumn }), "Image à côté du nom", "Aucune")}
+      </>}
+      {(layout.groupBy || layout.kind === "kanban") && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.hideEmpty)} onCheckedChange={(checked) => set({ hideEmpty: checked === true || undefined })} />Masquer « Sans valeur »</label>}
+      {layout.groupBy && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.hideCounts)} onCheckedChange={(checked) => set({ hideCounts: checked === true || undefined })} />Sans le nombre de lignes</label>}
+      {layout.kind === "list" && <label className="grid gap-1 text-xs font-semibold">Colonnes de la liste<NativeSelect value={String(layout.listColumns ?? 1)} onChange={(event) => set({ listColumns: Number(event.target.value) === 1 ? undefined : Number(event.target.value) as 2 | 3 })} className="h-9 text-sm">{[1, 2, 3].map((count) => <NativeSelectOption key={count} value={String(count)}>{count === 1 ? "Une" : count === 2 ? "Deux" : "Trois"}</NativeSelectOption>)}</NativeSelect></label>}
+      {layout.kind === "kanban" && <label className="grid gap-1 text-xs font-semibold">Largeur des colonnes<NativeSelect value={layout.laneWidth ?? "normal"} onChange={(event) => set({ laneWidth: event.target.value === "normal" ? undefined : event.target.value as "narrow" | "wide" })} className="h-9 text-sm"><NativeSelectOption value="narrow">Serrées</NativeSelectOption><NativeSelectOption value="normal">Normales</NativeSelectOption><NativeSelectOption value="wide">Larges</NativeSelectOption></NativeSelect></label>}
+      {layout.kind === "calendar" && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.showUndated)} onCheckedChange={(checked) => set({ showUndated: checked === true || undefined })} />Lister les lignes sans date</label>}
+      {layout.kind === "dashboard" && <label className="grid gap-1 text-xs font-semibold">Tuiles par rangée<NativeSelect value={String(layout.tileColumns ?? 3)} onChange={(event) => set({ tileColumns: Number(event.target.value) === 3 ? undefined : Number(event.target.value) as 1 | 2 | 4 })} className="h-9 text-sm">{[1, 2, 3, 4].map((count) => <NativeSelectOption key={count} value={String(count)}>{count}</NativeSelectOption>)}</NativeSelect></label>}
+      {layout.kind === "master-detail" && <div className="grid gap-1.5 sm:col-span-2">
+        <span className="text-xs font-semibold">Colonnes du détail <span className="font-normal text-muted-foreground">(toutes si aucune choisie, 12 au plus)</span></span>
+        <div className="flex flex-wrap gap-1">{columns.map((column) => { const chosen = (layout.detailFields ?? []).includes(column); return <button key={column} type="button" aria-pressed={chosen} onClick={() => set({ detailFields: chosen ? (layout.detailFields ?? []).filter((field) => field !== column) : [...(layout.detailFields ?? []), column].slice(0, 12) })} className={`rounded-full border px-2 py-0.5 text-xs ${chosen ? "border-primary bg-primary/10 font-semibold text-primary" : "hover:bg-muted"}`}>{column}</button> })}</div>
+      </div>}
+    </div>}
   </div>
 }
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[] }
 
-const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [] }
+const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [] }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -108,7 +127,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [] }
         known.set(index, next)
         setSettings(next)
       })
@@ -164,6 +183,22 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "save-cards", index, changes })
     if (payload.cards) update({ cards: payload.cards })
   }, [index, update])
+  /** Les vues (liste, kanban…) d'onglets de cet index ; `null` : l'onglet revient aux réglages d'office. */
+  const savePresentations = useCallback(async (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => {
+    if (!changes.length) return
+    const payload = await postSettings({ action: "save-presentations", index, changes })
+    if (payload.presentations) update({ presentations: payload.presentations })
+  }, [index, update])
+  /** Les presets de vues, communs à tous les index. */
+  const saveViewPreset = useCallback(async (preset: { id?: string; name: string; layout: ViewLayout }) => {
+    const payload = await postSettings({ action: "save-view-preset", ...preset })
+    if (payload.viewPresets) update({ viewPresets: payload.viewPresets })
+    return payload.id ?? ""
+  }, [update])
+  const deleteViewPreset = useCallback(async (id: string) => {
+    const payload = await postSettings({ action: "delete-view-preset", id })
+    if (payload.viewPresets) update({ viewPresets: payload.viewPresets })
+  }, [update])
   /** Les presets de cartes, communs à tous les index. */
   const saveCardPreset = useCallback(async (preset: { id?: string; name: string; card: CardTemplate }) => {
     const payload = await postSettings({ action: "save-card-preset", ...preset })
@@ -174,7 +209,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset }
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })
@@ -354,6 +389,7 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
         {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
       </div>
       <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
+      {["list", "kanban", "master-detail", "calendar", "dashboard"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier › Vues » (presets, tri, couleurs, images…), pris d’office pour cet onglet.</p>}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}

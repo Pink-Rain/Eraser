@@ -14,7 +14,7 @@ export { cellNumber }
 
 export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "stats"
 
-export type DashboardTileKind = "count" | "sum" | "average" | "breakdown"
+export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown"
 export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string }
 
 export type ViewLayout = {
@@ -37,6 +37,27 @@ export type ViewLayout = {
   tiles?: DashboardTile[]
   /** Onglet stat : ses statistiques (phrase à trous), 24 au plus. */
   stats?: StatDefinition[]
+  /** Toutes : l'ordre des lignes (une colonne, croissant ou décroissant). */
+  sortBy?: string
+  sortDesc?: boolean
+  /** Une colonne liste dont la couleur du choix marque chaque ligne (liseré). */
+  colorBy?: string
+  /** Une colonne d'image (portrait, icône) montrée à côté du nom. */
+  imageColumn?: string
+  /** Sections et kanban : sans la section (ou colonne) « Sans valeur ». */
+  hideEmpty?: boolean
+  /** Sections : sans le nombre de lignes. */
+  hideCounts?: boolean
+  /** Liste : sur une, deux ou trois colonnes. */
+  listColumns?: 1 | 2 | 3
+  /** Kanban : largeur des colonnes. */
+  laneWidth?: "narrow" | "normal" | "wide"
+  /** Maître-détail : les colonnes du détail (toutes si vide), douze au plus. */
+  detailFields?: string[]
+  /** Calendrier : la liste des lignes sans date sous le calendrier. */
+  showUndated?: boolean
+  /** Tableau de bord : nombre de tuiles par rangée. */
+  tileColumns?: 1 | 2 | 3 | 4
 }
 
 /** Une case de Google Sheets en tient 50 000 : la présentation d'une vue reste bien en deçà. */
@@ -60,6 +81,9 @@ export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string
   { value: "count", label: "Nombre de lignes", needsColumn: false },
   { value: "sum", label: "Somme d’une colonne", needsColumn: true },
   { value: "average", label: "Moyenne d’une colonne", needsColumn: true },
+  { value: "min", label: "Plus petite valeur", needsColumn: true },
+  { value: "max", label: "Plus grande valeur", needsColumn: true },
+  { value: "filled", label: "Lignes remplies dans une colonne", needsColumn: true },
   { value: "breakdown", label: "Répartition par valeur", needsColumn: true },
 ]
 
@@ -94,6 +118,18 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
     return [{ kind: entry.kind as DashboardTileKind, ...(text(entry.column) ? { column: text(entry.column) } : {}), ...(text(entry.label, 60) ? { label: text(entry.label, 60) } : {}) }]
   }).slice(0, 12) : []
   if (tiles.length) layout.tiles = tiles
+  if (text(raw.sortBy)) layout.sortBy = text(raw.sortBy)
+  if (raw.sortDesc === true) layout.sortDesc = true
+  if (text(raw.colorBy)) layout.colorBy = text(raw.colorBy)
+  if (text(raw.imageColumn)) layout.imageColumn = text(raw.imageColumn)
+  if (raw.hideEmpty === true) layout.hideEmpty = true
+  if (raw.hideCounts === true) layout.hideCounts = true
+  if (raw.listColumns === 2 || raw.listColumns === 3) layout.listColumns = raw.listColumns
+  if (raw.laneWidth === "narrow" || raw.laneWidth === "wide") layout.laneWidth = raw.laneWidth
+  const detailFields = Array.isArray(raw.detailFields) ? raw.detailFields.map((field) => text(field)).filter(Boolean).slice(0, 12) : []
+  if (detailFields.length) layout.detailFields = detailFields
+  if (raw.showUndated === true) layout.showUndated = true
+  if (raw.tileColumns === 1 || raw.tileColumns === 2 || raw.tileColumns === 4) layout.tileColumns = raw.tileColumns
   return layout.kind === "table" && !layout.groupBy ? undefined : layout
 }
 
@@ -130,7 +166,93 @@ export function dashboardTileValue<T>(tile: DashboardTile, rows: T[], valueOf: (
     const groups = groupRowsBy(rows, (row) => valueOf(row, tile.column!)).map((group) => ({ name: group.name || "Sans valeur", count: group.rows.length }))
     return { number: groups.length, breakdown: groups.sort((left, right) => right.count - left.count).slice(0, 8) }
   }
+  if (tile.kind === "filled") return { number: rows.filter((row) => cellParts(valueOf(row, tile.column!)).length > 0).length, breakdown: [] }
   const numbers = rows.map((row) => cellNumber(valueOf(row, tile.column!))).filter((number): number is number => number !== null)
   const sum = numbers.reduce((total, number) => total + number, 0)
+  if (tile.kind === "min" || tile.kind === "max") return { number: numbers.length ? (tile.kind === "min" ? Math.min(...numbers) : Math.max(...numbers)) : 0, breakdown: [] }
   return { number: tile.kind === "sum" ? sum : numbers.length ? sum / numbers.length : 0, breakdown: [] }
+}
+
+/* ---------- Vues d'un onglet (Modifier › Vues, à côté de Cartes) ---------- */
+
+/** Les vues réglées dans « Modifier », que les onglets-fenêtres affichent. */
+export type PresentationKind = Exclude<ViewLayoutKind, "table" | "cards" | "stats">
+export const presentationKinds = viewLayoutKinds.filter((kind): kind is (typeof viewLayoutKinds)[number] & { value: PresentationKind } => kind.value !== "table" && kind.value !== "cards")
+export const isPresentationKind = (value: unknown): value is PresentationKind => presentationKinds.some((kind) => kind.value === value)
+
+/** Les réglages de chaque présentation d'un onglet (Modifier › Vues), enregistrés dans Eraser. */
+export type TabPresentations = Partial<Record<PresentationKind, ViewLayout>>
+
+export function parseTabPresentations(input: unknown): TabPresentations | null {
+  let value = input
+  if (typeof value === "string") {
+    try { value = JSON.parse(value) } catch { return null }
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null
+  const result: TabPresentations = {}
+  for (const [key, layout] of Object.entries(value as Record<string, unknown>)) {
+    if (!isPresentationKind(key) || !layout || typeof layout !== "object") continue
+    const clean = cleanViewLayout({ ...(layout as Record<string, unknown>), kind: key })
+    if (clean) result[key] = clean
+  }
+  return result
+}
+
+/** La présentation à montrer : celle réglée pour l'onglet, sinon ses réglages par défaut. */
+export function presentationFor(stored: Record<string, TabPresentations> | null | undefined, tab: string, kind: PresentationKind): ViewLayout {
+  const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  const entry = stored ? Object.entries(stored).find(([name]) => fold(name) === fold(tab))?.[1] : undefined
+  return entry?.[kind] ?? { kind }
+}
+
+/** Les lignes dans l'ordre de la vue (nombres comparés comme des nombres, sinon l'ordre alphabétique). */
+export function sortLayoutRows<T>(rows: T[], layout: Pick<ViewLayout, "sortBy" | "sortDesc">, valueOf: (row: T, column: string) => string) {
+  if (!layout.sortBy) return rows
+  const key = (row: T) => valueOf(row, layout.sortBy!).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+  const sorted = [...rows].sort((left, right) => {
+    const a = key(left), b = key(right)
+    if (!a !== !b) return a ? -1 : 1
+    const na = cellNumber(a), nb = cellNumber(b)
+    const order = na !== null && nb !== null && /^-?\d/.test(a) && /^-?\d/.test(b) ? na - nb : a.localeCompare(b, "fr", { numeric: true, sensitivity: "base" })
+    return layout.sortDesc ? -order : order
+  })
+  return sorted
+}
+
+/**
+ * Une vue réglée appliquée à un autre onglet ou index : ses colonnes absentes de l'onglet
+ * sont retirées (le preset garde le reste : sections repliables, densité, tuiles…).
+ */
+export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewLayout {
+  const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").trim()
+  const known = new Map(columns.map((column) => [fold(column), column]))
+  const one = (value?: string) => value ? known.get(fold(value)) : undefined
+  const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
+  return cleanViewLayout(next) ?? { kind: layout.kind }
+}
+
+/** Un preset de vue : des réglages nommés, communs à tous les index. */
+export type ViewPreset = { id: string; name: string; layout: ViewLayout; builtin?: boolean; updatedAt?: string }
+
+/** Les presets d'Eraser, sans colonne : ils se complètent avec celles de l'onglet. */
+export const builtinViewPresets: ViewPreset[] = [
+  { id: "eraser:list-compact", name: "Liste compacte", builtin: true, layout: { kind: "list", compact: true } },
+  { id: "eraser:list-folding", name: "Liste à lignes dépliables", builtin: true, layout: { kind: "list", collapsible: true } },
+  { id: "eraser:list-two", name: "Liste sur deux colonnes", builtin: true, layout: { kind: "list", compact: true, listColumns: 2 } },
+  { id: "eraser:list-sections", name: "Sections repliées", builtin: true, layout: { kind: "list", collapsible: true, collapsed: true, hideEmpty: true } },
+  { id: "eraser:kanban-narrow", name: "Kanban serré", builtin: true, layout: { kind: "kanban", laneWidth: "narrow", hideEmpty: true } },
+  { id: "eraser:kanban-wide", name: "Kanban large", builtin: true, layout: { kind: "kanban", laneWidth: "wide" } },
+  { id: "eraser:master-sections", name: "Maître-détail en sections", builtin: true, layout: { kind: "master-detail", collapsible: true } },
+  { id: "eraser:calendar-real", name: "Calendrier réel", builtin: true, layout: { kind: "calendar", calendar: "Calendrier réel", showUndated: true } },
+  { id: "eraser:dashboard-count", name: "Tableau de bord simple", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }], tileColumns: 3 } },
+]
+
+export function cleanViewPreset(value: unknown): ViewPreset | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const name = text(raw.name, 60)
+  const layout = cleanViewLayout(raw.layout)
+  if (!name || !layout || !isPresentationKind(layout.kind)) return null
+  return { id: text(raw.id, 80) || "", name, layout, ...(text(raw.updatedAt, 40) ? { updatedAt: text(raw.updatedAt, 40) } : {}) }
 }
