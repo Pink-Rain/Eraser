@@ -29,6 +29,7 @@ import {
   type PageSummary,
   type StudioPage,
   type ViewBlockKind,
+  studioHref,
 } from "@/lib/custom-pages"
 
 /**
@@ -442,7 +443,7 @@ export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveErr
       <Hint>{page.published ? `Publiée le ${formatWhen(page.publishedAt)}. Les lecteurs voient cette version tant que tu ne publies pas tes modifications.` : "Jamais publiée : seuls ceux qui peuvent la modifier la voient."}</Hint>
       {page.published && <button type="button" disabled={!page.unpublished || busy} onClick={onRevert} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:border-ring disabled:opacity-50">Revenir à la version publiée</button>}
       {page.status === "publiee" && <a href={href} target="_self" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Ouvrir la page publiée</a>}
-      <Field label="Pages qui mènent ici">{linking.length ? <div className="flex flex-wrap gap-1">{linking.map((item) => <a key={item.id} href={`/pages/atelier?id=${encodeURIComponent(item.id)}`} className="rounded-full border bg-background/60 px-2 py-0.5 text-xs hover:border-ring">{item.title}</a>)}</div> : <span className="text-xs text-muted-foreground">Aucune pour l’instant.</span>}</Field>
+      <Field label="Pages qui mènent ici">{linking.length ? <div className="flex flex-wrap gap-1">{linking.map((item) => <a key={item.id} href={studioHref(item.id)} className="rounded-full border bg-background/60 px-2 py-0.5 text-xs hover:border-ring">{item.title}</a>)}</div> : <span className="text-xs text-muted-foreground">Aucune pour l’instant.</span>}</Field>
     </Group>
     <Group title="Remplacer une page d’Eraser" open={Boolean(page.replaces)} badge={page.replaces ? <span className="rounded-full border border-primary/35 bg-primary/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-primary">active</span> : undefined}>
       {page.rowOf?.index ? <Hint>Cette page est le modèle des lignes d’un index : elle ne remplace pas une page d’Eraser. Retire d’abord le modèle (ci-dessous) pour l’utiliser ici.</Hint> : <>
