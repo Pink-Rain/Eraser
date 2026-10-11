@@ -6,19 +6,22 @@
 
 export type SessionNoteType = "resume" | "evenement" | "citation" | "quete" | "pense" | "indice" | "butin" | "rumeur" | "question" | "mj" | "autre"
 
-/** Les types dans l'ordre du journal ; `title` : ce que demande la case de titre, s'il y en a une. */
+/**
+ * Les types dans l'ordre du journal ; `title` : ce que demande la case de titre, s'il y en a une.
+ * Chaque type garde sa teinte, assourdie pour se lire sur le parchemin (affichage seulement).
+ */
 export const sessionNoteTypes: Array<{ key: SessionNoteType; label: string; many: string; color: string; help: string; title?: string }> = [
-  { key: "resume", label: "Résumé", many: "Résumés", color: "#927640", help: "Ce qui s’est passé, en deux ou trois lignes." },
-  { key: "evenement", label: "Événement", many: "Événements", color: "#b45309", help: "Un moment de la session, placé dans la frise.", title: "Titre" },
-  { key: "citation", label: "Citation", many: "Citations", color: "#7c3aed", help: "Une réplique de la table.", title: "Qui l’a dite" },
-  { key: "quete", label: "Quête", many: "Quêtes", color: "#0f766e", help: "Un objectif à suivre. Rattache-le à l’étape d’avant pour faire avancer la quête." },
-  { key: "pense", label: "Pense-bête", many: "Pense-bêtes", color: "#2563eb", help: "À ne pas oublier pour la suite." },
-  { key: "indice", label: "Indice", many: "Indices", color: "#0891b2", help: "Un élément qui éclaire un mystère." },
-  { key: "butin", label: "Butin", many: "Butins", color: "#ca8a04", help: "Ce qui a été trouvé et qui le garde." },
-  { key: "rumeur", label: "Rumeur", many: "Rumeurs", color: "#9333ea", help: "Entendu quelque part, pas forcément vrai." },
-  { key: "question", label: "Question ouverte", many: "Questions ouvertes", color: "#db2777", help: "Ce que le groupe se demande encore." },
-  { key: "mj", label: "Décision du MJ", many: "Décisions du MJ", color: "#b91c1c", help: "Une règle tranchée ou un choix du MJ à retenir." },
-  { key: "autre", label: "Autre", many: "Autres", color: "#64748b", help: "Tout ce qui ne rentre dans aucune case." },
+  { key: "resume", label: "Résumé", many: "Résumés", color: "#7d6a4a", help: "Ce qui s’est passé, en deux ou trois lignes." },
+  { key: "evenement", label: "Événement", many: "Événements", color: "#a1561d", help: "Un moment de la session, placé dans la frise.", title: "Titre" },
+  { key: "citation", label: "Citation", many: "Citations", color: "#5a4f99", help: "Une réplique de la table.", title: "Qui l’a dite" },
+  { key: "quete", label: "Quête", many: "Quêtes", color: "#22705f", help: "Un objectif à suivre. Rattache-le à l’étape d’avant pour faire avancer la quête." },
+  { key: "pense", label: "Pense-bête", many: "Pense-bêtes", color: "#33619a", help: "À ne pas oublier pour la suite." },
+  { key: "indice", label: "Indice", many: "Indices", color: "#1d7589", help: "Un élément qui éclaire un mystère." },
+  { key: "butin", label: "Butin", many: "Butins", color: "#9a7414", help: "Ce qui a été trouvé et qui le garde." },
+  { key: "rumeur", label: "Rumeur", many: "Rumeurs", color: "#7d4a8a", help: "Entendu quelque part, pas forcément vrai." },
+  { key: "question", label: "Question ouverte", many: "Questions ouvertes", color: "#a3456a", help: "Ce que le groupe se demande encore." },
+  { key: "mj", label: "Décision du MJ", many: "Décisions du MJ", color: "#9b3530", help: "Une règle tranchée ou un choix du MJ à retenir." },
+  { key: "autre", label: "Autre", many: "Autres", color: "#66707a", help: "Tout ce qui ne rentre dans aucune case." },
 ]
 const typeKeys = new Set<string>(sessionNoteTypes.map((type) => type.key))
 export const sessionNoteType = (key: SessionNoteType) => sessionNoteTypes.find((type) => type.key === key) ?? sessionNoteTypes[sessionNoteTypes.length - 1]

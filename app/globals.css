@@ -652,3 +652,52 @@ a[href^="/reference/"] {
   cursor: default;
   user-select: all;
 }
+
+/*
+ * Journal de session. La couleur de la campagne est posée une seule fois sur la page
+ * (--journal-accent) ; tout le reste en dérive. --tc est la teinte d'un type de note ou d'un
+ * genre d'élément (PNJ, lieu…) : « text-tone », « bg-tone/10 », « border-tone/40 ».
+ */
+@theme inline {
+  --color-journal: var(--journal-accent, var(--primary));
+  --color-journal-ink: color-mix(in oklab, var(--journal-accent, var(--primary)) 72%, #1b1712);
+  --color-tone: var(--tc, var(--muted-foreground));
+  --color-done: #1f7a5c;
+  --color-pending: #8d6618;
+  /* L'encre claire posée sur la bannière, et l'or du numéro de session. */
+  --color-banner-ink: #fbf7ee;
+  --color-banner-gold: #f3d9a6;
+}
+
+/* Le fond de la bannière : un dégradé aux couleurs de la campagne, avec ou sans image. */
+.journal-banner-bg {
+  background:
+    radial-gradient(120% 95% at 50% 0%,
+      color-mix(in oklab, var(--journal-accent, var(--primary)) 80%, #15110c) 0%,
+      color-mix(in oklab, var(--journal-accent, var(--primary)) 52%, #15110c) 58%,
+      color-mix(in oklab, var(--journal-accent, var(--primary)) 30%, #0e0b08) 100%);
+}
+
+/* Le filet sous le titre d'une section : la couleur de la campagne qui s'efface. */
+.journal-rule {
+  background: linear-gradient(90deg, color-mix(in oklab, var(--journal-accent, var(--primary)) 55%, transparent), var(--border) 38%, transparent);
+}
+
+/* Une note ou une carte que l'on vient de montrer (clic dans une liste, un lien, une frise). */
+@keyframes journal-flash {
+  0%, 35% { box-shadow: 0 0 0 3px color-mix(in oklab, var(--journal-accent, var(--primary)) 50%, transparent); }
+  100% { box-shadow: 0 0 0 0 transparent; }
+}
+.journal-flash { animation: journal-flash 1.6s ease-out; }
+
+/* Le contenu d'une session apparaît en douceur quand on change de session. */
+@keyframes journal-rise {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.journal-rise { animation: journal-rise 0.35s ease-out both; }
+
+@media (prefers-reduced-motion: reduce) {
+  .journal-flash, .journal-rise { animation: none; }
+  .journal *, .journal-notes * { transition: none !important; scroll-behavior: auto !important; }
+}
