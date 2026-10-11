@@ -9,6 +9,17 @@
  */
 @custom-variant dark (&:where(.dark, .dark *));
 
+/*
+ * Tailwind 4 donne aux bordures la couleur du texte (presque noire) quand aucune couleur
+ * n'est précisée : les cadres « border » prennent ici la couleur parchemin du thème
+ * (--border), comme le prévoyait la palette. Une classe ou un style de couleur l'emporte.
+ */
+@layer base {
+  *, ::after, ::before, ::backdrop, ::file-selector-button {
+    border-color: var(--color-border, currentColor);
+  }
+}
+
 @utility scrollbar-thin {
   scrollbar-width: thin;
 }
