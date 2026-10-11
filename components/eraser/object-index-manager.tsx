@@ -35,6 +35,7 @@ import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
 import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { foldName, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { unpackTableRows } from "@/lib/index-rows-wire"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { isBuiltinWorldIndexKey, worldIndexDefinitions } from "@/lib/world-index-definitions"
@@ -90,7 +91,8 @@ function isIconHeader(header: string) {
 type Schemas = Record<string, SchemaEntry[]>
 
 export function ObjectIndexManager({ initialTables, initialSchemas = {}, initialError }: { initialTables: ObjectIndexTable[]; initialSchemas?: Schemas; initialError: string }) {
-  const [tables, setTables] = useState(initialTables)
+  // Les lignes arrivent allégées (lib/index-rows-wire.ts) : rétablies une fois, ici.
+  const [tables, setTables] = useState(() => initialTables.map(unpackTableRows))
   // Le schéma de chaque classeur (onglet « Eraser · colonnes ») : types choisis dans « Modifier », colonnes à la corbeille.
   const [schemas, setSchemas] = useState<Schemas>(initialSchemas)
   const [editor, setEditor] = useState<IndexEditorModel | null>(null)

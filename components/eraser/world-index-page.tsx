@@ -8,6 +8,7 @@ import { WorldIndexManager } from "@/components/eraser/world-index-manager"
 import { worldIndexDefinitions, type BuiltinWorldIndexKey, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { withEntityExtras } from "@/lib/entity-index-extras"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
+import { packTableRows } from "@/lib/index-rows-wire"
 import { getWorldIndex, type WorldIndexData } from "@/lib/world-indexes"
 import { ensureShopTypeTabPrepared } from "@/lib/shop-types-server"
 
@@ -22,7 +23,7 @@ async function IndexData({ indexKey, sheetName }: { indexKey: WorldIndexKey; she
     console.error("WORLD_INDEX_LOAD_FAILED", indexKey, reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
     error = `La feuille « ${sheetName} » n’a pas pu être chargée depuis Google Drive.`
   }
-  return <WorldIndexManager indexKey={indexKey} initialData={data} initialError={error} />
+  return <WorldIndexManager indexKey={indexKey} initialData={data ? { ...data, tables: data.tables.map(packTableRows) } : data} initialError={error} />
 }
 
 type IndexPageHead = { title: string; sheetName: string; description?: string }

@@ -1,28 +1,34 @@
-# Eraser 0.1.1-alpha.202 — Le créateur de pages
+# Eraser 0.1.1-alpha.204 — Beaucoup moins d'attente à chaque page
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est écrit dans Google
-Sheets. Les pages sont enregistrées sur le serveur partagé d'Eraser.
+Sheets. Elle ne change aucune fonctionnalité : elle enlève du temps perdu.
 
-## Créer ses propres pages (admin et MJ)
+## Ce qui faisait attendre
 
-- **Index des pages** (`/pages`, aussi dans Ctrl + K) : toutes les pages créées, leur place,
-  leur état. « Nouvelle page » choisit un nom, une icône et une place.
-- **L'atelier à trois volets** : les blocs à gauche, la page au centre, les réglages à droite.
-  Glisser-déposer, Ctrl + Z, sections à une, deux, trois colonnes ou avec colonne latérale.
-  « Voir comme Admin / MJ / Joueur » montre la page telle que chacun la verra.
-- **Les blocs** : titre, texte riche (avec le menu « { »), encadré (info, MJ, secret, alerte),
-  citation, image, séparateur, lien vers une page, **secret à révéler** (le MJ le révèle aux
-  joueurs d'un clic), **bloc-notes** (un carnet qu'on continue d'écrire sur la page publiée),
-  **vue d'index** (une vue réglée dans un index) et **stat épinglée**.
-- Chaque bloc a son **« Qui voit »** ; le bloc-notes a son **« Qui peut écrire »**. Ce qu'un
-  joueur ne doit pas voir ne lui est jamais envoyé.
-- **Où vit une page** : dans une section du menu (Règles, Ressources, Bac à sable,
-  Administration), dans une campagne, ou hors menu. Son adresse suit sa section
-  (`/regles/guide-du-joueur`).
-- Brouillon et version publiée, « Revenir à la version publiée », corbeille, modèles de page
-  enregistrés.
-- Les pages d'Eraser existantes gardent leur adresse et leur contenu.
+- **Chaque page était calculée deux fois.** Le routeur rendait d'abord la page « à blanc »
+  pour y détecter une redirection, puis pour de vrai : toutes ses lectures Google, toutes ses
+  questions au serveur partagé, tout son calcul, en double. Chaque page a maintenant une
+  frontière de chargement : elle n'est rendue qu'une fois, et la coque s'affiche avant que
+  ses données soient là.
+- **Le partage des lectures coûtait trois allers-retours de plus par lecture.** Avant de
+  lire Google, chaque lecture posait un bail sur le serveur partagé, patientait, puis le
+  relisait. Le bail est maintenant posé sans attendre : une question au serveur partagé,
+  puis Google.
+- **Deux lectures identiques au même instant** (deux pages ouvertes, ou le rendu en double
+  ci-dessus) partaient toutes les deux ; la seconde attendait la première en interrogeant
+  le serveur partagé en boucle. Elles n'en font plus qu'une, aussi pour les lectures
+  fraîches (sessions, événements, PNJ).
+- **Les index envoyaient chaque case deux fois** (sa valeur et sa mise en forme, presque
+  toujours identiques) : la page d'un index est près de deux fois plus légère.
+- La comparaison des noms (accents, casse), faite pour chaque case à chaque affichage d'un
+  index, est gardée en mémoire : un tiers du temps de dessin d'un index en moins.
+- Les liens d'identité des comptes n'étaient demandés deux fois au serveur partagé que par
+  une course entre deux lectures : une seule fois.
+
+Sur le banc de mesure (Google à 250 ms, serveur partagé à 100 ms), une page d'index ouverte
+pour la première fois passe de 2,4 s à 1,3 s, une campagne de 2,8 s à 1,7 s, et une page
+déjà vue répond en quelques millisecondes.
 
 ## Aussi
 
-- La stat épinglée d'une page montre ses lignes concernées, comme dans l'onglet stat.
+- `/campagne?campagne=…` menait toujours à l'accueil (même cause que l'atelier des pages).
