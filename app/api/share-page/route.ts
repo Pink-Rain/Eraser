@@ -1,7 +1,20 @@
+import { env } from "cloudflare:workers"
 import { NextResponse } from "next/server"
 
+import { remoteAccountsConfig } from "@/lib/accounts-remote"
 import { isSharedPageHref, sharePageWith } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
+
+/**
+ * L'adresse publique des liens copiés : « …/ouvrir?p=/la/page » sur le serveur partagé
+ * propose d'ouvrir l'application, comme un lien Discord. Null sans serveur partagé.
+ */
+export async function GET() {
+  const account = await authorizedAccount(["admin", "mj", "joueur"])
+  if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
+  const base = remoteAccountsConfig(env)?.baseUrl ?? null
+  return NextResponse.json({ openBase: base ? `${base}/ouvrir` : null }, { headers: { "cache-control": "no-store" } })
+}
 
 /** Envoie une page de l'app à d'autres comptes : elle leur arrive en notification. */
 export async function POST(request: Request) {

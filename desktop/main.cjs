@@ -7,6 +7,7 @@ const { dirname, join } = require("node:path")
 const { randomBytes } = require("node:crypto")
 const hotUpdate = require("./hot-update.cjs")
 const discordPresence = require("./discord-presence.cjs")
+const deepLink = require("./deep-link.cjs")
 
 const LOCAL_PORT = 32147
 const PERSISTENT_PARTITION = "persist:eraser"
@@ -849,10 +850,38 @@ ipcMain.handle("eraser:tab-drag-end", async (event, details) => {
 const hasLock = app.requestSingleInstanceLock()
 if (!hasLock) app.quit()
 
-app.on("second-instance", () => {
+// Les liens « eraser:// » ouvrent Eraser sur la bonne page (comme un lien Discord) :
+// Windows lance Eraser avec le lien en argument, ou le passe à l'instance déjà ouverte.
+try {
+  if (process.defaultApp && process.argv.length >= 2) app.setAsDefaultProtocolClient(deepLink.DEEP_LINK_SCHEME, process.execPath, [require("node:path").resolve(process.argv[1])])
+  else if (!process.defaultApp) app.setAsDefaultProtocolClient(deepLink.DEEP_LINK_SCHEME)
+} catch (error) {
+  logLine(`[lien] Le protocole eraser:// n’a pas pu être enregistré : ${error instanceof Error ? error.message : error}`)
+}
+/** La page demandée au lancement par un lien « eraser:// », ouverte dès que le serveur est prêt. */
+let pendingDeepLink = deepLink.pathFromDeepLink(deepLink.deepLinkInArgs(process.argv))
+
+function openDeepLink(link) {
+  const path = deepLink.pathFromDeepLink(link)
+  if (!path) return
+  const address = serverUrl ? appAddress(path) : null
+  if (!mainWindow || mainWindow.isDestroyed() || !address) { pendingDeepLink = path; return }
+  if (mainWindow.isMinimized()) mainWindow.restore()
+  mainWindow.focus()
+  logLine(`[lien] Ouverture de ${path}`)
+  void mainWindow.loadURL(address).catch(() => undefined)
+}
+
+app.on("second-instance", (_event, argv) => {
+  const link = deepLink.deepLinkInArgs(argv)
+  if (link) { openDeepLink(link); return }
   if (!mainWindow) return
   if (mainWindow.isMinimized()) mainWindow.restore()
   mainWindow.focus()
+})
+app.on("open-url", (event, link) => {
+  event.preventDefault()
+  openDeepLink(link)
 })
 
 app.whenReady().then(async () => {
@@ -861,7 +890,9 @@ app.whenReady().then(async () => {
     hotUpdate.cleanup()
     const url = await startServerSafely()
     serverUrl = url
-    await createWindow(url)
+    const firstPage = pendingDeepLink && pendingDeepLink !== "/" ? appAddress(pendingDeepLink) : null
+    pendingDeepLink = null
+    await createWindow(firstPage || url)
     // Le statut Discord « Eraser - JDR » : jamais pendant le test d'installation, et un
     // échec (Discord fermé) ne gêne en rien l'ouverture d'Eraser.
     if (!process.env.ERASER_UI_SMOKE_RESULT) {

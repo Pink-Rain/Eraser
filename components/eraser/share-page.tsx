@@ -13,8 +13,8 @@ import { Textarea } from "@/components/ui/textarea"
 /**
  * « Envoyer cette page » : la page ouverte arrive en notification dans l'app des comptes
  * choisis, qui l'ouvrent d'un clic (chacun avec ses droits : un joueur ne voit pas une page
- * réservée au MJ). « Copier le lien » donne aussi son adresse, à coller dans la recherche
- * de pages (Ctrl + K) d'une autre installation.
+ * réservée au MJ). « Copier le lien » donne un lien qui, comme un lien Discord, propose
+ * d'ouvrir la page dans l'application de celui qui le reçoit (voir desktop/deep-link.cjs).
  */
 export function SharePageButton({ title }: { title: string }) {
   const [open, setOpen] = useState(false)
@@ -50,7 +50,12 @@ export function SharePageButton({ title }: { title: string }) {
 
   async function copy() {
     setError("")
-    try { await navigator.clipboard.writeText(`${window.location.origin}${href()}`); setStatus("copied") } catch { setError("Le lien n’a pas pu être copié.") }
+    try {
+      const payload = (await fetch("/api/share-page", { cache: "no-store" }).then((response) => response.ok ? response.json() : {}).catch(() => ({}))) as { openBase?: string | null }
+      // Sans serveur partagé, le lien « eraser:// » ouvre quand même l'application installée.
+      const link = payload.openBase ? `${payload.openBase}?p=${encodeURIComponent(href())}` : `eraser://open${href()}`
+      await navigator.clipboard.writeText(link); setStatus("copied")
+    } catch { setError("Le lien n’a pas pu être copié.") }
   }
 
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) { setStatus(""); setError("") } }}>

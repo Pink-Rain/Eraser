@@ -640,6 +640,66 @@ async function handleAccessToken(request: Request, env: Env) {
   return json({ accessToken: payload.access_token, expiresAt })
 }
 
+
+// ---------- page d'ouverture des liens partagés ----------
+
+/**
+ * « /ouvrir?p=/regles/classes » : la page publique d'un lien Eraser partagé. Comme un lien
+ * Discord ou Spotify, elle propose d'ouvrir l'application sur cette page (« eraser:// »)
+ * et l'essaie d'elle-même. Elle n'affiche rien d'autre que l'adresse de la page : aucune
+ * donnée, aucun compte. Seule une adresse de page d'Eraser est acceptée.
+ */
+function safeAppPath(input: string | null) {
+  const value = (input ?? "").trim()
+  if (!value || value.length > 1000 || !value.startsWith("/") || value.startsWith("//")) return "/"
+  if (/[\\\u0000-\u001f\u007f]/.test(value) || /^\/[a-z][a-z0-9+.-]*:/i.test(value)) return "/"
+  return value
+}
+
+function escapeHtml(value: string) {
+  return value.replace(/[&<>"']/g, (char) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[char] as string)
+}
+
+function openAppPage(url: URL) {
+  const path = safeAppPath(url.searchParams.get("p"))
+  const deep = `eraser://open${path}`
+  const local = `http://127.0.0.1:32147${path}`
+  const label = path === "/" ? "l’accueil" : path
+  const html = `<!doctype html>
+<html lang="fr"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Ouvrir dans Eraser</title><meta name="robots" content="noindex">
+<style>
+:root{--bg:#f2eee5;--card:#faf7ef;--ink:#211e1a;--soft:#6d645a;--line:#d1c6b4;--primary:#682522;--primary-ink:#fff9ef;color-scheme:light}
+@media (prefers-color-scheme:dark){:root{--bg:#1b1916;--card:#24211d;--ink:#f1ebe0;--soft:#b6ab9b;--line:#3d3830;--primary:#d98a80;--primary-ink:#1b1916;color-scheme:dark}}
+*{box-sizing:border-box}body{margin:0;min-height:100svh;display:grid;place-items:center;background:var(--bg);color:var(--ink);font:15px/1.55 "Segoe UI",system-ui,-apple-system,Arial,sans-serif;padding:16px}
+main{width:min(440px,100%);background:var(--card);border:1px solid var(--line);border-radius:22px;padding:28px 24px;text-align:center;box-shadow:0 18px 44px rgba(33,30,26,.14)}
+.mark{width:64px;height:64px;margin:0 auto 14px;border-radius:18px;display:grid;place-items:center;background:var(--primary);color:var(--primary-ink);font:700 30px Georgia,"Times New Roman",serif}
+h1{font:600 26px/1.2 Georgia,"Times New Roman",serif;margin:0 0 6px}p{margin:0;color:var(--soft)}
+code{display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom;background:var(--bg);border:1px solid var(--line);border-radius:8px;padding:1px 8px;font-size:13px;color:var(--ink)}
+.go{display:block;margin:22px 0 10px;padding:12px 16px;border-radius:12px;background:var(--primary);color:var(--primary-ink);font-weight:600;text-decoration:none}
+.go:hover{filter:brightness(1.08)}.alt{display:inline-block;margin-top:4px;color:var(--soft);font-size:13px}
+.alt:hover{color:var(--ink)}small{display:block;margin-top:18px;color:var(--soft);font-size:12px}
+</style></head><body><main>
+<div class="mark" aria-hidden="true">E</div>
+<h1>Ouvrir dans Eraser</h1>
+<p>Quelqu’un t’a envoyé une page d’Eraser :<br><code>${escapeHtml(label)}</code></p>
+<a class="go" href="${escapeHtml(deep)}">Ouvrir dans l’application</a>
+<a class="alt" href="${escapeHtml(local)}">Eraser est déjà ouvert ? Continuer dans le navigateur</a>
+<small>Si rien ne se passe, Eraser n’est peut-être pas installé sur cet ordinateur : demande l’installateur à ton MJ.</small>
+</main>
+<script>setTimeout(function(){location.href=${JSON.stringify(deep).replace(/</g, "\\u003c")}},350)</script>
+</body></html>`
+  return new Response(html, {
+    headers: {
+      "content-type": "text/html; charset=utf-8",
+      "cache-control": "no-store",
+      "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'",
+      "referrer-policy": "no-referrer",
+      "x-content-type-options": "nosniff",
+    },
+  })
+}
+
 // ---------- router ----------
 
 const worker = {
@@ -650,6 +710,8 @@ const worker = {
 
     try {
       if (path === "/health") return json({ ok: true })
+      // Publique : la page d'un lien partagé ne lit ni n'écrit aucune donnée.
+      if (method === "GET" && path === "/ouvrir") return openAppPage(url)
 
       requireClientKey(request, env)
 

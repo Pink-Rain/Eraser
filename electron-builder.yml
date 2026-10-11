@@ -36,3 +36,9 @@ publish:
   owner: Pink-Rain
   repo: Eraser
 asar: true
+# Les liens « eraser:// » ouvrent Eraser sur une page (enregistrés aussi au lancement
+# par app.setAsDefaultProtocolClient, ce qui suffit sous Windows).
+protocols:
+  - name: Eraser
+    schemes:
+      - eraser
