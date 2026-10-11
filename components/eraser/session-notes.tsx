@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useMemo, useState, type ReactNode } from "react"
 import { Check, ChevronDown, Link2, LoaderCircle, Pencil, Plus, Search, Trash2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -13,7 +13,6 @@ import { loadWorldIndexNames } from "@/components/eraser/index-cells"
 import type { ChoiceSource } from "@/lib/index-columns"
 import {
   canEditSessionNote,
-  isMySessionNote,
   sessionLinkKind,
   sessionNoteLabel,
   sessionNoteType,
@@ -286,7 +285,7 @@ function NoteRow({ note, sessionNumber, canEdit, linkLabel, onEdit, onDelete, on
  * groupes que tu ouvres). Le journal de la campagne y range les notes publiques ; la fiche d'un
  * personnage, ses notes privées (`privateFor`).
  */
-export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNotesChange, entities, viewer, privateFor, title = "Notes de session", className, initialMine = false, newInLatest = false }: {
+export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNotesChange, entities, viewer, privateFor, title = "Notes de session", className, newInLatest = false, toolbar }: {
   campaignId: string
   sessions: JournalSessionRef[]
   sessionId: string
@@ -297,8 +296,8 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   privateFor?: string
   title?: string
   className?: string
-  /** Ouvrir sur « Mon perso » (le raccourci de la fiche). */
-  initialMine?: boolean
+  /** Ce qui se place à côté de la recherche (le choix « Mon perso / Campagne » de la fiche). */
+  toolbar?: ReactNode
   /** Une nouvelle note va par défaut dans la dernière session (fiche), sinon dans celle affichée. */
   newInLatest?: boolean
 }) {
@@ -311,7 +310,6 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   }, [scope])
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
   const [search, setSearch] = useState("")
-  const [mine, setMine] = useState(initialMine)
   const [draft, setDraft] = useState<NoteDraft | null>(null)
   const [error, setError] = useState("")
   const [pending, setPending] = useState(false)
@@ -320,7 +318,6 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
   const sessionNumber = (id: string) => number.get(id) ?? 0
   const folded = fold(search)
   const visible = notes.filter((note) => note.sessionId === sessionId)
-    .filter((note) => !mine || isMySessionNote(note, viewer.uid, viewer.characterIds))
     .filter((note) => !folded || fold(`${note.title} ${note.text} ${note.moment} ${note.authorName}`).includes(folded))
   const groups = sessionNoteTypes.map((type) => ({ type, notes: visible.filter((note) => note.type === type.key) })).filter((group) => group.notes.length)
   const toggleGroup = (key: string, open: boolean) => setOpened((current) => {
@@ -360,9 +357,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
     </div>
     <div className="mt-2 flex flex-wrap items-center gap-2">
       <div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-2.5 top-1/2 size-3.5 -translate-y-1/2 text-muted-foreground" /><Input value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Chercher" className="h-8 pl-8 text-sm" aria-label="Chercher dans les notes" /></div>
-      {!privateFor && <div className="flex rounded-lg border p-0.5 text-xs" role="group" aria-label="Notes affichées">
-        {[{ value: false, label: "Campagne" }, { value: true, label: "Mon perso" }].map((option) => <button key={option.label} type="button" aria-pressed={mine === option.value} onClick={() => setMine(option.value)} className={cn("rounded-md px-2.5 py-1 font-medium", mine === option.value ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:text-foreground")}>{option.label}</button>)}
-      </div>}
+      {toolbar}
     </div>
     {error && <p className="mt-2 rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-xs text-destructive">{error}</p>}
     {groups.length ? <ul className="mt-2 space-y-1">{groups.map(({ type, notes: list }) => {
@@ -381,7 +376,7 @@ export function SessionNotesBoard({ campaignId, sessions, sessionId, notes, onNo
         </details>
       </li>
     })}</ul>
-      : <p className="mt-3 rounded-xl border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">{search || mine ? "Aucune note ne correspond." : privateFor ? "Aucune note privée pour cette session." : "Aucune note pour cette session."}</p>}
+      : <p className="mt-3 rounded-xl border border-dashed px-3 py-6 text-center text-sm text-muted-foreground">{search ? "Aucune note ne correspond." : privateFor ? "Aucune note privée pour cette session." : "Aucune note pour cette session."}</p>}
     <SessionNoteDialog draft={draft} onClose={() => setDraft(null)} onSaved={saved} campaignId={campaignId} sessions={sessions} notes={notes} entities={entities} privateFor={privateFor} />
   </section>
 }

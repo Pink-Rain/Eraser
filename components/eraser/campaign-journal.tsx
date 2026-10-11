@@ -56,14 +56,13 @@ function EntityCard({ entity, color, notes, extra }: { entity: JournalEntity; co
  * sessions. La page raconte la session (bilan, groupe, lieux, PNJs, créatures, objets,
  * magasins, quêtes, événements) et range à droite ses notes publiques.
  */
-export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialMine = false, initialNotes, notesError = false, viewer, members, npcs, shops, events }: {
+export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events }: {
   campaignId: string
   campaignName: string
   accentColor: string
   /** Dans l'ordre de création : S1 en premier. */
   sessions: JournalSessionDetail[]
   initialSessionId?: string
-  initialMine?: boolean
   initialNotes: SessionNote[]
   notesError?: boolean
   viewer: { uid: string; manager: boolean; characterIds: string[] }
@@ -135,52 +134,63 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   ]
   const scrollTo = (id: string) => { const target = document.getElementById(id); target?.scrollIntoView({ behavior: "smooth", block: "start" }); target?.focus({ preventScroll: true }) }
 
-  return <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-12">
-    <div className="mb-8 flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.22em]" style={{ color: accentColor }}>
-      <span className="h-px w-7" style={{ backgroundColor: accentColor }} />
-      <BookOpen className="size-3.5" />Journal de {campaignName}
-      <span className="h-px w-7" style={{ backgroundColor: accentColor }} />
-    </div>
+  // Avec une bannière : le titre et les flèches sont posés dessus, en clair sur un voile sombre.
+  const onBanner = Boolean(current?.bannerUrl)
+  const arrowClass = onBanner
+    ? "flex size-11 shrink-0 items-center justify-center rounded-full border border-white/35 bg-black/35 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/55 disabled:pointer-events-none disabled:opacity-30"
+    : arrow
+  const soft = onBanner ? "text-white/80" : "text-muted-foreground"
+  const label = <div className={cn("mb-6 flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.22em]", onBanner && "text-white")} style={onBanner ? undefined : { color: accentColor }}>
+    <span className="h-px w-7" style={{ backgroundColor: onBanner ? "rgba(255,255,255,.7)" : accentColor }} />
+    <BookOpen className="size-3.5" />Journal de {campaignName}
+    <span className="h-px w-7" style={{ backgroundColor: onBanner ? "rgba(255,255,255,.7)" : accentColor }} />
+  </div>
 
-    {!current ? <div className="mx-auto max-w-xl rounded-[1.5rem] border border-dashed bg-card/55 px-6 py-14 text-center">
+  return <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-12">
+    {!current ? <>{label}<div className="mx-auto max-w-xl rounded-[1.5rem] border border-dashed bg-card/55 px-6 py-14 text-center">
       <Feather className="mx-auto size-8 text-primary/50" />
       <p className="mt-4 font-display text-2xl font-semibold">Aucune session pour l’instant</p>
       <p className="mt-2 text-sm text-muted-foreground">Le journal s’ouvrira à la première session créée dans le Créateur de session.</p>
-    </div> : <>
-      <nav className="mx-auto flex max-w-3xl items-center justify-center gap-3 sm:gap-5" aria-label="Sessions">
-        <button type="button" className={arrow} onClick={() => go(index - 1)} disabled={index <= 0} aria-label="Session précédente" title="Session précédente (←)"><ChevronLeft className="size-5" /></button>
-        <Popover open={listOpen} onOpenChange={setListOpen}>
-          <PopoverTrigger asChild>
-            <button type="button" className="group min-w-0 flex-1 rounded-2xl px-4 py-2 text-center transition hover:bg-accent/60" aria-label={`S${index + 1} - ${current.name} : voir toutes les sessions`}>
-              <span className="block text-[11px] font-semibold uppercase tracking-[0.2em] text-muted-foreground">{index === sessions.length - 1 ? "Dernière session" : `Session ${index + 1} sur ${sessions.length}`}</span>
-              <span className="mt-1 flex items-center justify-center gap-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">
-                <span className="truncate"><span style={{ color: accentColor }}>S{index + 1}</span> - {current.name}</span>
-                <ChevronDown className={cn("size-5 shrink-0 text-muted-foreground transition-transform", listOpen && "rotate-180")} />
-              </span>
-              {sessionDate(current.createdAt) && <span className="mt-1 block text-xs text-muted-foreground">{sessionDate(current.createdAt)}</span>}
-            </button>
-          </PopoverTrigger>
-          <PopoverContent align="center" className="max-h-[min(26rem,70svh)] w-80 overflow-y-auto p-1">
-            {/* La plus récente en haut, comme la page s'ouvre. */}
-            {sessions.map((session, position) => ({ session, position })).reverse().map(({ session, position }) => <button
-              key={session.id}
-              type="button"
-              onClick={() => go(position)}
-              className={cn("flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm hover:bg-accent", position === index && "bg-accent/60")}
-            >
-              <span className="w-9 shrink-0 font-display font-semibold tabular-nums" style={{ color: accentColor }}>S{position + 1}</span>
-              <span className="min-w-0 flex-1"><span className="block truncate font-medium">{session.name}</span>{sessionDate(session.createdAt) && <span className="block text-[11px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
-              {position === index && <Check className="size-4 shrink-0 text-primary" />}
-            </button>)}
-          </PopoverContent>
-        </Popover>
-        <button type="button" className={arrow} onClick={() => go(index + 1)} disabled={index >= sessions.length - 1} aria-label="Session suivante" title="Session suivante (→)"><ChevronRight className="size-5" /></button>
-      </nav>
-
-      {current.bannerUrl && <div className="mx-auto mt-8 max-w-6xl overflow-hidden rounded-[1.5rem] border">
-        {/* eslint-disable-next-line @next/next/no-img-element -- bannière servie par l'app */}
-        <img src={current.bannerUrl} alt="" className="h-40 w-full object-cover sm:h-56" />
-      </div>}
+    </div></> : <>
+      <header className={cn("relative mx-auto max-w-6xl", onBanner && "overflow-hidden rounded-[1.5rem] border px-4 py-10 shadow-sm sm:py-14")}>
+        {onBanner && <>
+          {/* eslint-disable-next-line @next/next/no-img-element -- bannière servie par l'app */}
+          <img src={current.bannerUrl} alt="" className="absolute inset-0 size-full object-cover" />
+          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/40 to-black/60" aria-hidden />
+        </>}
+        <div className="relative">
+          {label}
+          <nav className="mx-auto flex max-w-3xl items-center justify-center gap-3 sm:gap-5" aria-label="Sessions">
+            <button type="button" className={arrowClass} onClick={() => go(index - 1)} disabled={index <= 0} aria-label="Session précédente" title="Session précédente (←)"><ChevronLeft className="size-5" /></button>
+            <Popover open={listOpen} onOpenChange={setListOpen}>
+              <PopoverTrigger asChild>
+                <button type="button" className={cn("group min-w-0 flex-1 rounded-2xl px-4 py-2 text-center transition", onBanner ? "text-white [text-shadow:0_2px_12px_rgba(0,0,0,.6)] hover:bg-black/25" : "hover:bg-accent/60")} aria-label={`S${index + 1} - ${current.name} : voir toutes les sessions`}>
+                  <span className={cn("block text-[11px] font-semibold uppercase tracking-[0.2em]", soft)}>{index === sessions.length - 1 ? "Dernière session" : `Session ${index + 1} sur ${sessions.length}`}</span>
+                  <span className="mt-1 flex items-center justify-center gap-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">
+                    <span className="truncate"><span style={onBanner ? undefined : { color: accentColor }}>S{index + 1}</span> - {current.name}</span>
+                    <ChevronDown className={cn("size-5 shrink-0 transition-transform", soft, listOpen && "rotate-180")} />
+                  </span>
+                  {sessionDate(current.createdAt) && <span className={cn("mt-1 block text-xs", soft)}>{sessionDate(current.createdAt)}</span>}
+                </button>
+              </PopoverTrigger>
+              <PopoverContent align="center" className="max-h-[min(26rem,70svh)] w-80 overflow-y-auto p-1">
+                {/* La plus récente en haut, comme la page s'ouvre. */}
+                {sessions.map((session, position) => ({ session, position })).reverse().map(({ session, position }) => <button
+                  key={session.id}
+                  type="button"
+                  onClick={() => go(position)}
+                  className={cn("flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm hover:bg-accent", position === index && "bg-accent/60")}
+                >
+                  <span className="w-9 shrink-0 font-display font-semibold tabular-nums" style={{ color: accentColor }}>S{position + 1}</span>
+                  <span className="min-w-0 flex-1"><span className="block truncate font-medium">{session.name}</span>{sessionDate(session.createdAt) && <span className="block text-[11px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
+                  {position === index && <Check className="size-4 shrink-0 text-primary" />}
+                </button>)}
+              </PopoverContent>
+            </Popover>
+            <button type="button" className={arrowClass} onClick={() => go(index + 1)} disabled={index >= sessions.length - 1} aria-label="Session suivante" title="Session suivante (→)"><ChevronRight className="size-5" /></button>
+          </nav>
+        </div>
+      </header>
 
       {/* Téléphone : bilan, notes, puis le récit ; ordinateur : les notes à droite, collées en défilant. */}
       <div className="mx-auto mt-8 grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
@@ -256,7 +266,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
         <aside className="min-w-0 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
           {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
-          <SessionNotesBoard campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} initialMine={initialMine} className="lg:max-h-[calc(100svh-3rem)] lg:overflow-y-auto" />
+          <SessionNotesBoard campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} className="lg:max-h-[calc(100svh-3rem)] lg:overflow-y-auto" />
         </aside>
       </div>
     </>}

@@ -17,7 +17,7 @@ const safeImage = (url: string) => /^(https:\/\/|\/api\/)/.test(url) ? url : ""
  * Le journal d'une campagne : une page par session (bilan, groupe, lieux, PNJs, créatures,
  * objets, magasins, quêtes, événements) et ses notes publiques. Joueurs et MJ.
  */
-export default async function CampaignJournalPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ session?: string; perso?: string }> }) {
+export default async function CampaignJournalPage({ params, searchParams }: { params: Promise<{ id: string }>; searchParams: Promise<{ session?: string }> }) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
   if (!account) redirect("/connexion")
   const [{ id }, query] = await Promise.all([params, searchParams])
@@ -30,7 +30,8 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
   const viewer = { uid: account.uid, manager: reader.manager }
   // Chaque lecture peut manquer (feuille pas encore créée, Google indisponible) : le reste s'affiche.
   const [notes, members, mine, npcs, shops, events] = await Promise.all([
-    listSessionNotes(id, viewer).catch(() => null),
+    // Le journal ne montre que les notes de session (publiques) ; les notes privées restent dans la fiche.
+    listSessionNotes(id, viewer).then((notes) => notes.filter((note) => !note.private)).catch(() => null),
     listCampaignMembers(id).catch(() => []),
     listCharactersForUser(account.uid).catch(() => []),
     listNpcs(id).catch(() => []),
@@ -64,7 +65,6 @@ export default async function CampaignJournalPage({ params, searchParams }: { pa
             accentColor={reader.campaign.accentColor || "#927640"}
             sessions={detail}
             initialSessionId={query.session}
-            initialMine={query.perso === "1"}
             initialNotes={notes ?? []}
             notesError={notes === null}
             viewer={{ uid: account.uid, manager: reader.manager, characterIds: mine.filter((character) => members.some((member) => member.id === character.id)).map((character) => character.id) }}
