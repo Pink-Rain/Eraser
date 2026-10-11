@@ -8,7 +8,7 @@ import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { PageBacklinksBlock, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
-import { fillRowPage, type RowContext } from "@/lib/custom-pages-rows"
+import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
@@ -287,7 +287,7 @@ export function PageHeader({ eyebrow, title, description, icon, emoji, children 
  * Révéler un secret et écrire dans un carnet passent par /api/pages : la page revient
  * telle que le serveur la voit après le changement.
  */
-export function CustomPageView({ initial, links, campaignName, indexPaths, row, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false }: {
+export function CustomPageView({ initial, links, campaignName, indexPaths, row: packedRow, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false }: {
   initial: PageView
   links: Record<string, PageLinkTarget>
   campaignName?: string
@@ -303,6 +303,8 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row, 
   blocksOnly?: boolean
 }) {
   const [raw, setView] = useState(initial)
+  // La ligne arrive allégée (html identique au texte vidé) : rétablie avant tout usage.
+  const row = useMemo(() => packedRow ? unpackRowContext(packedRow) : undefined, [packedRow])
   const view = useMemo(() => row ? fillRowPage(raw, row) : raw, [raw, row])
   const [error, setError] = useState("")
   const eyebrow = eyebrowOverride ?? (view.place === "campagne" ? `Campagne${campaignName ? ` · ${campaignName}` : ""}` : view.place === "hors-menu" ? "Page" : placeLabel(view.place))

@@ -6,7 +6,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { Button } from "@/components/ui/button"
 import { canManagePages, pageForViewer } from "@/lib/custom-pages"
-import { rowContextOf, templateForRow } from "@/lib/custom-pages-rows"
+import { packRowContext, rowContextOf, templateForRow } from "@/lib/custom-pages-rows"
 import { indexPathsOf, indexSourceOf, linkTargetsOf, readablePages, readOptions, viewerFor } from "@/lib/custom-pages-server"
 import { currentAccount, currentViewAccount } from "@/lib/server-auth"
 import { knownWorldIndexKey } from "@/lib/world-indexes"
@@ -44,7 +44,7 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
       <CustomPageView
         key={`${view.id}:${key}:${row.id}`}
         initial={view}
-        row={row}
+        row={packRowContext(row)}
         eyebrow={`${source.title} · ${row.tab}`}
         links={await linkTargetsOf(view, viewAccount)}
         indexPaths={indexPathsOf(view, viewAccount.role)}

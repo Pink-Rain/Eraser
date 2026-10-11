@@ -210,3 +210,17 @@ test("Page de ligne : vue filtrée sur la ligne, « Cité dans », liens vers le
   assert.equal(data.cellCitesRow("Forêt - Sylphe des brumes", "-", target), true);
   assert.equal(data.cellCitesRow("Sylphes", undefined, target), false);
 });
+
+test("Page de ligne sur le fil : l'html identique au texte est vidé à l'envoi, rétabli à l'arrivée", () => {
+  const row = { index: "creatures", indexTitle: "Créatures", tab: "Bestiaire", id: "CRE-1", name: "Veuve", hidden: [], columns: [
+    { header: "Nom", text: "Veuve", html: "Veuve" },
+    { header: "Description", text: "Brume & sel", html: "Brume &amp; <em>sel</em>" },
+    { header: "Rang", text: "", html: "" },
+  ] };
+  const packed = rows.packRowContext(row);
+  assert.deepEqual(packed.columns.map((column) => column.html), ["", "Brume &amp; <em>sel</em>", ""]);
+  assert.deepEqual(rows.unpackRowContext(packed), row);
+  const restored = rows.unpackRowContext(packed);
+  assert.equal(rows.unpackRowContext(restored), restored, "déjà rétablie : le même objet");
+  assert.equal(rows.packRowContext(packed), packed, "déjà allégée : le même objet");
+});

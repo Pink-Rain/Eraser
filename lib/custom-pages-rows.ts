@@ -28,6 +28,21 @@ export type RowContext = {
 
 export const rowPageHref = (index: string, id: string) => `/fiche/${encodeURIComponent(index)}/${encodeURIComponent(id)}`
 
+/**
+ * Sur le fil, de la page au composant client (comme lib/index-rows-wire.ts pour les index) :
+ * l'html d'une case identique à son texte est vidé avant l'envoi, puis rétabli avant usage.
+ * Rétablir une ligne déjà rétablie ne change rien.
+ */
+export function packRowContext(row: RowContext): RowContext {
+  if (!row.columns.some((column) => column.html !== "" && column.html === column.text)) return row
+  return { ...row, columns: row.columns.map((column) => column.html === column.text ? { ...column, html: "" } : column) }
+}
+
+export function unpackRowContext(row: RowContext): RowContext {
+  if (!row.columns.some((column) => column.html === "" && column.text !== "")) return row
+  return { ...row, columns: row.columns.map((column) => column.html === "" ? { ...column, html: column.text } : column) }
+}
+
 const plain = (value: string) => value.replace(/<br\s*\/?>/gi, " ").replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/\s+/g, " ").trim()
 const escapeHtml = (value: string) => value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;")
 
