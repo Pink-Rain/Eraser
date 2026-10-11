@@ -96,3 +96,38 @@ test("journal des erreurs : les avertissements de Node et les pages fermées en 
   assert.equal(journal.isJournaledError("WORLD_INDEX_TRASH_READ_FAILED states SHEETS_API_ERROR:429"), true);
   assert.equal(journal.isJournaledError("CLASS_COLUMNS_CHECK_FAILED SHEET_KEY_COLUMN_MISSING:Classes:ID"), true);
 });
+
+test("historique d'un personnage : chutes, retours et objets notés dans le serveur partagé, compteurs justes, taille bornée", async () => {
+  const history = await vite.ssrLoadModule("/lib/character-history.ts");
+  fakeStore.reset();
+  assert.deepEqual(await history.readCharacterHistory("PER-1"), { since: "", events: [] });
+  // Deux notes lancées ensemble ne s'écrasent pas.
+  await Promise.all([
+    history.noteCharacterEvent("PER-1", { kind: "chute", at: "2026-10-11T10:00:00.000Z" }),
+    history.noteCharacterEvent("PER-1", { kind: "objet", at: "2026-10-11T10:01:00.000Z", name: "Épée longue", rarity: "Rare" }),
+  ]);
+  await history.noteCharacterEvent("PER-1", { kind: "retour", at: "2026-10-11T10:02:00.000Z" });
+  await history.noteCharacterEvent("PER-1", { kind: "objet", at: "2026-10-11T10:03:00.000Z", name: "Pain", rarity: "Commun" });
+  const counts = history.historyCounts(await history.readCharacterHistory("PER-1"), ["Rare", "Très rare", "Ultime"]);
+  assert.equal(counts.since, "2026-10-11T10:00:00.000Z");
+  assert.deepEqual([counts.falls, counts.returns, counts.items, counts.rareItems], [1, 1, 2, 1]);
+  assert.deepEqual(counts.lastItems.map((item) => item.name), ["Pain", "Épée longue"]);
+  // Au-delà de la taille permise, les plus anciens objets partent, jamais les chutes.
+  for (let index = 0; index < 400; index += 1) await history.noteCharacterEvent("PER-2", { kind: "objet", at: `2026-10-11T11:${String(index % 60).padStart(2, "0")}:00.000Z`, name: `Objet n°${index} au nom assez long pour remplir`, rarity: "Commun" });
+  await history.noteCharacterEvent("PER-2", { kind: "chute", at: "2026-10-11T12:00:00.000Z" });
+  const record = fakeStore.store.records.get("character-history").get("PER-2").value;
+  assert.ok(record.length <= 19_000);
+  const big = history.historyCounts(await history.readCharacterHistory("PER-2"));
+  assert.equal(big.falls, 1);
+  assert.ok(big.items < 400 && big.items > 100);
+  assert.equal(big.lastItems[0].name, "Objet n°399 au nom assez long pour remplir");
+  // Un enregistrement illisible n'est jamais écrasé.
+  await fakeStore.writeSharedRecord("character-history", "PER-3", "{pas du json");
+  await history.noteCharacterEvent("PER-3", { kind: "chute", at: "2026-10-11T12:00:00.000Z" });
+  assert.equal(fakeStore.store.records.get("character-history").get("PER-3").value, "{pas du json");
+});
+
+test("journal des erreurs : une erreur d'Eraser qui cite un code de flux reste dans le journal", async () => {
+  const journal = await vite.ssrLoadModule("/lib/error-journal.ts");
+  assert.equal(journal.isJournaledError("DRIVE_MEDIA_STREAM_FAILED ERR_STREAM_PREMATURE_CLOSE"), true);
+});

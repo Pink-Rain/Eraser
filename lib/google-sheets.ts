@@ -34,7 +34,7 @@ import { isEntityWorldIndexKey, worldIndexDefinitions, type BuiltinWorldIndexKey
 import { foldName, isImageSource, type IndexColumnSpec } from "@/lib/index-columns"
 import { forgetJdrSheet, getJdrSheet, saveJdrSheet, type JdrSheetKey, type JdrSheetRecord } from "@/lib/jdr-sheets"
 import { forgetGoogleAccessToken, googleOAuthAuthorizedFetch, warmGoogleOAuthAccessToken } from "@/lib/google-oauth"
-import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess } from "@/lib/google-quota"
+import { acquireSheetsSlot, asBackgroundGoogleWork, googleQuotaUser, noteQuotaRefusal, noteQuotaSuccess, QUOTA_ERROR } from "@/lib/google-quota"
 import { sharedClassCatalog } from "@/lib/class-catalog-share"
 import { onForgetGoogleData } from "@/lib/data-refresh"
 import { freshAfter, mustReread } from "@/lib/request-freshness"
@@ -95,6 +95,9 @@ import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTy
 import { foldSheetHeader, headerAdditions, sheetColumns, withSheetHeaders, type SheetCell, type SheetColumns } from "@/lib/sheet-columns"
 import { getIdentityLink, identityUidsForUser } from "@/lib/identity-links"
 import { listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
+import { noteCharacterEvent } from "@/lib/character-history"
+import { characterLifeState } from "@/lib/character-life"
+import { parseCharacterStates } from "@/lib/character-states"
 
 export type CharacterRecord = {
   id: string
@@ -4018,6 +4021,18 @@ function identityColumnUsable(kind: string, sheet: NamedSheet, rows: readonly st
  * This never writes to Google Sheets; it lets the desktop account recognize data
  * created by the live site without changing that site's identifiers.
  */
+/**
+ * Une feuille que la synchronisation des index locaux n'a pas pu lire. Refusée faute de quota
+ * Google (toutes les installations le partagent), elle est simplement remise : la
+ * synchronisation est retentée 20 s plus tard et les pages gardent l'index local en attendant.
+ * Ce n'est pas une erreur du journal ; un autre refus, si.
+ */
+function identitySyncReadFailed(kind: string, error: unknown) {
+  const message = error instanceof Error ? error.message : "UNKNOWN_ERROR"
+  if (message.startsWith(QUOTA_ERROR)) console.warn(`IDENTITY_SYNC_${kind}_READ_DEFERRED`, message)
+  else console.error(`IDENTITY_SYNC_${kind}_READ_FAILED`, message)
+}
+
 export async function syncExistingIdentityIndexes(options: { fresh?: boolean } = { fresh: true }) {
   const fresh = options.fresh !== false
   const [campaignSource, characterSource, relationSource] = await Promise.all([
@@ -4029,9 +4044,9 @@ export async function syncExistingIdentityIndexes(options: { fresh?: boolean } =
   const empty: NamedSheet | null = null
   // Chaque feuille est lue par le nom de ses colonnes : les déplacer dans Sheets ne change rien.
   const [campaignSheet, characterSheet, relationSheet] = await Promise.all([
-    campaignSource ? readNamedSheet(campaignSource.spreadsheetId, campaignSource.tabName, campaignSheetHeaders, { fresh }).catch((error) => { console.error("IDENTITY_SYNC_CAMPAIGNS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
-    characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh }).catch((error) => { console.error("IDENTITY_SYNC_CHARACTERS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
-    relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { console.error("IDENTITY_SYNC_RELATIONS_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR"); return empty }) : Promise.resolve(empty),
+    campaignSource ? readNamedSheet(campaignSource.spreadsheetId, campaignSource.tabName, campaignSheetHeaders, { fresh }).catch((error) => { identitySyncReadFailed("CAMPAIGNS", error); return empty }) : Promise.resolve(empty),
+    characterSource ? readCharacterColumns(characterSource, ["Joueur", "Nom personnage", "Peuple"], { fresh }).catch((error) => { identitySyncReadFailed("CHARACTERS", error); return empty }) : Promise.resolve(empty),
+    relationSource ? readNamedSheet(relationSource.spreadsheetId, relationSource.tabName, campaignCharacterHeaders, { fresh }).then((sheet) => { relationsRead = sheet.columns.headers.length > 0; return sheet }).catch((error) => { identitySyncReadFailed("RELATIONS", error); return empty }) : Promise.resolve(empty),
   ])
   // Rien n'a pu être lu (Google saturé) : ce n'est pas une synchronisation, elle sera retentée.
   if (!campaignSheet && !characterSheet && !relationSheet && (campaignSource || characterSource || relationSource)) throw new Error("IDENTITY_SYNC_NOTHING_READ")
@@ -5527,6 +5542,58 @@ function tabletopCharacterEntityOf(id: string, cell: (name: string) => string, o
   }
 }
 
+export type CharacterGroupStats = {
+  /** La vie telle qu'écrite sur la fiche (sans les apports des objets ni des états) ; `null` : illisible. */
+  currentHp: number | null
+  totalHp: number | null
+  life: "alive" | "down" | "dead"
+  /** Les états posés (leur nom et leur niveau). */
+  states: Array<{ name: string; level: 1 | 2 }>
+  /** La bourse : or (PO), cuivre (PC), or noir (PN) ; `null` : pas de bourse lue. */
+  purse: { or: number; cuivre: number; orNoir: number } | null
+}
+
+/**
+ * La vie, les états et la bourse de chaque personnage, pour le tableau du groupe du dossier de
+ * campagne. Deux lectures gardées en mémoire et partagées avec le reste d'Eraser (les colonnes
+ * que lit le tabletop, l'inventaire), aucune écriture : une partie illisible reste vide.
+ */
+export async function listCharacterGroupStats(ids: string[]): Promise<Record<string, CharacterGroupStats>> {
+  const selected = new Set(ids)
+  if (!selected.size) return {}
+  const choicesHeader = characterValueHeaders[characterClassChoicesIndex]
+  const source = await charactersSource()
+  const [sheet, workbook] = await Promise.all([
+    source ? readCharacterColumns(source, ["Nom personnage", "Peuple", "Classe", "Vie actuelle", "Vie totale", "Rapidité", "Portrait", choicesHeader]).catch((error) => {
+      console.error("CHARACTER_GROUP_STATS_SHEET_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return null
+    }) : Promise.resolve(null),
+    readInventoryWorkbook(false).catch((error) => {
+      console.error("CHARACTER_GROUP_STATS_INVENTORY_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return null
+    }),
+  ])
+  const number = (text: string) => { const parsed = Number.parseFloat(String(text ?? "").replace(",", ".")); return Number.isFinite(parsed) ? parsed : null }
+  const rows = new Map(sheet ? sheet.rows.flatMap((row) => { const id = sheet.columns.get(row, "ID"); return selected.has(id) ? [[id, row] as const] : [] }) : [])
+  const typeById = new Map((workbook?.containerTypes ?? []).map((type) => [type.id, type]))
+  return Object.fromEntries([...selected].map((id): [string, CharacterGroupStats] => {
+    const row = rows.get(id)
+    const cell = (name: string) => row && sheet ? sheet.columns.get(row, name) : ""
+    let states: CharacterGroupStats["states"] = []
+    try { states = parseCharacterStates((JSON.parse(cell(choicesHeader) || "{}") as { states?: unknown }).states).map((state) => ({ name: state.name, level: state.level })) } catch { states = [] }
+    const purses = workbook ? workbook.containers.filter((container) => container.characterId === id && !container.deletedAt && inventoryContainerCategory(container, typeById) === "Bourse") : []
+    const coins = workbook ? workbook.contents.filter((content) => purses.some((container) => container.id === content.containerId)) : []
+    const coin = (key: string) => coins.filter((content) => inventoryCurrencyKey(content.customName || content.subtype) === key).reduce((total, content) => total + content.quantity, 0)
+    return [id, {
+      currentHp: row ? number(cell("Vie actuelle")) : null,
+      totalHp: row ? number(cell("Vie totale")) : null,
+      life: characterLifeState(cell("Vie actuelle"), cell("Vie totale")),
+      states,
+      purse: purses.length ? { or: coin("or"), cuivre: coin("cuivre"), orNoir: coin("or noir") } : null,
+    }]
+  }))
+}
+
 export async function listTabletopCharacterEntitiesByIds(ids: string[]) {
   const selected = new Set(ids)
   if (!selected.size) return []
@@ -5602,6 +5669,18 @@ async function readRelationSheet(options: { fresh?: boolean } = {}) {
 export async function listCharacterRelations(characterId: string) {
   const { columns, rows } = await readRelationSheet()
   return rows.map((row) => characterRelationFromRow(row, columns)).filter((relation): relation is CharacterRelationRecord => Boolean(relation && relation.characterId === characterId))
+}
+
+/**
+ * Les relations notées par ces personnages (le dossier de campagne : l'attitude du groupe
+ * envers ses PNJ). La feuille déjà lue en mémoire ; jamais créée si elle n'existe pas.
+ */
+export async function listRelationsOfCharacters(characterIds: string[]) {
+  const ids = new Set(characterIds)
+  const sheet = await resolveJdrSheet("character_relations")
+  if (!sheet || !ids.size) return []
+  const { columns, rows } = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, characterRelationHeaders)
+  return rows.map((row) => characterRelationFromRow(row, columns)).filter((relation): relation is CharacterRelationRecord => Boolean(relation && ids.has(relation.characterId)))
 }
 
 export async function getCharacterRelationById(characterId: string, relationId: string) {
@@ -6471,6 +6550,11 @@ export async function patchCharacterSheet(accountUid: string | null, id: string,
   await getDb().update(characterIndex).set({ name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt }).where(eq(characterIndex.id, id))
   const character = { ...existing, name: nextName, subtitle: displayedMultipleValue(values[1] || "", "all"), updatedAt, values, headers: written.layout.headers } satisfies CharacterSheetRecord
   characterSheetCache.set(id, { expiresAt: Date.now() + CHARACTER_SHEET_CACHE_MS, character })
+  // Une chute (la vie passe à 0 ou moins) ou un retour (elle repasse au-dessus), pour le
+  // tableau du groupe du dossier de campagne. Noté à part, sans jamais retarder la fiche.
+  const lifeBefore = characterLifeState(current.values[9] ?? "", current.values[10] ?? "")
+  const lifeAfter = characterLifeState(values[9] ?? "", values[10] ?? "")
+  if (lifeBefore !== lifeAfter && (lifeBefore === "alive" || lifeAfter === "alive")) void noteCharacterEvent(id, { kind: lifeAfter === "alive" ? "retour" : "chute", at: updatedAt })
   return character
 }
 
@@ -7617,6 +7701,8 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
           updatedAt: now,
         }
     const inventory = buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, updated]] }))
+    // Un objet arrivé dans l'inventaire d'un personnage (pas le coffre de campagne ni un PNJ).
+    if (mode === "character" && !isCampaignInventoryOwner(characterId)) void noteCharacterEvent(characterId, { kind: "objet", at: new Date().toISOString(), name: item.name, ...(item.rarity ? { rarity: item.rarity } : {}) })
     return landedOnGround ? { ...inventory, landedOnGround } : inventory
   })
 }
@@ -7664,6 +7750,7 @@ export async function createCharacterInventoryItem(
       effectHtml: "",
       updatedAt: new Date().toISOString(),
     }]] }))
+    if (mode === "character" && !isCampaignInventoryOwner(characterId)) void noteCharacterEvent(characterId, { kind: "objet", at: new Date().toISOString(), name: input.name.trim() })
     return landedOnGround ? { ...inventory, landedOnGround } : inventory
   })
 }

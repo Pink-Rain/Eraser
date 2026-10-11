@@ -654,7 +654,8 @@ function scheduleIdBackfill(key: WorldIndexKey) {
         const cells = [{ header: table.headers[column], html: id }]
         // Une ligne tapée dans Sheets reçoit, avec son identifiant, les valeurs d'une nouvelle
         // ligne réglées sur ses colonnes (la page de bibliothèque d'un PNJ…), comme un ajout.
-        for (const [header, value] of defaultValuesOf(key, tab.name, table.headers)) {
+        // Une ligne qui avait déjà un identifiant (en double, renouvelé) n'est pas nouvelle.
+        if (!current) for (const [header, value] of defaultValuesOf(key, tab.name, table.headers)) {
           const at = columnOf(table.headers, header)
           if (at < 0 || (row[at] ?? "").trim()) continue
           const target = `${columnName(at + 1)}${index + 1}`
@@ -1079,7 +1080,7 @@ async function writeCell(table: PlainTable, tabName: string, rowIndex: number, c
  * rangées par leur nom dans celles de l'onglet relu. Renvoie la ligne écrite et son
  * identifiant.
  */
-async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: string, provided: string[]) {
+async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: string, provided: string[], options: { moved?: boolean } = {}) {
   const current = await plainTable(key, tabName)
   // Rangées par nom de colonne : une colonne ajoutée ou déplacée entre-temps ne décale rien ;
   // une colonne en double ne reçoit la valeur qu'une fois (la première, celle qu'on voit).
@@ -1096,10 +1097,11 @@ async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: strin
   const idColumn = columnOf(current.headers, ID_HEADER)
   if (idColumn >= 0 && !(named[idColumn] ?? "").trim()) named[idColumn] = newIndexId(tabDefinition(key, tabName).idPrefix)
   // Une case vide reçoit la valeur d'une nouvelle ligne réglée sur sa colonne (la page d'un
-  // PNJ…) ; une ligne d'index d'entités, ses dates.
+  // PNJ…) ; une ligne d'index d'entités, ses dates. Une ligne déplacée n'est pas nouvelle :
+  // ses cases vides restent vides.
   const entity = entityOf(key)
   const now = new Date().toISOString()
-  const defaults = new Map(defaultValuesOf(key, tabName, current.headers).map(([header, value]) => [foldName(header), value]))
+  const defaults = new Map(options.moved ? [] : defaultValuesOf(key, tabName, current.headers).map(([header, value]) => [foldName(header), value]))
   const values = current.headers.map((header, index) => {
     const value = named[index] ?? ""
     if (value.trim()) return value
@@ -1238,6 +1240,18 @@ const spellSources: Partial<Record<WorldIndexKey, SpellSource>> = { "creature-sp
 async function renameSpellReferences(key: WorldIndexKey, oldName: string, newName: string): Promise<WorldIndexKey[]> {
   const source = spellSources[key]
   if (!source) return []
+  // Un nom encore porté par un autre sort (un homonyme dans cet index, ou un sort de l'autre
+  // index : les PNJ mêlent sorts de classe et de créature) : impossible de savoir lequel est
+  // cité, rien n'est renommé.
+  // Un classeur de sorts absent n'a pas d'homonyme ; illisible, on ne peut pas le savoir : rien n'est renommé.
+  for (const other of Object.keys(spellSources) as WorldIndexKey[]) {
+    let tabs: WorldIndexTabDefinition[]
+    try { tabs = await tabsOf(other) } catch (error) {
+      if (error instanceof Error && /NOT_FOUND|UNAVAILABLE|:404\b/.test(error.message)) continue
+      throw error
+    }
+    for (const tab of tabs) if (findRowByName(await plainTable(other, tab.name), oldName) > 0) return []
+  }
   const cites = (spec: IndexColumnSpec) => spec.kind === "spells" && (spec.spells?.source === source || spec.spells?.source === "all")
   const touched: WorldIndexKey[] = []
   for (const reader of Object.keys(worldIndexDefinitions) as BuiltinWorldIndexKey[]) {
@@ -1260,16 +1274,18 @@ async function renameSpellReferences(key: WorldIndexKey, oldName: string, newNam
           const names = splitNames(row[column] ?? "")
           if (!names.some((name) => foldName(name) === foldName(oldName))) return
           const cell = `${columnName(column + 1)}${rowIndex + 1}`
-          data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[names.map((name) => foldName(name) === foldName(oldName) ? newName : name).join(", ")]] })
+          // Sans doublon : « Morsure, Morsure venimeuse » renommé « Morsure venimeuse » n'en garde qu'un.
+          data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[splitNames(names.map((name) => foldName(name) === foldName(oldName) ? newName : name).join(", ")).join(", ")]] })
         })
       })
       if (!data.length) continue
       await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
       clearSpreadsheetReadCache(table.spreadsheetId)
+      // Oublié tout de suite : un échec plus loin ne laisse pas cet index en mémoire d'avant.
+      invalidateWorldIndexes([reader])
       if (!touched.includes(reader)) touched.push(reader)
     }
   }
-  if (touched.length) invalidateWorldIndexes(touched)
   return touched
 }
 
@@ -1590,7 +1606,10 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
     const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()
     if (oldName && newName && foldName(oldName) !== foldName(newName)) {
       await renameLinkedChoices(key, tabName, oldName, newName)
-      await renameSpellReferences(key, oldName, newName)
+      // Les cases sont écrites : un renommage des sorts cités qui échoue ne les annule pas.
+      await renameSpellReferences(key, oldName, newName).catch((error) => {
+        console.error("WORLD_INDEX_SPELL_RENAME_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      })
     }
     return written.length
   })
@@ -1622,7 +1641,7 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
         const column = columnOf(source.headers, header)
         return column >= 0 ? row[column] ?? "" : ""
       })
-      await writeNewRow(key, target, toTab, values)
+      await writeNewRow(key, target, toTab, values, { moved: true })
       moved.push(refOf(source, index))
     }
     if (!moved.length) return
@@ -1844,16 +1863,18 @@ function defaultValuesOf(key: WorldIndexKey, tabName: string, headers: string[])
   return headers.flatMap((header): Array<[string, string]> => {
     if (!header.trim() || foldName(header) === foldName(ID_HEADER)) return []
     const value = effectiveColumnSpec(key, tabName, header, schema).defaultValue
-    return value?.trim() ? [[header, value]] : []
+    return typeof value === "string" && value.trim() ? [[header, value]] : []
   })
 }
 
 /** Les réglages de la colonne « Onglet » tels qu'ils s'enregistrent (rien de réglé : `undefined`). */
-function cleanTabColumn(settings: TabColumnSettings, tabNames: string[]): TabColumnSettings | undefined {
-  const label = (settings.label ?? "").replace(/\s+/g, " ").trim().slice(0, 40)
-  const after = (settings.after ?? "").trim()
-  const targets = settings.targets?.filter((name) => tabNames.includes(name))
-  const clean: TabColumnSettings = { ...(label ? { label } : {}), ...(settings.hidden ? { hidden: true } : {}), ...(after ? { after } : {}), ...(targets ? { targets } : {}) }
+function cleanTabColumn(settings: TabColumnSettings | undefined, tabNames: string[]): TabColumnSettings | undefined {
+  // Venus de la page : chaque valeur est vérifiée (texte, liste de noms d'onglets).
+  const text = (value: unknown) => typeof value === "string" ? value : ""
+  const label = text(settings?.label).replace(/\s+/g, " ").trim().slice(0, 40)
+  const after = text(settings?.after).trim()
+  const targets = Array.isArray(settings?.targets) ? settings.targets.filter((name): name is string => typeof name === "string" && tabNames.includes(name)) : undefined
+  const clean: TabColumnSettings = { ...(label ? { label } : {}), ...(settings?.hidden === true ? { hidden: true } : {}), ...(after ? { after } : {}), ...(targets ? { targets } : {}) }
   return Object.keys(clean).length ? clean : undefined
 }
 
@@ -2014,6 +2035,9 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
               if (other.spec.lookup?.via && foldName(other.spec.lookup.via) === foldName(from)) other.spec = { ...other.spec, lookup: { ...other.spec.lookup, via: to } }
               if (other.spec.rollup?.via && foldName(other.spec.rollup.via) === foldName(from)) other.spec = { ...other.spec, rollup: { ...other.spec.rollup, via: to } }
             }
+            // La colonne « Onglet » placée après elle la suit aussi.
+            const tabColumn = findEntry(entries, TAB_COLUMN_ENTRY.tab, TAB_COLUMN_ENTRY.column)
+            if (tabColumn?.spec?.tabColumn?.after && foldName(tabColumn.spec.tabColumn.after) === foldName(from)) tabColumn.spec = { ...tabColumn.spec, tabColumn: { ...tabColumn.spec.tabColumn, after: to } }
             // L'ordre d'affichage gardé pour un index d'entités suit le nouveau nom.
             const order = findEntry(entries, tab.name, "")?.spec
             if (order?.kind === "tab" && order.columns) setTabSpec(entries, tab.name, { columns: order.columns.map((header) => foldName(header) === foldName(from) ? to : header) })
@@ -2079,11 +2103,11 @@ export async function listWorldIndexTrash(): Promise<IndexTrashItem[]> {
     if (isBuiltinWorldIndexKey(key) && !await existingWorkbook(key).catch(unreadable(key))) return []
     // Pour afficher : le schéma gardé en mémoire ou sa copie partagée, sans lecture fraîche ni
     // vérification d'en-têtes. Restaurer et supprimer relisent, eux, à l'instant.
-    const cached = effectiveIndexes.get(key)
-    const effective = cached && !cached.degraded ? cached : await loadEffectiveIndex(key).catch(unreadable(key))
+    // (La copie du schéma suit ses règles de cache : une colonne mise à la corbeille ailleurs
+    // apparaît en quelques minutes, sans « Actualiser ».)
+    const effective = await loadEffectiveIndex(key).catch(unreadable(key))
     if (!effective) return []
     if (effective.degraded) return unreadable(key)(new Error("WORLD_INDEX_SCHEMA_UNREADABLE")) ?? []
-    if (!cached) effectiveIndexes.set(key, effective)
     return effective.schema.filter((entry) => entry.deletedAt && entry.state !== "supprimé").map((entry): IndexTrashItem => ({ family: "world", key, title: effective.definition.title, tab: entry.tab, column: entry.column, deletedAt: entry.deletedAt, filled: 0 }))
   }
   // Trois index à la fois : vingt classeurs lus d'un coup dépassaient le quota Google (429).

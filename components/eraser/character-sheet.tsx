@@ -14,7 +14,7 @@ import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { nextNotebookPageName, notebookPageName, readNotebook, writeNotebook, type NotebookPage } from "@/lib/notebook-pages"
+import { nextNotebookPageName, notebookPageName, readNotebook, uniqueNotebookPageName, writeNotebook, type NotebookPage } from "@/lib/notebook-pages"
 import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
@@ -242,6 +242,10 @@ function NotebookEditor({ value, onCommit }: { value: string; onCommit: (value: 
   const [renaming, setRenaming] = useState<number | null>(null)
   const [draftName, setDraftName] = useState("")
   const [confirming, setConfirming] = useState<number | null>(null)
+  // Chaque page ouverte a son propre éditeur : il ne garde jamais le texte d'une autre page
+  // (supprimée, ou du même nom).
+  const [opened, setOpened] = useState(0)
+  const open = (index: number) => { setActive(index); setOpened((count) => count + 1) }
   const current = Math.min(active, pages.length - 1)
   const save = (next: NotebookPage[]) => onCommit(writeNotebook(next))
   const startRename = (index: number) => { setRenaming(index); setDraftName(pages[index].name); setConfirming(null) }
@@ -249,21 +253,21 @@ function NotebookEditor({ value, onCommit }: { value: string; onCommit: (value: 
     if (renaming === null) return
     // La page n'est plus là (enregistrement refusé, carnet relu) : rien à renommer.
     if (!pages[renaming]) { setRenaming(null); return }
-    const name = notebookPageName(draftName, pages[renaming].name)
+    const name = uniqueNotebookPageName(notebookPageName(draftName, pages[renaming].name), pages, renaming)
     if (name !== pages[renaming].name) void save(pages.map((page, index) => index === renaming ? { ...page, name } : page))
     setRenaming(null)
   }
   const addPage = () => {
     const name = nextNotebookPageName(pages)
     void save([...pages, { name, html: "" }])
-    setActive(pages.length)
+    open(pages.length)
     setRenaming(pages.length)
     setDraftName(name)
   }
   const removePage = (index: number) => {
     void save(pages.filter((_, position) => position !== index))
     setConfirming(null)
-    setActive((selected) => Math.max(0, selected >= index ? selected - 1 : selected))
+    open(Math.max(0, current >= index ? current - 1 : current))
   }
 
   return <section className="overflow-hidden rounded-2xl border border-[#74664f55] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.015))] shadow-sm">
@@ -273,7 +277,7 @@ function NotebookEditor({ value, onCommit }: { value: string; onCommit: (value: 
         {pages.map((page, index) => renaming === index
           ? <Input key={index} autoFocus value={draftName} maxLength={40} onChange={(event) => setDraftName(event.target.value)} onBlur={finishRename} onKeyDown={(event) => { if (event.key === "Enter") finishRename(); if (event.key === "Escape") setRenaming(null) }} aria-label="Nom de la page" className="mb-1 h-7 w-36 text-xs" />
           : <span key={index} className={`group/page inline-flex items-center rounded-t-lg border border-b-0 text-xs ${index === current ? "border-border/60 bg-background/45 font-semibold" : "border-transparent text-muted-foreground hover:bg-background/25"}`}>
-            <button type="button" role="tab" aria-selected={index === current} onClick={() => { setActive(index); setConfirming(null) }} onDoubleClick={() => startRename(index)} title="Double-clic pour renommer" className="max-w-40 truncate px-2.5 py-1.5">{page.name}</button>
+            <button type="button" role="tab" aria-selected={index === current} onClick={() => { if (index !== current) open(index); setConfirming(null) }} onDoubleClick={() => startRename(index)} title="Double-clic pour renommer" className="max-w-40 truncate px-2.5 py-1.5">{page.name}</button>
             {index === current && pages.length > 1 && (confirming === index
               ? <span className="mr-1 flex items-center gap-1 text-[11px] font-normal">Supprimer ?<button type="button" onClick={() => removePage(index)} className="rounded px-1 text-destructive hover:bg-destructive/10">Oui</button><button type="button" onClick={() => setConfirming(null)} className="rounded px-1 hover:bg-muted">Non</button></span>
               : <button type="button" onClick={() => setConfirming(index)} className="mr-1 rounded p-0.5 text-muted-foreground opacity-60 hover:text-destructive hover:opacity-100" aria-label={`Supprimer la page ${page.name}`} title="Supprimer cette page"><X className="size-3" /></button>)}
@@ -282,7 +286,7 @@ function NotebookEditor({ value, onCommit }: { value: string; onCommit: (value: 
       </div>
     </div>
     <RichTextField
-      key={`${current}:${pages[current]?.name}`}
+      key={`${opened}:${current}`}
       value={pages[current]?.html ?? ""}
       onCommit={(html) => void save(pages.map((page, index) => index === current ? { ...page, html } : page))}
       placeholder="Écrire…"

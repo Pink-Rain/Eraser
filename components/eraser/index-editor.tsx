@@ -1253,7 +1253,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               />
               {model.family === "world" && DEFAULT_VALUE_KINDS.has(column.spec.kind) && <label className="grid gap-1 text-xs">
                 <span><b>Valeur d’une nouvelle ligne</b> : écrite dans la case laissée vide quand une ligne est ajoutée (ou tapée dans Sheets puis reçue par Eraser).</span>
-                <Input disabled={typeDisabled} value={column.spec.defaultValue ?? ""} maxLength={200} onChange={(event) => updateColumn({ ...column, spec: { ...column.spec, defaultValue: event.target.value || undefined } })} placeholder={column.spec.kind === "checkbox" ? "Oui ou Non" : "Vide"} className="h-8 text-xs" />
+                <Input disabled={typeDisabled} value={column.spec.defaultValue ?? ""} maxLength={200} onChange={(event) => updateColumn({ ...column, spec: { ...column.spec, defaultValue: event.target.value || (column.originalSpec?.defaultValue ? "" : undefined) } })} placeholder={column.spec.kind === "checkbox" ? "Oui ou Non" : "Vide"} className="h-8 text-xs" />
               </label>}
               {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
             </div>

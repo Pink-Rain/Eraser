@@ -1215,7 +1215,9 @@ test("carnet de notes : une seule page « Notes » reste écrite comme avant, pl
   assert.deepEqual(readNotebook(writeNotebook([{ name: "Journal", html: "x" }])), [{ name: "Journal", html: "x" }]);
   // Une section collée dans une page ne la coupe pas en deux.
   assert.deepEqual(readNotebook(writeNotebook([{ name: "A", html: "<section>a</section>b" }, { name: "B", html: "c" }])), [{ name: "A", html: "ab" }, { name: "B", html: "c" }]);
-  // Du texte ajouté à la main dans Sheets hors des pages : gardé en tête.
-  assert.deepEqual(readNotebook(`avant${written}`)[0], { name: "Notes", html: "avant" });
+  // Du texte ajouté à la main dans Sheets hors des pages : gardé en tête, dans sa propre page.
+  assert.deepEqual(readNotebook(`avant${written}`)[0], { name: "Notes 2", html: "avant" });
+  // Deux pages du même nom : chacune reste à part, la seconde est renommée.
+  assert.deepEqual(readNotebook('<section data-eraser-page="A">1</section><section data-eraser-page="a">2</section>').map((page) => page.name), ["A", "a 2"]);
   assert.equal(nextNotebookPageName(pages), "Page 3");
 });

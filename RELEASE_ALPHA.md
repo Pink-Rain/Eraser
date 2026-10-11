@@ -1,51 +1,50 @@
-# Eraser 0.1.1-alpha.187 — Carnet en pages, dossier de campagne, index sans exceptions
+# Eraser 0.1.1-alpha.188 — Le dossier de campagne et ses statistiques
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Fiche de personnage
-
-- **Carnet de notes en pages** (onglet Journal) : des onglets nommés au-dessus du carnet. « + »
-  ajoute une page, un double-clic la renomme, la croix la supprime (après confirmation). Un
-  carnet d'une seule page « Notes » reste écrit exactement comme avant dans Google Sheets.
-
 ## Dossier de campagne
 
-- Les pages de la campagne ne sont plus en grandes cartes : elles sont dans un petit encart
-  **« La campagne »** à côté des statistiques, comme les liens de l'accueil (en tête sur mobile).
+- **Bannière** plus basse et plus jolie : l'image de la campagne (ou sa couleur) sous un dégradé
+  transparent qui porte le nom de la campagne et sa description.
+- **Le groupe, personnage par personnage**, sur toute la largeur : PV (barre, « à terre »,
+  « mort »), états posés, classe et rang, succès, chutes et retours, objets reçus (avec ceux rares
+  ou mieux, détail au clic), or (PO), cuivre (PC) et or noir (PN). Chaque colonne se trie ; en bas,
+  la **moyenne** et la **somme** du groupe pour chaque colonne.
+- Dessous, côte à côte : **PNJs du groupe** et **PNJ rencontrés** (anneau amis / neutres /
+  hostiles, d'après les relations des personnages ; filtre au clic), avec l'encart des pages de la
+  campagne à droite et le compagnon Roll20 sous les PNJ.
+- Les **chutes** (la vie tombe à 0 ou moins), les **retours** (elle repasse au-dessus) et les
+  **objets reçus** (ajoutés, achetés ou créés ; pas les échanges entre personnages) n'étaient
+  enregistrés nulle part : ils sont notés à partir de cette version, dans le serveur partagé
+  (aucune lecture Google en plus).
+- Tout le dossier se lit avec des lectures déjà gardées en mémoire ; une partie illisible (Google
+  saturé) reste vide sans bloquer la page.
 
-## Index
+## Corrections
 
-- **Colonne « Onglet »** de la vue « Tout » (Lieux…) réglable dans « Modifier » : son libellé, sa
-  place, masquée ou non, et les onglets vers lesquels une ligne peut être déplacée.
-- **« Nomme la ligne »** vaut aussi pour les citations « { » : les attributions de succès se citent
-  par leur succès.
-- **Classes** : « Ajouter une classe » menait à la page Création de classe, qui ne sait pas en
-  créer. Il ouvre maintenant le formulaire de l'index (ajout seulement : ni copie ni suppression
-  depuis le tableau, et un nom saisi ailleurs ne crée jamais de classe).
-- **Valeur d'une nouvelle ligne** : nouveau réglage de colonne dans « Modifier », pour tous les
-  index. Les valeurs données d'office à un PNJ ajouté (bibliothèque, « Non ») en sont devenues de
-  simples réglages, inchangés.
-- **Sorts des créatures** : un sort renommé dans l'index est renommé aussi chez les créatures et
-  les PNJs qui le citent.
-- **États** : les colonnes que lit la fiche de personnage (type, descriptions des niveaux, règles
-  liées) sont protégées, avec leur raison, comme les autres.
-- **PNJs** : le portrait est une colonne image (voir, importer, coller une adresse), importée
-  comme depuis la page du PNJ.
-- Les anciens éditeurs « en lecture seule » des pages Doublons (sorts) et Récupérer (PNJs), qui
-  décrivaient des colonnes qui n'existent plus, sont retirés : tout se règle dans « Modifier ».
+- Les petits menus déroulants (tri des relations, réglages de l'éditeur…) ne coupent plus leur
+  texte en bas.
+- Journal des erreurs : une synchronisation de routine remise faute de quota Google (elle est
+  retentée seule 20 s plus tard) n'y entre plus ; un vrai échec de lecture, si.
+- « Actualiser » relit aussi l'emplacement des sorts des créatures.
 
-## Corbeille et quota Google
+## Corrections de l'alpha 187 (relecture)
 
-- La page Corbeille ne relit plus les vingt classeurs d'index d'un coup en lecture forcée : elle
-  reprend les réglages déjà lus et avance trois index à la fois. Elle provoquait des refus de
-  quota Google (429) en rafale. Restaurer et supprimer relisent toujours tout juste avant d'écrire.
-- Si la liste des index créés ne se lit pas, la corbeille des autres index s'affiche quand même.
-
-## Journal des erreurs
-
-- N'y entrent plus : les avertissements de dépréciation de Node (DEP0180, levé par Electron en
-  lisant l'archive du serveur) et les pages fermées avant la fin de leur réponse
-  (ERR_STREAM_UNABLE_TO_PIPE, après un F5 par exemple). Ils restent dans le log de démarrage.
-- Feuille « Classes » : les en-têtes J1 et K1 étaient décalés (« Couleur d'accent sombre » en
-  double, « ID » manquant), ce qui empêchait Eraser de reconnaître les classes. Ils ont été
-  corrigés dans la feuille (deux cases de la ligne 1, aucune donnée déplacée).
+- **Sorts renommés** : un nom porté par deux sorts (deux « Soin », ou un sort de classe et un sort
+  de créature, que les PNJ mêlent) n'est plus renommé chez les créatures et les PNJ : impossible de
+  savoir lequel ils citent. Un renommage ne laisse plus de doublon dans une case.
+- **Valeur d'une nouvelle ligne** : n'est plus écrite dans les cases vides d'une ligne
+  **déplacée** vers un autre onglet, ni dans une ligne existante qui reçoit un nouvel identifiant.
+  Une valeur d'office d'Eraser (« Non » des PNJ) peut maintenant être vidée pour de bon.
+- **Carnet de notes** : deux pages ne peuvent plus porter le même nom (« Notes 2 »), et l'éditeur
+  repart de zéro à chaque page ouverte : supprimer une page ne peut plus montrer son texte ni
+  l'écrire dans la suivante. Une installation pas encore à jour (alpha 186 ou avant) qui modifie
+  un carnet en pages le remet en une seule page (le texte reste, pas les noms des pages).
+- Colonne « Onglet » : sa place suit le renommage de la colonne après laquelle elle est rangée ;
+  des réglages mal formés sont ignorés au lieu de bloquer l'enregistrement.
+- Journal des erreurs : seuls les messages de Node et du serveur web eux-mêmes sont écartés, plus
+  une erreur d'Eraser qui citerait le même code.
+- Corbeille : une colonne mise à la corbeille depuis une autre installation y apparaît en quelques
+  minutes, sans « Actualiser ».
+- Un renommage de sort qui échoue après l'enregistrement de la fiche ne la fait plus passer pour
+  ratée.

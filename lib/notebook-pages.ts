@@ -17,13 +17,24 @@ export function notebookPageName(name: string, fallback = DEFAULT_NOTEBOOK_PAGE)
   return name.replace(/\s+/g, " ").trim().slice(0, 40) || fallback
 }
 
+/** Un nom qu'aucune autre page ne porte : « Notes », sinon « Notes 2 », « Notes 3 »… */
+export function uniqueNotebookPageName(name: string, pages: readonly NotebookPage[], exceptIndex = -1) {
+  const taken = new Set(pages.filter((_, index) => index !== exceptIndex).map((page) => page.name.toLocaleLowerCase("fr")))
+  if (!taken.has(name.toLocaleLowerCase("fr"))) return name
+  let number = 2
+  while (taken.has(`${name} ${number}`.toLocaleLowerCase("fr"))) number += 1
+  return `${name} ${number}`
+}
+
 export function readNotebook(value: string): NotebookPage[] {
   const text = value ?? ""
   if (!text.includes("<section data-eraser-page=")) return [{ name: DEFAULT_NOTEBOOK_PAGE, html: text }]
-  const pages = [...text.matchAll(SECTION)].map((match) => ({ name: notebookPageName(unescapeName(match[1])), html: match[2] }))
-  // Du texte hors des pages (écrit à la main dans Sheets) : gardé en tête, dans la première page.
+  // Deux pages du même nom (écrites à la main dans Sheets) : la seconde est renommée, chaque page reste à part.
+  const pages: NotebookPage[] = []
+  for (const match of text.matchAll(SECTION)) pages.push({ name: uniqueNotebookPageName(notebookPageName(unescapeName(match[1])), pages), html: match[2] })
+  // Du texte hors des pages (écrit à la main dans Sheets) : gardé en tête, dans sa propre page.
   const outside = text.replace(SECTION, "").trim()
-  if (outside) pages.unshift({ name: DEFAULT_NOTEBOOK_PAGE, html: outside })
+  if (outside) pages.unshift({ name: uniqueNotebookPageName(DEFAULT_NOTEBOOK_PAGE, pages), html: outside })
   return pages.length ? pages : [{ name: DEFAULT_NOTEBOOK_PAGE, html: "" }]
 }
 

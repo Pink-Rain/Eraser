@@ -154,6 +154,22 @@ test("Étiquettes « { » : les valeurs d'un rangement en onglets deviennent des
   assert.deepEqual(words, ["Attribut", "Matériau"]);
 });
 
+test("Valeur d'une nouvelle ligne : écrite à l'ajout, jamais dans une ligne déplacée", async () => {
+  const id = fresh("places");
+  const headers = definitions.worldIndexDefinitions.places.tabs[0].headers;
+  const tabs = definitions.worldIndexDefinitions.places.tabs.map((tab) => ({ title: tab.name, grid: [tab.headers] }));
+  tabs[0].grid.push(line(headers, { "Nom": "Brume", "ID": "LIE-1" }));
+  google.addSpreadsheet(id, tabs);
+  await link("places", id, tabs[0].title);
+  const [first, second] = tabs.map((tab) => tab.title);
+  await engine.applyWorldSchemaOperations("places", [first, second].map((tab) => ({ op: "spec", tab, header: "Note", spec: { kind: "rich", defaultValue: "À visiter" } })));
+  await engine.addWorldIndexRow("places", first, headers.map((header) => header === "Nom" ? "Val" : ""), headers);
+  assert.equal(byId(google.grid(id, first))[ids(google.grid(id, first))[1]]["Note"], "À visiter");
+  // « Brume » déplacée : sa Note vide reste vide.
+  await engine.moveWorldIndexRows("places", first, second, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]);
+  assert.equal(byId(google.grid(id, second))["LIE-1"]["Note"], "");
+});
+
 test("Supprimer vise la ligne par son identifiant, même décalée ailleurs, sans confondre deux homonymes", async () => {
   const id = await linkCreatures([{ "Nom": "Loup", "Type": "Bête", "ID": "CRE-1" }, { "Nom": "Loup", "Type": "Garou", "ID": "CRE-2" }, { "Nom": "Ours", "Type": "Bête", "ID": "CRE-3" }]);
   const data = await engine.getWorldIndex("creatures", { refresh: true });

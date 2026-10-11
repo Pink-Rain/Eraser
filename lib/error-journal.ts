@@ -29,9 +29,9 @@ function text(value: unknown) {
  */
 const NOT_ERRORS = [
   // Les avertissements de dépréciation de Node (DEP0180 : lu dans l'archive .asar par Electron).
-  /\[DEP\d+\] DeprecationWarning/,
+  /^\(node:\d+\) \[DEP\d+\] DeprecationWarning/,
   // La page a fermé sa connexion (F5, page quittée) avant la fin de la réponse : rien n'a échoué.
-  /ERR_STREAM_UNABLE_TO_PIPE|ERR_STREAM_PREMATURE_CLOSE/,
+  /^\[vinext\] Server error: Error \[ERR_STREAM_(UNABLE_TO_PIPE|PREMATURE_CLOSE)\]/,
 ]
 
 export function isJournaledError(message: string) {

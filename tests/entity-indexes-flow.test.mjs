@@ -328,3 +328,20 @@ test("Sorts des créatures : un sort renommé dans l'index est renommé chez les
   const spells = npcRows[0].indexOf("Sorts actifs");
   assert.deepEqual(npcRows.slice(1).map((row) => row[spells]), ["Morsure profonde", "Soin"]);
 });
+
+test("Sorts des créatures : un nom porté par deux sorts n'est renommé nulle part ; un renommage ne crée pas de doublon", async () => {
+  await (await vite.ssrLoadModule("/lib/data-refresh.ts")).forgetGoogleData();
+  const id = fresh("creatures");
+  google.addSpreadsheet(id, [
+    { title: "Créatures", grid: [["Nom", "Sorts actifs", "ID"], ["Loup", "Soin, Morsure", "CRE-1"], ["Ours", "Morsure, Morsure venimeuse", "CRE-2"]] },
+    { title: "Sorts des créatures", grid: [["ID", "Nom", "Effet", "Description", "Type", "Compétences", "Distance", "Charges"], ["SOR-1", "Soin", "", "", "Actif", "", "", ""], ["SOR-2", "Soin", "", "", "Actif", "", "", ""], ["SOR-3", "Morsure", "", "", "Actif", "", "", ""]] },
+  ]);
+  await link("creatures", id, "Créatures");
+  await engine.getWorldIndex("creature-spells", { refresh: true });
+  // Deux « Soin » : lequel la créature cite-t-elle ? Rien n'est réécrit.
+  await engine.updateWorldIndexCell("creature-spells", "Sorts des créatures", { rowNumber: 2, id: "SOR-1", name: "Soin" }, "Nom", "Soin mineur");
+  assert.equal(google.grid(id, "Créatures")[1][1], "Soin, Morsure");
+  // « Morsure » devient « Morsure venimeuse » : l'Ours ne l'a qu'une fois.
+  await engine.updateWorldIndexCell("creature-spells", "Sorts des créatures", { rowNumber: 4, id: "SOR-3", name: "Morsure" }, "Nom", "Morsure venimeuse");
+  assert.deepEqual(google.grid(id, "Créatures").slice(1).map((row) => row[1]), ["Soin, Morsure venimeuse", "Morsure venimeuse"]);
+});
