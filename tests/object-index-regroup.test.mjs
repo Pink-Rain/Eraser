@@ -62,3 +62,19 @@ test("la copie n'est acceptée que si chaque ligne est identique", () => {
   assert.equal(regroup.copyMismatches(source, [{ rowNumber: 2, values: ["Épée", "#REF!"] }, { rowNumber: 3, values: ["Arc", "Arme"] }], 2).length, 1);
   assert.ok(regroup.copyMismatches(source, [{ rowNumber: 2, values: ["Épée", "Arme"] }], 2)[0].includes("lignes"));
 });
+
+test("Identifiant d'un objet : une seule règle, octet pour octet celle écrite dans les inventaires et les magasins", async () => {
+  const ids = await vite.ssrLoadModule("/lib/object-item-id.ts");
+  // Une ligne sans ID : sa place (classeur, onglet, ligne), exactement comme avant.
+  assert.equal(ids.positionalObjectId("1AbC", 0, 12), "DRIVE-1AbC-0-12");
+  assert.equal(ids.objectItemId("", "1AbC", 1234, "7"), "DRIVE-1AbC-1234-7");
+  assert.equal(ids.objectItemId("  OBJ-1 ", "1AbC", 0, 2), "OBJ-1");
+  assert.equal(regroup.legacyObjectId("1AbC", 0, 12), "DRIVE-1AbC-0-12");
+  // Les magasins gardent leur variante sans « DRIVE- » ; « Donner » et les fouilles la ramènent à celle de l'inventaire.
+  assert.equal(ids.shopObjectId(undefined, "1AbC", 0, 12), "1AbC-0-12");
+  assert.equal(ids.shopObjectId("OBJ-1", "1AbC", 0, 12), "OBJ-1");
+  assert.equal(ids.positionalFromShopObjectId("1AbC-0-12"), ids.positionalObjectId("1AbC", 0, 12));
+  assert.equal(ids.positionalFromShopObjectId("DRIVE-1AbC-0-12"), "DRIVE-1AbC-0-12");
+  assert.equal(ids.isPositionalObjectId("DRIVE-x"), true);
+  assert.equal(ids.isPositionalObjectId("OBJ-1"), false);
+});

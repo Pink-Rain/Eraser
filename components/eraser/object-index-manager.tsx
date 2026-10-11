@@ -42,6 +42,7 @@ import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, ty
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
+import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
 
 // Les fenêtres (« Modifier », guide) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
 const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
@@ -230,7 +231,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     // au premier affichage la préférence est encore vide alors qu'un tableau est choisi.
     const local = selected ? localEdits.current[`${tableKey(selected)}:${rowKey}:${columnKey}`] : undefined
     if (local !== undefined) return local
-    if (columnKey === COMPUTED_ID) return selected ? `DRIVE-${selected.fileId}-${selected.sheetId}-${rowKey}` : ""
+    if (columnKey === COMPUTED_ID) return selected ? positionalObjectId(selected.fileId, selected.sheetId, rowKey) : ""
     const row = selected?.rows.find((candidate) => String(candidate.rowNumber) === rowKey)
     const spec = specs[Number(columnKey)]
     return (spec && !isRichSpec(spec) ? row?.values[Number(columnKey)] : row?.html[Number(columnKey)]) ?? ""
@@ -381,7 +382,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   /** L'identifiant de l'objet pour les inventaires : sa colonne ID, sinon celui que les inventaires lui calculent. */
   const itemIdOf = useCallback((rowKey: string) => {
     const idIndex = specs.findIndex((spec) => spec.kind === "id")
-    return (idIndex >= 0 ? rawOf(rowKey, String(idIndex)).trim() : "") || (selected ? `DRIVE-${selected.fileId}-${selected.sheetId}-${rowKey}` : "")
+    return selected ? objectItemId(idIndex >= 0 ? rawOf(rowKey, String(idIndex)) : "", selected.fileId, selected.sheetId, rowKey) : (idIndex >= 0 ? rawOf(rowKey, String(idIndex)).trim() : "")
   }, [rawOf, selected, specs])
 
   /** Le nom d'une ligne, sans sa mise en forme (lu au clic, pour les fenêtres Envoyer et Déplacer). */

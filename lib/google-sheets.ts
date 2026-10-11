@@ -84,6 +84,7 @@ import {
   type InventorySlotExpectation,
   type InventoryTransferTarget,
 } from "@/lib/inventory-schema"
+import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
 import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOverrides, serializeItemLinks } from "@/lib/item-modifiers"
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
@@ -1983,7 +1984,7 @@ async function freezeObjectIndexRowIds(tables: ObjectIndexTable[]) {
       const written: Array<{ row: ObjectIndexRow; id: string }> = []
       for (const row of missing) {
         if (layout.locate(snapshotRowRef(table, row)) !== row.rowNumber) continue
-        const positional = `DRIVE-${table.fileId}-${table.sheetId}-${row.rowNumber}`
+        const positional = positionalObjectId(table.fileId, table.sheetId, row.rowNumber)
         const id = taken.has(positional) ? crypto.randomUUID() : positional
         taken.add(id)
         written.push({ row, id })
@@ -6781,7 +6782,7 @@ function parseObjectIndexItems(tables: ObjectIndexTable[]): InventoryItemRecord[
   return tables.flatMap((table) => table.rows.flatMap((row) => {
     const name = objectIndexCell(table, row, ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]).trim()
     if (!name) return []
-    const id = objectIndexCell(table, row, ["ID", "Identifiant"]).trim() || `DRIVE-${table.fileId}-${table.sheetId}-${row.rowNumber}`
+    const id = objectItemId(objectIndexCell(table, row, ["ID", "Identifiant"]), table.fileId, table.sheetId, row.rowNumber)
     return [{
       id,
       name,

@@ -8,6 +8,7 @@
 
 /** Le classeur regroupé, dans le dossier « Objets ». */
 export const MERGED_OBJECT_INDEX_NAME = "Index des objets"
+import { positionalObjectId } from "@/lib/object-item-id"
 /** Le sous-dossier de « Objets » où les anciens classeurs sont rangés, intacts. */
 export const OBJECT_INDEX_BACKUP_FOLDER = "Anciens index d’objets (avant regroupement)"
 /** L'onglet caché du classeur regroupé qui garde de quoi annuler. */
@@ -62,7 +63,7 @@ export function regroupedTabNames(sources: RegroupSource[]) {
 
 /** L'identifiant que l'inventaire donne à un objet d'un tableau sans colonne ID. */
 export function legacyObjectId(fileId: string, sheetId: number, rowNumber: number) {
-  return `DRIVE-${fileId}-${sheetId}-${rowNumber}`
+  return positionalObjectId(fileId, sheetId, rowNumber)
 }
 
 const idHeaders = new Set(["id", "identifiant"])

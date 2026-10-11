@@ -1,6 +1,7 @@
 import { listObjectIndexTablesForDisplay, objectCombatFields, objectIndexPrice } from "@/lib/google-sheets"
 import type { ObjectCombatFields } from "@/lib/inventory-schema"
 import { objectLocationColumns } from "@/lib/object-combat"
+import { shopObjectId } from "@/lib/object-item-id"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type ShopKey = "market" | "bookshop" | "antique" | "armory" | "black-market" | "alchemist" | "tavern"
@@ -106,7 +107,7 @@ export async function loadShopGeneratorItems() {
       .filter((location) => location.rarity.trim() && location.place.trim())
     if (!locations.length) return []
     return [{
-      id: cell(table.headers, row.values, ["ID", "Identifiant"]).trim() || `${table.fileId}-${table.sheetId}-${row.rowNumber}`,
+      id: shopObjectId(cell(table.headers, row.values, ["ID", "Identifiant"]), table.fileId, table.sheetId, row.rowNumber),
       name,
       description: cell(table.headers, row.values, ["Description", "Déscription"]),
       effect: cell(table.headers, row.values, ["Effet", "Effets", "Propriété", "Propriete"]),

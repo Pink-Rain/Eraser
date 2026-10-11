@@ -27,6 +27,7 @@ import { listIndexLayouts } from "@/lib/index-layouts-store"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { isBuiltinWorldIndexKey, isEntityWorldIndexKey, isNameColumn, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
+import { objectItemId } from "@/lib/object-item-id"
 
 /**
  * Un index qu'on peut citer. `entity` : personnages, campagnes, PNJs, classes, sorts (leurs
@@ -78,7 +79,7 @@ async function worldSource(key: WorldIndexKey): Promise<Source> {
 /** L'identifiant d'un objet, le même que celui de l'inventaire (ID de la ligne, sinon sa place). */
 export function objectReferenceId(table: Pick<ObjectIndexTable, "fileId" | "sheetId" | "headers">, row: { rowNumber: number; values: string[] }) {
   const id = columnAt(table.headers, ["ID", "Identifiant"])
-  return (id >= 0 ? (row.values[id] ?? "").trim() : "") || `DRIVE-${table.fileId}-${table.sheetId}-${row.rowNumber}`
+  return objectItemId(id >= 0 ? row.values[id] : "", table.fileId, table.sheetId, row.rowNumber)
 }
 
 async function objectSource(): Promise<Source> {

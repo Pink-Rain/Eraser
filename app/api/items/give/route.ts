@@ -6,6 +6,7 @@ import type { GiveDestination } from "@/lib/inventory-schema"
 import { notifyItemReceived } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 import { listTabletopSourcePages } from "@/lib/tabletop-access"
+import { isPositionalObjectId, positionalFromShopObjectId } from "@/lib/object-item-id"
 
 /** Les campagnes du compte (toutes pour l'administrateur, les siennes pour un MJ), sans le bac à sable. */
 async function campaignsOf(account: NonNullable<Awaited<ReturnType<typeof authorizedAccount>>>) {
@@ -56,8 +57,8 @@ export async function POST(request: Request) {
       result = await addCharacterInventoryItem(target.id, body.itemId, undefined, mode)
     } catch (error) {
       // Un objet sans colonne ID a deux identifiants selon qu'il vient des magasins ou des inventaires.
-      if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || body.itemId.startsWith("DRIVE-")) throw error
-      result = await addCharacterInventoryItem(target.id, `DRIVE-${body.itemId}`, undefined, mode)
+      if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || isPositionalObjectId(body.itemId)) throw error
+      result = await addCharacterInventoryItem(target.id, positionalFromShopObjectId(body.itemId), undefined, mode)
     }
     const landedOnGround = Boolean(result.landedOnGround)
     const itemName = typeof body.itemName === "string" ? body.itemName.trim().slice(0, 200) : ""

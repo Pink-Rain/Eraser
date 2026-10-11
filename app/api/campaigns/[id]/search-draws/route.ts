@@ -4,6 +4,7 @@ import { addCharacterInventoryItem, getCampaignDashboard, listInventoryTransferT
 import { notifyItemReceived } from "@/lib/item-notifications"
 import { authorizedAccount } from "@/lib/server-auth"
 import { readSearchDraws, searchDrawsShared, writeSearchDraws } from "@/lib/search-draws-store"
+import { isPositionalObjectId, positionalFromShopObjectId } from "@/lib/object-item-id"
 
 async function authorizedCampaign(id: string) {
   const account = await authorizedAccount(["admin", "mj"])
@@ -41,8 +42,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
       try {
         await addCharacterInventoryItem(target.id, body.itemId, undefined, mode)
       } catch (error) {
-        if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || body.itemId.startsWith("DRIVE-")) throw error
-        await addCharacterInventoryItem(target.id, `DRIVE-${body.itemId}`, undefined, mode)
+        if (!(error instanceof Error) || error.message !== "INVENTORY_ITEM_NOT_FOUND" || isPositionalObjectId(body.itemId)) throw error
+        await addCharacterInventoryItem(target.id, positionalFromShopObjectId(body.itemId), undefined, mode)
       }
       // Le nom affiché vient du tirage : il ne sert qu'au texte de la notification.
       const itemName = typeof body.itemName === "string" ? body.itemName.trim().slice(0, 200) : ""
