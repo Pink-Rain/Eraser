@@ -17,7 +17,7 @@ import {
   parseSearchDraws,
   rarityForRoll,
   searchPlaces,
-  searchPlacesIn,
+  searchPlaceMatcher,
   searchRarityFrom,
   searchRarityLabels,
   searchResults,
@@ -46,7 +46,7 @@ const resultStyles: Record<SearchResult, { button: string; badge: string }> = {
 const richText = "[&_a]:underline [&_li]:ml-5 [&_ol]:list-decimal [&_ul]:list-disc"
 
 function isPlace(value: unknown): value is SearchPlace {
-  return typeof value === "string" && (searchPlaces as readonly string[]).includes(value)
+  return typeof value === "string" && value.length > 0
 }
 
 function d100() {
@@ -73,7 +73,8 @@ type Catalog = {
  * Le catalogue est rangé une fois pour toutes par lieu et par rareté : un tirage n'est
  * ensuite qu'une lecture, sans attendre le réseau.
  */
-function buildCatalog(items: ShopGeneratorItem[]): Catalog {
+function buildCatalog(items: ShopGeneratorItem[], places: readonly string[]): Catalog {
+  const placesIn = searchPlaceMatcher(places)
   const byId = new Map<string, ShopGeneratorItem>()
   const byPlace = new Map<SearchPlace, Map<ShopRarity, ShopGeneratorItem[]>>()
   const byRarity = new Map<ShopRarity, ShopGeneratorItem[]>()
@@ -83,7 +84,7 @@ function buildCatalog(items: ShopGeneratorItem[]): Catalog {
     for (const location of item.locations) {
       const rarity = searchRarityFrom(location.rarity)
       if (!rarity) continue
-      for (const place of searchPlacesIn(location.place)) {
+      for (const place of placesIn(location.place)) {
         rarities.add(rarity)
         const forPlace = byPlace.get(place) ?? new Map<ShopRarity, ShopGeneratorItem[]>()
         const pool = forPlace.get(rarity) ?? []
@@ -197,11 +198,13 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
  * l'objet sont tirés sur place, sans attendre le réseau ; les 20 derniers tirages (et
  * ceux qu'on épingle) sont enregistrés en arrière-plan.
  */
-export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavailable = false, loadError }: { campaignId: string; items: ShopGeneratorItem[]; initialDraws: SearchDraw[] | null; drawsUnavailable?: boolean; loadError: string }) {
-  const catalog = useMemo(() => buildCatalog(items), [items])
+export function SearchGenerator({ campaignId, items, places = searchPlaces, initialDraws, drawsUnavailable = false, loadError }: { campaignId: string; items: ShopGeneratorItem[]; /** Les lieux de Lieux › Environnement. */ places?: readonly string[]; initialDraws: SearchDraw[] | null; drawsUnavailable?: boolean; loadError: string }) {
+  const catalog = useMemo(() => buildCatalog(items, places), [items, places])
   const shared = initialDraws !== null
   const localKey = `eraser:fouilles:${campaignId}`
-  const [place, setPlace] = usePersistentState<SearchPlace>(`eraser:fouilles:place:${campaignId}`, "Forêt", isPlace)
+  const [storedPlace, setPlace] = usePersistentState<SearchPlace>(`eraser:fouilles:place:${campaignId}`, places[0] ?? "Forêt", isPlace)
+  // Un lieu retiré ou renommé dans Lieux › Environnement : on reprend le premier de la liste.
+  const place = places.includes(storedPlace) ? storedPlace : places[0] ?? storedPlace
   const [draws, setDraws] = useState<SearchDraw[]>(initialDraws ?? [])
   const [freshId, setFreshId] = useState("")
   const [saveState, setSaveState] = useState<"idle" | "saving" | "saved" | "error">("idle")
@@ -334,7 +337,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavaila
     <section className="rounded-2xl border bg-card/70 p-4 shadow-sm sm:p-5">
       <p className="text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Lieu de fouille</p>
       <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Lieu de fouille">
-        {searchPlaces.map((candidate) => {
+        {places.map((candidate) => {
           const count = [...(catalog.byPlace.get(candidate)?.values() ?? [])].reduce((sum, pool) => sum + pool.length, 0)
           return <button key={candidate} type="button" role="radio" aria-checked={candidate === place} onClick={() => setPlace(candidate)} title={`${count} item${count > 1 ? "s" : ""} répertorié${count > 1 ? "s" : ""} ici`} className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${candidate === place ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"} ${count ? "" : "opacity-60"}`}>{candidate}</button>
         })}

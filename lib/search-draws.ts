@@ -35,12 +35,17 @@ export const searchTables: Record<SearchResult, Array<{ min: number; max: number
   ],
 }
 
+/**
+ * Les lieux de fouille d'origine : ceux de l'onglet « Environnement » de l'Index des lieux les
+ * remplacent dès qu'il est lu (un lieu renommé ou supprimé là l'est aussi ici).
+ */
 export const searchPlaces = [
   "Marais", "Désert", "Savane", "Forêt", "Forêt noire", "Jungle", "Plaine", "Montagne", "Caverne",
   "Ville", "Aquatique", "Ruine / donjon", "Maison", "Maison noble", "Bateau", "Corps", "Corps noble",
-] as const
+]
 
-export type SearchPlace = typeof searchPlaces[number]
+/** Un lieu de fouille : un nom de l'onglet Lieux › Environnement. */
+export type SearchPlace = string
 
 export const searchRarityLabels: Record<ShopRarity, string> = { "very-common": "Très commun", common: "Commun", rare: "Rare", "very-rare": "Très rare", ultimate: "Ultime" }
 
@@ -64,33 +69,36 @@ export function searchRarityFrom(value: string): ShopRarity | null {
   return null
 }
 
+// Les mots écrits autrement dans les emplacements des items.
+const placeAliases: Record<string, string> = { grotte: "caverne", grottes: "caverne", navire: "bateau", navires: "bateau", cadavre: "corps", cadavres: "corps", ruine: "donjon", ruines: "donjon" }
+/** « nobles », « noble », « noir », « noire » : un mot sans son s ni son e final. */
+function placeWord(word: string) { return (placeAliases[word] ?? word).replace(/s$/, "").replace(/e$/, "") }
+function placeWords(value: string) { return foldSearchText(value).split(" ").filter(Boolean).map(placeWord) }
+
 /**
- * Un emplacement de l'index des objets est une liste : « Marais - Désert - Forêt
- * ordinaire - Forêt noire ». Chaque morceau est comparé seul, pour que « Forêt » ne
- * trouve pas la forêt noire, ni « Maison » la maison noble.
+ * Qui reconnaît les lieux de fouille dans un emplacement d'item. Un emplacement est une liste
+ * (« Marais - Désert - Forêt noire ») ; chaque morceau va au lieu dont tous les mots y sont,
+ * le plus précis l'emportant (« Forêt noire » plutôt que « Forêt », « Maison noble » plutôt
+ * que « Maison »).
  */
-export function searchPlacesIn(value: string): SearchPlace[] {
-  const found = new Set<SearchPlace>()
-  for (const part of value.split(/\s+[-–—]\s+|[,;\n]+/)) {
-    const folded = foldSearchText(part)
-    if (!folded) continue
-    const noble = /\bnobles?\b/.test(folded)
-    if (folded.includes("marais")) found.add("Marais")
-    if (folded.includes("desert")) found.add("Désert")
-    if (folded.includes("savane")) found.add("Savane")
-    if (folded.includes("foret")) found.add(/\bnoire?s?\b/.test(folded) ? "Forêt noire" : "Forêt")
-    if (folded.includes("jungle")) found.add("Jungle")
-    if (folded.includes("plaine")) found.add("Plaine")
-    if (folded.includes("montagne")) found.add("Montagne")
-    if (folded.includes("cavern") || folded.includes("grotte")) found.add("Caverne")
-    if (/\bville\b/.test(folded)) found.add("Ville")
-    if (folded.includes("aquatique")) found.add("Aquatique")
-    if (folded.includes("ruine") || folded.includes("donjon")) found.add("Ruine / donjon")
-    if (folded.includes("maison")) found.add(noble ? "Maison noble" : "Maison")
-    if (folded.includes("bateau") || folded.includes("navire")) found.add("Bateau")
-    if (/\bcorps\b/.test(folded) || folded.includes("cadavre")) found.add(noble ? "Corps noble" : "Corps")
+export function searchPlaceMatcher(places: readonly string[]) {
+  const known = places.map((place) => ({ place, words: placeWords(place) })).filter((entry) => entry.words.length)
+  return (value: string): SearchPlace[] => {
+    const found = new Set<SearchPlace>()
+    for (const part of value.split(/\s+[-–—]\s+|\s*-\s*\n|[,;\n]+|\s+-$|^-\s+/)) {
+      const words = new Set(placeWords(part))
+      if (!words.size) continue
+      const matches = known.filter((entry) => entry.words.every((word) => words.has(word)))
+      const longest = Math.max(0, ...matches.map((entry) => entry.words.length))
+      for (const entry of matches) if (entry.words.length === longest) found.add(entry.place)
+    }
+    return [...found]
   }
-  return [...found]
+}
+
+/** Les lieux de fouille d'origine trouvés dans un emplacement (sans l'onglet Environnement). */
+export function searchPlacesIn(value: string, places: readonly string[] = searchPlaces): SearchPlace[] {
+  return searchPlaceMatcher(places)(value)
 }
 
 /** Un tirage tel qu'il est gardé : l'objet est relu dans le catalogue par son identifiant. */
@@ -123,7 +131,6 @@ export function keepSearchDraws(draws: SearchDraw[]) {
 }
 
 const resultKeys = new Set<string>(searchResults.map((result) => result.key))
-const placeKeys = new Set<string>(searchPlaces)
 const rarityKeys = new Set<string>(Object.keys(searchRarityLabels))
 
 function text(value: unknown, max: number) {
@@ -138,12 +145,12 @@ export function parseSearchDraws(value: unknown): SearchDraw[] {
     const draw = candidate as Record<string, unknown>
     const id = text(draw.id, 80)
     const roll = Number(draw.roll)
-    if (!id || !resultKeys.has(String(draw.result)) || !placeKeys.has(String(draw.place)) || !rarityKeys.has(String(draw.rarity)) || !Number.isInteger(roll) || roll < 1 || roll > 100) return []
+    if (!id || !resultKeys.has(String(draw.result)) || !text(draw.place, 120).trim() || !rarityKeys.has(String(draw.rarity)) || !Number.isInteger(roll) || roll < 1 || roll > 100) return []
     return [{
       id,
       at: text(draw.at, 40) || new Date(0).toISOString(),
       result: draw.result as SearchResult,
-      place: draw.place as SearchPlace,
+      place: text(draw.place, 120).trim(),
       roll,
       rarity: draw.rarity as ShopRarity,
       itemId: text(draw.itemId, 300),

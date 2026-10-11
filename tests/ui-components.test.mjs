@@ -194,6 +194,25 @@ test("Types de magasin : le plus précis l'emporte, types/sous-types filtrés, t
   assert.equal(pickedShopItem(entry("cheval", "Maquignon", { type: "Monture", source: "creatures" }), "maquignon", catalog).rarity, "common");
 });
 
+test("Fouilles : les lieux viennent de Lieux › Environnement, reconnus même mal écrits, le plus précis l'emporte", async () => {
+  const { searchPlaceMatcher, searchPlacesIn, parseSearchDraws } = await vite.ssrLoadModule("/lib/search-draws.ts");
+  // L'onglet Environnement tel qu'il est dans le Drive.
+  const environment = ["Forêt", "Forêt noire", "Corps", "Corps noble", "Jungle", "Marais", "Désert", "Savane", "Plaine", "Montagne", "Caverne", "Ville", "Aquatique", "Donjon", "Maison", "Maison noble", "Bateau", "Tropique"];
+  const match = searchPlaceMatcher(environment);
+  assert.deepEqual(match("Marais - Désert - Savane - Forêt ordinaire - Forêt noire - Jungle"), ["Marais", "Désert", "Savane", "Forêt", "Forêt noire", "Jungle"]);
+  assert.deepEqual(match("Forêt noir - Plaine - Marais"), ["Forêt noire", "Plaine", "Marais"]);
+  assert.deepEqual(match("Maison ordinaire -\nCorps ordinaire - Corps Noble"), ["Maison", "Corps", "Corps noble"]);
+  assert.deepEqual(match("Maison noble - Corps noble "), ["Maison noble", "Corps noble"]);
+  assert.deepEqual(match("Ville/Rue"), ["Ville"]);
+  assert.deepEqual(match("Ruines - grotte - navire"), ["Donjon", "Caverne", "Bateau"]);
+  assert.deepEqual(match("Marché ordinaire"), []);
+  // Un lieu ajouté dans l'onglet est trouvé aussitôt ; sans l'onglet, la liste d'origine sert.
+  assert.deepEqual(match("Tropique"), ["Tropique"]);
+  assert.deepEqual(searchPlacesIn("Donjon - Forêt noire"), ["Ruine / donjon", "Forêt noire"]);
+  // Un tirage gardé sous un lieu renommé depuis reste lisible.
+  assert.equal(parseSearchDraws([{ id: "d1", result: "success", place: "Ruine / donjon", roll: 12, rarity: "rare" }]).length, 1);
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),

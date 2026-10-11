@@ -8,17 +8,20 @@ import { getCampaignDashboard } from "@/lib/google-sheets"
 import { readSearchDraws } from "@/lib/search-draws-store"
 import { authorizedAccount } from "@/lib/server-auth"
 import { loadShopGeneratorItems } from "@/lib/shop-schema"
+import { loadSearchPlaces } from "@/lib/search-places-server"
 
 export const dynamic = "force-dynamic"
 
 async function CampaignSearchData({ campaignId }: { campaignId: string }) {
-  const [items, draws] = await Promise.all([
+  const [items, draws, places] = await Promise.all([
     loadShopGeneratorItems().catch(() => null),
     readSearchDraws(campaignId).catch(() => "error" as const),
+    loadSearchPlaces(),
   ])
   return <SearchGenerator
     campaignId={campaignId}
     items={items ?? []}
+    places={places}
     initialDraws={draws === "error" ? [] : draws}
     drawsUnavailable={draws === "error"}
     loadError={items ? "" : "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."}
