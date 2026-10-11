@@ -5,6 +5,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { SessionCreator } from "@/components/eraser/session-creator"
 import { listCampaignSessions } from "@/lib/campaign-sessions"
+import { listCampaignEvents } from "@/lib/campaign-events"
 import { getCampaignDashboard, listCampaignMembers, listNpcs, listSavedShops } from "@/lib/google-sheets"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import { loadShopGeneratorData } from "@/lib/shop-types-server"
@@ -13,12 +14,14 @@ import { authorizedAccount } from "@/lib/server-auth"
 export const dynamic = "force-dynamic"
 
 async function SessionCreatorData({ campaignId, sessionId }: { campaignId: string; sessionId: string }) {
-  const [sessions, members, shops, npcs, generator] = await Promise.all([
+  const [sessions, members, shops, npcs, generator, events] = await Promise.all([
     listCampaignSessions(campaignId),
     listCampaignMembers(campaignId),
     listSavedShops(campaignId),
     listNpcs(campaignId),
     loadShopGeneratorData(),
+    // Illisible ou pas encore créée : la section Événements reste vide, le reste s'affiche.
+    listCampaignEvents(campaignId).catch(() => []),
   ])
   const selected = sessions.some((session) => session.id === sessionId) ? sessionId : sessions.at(-1)?.id || ""
   return <SessionCreator
@@ -37,6 +40,7 @@ async function SessionCreatorData({ campaignId, sessionId }: { campaignId: strin
     shops={shops}
     generatorItems={generator.items ?? []}
     shopTypes={generator.catalog.types}
+    events={events}
   />
 }
 

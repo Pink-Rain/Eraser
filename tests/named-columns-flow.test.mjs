@@ -387,21 +387,41 @@ test("Relations, sessions, vocabulaire et to-do : lus et écrits par nom de colo
   assert.equal(record(sessionRows, 1)["ID campagne"], "CAMP-1");
   // Lieux, Document et Événements : colonnes ajoutées à droite, les anciennes ne bougent pas.
   assert.deepEqual(sessionRows[0].slice(0, 10), ["Titre", "ID", "ID campagne", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"]);
-  await sessionsModule.updateSessionTexts("CAMP-1", session.id, { places: "<p>Brume</p>", document: "<p>Texte lu</p>" });
-  const withEvents = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { add: [
-    { id: "EV-1", kind: "creature", refId: "CRE-1", name: "Loup", icon: "", image: "/api/resources/creature-portraits/abc", tag: "", tagColor: "", description: "" },
-    { id: "EV-2", kind: "other", refId: "", name: "Orage", icon: "CloudLightning", image: "javascript:alert(1)", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée." },
-    { id: "EV-3", kind: "inconnu", name: "Rejeté" },
-  ] });
-  assert.deepEqual(withEvents.events.map((event) => [event.id, event.kind, event.image]), [["EV-1", "creature", "/api/resources/creature-portraits/abc"], ["EV-2", "other", ""]]);
-  await sessionsModule.updateSessionEvents("CAMP-1", session.id, { update: [{ ...withEvents.events[1], tag: "Danger" }], order: ["EV-2", "EV-1"] });
+  await sessionsModule.updateSessionTexts("CAMP-1", session.id, { places: "<p>Brume</p>" });
+  // Les événements se préparent dans la page Événements (leur feuille) ; la session garde leurs identifiants.
+  const eventsModule = await vite.ssrLoadModule("/lib/campaign-events.ts");
+  const eventsSheet = fresh("events");
+  google.addSpreadsheet(eventsSheet, [{ title: "Événements", grid: [["Nom", "ID", "ID campagne", "Type"]] }]);
+  await link("campaign_events", eventsSheet, "Événements");
+  const wolf = await eventsModule.saveCampaignEvent("CAMP-1", { id: "EV-1", kind: "creature", refId: "CRE-1", name: "Loup", icon: "", image: "/api/resources/index-images/abc", tag: "", tagColor: "", description: "" }, "uid-1");
+  const storm = await eventsModule.saveCampaignEvent("CAMP-1", { id: "EV-2", kind: "other", name: "Orage", icon: "cloud-lightning", image: "javascript:alert(1)", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée." }, "uid-1");
+  assert.equal(storm.image, "");
+  await assert.rejects(eventsModule.saveCampaignEvent("CAMP-1", { id: "EV-3", kind: "inconnu", name: "Rejeté" }, "uid-1"), /INVALID_EVENT/);
+  await assert.rejects(eventsModule.saveCampaignEvent("CAMP-2", { ...wolf, name: "Volé" }, "uid-2"), /EVENT_NOT_FOUND/);
+  await eventsModule.saveCampaignEvent("CAMP-1", { ...storm, tag: "Danger" }, "uid-2");
+  const eventRows = google.grid(eventsSheet, "Événements");
+  // Les colonnes de la feuille gardent leur place ; les autres s'ajoutent à droite.
+  assert.deepEqual(eventRows[0].slice(0, 4), ["Nom", "ID", "ID campagne", "Type"]);
+  assert.equal(record(eventRows, 2)["Étiquette"], "Danger");
+  assert.equal(record(eventRows, 2)["Créé par"], "uid-1");
+  assert.deepEqual((await eventsModule.listCampaignEvents("CAMP-1")).map((event) => [event.id, event.tag]), [["EV-1", ""], ["EV-2", "Danger"]]);
+  const withEvents = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { add: ["EV-1", "EV-2", "shop:SHOP-9", "EV-1"] });
+  assert.deepEqual(withEvents.eventIds, ["EV-1", "EV-2", "shop:SHOP-9"]);
   const reread = (await sessionsModule.listCampaignSessions("CAMP-1"))[0];
   assert.equal(reread.places, "<p>Brume</p>");
-  assert.equal(reread.document, "<p>Texte lu</p>");
-  assert.deepEqual(reread.events.map((event) => [event.id, event.tag]), [["EV-2", "Danger"], ["EV-1", ""]]);
+  assert.deepEqual(reread.eventIds, ["EV-1", "EV-2", "shop:SHOP-9"]);
   assert.equal(record(google.grid(sessions, "Sessions"), 1)["Titre"], "Prologue");
   const removed = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { remove: ["EV-2"] });
-  assert.deepEqual(removed.events.map((event) => event.id), ["EV-1"]);
+  assert.deepEqual(removed.eventIds, ["EV-1", "shop:SHOP-9"]);
+  await eventsModule.deleteCampaignEvent("CAMP-1", "EV-2");
+  assert.deepEqual((await eventsModule.listCampaignEvents("CAMP-1")).map((event) => event.id), ["EV-1"]);
+  // Les événements complets écrits par l'alpha 193 restent lisibles et retirables.
+  const legacyRow = google.grid(sessions, "Sessions")[1];
+  legacyRow[google.grid(sessions, "Sessions")[0].indexOf("Événements (JSON)")] = JSON.stringify([{ id: "OLD-1", kind: "other", name: "Ancien", icon: "", tag: "", tagColor: "", description: "" }, "EV-1"]);
+  const legacy = (await sessionsModule.listCampaignSessions("CAMP-1"))[0];
+  assert.deepEqual([legacy.legacyEvents.map((event) => event.name), legacy.eventIds], [["Ancien"], ["EV-1"]]);
+  const cleaned = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { remove: ["OLD-1"] });
+  assert.deepEqual([cleaned.legacyEvents, cleaned.eventIds], [[], ["EV-1"]]);
 
   const vocabularyModule = await vite.ssrLoadModule("/lib/vocabulary.ts");
   const vocabulary = fresh("vocabulary");

@@ -546,10 +546,11 @@ test("renders the session creator with its sections", async () => {
   const { SessionCreator } = await vite.ssrLoadModule("/components/eraser/session-creator.tsx");
   const member = { id: "char-1", name: "Aelis", people: "Elfe", classes: "Rôdeuse", level: "3", honoraryTitle: "" };
   const npc = { id: "npc-1", pageLinked: "camp-1", name: "Basile Orme", title: "", occupation: "Forgeron", people: "", portrait: "", currentHp: 10, totalHp: 20, speed: 10, constitution: 1, strength: 1, dexterity: 1, intelligence: 1, wisdom: 1, charisma: 1, playerNotes: "", gmNotes: "", inCampaign: true, important: false, createdByUid: "", createdAt: "2026-01-01", updatedAt: "" };
-  const session = { id: "s-1", campaignId: "camp-1", name: "Le col des brumes", bannerUrl: "", characterIds: ["char-1"], npcIds: ["npc-1"], shopIds: [], createdByUid: "", createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "", places: "<p>Port-Brume</p>", document: "", events: [{ id: "ev-1", kind: "other", refId: "", name: "Orage sur le col", icon: "CloudLightning", image: "", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée." }] };
+  const session = { id: "s-1", campaignId: "camp-1", name: "Le col des brumes", bannerUrl: "", characterIds: ["char-1"], npcIds: ["npc-1"], shopIds: [], createdByUid: "", createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "", places: "<p>Port-Brume</p>", document: "", eventIds: ["ev-1"], legacyEvents: [] };
+  const events = [{ id: "ev-1", campaignId: "camp-1", kind: "other", refId: "", name: "Orage sur le col", icon: "cloud-lightning", image: "", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée.", createdByUid: "", createdAt: "", updatedAt: "" }];
   const { AppRouterContext } = createRequire(import.meta.url)("next/dist/shared/lib/app-router-context.shared-runtime.js");
   const router = { push() {}, replace() {}, refresh() {}, prefetch() {}, back() {}, forward() {} };
-  const render = (sessions) => renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: router }, React.createElement(SessionCreator, { campaignId: "camp-1", initialSessions: sessions, initialSessionId: sessions[0]?.id || "", members: [member], npcs: [npc], shops: [], generatorItems: [] })));
+  const render = (sessions) => renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: router }, React.createElement(SessionCreator, { campaignId: "camp-1", initialSessions: sessions, initialSessionId: sessions[0]?.id || "", members: [member], npcs: [npc], shops: [], generatorItems: [], events })));
 
   const empty = render([]);
   assert.match(empty, /Aucune session/);
@@ -562,12 +563,12 @@ test("renders the session creator with its sections", async () => {
   assert.match(html, /Ajouter un PNJ/);
   assert.match(html, /Ajouter un marché/);
   assert.match(html, /Lieux de la session/);
-  assert.match(html, />Document</);
+  assert.doesNotMatch(html, />Document</);
   assert.match(html, /Événements/);
   assert.match(html, /Orage sur le col/);
   assert.match(html, /Météo/);
   assert.match(html, /Ajouter un événement/);
-  assert.match(html, /Envoyer Orage sur le col dans une autre session/);
+  assert.match(html, /Envoyer dans une autre session \(il reste aussi dans celle-ci\) : Orage sur le col/);
   assert.match(html, /Envoyer Basile Orme dans une autre session/);
 });
 

@@ -629,6 +629,7 @@ export function AppShell({
                         <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
                         <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
                         <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
+                        <NavSubLink nested href={`${campaignHref}/document`} label="Document" active={pathname === `${campaignHref}/document`} />
                       </>
                     })()}
                   </NavSection>

@@ -41,9 +41,15 @@ export type CampaignSessionRecord = {
   updatedAt: string
   /** Les lieux de la session, notés à la main (texte mis en forme). */
   places: string
-  /** La page « Document », à remplir librement (texte mis en forme). */
+  /** Ancienne page « Document » de l'alpha 193 : gardée dans la feuille, plus affichée. */
   document: string
-  events: SessionEvent[]
+  /**
+   * Les événements envoyés dans la session (page Événements) : l'identifiant d'un
+   * événement de campagne, ou « shop:ID » pour un marché ambulant (feuille Magasins).
+   */
+  eventIds: string[]
+  /** Événements écrits en entier dans la session par l'alpha 193 : affichés et retirables. */
+  legacyEvents: SessionEvent[]
 }
 
 /**
@@ -90,16 +96,24 @@ export function cleanSessionEvent(value: unknown): SessionEvent | null {
   return event.name || event.refId ? event : null
 }
 
-/** Les événements (JSON) ; `strict` pour une écriture : une case illisible n'est pas une liste vide. */
-function eventList(value: string | undefined, strict = false) {
+/**
+ * Les événements (JSON) : des identifiants, et les événements complets de l'alpha 193.
+ * `strict` pour une écriture : une case illisible n'est pas une liste vide.
+ */
+function eventList(value: string | undefined, strict = false): { ids: string[]; legacy: SessionEvent[] } {
   try {
     const parsed = JSON.parse(value || "[]") as unknown
     if (!Array.isArray(parsed)) throw new Error("NOT_A_LIST")
-    return parsed.flatMap((item) => cleanSessionEvent(item) ?? [])
+    const ids = parsed.filter((item): item is string => typeof item === "string" && item.length > 0 && item.length <= 220)
+    return { ids: [...new Set(ids)], legacy: parsed.flatMap((item) => typeof item === "object" ? cleanSessionEvent(item) ?? [] : []) }
   } catch {
     if (strict) throw new Error("SESSION_LISTS_UNREADABLE")
-    return []
+    return { ids: [], legacy: [] }
   }
+}
+
+function eventsJson(session: Pick<CampaignSessionRecord, "eventIds" | "legacyEvents">) {
+  return JSON.stringify([...session.legacyEvents, ...session.eventIds])
 }
 
 export type SessionMembership = { characterIds?: string[]; npcIds?: string[]; shopIds?: string[] }
@@ -138,7 +152,7 @@ function sessionFromRow(row: string[], strict = false): CampaignSessionRecord | 
     updatedAt: row[9] || "",
     places: row[10] || "",
     document: row[11] || "",
-    events: eventList(row[12], strict),
+    ...(() => { const events = eventList(row[12], strict); return { eventIds: events.ids, legacyEvents: events.legacy } })(),
   }
 }
 
@@ -154,7 +168,7 @@ function sessionCells(change: Partial<CampaignSessionRecord>) {
   if (change.updatedAt !== undefined) cells["Modifiée le"] = change.updatedAt
   if (change.places !== undefined) cells["Lieux de la session"] = change.places
   if (change.document !== undefined) cells["Document"] = change.document
-  if (change.events !== undefined) cells["Événements (JSON)"] = JSON.stringify(change.events)
+  if (change.eventIds !== undefined && change.legacyEvents !== undefined) cells["Événements (JSON)"] = eventsJson({ eventIds: change.eventIds, legacyEvents: change.legacyEvents })
   return cells
 }
 
@@ -163,7 +177,7 @@ function sessionRow(session: CampaignSessionRecord) {
     session.id, session.campaignId, session.name, session.bannerUrl,
     JSON.stringify(session.characterIds), JSON.stringify(session.npcIds), JSON.stringify(session.shopIds),
     session.createdByUid, session.createdAt, session.updatedAt,
-    session.places, session.document, JSON.stringify(session.events),
+    session.places, session.document, eventsJson(session),
   ]
 }
 
@@ -272,7 +286,8 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     updatedAt: now,
     places: "",
     document: "",
-    events: [],
+    eventIds: [],
+    legacyEvents: [],
   }
   const sheet = await sessionsSheet()
   // Deux créations simultanées ne prennent pas la même ligne libre.
@@ -305,26 +320,16 @@ export async function updateSessionTexts(campaignId: string, sessionId: string, 
 }
 
 /**
- * Ajoute, modifie, retire ou réordonne des événements, appliqués à la liste relue juste
- * avant d'écrire : un ajout fait ailleurs entre-temps n'est pas perdu.
+ * Ajoute ou retire des événements (leurs identifiants), appliqués à la liste relue juste
+ * avant d'écrire : un ajout fait ailleurs entre-temps n'est pas perdu. Retirer vaut aussi
+ * pour un événement complet de l'alpha 193.
  */
-export async function updateSessionEvents(campaignId: string, sessionId: string, change: { add?: SessionEvent[]; update?: SessionEvent[]; remove?: string[]; order?: string[] }) {
+export async function updateSessionEvents(campaignId: string, sessionId: string, change: { add?: string[]; remove?: string[] }) {
   return updateSession(campaignId, sessionId, (session) => {
     const removed = new Set(change.remove ?? [])
-    // Nettoyés ici aussi : ce qui s'écrit dans la feuille ne dépend pas de l'appelant.
-    const clean = (list: unknown[] = []) => list.flatMap((event) => cleanSessionEvent(event) ?? [])
-    const updates = new Map(clean(change.update).map((event) => [event.id, event]))
-    let events = session.events.filter((event) => !removed.has(event.id)).map((event) => updates.get(event.id) ?? event)
-    const known = new Set(events.map((event) => event.id))
-    events = [...events, ...clean(change.add).map((event) => known.has(event.id) ? { ...event, id: crypto.randomUUID() } : event)]
-    if (change.order?.length) {
-      const rank = new Map(change.order.map((id, index) => [id, index]))
-      events = [...events].sort((left, right) => (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER))
-    }
-    events = events.slice(0, 200)
-    // Une case de Google Sheets garde 50 000 caractères au plus.
-    if (JSON.stringify(events).length > 45_000) throw new Error("SESSION_EVENTS_TOO_LONG")
-    return { events }
+    const eventIds = [...new Set([...session.eventIds, ...(change.add ?? [])])].filter((id) => !removed.has(id)).slice(0, 300)
+    const legacyEvents = session.legacyEvents.filter((event) => !removed.has(event.id))
+    return { eventIds, legacyEvents }
   }, { lists: true })
 }
 

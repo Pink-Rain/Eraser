@@ -33,6 +33,7 @@ const campaignPages: Record<string, string> = {
   "roll20": "Roll20",
   "lieux-et-rencontres": "Créateur de session",
   "evenements": "Événements",
+  "document": "Document",
   "magasin-et-fouille": "Magasins",
   "fouilles": "Fouilles",
   "pnjs": "PNJs",

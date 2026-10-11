@@ -3263,6 +3263,7 @@ export type StructuredSheetDefinition = {
 const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
 // Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
+export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
 export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)"]
 
 const npcSheetColumnWidths = [
@@ -3388,6 +3389,16 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     frozenColumns: 3,
     headers: sessionSheetHeaders,
     columnWidths: [180, 180, 260, 320, 320, 320, 320, 190, 170, 170],
+  },
+  {
+    // Les événements préparés d'une campagne (page Événements) : créatures, PNJs génériques,
+    // événements libres. Les marchés ambulants restent dans la feuille Magasins.
+    key: "campaign_events",
+    name: "Événements de campagne",
+    tabName: "Événements",
+    frozenColumns: 3,
+    headers: campaignEventSheetHeaders,
+    columnWidths: [180, 180, 140, 180, 240, 140, 320, 160, 110, 420, 190, 170, 170],
   },
   {
     key: "tabletop",

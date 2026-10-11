@@ -1,11 +1,25 @@
+import { Suspense } from "react"
 import { notFound, redirect } from "next/navigation"
-import { CalendarDays } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { getCampaignDashboard } from "@/lib/google-sheets"
+import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
+import { CampaignEventManager } from "@/components/eraser/session-events"
+import { listCampaignEvents } from "@/lib/campaign-events"
+import { getCampaignDashboard, listCampaignNpcs, listSavedShops } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
+import { loadShopGeneratorData } from "@/lib/shop-types-server"
 
 export const dynamic = "force-dynamic"
+
+async function CampaignEventsData({ campaignId }: { campaignId: string }) {
+  const [events, shops, npcs, generator] = await Promise.all([
+    listCampaignEvents(campaignId).then((list) => ({ list, error: "" })).catch(() => ({ list: [], error: "Les événements n’ont pas pu être chargés depuis Google Sheets. Réessaie dans un instant." })),
+    listSavedShops(campaignId),
+    listCampaignNpcs(campaignId),
+    loadShopGeneratorData(),
+  ])
+  return <CampaignEventManager campaignId={campaignId} initialEvents={events.list} loadError={events.error} shops={shops} npcs={npcs} generatorItems={generator.items ?? []} shopTypes={generator.catalog.types} />
+}
 
 export default async function CampaignEventsPage({ params }: { params: Promise<{ id: string }> }) {
   const account = await authorizedAccount(["admin", "mj"])
@@ -20,12 +34,9 @@ export default async function CampaignEventsPage({ params }: { params: Promise<{
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">{campaign.name}</p>
         <h1 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">Événements</h1>
-        <div className="mt-7 grid min-h-52 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center">
-          <div>
-            <CalendarDays className="mx-auto size-9 text-primary/45" />
-            <p className="font-display mt-3 text-xl font-semibold">Aucun événement</p>
-          </div>
-        </div>
+        <Suspense key={id} fallback={<DeferredContentLoading label="Chargement des événements…" />}>
+          <CampaignEventsData campaignId={campaign.id} />
+        </Suspense>
       </div>
     </AuthenticatedShell>
   )

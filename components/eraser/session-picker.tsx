@@ -6,7 +6,7 @@ import { CalendarPlus, Check, LoaderCircle, MapPinned, Plus, Search } from "luci
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import type { CampaignSessionRecord, SessionEvent, SessionMembership } from "@/lib/campaign-sessions"
+import type { CampaignSessionRecord, SessionMembership } from "@/lib/campaign-sessions"
 import { cn } from "@/lib/utils"
 
 export type { CampaignSessionRecord } from "@/lib/campaign-sessions"
@@ -33,7 +33,7 @@ export async function createSession(campaignId: string, name: string) {
   return payload.session
 }
 
-export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: SessionEvent[]; update?: SessionEvent[]; remove?: string[]; order?: string[] } } | FormData) {
+export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: string[]; remove?: string[] } } | FormData) {
   const init: RequestInit = body instanceof FormData
     ? { method: "PATCH", body }
     : { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
