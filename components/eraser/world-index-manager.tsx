@@ -16,6 +16,8 @@ import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
+import type { StatDefinition } from "@/lib/index-stats"
 import { groupRowsBy } from "@/lib/index-view-layouts"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
@@ -1150,6 +1152,27 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return groupBy ? groupRowsBy(displayedRows, (row) => valueOf(row.key, groupBy)) : null
   }, [displayedRows, valueOf, viewLayout])
   const layoutOptionsOf = useCallback((header: string) => (table ? specOf(table.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })), [specOf, table])
+  // L'onglet stat : ses statistiques portent sur tous les onglets de données (la phrase choisit l'onglet).
+  const statsView = viewLayout?.kind === "stats" ? activeView : null
+  const statTabs = useMemo(() => statsView ? viewTables.map((owner) => owner.tabName) : [], [statsView, viewTables])
+  const statHeaders = useMemo(() => {
+    if (!statsView) return []
+    const seen = new Map<string, string>()
+    for (const owner of viewTables) for (const header of owner.headers) {
+      if (!header.trim() || isIdHeader(header) || seen.has(foldName(header)) || specOf(owner.tabName, header).kind === "archived") continue
+      seen.set(foldName(header), header)
+    }
+    // Plusieurs onglets : la colonne virtuelle « Onglet » (sauf si une vraie colonne porte ce nom).
+    if (viewTables.length > 1 && !seen.has(foldName(TAB_PSEUDO))) seen.set(foldName(TAB_PSEUDO), TAB_PSEUDO)
+    return [...seen.values()]
+  }, [specOf, statsView, viewTables])
+  const statValueOf = useCallback((rowKey: string, column: string) => column === TAB_PSEUDO && !locate(rowKey)?.table.headers.some((header) => foldName(header) === foldName(TAB_PSEUDO)) ? parseRowKey(rowKey).tabName : valueOf(rowKey, column), [locate, valueOf])
+  const statTabOf = useCallback((rowKey: string) => parseRowKey(rowKey).tabName, [])
+  const saveStats = useCallback(async (stats: StatDefinition[]) => {
+    if (!statsView) return
+    const { id, index, name, source, match, conditions } = statsView
+    await settings.saveView({ id, index, name, source, match, conditions, layout: { kind: "stats", stats } })
+  }, [settings, statsView])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -1286,7 +1309,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           <span className="flex items-center gap-1">
             <NativeSelect value={activeView ? viewSelectKey(activeView.id) : ""} onChange={(event) => { setTabName(event.target.value); setCreating(false); setDetails(null) }} disabled={busy} className="h-9 min-w-44 text-foreground">
               <NativeSelectOption value="">{embed.label}</NativeSelectOption>
-              {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
+              {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>{view.layout?.kind === "stats" ? "∑" : "⧉"} {view.name}</NativeSelectOption>)}
             </NativeSelect>
             {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
@@ -1301,11 +1324,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
                 // Un vrai onglet qui porte le nom d'une valeur de rangement est réuni à son onglet de rangement.
                 ...tables.filter((candidate) => !absorbed.has(foldName(candidate.tabName))).map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
                 ...sortTabs.map((entry) => ({ value: `${SORT_PREFIX}${entry.value}`, label: entry.value, detail: String(entry.count) })),
-                ...views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+                ...views.map((view) => ({ value: viewSelectKey(view.id), label: `${view.layout?.kind === "stats" ? "∑" : "⧉"} ${view.name}`, group: "Onglets-fenêtres" })),
               ]}
               onChange={(value) => { setTabName(value); setCreating(false); setDetails(null) }}
               hrefOf={tabHref}
-              tabLabel={(option) => option.value === ALL_TABS ? definition.title : `${definition.title} · ${option.label.replace(/^⧉ /, "")}`}
+              tabLabel={(option) => option.value === ALL_TABS ? definition.title : `${definition.title} · ${option.label.replace(/^[⧉∑] /, "")}`}
               disabled={busy}
               className="text-foreground"
             />
@@ -1313,13 +1336,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           </span>
         </label>}
         {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
-        {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
+        {table && !statsView && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {data?.webViewLink && <SheetsLinkButton href={data.webViewLink} />}
-          {table && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
+          {table && display === "table" && !statsView && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
-          {table && <DrawRowButton
+          {table && !statsView && <DrawRowButton
             rows={displayedRows}
             weightColumns={weightColumns}
             weightOf={(rowKey, header) => { const found = locate(rowKey); return found ? numericCellValue(valueOf(rowKey, header), specOf(found.table.tabName, header)) : null }}
@@ -1328,7 +1351,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
             disabled={busy}
             compact
           />}
-          <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les lignes répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
+          <ToolbarIconButton label="Nouvel onglet : onglet fenêtre (des lignes choisies) ou onglet stat (des statistiques)" onClick={() => setViewDialog("new")} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
@@ -1373,7 +1396,20 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onSave={(values) => void addRow(formTable.tabName, formTable.headers.map((header) => values[header] || (activeSort && activeSort.columns.some((column) => foldName(column) === foldName(header)) ? activeSort.value : "")), formTable.headers)}
       />}
 
-      {table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexViewLayout
+      {table && statsView ? <IndexStats
+        key={statsView.id}
+        view={statsView}
+        rows={displayedRows.map((row) => row.key)}
+        columns={statHeaders}
+        tabs={statTabs}
+        valueOf={statValueOf}
+        tabOf={statTabOf}
+        nameOf={layoutNameOf}
+        optionsOf={layoutOptionsOf}
+        onOpen={openRow}
+        canEdit={!statsView.builtin && !busy}
+        onSave={saveStats}
+      /> : table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexViewLayout
         layout={viewLayout}
         rows={displayedRows.map((row) => row.key)}
         headers={layoutHeaders}
@@ -1474,6 +1510,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)).flatMap((candidate) => (data?.columns[candidate.tabName] ?? []).map((column) => column.header)).filter((header) => !/^id$/i.test(header)))]}
         onSave={async (view) => { const id = await settings.saveView(view); setTabName(viewSelectKey(id)); return id }}
         onDelete={async (id) => { await settings.deleteView(id); setTabName(embed ? "" : ALL_TABS) }}
+        allowStats
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {noticesView}

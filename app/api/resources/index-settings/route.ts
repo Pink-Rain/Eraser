@@ -12,6 +12,7 @@ import { authorizedAccount } from "@/lib/server-auth"
 const messages: Record<string, string> = {
   INDEX_VIEW_NAME_INVALID: "Donne un nom (60 caractères au plus) à l’onglet-fenêtre.",
   INDEX_VIEW_NOT_FOUND: "Cet onglet-fenêtre n’existe plus.",
+  INDEX_VIEW_LAYOUT_TOO_LARGE: "Cet onglet est trop long pour sa case Google Sheets : supprime une statistique ou retire quelques conditions.",
   INDEX_PRESET_NAME_INVALID: "Donne un nom (60 caractères au plus) au preset.",
   INDEX_PRESET_EMPTY: "Ce preset n’a aucune colonne à garder (le Nom et l’ID sont déjà dans chaque onglet).",
   INDEX_PRESET_NOT_FOUND: "Ce preset n’existe plus.",

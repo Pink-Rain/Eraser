@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { CalendarDays, Columns3, Filter, Gauge, LayoutGrid, LayoutList, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
+import { AppWindow, ArrowLeft, CalendarDays, ChartColumnBig, Columns3, Filter, Gauge, LayoutGrid, LayoutList, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -17,7 +17,7 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type ViewLayout, type ViewLayoutKind } from "@/lib/index-view-layouts"
 
-const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge }
+const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
 
 /** Les noms des calendriers de l'Index des calendriers (le calendrier réel en tête). */
 function useCalendarNames(active: boolean) {
@@ -183,7 +183,7 @@ const emptyCondition = (column: string): ViewCondition => ({ column, operator: "
  * Créer ou modifier un onglet-fenêtre : son nom, d'où il prend ses lignes (tout l'index
  * ou un onglet) et ses conditions. Les lignes ne sont jamais copiées.
  */
-export function IndexViewDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete }: {
+export function IndexViewDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, allowStats = false }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
@@ -194,6 +194,93 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
   columnsOf: (source: string) => string[]
   onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
   onDelete?: (id: string) => Promise<void>
+  /** Un nouvel onglet peut être un onglet stat (le moteur des index sait l'afficher). */
+  allowStats?: boolean
+}) {
+  // Nouvel onglet : d'abord le choix entre onglet fenêtre et onglet stat.
+  const [kind, setKind] = useState<"window" | "stats" | null>(() => view ? view.layout?.kind === "stats" ? "stats" : "window" : allowStats ? null : "window")
+  if (kind === null) return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-xl">
+      <DialogHeader>
+        <DialogTitle>Nouvel onglet</DialogTitle>
+        <DialogDescription className="sr-only">Choisir le genre d’onglet à créer.</DialogDescription>
+      </DialogHeader>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {([
+          { value: "window", Icon: AppWindow, label: "Onglet fenêtre", hint: "Des lignes choisies, en tableau, cartes, kanban…" },
+          { value: "stats", Icon: ChartColumnBig, label: "Onglet stat", hint: "Des chiffres, barres et tableaux croisés sur l’index." },
+        ] as const).map((choice) => <button key={choice.value} type="button" autoFocus={choice.value === "window"} onClick={() => setKind(choice.value)} className="group grid justify-items-start gap-2 rounded-xl border bg-card/70 p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring">
+          <span className="grid size-11 place-items-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground"><choice.Icon className="size-6" /></span>
+          <span className="font-display text-lg font-semibold">{choice.label}</span>
+          <span className="text-xs text-muted-foreground">{choice.hint}</span>
+        </button>)}
+      </div>
+    </DialogContent>
+  </Dialog>
+  if (kind === "stats") return <StatsTabDialog open={open} onOpenChange={onOpenChange} index={index} view={view} onBack={view ? undefined : () => setKind(null)} onSave={onSave} onDelete={onDelete} />
+  return <WindowViewDialog open={open} onOpenChange={onOpenChange} index={index} view={view} sources={sources} columnsOf={columnsOf} onSave={onSave} onDelete={onDelete} onBack={!view && allowStats ? () => setKind(null) : undefined} />
+}
+
+/** Un onglet stat : son nom ; ses statistiques se règlent dans l'onglet même. */
+function StatsTabDialog({ open, onOpenChange, index, view, onBack, onSave, onDelete }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  index: string
+  view?: IndexView | null
+  onBack?: () => void
+  onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
+  onDelete?: (id: string) => Promise<void>
+}) {
+  const [name, setName] = useState(view?.name ?? "")
+  const [pending, setPending] = useState("")
+  const [error, setError] = useState("")
+  async function save() {
+    setPending("save"); setError("")
+    try {
+      // Ses statistiques (la présentation) restent telles quelles : seul le nom change ici.
+      await onSave({ id: view?.id, index, name, source: view?.source ?? ALL_SOURCES, match: view?.match ?? "toutes", conditions: view?.conditions ?? [], layout: view?.layout?.kind === "stats" ? view.layout : { kind: "stats" } })
+      onOpenChange(false)
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "L’onglet stat n’a pas pu être enregistré.")
+    }
+    setPending("")
+  }
+  async function remove() {
+    if (!view || !onDelete || !window.confirm(`Supprimer l’onglet stat « ${view.name} » et ses statistiques ? Les lignes de l’index ne sont pas touchées.`)) return
+    setPending("delete"); setError("")
+    try { await onDelete(view.id); onOpenChange(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
+    setPending("")
+  }
+  return <Dialog open={open} onOpenChange={onOpenChange}>
+    <DialogContent className="sm:max-w-md">
+      <DialogHeader>
+        <DialogTitle className="flex items-center gap-2"><ChartColumnBig className="size-4 text-primary" />{view ? "Modifier l’onglet stat" : "Nouvel onglet stat"}</DialogTitle>
+        <DialogDescription className="sr-only">Le nom de l’onglet stat.</DialogDescription>
+      </DialogHeader>
+      <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); if (name.trim() && !pending) void save() }}>
+        <label className="grid gap-1.5 text-sm font-medium">Nom de l’onglet<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Statistiques, Raretés…" autoFocus /></label>
+        {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
+        <div className="flex flex-wrap justify-end gap-2">
+          {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}
+          {view && onDelete && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}
+          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
+          <Button type="submit" disabled={Boolean(pending) || !name.trim()}>{pending === "save" ? <LoaderCircle className="animate-spin" /> : <ChartColumnBig />}{view ? "Enregistrer" : "Créer"}</Button>
+        </div>
+      </form>
+    </DialogContent>
+  </Dialog>
+}
+
+function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, onBack }: {
+  open: boolean
+  onOpenChange: (open: boolean) => void
+  index: string
+  view?: IndexView | null
+  sources: Array<{ value: string; label: string }>
+  columnsOf: (source: string) => string[]
+  onSave: (view: Omit<IndexView, "id" | "position"> & { id?: string }) => Promise<string>
+  onDelete?: (id: string) => Promise<void>
+  onBack?: () => void
 }) {
   const [name, setName] = useState(view?.name ?? "")
   const [source, setSource] = useState(view?.source ?? ALL_SOURCES)
@@ -269,6 +356,7 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
       <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
+        {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}
         {view && onDelete && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}
         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
         <Button type="button" disabled={Boolean(pending) || !name.trim()} onClick={() => void save()}>{pending === "save" ? <LoaderCircle className="animate-spin" /> : <Filter />}Enregistrer</Button>

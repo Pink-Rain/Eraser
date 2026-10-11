@@ -14,7 +14,7 @@ import { sheetColumns, type SheetCell, type SheetColumns } from "@/lib/sheet-col
 import { newIndexId } from "@/lib/index-columns"
 import { parsePresetColumns, presetColumnsOf, type ColumnPreset, type PresetColumn } from "@/lib/index-presets"
 import { parseViewConditions, type IndexView, type ViewCondition } from "@/lib/index-views"
-import { cleanViewLayout, parseViewLayout } from "@/lib/index-view-layouts"
+import { cleanViewLayout, parseViewLayout, viewLayoutTooLarge } from "@/lib/index-view-layouts"
 
 const SETTINGS_NAME = "Eraser · Réglages des index"
 const VIEWS_TAB = "Onglets-fenêtres"
@@ -111,6 +111,8 @@ export async function saveIndexView(input: { id?: string; index: string; name: s
   const position = existing >= 0 ? rows[existing][6] ?? "0" : String(rows.filter((row) => row[1]?.trim() === input.index && !row[8]?.trim()).length)
   const viewId = existing >= 0 ? input.id! : newIndexId("VUE")
   const layout = cleanViewLayout(input.layout)
+  // Une case de Sheets a ses limites : une présentation trop longue est refusée, pas tronquée.
+  if (viewLayoutTooLarge(layout)) throw new Error("INDEX_VIEW_LAYOUT_TOO_LARGE")
   const values = [viewId, input.index.trim(), name, input.source.trim() || "*", JSON.stringify(conditions), input.match === "une" ? "une" : "toutes", position, now, "", layout ? JSON.stringify(layout) : ""]
   await writeRow(id, VIEWS_TAB, columns, existing, values)
   clearSpreadsheetReadCache(id)

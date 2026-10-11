@@ -4,9 +4,15 @@
  * tableau de bord. Elle s'enregistre avec la vue (classeur « Eraser · Réglages des index »),
  * dans « Modifier » de l'index ; le créateur de pages ne fait que l'afficher et la régler.
  * Règles pures : la page, le serveur et les tests s'en servent.
+ *
+ * L'onglet stat (« stats ») est une vue comme les autres : ses statistiques tiennent dans
+ * la même case « Présentation (JSON) », sans nouvelle colonne ni nouvelle feuille.
  */
+import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
 
-export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard"
+export { cellNumber }
+
+export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "stats"
 
 export type DashboardTileKind = "count" | "sum" | "average" | "breakdown"
 export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string }
@@ -29,6 +35,15 @@ export type ViewLayout = {
   calendar?: string
   /** Tableau de bord : ses tuiles. */
   tiles?: DashboardTile[]
+  /** Onglet stat : ses statistiques (phrase à trous), 24 au plus. */
+  stats?: StatDefinition[]
+}
+
+/** Une case de Google Sheets en tient 50 000 : la présentation d'une vue reste bien en deçà. */
+export const MAX_VIEW_LAYOUT_JSON = 40_000
+
+export function viewLayoutTooLarge(layout: ViewLayout | undefined) {
+  return Boolean(layout) && JSON.stringify(layout).length > MAX_VIEW_LAYOUT_JSON
 }
 
 export const viewLayoutKinds: Array<{ value: ViewLayoutKind; label: string; hint: string }> = [
@@ -48,7 +63,8 @@ export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string
   { value: "breakdown", label: "Répartition par valeur", needsColumn: true },
 ]
 
-const kinds = new Set<string>(viewLayoutKinds.map((kind) => kind.value))
+// « stats » n'est pas proposée parmi les présentations d'un onglet-fenêtre : c'est l'onglet stat.
+const kinds = new Set<string>([...viewLayoutKinds.map((kind) => kind.value), "stats"])
 const tileKinds = new Set<string>(dashboardTileKinds.map((kind) => kind.value))
 const text = (value: unknown, max = 120) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : ""
 
@@ -57,6 +73,10 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (!value || typeof value !== "object") return undefined
   const raw = value as Record<string, unknown>
   if (!kinds.has(String(raw.kind))) return undefined
+  if (raw.kind === "stats") {
+    const stats = cleanStats(raw.stats)
+    return stats.length ? { kind: "stats", stats } : { kind: "stats" }
+  }
   const layout: ViewLayout = { kind: raw.kind as ViewLayoutKind }
   if (text(raw.groupBy)) layout.groupBy = text(raw.groupBy)
   if (raw.collapsible === true) layout.collapsible = true
@@ -82,15 +102,11 @@ export function parseViewLayout(raw: string | undefined) {
   try { return cleanViewLayout(JSON.parse(raw)) } catch { return undefined }
 }
 
-function plain(value: string) {
-  return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim()
-}
-
 /** Les sections d'une colonne : une par valeur (une case à plusieurs valeurs va dans chacune), « Sans valeur » à la fin. */
 export function groupRowsBy<T>(rows: T[], valueOf: (row: T) => string, order: string[] = []): Array<{ name: string; rows: T[] }> {
   const groups = new Map<string, { name: string; rows: T[] }>()
   for (const row of rows) {
-    const values = plain(valueOf(row)).split(/\s*[,;]\s*/).filter(Boolean)
+    const values = cellParts(valueOf(row))
     for (const value of values.length ? values : [""]) {
       const key = value.toLocaleLowerCase("fr")
       const group = groups.get(key) ?? { name: value, rows: [] }
@@ -105,12 +121,6 @@ export function groupRowsBy<T>(rows: T[], valueOf: (row: T) => string, order: st
     const rightRank = rank.get(right.name.toLocaleLowerCase("fr")) ?? Number.MAX_SAFE_INTEGER
     return leftRank - rightRank || left.name.localeCompare(right.name, "fr", { numeric: true })
   })
-}
-
-/** Un nombre lu dans une case (« 1 250,5 PO » → 1250.5) ; `null` si elle n'en contient pas. */
-export function cellNumber(value: string) {
-  const match = plain(value).replace(/\s/g, "").match(/-?\d+(?:[.,]\d+)?/)
-  return match ? Number(match[0].replace(",", ".")) : null
 }
 
 /** La valeur d'une tuile de tableau de bord : un nombre, ou une répartition (les 8 premières valeurs). */
