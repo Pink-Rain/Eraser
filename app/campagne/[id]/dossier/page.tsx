@@ -2,6 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { BookOpen, CalendarDays, ChartColumn, ChevronDown, Drama, LayoutDashboard, Map, PackageSearch, Store, Waypoints } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { CampaignGroupTable, GroupNpcsPanel, MetNpcsPanel, type FolderCharacter, type FolderMember, type FolderNpc, type MetNpc, type NpcRelation } from "@/components/eraser/campaign-folder"
 import { MenuLinkPanel } from "@/components/eraser/menu-page"
 import { Roll20BridgePanel } from "@/components/eraser/roll20-bridge-panel"
@@ -109,7 +110,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
   const { id } = await params
   const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, id).catch(() => null)
   if (!campaign) notFound()
-  const [link, data] = await Promise.all([getRoll20LinkForManager(account, id).catch(() => null), folderData(campaign, account)])
+  const [link, data, pages] = await Promise.all([getRoll20LinkForManager(account, id).catch(() => null), folderData(campaign, account), customPageLinks("campagne", campaign.id, "size-4")])
   const href = `/campagne/${encodeURIComponent(campaign.id)}`
   const accent = campaign.accentColor || "#3b5c8a"
   return (
@@ -158,6 +159,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
             { href: `${href}/magasin-et-fouille`, label: "Magasins", description: "Les boutiques de la campagne et leurs stocks.", icon: Store },
             { href: `${href}/fouilles`, label: "Fouilles", description: "Ce que les joueurs trouvent en fouillant.", icon: PackageSearch },
             { href: `${href}/pnjs`, label: "PNJs", description: "Les PNJ de la campagne, leurs fiches et leurs sacs.", icon: Drama },
+            ...pages,
           ]} />
         </div>
       </div>

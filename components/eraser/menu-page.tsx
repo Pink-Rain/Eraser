@@ -2,7 +2,8 @@ import type { ReactNode } from "react"
 import Link from "next/link"
 import { ChevronRight, type LucideIcon } from "lucide-react"
 
-export type MenuPageLink = { href: string; label: string; description: string; icon: LucideIcon }
+/** `glyph` : une icône déjà dessinée (celle choisie pour une page du créateur de pages), à la place d'`icon`. */
+export type MenuPageLink = { href: string; label: string; description: string; icon: LucideIcon; glyph?: ReactNode }
 
 /**
  * Une « page menu » : la page d'une section du menu (Règles, Administration, Bac à sable,
@@ -38,9 +39,9 @@ export function MenuPage({ eyebrow, title, description, icon: Icon, links, child
       </section>
       {before && <div className="mt-10">{before}</div>}
       {links.length > 0 && <nav aria-label={title} className="mt-10 grid gap-3 sm:grid-cols-2 xl:grid-cols-3">
-        {links.map(({ href, label, description: detail, icon: LinkIcon }) => (
+        {links.map(({ href, label, description: detail, icon: LinkIcon, glyph }) => (
           <Link key={href} href={href} prefetch={false} className="group flex items-start gap-3 rounded-2xl border bg-card/85 p-4 shadow-[0_10px_30px_rgb(67_50_31/0.06)] transition hover:-translate-y-0.5 hover:border-primary/35 hover:shadow-[0_16px_40px_rgb(67_50_31/0.11)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/8 text-primary"><LinkIcon className="size-4.5" /></span>
+            <span className="flex size-10 shrink-0 items-center justify-center rounded-xl border border-primary/20 bg-primary/8 text-primary">{glyph ?? <LinkIcon className="size-4.5" />}</span>
             <span className="min-w-0 flex-1">
               <span className="block font-display text-lg font-semibold leading-tight">{label}</span>
               <span className="mt-1 block text-xs leading-5 text-muted-foreground">{detail}</span>
@@ -67,9 +68,9 @@ export function MenuLinkPanel({ title, icon: Icon, links }: { title: string; ico
         <h2 className="font-display flex-1 text-2xl font-semibold tracking-[-0.01em]">{title}</h2>
       </div>
       <nav aria-label={title} className="grid gap-1">
-        {links.map(({ href, label, description, icon: LinkIcon }) => (
+        {links.map(({ href, label, description, icon: LinkIcon, glyph }) => (
           <Link key={href} href={href} prefetch={false} title={description} className="group flex items-center gap-3 rounded-xl px-2.5 py-1.5 text-sm transition hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-primary transition group-hover:bg-primary/10"><LinkIcon className="size-4" /></span>
+            <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-muted/70 text-primary transition group-hover:bg-primary/10">{glyph ?? <LinkIcon className="size-4" />}</span>
             <span className="min-w-0 flex-1 truncate font-medium">{label}</span>
             <ChevronRight className="size-4 text-muted-foreground/50 transition group-hover:translate-x-0.5 group-hover:text-muted-foreground" />
           </Link>

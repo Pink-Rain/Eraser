@@ -128,7 +128,7 @@ async function npcSource(): Promise<EntitySource | null> {
   const shown = menuColumns(headers, NPC_TECHNICAL)
   const hints: SourceHints = { type: ["Titre", "Classe / métier"], description: ["Notes joueurs"], image: ["Portrait"] }
   const tables = [...groups.entries()].map(([tab, group]) => table(tab, headers, group.rows, { name: "Nom du PNJ", columns: shown, hints, unlisted: group.unlisted }))
-  return { key: "npcs", title: "PNJs", itemLabel: "un PNJ", tabs: tables.map((item) => ({ name: item.tab })), tables, hiddenForPlayers: (column) => NPC_PRIVATE.has(foldName(column)) }
+  return { key: "npcs", title: "PNJs", itemLabel: "un PNJ", tabs: tables.map((item) => ({ name: item.tab })), tables, hiddenForPlayers: (column) => entityColumnHiddenForPlayers("npcs", column) }
 }
 
 // ---------------------------------------------------------------------------
@@ -151,7 +151,7 @@ async function campaignSource(): Promise<EntitySource | null> {
   const shown = menuColumns(headers, ["ID", "MJ", "Nom de la campagne", "Bannière"])
   const hints: SourceHints = { description: ["Description"], image: ["Bannière"], color: ["Couleur d’accent"] }
   const tables = [table("Campagnes", headers, listed, { name: "Nom de la campagne", columns: shown, hints }), table("Corbeille", headers, hidden, { name: "Nom de la campagne", columns: shown, hints, unlisted: true })]
-  return { key: "campaigns", title: "Campagnes", itemLabel: "une campagne", tabs: [{ name: "Campagnes" }], tables, hiddenForPlayers: (column) => foldName(column) === foldName("MJ") }
+  return { key: "campaigns", title: "Campagnes", itemLabel: "une campagne", tabs: [{ name: "Campagnes" }], tables, hiddenForPlayers: (column) => entityColumnHiddenForPlayers("campaigns", column) }
 }
 
 // ---------------------------------------------------------------------------
@@ -187,7 +187,7 @@ async function characterSource(cited: readonly string[] = []): Promise<EntitySou
   const shown = CHARACTER_MENU.filter((header) => columns.at(header) >= 0)
   const hints: SourceHints = { type: ["Classe", "Peuple"], description: ["Titre honorifique"], image: ["Portrait"] }
   const tables = [table("Personnages", headers, listed, { name: "Nom personnage", columns: shown, hints }), table("Corbeille", headers, hidden, { name: "Nom personnage", columns: shown, hints, unlisted: true })]
-  return { key: "characters", title: "Personnages", itemLabel: "un personnage", tabs: [{ name: "Personnages" }], tables, hiddenForPlayers: (column) => !CHARACTER_PUBLIC.has(foldName(column)) }
+  return { key: "characters", title: "Personnages", itemLabel: "un personnage", tabs: [{ name: "Personnages" }], tables, hiddenForPlayers: (column) => entityColumnHiddenForPlayers("characters", column) }
 }
 
 // ---------------------------------------------------------------------------
@@ -255,4 +255,16 @@ export async function loadEntitySource(key: EntityReferenceKey, options: { cited
   if (key === "classes") return classSource()
   if (key === "class-spells") return spellSource("classes")
   return spellSource("creatures")
+}
+
+/**
+ * Les colonnes d'une entité qu'un joueur ne lit jamais (notes MJ d'un PNJ, MJ d'une
+ * campagne, tout ce qui dépasse la carte d'un personnage) : pour les références « { » comme
+ * pour les vues d'index posées dans une page du créateur de pages.
+ */
+export function entityColumnHiddenForPlayers(key: string, column: string) {
+  if (key === "npcs") return NPC_PRIVATE.has(foldName(column))
+  if (key === "campaigns") return foldName(column) === foldName("MJ")
+  if (key === "characters") return !CHARACTER_PUBLIC.has(foldName(column))
+  return false
 }

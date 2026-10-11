@@ -30,6 +30,8 @@ export type IndexStatsProps = {
   groups?: StatColumnGroup[]
   /** L'onglet stat : seulement les épinglées, sans constructeur. */
   pinnedOnly?: boolean
+  /** Avec `pinnedOnly` : une seule statistique, sur toute la largeur (bloc « Stat épinglée » d'une page). */
+  single?: boolean
   /** L'onglet stat : ouvrir « Modifier › Stats ». */
   onManage?: () => void
   /** Les lignes de l'index (recherche comprise), tous onglets de données. */
@@ -378,7 +380,7 @@ function ArrangeBar({ stat, arrange }: { stat: StatDefinition; arrange: Arrange 
  * Une statistique épinglée, dans l'onglet stat : son graphique, dont chaque part se clique,
  * et ses lignes concernées en dessous (affichées, repliées ou masquées : « Organiser »).
  */
-function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpen, arrange }: { stat: StatDefinition; data: StatData; expanded: Set<string>; onToggle: (key: string) => void; tabs: string[]; tabOf: (rowKey: string) => string; nameOf: (rowKey: string) => string; onOpen?: (rowKey: string, rows?: string[]) => void; arrange?: Arrange }) {
+function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpen, arrange, full = false }: { full?: boolean; stat: StatDefinition; data: StatData; expanded: Set<string>; onToggle: (key: string) => void; tabs: string[]; tabOf: (rowKey: string) => string; nameOf: (rowKey: string) => string; onOpen?: (rowKey: string, rows?: string[]) => void; arrange?: Arrange }) {
   const prepared = useMemo(() => prepareFor(stat, data), [data, stat])
   const [picked, setPicked] = useState<{ label: string; rows: string[]; id: string } | null>(null)
   const [unfolded, setUnfolded] = useState<boolean | null>(null)
@@ -386,7 +388,7 @@ function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpe
   const withRows = stat.rows !== "hidden"
   const concerned = picked?.rows ?? unitRows(prepared.units)
   const slots = prepared.size
-  const width = pinnedWidth(stat)
+  const width = full ? "full" : pinnedWidth(stat)
   const metaOf = (row: string) => [tabs.length > 1 ? tabOf(row) : "", stat.by[0] ? cellText(prepared.valueOf({ row, slot: -1 }, stat.by[0])) : ""].filter(Boolean).join(" · ")
   return <article className={`grid min-w-0 content-start gap-2.5 rounded-2xl border bg-card p-4 ${widthClass[width]} ${arrange ? "border-[#3b5c8a]/60" : ""}`}>
     <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase"><Pin className="size-3 shrink-0 text-[#a87a1f]" /><span className="truncate">{stat.title}</span></span>
@@ -399,7 +401,7 @@ function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpe
   </article>
 }
 
-export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
+export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
   // Un groupe créé ou modifié se voit tout de suite, avant même la réponse du serveur.
   const [pendingGroups, setPendingGroups] = useState<StatColumnGroup[] | null>(null)
   const groups = useMemo(() => pendingGroups ?? groupsProp ?? [], [groupsProp, pendingGroups])
@@ -628,15 +630,15 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
   const manage = onManage && <Button type="button" variant="outline" size="sm" onClick={onManage}><Pencil />Créer et épingler des stats</Button>
   if (pinnedOnly) return pinned.length
     ? <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
-      {(manage || canEdit) && <div className="flex flex-wrap items-center justify-end gap-2">
+      {(manage || (canEdit && !single)) && <div className="flex flex-wrap items-center justify-end gap-2">
         {arranging && <span className="mr-auto text-xs text-muted-foreground">Largeur, ordre et lignes de chaque statistique : tout s’enregistre aussitôt.</span>}
-        {canEdit && <Button type="button" variant={arranging ? "default" : "outline"} size="sm" aria-pressed={arranging} onClick={() => setArranging((value) => !value)}><LayoutGrid />{arranging ? "Terminé" : "Organiser"}</Button>}
+        {canEdit && !single && <Button type="button" variant={arranging ? "default" : "outline"} size="sm" aria-pressed={arranging} onClick={() => setArranging((value) => !value)}><LayoutGrid />{arranging ? "Terminé" : "Organiser"}</Button>}
         {manage}
       </div>}
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
-      <section aria-label="Statistiques épinglées" className="grid grid-cols-[minmax(0,1fr)] items-start gap-3 md:grid-cols-6">
-        {pinned.map((stat, index) => <PinnedStat key={stat.id} stat={stat} data={data} expanded={expanded} onToggle={onToggle} tabs={tabs} tabOf={tabOf} nameOf={nameOf} onOpen={onOpen}
-          arrange={arranging && canEdit ? { pending, first: index === 0, last: index === pinned.length - 1, onWidth: (width) => void arrange(stat.id, { width }), onRows: (rows) => void arrange(stat.id, { rows }), onMove: (step) => void persist(movePinned(stats, stat.id, step), "Ordre enregistré."), onUnpin: () => void togglePin(stat.id) } : undefined} />)}
+      <section aria-label="Statistiques épinglées" className={`grid grid-cols-[minmax(0,1fr)] items-start gap-3 ${single ? "" : "md:grid-cols-6"}`}>
+        {pinned.map((stat, index) => <PinnedStat key={stat.id} stat={stat} data={data} expanded={expanded} onToggle={onToggle} tabs={tabs} tabOf={tabOf} nameOf={nameOf} onOpen={onOpen} full={single}
+          arrange={arranging && canEdit && !single ? { pending, first: index === 0, last: index === pinned.length - 1, onWidth: (width) => void arrange(stat.id, { width }), onRows: (rows) => void arrange(stat.id, { rows }), onMove: (step) => void persist(movePinned(stats, stat.id, step), "Ordre enregistré."), onUnpin: () => void togglePin(stat.id) } : undefined} />)}
       </section>
       {toastView}
     </div>
