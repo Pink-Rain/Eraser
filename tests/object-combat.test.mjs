@@ -89,6 +89,19 @@ test("types des colonnes de combat dans l'Index des objets", () => {
   assert.equal(columns.objectColumnSpec("Valeur", parchemins).kind, "number");
 });
 
+test("raretés principale et secondaire : la même liste, à ajout libre", () => {
+  const headers = ["Nom", "Rareté principale", "Emplacement principal", "Rareté secondaire", "Rareté"];
+  for (const header of ["Rareté principale", "Rareté principal", "Rareté secondaire", "Rareté", "RARETE"]) {
+    const spec = columns.objectColumnSpec(header, headers);
+    assert.equal(spec.kind, "choice", header);
+    assert.equal(spec.allowCustom, true, header);
+    assert.deepEqual(spec.options.map((option) => option.value), ["Très commun", "Commun", "Rare", "Très rare", "Ultime"]);
+    assert.ok(spec.options.every((option) => /^#[0-9a-f]{6}$/.test(option.color)));
+  }
+  // Une rareté écrite sans accent dans la feuille est reconnue.
+  assert.equal(columns.matchChoice("tres rare", columns.objectRarityOptions)?.value, "Très rare");
+});
+
 test("« Armes - Modificateurs » lu pour l'affichage : nom, description, identifiant", async () => {
   const modifiers = await vite.ssrLoadModule("/lib/weapon-modifiers.ts");
   const parsed = modifiers.parseWeaponModifiers([{

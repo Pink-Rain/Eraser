@@ -703,6 +703,18 @@ export const OBJECT_VALUE_HELP = "Plusieurs modes (une arme qui tire et frappe) 
 /** Comment remplir la Distance d'un objet. */
 export const OBJECT_DISTANCE_HELP = "En mètres : « 12 » s’affiche « 12 m ». Plusieurs modes : sépare par « | », par exemple « 60 | 1 ». Dans la description ou l’effet, {Distance} affiche la première, {Distance 2} la deuxième."
 
+/**
+ * Les raretés d'un objet, du plus courant au plus précieux, aux couleurs de la fouille et des
+ * magasins. Une rareté nouvelle se tape dans la case : elle rejoint la liste.
+ */
+export const objectRarityOptions: ChoiceOption[] = [
+  { value: "Très commun", color: "#78716c" },
+  { value: "Commun", color: "#059669" },
+  { value: "Rare", color: "#0284c7" },
+  { value: "Très rare", color: "#7c3aed" },
+  { value: "Ultime", color: "#d97706" },
+]
+
 /** Les en-têtes qui désignent le nom d'un objet, dans l'ordre où l'inventaire les cherche. */
 const objectNameHeaders = ["Nom", "Nom de l'objet", "Objet", "Arme", "Équipement", "Equipement", "Ressource", "Livre", "Titre"]
 
@@ -724,6 +736,8 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
     ? { kind: "rich", description: OBJECT_VALUE_HELP }
     : { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
+  // Rareté principale et secondaire : une liste, la même pour les deux ; « Ajout libre » pour en créer une autre.
+  if (["rarete", "raretes", "rarete principale", "rarete principal", "rarete secondaire"].includes(folded)) return { kind: "choice", allowCustom: true, options: objectRarityOptions, description: "Très commun, Commun, Rare, Très rare ou Ultime. Une autre rareté se tape dans la case : elle rejoint la liste." }
   // Type et sous-type : une liste, nourrie des valeurs déjà écrites ; une valeur nouvelle se tape dans la case.
   if (["type", "types", "sous-type", "sous-types", "sous type", "sous types", "soustype"].includes(folded)) return { kind: "choice", allowCustom: true, options: [], description: "Choisis une valeur déjà utilisée, ou tape-en une nouvelle : elle rejoint la liste." }
   // Les colonnes de combat : la liste des caractéristiques et compétences de la fiche
