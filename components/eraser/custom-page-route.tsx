@@ -6,9 +6,9 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { PageLabel } from "@/components/eraser/app-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { Button } from "@/components/ui/button"
-import { canManagePages, pageForViewer, type CustomPage, type PagePlace, type PageView } from "@/lib/custom-pages"
+import { canManagePages, pageForViewer, studioHref, type CustomPage, type PagePlace, type PageView } from "@/lib/custom-pages"
 import { findCustomPage } from "@/lib/custom-pages-store"
-import { campaignsOf, indexPathsOf, linkTargetsOf, viewerFor } from "@/lib/custom-pages-server"
+import { campaignsOf, indexPathsOf, linkTargetsKnown, linkTargetsOf, viewerFor } from "@/lib/custom-pages-server"
 import { replacementLabel, type ReplaceMode } from "@/lib/page-replacements"
 import { currentAccount, currentViewAccount, type AuthorizedUser } from "@/lib/server-auth"
 
@@ -37,17 +37,22 @@ export async function CustomPageRoute({ place, slug, campaignId = "" }: { place:
  * Une page d'Eraser remplacée ou complétée par une page du créateur de pages (layout racine) :
  * `replace` montre la page créée à la place, `before` / `after` ajoutent ses blocs au-dessus ou
  * en dessous du contenu d'origine. Admins et MJ gardent « Voir la page d'origine ».
+ *
+ * Rien n'est attendu ici (liens d'après la copie en mémoire des pages). Limite connue : en
+ * mode « à la place », `children` n'est pas rendu, mais le routeur a déjà exécuté la page
+ * d'origine avant ce layout (son rendu « à blanc », qui détecte redirect() et notFound(),
+ * appelle la page directement) : sans middleware, son travail serveur ne s'évite pas.
  */
-export async function ReplacementView({ page, view, mode, pathname, account, children }: { page: CustomPage; view: PageView; mode: ReplaceMode; pathname: string; account: AuthorizedUser; children: React.ReactNode }) {
+export function ReplacementView({ page, view, mode, pathname, account, children }: { page: CustomPage; view: PageView; mode: ReplaceMode; pathname: string; account: AuthorizedUser; children: React.ReactNode }) {
   const manager = canManagePages(account.role)
-  const links = await linkTargetsOf(view, account)
+  const links = linkTargetsKnown(view, account)
   const indexPaths = indexPathsOf(view, account.role)
   const label = replacementLabel(page.replaces ?? pathname)
   const notice = manager ? <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-primary/35 bg-primary/[0.035] px-3.5 py-2 text-[12.5px] text-muted-foreground">
     <Replace className="size-3.5 shrink-0 text-primary" />
     <span className="min-w-0 flex-1">{mode === "replace" ? `Cette page remplace « ${label} » d’Eraser.` : `La page « ${view.title} » complète « ${label} » ${mode === "before" ? "au-dessus" : "en dessous"} de son contenu.`}</span>
     {mode === "replace" && <Link href={`${pathname}?origine=1`} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Voir la page d’origine</Link>}
-    {view.editable && <Link href={`/pages/atelier?id=${encodeURIComponent(page.id)}`} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><PenLine className="size-3.5" />Modifier</Link>}
+    {view.editable && <Link href={studioHref(page.id)} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><PenLine className="size-3.5" />Modifier</Link>}
   </p> : null
   if (mode === "replace") return <PageLabel label={view.title}>
     <CustomPageView key={`${view.id}:${pathname}`} initial={view} links={links} indexPaths={indexPaths} eyebrow={label} notice={notice} actions={manager ? <Button asChild size="sm" variant="ghost"><Link href={`${pathname}?origine=1`} prefetch={false}><ExternalLink />Voir la page d’origine</Link></Button> : undefined} />

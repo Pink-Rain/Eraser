@@ -10,7 +10,7 @@ import { IndexRichText } from "@/components/eraser/index-references"
 import { PageBacklinksBlock, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
 import { fillRowPage, type RowContext } from "@/lib/custom-pages-rows"
 import { RichTextField } from "@/components/eraser/rich-text"
-import { placeLabel, sectionLayouts, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
+import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
 /**
  * Les pages du créateur de pages, telles qu'on les lit : les sections et leurs colonnes,
@@ -339,7 +339,7 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row, 
       {(view.editable || actions) && <div className="mt-5 flex flex-wrap items-center gap-2">
         {view.editable && <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${view.draft ? "border-[#9a6512]/40 bg-[#9a6512]/10 text-[#9a6512]" : "border-[#0f7a65]/40 bg-[#0f7a65]/10 text-[#0f7a65]"}`}>{view.draft ? "Brouillon" : "Publiée"}</span>}
         {view.unpublished && !view.draft && <span className="text-xs text-muted-foreground">Des modifications attendent d’être publiées.</span>}
-        {view.editable && <Button asChild size="sm" variant="outline" className="ml-1"><Link href={`/pages/atelier?id=${encodeURIComponent(view.id)}`} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>}
+        {view.editable && <Button asChild size="sm" variant="outline" className="ml-1"><Link href={studioHref(view.id)} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>}
         {actions}
       </div>}
     </PageHeader>

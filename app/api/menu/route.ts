@@ -20,7 +20,7 @@ export async function GET() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account || !canManagePages(account.role)) return denied()
   try {
-    const [layout, pages, previous] = await Promise.all([readMenuLayout({ fresh: true }), readablePages(account, { includeDrafts: true }), hasPreviousMenu()])
+    const [layout, pages, previous] = await Promise.all([readMenuLayout(), readablePages(account, { includeDrafts: true }), hasPreviousMenu()])
     return NextResponse.json({
       items: mergeMenu(layout?.items),
       custom: Boolean(layout),

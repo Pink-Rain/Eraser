@@ -82,7 +82,7 @@ import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/goo
 import { campaignCreatedEvent, characterCreatedEvent } from "@/lib/selection-events"
 import { cn } from "@/lib/utils"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { menuItemActive, resolveMenu, type MenuIconKey, type ResolvedMenuItem } from "@/lib/app-menu"
+import { menuItemActive, resolveMenu, type MenuIconKey, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
 // Seul le numéro de version est gardé (import nommé d'un JSON) : c'est celui du serveur
 // qui tourne, donc aussi d'une mise à jour reçue sans réinstallation.
 import { version as appVersion } from "@/package.json"
@@ -246,11 +246,14 @@ export function AppShell({
   initialViewRole,
   pageLabel,
   menu = null,
+  campaignPages,
   children,
 }: {
   user: ShellUser
   /** Le menu réglé dans l'éditeur, déjà filtré pour la vue du compte ; `null` : celui d'Eraser. */
   menu?: ResolvedMenuItem[] | null
+  /** Les pages créées de chaque campagne, sous son dossier (vue MJ) ; en vol avec la liste des campagnes. */
+  campaignPages?: Record<string, MenuPageEntry[]> | Promise<Record<string, MenuPageEntry[]>>
   /** Listes de la barre latérale, encore en vol : la coque ne les attend jamais (app/layout.tsx). */
   characters: CharacterRecord[] | Promise<CharacterRecord[]>
   campaigns: CampaignRecord[] | Promise<CampaignRecord[]>
@@ -282,6 +285,7 @@ export function AppShell({
   const [selectedCampaignId, setSelectedCampaignId] = useStoredText(campaignStorageKey)
   const [visibleCharacters, setVisibleCharacters] = useState<CharacterRecord[]>(() => Array.isArray(characters) ? characters : [])
   const [visibleCampaigns, setVisibleCampaigns] = useState<CampaignRecord[]>(() => Array.isArray(campaigns) ? campaigns : [])
+  const [visibleCampaignPages, setVisibleCampaignPages] = useState<Record<string, MenuPageEntry[]>>(() => campaignPages && !(campaignPages instanceof Promise) ? campaignPages : {})
   // Tant que les listes n'ont jamais répondu, la barre latérale et l'accueil disent qu'elles
   // arrivent, au lieu d'annoncer « aucun personnage ».
   const [listsLoaded, setListsLoaded] = useState(() => Array.isArray(characters) && Array.isArray(campaigns))
@@ -362,6 +366,15 @@ export function AppShell({
     })
     return () => { active = false }
   }, [campaigns, characters])
+
+  useEffect(() => {
+    let active = true
+    void Promise.resolve(campaignPages ?? {}).then((next) => {
+      if (!active) return
+      setVisibleCampaignPages((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    })
+    return () => { active = false }
+  }, [campaignPages])
 
   useEffect(() => {
     if (!accountMenuOpen || viewRole !== "admin" || user.role !== "admin" || todosLoaded || todosLoadingRef.current) return
@@ -496,7 +509,7 @@ export function AppShell({
         <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
         <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
         <NavSubLink nested href={`${campaignHref}/document`} label="Document" active={pathname === `${campaignHref}/document`} />
-        {(item.campaignPages?.[selectedCampaign.id] ?? []).map((page) => <NavSubLink key={page.href} href={page.href} label={page.title} active={pathname === page.href} />)}
+        {(visibleCampaignPages[selectedCampaign.id] ?? []).map((page) => <NavSubLink key={page.href} href={page.href} label={page.title} active={pathname === page.href} />)}
       </NavSection>
     }
     if (item.dynamic === "personnage") {

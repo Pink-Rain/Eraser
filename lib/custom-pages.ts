@@ -385,10 +385,11 @@ export function cleanCustomPage(input: unknown): PageDraft {
   // Seules les adresses d'Eraser prévues (jamais une route technique) se remplacent.
   const replaces = typeof raw.replaces === "string" && isReplaceablePath(raw.replaces.trim()) ? raw.replaces.trim() : ""
   const rowOf = raw.rowOf && typeof raw.rowOf === "object" ? { index: text((raw.rowOf as Record<string, unknown>).index, 90), tab: text((raw.rowOf as Record<string, unknown>).tab, 120) } : null
-  // Un modèle de page de ligne (« {Nom} »…) ne remplace jamais une page d'Eraser.
+  // Un modèle de page de ligne (« {Nom} »…) ou une page de campagne (lisible selon ses
+  // membres, ce que la coque ne sait pas sans Google) ne remplace jamais une page d'Eraser.
   return {
     ...content, slug, place, campaignId, vis,
-    ...(replaces && !rowOf?.index ? { replaces, replaceMode: cleanReplaceMode(raw.replaceMode) } : {}),
+    ...(replaces && !rowOf?.index && place !== "campagne" ? { replaces, replaceMode: cleanReplaceMode(raw.replaceMode) } : {}),
     ...(rowOf?.index ? { rowOf: rowOf.tab ? rowOf : { index: rowOf.index } } : {}),
   }
 }

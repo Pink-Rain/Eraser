@@ -22,9 +22,11 @@ const replacements = await vite.ssrLoadModule("/lib/page-replacements.ts");
 const rows = await vite.ssrLoadModule("/lib/custom-pages-rows.ts");
 const pages = await vite.ssrLoadModule("/lib/custom-pages.ts");
 const data = await vite.ssrLoadModule("/lib/custom-pages-data.ts");
+const pagesStore = await vite.ssrLoadModule("/lib/custom-pages-store.ts");
 const shared = await vite.ssrLoadModule("/tests/fakes/shared-store.ts");
 
-beforeEach(() => { shared.reset(); });
+beforeEach(() => { shared.reset(); menuStore.forgetMenuLayout(); pagesStore.forgetCustomPages(); });
+const tick = () => new Promise((resolve) => setTimeout(resolve, 5));
 
 const keys = (items) => items.map((item) => item.children ? `${item.key}[${item.children.map((child) => child.key).join(",")}]` : item.key);
 
@@ -90,17 +92,46 @@ test("Garde-fous : l'admin garde le Créateur de pages et l'éditeur du menu, m�
 });
 
 test("Menu sur le serveur partagé : enregistrer, refuser une version dépassée, rétablir puis remettre", async () => {
-  assert.equal(await menuStore.readMenuLayout({ fresh: true }), null);
+  assert.equal(await menuStore.readMenuLayout(), null);
   const saved = await menuStore.saveMenuLayout([{ id: "accueil", label: "Le port" }], "", "Admin");
-  assert.equal((await menuStore.readMenuLayout({ fresh: true })).items[0].label, "Le port");
+  assert.equal((await menuStore.readMenuLayout()).items[0].label, "Le port");
   await assert.rejects(menuStore.saveMenuLayout([{ id: "accueil" }], "", "Morgane"), (error) => error.status === 409);
   await menuStore.saveMenuLayout([{ id: "accueil", label: "Le port v2" }], saved.updatedAt, "Admin");
   await menuStore.resetMenuLayout();
-  assert.equal(await menuStore.readMenuLayout({ fresh: true }), null);
+  assert.equal(await menuStore.readMenuLayout(), null);
   assert.equal(await menuStore.hasPreviousMenu(), true);
   const restored = await menuStore.restorePreviousMenu("Admin");
   assert.equal(restored.items[0].label, "Le port v2");
   assert.equal(await menuStore.hasPreviousMenu(), false);
+});
+
+test("La coque n'attend jamais le serveur partagé : copies en mémoire, relues en arrière-plan, à jour après un enregistrement", async () => {
+  // Jamais lu : rien tout de suite (menu d'Eraser), une seule relecture part en arrière-plan.
+  assert.equal(menuStore.knownMenuLayout(), undefined);
+  assert.equal(pagesStore.knownCustomPages(), null);
+  const before = shared.store.calls.length;
+  menuStore.knownMenuLayout(); pagesStore.knownCustomPages(); menuStore.knownMenuLayout(); pagesStore.knownCustomPages();
+  assert.equal(shared.store.calls.length, before);
+  await tick();
+  assert.equal(menuStore.knownMenuLayout(), null);
+  assert.deepEqual(pagesStore.knownCustomPages(), []);
+  const read = shared.store.calls.length;
+  // Un enregistrement fait ici est connu tout de suite, sans relecture.
+  const saved = await menuStore.saveMenuLayout([{ id: "accueil", label: "Le port" }], "", "Admin");
+  assert.equal(menuStore.knownMenuLayout().items[0].label, "Le port");
+  const page = await pagesStore.createCustomPage({ title: "Dieux", place: "regles" }, { uid: "a", name: "Admin" });
+  assert.deepEqual(pagesStore.knownCustomPages().map((item) => item.id), [page.id]);
+  const writes = shared.store.calls.length;
+  menuStore.knownMenuLayout(); pagesStore.knownCustomPages();
+  await tick();
+  assert.equal(shared.store.calls.length, writes, "aucune relecture dans la minute qui suit");
+  assert.ok(writes > read);
+  // Rétablir, puis remettre : la copie suit.
+  await menuStore.resetMenuLayout();
+  assert.equal(menuStore.knownMenuLayout(), null);
+  await menuStore.restorePreviousMenu("Admin");
+  assert.equal(menuStore.knownMenuLayout().items[0].label, "Le port");
+  assert.notEqual(menuStore.knownMenuLayout().updatedAt, saved.updatedAt);
 });
 
 test("Remplacements : seules les pages d'Eraser prévues, jamais les routes techniques", () => {

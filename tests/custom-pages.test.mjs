@@ -127,6 +127,8 @@ test("Nettoyage : rien d'exécutable, blocs inconnus écartés, colonnes ajusté
   const row = pages.cleanCustomPage({ title: "{Nom}", replaces: "/regles/combat", rowOf: { index: "creatures", tab: "" } });
   assert.deepEqual(row.rowOf, { index: "creatures" });
   assert.equal(row.replaces, undefined);
+  // Une page de campagne (lisible selon ses membres) ne remplace pas une page d'Eraser.
+  assert.equal(pages.cleanCustomPage({ title: "x", place: "campagne", campaignId: "C1", replaces: "/regles/combat" }).replaces, undefined);
 });
 
 test("Ce que reçoit chaque rôle : blocs masqués et secrets non révélés ne quittent pas le serveur", () => {

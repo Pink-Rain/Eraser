@@ -143,6 +143,22 @@ export async function deleteChunked(scope: string, key: string) {
 
 let cache: { expiresAt: number; promise: Promise<CustomPage[]> } | null = null
 
+/**
+ * La dernière liste connue, servie tout de suite à la coque de chaque page (menu, page
+ * d'Eraser remplacée) : un rendu n'attend jamais le serveur partagé pour elle. Elle suit
+ * chaque enregistrement fait sur cette installation et se relit en arrière-plan au plus
+ * toutes les soixante secondes.
+ */
+let known: CustomPage[] | null = null
+let refreshDueAt = 0
+let refreshing: Promise<unknown> | null = null
+const REFRESH_EVERY = 60_000
+
+function remember(list: CustomPage[]) {
+  known = list
+  refreshDueAt = Date.now() + REFRESH_EVERY
+}
+
 async function readAll() {
   if (!sharedStoreAvailable()) return []
   return assembleChunks(await listSharedRecords(PAGES_SCOPE)).flatMap(([, value]) => { const page = parseCustomPage(value); return page ? [page] : [] })
@@ -153,12 +169,27 @@ export function listCustomPages(options: { fresh?: boolean } = {}) {
   if (!options.fresh && cache && cache.expiresAt > Date.now()) return cache.promise
   const promise = readAll()
   cache = { expiresAt: Date.now() + 15_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
+  // Une lecture partie avant un enregistrement ne reprend pas la main sur la copie en mémoire.
+  promise.then((list) => { if (cache?.promise === promise) remember(list) }, () => { if (cache?.promise === promise) cache = null })
   return promise
+}
+
+/**
+ * Les pages connues tout de suite (`null` : jamais lues), sans attendre le serveur partagé ;
+ * lance leur relecture en arrière-plan quand la copie date de plus d'une minute.
+ */
+export function knownCustomPages(): CustomPage[] | null {
+  if (sharedStoreAvailable() && !refreshing && Date.now() >= refreshDueAt) {
+    refreshDueAt = Date.now() + REFRESH_EVERY
+    refreshing = listCustomPages({ fresh: true }).catch(() => null).finally(() => { refreshing = null })
+  }
+  return known
 }
 
 export function forgetCustomPages() {
   cache = null
+  known = null
+  refreshDueAt = 0
 }
 
 export async function readCustomPage(id: string, options: { fresh?: boolean } = {}) {
@@ -191,7 +222,8 @@ async function persist(page: CustomPage) {
   if (list) {
     const next = [...list.filter((item) => item.id !== page.id), page]
     cache = { expiresAt: Date.now() + 15_000, promise: Promise.resolve(next) }
-  }
+    remember(next)
+  } else refreshDueAt = 0
   return page
 }
 
@@ -306,7 +338,11 @@ export async function deleteCustomPage(id: string) {
     await deleteChunked(PAGES_SCOPE, id)
   })
   const list = await (cache?.promise.catch(() => null) ?? Promise.resolve(null))
-  if (list) cache = { expiresAt: Date.now() + 15_000, promise: Promise.resolve(list.filter((page) => page.id !== id)) }
+  if (list) {
+    const next = list.filter((page) => page.id !== id)
+    cache = { expiresAt: Date.now() + 15_000, promise: Promise.resolve(next) }
+    remember(next)
+  } else refreshDueAt = 0
 }
 
 /**

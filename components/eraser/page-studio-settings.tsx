@@ -446,7 +446,7 @@ export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveErr
       <Field label="Pages qui mènent ici">{linking.length ? <div className="flex flex-wrap gap-1">{linking.map((item) => <a key={item.id} href={studioHref(item.id)} className="rounded-full border bg-background/60 px-2 py-0.5 text-xs hover:border-ring">{item.title}</a>)}</div> : <span className="text-xs text-muted-foreground">Aucune pour l’instant.</span>}</Field>
     </Group>
     <Group title="Remplacer une page d’Eraser" open={Boolean(page.replaces)} badge={page.replaces ? <span className="rounded-full border border-primary/35 bg-primary/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-primary">active</span> : undefined}>
-      {page.rowOf?.index ? <Hint>Cette page est le modèle des lignes d’un index : elle ne remplace pas une page d’Eraser. Retire d’abord le modèle (ci-dessous) pour l’utiliser ici.</Hint> : <>
+      {page.rowOf?.index ? <Hint>Cette page est le modèle des lignes d’un index : elle ne remplace pas une page d’Eraser. Retire d’abord le modèle (ci-dessous) pour l’utiliser ici.</Hint> : page.place === "campagne" ? <Hint>Une page de campagne ne remplace pas une page d’Eraser : range-la d’abord ailleurs (Place et adresse).</Hint> : <>
       <Field label="Page d’Eraser" hint="La page créée prend sa place à son adresse, ou s’ajoute à son contenu. Seulement une fois publiée, et pour qui peut la lire ; les autres voient la page d’origine.">
         <select className={fieldClass} value={page.replaces ?? ""} onChange={(event) => onChange(event.target.value ? { replaces: event.target.value, replaceMode: page.replaceMode ?? "after" } : { replaces: undefined, replaceMode: undefined })}>
           <option value="">Aucune</option>

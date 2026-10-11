@@ -4,8 +4,10 @@
  * d'Eraser » efface cette entrée après l'avoir recopiée dans « layout-precedent » : un clic
  * la remet.
  *
- * La coque lit le menu à chaque page : il est gardé trente secondes en mémoire (une lecture du
- * serveur partagé, aucune de Google), et relu aussitôt après un enregistrement.
+ * La coque de chaque page (app/layout.tsx) n'attend jamais le serveur partagé : elle prend
+ * la copie en mémoire (`knownMenuLayout`, le menu d'Eraser tant que rien n'a été lu), qui
+ * suit chaque enregistrement fait sur cette installation et se relit en arrière-plan au plus
+ * toutes les soixante secondes. L'éditeur du menu, lui, lit toujours le serveur (`readMenuLayout`).
  */
 import { withAsyncLock } from "@/lib/async-lock"
 import { cleanMenuItems, keepAdminEntries, parseMenuLayout, type MenuLayout } from "@/lib/app-menu"
@@ -15,8 +17,20 @@ import { sharedStoreAvailable } from "@/lib/shared-store"
 export const MENU_SCOPE = "app-menu"
 const KEY = "layout"
 const PREVIOUS = "layout-precedent"
+/** Au plus une relecture en arrière-plan par minute. */
+const REFRESH_EVERY = 60_000
 
-let cache: { expiresAt: number; promise: Promise<MenuLayout | null> } | null = null
+/** La copie en mémoire (`undefined` : jamais lue ; `null` : le menu d'Eraser). */
+let known: MenuLayout | null | undefined
+let refreshDueAt = 0
+let refreshing: Promise<unknown> | null = null
+/** Compte les enregistrements : une lecture partie avant l'un d'eux ne reprend pas la main. */
+let writes = 0
+
+function remember(layout: MenuLayout | null) {
+  known = layout
+  refreshDueAt = Date.now() + REFRESH_EVERY
+}
 
 async function read(key: string) {
   if (!sharedStoreAvailable()) return null
@@ -24,13 +38,31 @@ async function read(key: string) {
   return value ? parseMenuLayout(value) : null
 }
 
-/** Le menu enregistré (`null` : le menu d'Eraser). */
-export function readMenuLayout(options: { fresh?: boolean } = {}) {
-  if (!options.fresh && cache && cache.expiresAt > Date.now()) return cache.promise
-  const promise = read(KEY)
-  cache = { expiresAt: Date.now() + 30_000, promise }
-  promise.catch(() => { if (cache?.promise === promise) cache = null })
-  return promise
+/** Le menu enregistré, lu sur le serveur partagé (`null` : le menu d'Eraser). */
+export async function readMenuLayout() {
+  const stamp = writes
+  const layout = await read(KEY)
+  if (stamp === writes) remember(layout)
+  return layout
+}
+
+/**
+ * Le menu connu tout de suite, sans attendre le serveur partagé : `undefined` tant qu'il
+ * n'a jamais été lu (la coque montre alors le menu d'Eraser), sinon le dernier lu ou
+ * enregistré ici. Lance la relecture en arrière-plan quand la copie date de plus d'une minute.
+ */
+export function knownMenuLayout(): MenuLayout | null | undefined {
+  if (sharedStoreAvailable() && !refreshing && Date.now() >= refreshDueAt) {
+    refreshDueAt = Date.now() + REFRESH_EVERY
+    refreshing = readMenuLayout().catch(() => null).finally(() => { refreshing = null })
+  }
+  return known
+}
+
+/** Oublie la copie en mémoire (tests). */
+export function forgetMenuLayout() {
+  known = undefined
+  refreshDueAt = 0
 }
 
 export async function hasPreviousMenu() {
@@ -48,7 +80,8 @@ export function saveMenuLayout(items: unknown, base: string, by: string, options
     const clean = cleanMenuItems(items)
     const layout: MenuLayout = { items: options.admin ? clean : keepAdminEntries(clean, current?.items), updatedAt: new Date().toISOString(), updatedBy: by }
     await writeChunked(MENU_SCOPE, KEY, JSON.stringify(layout))
-    cache = { expiresAt: Date.now() + 30_000, promise: Promise.resolve(layout) }
+    writes += 1
+    remember(layout)
     return layout
   })
 }
@@ -60,7 +93,8 @@ export function resetMenuLayout() {
     const current = await read(KEY)
     if (current) await writeChunked(MENU_SCOPE, PREVIOUS, JSON.stringify(current))
     await deleteChunked(MENU_SCOPE, KEY)
-    cache = { expiresAt: Date.now() + 30_000, promise: Promise.resolve(null) }
+    writes += 1
+    remember(null)
   })
 }
 
@@ -73,7 +107,8 @@ export function restorePreviousMenu(by: string) {
     const layout: MenuLayout = { items: previous.items, updatedAt: new Date().toISOString(), updatedBy: by }
     await writeChunked(MENU_SCOPE, KEY, JSON.stringify(layout))
     await deleteChunked(MENU_SCOPE, PREVIOUS)
-    cache = { expiresAt: Date.now() + 30_000, promise: Promise.resolve(layout) }
+    writes += 1
+    remember(layout)
     return layout
   })
 }

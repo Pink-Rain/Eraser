@@ -5,11 +5,11 @@
  */
 import { getCampaignForMj, getCampaignForPlayer, listAllCampaignsForAdmin, listCampaignsForMj, listCampaignsForPlayer } from "@/lib/google-sheets"
 import { canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
-import { listCustomPages } from "@/lib/custom-pages-store"
+import { knownCustomPages, listCustomPages } from "@/lib/custom-pages-store"
 import type { BlockDataOptions, IndexSource } from "@/lib/custom-pages-data"
 import { rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
 import { resolveMenu, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
-import { readMenuLayout } from "@/lib/app-menu-store"
+import { knownMenuLayout } from "@/lib/app-menu-store"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
 import { isForbiddenReplacement, matchesReplacement } from "@/lib/page-replacements"
@@ -57,9 +57,17 @@ export async function readablePages(account: Pick<AuthorizedUser, "uid" | "role"
   if (!pages.length) return []
   const needsCampaigns = account.role !== "admin" && pages.some((page) => page.place === "campagne")
   const campaigns = needsCampaigns ? new Map((await campaignsOf(account)).map((campaign) => [campaign.id, campaign])) : null
+  return readableAmong(pages, account, campaigns, options)
+}
+
+type CampaignMembership = Map<string, { mine: boolean }> | null
+
+/** Les pages lisibles parmi `pages` ; `campaigns` : celles du compte (`null` : inconnues, leurs pages sont tenues pour fermées). */
+function readableAmong(pages: CustomPage[], account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">, campaigns: CampaignMembership, options: { includeDrafts?: boolean } = {}) {
   const base = { role: account.role, uid: account.uid, name: pageAuthor(account).name }
   const admin = account.role === "admin"
   return pages.flatMap((page) => {
+    if (page.trashedAt) return []
     const campaign = page.place === "campagne" ? campaigns?.get(page.campaignId) : undefined
     const viewer: PageViewer = { ...base, member: page.place === "campagne" && (admin || Boolean(campaign)), manager: page.place === "campagne" && (admin || Boolean(campaign?.mine)) }
     if (!canReadPage(page, viewer)) return []
@@ -67,6 +75,15 @@ export async function readablePages(account: Pick<AuthorizedUser, "uid" | "role"
     if (!options.includeDrafts && (page.status !== "publiee" || !page.published)) return []
     return [{ page, viewer, editable: canEditPage(page, viewer) }]
   })
+}
+
+/**
+ * Les pages lisibles tout de suite, d'après la copie en mémoire (aucune attente du serveur
+ * partagé ni de Google) : pour la coque de chaque page. Les pages de campagne d'un compte qui
+ * n'est pas administrateur demandent ses campagnes (Google) : elles n'y sont pas.
+ */
+function readableKnownPages(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">, options: { includeDrafts?: boolean } = {}) {
+  return readableAmong(knownCustomPages() ?? [], account, null, options)
 }
 
 /** Les pages d'une section (ou d'une campagne), publiées et visibles du compte, par titre. */
@@ -132,25 +149,34 @@ export async function backlinkSources() {
 /**
  * Le menu tel que le voit ce compte (sa vue) : celui réglé dans l'éditeur, sinon celui
  * d'Eraser, avec les pages publiées et lisibles de chaque section sous la section (Règles,
- * Index, Bac à sable, Administration) et celles d'une campagne sous son dossier. Une lecture
- * du serveur partagé gardée en mémoire ; aucune de Google.
+ * Index, Bac à sable, Administration). Tout vient des copies en mémoire du serveur partagé :
+ * rien n'est attendu, ni de lui ni de Google. `campaignPages` : les pages publiées de chaque
+ * campagne (vue MJ), que la coque range sous le dossier de ses campagnes à elle quand leur
+ * liste, déjà en vol, arrive.
  */
-export async function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">): Promise<ResolvedMenuItem[]> {
-  const [layout, readable] = await Promise.all([readMenuLayout().catch(() => null), readablePages(account).catch(() => [])])
+export function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">): { items: ResolvedMenuItem[]; campaignPages: Record<string, MenuPageEntry[]> } {
+  const layout = knownMenuLayout()
+  const known = knownCustomPages() ?? []
   const pages: Record<string, MenuPageEntry> = {}
   const sectionPages: Record<string, MenuPageEntry[]> = {}
   const campaignPages: Record<string, MenuPageEntry[]> = {}
-  for (const { page } of readable) {
-    const content = page.published ?? page
-    const entry: MenuPageEntry = { title: content.title, href: pageHref(page), icon: content.icon, emoji: content.emoji }
-    pages[page.id] = entry
+  const entryOf = (page: CustomPage): MenuPageEntry => { const content = page.published ?? page; return { title: content.title, href: pageHref(page), icon: content.icon, emoji: content.emoji } }
+  for (const { page } of readableAmong(known, account, null)) {
+    pages[page.id] = entryOf(page)
     // Une page de ligne d'index ou qui remplace une page d'Eraser n'est pas une entrée de section.
-    if (page.rowOf?.index || page.replaces) continue
-    if (page.place === "campagne") (campaignPages[page.campaignId] ??= []).push(entry)
-    else if (page.place !== "hors-menu") (sectionPages[page.place] ??= []).push(entry)
+    if (page.rowOf?.index || page.replaces || page.place === "hors-menu" || page.place === "campagne") continue
+    (sectionPages[page.place] ??= []).push(pages[page.id])
+  }
+  if (account.role === "mj") {
+    // Ses campagnes ne sont pas connues ici : candidates par campagne, triées par la coque.
+    const viewer: PageViewer = { role: "mj", uid: account.uid, name: pageAuthor(account).name, member: true, manager: true }
+    for (const page of known) {
+      if (page.place !== "campagne" || page.rowOf?.index || page.replaces || page.status !== "publiee" || !page.published || !canReadPage(page, viewer)) continue
+      (campaignPages[page.campaignId] ??= []).push(entryOf(page))
+    }
   }
   for (const list of [...Object.values(sectionPages), ...Object.values(campaignPages)]) list.sort((left, right) => left.title.localeCompare(right.title, "fr"))
-  return resolveMenu(layout?.items ?? null, { role: account.role, pages, sectionPages, campaignPages })
+  return { items: resolveMenu(layout?.items ?? null, { role: account.role, pages, sectionPages }), campaignPages }
 }
 
 /* ---------- Pages d'Eraser remplacées ou complétées ---------- */
@@ -158,28 +184,43 @@ export async function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "
 /**
  * La page du créateur de pages qui remplace ou complète l'adresse demandée, telle que ce
  * compte la lit (publiée, ouverte à son rôle) ; `null` : la page d'Eraser telle quelle.
+ * D'après la copie en mémoire, sans attente : une page de campagne ne remplace jamais une page
+ * d'Eraser (lib/custom-pages.ts), le lecteur se décide donc sans lire ses campagnes.
  */
-export async function replacementFor(pathname: string, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+export function replacementFor(pathname: string, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
   if (!pathname || isForbiddenReplacement(pathname)) return null
-  const candidates = (await listCustomPages().catch(() => [])).filter((page) => !page.trashedAt && page.status === "publiee" && page.published && page.replaces && matchesReplacement(page.replaces, pathname))
+  const candidates = (knownCustomPages() ?? []).filter((page) => !page.trashedAt && page.status === "publiee" && page.published && page.replaces && page.place !== "campagne" && matchesReplacement(page.replaces, pathname))
+  const viewer: PageViewer = { role: account.role, uid: account.uid, name: pageAuthor(account).name, member: false, manager: false }
   for (const page of candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
-    const view = pageForViewer(page, await viewerFor(account, page))
+    const view = pageForViewer(page, viewer)
     if (view) return { page, view, mode: page.replaceMode ?? "after" }
   }
   return null
 }
 
-/** Les pages vers lesquelles mènent les blocs Lien d'une page : seulement celles que le lecteur peut ouvrir. */
-export async function linkTargetsOf(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+type LinkTargets = Record<string, { title: string; href: string; icon: string; emoji: string; description: string }>
+
+function linkTargetsAmong(view: PageView, readable: ReturnType<typeof readableAmong>) {
   const linked = new Set(view.sections.flatMap((section) => section.cols.flat()).flatMap((block) => block.type === "link" && block.pageId ? [block.pageId] : []))
-  const links: Record<string, { title: string; href: string; icon: string; emoji: string; description: string }> = {}
+  const links: LinkTargets = {}
   if (!linked.size) return links
-  for (const { page: target } of await readablePages(account, { includeDrafts: canManagePages(account.role) })) {
+  for (const { page: target } of readable) {
     if (!linked.has(target.id)) continue
     const content = target.status === "publiee" && target.published ? target.published : target
     links[target.id] = { title: content.title, href: pageHref(target), icon: content.icon, emoji: content.emoji, description: content.description }
   }
   return links
+}
+
+/** Les pages vers lesquelles mènent les blocs Lien d'une page : seulement celles que le lecteur peut ouvrir. */
+export async function linkTargetsOf(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  const linked = view.sections.some((section) => section.cols.flat().some((block) => block.type === "link" && block.pageId))
+  return linkTargetsAmong(view, linked ? await readablePages(account, { includeDrafts: canManagePages(account.role) }) : [])
+}
+
+/** Les mêmes, tout de suite d'après la copie en mémoire (page d'Eraser remplacée, dans la coque). */
+export function linkTargetsKnown(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  return linkTargetsAmong(view, readableKnownPages(account, { includeDrafts: canManagePages(account.role) }))
 }
 
 /** L'adresse de l'index de chaque bloc Vue (MJ et admins : les joueurs n'ont pas accès aux index). */

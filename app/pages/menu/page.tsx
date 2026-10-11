@@ -15,7 +15,7 @@ export default async function MenuEditorPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   const [layout, previous, pages] = await Promise.all([
-    readMenuLayout({ fresh: true }).catch(() => null),
+    readMenuLayout().catch(() => null),
     hasPreviousMenu().catch(() => false),
     readablePages(account, { includeDrafts: true }).catch(() => []),
   ])
