@@ -111,9 +111,18 @@ function escapeHtml(value: string) {
  */
 async function withClassRanks(data: WorldIndexData): Promise<WorldIndexData> {
   try {
+    // La mémoire locale d'abord ; une installation neuve lit la liste des classes une fois. Illisible
+    // (Google saturé) : la colonne le dit au lieu de disparaître, et les rangs ne se modifient pas.
     const indexed = await listIndexedClasses()
-    const classes = indexed.length ? indexed : await listClasses()
-    const ranks: ClassRanksExtra = { options: classes.map((item) => ({ id: item.id, name: item.name, color: item.accentDark })), headers: {}, rows: {}, perRankLimit: MAX_CLASS_SPELLS_PER_RANK }
+    let classes = indexed
+    let error = ""
+    if (!classes.length) {
+      try { classes = await listClasses() } catch (reason) {
+        console.error("CLASS_RANKS_CLASSES_FAILED", reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
+        error = "Les classes n’ont pas pu être lues : actualise dans un instant pour régler les rangs."
+      }
+    }
+    const ranks: ClassRanksExtra = { options: classes.map((item) => ({ id: item.id, name: item.name, color: item.accentDark })), headers: {}, rows: {}, perRankLimit: MAX_CLASS_SPELLS_PER_RANK, ...(error ? { error } : {}) }
     const columns = { ...data.columns }
     for (const table of data.tables) {
       const idColumn = table.headers.findIndex((header) => foldName(header) === "id")

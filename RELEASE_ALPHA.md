@@ -18,7 +18,9 @@ réécrite : la feuille « Sorts de classe » garde exactement ses colonnes et s
 - **Onglets-fenêtres prévus d'office** dans l'Index des sorts des classes : **Actifs**, **Passifs**
   et **Bonus** (Actifs et Passifs dans les sorts des créatures), rangés exactement comme dans
   Création de classe. Ils ne s'écrivent nulle part et ne se suppriment pas ; tes propres
-  onglets-fenêtres restent à côté.
+  onglets-fenêtres restent à côté. « Ajouter » depuis Passifs ou Bonus donne ce Type au nouveau
+  sort, qui reste ainsi dans l'onglet.
+- Deux changements rapides sur la même pastille partent l'un après l'autre, sans se refuser.
 - Copier un sort donne toujours une copie sans rang (un rang n'admet que trois sorts, et un sort
   de rang commun serait donné à tous les personnages de la classe).
 

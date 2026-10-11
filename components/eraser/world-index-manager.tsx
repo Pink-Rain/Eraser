@@ -9,7 +9,7 @@ import { ArrowRightLeft, CircleHelp, FileText, Filter, LoaderCircle, Pencil, Plu
 import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
-import { builtinViewsFor } from "@/lib/index-view-defaults"
+import { builtinViewsFor, viewAddDefaults } from "@/lib/index-view-defaults"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
@@ -571,8 +571,6 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
    */
   const classRanks = data?.classRanks
   const [rankDrafts, setRankDrafts] = useState<Record<string, Record<string, number | null>>>({})
-  const rankDraftsRef = useRef(rankDrafts)
-  useEffect(() => { rankDraftsRef.current = rankDrafts }, [rankDrafts])
   const rankHeaders = useMemo(() => new Set(Object.values(classRanks?.headers ?? {}).flat().map(foldName)), [classRanks])
   const classRankColumn = useMemo((): NonNullable<IndexEmbed["extraColumns"]>[number] | null => {
     if (!classRanks) return null
@@ -587,14 +585,22 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       setSaving((count) => count + 1); setError("")
       try {
         for (const classId of changes) {
-          const payload = await post({ action: "set-class-rank", tabName, rowId: row.id, classId, rank: next[classId] ?? null, originalRank: classRanks.rows[row.id]?.[classId] ?? null })
+          // Le rang que la pastille montrait : deux changements rapides partent dans l'ordre, chacun sur le précédent.
+          const payload = await post({ action: "set-class-rank", tabName, rowId: row.id, classId, rank: next[classId] ?? null, originalRank: before[classId] ?? null })
           if (payload.data) applyData(payload.data, payload.seq)
         }
       } catch (reason) {
         setError(reason instanceof Error ? reason.message : "Ce rang n’a pas pu être enregistré.")
       } finally {
-        // La feuille relue fait foi : ce qui a été enregistré y est, un refus y est absent.
-        setRankDrafts((current) => { const copy = { ...current }; delete copy[row.id]; return copy })
+        // La feuille relue fait foi : ce qui a été enregistré y est, un refus y est absent. Seuls
+        // les changements de cet appel sont oubliés, s'ils n'ont pas été remplacés entre-temps.
+        setRankDrafts((current) => {
+          const own = { ...current[row.id] }
+          for (const classId of changes) if (own[classId] === (next[classId] ?? null)) delete own[classId]
+          const copy = { ...current }
+          if (Object.keys(own).length) copy[row.id] = own; else delete copy[row.id]
+          return copy
+        })
         setSaving((count) => Math.max(0, count - 1))
       }
     }
@@ -603,7 +609,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       label: "Classes et rangs",
       width: 280,
       after: "Compétences",
-      render: (row, compact) => row.id
+      render: (row, compact) => classRanks.error
+        ? <span className="px-2 text-xs text-muted-foreground" title={classRanks.error}>Classes illisibles</span>
+        : row.id
         ? <RankedLinksCell
           links={linksOf(row.id)}
           options={classRanks.options}
@@ -733,7 +741,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     else setCreating(true)
   }, [applyData, embedAdd, entity, post, router, table])
   /** Une ligne ajoutée depuis la vue intégrée reçoit ce que la page impose (le Type des passifs). */
-  const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? {}).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [embed])
+  // Depuis un onglet-fenêtre prévu par Eraser (Passifs, Bonus), la ligne reçoit son Type : elle y reste.
+  const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? viewAddDefaults(activeView)).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [activeView, embed])
 
   // Toutes les colonnes sont dans la liste : la grille cache les masquées (et les
   // « Formulaire seulement », comme celles de la fiche des créatures) et les montre d'un clic.

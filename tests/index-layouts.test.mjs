@@ -122,6 +122,13 @@ test("onglets-fenêtres prévus par Eraser : Actifs, Passifs et Bonus rangent le
     assert.equal(inView("creature-spells", "passifs", type), category === "passif", type);
   }
   assert.deepEqual(defaults.builtinViewsFor("places"), []);
+  // Ajouter depuis Passifs ou Bonus donne son Type à la ligne (vide, elle serait un actif et quitterait la vue).
+  const view = (index, id) => defaults.builtinViewsFor(index).find((item) => item.id === `eraser-${id}`);
+  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "passifs")), { Type: "Passif" });
+  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "bonus")), { Type: "Bonus" });
+  assert.deepEqual(defaults.viewAddDefaults(view("class-spells", "actifs")), {});
+  assert.deepEqual(defaults.viewAddDefaults(view("creature-spells", "actifs")), {});
+  assert.deepEqual(defaults.viewAddDefaults(null), {});
   assert.ok(defaults.builtinViewsFor("class-spells").every((view) => view.builtin));
   // Jamais proposée dans la fenêtre « Modifier un onglet-fenêtre », ni relue dans les réglages.
   assert.ok(!views.viewOperators.some((operator) => operator.value === "categorie-sort"));

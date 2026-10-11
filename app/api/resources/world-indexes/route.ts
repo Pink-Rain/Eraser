@@ -2,7 +2,7 @@ import { NextResponse } from "next/server"
 
 import { withEntityExtras } from "@/lib/entity-index-extras"
 import { addRankBonusRow, invalidateClassContentCaches, linkClassSpell } from "@/lib/class-content"
-import { getCampaignForMj, getCharacterForUser, listClassOptions } from "@/lib/google-sheets"
+import { getCampaignForMj, getCharacterForUser, listCachedClassOptions } from "@/lib/google-sheets"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { isClassRankHeader } from "@/lib/world-index-definitions"
@@ -33,6 +33,10 @@ const conflicts: Record<string, string> = {
   WORLD_INDEX_ROW_DUPLICATE: "Plusieurs lignes portent cet identifiant dans Google Sheets : actualise (ou corrige le doublon dans Sheets) puis recommence.",
   WORLD_INDEX_CELL_CHANGED: "Cette case a été modifiée entre-temps (dans Sheets ou par quelqu’un d’autre) : actualise pour voir sa valeur actuelle, puis recommence.",
   WORLD_INDEX_COLUMN_NOT_FOUND: "Cette colonne n’existe plus dans Google Sheets : actualise puis recommence.",
+  // « Classes et rangs » : la feuille des sorts a changé depuis que la page l'a lue.
+  CLASS_SPELL_CHANGED: "La feuille a changé entre-temps : actualise puis recommence.",
+  CLASS_SPELL_MOVED: "La feuille a changé entre-temps : actualise puis recommence.",
+  CLASS_SPELL_ID_DUPLICATE: "Plusieurs lignes de la feuille des sorts portent cet ID : corrige-les dans Google Sheets, puis actualise.",
 }
 
 /** Le message montré et le code HTTP d'une écriture refusée. */
@@ -55,7 +59,6 @@ function errorMessage(code: string) {
   if (code === "CLASS_SPELLS_SHEET_NOT_FOUND") return "Le classeur « Sorts de classe » est introuvable dans le Drive."
   if (code === "CLASS_RANK_COLUMN_LOCKED") return "Les rangs se règlent dans la colonne « Classes et rangs » : elle vérifie qu’un rang n’a pas plus de trois sorts."
   if (code.startsWith("CLASS_RANK_FULL")) return "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux."
-  if (code === "CLASS_SPELL_CHANGED" || code === "CLASS_SPELL_MOVED") return "La feuille a changé entre-temps : actualise puis recommence."
   if (code === "CLASS_SPELL_ID_REQUIRED") return "Ce sort n’a pas encore d’identifiant : actualise le tableau puis recommence."
   if (code === "CLASS_RANK_INVALID") return "Le rang doit être compris entre 0 et 20."
   if (code.startsWith("CLASS_COLUMN_NOT_FOUND")) return "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée."
@@ -114,11 +117,14 @@ export async function POST(request: Request) {
     // Personnages et campagnes, pour un MJ : seulement ses lignes, jamais la case du propriétaire.
     const guard = worldIndexRowGuard(key, account)
     let changed: string[] = []
-    // Sorts des classes : les colonnes de rang ne s'écrivent que par « Classes et rangs » (trois sorts par rang au plus).
-    if (key === "class-spells" && (body.action === "update-cell" || body.action === "update-fields")) {
-      const classNames = (await listClassOptions()).map((item) => item.name)
-      const headers = body.action === "update-cell" ? [String(body.header ?? "")] : Object.keys(body.fields ?? {})
-      if (headers.some((header) => isClassRankHeader(header, classNames))) throw new Error("CLASS_RANK_COLUMN_LOCKED")
+    // Sorts des classes : les colonnes de rang ne s'écrivent que par « Classes et rangs » (trois sorts
+    // par rang au plus). Les classes viennent de la mémoire locale : jamais de lecture Google ici.
+    if (key === "class-spells" && ["update-cell", "update-fields", "add", "ensure"].includes(body.action ?? "")) {
+      const classNames = (await listCachedClassOptions().catch(() => [])).map((item) => item.name)
+      const written = body.action === "update-cell" ? [String(body.header ?? "")]
+        : body.action === "add" ? (Array.isArray(body.headers) ? body.headers.map((header) => String(header ?? "")).filter((_, index) => String(body.values?.[index] ?? "").trim()) : [])
+        : Object.entries(body.fields ?? {}).filter(([, value]) => String(value ?? "").trim() || body.action === "update-fields").map(([header]) => header)
+      if (written.some((header) => isClassRankHeader(header, classNames))) throw new Error("CLASS_RANK_COLUMN_LOCKED")
     }
     if (key === "class-spells" && body.action === "set-class-rank") {
       const spellId = text(body.rowId).trim()

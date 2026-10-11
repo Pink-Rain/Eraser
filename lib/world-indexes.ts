@@ -118,6 +118,8 @@ export type ClassRanksExtra = {
   /** Par identifiant de sort : son rang (0 à 20) dans chaque classe. */
   rows: Record<string, Record<string, number>>
   perRankLimit: number
+  /** Les classes n'ont pas pu être lues : la colonne le montre, sans rien permettre d'écrire. */
+  error?: string
 }
 
 export type EntityIndexLink = { label: string; href: string; title?: string; color?: string }

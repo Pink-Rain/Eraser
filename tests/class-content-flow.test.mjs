@@ -502,6 +502,16 @@ test("Classes et rangs dans le moteur : lus dans les colonnes de rang, écrits u
   const fields = await world({ action: "update-fields", rowNumber: 2, rowId: "SOR-FEU", rowName: "Boule de feu", fields: { "Guerrier·e": "1" } });
   assert.equal(fields.status, 400);
   assert.equal(record(grid(), 1)["Mage"], "3");
+  // Ni par l'ajout d'une ligne (un bouton d'action, un formulaire) : le plafond serait contourné.
+  const added = await world({ action: "add", headers: ["Nom", "Type", "Mage"], values: ["Neuf", "Actif", "3"] });
+  assert.equal(added.status, 400);
+  assert.match(added.body.error, /Classes et rangs/);
+  assert.ok(!names(grid()).includes("Neuf"));
+  // Une ligne ajoutée sans rang passe.
+  const plain = await world({ action: "add", headers: ["Nom", "Type", "Mage"], values: ["Neuf", "Actif", ""] });
+  assert.equal(plain.status, 200, JSON.stringify(plain.body));
+  // Un rang vu qui n'est plus celui de la feuille : conflit (409), comme dans Création de classe.
+  assert.equal(stale.status, 409);
   // Délier : la case se vide, le reste de la ligne ne bouge pas.
   await world({ action: "set-class-rank", rowId: "SOR-ECLAIR", classId: "CLA-0001", rank: null, originalRank: 5 });
   assert.equal(record(grid(), 2)["Guerrier·e"], undefined);
