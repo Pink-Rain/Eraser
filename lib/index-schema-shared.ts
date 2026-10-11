@@ -50,6 +50,8 @@ export type EditorColumn = { header: string; spec: IndexColumnSpec; policy: Colu
 
 export type EditorTab = {
   name: string
+  /** Comment s'appelle une ligne (« un sort ») ; absent : l'onglet n'a pas ce réglage. */
+  itemLabel?: string
   columns: EditorColumn[]
   remove: boolean
   removeReason?: string
@@ -95,6 +97,8 @@ export type SchemaOperation =
   | { op: "rename-tab"; tab: string; to: string }
   /** Nouvel ordre des onglets. */
   | { op: "order-tabs"; tabs: string[] }
+  /** Comment s'appelle une ligne de l'onglet (« un sort ») ; vide : celui d'Eraser. */
+  | { op: "tab-label"; tab: string; label: string }
 
 /** Les types proposés à la création ou au changement de type d'une colonne. */
 // « Nom formulaire » n'y est pas : chaque index a déjà le sien, créé d'office ; on n'en veut pas deux.
@@ -103,7 +107,7 @@ export const creatableKinds: IndexColumnKind[] = ["rich", "number", "checkbox", 
 export const freePolicy: ColumnPolicy = { rename: true, type: true, remove: true, reasons: [], allowed: "Tout : nom, type, réglages, place, suppression." }
 
 /** Ce qu'on peut toujours changer, même sur une colonne verrouillée : son affichage. */
-export const displayOnlyAllowed = "L’affichage seulement : description, « Masquée », style imposé, place dans le tableau."
+export const displayOnlyAllowed = "L’affichage seulement : description, « Masquée », style imposé, place dans le tableau, couleurs et ordre des options."
 
 export function lockedPolicy(reasons: string[], allowed = displayOnlyAllowed, partial: Partial<Pick<ColumnPolicy, "rename" | "type" | "remove">> = {}): ColumnPolicy {
   return { rename: false, type: false, remove: false, ...partial, reasons, allowed }
@@ -122,8 +126,9 @@ export function sameSpec(left: IndexColumnSpec, right: IndexColumnSpec) {
 
 /**
  * Un changement qui ne touche que l'affichage (description, masquée, style imposé,
- * emplacement tableau / formulaire, Nom ↔ Nom formulaire) : permis même quand la
- * colonne est verrouillée, puisque la donnée écrite dans Sheets ne change pas.
+ * emplacement tableau / formulaire, Nom ↔ Nom formulaire, couleurs, groupes et ordre des
+ * options d'une liste) : permis même quand la colonne est verrouillée, puisque la donnée
+ * écrite dans Sheets ne change pas. Les valeurs d'une liste, elles, restent celles qu'Eraser lit.
  */
 export function isDisplayOnlyChange(current: IndexColumnSpec, next: IndexColumnSpec) {
   const a = normalizeSpec(current)
@@ -131,7 +136,8 @@ export function isDisplayOnlyChange(current: IndexColumnSpec, next: IndexColumnS
   if (!isSameDataKind(a.kind, b.kind)) return false
   const strip = (spec: IndexColumnSpec) => {
     const copy: Record<string, unknown> = { ...spec, kind: spec.kind === "name-form" ? "name" : spec.kind }
-    for (const key of ["hidden", "description", "style", "placement", "form", "display"]) delete copy[key]
+    for (const key of ["hidden", "description", "style", "placement", "form", "display", "groups", "rowLabel"]) delete copy[key]
+    if (Array.isArray(copy.options)) copy.options = (copy.options as Array<{ value: string }>).map((option) => option.value.trim()).sort()
     return JSON.stringify(stable(copy))
   }
   return strip(a) === strip(b)

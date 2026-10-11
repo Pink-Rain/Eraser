@@ -403,6 +403,18 @@ export type IndexColumnSpec = {
   /** Colonne masquée : cachée du tableau, qu'on peut montrer d'un clic. */
   hidden?: boolean
   /**
+   * Nomme la ligne dans un onglet sans colonne Nom (titre de sa fiche, citations « { »,
+   * lignes reconnues par leur nom) : « Succès » dans les succès obtenus.
+   */
+  rowLabel?: boolean
+  /**
+   * Texte enrichi gardé en HTML dans la case (le « Contenu » du vocabulaire, que sa page
+   * affiche avec ses listes) : lu et réécrit comme ce texte, jamais converti en mise en forme Sheets.
+   */
+  htmlText?: boolean
+  /** Ligne d'onglet du schéma : comment s'appelle une ligne (« un sort » : « Ajouter un sort »). */
+  itemLabel?: string
+  /**
    * Lecture seule : la colonne s'affiche (tri, recherche, survol, fiche) mais ne se modifie
    * pas depuis l'index ; ses données viennent d'ailleurs (la fiche d'un personnage…).
    */

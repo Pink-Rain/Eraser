@@ -137,17 +137,20 @@ async function loadSource(key: string, options: { cited?: readonly string[] } = 
 // Le catalogue du menu « { »
 // ---------------------------------------------------------------------------
 
-/** Les mots du menu : l'index, chacun de ses onglets s'il en a plusieurs, les types de modificateurs. */
+/** Les mots du menu : l'index, chacun de ses onglets s'il en a plusieurs, et les valeurs de ses rangements en onglets. */
 function entriesOf(source: Source, rows: ReferenceIndex["rows"]): ReferenceEntry[] {
   // Le mot de ses lignes, le nom de l'index, et ceux de ses onglets : le même pour tout index du moteur.
   const entries: ReferenceEntry[] = indexEntries(source)
-  // « Attribut », « Matériau », « Rune » : les lignes d'« Armes - Modificateurs » de ce type.
-  if (source.key === "weapon-modifiers") {
-    const types = new Map<string, string>()
-    for (const row of rows) for (const tag of row.tags ?? []) if (!types.has(foldName(tag))) types.set(foldName(tag), tag)
-    for (const tag of types.values()) entries.push({ index: source.key, label: tag, hint: source.title, tag })
-  }
+  // Chaque valeur d'un « Rangement en onglets » (« Attribut », « Matériau », « Rune »…) cite les lignes qui l'ont.
+  const types = new Map<string, string>()
+  for (const row of rows) for (const tag of row.tags ?? []) if (!types.has(foldName(tag))) types.set(foldName(tag), tag)
+  for (const tag of types.values()) entries.push({ index: source.key, label: tag, hint: source.title, tag })
   return entries
+}
+
+/** La colonne « Rangement en onglets » d'un onglet (la première), dont les valeurs servent d'étiquettes. */
+function tagColumnOf(table: Source["tables"][number]) {
+  return table.headers.findIndex((header) => table.specs?.get(foldName(header))?.kind === "tab-sort")
 }
 
 let catalogCache: { at: number; promise: Promise<ReferenceCatalog> } | null = null
@@ -159,7 +162,7 @@ async function buildCatalog(): Promise<ReferenceCatalog> {
   const used = new Set<string>()
   for (const source of sources) {
     const rows = source.tables.filter((table) => !table.unlisted).flatMap((table) => {
-      const type = source.key === "weapon-modifiers" ? columnAt(table.headers, ["Type"]) : -1
+      const type = tagColumnOf(table)
       return table.rows.map((row) => ({ id: row.id, name: row.name, tab: table.tab, ...(type >= 0 && row.values[type]?.trim() ? { tags: row.values[type].split(/\s*[,;|]\s*/).filter(Boolean) } : {}) }))
     })
     indexes.push({ key: source.key, title: source.title, tabs: source.tables.filter((table) => !table.unlisted).map((table) => ({ name: table.tab, columns: table.columns })), rows })

@@ -1,25 +1,34 @@
-# Eraser 0.1.1-alpha.185 — Le journal de campagne
+# Eraser 0.1.1-alpha.186 — Les index, tous sur le même moteur
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Le journal
+Les petites particularités des index, jusque-là écrites dans le code, deviennent des réglages
+ordinaires de « Modifier ». Rien ne change dans les feuilles Google.
 
-- Dans le tableau de bord d'une campagne, entre les PNJs du groupe et l'inventaire, un encart
-  **Journal • Dernière session** mène au **Journal de [la campagne]**.
-- Le journal s'ouvre sur la dernière session (**S12 - Son nom**). Les flèches ← → (à l'écran ou
-  au clavier) passent à la session voisine ; un clic sur le nom déroule toutes les sessions pour
-  aller directement à l'une d'elles. Le contenu de chaque session arrive dans une prochaine
-  version.
-- Dans le menu, sous la campagne, un lien **Journal de [la campagne]**, côté joueur comme côté
-  MJ (et dans le dossier de la campagne). Vue joueur, menu replié : une icône cliquable.
-- Le journal lit les sessions sans rien écrire dans Google Sheets, avec la lecture partagée :
-  cinq joueurs qui l'ouvrent ensemble ne coûtent qu'une lecture.
+## Liens entre index
 
-## Index
+- Les liens prévus par Eraser (Religions ↔ Divinités, Peuples : Ancêtres ↔ Descendant, Lieux,
+  Langues…) sont maintenant des **colonnes liées** comme celles créées dans « Modifier » : on
+  les voit, on lit quelle colonne leur répond, et « Modifier quand même » permet de les changer.
 
-- La fiche des créatures suit enfin les types de colonnes choisis dans « Modifier ».
-- La colonne « Type » d'Armes - Modificateurs est protégée : les objets (Attributs, Matériaux,
-  Runes) et les citations « { » la lisent par son nom, la renommer les cassait sans prévenir.
-- Index des objets : « Modifier » propose de nouveau la **Liste liée** (comme le serveur le
-  permettait déjà) ; le rangement en onglets, pas encore géré par les objets, est refusé des deux
-  côtés.
+## Réglages de colonne
+
+- **Couleurs et ordre des options** d'une liste : modifiables même sur une colonne verrouillée
+  (Caractéristiques, Succès…), puisque les valeurs écrites dans Sheets ne changent pas. Les
+  valeurs elles-mêmes restent protégées.
+- **Nomme la ligne** : dans un onglet sans colonne Nom (les attributions de Succès), la colonne
+  choisie donne son titre à la fiche et aux citations.
+- **Mise en forme gardée en HTML** : le réglage du « Contenu » du Vocabulaire, désormais visible
+  dans les réglages de texte enrichi.
+- Les étiquettes « { » (Attribut, Matériau, Rune…) viennent de n'importe quel **Rangement en
+  onglets**, plus seulement d'Armes - Modificateurs.
+
+## Onglets
+
+- **Une ligne s'appelle…** : dans « Modifier », chaque onglet règle le mot de ses boutons et
+  messages (« + Ajouter un lieu », « Ajoute une lignée pour commencer »). Vide : celui d'Eraser.
+
+## Pages
+
+- Les seize pages d'index et celles des index créés passent par une seule page commune : même
+  titre, même chargement, mêmes liens annexes (Doublons, Création de classe, ancienne vue PNJs).

@@ -147,6 +147,8 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       }
       continue
     }
+    // Le nom d'une ligne vient des onglets d'objets eux-mêmes : « Modifier » ne le propose pas ici.
+    if (operation.op === "tab-label") throw new Error("INDEX_SCHEMA_LOCKED:Le nom d’une ligne ne se règle pas dans l’index des objets.")
     if (operation.op === "remove-tab") {
       locked(tables.length > 1, ["C’est le seul tableau de ce classeur : il doit en garder au moins un."])
       upsertEntry(schema, table.tabName, "", { deletedAt: now })

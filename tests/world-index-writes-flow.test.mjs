@@ -75,6 +75,44 @@ beforeEach(async () => {
   for (const key of ["creatures", "creature-spells", "characters", "campaigns", "class-spells", "places", "peoples"]) engine.forgetEffectiveIndex(key);
 });
 
+test("Liens de départ : réglages de colonne ordinaires, ils recopient les noms et se remplacent dans le schéma", async () => {
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers, line(headers, { "Nom": "Elfes", "ID": "PEU-1" }), line(headers, { "Nom": "Hauts-Elfes", "ID": "PEU-2" })] }]);
+  await link("peoples", id, "Peuples");
+  const data = await engine.getWorldIndex("peoples", { refresh: true });
+  // Le lien est un réglage de la colonne, comme ceux créés dans « Modifier ».
+  const descendant = data.columns.Peuples.find((column) => column.header === "Descendant");
+  assert.equal(descendant.spec.kind, "linked");
+  assert.deepEqual(descendant.spec.link, { index: "peoples", tab: "Peuples", column: "Ancêtres" });
+  // « Hauts-Elfes » en Descendant des Elfes : les Elfes arrivent dans les Ancêtres des Hauts-Elfes.
+  await engine.updateWorldIndexCell("peoples", "Peuples", { rowNumber: 2, id: "PEU-1", name: "Elfes" }, "Descendant", "Hauts-Elfes");
+  assert.equal(byId(google.grid(id, "Peuples"))["PEU-2"]["Ancêtres"], "Elfes");
+  // Le verrou nomme la colonne qui répond.
+  const model = await engine.worldEditorModel("peoples");
+  const locked = model.tabs[0].columns.find((column) => column.header === "Ancêtres");
+  assert.equal(locked.policy.type, false);
+  assert.match(locked.policy.reasons[0], /Descendant/);
+});
+
+test("Le nom d'une ligne se règle par onglet dans « Modifier » et revient à celui d'Eraser une fois vidé", async () => {
+  const headers = definitions.worldIndexDefinitions.peoples.tabs[0].headers;
+  const id = fresh("peoples");
+  google.addSpreadsheet(id, [{ title: "Peuples", grid: [headers] }]);
+  await link("peoples", id, "Peuples");
+  const builtin = definitions.worldIndexDefinitions.peoples.tabs[0].itemLabel;
+  assert.equal((await engine.worldEditorModel("peoples")).tabs[0].itemLabel, builtin);
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "tab-label", tab: "Peuples", label: "  une   lignée " }]);
+  let data = await engine.getWorldIndex("peoples", { refresh: true });
+  assert.equal(data.definition.tabs[0].itemLabel, "une lignée");
+  assert.equal((await engine.worldEditorModel("peoples")).tabs[0].itemLabel, "une lignée");
+  await engine.applyWorldSchemaOperations("peoples", [{ op: "tab-label", tab: "Peuples", label: "" }]);
+  data = await engine.getWorldIndex("peoples", { refresh: true });
+  assert.equal(data.definition.tabs[0].itemLabel, builtin);
+  // La feuille elle-même n'a pas bougé.
+  assert.deepEqual(google.grid(id, "Peuples")[0], headers);
+});
+
 test("Supprimer vise la ligne par son identifiant, même décalée ailleurs, sans confondre deux homonymes", async () => {
   const id = await linkCreatures([{ "Nom": "Loup", "Type": "Bête", "ID": "CRE-1" }, { "Nom": "Loup", "Type": "Garou", "ID": "CRE-2" }, { "Nom": "Ours", "Type": "Bête", "ID": "CRE-3" }]);
   const data = await engine.getWorldIndex("creatures", { refresh: true });

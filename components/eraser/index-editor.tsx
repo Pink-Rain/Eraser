@@ -68,7 +68,7 @@ import {
  * changement part alors avec `force`, et l'avertissement reste affiché).
  */
 type DraftColumn = { id: string; original?: string; originalIndex?: number; header: string; spec: IndexColumnSpec; originalSpec?: IndexColumnSpec; policy: ColumnPolicy; lockedPolicy?: ColumnPolicy; removed: boolean }
-type DraftTab = { id: string; original?: string; name: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
+type DraftTab = { id: string; original?: string; name: string; itemLabel?: string; originalItemLabel?: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
 
 let draftCounter = 0
 const nextId = () => `draft-${draftCounter++}`
@@ -103,6 +103,8 @@ function draftOf(model: IndexEditorModel): DraftTab[] {
     id: nextId(),
     original: tab.name,
     name: tab.name,
+    itemLabel: tab.itemLabel,
+    originalItemLabel: tab.itemLabel,
     removed: false,
     remove: tab.remove,
     removeReason: tab.removeReason,
@@ -139,6 +141,7 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
     const live = tab.columns.filter((column) => !column.removed)
     const natural = [...live.filter((column) => column.original).sort((left, right) => (left.originalIndex ?? 0) - (right.originalIndex ?? 0)), ...live.filter((column) => !column.original)]
     if (live.some((column, index) => column.id !== natural[index].id)) operations.push({ op: "order-columns", tab: tab.original, headers: live.map((column) => column.header.trim()) })
+    if (tab.itemLabel !== undefined && (tab.itemLabel ?? "").trim() !== (tab.originalItemLabel ?? "").trim()) operations.push({ op: "tab-label", tab: tab.original, label: tab.itemLabel.trim() })
     if (tab.name.trim() !== tab.original) operations.push({ op: "rename-tab", tab: tab.original, to: tab.name.trim() })
   }
   const liveTabs = tabs.filter((tab) => !tab.removed)
@@ -163,6 +166,7 @@ function describeOperation(operation: SchemaOperation) {
     case "order-columns": return `Nouvel ordre des colonnes de « ${operation.tab} »`
     case "rename-tab": return `Onglet « ${operation.tab} » renommé « ${operation.to} »`
     case "order-tabs": return `Nouvel ordre des onglets : ${operation.tabs.join(", ")}`
+    case "tab-label": return `Onglet « ${operation.tab} » : une ligne s’appelle « ${operation.label || "(par défaut)"} »`
   }
 }
 
@@ -264,6 +268,8 @@ type SettingsProps = {
   indexKey: string
   sampleRows: Array<Record<string, string>>
   openGuide: (section: GuideSection) => void
+  /** L'apparence (couleurs, groupes, ordre des options) : modifiable même quand le type est verrouillé. */
+  lookDisabled?: boolean
 }
 
 function NumberFormatSettings({ spec, onChange, disabled }: Pick<SettingsProps, "spec" | "onChange" | "disabled">) {
@@ -288,7 +294,7 @@ function NumberFormatSettings({ spec, onChange, disabled }: Pick<SettingsProps, 
   </div>
 }
 
-function ListSettings({ spec, onChange, disabled }: Pick<SettingsProps, "spec" | "onChange" | "disabled">) {
+function ListSettings({ spec, onChange, disabled, lookDisabled = disabled }: Pick<SettingsProps, "spec" | "onChange" | "disabled" | "lookDisabled">) {
   const options = spec.options ?? []
   const groups = spec.groups ?? []
   const [bulk, setBulk] = useState(false)
@@ -307,11 +313,11 @@ function ListSettings({ spec, onChange, disabled }: Pick<SettingsProps, "spec" |
           {options.map((option, index) => <li key={index} className="flex flex-wrap items-center gap-1.5 rounded-lg border bg-background/60 p-1.5">
             <span className="inline-flex max-w-40 truncate rounded-full border px-2 py-0.5 text-xs" style={pillStyle(option.color ?? groups.find((group) => option.group && foldName(group.name) === foldName(option.group))?.color)}>{option.value || "…"}</span>
             <Input disabled={disabled} value={option.value} onChange={(event) => setOptions(options.map((item, position) => position === index ? { ...item, value: event.target.value } : item))} className="h-7 w-40 text-xs" aria-label="Valeur" />
-            <ColorSwatches disabled={disabled} value={option.color} onChange={(color) => setOptions(options.map((item, position) => position === index ? { ...item, color } : item))} />
-            {groups.length > 0 && <NativeSelect disabled={disabled} value={option.group ?? ""} onChange={(event) => setOptions(options.map((item, position) => position === index ? { ...item, group: event.target.value || undefined } : item))} className="h-7 w-32 text-xs"><NativeSelectOption value="">Sans groupe</NativeSelectOption>{groups.map((group) => <NativeSelectOption key={group.name} value={group.name}>{group.name}</NativeSelectOption>)}</NativeSelect>}
+            <ColorSwatches disabled={lookDisabled} value={option.color} onChange={(color) => setOptions(options.map((item, position) => position === index ? { ...item, color } : item))} />
+            {groups.length > 0 && <NativeSelect disabled={lookDisabled} value={option.group ?? ""} onChange={(event) => setOptions(options.map((item, position) => position === index ? { ...item, group: event.target.value || undefined } : item))} className="h-7 w-32 text-xs"><NativeSelectOption value="">Sans groupe</NativeSelectOption>{groups.map((group) => <NativeSelectOption key={group.name} value={group.name}>{group.name}</NativeSelectOption>)}</NativeSelect>}
             <span className="ml-auto flex">
-              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => move(index, -1)} aria-label="Monter"><ArrowUp /></Button>
-              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === options.length - 1} onClick={() => move(index, 1)} aria-label="Descendre"><ArrowDown /></Button>
+              <Button type="button" variant="ghost" size="icon-xs" disabled={lookDisabled || index === 0} onClick={() => move(index, -1)} aria-label="Monter"><ArrowUp /></Button>
+              <Button type="button" variant="ghost" size="icon-xs" disabled={lookDisabled || index === options.length - 1} onClick={() => move(index, 1)} aria-label="Descendre"><ArrowDown /></Button>
               <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => setOptions(options.filter((_, position) => position !== index))} aria-label="Retirer"><Trash2 /></Button>
             </span>
           </li>)}
@@ -322,11 +328,11 @@ function ListSettings({ spec, onChange, disabled }: Pick<SettingsProps, "spec" |
       <p className={smallLabel}>Groupes (statut) — facultatif</p>
       <p className="text-xs text-muted-foreground">Range les options par étapes, dans l’ordre : « À faire », « En cours », « Fini ». Le menu les montre par groupe ; une option sans couleur prend celle de son groupe.</p>
       {groups.map((group, index) => <div key={index} className="flex flex-wrap items-center gap-1.5">
-        <Input disabled={disabled} value={group.name} onChange={(event) => onChange({ ...spec, groups: groups.map((item, position) => position === index ? { ...item, name: event.target.value } : item), options: options.map((option) => option.group === group.name ? { ...option, group: event.target.value } : option) })} className="h-7 w-40 text-xs" />
-        <ColorSwatches disabled={disabled} value={group.color} onChange={(color) => onChange({ ...spec, groups: groups.map((item, position) => position === index ? { ...item, color } : item) })} />
-        <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => onChange({ ...spec, groups: groups.filter((_, position) => position !== index), options: options.map((option) => option.group === group.name ? { ...option, group: undefined } : option) })} aria-label="Retirer le groupe"><Trash2 /></Button>
+        <Input disabled={lookDisabled} value={group.name} onChange={(event) => onChange({ ...spec, groups: groups.map((item, position) => position === index ? { ...item, name: event.target.value } : item), options: options.map((option) => option.group === group.name ? { ...option, group: event.target.value } : option) })} className="h-7 w-40 text-xs" />
+        <ColorSwatches disabled={lookDisabled} value={group.color} onChange={(color) => onChange({ ...spec, groups: groups.map((item, position) => position === index ? { ...item, color } : item) })} />
+        <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={lookDisabled} onClick={() => onChange({ ...spec, groups: groups.filter((_, position) => position !== index), options: options.map((option) => option.group === group.name ? { ...option, group: undefined } : option) })} aria-label="Retirer le groupe"><Trash2 /></Button>
       </div>)}
-      <div><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => onChange({ ...spec, groups: [...groups, { name: groups.length ? `Groupe ${groups.length + 1}` : "À faire" }] })}><Plus />Ajouter un groupe</Button></div>
+      <div><Button type="button" variant="ghost" size="sm" disabled={lookDisabled} onClick={() => onChange({ ...spec, groups: [...groups, { name: groups.length ? `Groupe ${groups.length + 1}` : "À faire" }] })}><Plus />Ajouter un groupe</Button></div>
     </div>
   </>
 }
@@ -542,7 +548,10 @@ function TypeSettings(props: SettingsProps) {
   const targetOf = (index: string | undefined) => targets.find((target) => target.index === index)
   const relations = siblings.filter((column) => !column.removed && (column.spec.kind === "linked" || column.spec.kind === "linked-choice"))
   switch (spec.kind) {
-    case "rich": return <p className="text-xs text-muted-foreground">Chaque case garde sa mise en forme. Pour un style commun à toute la colonne (et sans mise en forme propre à chaque case), règle le « Style imposé » plus bas.</p>
+    case "rich": return <div className="grid gap-2">
+      <p className="text-xs text-muted-foreground">Chaque case garde sa mise en forme. Pour un style commun à toute la colonne (et sans mise en forme propre à chaque case), règle le « Style imposé » plus bas.</p>
+      <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.htmlText)} onCheckedChange={(checked) => set({ htmlText: checked === true || undefined })} /><span><b>Mise en forme gardée en HTML</b> : la case contient le HTML tel quel (listes, paragraphes), pour une page qui le lit ; Sheets montre alors les balises.</span></label>
+    </div>
     case "name-form": return <p className="text-xs text-muted-foreground">Un clic sur le nom ouvre la fiche de la ligne, avec tous ses champs (masqués compris, rangés selon sa mise en page). Le nom se modifie dans la fiche, qui s’enregistre d’elle-même.</p>
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
     case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
@@ -553,7 +562,7 @@ function TypeSettings(props: SettingsProps) {
       <label className="flex items-center gap-2"><Checkbox disabled={disabled} checked={spec.glyph?.filled !== false} onCheckedChange={(checked) => set({ glyph: { ...spec.glyph, filled: checked === true } })} />Icône pleine (décochée : seulement son contour)</label>
     </div>
     case "tab-sort": return <p className="text-xs text-muted-foreground">Chaque valeur devient un onglet qui porte son nom et montre les lignes qui l’ont. La ligne reste dans son onglet et apparaît en plus dans celui de sa valeur : rien n’est déplacé dans Sheets. La liste propose les valeurs déjà utilisées ; une valeur nouvelle crée son onglet.</p>
-    case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} />
+    case "choice": return <ListSettings spec={spec} onChange={onChange} disabled={disabled} lookDisabled={props.lookDisabled ?? disabled} />
     case "linked-choice": {
       const source = spec.source ?? { index: targets[0]?.index ?? "peoples", tab: "" }
       const target = targetOf(source.index)
@@ -671,6 +680,7 @@ function DisplaySettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; 
     <p className="font-semibold">Affichage</p>
     <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={masked} onCheckedChange={(checked) => onChange({ ...spec, hidden: checked === true || undefined, placement: placementOf(spec) === "sheet" ? undefined : spec.placement, form: undefined })} /><span><b>Masquée</b> : cachée du tableau ; le bouton « Colonnes masquées » la montre d’un clic.</span></label>
     {!isComputedSpec(spec) && spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> : visible, triable et dans les survols, mais ne se modifie pas d’ici (ses données viennent d’ailleurs).</span></label>}
+    {spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.rowLabel)} onCheckedChange={(checked) => onChange({ ...spec, rowLabel: checked === true || undefined })} /><span><b>Nomme la ligne</b> : dans un onglet sans colonne Nom, cette colonne donne son nom à la ligne (titre de la fiche, citations « {"{"} »).</span></label>}
     <label className={smallLabel}>Description (au survol de l’en-tête et dans la fiche)<Input disabled={disabled} value={spec.description ?? ""} onChange={(event) => onChange({ ...spec, description: event.target.value || undefined })} placeholder="À quoi sert cette colonne ?" /></label>
     <p className="text-[11px] text-muted-foreground">Pour choisir les champs de la fiche et du survol (masqués compris) : « Mise en page de la fiche » et « Survol », en haut.</p>
   </div>
@@ -1055,6 +1065,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               </NativeSelect>}
             </form>
             : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
+          {!readOnly && tab && !tab.removed && tab.itemLabel !== undefined && <label className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2 text-[11px] text-muted-foreground" title="Le mot des boutons et messages de l’onglet : « + Ajouter un lieu », « Ce lieu a été supprimé »…">
+            Une ligne de « {tab.name} » s’appelle
+            <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
+          </label>}
           {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2">
             <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
               <Columns3 />Aligner les autres onglets sur « {tab.name} »
@@ -1176,6 +1190,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 spec={column.spec}
                 onChange={(spec) => updateColumn({ ...column, spec })}
                 disabled={typeDisabled}
+                lookDisabled={displayDisabled}
                 targets={model.relationTargets}
                 siblings={tab.columns.filter((item) => item.id !== column.id)}
                 tabs={tabs}
@@ -1184,7 +1199,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 sampleRows={sampleRows[tab.original ?? tab.name] ?? []}
                 openGuide={(section) => setGuide(section)}
               />
-              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description et le style imposé restent modifiables ci-dessous.</p>}
+              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
             </div>
             <DisplaySettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
             <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />

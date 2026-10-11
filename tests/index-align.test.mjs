@@ -7,7 +7,7 @@ import { createServer } from "vite";
 const root = fileURLToPath(new URL("..", import.meta.url));
 const vite = await createServer({ appType: "custom", configFile: false, root, resolve: { alias: { "@": root } }, server: { middlewareMode: true } });
 after(async () => { await vite.close(); });
-const { alignColumns, canonicalObjectHeader, isObjectSpellingFix, objectHeaderIndex } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
+const { alignColumns, canonicalObjectHeader, isDisplayOnlyChange, isObjectSpellingFix, objectHeaderIndex } = await vite.ssrLoadModule("/lib/index-schema-shared.ts");
 const { layoutPlaces } = await vite.ssrLoadModule("/lib/index-layouts.ts");
 
 // Les en-têtes réels de l'index des objets (onglets Armes et Ressources).
@@ -79,4 +79,12 @@ test("le nom enrichi des objets le reste à chaque lecture", async () => {
   assert.equal(isRichSpec({ kind: "name", also: ["rich"] }), true);
   // Un nom ordinaire reste en gras, en texte simple.
   assert.equal(isRichSpec(normalizeSpec({ kind: "name" })), false);
+});
+
+test("une liste verrouillée garde ses valeurs, mais ses couleurs, groupes et ordre se règlent", () => {
+  const base = { kind: "choice", options: [{ value: "Principale", color: "#397f88" }, { value: "Secondaire", color: "#b48745" }] };
+  assert.equal(isDisplayOnlyChange(base, { ...base, options: [{ value: "Secondaire", color: "#ff0000" }, { value: "Principale" }], groups: [{ name: "Haut" }] }), true);
+  assert.equal(isDisplayOnlyChange(base, { ...base, options: [{ value: "Principale" }, { value: "Mentale" }] }), false);
+  assert.equal(isDisplayOnlyChange(base, { ...base, options: [...base.options, { value: "Tertiaire" }] }), false);
+  assert.equal(isDisplayOnlyChange(base, { ...base, multiple: true }), false);
 });

@@ -316,11 +316,16 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const tableByName = useMemo(() => new Map(tables.map((candidate) => [candidate.tabName, candidate])), [tables])
   // Un index d'entités : le nom mène à la page de la ligne, « Ajouter » à sa page de création.
   const entity = definition.entity
-  /** La colonne du nom d'une ligne de cet index : celle que l'index d'entités désigne (« Rang » des bonus de rang), sinon « Nom ». */
-  const ownNameColumn = useCallback((headers: string[]) => {
+  /**
+   * La colonne du nom d'une ligne de cet index : celle que l'index d'entités désigne (« Rang »
+   * des bonus de rang), sinon « Nom » ; dans un onglet sans Nom, celle réglée « Nomme la ligne ».
+   */
+  const ownNameColumn = useCallback((headers: string[], tabName?: string) => {
     const own = entity?.nameHeader ? headers.findIndex((header) => foldName(header) === foldName(entity.nameHeader)) : -1
-    return own >= 0 ? own : nameColumnOf(headers)
-  }, [entity])
+    if (own >= 0) return own
+    const name = nameColumnOf(headers)
+    return name >= 0 || !tabName ? name : headers.findIndex((header) => specOf(tabName, header)?.rowLabel)
+  }, [entity, specOf])
 
   const locate = useCallback((rowKey: string): { table: WorldIndexTable; row: WorldIndexRow } | null => {
     const { tabName: rowTab, rowNumber } = parseRowKey(rowKey)
@@ -537,7 +542,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   /** Le nom d'une ligne, quelle que soit sa colonne (« Nom », « Nom du PNJ »…). */
   const nameOf = useCallback((rowKey: string) => {
     const found = locate(rowKey)
-    const column = found ? ownNameColumn(found.table.headers) : -1
+    const column = found ? ownNameColumn(found.table.headers, found.table.tabName) : -1
     return found && column >= 0 ? rawOf(rowKey, found.table.headers[column]).replace(/<[^>]+>/g, "") : ""
   }, [locate, ownNameColumn, rawOf])
 
@@ -1328,7 +1333,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       {!nameOpensDetails && detailsFound && details !== null && <IndexRowSheet
         open
         rowKey={details}
-        title={savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers)] ?? "").replace(/<[^>]+>/g, "")}
+        title={savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers, detailsFound.table.tabName)] ?? "").replace(/<[^>]+>/g, "")}
         subtitle={`${definition.title} · ${detailsFound.table.tabName}`}
         fields={sheetFields}
         layout={sheetLayout}

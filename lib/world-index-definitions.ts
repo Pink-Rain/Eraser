@@ -175,12 +175,6 @@ export type WorldIndexDefinition = {
   description?: string
   /** Index d'entités (PNJs, campagnes, personnages, classes, sorts). */
   entity?: EntityIndexOptions
-  /**
-   * Colonnes dont la case garde du HTML écrit tel quel (le « Contenu » du vocabulaire, que
-   * sa page affiche avec ses listes et paragraphes) : lues et réécrites comme ce texte, jamais
-   * converties en mise en forme de Sheets.
-   */
-  htmlTextHeaders?: string[]
 }
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
@@ -401,7 +395,6 @@ const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldInde
     // La feuille de la page Règles › Vocabulaire, reliée telle quelle : son « Titre » devient
     // « Nom » (en-tête seul, valeurs intactes), et un « ID » masqué est ajouté à droite.
     tabs: [{ name: "Vocabulaire", itemLabel: "un mot", headers: ["Nom", "Contenu", ID_HEADER], widths: [260, 640, 130], idPrefix: "VOC", renamedHeaders: [["Titre", "Nom"]] }],
-    htmlTextHeaders: ["Contenu"],
   },
 }
 
@@ -540,11 +533,13 @@ export const worldIndexRowAdditions: Partial<Record<BuiltinWorldIndexKey, Array<
 export type WorldIndexLinkEnd = { index: WorldIndexKey; tab: string; column: string }
 
 /**
- * Colonnes qui se répondent. Écrire un nom d'un côté l'inscrit de l'autre, et crée
- * la ligne manquante au besoin : « x » en Descendant de « y » ajoute « y » aux
- * Ancêtres de « x ».
+ * Les colonnes liées prévues par Eraser, comme réglage de départ : chacune devient une
+ * « Colonne liée » ordinaire du moteur (son `link` dans `worldColumnSpec`), visible dans
+ * « Modifier » et remplaçable par ce que le schéma enregistre. Écrire un nom d'un côté
+ * l'inscrit de l'autre, et crée la ligne manquante au besoin : « x » en Descendant de « y »
+ * ajoute « y » aux Ancêtres de « x ».
  */
-export const worldIndexLinks: Array<[WorldIndexLinkEnd, WorldIndexLinkEnd]> = [
+export const defaultWorldIndexLinks: Array<[WorldIndexLinkEnd, WorldIndexLinkEnd]> = [
   [{ index: "religions", tab: "Religions", column: "Divinités" }, { index: "religions", tab: "Divinités", column: "Religion" }],
   [{ index: "peoples", tab: "Peuples", column: "Ancêtres" }, { index: "peoples", tab: "Peuples", column: "Descendant" }],
   [{ index: "peoples", tab: "Peuples", column: "Lieux" }, { index: "places", tab: "*", column: "Peuple" }],
@@ -644,7 +639,7 @@ function entityReaders(index: EntityWorldIndexKey, header: string, context: Worl
  */
 export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: string, links: WorldIndexLink[], context: WorldPolicyContext = {}): ColumnPolicy {
   const all = "Tout : nom, type, réglages, suppression."
-  const only = "Seulement la description et l’option « Masquée »."
+  const only = "L’affichage : description, « Masquée », style imposé, couleurs et ordre des options."
   if (isIdHeader(header)) return { rename: false, type: false, remove: false, reasons: ["Généré par Eraser pour reconnaître chaque ligne (et masqué d’office)."], allowed: only }
   if (isNameColumn(header)) return { rename: false, type: false, remove: false, reasons: ["Chaque ligne est retrouvée par son nom : colonnes liées, listes liées (le Peuple des PNJ…), Recherche, Agrégat et création de personnage (Peuples) en dépendent."], allowed: only }
   const pair = links.find(([end]) => linkEndCovers(end, index, tab) && foldName(end.column) === foldName(header))
@@ -687,17 +682,27 @@ export function nameColumnIndex(headers: readonly string[]) {
 }
 
 /**
- * La colonne qui reconnaît une ligne encore sans identifiant : son nom, sinon (un onglet
- * sans « Nom », comme les succès obtenus) sa première colonne.
+ * La colonne qui nomme une ligne : son nom ; sinon (un onglet sans « Nom ») celle réglée
+ * « Nomme la ligne » dans « Modifier » ; sinon sa première colonne.
  */
-export function labelColumnIndex(headers: readonly string[]) {
+export function labelColumnIndex(headers: readonly string[], specOf?: (header: string) => IndexColumnSpec | undefined) {
   const name = nameColumnIndex(headers)
-  return name >= 0 ? name : headers.findIndex((header) => header.trim() && !isIdHeader(header))
+  if (name >= 0) return name
+  const chosen = specOf ? headers.findIndex((header) => header.trim() && specOf(header)?.rowLabel) : -1
+  return chosen >= 0 ? chosen : headers.findIndex((header) => header.trim() && !isIdHeader(header))
 }
 
-/** Colonnes de liste de noms : saisies en texte brut pour que les liens restent lisibles. */
-export function linkedColumnsOf(index: WorldIndexKey, tab: string) {
-  return worldIndexLinks.flatMap((pair) => pair.filter((end) => linkEndCovers(end, index, tab)).map((end) => end.column))
+/**
+ * Les colonnes liées de départ d'un index, chacune avec la colonne qui lui répond (les
+ * deux sens de chaque lien prévu par Eraser).
+ */
+export function defaultLinkEnds(index: WorldIndexKey): Array<[WorldIndexLinkEnd, WorldIndexLinkEnd]> {
+  return defaultWorldIndexLinks.flatMap(([left, right]) => [[left, right], [right, left]] as Array<[WorldIndexLinkEnd, WorldIndexLinkEnd]>).filter(([end]) => end.index === index)
+}
+
+/** La colonne qui répond à cette colonne d'après les liens de départ, s'il y en a une. */
+export function defaultLinkOf(index: WorldIndexKey, tab: string, header: string) {
+  return defaultLinkEnds(index).find(([end]) => linkEndCovers(end, index, tab) && foldName(end.column) === foldName(header))?.[1]
 }
 
 /** Anciennes colonnes des créatures : sorties de la fiche, elles gardent leur contenu dans Sheets. */
@@ -721,10 +726,13 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
   // Tous les noms ouvrent la fiche de leur ligne (Nom formulaire).
   if (isNameColumn(header)) return { kind: "name-form", also: ["fixed"] }
   if (isEntityWorldIndexKey(index)) return entityColumnSpec(index, header)
-  if (linkedColumnsOf(index, tab).some((column) => foldName(column) === foldName(header))) return { kind: "linked", also: ["rich"] }
+  // Une colonne liée de départ : son lien est un réglage comme un autre (« Modifier » le montre).
+  const link = defaultLinkOf(index, tab, header)
+  if (link) return { kind: "linked", also: ["rich"], link: { ...link } }
   if (index === "achievements") {
     if (tab === OBTAINED_TAB) {
-      if (isHeader(header, [OBTAINED_ACHIEVEMENT_HEADER])) return { kind: "linked-choice", source: { index: "achievements", tab: ACHIEVEMENTS_TAB, onlyTab: true } }
+      // Un succès obtenu est nommé par son succès (l'onglet n'a pas de colonne Nom).
+      if (isHeader(header, [OBTAINED_ACHIEVEMENT_HEADER])) return { kind: "linked-choice", rowLabel: true, source: { index: "achievements", tab: ACHIEVEMENTS_TAB, onlyTab: true } }
       if (isHeader(header, [OBTAINED_ACCOUNT_HEADER])) return { kind: "rich", hidden: true }
       return { kind: "rich" }
     }
@@ -770,6 +778,8 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     if (isHeader(header, [CATALOG_KEY_HEADER])) return { kind: "rich", hidden: true, placement: "table" }
     return { kind: "rich" }
   }
+  // Le « Contenu » du vocabulaire garde son HTML dans la case : sa page l'affiche avec ses listes.
+  if (index === "vocabulary" && isHeader(header, ["Contenu"])) return { kind: "rich", htmlText: true }
   if (index === "creatures") {
     const form = !isHeader(header, creatureGridHeaders)
     if (isHeader(header, creatureArchivedHeaders)) return { kind: "archived" }

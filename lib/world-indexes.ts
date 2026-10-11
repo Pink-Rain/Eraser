@@ -61,7 +61,7 @@ import {
   worldIndexRowAdditions,
   worldIndexSeeds,
   worldColumnSpec,
-  worldIndexLinks,
+  defaultLinkEnds,
   type EntityWorldIndexKey,
   type WorldIndexKey,
   type WorldIndexDefinition,
@@ -174,7 +174,8 @@ function effectiveTabs(base: WorldIndexTabDefinition[], schema: SchemaEntry[]) {
     return { name: entry.tab, itemLabel: "une ligne", headers: ["Nom", ...columns.filter((header) => !["nom", "id"].includes(foldName(header))), ID_HEADER], widths: [], idPrefix: idPrefixOf(entry.tab) }
   })
   // L'ordre choisi dans « Modifier » (place gardée sur la ligne de l'onglet) ; les autres gardent le leur, à la suite.
-  const all = [...kept, ...added]
+  // Le nom d'une ligne réglé dans « Modifier » (« un sort ») remplace celui d'Eraser.
+  const all = [...kept, ...added].map((tab) => { const spec = findEntry(schema, tab.name, "")?.spec; return spec?.kind === "tab" && spec.itemLabel?.trim() ? { ...tab, itemLabel: spec.itemLabel.trim() } : tab })
   const placeOf = (name: string, index: number) => { const spec = findEntry(schema, name, "")?.spec; return spec?.kind === "tab" && typeof spec.position === "number" ? spec.position : 1000 + index }
   return all.map((tab, index) => ({ tab, place: placeOf(tab.name, index) })).sort((left, right) => left.place - right.place).map((item) => item.tab)
 }
@@ -448,13 +449,34 @@ function columnsOf(key: WorldIndexKey, table: WorldIndexTable, schema: SchemaEnt
   return columns.map((column, index) => ({ column, place: place(column.header, index) })).sort((left, right) => left.place - right.place).map((item) => item.column)
 }
 
-/** Les liens d'un index : ceux prévus par Eraser et ceux créés dans l'éditeur (déclarés des deux côtés). */
+/**
+ * Les liens d'un index, lus dans le type de ses colonnes : ceux créés dans l'éditeur
+ * (enregistrés dans le schéma, déclarés des deux côtés) et ceux de départ, tant que le
+ * schéma ne les a pas changés (autre type, autre colonne en face, colonne à la corbeille).
+ */
 function linksOf(key: WorldIndexKey): WorldIndexLink[] {
-  const schema = effectiveIndexes.get(key)?.schema ?? []
+  const effective = effectiveIndexes.get(key)
+  const schema = effective?.schema ?? []
+  const tabNames = (effective?.definition.tabs ?? (isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].tabs : [])).map((tab) => tab.name)
+  const sameEnd = (left: WorldIndexLinkEnd, right: WorldIndexLinkEnd) => left.index === right.index && left.tab === right.tab && foldName(left.column) === foldName(right.column)
+  // Le schéma a-t-il remplacé ce lien de départ sur cet onglet ?
+  const replaced = (tab: string, column: string, other: WorldIndexLinkEnd) => {
+    const entry = findEntry(schema, tab, column)
+    if (!entry) return false
+    if (trashed(entry)) return true
+    return Boolean(entry.spec && (entry.spec.kind !== "linked" || (entry.spec.link && !sameEnd(entry.spec.link, other))))
+  }
+  const defaults = defaultLinkEnds(key).flatMap(([end, other]): WorldIndexLink[] => {
+    if (end.tab !== "*") return replaced(end.tab, end.column, other) ? [] : [[end, other]]
+    // « Tous les onglets » : gardé tel quel tant qu'aucun onglet ne le change, sinon onglet par onglet.
+    if (!tabNames.some((tab) => replaced(tab, end.column, other))) return [[end, other]]
+    return tabNames.filter((tab) => !replaced(tab, end.column, other)).map((tab): WorldIndexLink => [{ ...end, tab }, other])
+  })
   const fromSchema = schema.flatMap((entry): WorldIndexLink[] => entry.column && !trashed(entry) && entry.spec?.kind === "linked" && entry.spec.link
     ? [[{ index: key, tab: entry.tab, column: entry.column }, entry.spec.link]]
     : [])
-  return [...worldIndexLinks.filter(([left, right]) => left.index === key || right.index === key), ...fromSchema]
+  // Un lien de départ enregistré tel quel dans le schéma n'est compté qu'une fois.
+  return [...defaults, ...fromSchema.filter(([end, other]) => !defaults.some(([candidate, answer]) => linkEndCovers(candidate, key, end.tab) && foldName(candidate.column) === foldName(end.column) && sameEnd(answer, other)))]
 }
 
 /**
@@ -784,10 +806,9 @@ function columnOf(headers: string[], name: string) {
   return headers.findIndex((header) => foldName(header) === foldName(name))
 }
 
-/** Une colonne dont la case garde son HTML en texte (le « Contenu » du vocabulaire) : écrite telle quelle. */
-function isHtmlTextColumn(key: WorldIndexKey, header: string) {
-  const names = isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].htmlTextHeaders ?? [] : []
-  return names.some((name) => foldName(name) === foldName(header))
+/** Une colonne réglée « HTML gardé dans la case » (le « Contenu » du vocabulaire) : lue et écrite telle quelle. */
+function isHtmlTextColumn(key: WorldIndexKey, tabName: string, header: string) {
+  return Boolean(effectiveColumnSpec(key, tabName, header, effectiveIndexes.get(key)?.schema ?? []).htmlText)
 }
 
 /**
@@ -795,7 +816,7 @@ function isHtmlTextColumn(key: WorldIndexKey, header: string) {
  * fiche le mettent en forme), et leur valeur simple le texte sans balises (recherche, tri).
  */
 function withHtmlTextColumns(key: WorldIndexKey, table: WorldIndexTable): WorldIndexTable {
-  const columns = table.headers.flatMap((header, index) => isHtmlTextColumn(key, header) ? [index] : [])
+  const columns = table.headers.flatMap((header, index) => isHtmlTextColumn(key, table.tabName, header) ? [index] : [])
   if (!columns.length) return table
   return {
     ...table,
@@ -1212,7 +1233,7 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
     const current = before.rows[rowIndex]?.[column] ?? ""
     if (options.previous !== undefined && !sameCellText(options.previous, current)) throw new Error("WORLD_INDEX_CELL_CHANGED")
     // Une case HTML-en-texte (le vocabulaire) garde son HTML tel quel, comme l'écrit sa page.
-    if (isHtmlTextColumn(key, target)) await writeCell(before, tabName, rowIndex, column, html)
+    if (isHtmlTextColumn(key, tabName, target)) await writeCell(before, tabName, rowIndex, column, html)
     else await updateFormattedCell({ spreadsheetId: sheet.spreadsheetId, sheetId: await sheetIdOf(sheet.spreadsheetId, tabName), rowNumber: rowIndex + 1, column, html })
     await patchCachedRow(key, tabName, cachedIdentityOf(before, rowIndex), [{ header: target, html }])
     // La case est écrite. Ce qui suit (les liens vers d'autres index) peut échouer sans que
@@ -1286,7 +1307,7 @@ export function addWorldIndexRow(key: WorldIndexKey, tabName: string, provided: 
       return given.get(name) ?? ""
     })
     // Une case HTML-en-texte (le vocabulaire) est écrite avec son HTML, comme sa page l'écrit.
-    const htmlText = current.headers.map((header) => isHtmlTextColumn(key, header))
+    const htmlText = current.headers.map((header) => isHtmlTextColumn(key, tabName, header))
     const plain = html.map((value, column) => htmlText[column] ? value : htmlToRichText(value).text)
     const nameColumn = nameColumnIndex(current.headers)
     if (nameColumn >= 0 && !plain[nameColumn].trim()) throw new Error("WORLD_INDEX_NAME_REQUIRED")
@@ -1486,7 +1507,7 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
       written.push({ header: table.headers[target.column], html: target.value })
       // Texte enrichi : écrit avec sa mise en forme plutôt qu'avec ses balises.
       // (Sauf une case HTML-en-texte, le vocabulaire : son HTML est écrit tel quel.)
-      if (/<[a-z]/i.test(target.value) && !isHtmlTextColumn(key, table.headers[target.column])) { formatted.push({ column: target.column, html: target.value }); continue }
+      if (/<[a-z]/i.test(target.value) && !isHtmlTextColumn(key, tabName, table.headers[target.column])) { formatted.push({ column: target.column, html: target.value }); continue }
       const cell = `${columnName(target.column + 1)}${rowNumber}`
       data.push({ range: sheetTabRange(tabName, `${cell}:${cell}`), values: [[target.value]] })
     }
@@ -1663,6 +1684,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
       return {
         name: table.tabName,
         columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
+        itemLabel: data.definition.tabs.find((candidate) => candidate.name === table.tabName)?.itemLabel ?? data.definition.itemLabel ?? "une ligne",
         remove: false,
         removeReason: reason,
         rename: false,
@@ -1679,6 +1701,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
     return {
       name: table.tabName,
       columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
+      itemLabel: data.definition.tabs.find((candidate) => candidate.name === table.tabName)?.itemLabel ?? "une ligne",
       remove: !locked,
       removeReason: locked || undefined,
       rename: !renameReason,
@@ -1747,7 +1770,7 @@ async function ensureReciprocal(key: WorldIndexKey, tab: string, header: string,
 }
 
 /** La ligne d'un onglet dans le schéma : sa place, et pour un index d'entités l'ordre d'affichage de ses colonnes. */
-function setTabSpec(entries: SchemaEntry[], tab: string, changes: Pick<IndexColumnSpec, "position" | "columns">) {
+function setTabSpec(entries: SchemaEntry[], tab: string, changes: Pick<IndexColumnSpec, "position" | "columns" | "itemLabel">) {
   const current = findEntry(entries, tab, "")?.spec
   upsertEntry(entries, tab, "", { spec: { ...(current?.kind === "tab" ? current : {}), kind: "tab", ...changes } })
 }
@@ -1804,6 +1827,12 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
         }
         const tab = sheet.definition.tabs.find((candidate) => candidate.name === operation.tab)
         if (!tab) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+        if (operation.op === "tab-label") {
+          // Un simple réglage d'affichage, gardé sur la ligne de l'onglet dans le schéma.
+          const label = operation.label.replace(/\s+/g, " ").trim().slice(0, 60)
+          edit((entries) => setTabSpec(entries, tab.name, { itemLabel: label || undefined }))
+          continue
+        }
         if (operation.op === "rename-tab") {
           const model = await worldEditorModel(key)
           const target = model.tabs.find((candidate) => candidate.name === tab.name)
