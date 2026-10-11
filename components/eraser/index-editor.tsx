@@ -46,6 +46,7 @@ import {
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
 import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
+import { builtinLayoutFor, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { cardId, renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import {
@@ -903,8 +904,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const layoutsEnabled = Boolean(onSaveLayouts) && !readOnly
   const layoutOf = (draft: DraftTab, kind: LayoutKind) => {
     const touched = layoutDrafts[draft.id]
-    if (touched && kind in touched) return touched[kind] ?? null
-    return draft.original ? tabLayout(layouts, draft.original, kind) : null
+    // Sans mise en page enregistrée : celle d'Eraser (la fiche des créatures), sinon l'automatique.
+    const builtin = draft.original ? builtinLayoutFor(model.key, draft.original, kind) : null
+    if (touched && kind in touched) return touched[kind] ?? builtin
+    return draft.original ? tabLayoutOrBuiltin(layouts, model.key, draft.original, kind) : null
   }
   /**
    * Ce qu'il faut écrire : les mises en page touchées, et celles qui suivent un onglet ou
@@ -915,7 +918,17 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const saved = { form: draft.original ? tabLayout(layouts, draft.original, "form") : null, hover: draft.original ? tabLayout(layouts, draft.original, "hover") : null }
     const touched = layoutDrafts[draft.id] ?? {}
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
-    const next = (kind: LayoutKind) => { const layout = kind in touched ? touched[kind] ?? null : saved[kind]; return layout ? renameLayoutColumns(layout, renames) : null }
+    // La mise en page d'Eraser n'est écrite que si une colonne qu'elle range est renommée (elle la suit).
+    const builtinRenamed = (kind: LayoutKind) => {
+      const builtin = draft.original && renames.size ? builtinLayoutFor(model.key, draft.original, kind) : null
+      const renamedBuiltin = builtin ? renameLayoutColumns(builtin, renames) : null
+      return renamedBuiltin && serializeIndexLayout(renamedBuiltin) !== serializeIndexLayout(builtin) ? renamedBuiltin : null
+    }
+    const next = (kind: LayoutKind) => {
+      if (!(kind in touched) && !saved[kind]) return builtinRenamed(kind)
+      const layout = kind in touched ? touched[kind] ?? null : saved[kind]
+      return layout ? renameLayoutColumns(layout, renames) : null
+    }
     const form = next("form")
     const hover = next("hover")
     const name = draft.name.trim()
@@ -926,7 +939,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const retired = renamed && (saved.form || saved.hover) ? [{ tab: draft.original!, form: null, hover: null }] : []
     if (renamed && !form && !hover && !retired.length) return []
     return [...retired, { tab: name, form, hover }]
-  }), [layoutDrafts, layouts, tabs])
+  }), [layoutDrafts, layouts, model.key, tabs])
 
   // Les cartes touchées, par onglet (identifiant du brouillon) ; `null` : retour aux cartes d'Eraser.
   const [cardDrafts, setCardDrafts] = useState<Record<string, TabCards | null>>({})
@@ -1179,6 +1192,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             value={layoutOf(tab, mode)}
             onChange={(layout) => setLayoutDrafts((current) => ({ ...current, [tab.id]: { ...current[tab.id], [mode]: layout } }))}
             sample={sampleRows[tab.original ?? tab.name]?.[0]}
+            resetLabel={tab.original && builtinLayoutFor(model.key, tab.original, mode) ? "Revenir à la fiche d’Eraser" : undefined}
             disabled={pending || layoutSaving || tab.removed}
           />
         </section>}

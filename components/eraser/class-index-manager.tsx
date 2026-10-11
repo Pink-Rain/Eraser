@@ -469,12 +469,12 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
 
   async function merge(keep: ClassSpell, removed: ClassSpell[], draft: ClassSpellDraft) {
     // `original` : le sort gardé tel qu'il est affiché ; seuls les champs changés depuis partent.
-    const result = await mutate({ action: "merge", keep: { rowNumber: keep.rowNumber, id: keep.id }, remove: removed.map((spell) => ({ rowNumber: spell.rowNumber, id: spell.id })), original: toDraft(keep), draft }) as (MutationResult & { creatures?: number; characters?: number }) | false
+    const result = await mutate({ action: "merge", keep: { rowNumber: keep.rowNumber, id: keep.id }, remove: removed.map((spell) => ({ rowNumber: spell.rowNumber, id: spell.id })), original: toDraft(keep), draft }) as (MutationResult & { references?: string[]; characters?: number }) | false
     if (result === false) return false
     await refresh()
     setDuplicateFocus(null)
     const characters = result?.characters ?? 0
-    setNotice(`Fusion faite : « ${draft.name} » est conservé, ${removed.length} sort${removed.length > 1 ? "s" : ""} supprimé${removed.length > 1 ? "s" : ""}${characters ? `, ${characters} fiche${characters > 1 ? "s" : ""} de personnage mise${characters > 1 ? "s" : ""} à jour` : ""}${result?.creatures ? `, ${result.creatures} fiche${result.creatures > 1 ? "s" : ""} de créature mise${result.creatures > 1 ? "s" : ""} à jour` : ""}.`)
+    setNotice(`Fusion faite : « ${draft.name} » est conservé, ${removed.length} sort${removed.length > 1 ? "s" : ""} supprimé${removed.length > 1 ? "s" : ""}${characters ? `, ${characters} fiche${characters > 1 ? "s" : ""} de personnage mise${characters > 1 ? "s" : ""} à jour` : ""}${result?.references?.length ? `, sort renommé aussi dans : ${result.references.join(", ")}` : ""}.`)
     return true
   }
 

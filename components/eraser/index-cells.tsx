@@ -39,7 +39,11 @@ import {
   type ChoiceSource,
   type IndexColumnSpec,
   type SpellSource,
+  fileAspectClass,
+  isImageSource,
 } from "@/lib/index-columns"
+import { creatureTokenId, uploadCreaturePortrait } from "@/components/eraser/creature-portrait"
+import { TokenButton } from "@/components/eraser/token-editor"
 import type { FormulaDisplay } from "@/lib/index-formula"
 import { arrangeLayout, type IndexLayout } from "@/lib/index-layouts"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
@@ -1011,7 +1015,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
         multiple={spec.file?.multiple}
         disabled={off(rowKey)}
         preview={extra.renderValue?.(valueOf(rowKey, key), rowKey)}
-        upload={extra.upload ? (file, previous) => extra.upload!(file, previous, rowKey) : undefined}
+        upload={extra.upload ? (file, previous) => extra.upload!(file, previous, rowKey) : fileUploadFor(spec)}
         onChange={(value) => commit(rowKey, key, value)}
       />
       break
@@ -1117,10 +1121,17 @@ export type IndexFieldProps = {
     tabNames?: string[]
     /** Colonne Image : import propre à la colonne (portrait d'un personnage…). */
     upload?: (file: File, previous: string) => Promise<string>
+    /** Le nom de la ligne (le token d'une créature le porte). */
+    name?: string
   }
 }
 
 const fieldLabel = "grid content-start gap-1 text-xs font-semibold"
+
+/** L'import d'une colonne Fichier réglée vers un autre rangement (portraits des créatures) ; sinon celui des index. */
+function fileUploadFor(spec: IndexColumnSpec) {
+  return spec.file?.store === "creature-portraits" ? uploadCreaturePortrait : undefined
+}
 
 /** Un champ de la fiche ; une colonne en lecture seule s'y affiche sans se modifier. */
 export function IndexField(props: IndexFieldProps) {
@@ -1148,7 +1159,9 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
     case "file":
       return spec.file?.accept === "image" && !spec.file.multiple
-        ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} upload={row?.upload} aspect="aspect-video" disabled={disabled} /></div>
+        ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} upload={row?.upload ?? fileUploadFor(spec)} aspect={fileAspectClass(spec.file.aspect)} disabled={disabled}>
+          {spec.file.token === "creature" && row && <TokenButton kind="creature" ownerId={creatureTokenId(value)} name={row.name ?? label} source={isImageSource(value) ? value : ""} style={{ kind: "creature" }} disabledReason={creatureTokenId(value) ? "" : "Importe d’abord l’image de la créature"} />}
+        </ImageField></div>
         : <div className={`${fieldLabel} ${spec.file?.multiple ? "md:col-span-2" : ""}`}>{title}<span className="rounded-lg border bg-background/50 p-2"><FilesEditor files={splitFiles(value)} accept={spec.file?.accept ?? "any"} multiple={Boolean(spec.file?.multiple)} disabled={disabled} onChange={(files) => onChange(files.join("\n"))} /></span></div>
     case "color":
       return <div className={fieldLabel}>{title}<span className="rounded-lg border bg-background/50"><ColorCell label={label} value={value} disabled={disabled} onChange={onChange} /></span></div>

@@ -345,3 +345,28 @@ test("Sorts des créatures : un nom porté par deux sorts n'est renommé nulle p
   await engine.updateWorldIndexCell("creature-spells", "Sorts des créatures", { rowNumber: 4, id: "SOR-3", name: "Morsure" }, "Nom", "Morsure venimeuse");
   assert.deepEqual(google.grid(id, "Créatures").slice(1).map((row) => row[1]), ["Soin, Morsure venimeuse", "Morsure venimeuse"]);
 });
+
+test("Sorts fusionnés : les créatures et les PNJs qui citaient un sort supprimé citent le sort gardé", async () => {
+  await (await vite.ssrLoadModule("/lib/data-refresh.ts")).forgetGoogleData();
+  const id = fresh("creatures");
+  // La fusion a déjà retiré « Morsur » ; « Soin » est encore porté par un autre sort.
+  google.addSpreadsheet(id, [
+    { title: "Créatures", grid: [["Nom", "Sorts actifs", "Sorts passifs", "ID"], ["Loup", "Morsur, Hurlement", "", "CRE-1"], ["Ours", "Morsure, Morsur", "Soin", "CRE-2"]] },
+    { title: "Sorts des créatures", grid: [["ID", "Nom", "Effet", "Description", "Type", "Compétences", "Distance", "Charges"], ["SOR-1", "Morsure", "2d6", "", "Actif", "", "", ""], ["SOR-2", "Soin", "", "", "Passif", "", "", ""]] },
+  ]);
+  await link("creatures", id, "Créatures");
+  const npcs = await linkNpcs(npcGrid([{ "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor", "Sorts actifs": "Morsur" }]));
+  const touched = await engine.renameMergedSpells("creature-spells", ["Morsur", "Soin", "Morsure"], "Morsure");
+  assert.deepEqual(touched.sort(), ["Créatures", "PNJs"]);
+  assert.deepEqual(google.grid(id, "Créatures").slice(1).map((row) => [row[1], row[2]]), [["Morsure, Hurlement", ""], ["Morsure", "Soin"]]);
+  const npcRows = google.grid(npcs, "PNJs");
+  assert.equal(npcRows[1][npcRows[0].indexOf("Sorts actifs")], "Morsure");
+});
+
+test("Créatures : le portrait garde son rangement et son token même réglé avant, une colonne ajoutée se voit dans le tableau", () => {
+  const portrait = engine.effectiveColumnSpec("creatures", "Créatures", "Portrait", [{ tab: "Créatures", column: "Portrait", spec: { kind: "file", file: { accept: "image" }, form: true } }]);
+  assert.deepEqual(portrait.file, { accept: "image", aspect: "portrait", store: "creature-portraits", token: "creature" });
+  // Un réglage écrit dans « Modifier » l'emporte.
+  assert.equal(engine.effectiveColumnSpec("creatures", "Créatures", "Portrait", [{ tab: "Créatures", column: "Portrait", spec: { kind: "file", file: { accept: "image", multiple: true } } }]).file.multiple, true);
+  assert.deepEqual(engine.effectiveColumnSpec("creatures", "Créatures", "Habitat naturel", []), { kind: "rich" });
+});

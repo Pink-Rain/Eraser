@@ -125,11 +125,6 @@ export type WorldIndexTabDefinition = {
   /** Préfixe des identifiants de l'onglet : « CRE » donne « CRE-3F9A1C2B ». */
   idPrefix: string
   /**
-   * Colonnes affichées dans le tableau de l'application, quand elles ne sont pas
-   * toutes utiles : les autres restent dans Sheets et se remplissent par la fiche.
-   */
-  gridHeaders?: string[]
-  /**
    * Colonnes renommées par Eraser : `[ancien nom, nouveau nom]`. Trouvé sous l'ancien nom,
    * l'en-tête est réécrit sur place ; la colonne et ses valeurs ne bougent pas.
    */
@@ -197,6 +192,11 @@ export const creatureCharacteristics = ["Force", "Dextérité", "Intelligence", 
 /** La seule note de la fiche. */
 export const creatureNoteHeader = "Description"
 
+/** Les colonnes qu'un compagnon (une créature apprivoisée) recopie par leur nom : lib/companions.ts. */
+const creatureCompanionHeaders = ["Portrait", "Type", "Sous-type", "Rang", "Sorts actifs", "Sorts passifs", creatureNoteHeader, ...creatureCharacteristics]
+/** Parmi elles, celles recopiées telles quelles, comme du texte. */
+const creatureTextHeaders = ["Type", "Sous-type", "Rang"]
+
 /**
  * Colonnes remplies par la fiche d'une créature. Elles vivent dans Sheets, à la suite
  * des colonnes de l'index, mais ne s'affichent pas dans le tableau de l'application.
@@ -220,7 +220,7 @@ export const creatureLocations: ChoiceOption[] = [
 ]
 export const creatureRarities = choices(["Très commun", "Commun", "Rare", "Très rare", "Ultime", "Légendaire"])
 
-/** Les listes fermées de la fiche, par en-tête de colonne. */
+/** Les listes de départ de la fiche, par en-tête de colonne (leurs valeurs se changent dans « Modifier »). */
 export const creatureChoices: Record<string, ChoiceOption[]> = {
   "Rang": choices(["1", "2", "3", "4", "5"]),
   "Type": choices(["Animal", "Artificiel", "Extérieur", "Humanoïdes monstrueux", "Mort-vivant", "Spectrale", "Végétale", "Vermine"]),
@@ -279,7 +279,6 @@ const worldBaseDefinitions: Record<Exclude<BuiltinWorldIndexKey, EntityWorldInde
       itemLabel: "une créature",
       headers: [...creatureGridHeaders, ...creatureSheetOnlyHeaders, ID_HEADER],
       widths: [240, 170, 160, 90, 100, 190, 140, 190, 150, 140, 120, ...creatureSheetOnlyHeaders.map((header) => /portrait|sorts|description|organisation|rencontre/i.test(header) ? 260 : 130), 130],
-      gridHeaders: [...creatureGridHeaders, ID_HEADER],
       idPrefix: "CRE",
     }],
   },
@@ -569,12 +568,10 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
   const folded = foldName(header)
   const reasons: string[] = []
   if (index === "creatures") {
-    if (["portrait", "sorts actifs", "sorts passifs", "taille", "poids", "organisation", "langue", foldName(creatureNoteHeader), ...creatureCharacteristics.map(foldName), ...creatureGridHeaders.filter((item) => foldName(item) !== "extension").map(foldName)].includes(folded)) {
-      reasons.push("La fiche des créatures lit cette colonne par son nom et l’affiche avec un champ prévu pour elle.")
-    }
+    // La fiche est celle du moteur : seule l'adoption d'un compagnon lit encore ces colonnes par leur nom.
+    if (creatureCompanionHeaders.some((name) => foldName(name) === folded)) reasons.push("Une créature apprivoisée devient le compagnon d’un personnage : sa fiche recopie cette colonne par son nom.")
     if (folded === "sorts actifs" || folded === "sorts passifs") reasons.push("La fusion des sorts (Index des sorts) renomme les sorts cités dans cette colonne.")
     if (folded === "portrait") reasons.push("Le token d’une créature est fabriqué à partir de ce portrait.")
-    if (Object.keys(creatureChoices).some((choice) => foldName(choice) === folded)) reasons.push("« Corriger les fautes » compare cette colonne à sa liste de choix.")
   }
   if (index === "achievements") {
     const cards = "L’accueil et le profil affichent les succès en cartes à partir de cette colonne."
@@ -657,6 +654,8 @@ export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: str
     return { rename: false, type: false, remove: false, reasons: [`Répond à « ${other.column} » (${where}${other.tab === "*" ? "" : `, onglet ${other.tab}`}) : les deux colonnes se recopient par leur nom. Changer son nom, son type ou la supprimer couperait le lien.`], allowed: only }
   }
   const readers = builtinReaders(index, tab, header, context)
+  // Recopiée comme du texte : sa liste (valeurs comprises) et son type restent libres.
+  if (readers.length && index === "creatures" && creatureTextHeaders.some((name) => foldName(name) === foldName(header))) return { rename: false, type: true, remove: false, reasons: readers, allowed: "Le type et ses réglages (les valeurs d’une liste comprises), et tout l’affichage." }
   if (readers.length) return { rename: false, type: false, remove: false, reasons: readers, allowed: only }
   return { rename: true, type: true, remove: true, reasons: [], allowed: all }
 }
@@ -794,12 +793,14 @@ export function worldColumnSpec(index: WorldIndexKey, tab: string, header: strin
     const options = Object.entries(creatureChoices).find(([candidate]) => foldName(candidate) === foldName(header))?.[1]
     if (options) return { kind: "choice", options, form }
     if (foldName(header) === "dressable") return { kind: "checkbox" }
-    if (foldName(header) === "portrait") return { kind: "file", file: { accept: "image" }, form: true }
+    // Rangé avec les portraits de créatures : le token en est fabriqué, sous le même identifiant.
+    if (foldName(header) === "portrait") return { kind: "file", file: { accept: "image", aspect: "portrait", store: "creature-portraits", token: "creature" }, form: true }
     if (isHeader(header, ["Sorts actifs"])) return { kind: "spells", spells: { source: "creature", category: "actif" }, form: true }
     if (isHeader(header, ["Sorts passifs"])) return { kind: "spells", spells: { source: "creature", category: "passif" }, form: true }
     if (isHeader(header, creatureCharacteristics)) return { kind: "number", min: 0, max: 99999, form: true }
     if (isHeader(header, creatureFormTexts)) return { kind: "rich", form: true }
-    return { kind: "rich", form }
+    // Une colonne ajoutée à la main dans Sheets : du texte, visible dans le tableau comme ailleurs.
+    return { kind: "rich" }
   }
   return { kind: "rich" }
 }

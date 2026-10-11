@@ -17,7 +17,8 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
-import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
+import { layoutPlaces } from "@/lib/index-layouts"
+import { tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -28,7 +29,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isGridSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
@@ -54,7 +55,6 @@ import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 // Les fenêtres (« Modifier », guide, fiche d'une créature) ne sont chargées qu'à leur ouverture : la page s'affiche plus vite.
 const IndexEditor = dynamic(() => import("@/components/eraser/index-editor").then((module) => module.IndexEditor), { ssr: false })
 const IndexGuide = dynamic(() => import("@/components/eraser/index-guide").then((module) => module.IndexGuide), { ssr: false })
-const CreatureSheetDialog = dynamic(() => import("@/components/eraser/creature-sheet").then((module) => module.CreatureSheetDialog), { ssr: false })
 
 
 /** Personnages et campagnes : leur propriétaire et leurs liens, calculés par Eraser. */
@@ -163,7 +163,7 @@ export type IndexEmbed = {
   addDefaults?: Record<string, string>
 }
 
-type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; nameOpensDetails?: boolean; embed?: IndexEmbed }
+type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; embed?: IndexEmbed }
 
 /**
  * Les pages d'index rendent ce composant au même endroit de l'arbre : sans clé,
@@ -194,7 +194,7 @@ export function EmbeddedWorldIndex({ indexKey, embed }: { indexKey: WorldIndexKe
  * sur son classeur Google Sheets. Les colonnes liées d'un index à l'autre se complètent
  * côté serveur ; le tableau se recharge quand un lien a touché l'index affiché.
  */
-function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails = false, embed }: WorldIndexManagerProps) {
+function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldIndexManagerProps) {
   const [data, setData] = useState(initialData)
   const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
@@ -657,11 +657,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   /** Une ligne ajoutée depuis la vue intégrée reçoit ce que la page impose (le Type des passifs). */
   const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? {}).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [embed])
 
-  // Les colonnes remplies par la fiche d'une créature restent dans Sheets, hors du tableau.
-  // Ailleurs, toutes les colonnes sont dans la liste : la grille cache les masquées (et les
-  // anciennes « Formulaire seulement ») et les montre d'un clic.
+  // Toutes les colonnes sont dans la liste : la grille cache les masquées (et les
+  // « Formulaire seulement », comme celles de la fiche des créatures) et les montre d'un clic.
   const hiddenInEmbed = useMemo(() => new Set((embed?.hiddenColumns ?? []).map(foldName)), [embed])
-  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => (nameOpensDetails ? isGridSpec(column.spec) : column.spec.kind !== "archived") && !hiddenInEmbed.has(foldName(column.header))).map((column) => column.header) : [], [data, hiddenInEmbed, nameOpensDetails, table])
+  const visible = useMemo(() => table ? (data?.columns[table.tabName] ?? []).filter((column) => column.spec.kind !== "archived" && !hiddenInEmbed.has(foldName(column.header))).map((column) => column.header) : [], [data, hiddenInEmbed, table])
 
   // Recherche, Agrégat, formules et tirages lisent d'autres index : chargés une fois pour la page.
   const [related, setRelated] = useState<Record<string, LoadedWorldIndex | null>>({})
@@ -1060,12 +1059,10 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const formTable = spanning ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
   // Le formulaire d'ajout montre les colonnes du formulaire (« Tableau et formulaire »,
-  // « Formulaire seulement »), sauf l'identifiant (généré), les colonnes calculées et,
-  // pour les créatures, ce qui se remplit dans leur fiche.
+  // « Formulaire seulement »), sauf l'identifiant (généré) et les colonnes calculées.
   const formFields: IndexFormField[] = formTable ? (data?.columns[formTable.tabName] ?? [])
     .flatMap(({ header, spec }) => {
-      if (!(isSheetSpec(spec) || layoutPlaces(tabLayout(settings.layouts, formTable.tabName, "form"), header)) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
-      if (nameOpensDetails && (!isGridSpec(spec) || foldName(header) === "extension")) return []
+      if (!(isSheetSpec(spec) || layoutPlaces(tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form"), header)) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
       return [{ key: header, label: header, spec, long: isLongColumn(header) }]
     }) : []
 
@@ -1085,11 +1082,11 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     return isRichSpec(specOf(found.table.tabName, header)) ? found.row.html[column] ?? "" : found.row.values[column] ?? ""
   }
 
-  // La fiche d'une ligne (index sans fiche dédiée) : tous ses champs du formulaire.
+  // La fiche d'une ligne : tous ses champs du formulaire, rangés par sa mise en page.
   // Une colonne hors fiche (ancien « Tableau seulement ») y vient quand sa mise en page la place.
-  const sheetLayout = detailsFound ? tabLayout(settings.layouts, detailsFound.table.tabName, "form") : null
+  const sheetLayout = detailsFound ? tabLayoutOrBuiltin(settings.layouts, indexKey, detailsFound.table.tabName, "form") : null
   /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
-  const sheetFields = detailsFound && !nameOpensDetails ? (data?.columns[detailsFound.table.tabName] ?? [])
+  const sheetFields = detailsFound ? (data?.columns[detailsFound.table.tabName] ?? [])
     .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
     .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) }))
     // Les colonnes propres à la page qui accueille la vue, dessinées par elle.
@@ -1104,6 +1101,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     buttonVisible: (button) => engine.buttonVisible(details, button),
     runButton: (button) => runButton(details, button),
     tabNames: sortTabs.map((entry) => entry.value),
+    name: detailsFound ? savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers, detailsFound.table.tabName)] ?? "").replace(/<[^>]+>/g, "") : undefined,
   }
 
   /** Les champs d'une ligne, enregistrés d'eux-mêmes par sa fiche (la ligne est donnée : on a pu passer à une autre). */
@@ -1263,7 +1261,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         key={formTable.tabName}
         title={`Ajouter ${formDefinition.itemLabel}`}
         fields={formFields}
-        layout={tabLayout(settings.layouts, formTable.tabName, "form")}
+        layout={tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form")}
         pending={pending === "add"}
         leading={spanning ? <label className="grid gap-1 text-xs font-semibold">
           Onglet
@@ -1335,28 +1333,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Le classeur « {definition.sheetName} » n’a pas pu être préparé.</div> : null}
 
-      {/* Clé sur la ligne seulement : un rechargement de l'index pendant que la fiche est
-          ouverte ne la remonte pas (champs en cours gardés, sorts non relus). */}
-      {nameOpensDetails && detailsFound && <CreatureSheetDialog
-        key={details}
-        open
-        headers={detailsFound.table.headers}
-        values={detailsFound.row.values}
-        html={detailsFound.row.html}
-        columnSpec={(header) => specOf(detailsFound.table.tabName, header)}
-        onClose={() => setDetails(null)}
-        onSave={async (fields, previous) => {
-          if (!Object.keys(fields).length) return
-          // La créature désignée par son identifiant ; ce que la fiche montrait de chaque champ fait
-          // refuser l'enregistrement si l'un d'eux a changé ailleurs entre-temps.
-          const target = details === null ? null : rowTargetOf(details)
-          if (!target) throw new Error("Cette ligne n’existe plus : actualise le tableau.")
-          const payload = await post({ action: "update-fields", tabName: target.tabName, rowNumber: target.rowNumber, rowId: target.id, rowName: target.name, fields, previous })
-          if (payload.data) applyData(payload.data, payload.seq)
-        }}
-      />}
-
-      {!nameOpensDetails && detailsFound && details !== null && <IndexRowSheet
+      {detailsFound && details !== null && <IndexRowSheet
         open
         rowKey={details}
         title={savedCell(detailsFound, detailsFound.table.headers[ownNameColumn(detailsFound.table.headers, detailsFound.table.tabName)] ?? "").replace(/<[^>]+>/g, "")}

@@ -1,50 +1,35 @@
-# Eraser 0.1.1-alpha.188 — Le dossier de campagne et ses statistiques
+# Eraser 0.1.1-alpha.189 — Les créatures passent sur le moteur des index
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Dossier de campagne
+## Index des créatures
 
-- **Bannière** plus basse et plus jolie : l'image de la campagne (ou sa couleur) sous un dégradé
-  transparent qui porte le nom de la campagne et sa description.
-- **Le groupe, personnage par personnage**, sur toute la largeur : PV (barre, « à terre »,
-  « mort »), états posés, classe et rang, succès, chutes et retours, objets reçus (avec ceux rares
-  ou mieux, détail au clic), or (PO), cuivre (PC) et or noir (PN). Chaque colonne se trie ; en bas,
-  la **moyenne** et la **somme** du groupe pour chaque colonne.
-- Dessous, côte à côte : **PNJs du groupe** et **PNJ rencontrés** (anneau amis / neutres /
-  hostiles, d'après les relations des personnages ; filtre au clic), avec l'encart des pages de la
-  campagne à droite et le compagnon Roll20 sous les PNJ.
-- Les **chutes** (la vie tombe à 0 ou moins), les **retours** (elle repasse au-dessus) et les
-  **objets reçus** (ajoutés, achetés ou créés ; pas les échanges entre personnages) n'étaient
-  enregistrés nulle part : ils sont notés à partir de cette version, dans le serveur partagé
-  (aucune lecture Google en plus).
-- Tout le dossier se lit avec des lectures déjà gardées en mémoire ; une partie illisible (Google
-  saturé) reste vide sans bloquer la page.
+- **La fiche d'une créature est celle de tous les index** : elle s'ouvre d'un clic sur le nom,
+  s'enregistre toute seule à chaque champ (plus de bouton « Enregistrer la fiche »), passe à la
+  créature suivante ou précédente sans se fermer, et suit les types de colonnes réglés dans
+  « Modifier ».
+- Elle garde la disposition de l'ancienne fiche, comme **mise en page d'office** : portrait à
+  gauche (avec son bouton **Token**), identité, « Où la trouver », caractéristiques encadrées,
+  « Description, Histoire, Lore, Autre », puis les sorts **Actifs** et **Passifs**. Elle se modifie
+  dans « Modifier › Fiche » comme celle de n'importe quel onglet ; « Revenir à la fiche d'Eraser »
+  la remet telle quelle.
+- **Listes modifiables** : Emplacement, Rareté, Organisation, Comportement, Langue, Taille, Poids…
+  ne sont plus verrouillées (valeurs de liste, type, nom). Type, Sous-type et Rang gardent leur nom
+  (un compagnon les recopie) mais leurs valeurs et leur type se changent. Restent verrouillés : le
+  portrait (le token en est fait), les caractéristiques et les sorts, que lisent les compagnons et
+  la fusion des sorts.
+- Le formulaire « Ajouter » propose tous les champs de la fiche, rangés comme elle.
+- Les colonnes de la fiche restent masquées dans le tableau ; « Colonnes masquées » les montre
+  maintenant d'un clic. Une colonne ajoutée à la main dans Sheets apparaît dans le tableau, comme
+  ailleurs.
+- **Fusion de sorts** (Doublons) : le sort gardé remplace les sorts supprimés chez les créatures
+  **et chez les PNJ** qui les citaient (avant : les créatures seulement), comme pour un renommage.
+  Un nom encore porté par un autre sort n'est pas touché.
 
-## Corrections
+## Mises en page des fiches (tous les index)
 
-- Les petits menus déroulants (tri des relations, réglages de l'éditeur…) ne coupent plus leur
-  texte en bas.
-- Journal des erreurs : une synchronisation de routine remise faute de quota Google (elle est
-  retentée seule 20 s plus tard) n'y entre plus ; un vrai échec de lecture, si.
-- « Actualiser » relit aussi l'emplacement des sorts des créatures.
-
-## Corrections de l'alpha 187 (relecture)
-
-- **Sorts renommés** : un nom porté par deux sorts (deux « Soin », ou un sort de classe et un sort
-  de créature, que les PNJ mêlent) n'est plus renommé chez les créatures et les PNJ : impossible de
-  savoir lequel ils citent. Un renommage ne laisse plus de doublon dans une case.
-- **Valeur d'une nouvelle ligne** : n'est plus écrite dans les cases vides d'une ligne
-  **déplacée** vers un autre onglet, ni dans une ligne existante qui reçoit un nouvel identifiant.
-  Une valeur d'office d'Eraser (« Non » des PNJ) peut maintenant être vidée pour de bon.
-- **Carnet de notes** : deux pages ne peuvent plus porter le même nom (« Notes 2 »), et l'éditeur
-  repart de zéro à chaque page ouverte : supprimer une page ne peut plus montrer son texte ni
-  l'écrire dans la suivante. Une installation pas encore à jour (alpha 186 ou avant) qui modifie
-  un carnet en pages le remet en une seule page (le texte reste, pas les noms des pages).
-- Colonne « Onglet » : sa place suit le renommage de la colonne après laquelle elle est rangée ;
-  des réglages mal formés sont ignorés au lieu de bloquer l'enregistrement.
-- Journal des erreurs : seuls les messages de Node et du serveur web eux-mêmes sont écartés, plus
-  une erreur d'Eraser qui citerait le même code.
-- Corbeille : une colonne mise à la corbeille depuis une autre installation y apparaît en quelques
-  minutes, sans « Actualiser ».
-- Un renommage de sort qui échoue après l'enregistrement de la fiche ne la fait plus passer pour
-  ratée.
+- Chaque champ placé peut porter **son propre libellé** (bouton « Libellé » du champ, dans
+  « Modifier › Fiche ») : « Actifs » au lieu de « Sorts actifs »…
+- Une colonne Image peut afficher un portrait en hauteur ; sur téléphone, l'image de la colonne
+  latérale ne prend plus tout l'écran.
+- Une case à cocher s'aligne sur le bas des champs de sa ligne.

@@ -54,3 +54,37 @@ test("la mise en page de départ ressemble à l'affichage automatique", () => {
   assert.deepEqual(start.aside, [{ column: "Image" }]);
   assert.deepEqual(start.sections[0].rows.map((row) => row.fields.map((field) => field.column)), [["Nom"], ["Rang", "Type"], ["Description"]]);
 });
+
+test("la fiche des créatures a sa mise en page d'Eraser tant qu'aucune n'est réglée, et chaque champ peut porter son libellé", async () => {
+  const defaults = await vite.ssrLoadModule("/lib/index-layout-defaults.ts");
+  const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const builtin = defaults.builtinLayoutFor("creatures", "Créatures", "form");
+  assert.equal(builtin.aside[0].column, "Portrait");
+  assert.equal(defaults.builtinLayoutFor("creatures", "Créatures", "hover"), null);
+  assert.equal(defaults.builtinLayoutFor("places", "Villes", "form"), null);
+  // Une mise en page réglée dans « Modifier » la remplace.
+  assert.equal(defaults.tabLayoutOrBuiltin({ "Créatures": { form: sample } }, "creatures", "Créatures", "form"), sample);
+  assert.equal(defaults.tabLayoutOrBuiltin({}, "creatures", "Créatures", "form"), builtin);
+  // Elle se relit telle quelle (libellés compris) et range toutes les colonnes de la feuille d'origine.
+  assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(builtin)), builtin);
+  const headers = definitions.worldIndexDefinitions.creatures.tabs[0].headers;
+  const placed = [...builtin.aside, ...builtin.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => field.column);
+  for (const column of placed) assert.ok(headers.includes(column), column);
+  const description = builtin.sections.flatMap((section) => section.rows.flatMap((row) => row.fields)).find((field) => field.column === "Description");
+  assert.equal(description.label, "Description, Histoire, Lore, Autre");
+  const arranged = layouts.arrangeLayout(builtin, headers.map((header) => ({ header })), (item) => item.header);
+  // Les anciennes colonnes (archivées, hors de la fiche) restent à la suite tant qu'on ne les retire pas.
+  assert.ok(arranged.rest.every((item) => definitions.creatureArchivedHeaders.includes(item.header) || item.header === "ID"), arranged.rest.map((item) => item.header).join(", "));
+});
+
+test("créatures : listes et types modifiables, sauf ce que recopie un compagnon", async () => {
+  const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const policy = (header) => definitions.worldColumnPolicy("creatures", "Créatures", header, []);
+  assert.deepEqual([policy("Emplacement principal").rename, policy("Emplacement principal").type, policy("Emplacement principal").remove], [true, true, true]);
+  assert.deepEqual([policy("Type").rename, policy("Type").type, policy("Type").remove], [false, true, false]);
+  assert.deepEqual([policy("Force").rename, policy("Force").type], [false, false]);
+  assert.equal(policy("Sorts actifs").type, false);
+  assert.ok(policy("Sorts actifs").reasons.some((reason) => /fusion/.test(reason)));
+  assert.ok(policy("Portrait").reasons.some((reason) => /token/.test(reason)));
+  assert.equal(definitions.worldColumnSpec("creatures", "Créatures", "Portrait").file.store, "creature-portraits");
+});

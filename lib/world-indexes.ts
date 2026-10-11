@@ -428,7 +428,11 @@ async function sheetIdOf(spreadsheetId: string, tabName: string) {
 export function effectiveColumnSpec(key: WorldIndexKey, tab: string, header: string, schema: SchemaEntry[]): IndexColumnSpec {
   const entry = findEntry(schema, tab, header)
   const base = worldColumnSpec(key, tab, entry?.origin || header)
-  return entry?.spec ? { ...base, ...entry.spec } : base
+  if (!entry?.spec) return base
+  // Un réglage enregistré avant qu'Eraser range un fichier à part (le portrait d'une créature
+  // et son token) le garde : seuls les réglages écrits dans « Modifier » remplacent les siens.
+  const file = base.file && entry.spec.file ? { ...base.file, ...entry.spec.file } : entry.spec.file ?? base.file
+  return { ...base, ...entry.spec, ...(file ? { file } : {}) }
 }
 
 /**
@@ -1654,34 +1658,19 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
 }
 
 /**
- * Après une fusion de sorts : les créatures qui citaient un sort supprimé citent
- * désormais le sort gardé. Ne crée jamais le classeur des créatures s'il n'existe pas.
+ * Après une fusion de sorts : les créatures, les PNJ (toute colonne « Sorts » qui cite cet
+ * index) qui citaient un sort supprimé citent désormais le sort gardé, comme après un
+ * renommage. Un nom encore porté par un autre sort n'est pas touché. Rend les titres des
+ * index réécrits ; ne crée jamais un classeur absent.
  */
-export function renameCreatureSpells(oldNames: string[], newName: string) {
+export function renameMergedSpells(key: "creature-spells" | "class-spells", oldNames: string[], newName: string) {
   return serialized(async () => {
-    const stored = await resolveJdrSheet("creatures")
-    if (!stored || !oldNames.length || !newName.trim()) return 0
-    const table = await plainTable("creatures", worldIndexDefinitions.creatures.tabs[0].name)
-    const replaced = new Set(oldNames.map(foldName))
-    const data: Array<{ range: string; values: string[][] }> = []
-    for (const header of ["Sorts actifs", "Sorts passifs"]) {
-      const column = columnOf(table.headers, header)
-      if (column < 0) continue
-      table.rows.forEach((row, index) => {
-        if (index === 0) return
-        const names = splitNames(row[column] || "")
-        if (!names.some((name) => replaced.has(foldName(name)))) return
-        const next = splitNames(names.map((name) => replaced.has(foldName(name)) ? newName : name).join(", ")).join(", ")
-        const cell = `${columnName(column + 1)}${index + 1}`
-        data.push({ range: sheetTabRange(worldIndexDefinitions.creatures.tabs[0].name, `${cell}:${cell}`), values: [[next]] })
-      })
+    const touched = new Set<WorldIndexKey>()
+    const kept = foldName(newName)
+    for (const oldName of new Set(oldNames.filter((name) => name.trim() && foldName(name) !== kept))) {
+      for (const reader of await renameSpellReferences(key, oldName, newName)) touched.add(reader)
     }
-    if (data.length) {
-      await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
-      clearSpreadsheetReadCache(table.spreadsheetId)
-      invalidateWorldIndexes(["creatures"])
-    }
-    return data.length
+    return [...touched].map((reader) => isBuiltinWorldIndexKey(reader) ? worldIndexDefinitions[reader].title : reader)
   })
 }
 

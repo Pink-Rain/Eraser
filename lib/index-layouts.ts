@@ -36,6 +36,8 @@ export type LayoutField = {
   hideLabel?: boolean
   /** Le champ en grand (un nom, un titre). */
   large?: boolean
+  /** Le texte écrit au-dessus du champ à la place du nom de la colonne (« Actifs »). */
+  label?: string
 }
 
 export type LayoutRow = { id: string; fields: LayoutField[] }
@@ -91,6 +93,8 @@ function cleanField(input: unknown): LayoutField | null {
   if (typeof raw.span === "number" && spans.has(raw.span)) field.span = raw.span as LayoutSpan
   if (raw.hideLabel === true) field.hideLabel = true
   if (raw.large === true) field.large = true
+  const label = cleanText(raw.label, 60)
+  if (label) field.label = label
   return field
 }
 

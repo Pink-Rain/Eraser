@@ -268,13 +268,14 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   const pictures = fields.filter((field) => pictureField(normalizeSpec(field.spec)))
   const others = fields.filter((field) => !pictureField(normalizeSpec(field.spec)) && normalizeSpec(field.spec).kind !== "id")
 
-  const field = (item: RowSheetField, hideLabel = false) => {
+  const field = (item: RowSheetField, hideLabel = false, label?: string) => {
     const own = renderField?.(item)
-    return own !== undefined ? <div key={item.key} className={item.long ? "md:col-span-2" : undefined}>{own}</div> : plainField(item, hideLabel)
+    return own !== undefined ? <div key={item.key} className={item.long ? "md:col-span-2" : undefined}>{own}</div> : plainField(item, hideLabel, label)
   }
-  const plainField = (item: RowSheetField, hideLabel: boolean) => <IndexField
+  // `label` : le texte que la mise en page écrit au-dessus du champ (sinon le nom de la colonne).
+  const plainField = (item: RowSheetField, hideLabel: boolean, label?: string) => <IndexField
     key={item.key}
-    label={item.label}
+    label={label || item.label}
     // Dans la fiche, le nom se modifie : il n'ouvre pas une autre fiche.
     spec={item.spec.kind === "name-form" ? { ...item.spec, kind: "name" } : item.spec}
     value={valueOf(item)}
@@ -291,7 +292,8 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
     {arranged
       ? <IndexLayoutView
         arranged={arranged}
-        render={(item, placed) => <div className={placed.large ? largeFieldClass : undefined}>{field(item, placed.hideLabel)}</div>}
+        // Une case à cocher (sans libellé au-dessus) s'aligne sur le bas des champs de sa ligne.
+        render={(item, placed) => <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed.label)}</div>}
         renderRest={(rest) => <div className="grid content-start gap-3 md:grid-cols-2">{rest.map((item) => field(item))}</div>}
       />
       : <div className={pictures.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]" : ""}>

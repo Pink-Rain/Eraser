@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server"
 
 import { deleteClassSpell, ignoreSpellPairs, invalidateClassContentCaches, linkClassSpell, listClassResources, mergeClassSpells, saveClassSpell, type ClassSpellDraft, type SpellIndexKind } from "@/lib/class-content"
-import { renameCreatureSpells } from "@/lib/world-indexes"
+import { renameMergedSpells } from "@/lib/world-indexes"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -64,12 +64,12 @@ export async function POST(request: Request) {
       result = await linkClassSpell(expectedId, body.classId, body.rank, body.originalRank === null || typeof body.originalRank === "number" ? body.originalRank : undefined)
     } else if (body.action === "merge" && isTarget(body.keep) && Array.isArray(body.remove) && body.remove.every(isTarget) && body.remove.length && isDraft(body.draft) && isDraft(body.original)) {
       const merged = await mergeClassSpells(body.keep, body.remove, body.draft, body.original, kind)
-      // Les créatures qui utilisaient un sort supprimé passent au sort gardé (seulement pour les sorts des créatures).
-      const creatures = kind !== "creatures" || !merged.keptName ? 0 : await renameCreatureSpells(merged.removedNames.filter((name) => name !== merged.keptName), merged.keptName).catch((error) => {
-        console.error("CREATURE_SPELL_RENAME_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-        return 0
+      // Les créatures et les PNJ qui citaient un sort supprimé passent au sort gardé, comme après un renommage.
+      const references = !merged.keptName ? [] : await renameMergedSpells(kind === "creatures" ? "creature-spells" : "class-spells", merged.removedNames, merged.keptName).catch((error) => {
+        console.error("MERGED_SPELL_RENAME_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+        return [] as string[]
       })
-      result = { ...merged, creatures }
+      result = { ...merged, references }
     } else if (body.action === "ignore" && Array.isArray(body.pairs)) {
       result = await ignoreSpellPairs(body.pairs.filter((pair): pair is [string, string] => Array.isArray(pair) && pair.length === 2 && pair.every((id) => typeof id === "string")), kind)
     } else if (body.action === "add" && isDraft(body.draft)) {

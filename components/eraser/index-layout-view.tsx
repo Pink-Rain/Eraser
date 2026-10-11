@@ -50,7 +50,8 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
     {arranged.sections.map((section) => <section key={section.id} className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"} ${section.framed ? `rounded-2xl border bg-muted/20 ${compact ? "p-2.5" : "p-3"}` : ""}`}>
       {section.title && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{section.title}</p>}
       {section.rows.map((row) => <div key={row.id} className={layoutRowClass} style={layoutRowStyle(row.fields)}>
-        {row.fields.map((field) => <div key={field.column} className="min-w-0">{render(field.item, field)}</div>)}
+        {/* En colonne : un champ peut occuper toute la hauteur de sa ligne (une case à cocher s'aligne en bas). */}
+        {row.fields.map((field) => <div key={field.column} className="flex min-w-0 flex-col self-stretch">{render(field.item, field)}</div>)}
       </div>)}
     </section>)}
     {arranged.rest.length > 0 && renderRest && <section className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>
@@ -60,7 +61,8 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
   </div>
   if (!arranged.aside.length) return main
   return <div className={`grid ${compact ? `gap-3 ${compactAsideColumns[arranged.asideWidth]}` : `gap-5 ${asideColumns[arranged.asideWidth]}`}`}>
-    <div className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>{arranged.aside.map((field) => <div key={field.column} className="min-w-0">{render(field.item, field)}</div>)}</div>
+    {/* Sur téléphone, la colonne latérale passe au-dessus : une image n'y prend pas tout l'écran. */}
+    <div className={`grid min-w-0 content-start ${compact ? "gap-2" : "mx-auto w-full max-w-64 gap-3 md:max-w-none"}`}>{arranged.aside.map((field) => <div key={field.column} className="min-w-0">{render(field.item, field)}</div>)}</div>
     {main}
   </div>
 }

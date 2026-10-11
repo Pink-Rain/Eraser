@@ -10,7 +10,7 @@ import { withEntityExtras } from "@/lib/entity-index-extras"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { getWorldIndex, type WorldIndexData } from "@/lib/world-indexes"
 
-async function IndexData({ indexKey, sheetName, nameOpensDetails }: { indexKey: WorldIndexKey; sheetName: string; nameOpensDetails?: boolean }) {
+async function IndexData({ indexKey, sheetName }: { indexKey: WorldIndexKey; sheetName: string }) {
   let data: WorldIndexData | null = null
   let error = ""
   try {
@@ -21,7 +21,7 @@ async function IndexData({ indexKey, sheetName, nameOpensDetails }: { indexKey: 
     console.error("WORLD_INDEX_LOAD_FAILED", indexKey, reason instanceof Error ? reason.message : "UNKNOWN_ERROR")
     error = `La feuille « ${sheetName} » n’a pas pu être chargée depuis Google Drive.`
   }
-  return <WorldIndexManager indexKey={indexKey} initialData={data} initialError={error} nameOpensDetails={nameOpensDetails} />
+  return <WorldIndexManager indexKey={indexKey} initialData={data} initialError={error} />
 }
 
 type IndexPageHead = { title: string; sheetName: string; description?: string }
@@ -30,7 +30,7 @@ type IndexPageHead = { title: string; sheetName: string; description?: string }
  * La page d'un index, prévu par Eraser ou créé : son titre et son tableau, sur le moteur des index.
  * `aside` : un lien sous le titre (une page liée, une ancienne vue gardée).
  */
-export function WorldIndexPage({ indexKey, head, aside, nameOpensDetails }: { indexKey: WorldIndexKey; head?: IndexPageHead; aside?: ReactNode; nameOpensDetails?: boolean }) {
+export function WorldIndexPage({ indexKey, head, aside }: { indexKey: WorldIndexKey; head?: IndexPageHead; aside?: ReactNode }) {
   const { title, sheetName, description } = head ?? worldIndexDefinitions[indexKey as BuiltinWorldIndexKey]
   return (
     <div className="w-full px-4 pt-4 sm:px-6">
@@ -43,7 +43,7 @@ export function WorldIndexPage({ indexKey, head, aside, nameOpensDetails }: { in
         {aside && <div className="text-xs text-muted-foreground">{aside}</div>}
       </div>
       <Suspense key={indexKey} fallback={<DeferredContentLoading variant="table" label="Chargement de l’index…" />}>
-        <IndexData indexKey={indexKey} sheetName={sheetName} nameOpensDetails={nameOpensDetails} />
+        <IndexData indexKey={indexKey} sheetName={sheetName} />
       </Suspense>
     </div>
   )
@@ -53,9 +53,7 @@ export function WorldIndexPage({ indexKey, head, aside, nameOpensDetails }: { in
  * Ce qui distingue la page d'un index prévu par Eraser, et seulement ça : le reste (titre,
  * feuille, colonnes, liens) vient de sa définition et de son schéma.
  */
-const pageSpecifics: Partial<Record<BuiltinWorldIndexKey, { label?: string; aside?: { href: string; text: string }; nameOpensDetails?: boolean }>> = {
-  // Le nom d'une créature ouvre sa fiche ; le tableau ne garde que les colonnes de grille.
-  creatures: { nameOpensDetails: true },
+const pageSpecifics: Partial<Record<BuiltinWorldIndexKey, { label?: string; aside?: { href: string; text: string } }>> = {
   vocabulary: { label: "Vocabulaire", aside: { href: "/regles/vocabulaire", text: "Voir la page Vocabulaire (Règles)" } },
   npcs: { label: "PNJs", aside: { href: "/ressources/index-des-pnjs/recuperer", text: "Ancienne vue : récupérer des PNJs d’une campagne" } },
   campaigns: { label: "Campagnes" },
@@ -78,7 +76,6 @@ export function worldIndexRoute(indexKey: BuiltinWorldIndexKey) {
       <AuthenticatedShell pageLabel={specifics.label ?? worldIndexDefinitions[indexKey].title} roles={["admin", "mj"]}>
         <WorldIndexPage
           indexKey={indexKey}
-          nameOpensDetails={specifics.nameOpensDetails}
           aside={specifics.aside && <Link href={specifics.aside.href} className="text-primary underline-offset-4 hover:underline">{specifics.aside.text}</Link>}
         />
       </AuthenticatedShell>

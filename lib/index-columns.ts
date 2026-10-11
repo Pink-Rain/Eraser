@@ -191,6 +191,27 @@ export function gaugeScaleOf(gauge: GaugeSettings | undefined): GaugeScale {
 /** Les fichiers acceptés par une colonne Fichier. */
 export type FileAccept = "image" | "audio" | "video" | "pdf" | "any"
 
+/**
+ * Une colonne Fichier : ce qu'elle accepte, un ou plusieurs ; pour une image seule, sa forme
+ * dans la fiche, où l'importer (les portraits des créatures ont leur rangement, dont leur
+ * token dépend) et le bouton du token sous l'image.
+ */
+export type FileSettings = {
+  accept: FileAccept
+  multiple?: boolean
+  /** Portrait (3/4), carré, ou large (16/9, par défaut). */
+  aspect?: "portrait" | "square" | "wide"
+  /** Rangement des images importées ; absent : celui des index. */
+  store?: "creature-portraits"
+  /** Un bouton « Token » sous l'image (créature). */
+  token?: "creature"
+}
+
+/** La classe de forme d'une image de fiche. */
+export function fileAspectClass(aspect: FileSettings["aspect"]) {
+  return aspect === "portrait" ? "aspect-[3/4]" : aspect === "square" ? "aspect-square" : "aspect-video"
+}
+
 export const fileAcceptLabels: Record<FileAccept, string> = { image: "Images", audio: "Sons", video: "Vidéos", pdf: "PDF", any: "Tous les fichiers" }
 
 /** Le filtre du sélecteur de fichiers du système pour chaque choix. */
@@ -389,7 +410,7 @@ export type IndexColumnSpec = {
   /** Nombre (et résultat numérique d'une formule) : unité, décimales, plage, pourcentage… */
   number?: NumberFormat
   /** Fichier : ce qui est accepté, un seul ou plusieurs. */
-  file?: { accept: FileAccept; multiple?: boolean }
+  file?: FileSettings
   /** Recherche : la colonne de relation à suivre et la colonne à afficher en face. */
   lookup?: { via: string; field: string }
   /** Agrégat : la colonne de relation, la colonne calculée en face et le calcul. */

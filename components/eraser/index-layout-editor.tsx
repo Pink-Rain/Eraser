@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, GripVertical, Heading, LayoutTemplate, Plus, RotateCcw, Tag, Trash2, Wand2, X } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, GripVertical, Heading, LayoutTemplate, Plus, RotateCcw, Tag, TextCursorInput, Trash2, Wand2, X } from "lucide-react"
 
 import { IndexLayoutView } from "@/components/eraser/index-layout-view"
 import { Button } from "@/components/ui/button"
@@ -90,7 +90,7 @@ const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
  * flèches font de même au clavier. L'aperçu, à droite, montre les premières lignes de
  * l'onglet. Sans mise en page, l'affichage reste automatique.
  */
-export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {}, disabled = false }: {
+export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {}, resetLabel = "Revenir à l’affichage automatique", disabled = false }: {
   kind: LayoutKind
   /** Les colonnes que la mise en page peut placer. */
   columns: LayoutColumn[]
@@ -98,11 +98,15 @@ export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {},
   onChange: (layout: IndexLayout | null) => void
   /** Une ligne de l'onglet (en-tête → texte), pour l'aperçu. */
   sample?: Record<string, string>
+  /** Le bouton qui oublie la mise en page réglée (l'onglet revient à celle d'Eraser, s'il en a une). */
+  resetLabel?: string
   disabled?: boolean
 }) {
   // La colonne qu'on glisse (le texte du glisser la porte aussi, pour un dépôt d'ailleurs).
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
+  // Le champ dont on écrit le libellé (le texte au-dessus du champ, à la place du nom de la colonne).
+  const [labelling, setLabelling] = useState<string | null>(null)
   const hover = kind === "hover"
   const layout = value
   const placed = useMemo(() => new Set(layout ? [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(field.column)) : []), [layout])
@@ -208,7 +212,9 @@ export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {},
       title={missing ? "Cette colonne n’existe plus dans l’onglet : elle sera ignorée." : spec ? indexColumnKinds[normalizeSpec(spec).kind].label : undefined}
     >
       <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />
-      <span className={`min-w-0 flex-1 truncate font-medium ${field.large ? "font-display text-sm" : ""} ${missing ? "line-through" : ""}`}>{field.column}</span>
+      {labelling === field.column
+        ? <Input autoFocus defaultValue={field.label ?? ""} maxLength={60} placeholder={field.column} aria-label={`Libellé de ${field.column}`} className="h-6 min-w-0 flex-1 px-1.5 text-xs" onBlur={(event) => { updateField(field.column, { label: event.target.value.trim() || undefined }); setLabelling(null) }} onKeyDown={(event) => { if (event.key === "Enter") event.currentTarget.blur(); if (event.key === "Escape") setLabelling(null) }} />
+        : <span className={`min-w-0 flex-1 truncate font-medium ${field.large ? "font-display text-sm" : ""} ${missing ? "line-through" : ""}`} title={field.label ? `Colonne « ${field.column} », écrite « ${field.label} »` : undefined}>{field.label ? <>{field.label} <span className="font-normal text-muted-foreground">· {field.column}</span></> : field.column}</span>}
       {place.area === "row" && <NativeSelect disabled={disabled} value={String(field.span ?? 6)} onChange={(event) => updateField(field.column, { span: Number(event.target.value) as LayoutSpan })} className="h-6 w-[4.5rem] py-0 pl-2 pr-7 text-xs" aria-label={`Largeur de ${field.column}`} title="Largeur sur la ligne">
         {layoutSpans.map((span) => <NativeSelectOption key={span.value} value={String(span.value)} title={span.label}>{span.short}</NativeSelectOption>)}
       </NativeSelect>}
@@ -217,6 +223,7 @@ export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {},
       <span className="absolute -top-3.5 right-1 z-20 hidden items-center rounded-md border bg-popover px-0.5 shadow-md group-hover/chip:flex group-focus-within/chip:flex">
         <Button type="button" variant={field.large ? "secondary" : "ghost"} size="icon-xs" disabled={disabled} onClick={() => updateField(field.column, { large: !field.large || undefined })} title={field.large ? "Taille normale" : "En grand (un nom, un titre)"} aria-label="En grand"><Heading /></Button>
         <Button type="button" variant={field.hideLabel ? "secondary" : "ghost"} size="icon-xs" disabled={disabled} onClick={() => updateField(field.column, { hideLabel: !field.hideLabel || undefined })} title={field.hideLabel ? "Montrer le nom de la colonne" : "Cacher le nom de la colonne"} aria-label="Nom de la colonne"><Tag /></Button>
+        <Button type="button" variant={field.label ? "secondary" : "ghost"} size="icon-xs" disabled={disabled} onClick={() => setLabelling(field.column)} title="Écrire un autre libellé au-dessus du champ (« Actifs » pour « Sorts actifs »)" aria-label="Libellé"><TextCursorInput /></Button>
         <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => set(placeField(layout, field.column, place, index - 1))} title="Vers la gauche (ou le haut)" aria-label="Avancer"><ArrowLeft /></Button>
         <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === count - 1} onClick={() => set(placeField(layout, field.column, place, index + 2))} title="Vers la droite (ou le bas)" aria-label="Reculer"><ArrowRight /></Button>
         {place.area === "row" && <>
@@ -236,8 +243,8 @@ export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {},
   // L'aperçu : les champs de l'onglet avec le texte de sa première ligne.
   const previewItems = columns.map((column) => ({ header: column.header, text: (sample[column.header] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }))
   const preview = arrangeLayout(layout, previewItems, (item) => item.header)
-  const previewField = (item: (typeof previewItems)[number], field: Pick<LayoutField, "hideLabel" | "large">): ReactNode => <div className="grid gap-0.5">
-    {!field.hideLabel && <span className="text-[10px] font-semibold text-muted-foreground">{item.header}</span>}
+  const previewField = (item: (typeof previewItems)[number], field: Pick<LayoutField, "hideLabel" | "large" | "label">): ReactNode => <div className="grid gap-0.5">
+    {!field.hideLabel && <span className="text-[10px] font-semibold text-muted-foreground">{field.label || item.header}</span>}
     <span className={`block min-h-6 truncate rounded-md border bg-background/70 px-1.5 py-1 ${field.large ? "font-display text-sm font-semibold" : "text-[11px]"}`}>{item.text || <span className="text-muted-foreground/60">—</span>}</span>
   </div>
 
@@ -327,7 +334,7 @@ export function IndexLayoutEditor({ kind, columns, value, onChange, sample = {},
           <label className="flex items-center gap-1.5"><input type="radio" disabled={disabled} checked={(layout.rest ?? (hover ? "hide" : "show")) === "hide"} onChange={() => set({ ...layout, rest: "hide" })} />sont masquées</label>
         </div>
       </div>
-      <div><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => onChange(null)}><RotateCcw />Revenir à l’affichage automatique</Button></div>
+      <div><Button type="button" variant="ghost" size="sm" disabled={disabled} onClick={() => onChange(null)}><RotateCcw />{resetLabel}</Button></div>
     </div>
 
     <aside className="grid content-start gap-2 rounded-xl border bg-card/70 p-3">
