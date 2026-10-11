@@ -8,7 +8,7 @@ import { Download, LoaderCircle, Plus, Search } from "lucide-react"
 
 import { ensureWorldIndexName, indexGridColumn, type AutoLink } from "@/components/eraser/index-cells"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
-import { blankNpc, ImportNpcsDialog, importNpcs, NpcForm, npcPeopleSource, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
+import { ImportNpcsDialog, newNpc, importNpcs, NpcForm, npcPeopleSource, persistNpcs, uploadNpcPortrait } from "@/components/eraser/npc-manager"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
@@ -229,7 +229,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
   function insertRows(rowKey: string, count: number) {
     void run(async () => {
       // Un PNJ a besoin d'un nom : les lignes arrivent en « Nouveau PNJ », à renommer.
-      const created = Array.from({ length: count }, () => ({ ...blankNpc(tab), name: "Nouveau PNJ" }))
+      const created = Array.from({ length: count }, () => newNpc(tab, "Nouveau PNJ"))
       replace(await persistNpcs("save", tab, created), true, rowKey)
     })
   }
@@ -284,7 +284,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
       <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher un PNJ…" className="pl-9" /></div>
       <div className="flex flex-wrap gap-2 lg:ml-auto">
         <Button type="button" variant="outline" onClick={() => setImporting(true)} disabled={pending}><Download />Récupérer</Button>
-        <Button type="button" onClick={() => setEditing(blankNpc(tab))} disabled={pending}><Plus />Créer un PNJ</Button>
+        <Button type="button" onClick={() => setEditing(newNpc(tab))} disabled={pending}><Plus />Créer un PNJ</Button>
       </div>
     </div>
 
@@ -301,7 +301,7 @@ export function NpcIndex({ initialNpcs, sourcePages, campaignsByName, pages }: {
       disabled={pending}
       version={version}
       addRowLabel="Créer un PNJ"
-      rowCommands={{ append: () => setEditing(blankNpc(tab)), insertRows, duplicate, remove }}
+      rowCommands={{ append: () => setEditing(newNpc(tab)), insertRows, duplicate, remove }}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
       empty={npcs.some((npc) => tabOf(npc) === tab) ? "Aucun PNJ ne correspond à la recherche." : "Cet onglet est vide. Crée un PNJ ou récupère ceux d’une campagne."}
     />

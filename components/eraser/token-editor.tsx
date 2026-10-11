@@ -6,7 +6,7 @@ import { CircleDot, Crosshair, LoaderCircle, Save } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { cn } from "@/lib/utils"
-import type { ShopKey } from "@/lib/shop-schema"
+import type { VisualShopKey } from "@/lib/shop-keys"
 import type { TokenKind } from "@/lib/tokens"
 import { framingFromPlacement } from "@/lib/portrait-framing-shared"
 import { announcePortraitFraming } from "@/components/eraser/portrait-framing"
@@ -19,13 +19,13 @@ import "@/integrations/roll20/extension/token-art.js"
 type Placement = { x: number; y: number; width: number }
 type TokenImage = HTMLImageElement | null
 
-export type TokenStyle = { kind: Exclude<TokenKind, "shop"> } | { kind: "shop"; shopKey: ShopKey }
+export type TokenStyle = { kind: Exclude<TokenKind, "shop"> } | { kind: "shop"; shopKey: VisualShopKey }
 
 type TokenArt = {
   SIZE: number
   CENTER: number
   INNER: number
-  shopFronts: Record<ShopKey, { stripes: [string, string]; background: string; sign: string; label: string }>
+  shopFronts: Record<VisualShopKey, { stripes: [string, string]; background: string; sign: string; label: string }>
   drawToken: (ctx: CanvasRenderingContext2D, style: TokenStyle, image: TokenImage, placement: Placement, editing: boolean) => void
   corners: (placement: Placement, height: number) => Array<readonly [number, number]>
   coverPlacement: (image: HTMLImageElement) => Placement

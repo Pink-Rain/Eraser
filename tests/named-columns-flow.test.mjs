@@ -284,6 +284,11 @@ test("Magasins : enregistrés et vérifiés par nom de colonne", async () => {
   assert.equal(saved.cityName, "Brume");
   const listed = await sheets.listSavedShops("CAMP-1");
   assert.deepEqual(listed.map((shop) => shop.name), ["Le Pot"]);
+  // Le Marché ambulant garde son type ; un type inconnu retombe sur Marché, comme avant.
+  await sheets.saveGeneratedShops("CAMP-1", [{ id: "SHOP-2", key: "travelling-market", name: "Caravane", size: "Petit", cityKey: "village", cityName: "Itinérant", items: [] }, { id: "SHOP-3", key: "boulangerie", name: "Four", size: "Petit", cityKey: "village", cityName: "Brume", items: [] }]);
+  const keys = Object.fromEntries((await sheets.listSavedShops("CAMP-1")).map((shop) => [shop.id, shop.key]));
+  assert.equal(keys["SHOP-2"], "travelling-market");
+  assert.equal(keys["SHOP-3"], "market");
 });
 
 test("Fiche rangée comme Eraser : une seule plage écrite dès la colonne C, comme avant", async () => {
@@ -379,6 +384,23 @@ test("Relations, sessions, vocabulaire et to-do : lus et écrits par nom de colo
   const sessionRows = google.grid(sessions, "Sessions");
   assert.equal(record(sessionRows, 1)["Titre"], "Prologue");
   assert.equal(record(sessionRows, 1)["ID campagne"], "CAMP-1");
+  // Lieux, Document et Événements : colonnes ajoutées à droite, les anciennes ne bougent pas.
+  assert.deepEqual(sessionRows[0].slice(0, 10), ["Titre", "ID", "ID campagne", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"]);
+  await sessionsModule.updateSessionTexts("CAMP-1", session.id, { places: "<p>Brume</p>", document: "<p>Texte lu</p>" });
+  const withEvents = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { add: [
+    { id: "EV-1", kind: "creature", refId: "CRE-1", name: "Loup", icon: "", image: "/api/resources/creature-portraits/abc", tag: "", tagColor: "", description: "" },
+    { id: "EV-2", kind: "other", refId: "", name: "Orage", icon: "CloudLightning", image: "javascript:alert(1)", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée." },
+    { id: "EV-3", kind: "inconnu", name: "Rejeté" },
+  ] });
+  assert.deepEqual(withEvents.events.map((event) => [event.id, event.kind, event.image]), [["EV-1", "creature", "/api/resources/creature-portraits/abc"], ["EV-2", "other", ""]]);
+  await sessionsModule.updateSessionEvents("CAMP-1", session.id, { update: [{ ...withEvents.events[1], tag: "Danger" }], order: ["EV-2", "EV-1"] });
+  const reread = (await sessionsModule.listCampaignSessions("CAMP-1"))[0];
+  assert.equal(reread.places, "<p>Brume</p>");
+  assert.equal(reread.document, "<p>Texte lu</p>");
+  assert.deepEqual(reread.events.map((event) => [event.id, event.tag]), [["EV-2", "Danger"], ["EV-1", ""]]);
+  assert.equal(record(google.grid(sessions, "Sessions"), 1)["Titre"], "Prologue");
+  const removed = await sessionsModule.updateSessionEvents("CAMP-1", session.id, { remove: ["EV-2"] });
+  assert.deepEqual(removed.events.map((event) => event.id), ["EV-1"]);
 
   const vocabularyModule = await vite.ssrLoadModule("/lib/vocabulary.ts");
   const vocabulary = fresh("vocabulary");

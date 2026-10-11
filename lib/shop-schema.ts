@@ -4,7 +4,9 @@ import { objectLocationColumns } from "@/lib/object-combat"
 import { shopObjectId } from "@/lib/object-item-id"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
-export type ShopKey = "market" | "bookshop" | "antique" | "armory" | "black-market" | "alchemist" | "tavern"
+export type { ShopKey, VisualShopKey } from "@/lib/shop-keys"
+export { shopKeyList, visualShopKey } from "@/lib/shop-keys"
+import type { ShopKey } from "@/lib/shop-keys"
 export type ShopSize = "Minuscule" | "Petit" | "Moyen" | "Grand" | "Géant"
 export type CityKey = "bourg" | "village" | "small-city" | "medium-city" | "large-city" | "capital"
 

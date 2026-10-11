@@ -4,6 +4,7 @@ import {
   canonicalRows,
   canonicalWrites,
   clearSpreadsheetReadCache,
+  columnName,
   ensureJdrSheet,
   ensureNamedColumns,
   listCampaignMembers,
@@ -38,13 +39,74 @@ export type CampaignSessionRecord = {
   createdByUid: string
   createdAt: string
   updatedAt: string
+  /** Les lieux de la session, notés à la main (texte mis en forme). */
+  places: string
+  /** La page « Document », à remplir librement (texte mis en forme). */
+  document: string
+  events: SessionEvent[]
+}
+
+/**
+ * Un événement préparé pour la session : une créature, un PNJ (de la campagne ou
+ * générique), un marché ambulant, ou « autre » (icône, nom, étiquette colorée, texte).
+ * Les créatures, PNJs et marchés restent dans leurs feuilles : l'événement les cite par
+ * leur identifiant et garde leur nom pour s'afficher même s'ils sont introuvables.
+ */
+export type SessionEventKind = "creature" | "npc" | "generic-npc" | "market" | "other"
+export type SessionEvent = {
+  id: string
+  kind: SessionEventKind
+  refId: string
+  name: string
+  /** « Autre » : le nom d'une icône Lucide choisie dans la liste. */
+  icon: string
+  /** Créature, PNJ : le portrait, gardé pour ne pas relire l'index à l'affichage. */
+  image: string
+  tag: string
+  tagColor: string
+  description: string
+}
+
+const EVENT_KINDS = new Set<SessionEventKind>(["creature", "npc", "generic-npc", "market", "other"])
+const text = (value: unknown, max: number) => typeof value === "string" ? value.slice(0, max) : ""
+
+/** Un événement propre : champs connus, longueurs bornées ; `null` s'il est inutilisable. */
+export function cleanSessionEvent(value: unknown): SessionEvent | null {
+  if (!value || typeof value !== "object") return null
+  const raw = value as Record<string, unknown>
+  const kind = raw.kind as SessionEventKind
+  if (!EVENT_KINDS.has(kind)) return null
+  const event: SessionEvent = {
+    id: text(raw.id, 80) || crypto.randomUUID(),
+    kind,
+    refId: text(raw.refId, 200),
+    name: text(raw.name, 160).trim(),
+    icon: text(raw.icon, 80),
+    image: /^(https:\/\/|\/api\/)/.test(text(raw.image, 600)) ? text(raw.image, 600) : "",
+    tag: text(raw.tag, 60),
+    tagColor: /^#[0-9a-f]{6}$/i.test(text(raw.tagColor, 7)) ? text(raw.tagColor, 7) : "",
+    description: text(raw.description, 4000),
+  }
+  return event.name || event.refId ? event : null
+}
+
+/** Les événements (JSON) ; `strict` pour une écriture : une case illisible n'est pas une liste vide. */
+function eventList(value: string | undefined, strict = false) {
+  try {
+    const parsed = JSON.parse(value || "[]") as unknown
+    if (!Array.isArray(parsed)) throw new Error("NOT_A_LIST")
+    return parsed.flatMap((item) => cleanSessionEvent(item) ?? [])
+  } catch {
+    if (strict) throw new Error("SESSION_LISTS_UNREADABLE")
+    return []
+  }
 }
 
 export type SessionMembership = { characterIds?: string[]; npcIds?: string[]; shopIds?: string[] }
 
-/** Les sessions décrites dans l'ordre prévu par Eraser : dix colonnes, de A à J. */
+/** Les sessions décrites dans l'ordre prévu par Eraser (les colonnes ajoutées plus tard à la fin). */
 const COLUMNS = sessionSheetHeaders.length
-const LAST_COLUMN = "J"
+const LAST_COLUMN = columnName(COLUMNS)
 
 /**
  * Une liste d'identifiants (JSON). `strict` pour une écriture : une case remplie mais
@@ -74,6 +136,9 @@ function sessionFromRow(row: string[], strict = false): CampaignSessionRecord | 
     createdByUid: row[7] || "",
     createdAt: row[8] || "",
     updatedAt: row[9] || "",
+    places: row[10] || "",
+    document: row[11] || "",
+    events: eventList(row[12], strict),
   }
 }
 
@@ -87,6 +152,9 @@ function sessionCells(change: Partial<CampaignSessionRecord>) {
   if (change.npcIds !== undefined) cells["PNJs (JSON)"] = JSON.stringify(change.npcIds)
   if (change.shopIds !== undefined) cells["Magasins (JSON)"] = JSON.stringify(change.shopIds)
   if (change.updatedAt !== undefined) cells["Modifiée le"] = change.updatedAt
+  if (change.places !== undefined) cells["Lieux de la session"] = change.places
+  if (change.document !== undefined) cells["Document"] = change.document
+  if (change.events !== undefined) cells["Événements (JSON)"] = JSON.stringify(change.events)
   return cells
 }
 
@@ -95,6 +163,7 @@ function sessionRow(session: CampaignSessionRecord) {
     session.id, session.campaignId, session.name, session.bannerUrl,
     JSON.stringify(session.characterIds), JSON.stringify(session.npcIds), JSON.stringify(session.shopIds),
     session.createdByUid, session.createdAt, session.updatedAt,
+    session.places, session.document, JSON.stringify(session.events),
   ]
 }
 
@@ -201,6 +270,9 @@ export async function createCampaignSession(campaignId: string, name: string, cr
     createdByUid,
     createdAt: now,
     updatedAt: now,
+    places: "",
+    document: "",
+    events: [],
   }
   const sheet = await sessionsSheet()
   // Deux créations simultanées ne prennent pas la même ligne libre.
@@ -222,6 +294,38 @@ export async function createCampaignSession(campaignId: string, name: string, cr
 
 export async function renameCampaignSession(campaignId: string, sessionId: string, name: string) {
   return updateSession(campaignId, sessionId, () => ({ name }))
+}
+
+/** Les lieux notés et la page « Document » : écrits tels quels (texte mis en forme). */
+export async function updateSessionTexts(campaignId: string, sessionId: string, texts: { places?: string; document?: string }) {
+  return updateSession(campaignId, sessionId, () => ({
+    ...(texts.places !== undefined ? { places: texts.places.slice(0, 45_000) } : {}),
+    ...(texts.document !== undefined ? { document: texts.document.slice(0, 45_000) } : {}),
+  }))
+}
+
+/**
+ * Ajoute, modifie, retire ou réordonne des événements, appliqués à la liste relue juste
+ * avant d'écrire : un ajout fait ailleurs entre-temps n'est pas perdu.
+ */
+export async function updateSessionEvents(campaignId: string, sessionId: string, change: { add?: SessionEvent[]; update?: SessionEvent[]; remove?: string[]; order?: string[] }) {
+  return updateSession(campaignId, sessionId, (session) => {
+    const removed = new Set(change.remove ?? [])
+    // Nettoyés ici aussi : ce qui s'écrit dans la feuille ne dépend pas de l'appelant.
+    const clean = (list: unknown[] = []) => list.flatMap((event) => cleanSessionEvent(event) ?? [])
+    const updates = new Map(clean(change.update).map((event) => [event.id, event]))
+    let events = session.events.filter((event) => !removed.has(event.id)).map((event) => updates.get(event.id) ?? event)
+    const known = new Set(events.map((event) => event.id))
+    events = [...events, ...clean(change.add).map((event) => known.has(event.id) ? { ...event, id: crypto.randomUUID() } : event)]
+    if (change.order?.length) {
+      const rank = new Map(change.order.map((id, index) => [id, index]))
+      events = [...events].sort((left, right) => (rank.get(left.id) ?? Number.MAX_SAFE_INTEGER) - (rank.get(right.id) ?? Number.MAX_SAFE_INTEGER))
+    }
+    events = events.slice(0, 200)
+    // Une case de Google Sheets garde 50 000 caractères au plus.
+    if (JSON.stringify(events).length > 45_000) throw new Error("SESSION_EVENTS_TOO_LONG")
+    return { events }
+  }, { lists: true })
 }
 
 function merged(current: string[], add: string[] = [], remove: string[] = []) {

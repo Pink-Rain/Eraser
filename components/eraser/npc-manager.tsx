@@ -1,8 +1,9 @@
 "use client"
 
 import { useEffect, useState } from "react"
+import { useRouter } from "next/navigation"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
-import { Backpack, ChevronDown, CircleMinus, Dices, Download, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
+import { Backpack, Check, ChevronDown, CircleMinus, Download, Send, LoaderCircle, MapPinned, Pencil, Plus, Save, Search, Shield, Sparkles, Store, Trash2, UserRound, UsersRound, WandSparkles, Zap } from "lucide-react"
 
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription,
@@ -26,7 +27,8 @@ import { SpellPicker, useSpellOptions } from "@/components/eraser/spell-picker"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { compactRichText } from "@/lib/index-columns"
 import { isNpcLibraryPage, npcBelongsToCampaign } from "@/lib/npc-pages"
-import type { CampaignNpcRecord, ReusablePageOption } from "@/lib/shop-schema"
+import type { CampaignNpcRecord, ReusablePageOption, SavedShopRecord } from "@/lib/shop-schema"
+import { fetchPersistedShops, persistShops } from "@/components/eraser/shop-persistence"
 
 export function blankNpc(pageLinked: string): CampaignNpcRecord {
   return {
@@ -38,6 +40,14 @@ export function blankNpc(pageLinked: string): CampaignNpcRecord {
 
 function randomBetween(min: number, max: number) { return Math.floor(Math.random() * (max - min + 1)) + min }
 const randomNpcNames = ["Aelis Varne", "Basile Orme", "Cassian Veyr", "Dahlia Sorne", "Eden Varel", "Faël Brume", "Gaïa Néris", "Ilyan Corbe", "Jade Solven", "Kaël Dorne", "Lysandre Morn", "Maé Terval", "Nour Silex", "Orphée Valme", "Sacha Ronce", "Tess Auber"] as const
+
+/**
+ * Un nouveau PNJ : sa vie et ses caractéristiques sont tirées d'office (on les change dans
+ * le formulaire) ; son nom reste à écrire.
+ */
+export function newNpc(pageLinked: string, name = ""): CampaignNpcRecord {
+  return { ...randomNpc(pageLinked), name }
+}
 
 function randomNpc(pageLinked: string): CampaignNpcRecord {
   const totalHp = randomBetween(45, 120)
@@ -201,7 +211,7 @@ export function NpcForm({ npc, pending, onClose, onSave, index = false, locked =
 
 type NpcCardAction = { kind: "add-to-session" } | { kind: "remove-from-session" } | { kind: "none" }
 
-function NpcCard({ npc, pending, mode, action, onEdit, onAction, onToggleGroup, onDelete }: { npc: CampaignNpcRecord; pending: boolean; mode: "manage" | "session"; action: NpcCardAction; onEdit: () => void; onAction: () => void; onToggleGroup: () => void; onDelete: () => void }) {
+function NpcCard({ npc, pending, mode, action, shops = [], onEdit, onAction, onSend, onLinkShop, onToggleGroup, onDelete }: { npc: CampaignNpcRecord; pending: boolean; mode: "manage" | "session"; action: NpcCardAction; shops?: SavedShopRecord[]; onEdit: () => void; onAction: () => void; onSend?: () => void; onLinkShop?: () => void; onToggleGroup: () => void; onDelete: () => void }) {
   const hp = npc.totalHp > 0 ? Math.max(0, Math.min(100, (npc.currentHp / npc.totalHp) * 100)) : 0
   const campaignNpc = npcBelongsToCampaign(npc)
   return <article className="overflow-hidden rounded-2xl border bg-card/75 shadow-sm">
@@ -214,10 +224,13 @@ function NpcCard({ npc, pending, mode, action, onEdit, onAction, onToggleGroup, 
             <Button type="button" variant="ghost" size="icon-sm" onClick={onEdit} disabled={pending} title="Modifier" aria-label={`Modifier ${npc.name}`}><Pencil /></Button>
             {campaignNpc && <Button type="button" variant={npc.inPlayerGroup ? "secondary" : "ghost"} size="icon-sm" onClick={onToggleGroup} disabled={pending} title={npc.inPlayerGroup ? "Retirer des PNJs du groupe" : "Ajouter aux PNJs du groupe"} aria-label={npc.inPlayerGroup ? `Retirer ${npc.name} des PNJs du groupe` : `Ajouter ${npc.name} aux PNJs du groupe`} aria-pressed={npc.inPlayerGroup}><UsersRound className={npc.inPlayerGroup ? "text-primary" : ""} /></Button>}
             {action.kind === "add-to-session" && <Button type="button" variant="ghost" size="icon-sm" onClick={onAction} disabled={pending} title="Ajouter à la session" aria-label={`Ajouter ${npc.name} à la session`}><MapPinned /></Button>}
+            {onLinkShop && <Button type="button" variant="ghost" size="icon-sm" onClick={onLinkShop} disabled={pending} title="Lier un magasin (ce PNJ en devient le vendeur)" aria-label={`Lier un magasin à ${npc.name}`}><Store /></Button>}
+            {onSend && <Button type="button" variant="ghost" size="icon-sm" onClick={onSend} disabled={pending} title="Envoyer dans une autre session (il reste aussi dans celle-ci)" aria-label={`Envoyer ${npc.name} dans une autre session`}><Send /></Button>}
             {action.kind === "remove-from-session" && <Button type="button" variant="ghost" size="icon-sm" className="text-destructive" onClick={onAction} disabled={pending} title="Retirer de la session" aria-label={`Retirer ${npc.name} de la session`}><CircleMinus /></Button>}
             {mode === "manage" && <AlertDialog><AlertDialogTrigger asChild><Button type="button" variant="ghost" size="icon-sm" className="text-destructive" disabled={pending} aria-label={`Supprimer ${npc.name}`}><Trash2 /></Button></AlertDialogTrigger><AlertDialogContent><AlertDialogHeader><AlertDialogTitle>Supprimer « {npc.name} » ?</AlertDialogTitle><AlertDialogDescription>Cette suppression est définitive.</AlertDialogDescription></AlertDialogHeader><AlertDialogFooter><AlertDialogCancel>Annuler</AlertDialogCancel><AlertDialogAction variant="destructive" onClick={onDelete}>Supprimer</AlertDialogAction></AlertDialogFooter></AlertDialogContent></AlertDialog>}
           </div>
         </div>
+        {shops.length > 0 && <p className="flex flex-wrap items-center gap-1.5 text-xs"><span className="font-semibold uppercase tracking-wider text-muted-foreground">Vendeur</span>{shops.map((shop) => <span key={shop.id} className="inline-flex items-center gap-1 rounded-full border border-primary/25 bg-primary/5 px-2 py-0.5 font-medium text-primary"><Store className="size-3" />{shop.name}</span>)}</p>}
         {campaignNpc && <Progress value={hp} className="h-2" />}
         <CharacteristicBadges values={npcCharacteristics(npc)} />
       </div>
@@ -235,7 +248,7 @@ function NpcCard({ npc, pending, mode, action, onEdit, onAction, onToggleGroup, 
 }
 
 /** Les PNJs d'une session : les identifiants de la session et ce qu'on fait en ajoutant ou retirant. */
-export type NpcSessionBinding = { ids: string[]; onAdd: (ids: string[]) => Promise<void>; onRemove: (id: string) => Promise<void> }
+export type NpcSessionBinding = { ids: string[]; onAdd: (ids: string[]) => Promise<void>; onRemove: (id: string) => Promise<void>; /** La session affichée (« Envoyer dans une autre session » ne la propose pas). */ currentId?: string }
 
 /** « Ajouter un PNJ » : choisir parmi les PNJs de la campagne qui ne sont pas encore dans la session. */
 function AddNpcToSessionDialog({ open, candidates, pending, onClose, onAdd, onCreate }: { open: boolean; candidates: CampaignNpcRecord[]; pending: boolean; onClose: () => void; onAdd: (ids: string[]) => void; onCreate: () => void }) {
@@ -248,9 +261,64 @@ function AddNpcToSessionDialog({ open, candidates, pending, onClose, onAdd, onCr
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) close() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Ajouter un PNJ</DialogTitle></DialogHeader><div className="space-y-4"><div className="flex gap-2"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ de la campagne…" /></div><Button type="button" variant="outline" onClick={() => { setSelected(new Set()); setQuery(""); onCreate() }}><Plus />Créer un PNJ</Button></div><div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{filtered.length ? filtered.map((npc) => <button key={npc.id} type="button" onClick={() => toggle(npc.id)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent ${selected.has(npc.id) ? "bg-primary/10" : ""}`}><Checkbox checked={selected.has(npc.id)} aria-label={`Sélectionner ${npc.name}`} /><UserRound className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{npc.name}</span><span className="truncate text-xs text-muted-foreground">{[richTextPlainText(npc.title), richTextPlainText(npc.occupation)].filter(Boolean).join(" · ")}</span></button>) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{candidates.length ? "Aucun PNJ ne correspond." : "Tous les PNJs de la campagne sont déjà dans la session."}</p>}</div><div className="flex justify-end gap-2"><Button type="button" variant="ghost" onClick={close}>Annuler</Button><Button type="button" disabled={pending || !selected.size} onClick={() => { onAdd([...selected]); setSelected(new Set()); setQuery("") }}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}Ajouter {selected.size || ""}</Button></div></div></DialogContent></Dialog>
 }
 
-export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "manage", session }: { initialNpcs: CampaignNpcRecord[]; pageLinked: string; sourcePages?: ReusablePageOption[]; mode?: "manage" | "session"; session?: NpcSessionBinding }) {
+/**
+ * « Lier un magasin » depuis un PNJ : la liste est relue à l'ouverture (un lien réécrit tout le
+ * magasin, il ne doit jamais partir d'une copie périmée). Cocher fait du PNJ le vendeur, décocher
+ * retire le lien.
+ */
+function LinkShopDialog({ npc, pageLinked, npcs, onClose, onLinked }: { npc: CampaignNpcRecord | null; pageLinked: string; npcs: CampaignNpcRecord[]; onClose: () => void; onLinked: (shops: SavedShopRecord[]) => void }) {
+  const [shops, setShops] = useState<SavedShopRecord[] | null>(null)
+  const [query, setQuery] = useState("")
+  const [busy, setBusy] = useState("")
+  const [error, setError] = useState("")
+  const npcId = npc?.id || ""
+  useEffect(() => {
+    if (!npcId) return
+    let active = true
+    fetchPersistedShops(pageLinked).then((loaded) => { if (active) setShops(loaded) }).catch((caught) => { if (active) setError(caught instanceof Error ? caught.message : "Chargement impossible.") })
+    return () => { active = false }
+  }, [npcId, pageLinked])
+  const normalized = query.trim().toLocaleLowerCase("fr")
+  const filtered = (shops || []).filter((shop) => !normalized || `${shop.name} ${shop.cityName}`.toLocaleLowerCase("fr").includes(normalized))
+  async function toggle(shop: SavedShopRecord) {
+    if (!npc) return
+    setBusy(shop.id); setError("")
+    try {
+      const linked = shop.npcId === npc.id
+      const saved = await persistShops("link-npc", pageLinked, [shop], linked ? "" : npc.id)
+      const updated = saved.find((candidate) => candidate.id === shop.id) || { ...shop, npcId: linked ? "" : npc.id }
+      const next = (shops || []).map((candidate) => candidate.id === shop.id ? updated : candidate)
+      setShops(next)
+      onLinked(next)
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "Le lien n’a pas pu être enregistré.") }
+    setBusy("")
+  }
+  function close() { setShops(null); setQuery(""); setError(""); onClose() }
+  return <Dialog open={Boolean(npc)} onOpenChange={(open) => { if (!open && !busy) close() }}><DialogContent className="sm:max-w-2xl"><DialogHeader><DialogTitle>Lier un magasin à {npc?.name}</DialogTitle></DialogHeader><div className="space-y-3">
+    <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un magasin sauvegardé…" /></div>
+    {error && <p className="text-sm text-destructive">{error}</p>}
+    <div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">{shops === null ? <div className="grid min-h-28 place-items-center"><LoaderCircle className="animate-spin text-muted-foreground" /></div> : filtered.length ? filtered.map((shop) => { const linked = shop.npcId === npcId; const other = !linked && shop.npcId ? npcs.find((candidate) => candidate.id === shop.npcId)?.name || "un autre PNJ" : ""; return <button key={shop.id} type="button" disabled={Boolean(busy)} onClick={() => void toggle(shop)} className={`flex w-full items-center gap-3 rounded-lg px-3 py-2 text-left hover:bg-accent disabled:opacity-60 ${linked ? "bg-primary/10" : ""}`}>
+      <span className={`flex size-5 items-center justify-center rounded border ${linked ? "border-primary bg-primary text-primary-foreground" : ""}`}>{busy === shop.id ? <LoaderCircle className="size-3 animate-spin" /> : linked && <Check className="size-3.5" />}</span>
+      <Store className="size-4 text-primary" /><span className="min-w-0 flex-1 truncate text-sm font-medium">{shop.name}</span><span className="truncate text-xs text-muted-foreground">{other ? `Vendeur : ${other}` : shop.cityName}</span>
+    </button> }) : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{shops.length ? "Aucun magasin ne correspond." : "Aucun magasin sauvegardé dans cette campagne. Génère-en depuis Magasin et fouille."}</p>}</div>
+    <div className="flex justify-end"><Button type="button" variant="ghost" disabled={Boolean(busy)} onClick={close}>Fermer</Button></div>
+  </div></DialogContent></Dialog>
+}
+
+/** `shops` : les magasins de la campagne déjà chargés par la page (le Créateur de session), pour montrer de quels magasins chaque PNJ est le vendeur. */
+export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "manage", session, shops: initialShops }: { initialNpcs: CampaignNpcRecord[]; pageLinked: string; sourcePages?: ReusablePageOption[]; mode?: "manage" | "session"; session?: NpcSessionBinding; shops?: SavedShopRecord[] }) {
+  const router = useRouter()
   const [npcs, setNpcs] = useState(initialNpcs); const [editing, setEditing] = useState<CampaignNpcRecord | null>(null); const [importing, setImporting] = useState(false); const [pending, setPending] = useState(false); const [query, setQuery] = useRememberedSearch(mode); const [error, setError] = useState("")
   const [sessionTarget, setSessionTarget] = useState<CampaignNpcRecord | null>(null); const [picking, setPicking] = useState(false); const [notice, setNotice] = useState("")
+  const [shopTarget, setShopTarget] = useState<CampaignNpcRecord | null>(null); const [shops, setShops] = useState(initialShops)
+  // La page relue (un PNJ créé depuis un magasin, un lien posé ailleurs) remplace les listes affichées.
+  const [seen, setSeen] = useState({ initialNpcs, initialShops })
+  if (seen.initialNpcs !== initialNpcs || seen.initialShops !== initialShops) {
+    if (seen.initialNpcs !== initialNpcs) setNpcs(initialNpcs)
+    if (seen.initialShops !== initialShops) setShops(initialShops)
+    setSeen({ initialNpcs, initialShops })
+  }
+  const canLinkShops = !isNpcLibraryPage(pageLinked) && pageLinked !== "bac-a-sable"
   const inSession = mode === "session" && session ? new Set(session.ids) : null
   const shown = inSession ? npcs.filter((npc) => inSession.has(npc.id)) : npcs
   const normalizedQuery = query.trim().toLocaleLowerCase("fr")
@@ -264,5 +332,5 @@ export function NpcManager({ initialNpcs, pageLinked, sourcePages = [], mode = "
   async function remove(npc: CampaignNpcRecord) { setPending(true); setError(""); try { await persistNpcs("delete", pageLinked, [npc]); setNpcs((current) => current.filter((item) => item.id !== npc.id)) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") } finally { setPending(false) } }
   async function importSelected(sourcePageLinked: string, ids: string[], transferMode: "copy" | "move") { setPending(true); setError(""); try { const imported = await importNpcs(pageLinked, sourcePageLinked, ids, transferMode); setNpcs((current) => [...imported, ...current]); setImporting(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Import impossible.") } finally { setPending(false) } }
   const cardAction = (): NpcCardAction => mode === "session" ? { kind: "remove-from-session" } : canAddToSession ? { kind: "add-to-session" } : { kind: "none" }
-  return <div className="space-y-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ…" /></div>{mode === "manage" && <div className="flex gap-2">{sourcePages.length > 0 && <Button type="button" variant="outline" onClick={() => setImporting(true)}><Download />Récupérer</Button>}<Button type="button" variant="outline" onClick={() => setEditing(randomNpc(pageLinked))}><Dices />Générer un PNJ</Button><Button type="button" onClick={() => setEditing(blankNpc(pageLinked))}><Plus />Créer un PNJ</Button></div>}{mode === "session" && <Button type="button" onClick={() => setPicking(true)} disabled={pending}><Plus />Ajouter un PNJ</Button>}</div>{error && <p className="text-sm text-destructive">{error}</p>}{notice && <p className="text-sm text-primary">{notice}</p>}<div className="grid gap-4 xl:grid-cols-2">{filtered.map((npc) => <NpcCard key={npc.id} npc={npc} pending={pending} mode={mode} action={cardAction()} onEdit={() => setEditing(npc)} onAction={() => mode === "session" ? void removeFromSession(npc) : setSessionTarget(npc)} onToggleGroup={() => void toggleGroup(npc)} onDelete={() => void remove(npc)} />)}{!filtered.length && <p className="col-span-full rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{mode === "session" ? "Aucun PNJ dans cette session." : "Aucun PNJ."}</p>}</div><Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>{editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle>{editing.createdAt ? `Modifier ${editing.name}` : "Créer un PNJ"}</DialogTitle></DialogHeader><NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={(npc, portrait) => void save(npc, portrait)} /></DialogContent>}</Dialog><ImportNpcsDialog open={importing} sourcePages={sourcePages} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void importSelected(source, ids, transferMode)} />{canAddToSession && <AddToSessionDialog open={Boolean(sessionTarget)} campaignId={pageLinked} subject={sessionTarget ? `Choisis la session où ajouter ${sessionTarget.name}.` : ""} pending={pending} onClose={() => setSessionTarget(null)} onConfirm={(sessionId) => void addToSession(sessionId)} />}{mode === "session" && <AddNpcToSessionDialog open={picking} candidates={inSession ? npcs.filter((npc) => !inSession.has(npc.id)) : []} pending={pending} onClose={() => setPicking(false)} onAdd={(ids) => void addSelected(ids)} onCreate={() => { setPicking(false); setEditing(blankNpc(pageLinked)) }} />}</div>
+  return <div className="space-y-5"><div className="flex flex-col gap-3 sm:flex-row sm:items-center"><div className="relative min-w-0 flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder="Rechercher un PNJ…" /></div>{mode === "manage" && <div className="flex gap-2">{sourcePages.length > 0 && <Button type="button" variant="outline" onClick={() => setImporting(true)}><Download />Récupérer</Button>}<Button type="button" onClick={() => setEditing(newNpc(pageLinked))}><Plus />Créer un PNJ</Button></div>}{mode === "session" && <Button type="button" onClick={() => setPicking(true)} disabled={pending}><Plus />Ajouter un PNJ</Button>}</div>{error && <p className="text-sm text-destructive">{error}</p>}{notice && <p className="text-sm text-primary">{notice}</p>}<div className="grid gap-4 xl:grid-cols-2">{filtered.map((npc) => <NpcCard key={npc.id} npc={npc} pending={pending} mode={mode} action={cardAction()} onEdit={() => setEditing(npc)} onAction={() => mode === "session" ? void removeFromSession(npc) : setSessionTarget(npc)} onSend={mode === "session" && npcBelongsToCampaign(npc) ? () => setSessionTarget(npc) : undefined} shops={shops?.filter((shop) => shop.npcId === npc.id)} onLinkShop={canLinkShops && npcBelongsToCampaign(npc) ? () => setShopTarget(npc) : undefined} onToggleGroup={() => void toggleGroup(npc)} onDelete={() => void remove(npc)} />)}{!filtered.length && <p className="col-span-full rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{mode === "session" ? "Aucun PNJ dans cette session." : "Aucun PNJ."}</p>}</div><Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>{editing && <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-5xl"><DialogHeader><DialogTitle>{editing.createdAt ? `Modifier ${editing.name}` : "Créer un PNJ"}</DialogTitle></DialogHeader><NpcForm key={editing.id} npc={editing} pending={pending} onClose={() => setEditing(null)} onSave={(npc, portrait) => void save(npc, portrait)} /></DialogContent>}</Dialog><ImportNpcsDialog open={importing} sourcePages={sourcePages} pending={pending} onClose={() => setImporting(false)} onImport={(source, ids, transferMode) => void importSelected(source, ids, transferMode)} />{(canAddToSession || mode === "session") && <AddToSessionDialog open={Boolean(sessionTarget)} campaignId={pageLinked} title={mode === "session" ? "Envoyer dans une autre session" : undefined} confirmLabel={mode === "session" ? "Envoyer" : undefined} excludeId={session?.currentId} subject={sessionTarget ? mode === "session" ? `${sessionTarget.name} reste dans cette session et rejoint celle choisie.` : `Choisis la session où ajouter ${sessionTarget.name}.` : ""} pending={pending} onClose={() => setSessionTarget(null)} onConfirm={(sessionId) => void addToSession(sessionId)} />}<LinkShopDialog npc={shopTarget} pageLinked={pageLinked} npcs={npcs} onClose={() => setShopTarget(null)} onLinked={(next) => { if (shops) setShops(next); router.refresh() }} />{mode === "session" && <AddNpcToSessionDialog open={picking} candidates={inSession ? npcs.filter((npc) => !inSession.has(npc.id)) : []} pending={pending} onClose={() => setPicking(false)} onAdd={(ids) => void addSelected(ids)} onCreate={() => { setPicking(false); setEditing(newNpc(pageLinked)) }} />}</div>
 }

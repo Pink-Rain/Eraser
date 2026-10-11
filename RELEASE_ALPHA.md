@@ -1,32 +1,46 @@
-# Eraser 0.1.1-alpha.192 — Sorts des classes et bonus de rang dans le moteur des index
+# Eraser 0.1.1-alpha.193 — Créateur de session, Marché ambulant, Index des items
 
-Cette version arrive par la mise à jour sans réinstallation. Aucune donnée n'est déplacée ni
-réécrite : la feuille « Sorts de classe » garde exactement ses colonnes et ses valeurs.
+Cette version arrive par la mise à jour sans réinstallation. Rien n'est supprimé ni déplacé dans
+Google Sheets : la feuille « Sessions » reçoit seulement trois colonnes à droite (« Lieux de la
+session », « Document », « Événements (JSON) ») au premier enregistrement qui en a besoin.
 
-## Sorts des classes
+## Créateur de session
 
-- **« Classes et rangs »** est maintenant une colonne du moteur des index : elle apparaît aussi
-  dans l'**Index des sorts des classes** (plus seulement dans Création de classe), dans le tableau
-  comme dans la fiche d'un sort. Une pastille par classe, aux couleurs de la classe, avec son
-  rang (C, R1…R20) ; « + Classe » en ajoute une.
-- Chaque changement est vérifié avant d'être écrit : **trois sorts par rang au plus**, et si la
-  feuille a changé entre-temps (une autre installation), rien n'est écrasé. La pastille change
-  tout de suite et revient comme avant en cas de refus, avec la raison.
-- Les colonnes de rang de la feuille (une par classe) restent dans Google Sheets mais sortent du
-  tableau et de la fiche : on ne peut plus y taper un rang à la main (ce qui contournait la limite
-  de trois sorts). Elles se règlent seulement par « Classes et rangs ».
-- **Onglets-fenêtres prévus d'office** dans l'Index des sorts des classes : **Actifs**, **Passifs**
-  et **Bonus** (Actifs et Passifs dans les sorts des créatures), rangés exactement comme dans
-  Création de classe. Ils ne s'écrivent nulle part et ne se suppriment pas ; tes propres
-  onglets-fenêtres restent à côté. « Ajouter » depuis Passifs ou Bonus donne ce Type au nouveau
-  sort, qui reste ainsi dans l'onglet.
-- Deux changements rapides sur la même pastille partent l'un après l'autre, sans se refuser.
-- Copier un sort donne toujours une copie sans rang (un rang n'admet que trois sorts, et un sort
-  de rang commun serait donné à tous les personnages de la classe).
+- **Document** : une page vide par session, à côté de « Préparation », pour écrire librement
+  (texte lu aux joueurs, déroulé…). Enregistrée en quittant le champ.
+- **Lieux de la session** : un petit encart en haut de la préparation pour noter les lieux.
+- **Événements** : une nouvelle section. « Ajouter un événement » propose
+  - une **créature** (recherche dans l'Index des créatures),
+  - un **PNJ** de la campagne ou un **PNJ générique**,
+  - un **Marché ambulant** sauvegardé, ou en générer un sur place,
+  - **Autre** : nom, icône au choix, étiquette avec sa couleur et description.
+  Chaque carte s'ouvre sur sa fiche, se modifie (étiquette, couleur, description) et se retire.
+- **Envoyer dans une autre session** sur les PNJs, les magasins et les événements : ils restent
+  dans la session ouverte et rejoignent celle choisie.
 
-## Bonus de rang
+## PNJs
 
-- **« Ajouter un rang »** passe par le moteur : il écrit le rang suivant (« Rang 21 »), une seule
-  fois par clic, même si deux personnes cliquent en même temps.
-- La fiche de personnage voit tout de suite un bonus modifié dans le tableau, sans attendre trois
-  minutes ni « Actualiser ».
+- « Générer un PNJ » disparaît : **tout nouveau PNJ** naît avec ses PV et caractéristiques tirés.
+- **Lier un magasin depuis un PNJ** (icône boutique sur sa carte) : cocher un magasin fait du PNJ
+  son vendeur, décocher retire le lien. La carte du PNJ affiche les magasins qu'il tient.
+
+## Magasins
+
+- **Marché ambulant** : un nouveau magasin, avec les mêmes règles que les autres, généré à part
+  (dans Magasin et fouille ou dans les événements) avec **4 à 8 items**, choisis ou tirés au
+  hasard. Il se sauvegarde, se relance et se lie à un PNJ comme les autres. Ses items sont ceux
+  dont un emplacement est « Marché ambulant ».
+- Une case d'emplacement qui liste plusieurs lieux (« Marché ordinaire - Marché ambulant -
+  Bateau ») est lue lieu par lieu : l'item se vend au Marché **et** au Marché ambulant. Avant,
+  un item « Marché ordinaire - Marché noir » n'arrivait jamais au Marché.
+- **Loupe** sur chaque ligne, à côté de « Relancer » : chercher un item dans l'index et le mettre
+  à la place, par défaut parmi ceux que vend ce magasin (une case ouvre tout l'index).
+- **« Lier à un PNJ » peut créer le PNJ** : « Créer un PNJ », un nom, et le vendeur naît lié.
+
+## Index des items
+
+- L'Index des objets s'appelle maintenant **Index des items** partout à l'écran. « Objets » reste
+  le nom de l'onglet, du type et des colonnes de la feuille.
+- **Bouton tout fait « Envoyer dans un autre onglet »** dans le type de colonne Boutons de
+  l'éditeur d'index, utilisable dans tous les index ; la colonne Actions des items l'utilise.
+- La colonne **« Onglet »** de la vue Tout (Lieux…) est retirée : le bouton ci-dessus la remplace.

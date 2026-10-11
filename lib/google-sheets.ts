@@ -90,6 +90,7 @@ import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
 import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
+import { shopKeyList } from "@/lib/shop-keys"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { matchValueRanges, normalizeGoogleSheetRows, sheetNumber, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
@@ -3261,7 +3262,8 @@ export type StructuredSheetDefinition = {
 /** Dernière colonne d'une feuille des PNJ neuve (AK) : sert seulement à la créer et aux anciennes versions. */
 const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
-export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le"]
+// Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
+export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)"]
 
 const npcSheetColumnWidths = [
   180, 190, 220, 180, 110, 110, 110, 100, 100, 110, 100, 100, 130, 120, 130, 120, 110,
@@ -4570,7 +4572,7 @@ export async function createCampaignForMj(mjUid: string, input: { id?: string; n
   return campaign
 }
 
-const shopKeys = new Set<ShopKey>(["market", "bookshop", "antique", "armory", "black-market", "alchemist", "tavern"])
+const shopKeys = new Set<ShopKey>(shopKeyList)
 const shopSizes = new Set<ShopSize>(["Minuscule", "Petit", "Moyen", "Grand", "Géant"])
 const cityKeys = new Set<CityKey>(["bourg", "village", "small-city", "medium-city", "large-city", "capital"])
 

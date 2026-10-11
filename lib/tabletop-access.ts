@@ -13,6 +13,7 @@ import { identityUidsForUser } from "@/lib/identity-links"
 import { chatAccountsForCampaign, chatAuthorName, listDirectoryAccounts } from "@/lib/chat-accounts"
 import { ownedBy } from "@/lib/ownership"
 import { sheetNumber } from "@/lib/google-sheet-values"
+import { visualShopKey } from "@/lib/shop-keys"
 
 export function canManageTabletop(account: AuthorizedUser) { return account.role === "admin" || account.role === "mj" }
 
@@ -66,7 +67,7 @@ function npcEntity(npc: Awaited<ReturnType<typeof listNpcs>>[number]): TabletopE
 }
 
 function shopEntity(shop: Awaited<ReturnType<typeof listSavedShops>>[number], _pageLinked: string, linkedNpc?: Awaited<ReturnType<typeof listNpcs>>[number]): TabletopEntityRecord {
-  return { id: shop.id, kind: "shop", name: shop.name, subtitle: linkedNpc ? `Vendeur · ${linkedNpc.name}` : `${shop.cityName || "Magasin"} · ${shop.size}`, portrait: linkedNpc?.portrait || "", currentHp: 0, totalHp: 0, speed: 0, ownerUid: "", shopKey: shop.key, shopSize: shop.size, shopCity: shop.cityName, linkedNpcId: linkedNpc?.id || "", linkedNpcName: linkedNpc?.name || "" }
+  return { id: shop.id, kind: "shop", name: shop.name, subtitle: linkedNpc ? `Vendeur · ${linkedNpc.name}` : `${shop.cityName || "Magasin"} · ${shop.size}`, portrait: linkedNpc?.portrait || "", currentHp: 0, totalHp: 0, speed: 0, ownerUid: "", shopKey: visualShopKey(shop.key), shopSize: shop.size, shopCity: shop.cityName, linkedNpcId: linkedNpc?.id || "", linkedNpcName: linkedNpc?.name || "" }
 }
 
 export async function getTabletopSpeakerName(account: AuthorizedUser, pageLinked: string, characterId: string) {
@@ -87,7 +88,7 @@ export async function getTabletopShopDetail(account: AuthorizedUser, mapId: stri
   const shop = shops.find((candidate) => candidate.id === shopId)
   if (!shop) return null
   const npc = npcs.find((candidate) => candidate.id === shop.npcId)
-  return { id: shop.id, key: shop.key, name: shop.name, size: shop.size, cityName: shop.cityName, linkedNpcName: npc?.name || "", portrait: npc?.portrait || "", items: shop.items }
+  return { id: shop.id, key: visualShopKey(shop.key), name: shop.name, size: shop.size, cityName: shop.cityName, linkedNpcName: npc?.name || "", portrait: npc?.portrait || "", items: shop.items }
 }
 
 export async function getTabletopNpcDetail(account: AuthorizedUser, mapId: string, npcId: string, roomKey = ""): Promise<TabletopNpcDetail | null> {

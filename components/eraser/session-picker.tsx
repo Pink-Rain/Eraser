@@ -6,7 +6,7 @@ import { CalendarPlus, Check, LoaderCircle, MapPinned, Plus, Search } from "luci
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
-import type { CampaignSessionRecord, SessionMembership } from "@/lib/campaign-sessions"
+import type { CampaignSessionRecord, SessionEvent, SessionMembership } from "@/lib/campaign-sessions"
 import { cn } from "@/lib/utils"
 
 export type { CampaignSessionRecord } from "@/lib/campaign-sessions"
@@ -33,13 +33,18 @@ export async function createSession(campaignId: string, name: string) {
   return payload.session
 }
 
-export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership } | FormData) {
+export async function patchSession(campaignId: string, sessionId: string, body: { name?: string; add?: SessionMembership; remove?: SessionMembership; places?: string; document?: string; events?: { add?: SessionEvent[]; update?: SessionEvent[]; remove?: string[]; order?: string[] } } | FormData) {
   const init: RequestInit = body instanceof FormData
     ? { method: "PATCH", body }
     : { method: "PATCH", headers: { "content-type": "application/json" }, body: JSON.stringify(body) }
   const payload = await sessionJson<{ session: CampaignSessionRecord }>(await fetch(sessionsUrl(campaignId, sessionId), init), "La session n’a pas pu être modifiée.")
+  // « Envoyer dans une autre session » modifie une session que la page garde en mémoire.
+  if (typeof window !== "undefined") window.dispatchEvent(new CustomEvent<CampaignSessionRecord>(SESSION_UPDATED_EVENT, { detail: payload.session }))
   return payload.session
 }
+
+/** Émis après chaque modification d'une session, avec la session relue. */
+export const SESSION_UPDATED_EVENT = "eraser:session-updated"
 
 export async function deleteSession(campaignId: string, sessionId: string) {
   await sessionJson<{ ok: true }>(await fetch(sessionsUrl(campaignId, sessionId), { method: "DELETE" }), "La session n’a pas pu être supprimée.")
@@ -94,7 +99,8 @@ export function CreateSessionDialog({ open, campaignId, onClose, onCreated }: { 
 // pendant qu'elles sont relues.
 const knownSessions = new Map<string, CampaignSessionRecord[]>()
 
-export function SessionPicker({ campaignId, value, onChange }: { campaignId: string; value: string; onChange: (sessionId: string) => void }) {
+/** `excludeId` : la session d'où l'on envoie (« Envoyer dans une autre session ») n'est pas proposée. */
+export function SessionPicker({ campaignId, value, onChange, excludeId = "" }: { campaignId: string; value: string; onChange: (sessionId: string) => void; excludeId?: string }) {
   const [sessions, setShownSessions] = useState<CampaignSessionRecord[] | null>(() => knownSessions.get(campaignId) ?? null)
   const setSessions = (next: CampaignSessionRecord[]) => { knownSessions.set(campaignId, next); setShownSessions(next) }
   const [refreshing, setRefreshing] = useState(true)
@@ -104,7 +110,7 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
 
   useEffect(() => {
     let alive = true
-    const cached = knownSessions.get(campaignId)
+    const cached = knownSessions.get(campaignId)?.filter((session) => session.id !== excludeId)
     if (cached?.[0]) onChange(cached[0].id)
     fetchSessions(campaignId)
       .then((loaded) => {
@@ -112,7 +118,8 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
         knownSessions.set(campaignId, ordered)
         if (!alive) return
         setShownSessions(ordered)
-        if (ordered[0] && ordered[0].id !== cached?.[0]?.id) onChange(ordered[0].id)
+        const first = ordered.find((session) => session.id !== excludeId)
+        if (first && first.id !== cached?.[0]?.id) onChange(first.id)
       })
       .catch((caught) => { if (alive) { if (!cached) setShownSessions([]); setError(caught instanceof Error ? caught.message : "Chargement impossible.") } })
       .finally(() => { if (alive) setRefreshing(false) })
@@ -122,7 +129,7 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
   }, [campaignId])
 
   const normalized = query.trim().toLocaleLowerCase("fr")
-  const filtered = useMemo(() => (sessions || []).filter((session) => !normalized || session.name.toLocaleLowerCase("fr").includes(normalized)), [sessions, normalized])
+  const filtered = useMemo(() => (sessions || []).filter((session) => session.id !== excludeId && (!normalized || session.name.toLocaleLowerCase("fr").includes(normalized))), [excludeId, sessions, normalized])
 
   return <div className="space-y-2">
     <div className="flex gap-2">
@@ -152,15 +159,15 @@ export function SessionPicker({ campaignId, value, onChange }: { campaignId: str
 }
 
 /** La fenêtre « Ajouter à la session » des pages PNJs et magasins. */
-export function AddToSessionDialog({ open, campaignId, subject, pending, onClose, onConfirm }: { open: boolean; campaignId: string; subject: string; pending: boolean; onClose: () => void; onConfirm: (sessionId: string) => void }) {
+export function AddToSessionDialog({ open, campaignId, subject, pending, title = "Ajouter à la session", confirmLabel = "Ajouter", excludeId = "", onClose, onConfirm }: { open: boolean; campaignId: string; subject: string; pending: boolean; title?: string; confirmLabel?: string; excludeId?: string; onClose: () => void; onConfirm: (sessionId: string) => void }) {
   const [sessionId, setSessionId] = useState("")
   return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose() }}>
     <DialogContent className="sm:max-w-lg">
-      <DialogHeader><DialogTitle>Ajouter à la session</DialogTitle><DialogDescription>{subject}</DialogDescription></DialogHeader>
-      {open && <SessionPicker campaignId={campaignId} value={sessionId} onChange={setSessionId} />}
+      <DialogHeader><DialogTitle>{title}</DialogTitle><DialogDescription>{subject}</DialogDescription></DialogHeader>
+      {open && <SessionPicker campaignId={campaignId} value={sessionId} onChange={setSessionId} excludeId={excludeId} />}
       <div className="flex justify-end gap-2">
         <Button type="button" variant="ghost" disabled={pending} onClick={onClose}>Annuler</Button>
-        <Button type="button" disabled={pending || !sessionId} onClick={() => onConfirm(sessionId)}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}Ajouter</Button>
+        <Button type="button" disabled={pending || !sessionId} onClick={() => onConfirm(sessionId)}>{pending ? <LoaderCircle className="animate-spin" /> : <MapPinned />}{confirmLabel}</Button>
       </div>
     </DialogContent>
   </Dialog>

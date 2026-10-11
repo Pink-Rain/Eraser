@@ -2,8 +2,8 @@
 
 import { NO_CLASS } from "@/lib/class-visibility"
 import { displayedMultipleValue } from "@/lib/multiple-values"
-import { useState } from "react"
-import { ArrowUpRight, CalendarPlus, CircleMinus, CircleUserRound, ImagePlus, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
+import { useEffect, useState } from "react"
+import { ArrowUpRight, CalendarPlus, CircleMinus, CircleUserRound, FileText, ImagePlus, LayoutList, LoaderCircle, Pencil, Plus, Trash2, UsersRound } from "lucide-react"
 import Link from "next/link"
 
 import {
@@ -15,8 +15,10 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { NpcManager } from "@/components/eraser/npc-manager"
-import { CreateSessionDialog, deleteSession, patchSession, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
+import { CreateSessionDialog, deleteSession, patchSession, SESSION_UPDATED_EVENT, sessionDateLabel, type CampaignSessionRecord } from "@/components/eraser/session-picker"
 import { SavedShopCollection } from "@/components/eraser/shop-generator"
+import { SessionEvents } from "@/components/eraser/session-events"
+import { RichTextField } from "@/components/eraser/rich-text"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
 
@@ -77,6 +79,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   const [deleting, setDeleting] = useState(false)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
+  const [page, setPage] = useState<"session" | "document">("session")
   const session = sessions.find((candidate) => candidate.id === selectedId) || null
 
   function select(id: string) {
@@ -91,6 +94,15 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   function replace(updated: CampaignSessionRecord) {
     setSessions((current) => current.map((candidate) => candidate.id === updated.id ? updated : candidate))
   }
+  // Une autre session de la campagne modifiée d'ici (« Envoyer dans une autre session ») est à jour quand on la choisit.
+  useEffect(() => {
+    const listener = (event: Event) => {
+      const updated = (event as CustomEvent<CampaignSessionRecord>).detail
+      if (updated?.campaignId === campaignId) setSessions((current) => current.map((candidate) => candidate.id === updated.id ? updated : candidate))
+    }
+    window.addEventListener(SESSION_UPDATED_EVENT, listener)
+    return () => window.removeEventListener(SESSION_UPDATED_EVENT, listener)
+  }, [campaignId])
 
   async function change(body: Parameters<typeof patchSession>[2]) {
     if (!session) return
@@ -101,6 +113,14 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
     setPending(true); setError("")
     try { await task() } catch (caught) { setError(caught instanceof Error ? caught.message : "La session n’a pas pu être modifiée.") }
     setPending(false)
+  }
+
+  /** Lieux, Document : enregistrés quand le champ est quitté, sans bloquer le reste de la page. */
+  async function saveText(field: "places" | "document", value: string) {
+    if (!session || session[field] === value) return
+    setError("")
+    try { await change(field === "places" ? { places: value } : { document: value }) }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "Le texte n’a pas pu être enregistré.") }
   }
 
   async function uploadBanner(file?: File) {
@@ -144,7 +164,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <div>
         <CalendarPlus className="mx-auto size-9 text-primary/45" />
         <p className="font-display mt-3 text-2xl font-semibold">Aucune session</p>
-        <p className="mt-1 text-sm text-muted-foreground">Crée une session pour y préparer joueurs, PNJs et magasins.</p>
+        <p className="mt-1 text-sm text-muted-foreground">Crée une session pour y préparer joueurs, PNJs, magasins et événements.</p>
         <Button type="button" className="mt-5" onClick={() => setCreating(true)}><Plus />Créer une nouvelle session</Button>
       </div>
     </section> : <>
@@ -168,7 +188,21 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
         </div>
       </section>
 
+      <div className="flex gap-1 rounded-xl border bg-card/65 p-1" role="tablist" aria-label="Pages de la session">
+        <Button type="button" role="tab" aria-selected={page === "session"} variant={page === "session" ? "default" : "ghost"} className="flex-1 sm:flex-none" onClick={() => setPage("session")}><LayoutList />Préparation</Button>
+        <Button type="button" role="tab" aria-selected={page === "document"} variant={page === "document" ? "default" : "ghost"} className="flex-1 sm:flex-none" onClick={() => setPage("document")}><FileText />Document</Button>
+      </div>
+
+      {page === "document" ? <section>
+        <SectionTitle>Document</SectionTitle>
+        <RichTextField key={`document:${session.id}`} value={session.document} onCommit={(value) => void saveText("document", value)} toolbar="always" minHeight="min-h-[28rem]" ariaLabel="Document de la session" placeholder="Une page libre pour cette session : texte lu aux joueurs, plan, déroulé…" />
+      </section> : <>
       <section>
+        <SectionTitle>Lieux de la session</SectionTitle>
+        <RichTextField key={`places:${session.id}`} value={session.places} onCommit={(value) => void saveText("places", value)} minHeight="min-h-20" ariaLabel="Lieux de la session" placeholder="Les lieux que les joueurs traverseront : ville, auberge, donjon…" />
+      </section>
+
+      <section className="border-t pt-8">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <SectionTitle count={players.length}>Joueurs</SectionTitle>
           {addable.length > 0 && <NativeSelect value="" aria-label="Ajouter un joueur" disabled={pending} onChange={(event) => { const id = event.target.value; if (id) void guarded(() => change({ add: { characterIds: [id] } })) }}>
@@ -183,7 +217,8 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
 
       <section className="border-t pt-8">
         <SectionTitle count={session.npcIds.length}>PNJs</SectionTitle>
-        <NpcManager initialNpcs={npcs} pageLinked={campaignId} mode="session" session={{
+        <NpcManager initialNpcs={npcs} pageLinked={campaignId} mode="session" shops={shops} session={{
+          currentId: session.id,
           ids: session.npcIds,
           onAdd: (ids) => change({ add: { npcIds: ids } }),
           onRemove: (id) => change({ remove: { npcIds: [id] } }),
@@ -193,11 +228,18 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       <section className="border-t pt-8">
         <SectionTitle count={session.shopIds.length}>Magasins</SectionTitle>
         <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} mode="session" session={{
+          currentId: session.id,
           ids: session.shopIds,
           onAdd: (ids) => change({ add: { shopIds: ids } }),
           onRemove: (id) => change({ remove: { shopIds: [id] } }),
         }} />
       </section>
+
+      <section className="border-t pt-8">
+        <SectionTitle count={session.events.length}>Événements</SectionTitle>
+        <SessionEvents campaignId={campaignId} session={session} npcs={npcs} shops={shops} generatorItems={generatorItems} onUpdated={replace} />
+      </section>
+      </>}
     </>}
 
     <CreateSessionDialog open={creating} campaignId={campaignId} onClose={() => setCreating(false)} onCreated={(created) => {

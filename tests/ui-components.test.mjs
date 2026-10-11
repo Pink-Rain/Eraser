@@ -133,11 +133,45 @@ test("rerolls only a shop stock and preserves its identity", async () => {
   assert.notEqual(updated.items, shop.items);
 });
 
+test("Marché ambulant : 4 à 8 items vendus « ambulant », que le Marché ne vend plus ; loupe et devanture", async () => {
+  const { generateTravellingMarket, pickedShopItem, rerollShop, shopSummary } = await vite.ssrLoadModule("/components/eraser/shop-generator.tsx");
+  const { visualShopKey } = await vite.ssrLoadModule("/lib/shop-keys.ts");
+  const item = (id, place, rarity = "Commun") => ({ id, name: id, description: "", effect: "", nameHtml: "", descriptionHtml: "", effectHtml: "", type: "Objet", subtype: "", price: "1 PO", icon: "", locations: [{ place, rarity }] });
+  const catalog = [...Array.from({ length: 10 }, (_, index) => item(`A${index}`, "Marché ambulant")), ...Array.from({ length: 10 }, (_, index) => item(`M${index}`, "Marché"))];
+  for (let round = 0; round < 20; round += 1) {
+    const random = generateTravellingMarket(catalog);
+    assert.equal(random.key, "travelling-market");
+    assert.ok(random.items.length >= 4 && random.items.length <= 8);
+    assert.ok(random.items.every((entry) => entry.id.startsWith("A")));
+  }
+  const six = generateTravellingMarket(catalog, 6);
+  assert.equal(six.items.length, 6);
+  assert.equal(shopSummary(six), "Itinérant · 6 items");
+  // Relancer garde le nombre d'items choisi.
+  assert.equal(rerollShop(catalog, six).items.length, 6);
+  assert.equal(generateTravellingMarket(catalog, 12).items.length, 8);
+  const market = rerollShop(catalog, { id: "m", key: "market", name: "Marché", size: "Grand", cityKey: "village", cityName: "Brume", items: [] });
+  assert.ok(market.items.length && market.items.every((entry) => entry.id.startsWith("M")));
+  // Loupe : la rareté du magasin si l'item s'y vend, sinon la première connue.
+  assert.equal(pickedShopItem({ ...item("X", "Librairie", "Rare"), locations: [{ place: "Librairie", rarity: "Rare" }, { place: "Marché", rarity: "Très commun" }] }, "market").rarity, "very-common");
+  assert.equal(pickedShopItem(item("Y", "Librairie", "Ultime"), "market").rarity, "ultimate");
+  assert.equal(pickedShopItem({ ...item("Z", "", ""), locations: [] }, "market").rarity, "common");
+  // Une case qui liste plusieurs emplacements : chaque magasin y retrouve le sien.
+  const both = item("B", "Marché ordinaire - Marché ambulant - Bateau");
+  const noir = item("N", "Marché ordinaire -\nMarché noir");
+  assert.ok(generateTravellingMarket([both], 4).items.some((entry) => entry.id === "B"));
+  const ordinary = rerollShop([both, noir], { id: "o", key: "market", name: "Marché", size: "Grand", cityKey: "village", cityName: "Brume", items: [] });
+  assert.deepEqual(ordinary.items.map((entry) => entry.id).sort(), ["B", "N"]);
+  assert.deepEqual(rerollShop([both, noir], { id: "b", key: "black-market", name: "Marché noir", size: "Grand", cityKey: "village", cityName: "Brume", items: [] }).items.map((entry) => entry.id), ["N"]);
+  assert.equal(visualShopKey("travelling-market"), "market");
+  assert.equal(visualShopKey("tavern"), "tavern");
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
     readFile(new URL("../app/api/shops/route.ts", import.meta.url), "utf8"),
-    readFile(new URL("../components/eraser/shop-generator.tsx", import.meta.url), "utf8"),
+    Promise.all([readFile(new URL("../components/eraser/shop-generator.tsx", import.meta.url), "utf8"), readFile(new URL("../components/eraser/shop-persistence.ts", import.meta.url), "utf8")]).then((files) => files.join("\n")),
     readFile(new URL("../app/campagne/[id]/magasin-et-fouille/page.tsx", import.meta.url), "utf8"),
     readFile(new URL("../app/bac-a-sable/magasin/page.tsx", import.meta.url), "utf8"),
   ]);
@@ -485,7 +519,7 @@ test("renders the session creator with its sections", async () => {
   const { SessionCreator } = await vite.ssrLoadModule("/components/eraser/session-creator.tsx");
   const member = { id: "char-1", name: "Aelis", people: "Elfe", classes: "Rôdeuse", level: "3", honoraryTitle: "" };
   const npc = { id: "npc-1", pageLinked: "camp-1", name: "Basile Orme", title: "", occupation: "Forgeron", people: "", portrait: "", currentHp: 10, totalHp: 20, speed: 10, constitution: 1, strength: 1, dexterity: 1, intelligence: 1, wisdom: 1, charisma: 1, playerNotes: "", gmNotes: "", inCampaign: true, important: false, createdByUid: "", createdAt: "2026-01-01", updatedAt: "" };
-  const session = { id: "s-1", campaignId: "camp-1", name: "Le col des brumes", bannerUrl: "", characterIds: ["char-1"], npcIds: ["npc-1"], shopIds: [], createdByUid: "", createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "" };
+  const session = { id: "s-1", campaignId: "camp-1", name: "Le col des brumes", bannerUrl: "", characterIds: ["char-1"], npcIds: ["npc-1"], shopIds: [], createdByUid: "", createdAt: "2026-09-01T10:00:00.000Z", updatedAt: "", places: "<p>Port-Brume</p>", document: "", events: [{ id: "ev-1", kind: "other", refId: "", name: "Orage sur le col", icon: "CloudLightning", image: "", tag: "Météo", tagColor: "#2563eb", description: "La route est coupée." }] };
   const { AppRouterContext } = createRequire(import.meta.url)("next/dist/shared/lib/app-router-context.shared-runtime.js");
   const router = { push() {}, replace() {}, refresh() {}, prefetch() {}, back() {}, forward() {} };
   const render = (sessions) => renderToStaticMarkup(React.createElement(AppRouterContext.Provider, { value: router }, React.createElement(SessionCreator, { campaignId: "camp-1", initialSessions: sessions, initialSessionId: sessions[0]?.id || "", members: [member], npcs: [npc], shops: [], generatorItems: [] })));
@@ -500,6 +534,14 @@ test("renders the session creator with its sections", async () => {
   assert.match(html, /Basile Orme/);
   assert.match(html, /Ajouter un PNJ/);
   assert.match(html, /Ajouter un marché/);
+  assert.match(html, /Lieux de la session/);
+  assert.match(html, />Document</);
+  assert.match(html, /Événements/);
+  assert.match(html, /Orage sur le col/);
+  assert.match(html, /Météo/);
+  assert.match(html, /Ajouter un événement/);
+  assert.match(html, /Envoyer Orage sur le col dans une autre session/);
+  assert.match(html, /Envoyer Basile Orme dans une autre session/);
 });
 
 test("shows a light Token button and the formatted player titles", async () => {
