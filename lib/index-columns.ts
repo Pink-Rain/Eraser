@@ -620,9 +620,21 @@ export function joinListValue(values: string[], separator = ",") {
   return values.map((value) => value.trim()).filter(Boolean).join(separator.trim() === "-" ? " - " : ", ")
 }
 
+/**
+ * Les noms déjà repliés : la grille appelle `foldName` pour chaque case à chaque rendu (en-têtes,
+ * choix, colonnes liées), sur une poignée de valeurs distinctes. Normaliser puis abaisser la
+ * casse coûtait un tiers du rendu d'un index ; la réponse est gardée (dix mille noms au plus).
+ */
+const foldedNames = new Map<string, string>()
+
 export function foldName(value: string) {
+  const known = foldedNames.get(value)
+  if (known !== undefined) return known
   // ’ et ' sont le même caractère pour un nom : le clavier et Sheets n'écrivent pas toujours le même.
-  return value.normalize("NFD").replace(/\p{M}/gu, "").replace(/[’‘ʼ`´]/g, "'").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  const folded = value.normalize("NFD").replace(/\p{M}/gu, "").replace(/[’‘ʼ`´]/g, "'").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  if (foldedNames.size >= 10_000) foldedNames.clear()
+  foldedNames.set(value, folded)
+  return folded
 }
 
 /**

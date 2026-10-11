@@ -505,10 +505,26 @@ const wait = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms))
  */
 async function googleSheetsFetch(path: string, init?: RequestInit) {
   const spreadsheetId = path.match(/^spreadsheets\/([^/:?]+)/)?.[1]
-  if ((init?.method ?? "GET").toUpperCase() !== "GET" || !spreadsheetId || !sharedReadsActive()) return googleSheetsFetchDirect(path, init)
-  const text = await sharedSheetRead(spreadsheetId, path, async () => (await googleSheetsFetchDirect(path, init)).text())
-  return new Response(text, { status: 200, headers: { "content-type": "application/json" } })
+  const method = (init?.method ?? "GET").toUpperCase()
+  if (method === "GET" && spreadsheetId && sharedReadsActive()) {
+    const text = await sharedSheetRead(spreadsheetId, path, async () => (await googleSheetsFetchDirect(path, init)).text())
+    return new Response(text, { status: 200, headers: { "content-type": "application/json" } })
+  }
+  // Une lecture fraîche (en POST, hors partage) demandée deux fois au même instant — le rendu
+  // « à blanc » du routeur puis le vrai, deux pages ouvertes ensemble — ne part qu'une fois.
+  if (method === "GET" || (method === "POST" && /:(?:batchGet|batchGetByDataFilter|getByDataFilter)(?:\?|$)/.test(path))) {
+    const key = `${method} ${path} ${typeof init?.body === "string" ? init.body : ""}`
+    const running = inflightReads.get(key)
+    if (running) return running.then((text) => new Response(text, { status: 200, headers: { "content-type": "application/json" } }))
+    const reading = googleSheetsFetchDirect(path, init).then((response) => response.text()).finally(() => { if (inflightReads.get(key) === reading) inflightReads.delete(key) })
+    inflightReads.set(key, reading)
+    return new Response(await reading, { status: 200, headers: { "content-type": "application/json" } })
+  }
+  return googleSheetsFetchDirect(path, init)
 }
+
+/** Les lectures fraîches en vol, par requête : la même réponse pour deux demandes identiques simultanées. */
+const inflightReads = new Map<string, Promise<string>>()
 
 async function googleSheetsFetchDirect(path: string, init?: RequestInit) {
   // `quotaUser` : chaque installation comptée à part par Google (voir google-quota.ts).

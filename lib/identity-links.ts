@@ -37,6 +37,18 @@ async function remoteLinks(): Promise<IdentityLink[]> {
   const config = remote()
   if (!config) return []
   if (remoteLinksCache && Date.now() - remoteLinksCache.loadedAt < FRESH_MS) return remoteLinksCache.links
+  // Deux demandes au même instant (deux lectures d'une même page) ne partent qu'une fois :
+  // la promesse est gardée avant la première attente, pas après.
+  if (pendingLinks) return pendingLinks
+  pendingLinks = remoteLinksUncached().finally(() => { pendingLinks = null })
+  return pendingLinks
+}
+
+let pendingLinks: Promise<IdentityLink[]> | null = null
+
+async function remoteLinksUncached(): Promise<IdentityLink[]> {
+  const config = remote()
+  if (!config) return []
   // Le jeton est lu pendant la requête : une relecture en arrière-plan ne peut plus le lire.
   const token = await currentAuthToken().catch(() => undefined)
   const started = generation

@@ -215,3 +215,33 @@ test("plusieurs plages du même classeur lues ensemble : une seule question sur 
   await Promise.all([sheets.readRange(id, RANGE), sheets.readRange(id, "Autre!A1:A2")]);
   assert.equal(shared.store.calls.filter((call) => call === `get sheet-versions ${id}`).length, 1);
 });
+
+test("une lecture froide pose son bail sans le relire : une question au serveur partagé, puis Google", async () => {
+  const id = fresh("bail-rapide");
+  google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);
+  assert.deepEqual(await sheets.readRange(id, RANGE), [["ID", "Nom"], ["1", "Google"]]);
+  assert.equal(googleReads(id), 1);
+  // Avant Google : la version, le manifeste et le bail (en parallèle) ; le bail est écrit sans être relu.
+  const before = shared.store.calls.filter((call) => call.startsWith("get "));
+  assert.deepEqual(before.map((call) => call.split(" ").at(-1)), ["" + id, "manifest", "lease"].map((part) => part === "" + id ? id : part), `questions posées : ${before.join(" | ")}`);
+  assert.equal(shared.store.calls.filter((call) => call === `set ${scopeOf(id)} lease`).length, 1);
+});
+
+test("deux lectures identiques au même instant (rendu à blanc puis vrai rendu) : une seule lecture de Google, une seule série de questions", async () => {
+  const id = fresh("doublon");
+  google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);
+  shared.store.delayMs = 30;
+  const [first, second] = await Promise.all([sheets.readRange(id, RANGE), sheets.readRange(id, `${RANGE}`)]);
+  assert.deepEqual(first, [["ID", "Nom"], ["1", "Google"]]);
+  assert.deepEqual(second, first);
+  assert.equal(googleReads(id), 1);
+  assert.equal(shared.store.calls.filter((call) => call.startsWith("get ") && call.includes("lease")).length, 1);
+});
+
+test("deux lectures fraîches identiques au même instant ne partent qu'une fois vers Google", async () => {
+  const id = fresh("frais");
+  google.addSpreadsheet(id, [{ title: "Feuille", grid: [["ID", "Nom"], ["1", "Google"]] }]);
+  const [a, b] = await Promise.all([sheets.readRangeFreshWithOffset(id, RANGE), sheets.readRangeFreshWithOffset(id, RANGE)]);
+  assert.deepEqual(a, b);
+  assert.equal(googleReads(id), 1);
+});

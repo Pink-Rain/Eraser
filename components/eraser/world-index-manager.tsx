@@ -36,6 +36,7 @@ import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/component
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { choiceCorrection, computeRollup, isIdHeader, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { unpackTableRows } from "@/lib/index-rows-wire"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
@@ -202,7 +203,8 @@ export function EmbeddedWorldIndex({ indexKey, embed }: { indexKey: WorldIndexKe
  * côté serveur ; le tableau se recharge quand un lien a touché l'index affiché.
  */
 function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldIndexManagerProps) {
-  const [data, setData] = useState(initialData)
+  // Les lignes arrivent allégées (lib/index-rows-wire.ts) : rétablies une fois, ici.
+  const [data, setData] = useState(() => initialData ? { ...initialData, tables: initialData.tables.map(unpackTableRows) } : initialData)
   const definition = useMemo(() => data?.definition ?? fallbackDefinition(indexKey), [data, indexKey])
   // Plusieurs onglets : la liste s'ouvre sur « Tout ».
   // L'onglet affiché est dans l'adresse (`?onglet=`) : chaque onglet de l'application a le sien.

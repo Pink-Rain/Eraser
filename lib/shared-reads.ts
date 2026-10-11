@@ -39,19 +39,16 @@ const COPY_MS = 45_000
  */
 const LEASE_BEAT_MS = 3_000
 const LEASE_MS = 8_000
-/**
- * Le temps de laisser arriver les baux posés au même instant par d'autres installations.
- *
- * Une autre installation B n'a pu poser son bail par-dessus le nôtre que si elle a vérifié
- * le serveur partagé avant que le nôtre y soit écrit (sinon elle l'aurait vu et attendrait).
- * Son bail arrive alors au plus un aller-retour de B après le nôtre ; notre relecture, elle,
- * arrive un aller-retour à nous plus cette pause après le nôtre. La pause n'a donc à couvrir
- * que l'écart de latence entre deux installations (les joueurs d'une même table ont des
- * latences voisines vers le même Worker), pas une latence entière : 100 ms suffisent là où
- * 200 ms étaient payés par chaque lecture froide. Un bail manqué ne coûte qu'une lecture
- * Google en double (chacun se croit seul et dépose sa copie), jamais une donnée fausse.
+/*
+ * Le bail est posé sans attendre sa confirmation. Avant, chaque lecture froide écrivait son
+ * bail, patientait 100 ms, puis le relisait pour savoir si une autre installation l'avait
+ * recouvert : deux allers-retours de plus au serveur partagé, enchaînés, avant même de
+ * demander quoi que ce soit à Google — sur une page qui lit dix plages, des secondes. Deux
+ * installations qui posent leur bail au même instant lisent Google chacune et déposent chacune
+ * leur copie : une lecture en double, jamais une donnée fausse. C'est le cas rare ; le cas
+ * courant (un joueur seul, ou le premier à ouvrir une page) ne paie plus que la question
+ * initiale au serveur partagé, puis Google.
  */
-const LEASE_SETTLE_MS = 100
 /** Au plus, le temps d'attendre la copie d'une installation qui lit encore (la patience de la porte du quota). */
 const WAIT_MS = 80_000
 /** Le serveur partagé est interrogé souvent au début de l'attente, puis plus calmement. */
@@ -81,6 +78,16 @@ const VERSION_MEMORY_MS = 2_000
 
 const VERSION_SCOPE = "sheet-versions"
 const INSTALLATION = crypto.randomUUID()
+
+/**
+ * Les lectures en cours, par portée : deux demandes identiques lancées en même temps dans
+ * cette installation (deux pages ouvertes, ou le rendu « à blanc » du routeur suivi du vrai)
+ * n'interrogent le serveur partagé et Google qu'une fois. Sans cela, la seconde voyait le
+ * bail de la première, puis attendait sa copie en interrogeant le serveur partagé toutes les
+ * quelques centaines de millisecondes, pour finir par la télécharger : des dizaines d'appels
+ * pour une réponse déjà en mémoire.
+ */
+const inflight = new Map<string, { since: number; promise: Promise<string> }>()
 
 let enabled = true
 
@@ -230,21 +237,29 @@ async function publish(scope: string, text: string, version: string, readAt: num
  * pour une réponse trop grosse pour être partagée, c'est exactement la lecture d'avant.
  */
 export async function sharedSheetRead(spreadsheetId: string, path: string, readGoogle: () => Promise<string>) {
-  if (!sharedReadsActive()) return readGoogle()
   const scope = scopeOf(path)
+  const after = sharedReadsActive() ? await freshAfter() : 0
+  // Une lecture identique déjà en vol, commencée après « Actualiser » s'il y a lieu : la même réponse.
+  const running = inflight.get(scope)
+  if (running && running.since >= after) return running.promise
+  const since = Date.now()
+  const promise = sharedSheetReadOnce(spreadsheetId, scope, after, readGoogle).finally(() => {
+    if (inflight.get(scope)?.promise === promise) inflight.delete(scope)
+  })
+  inflight.set(scope, { since, promise })
+  return promise
+}
+
+async function sharedSheetReadOnce(spreadsheetId: string, scope: string, after: number, readGoogle: () => Promise<string>) {
+  if (!sharedReadsActive()) return readGoogle()
   // Trop grosse pour être partagée : personne n'aurait de copie à reprendre ni à attendre.
   if (knownOversize(scope)) return readGoogle()
-  const after = await freshAfter()
   let version = ""
   // Une autre installation lit Google, son bail est encore renouvelé, et sa lecture a commencé
   // après « Actualiser » : sa copie conviendra. Commencée avant le clic, elle ne conviendrait
   // pas : inutile de l'attendre.
   const worthWaiting = (lease: Lease | null) => Boolean(lease && lease.by !== INSTALLATION && Date.now() - lease.at < LEASE_MS && (lease.since ?? 0) >= after)
   let ownLease: Lease | null = null
-  // Le bail posé mais pas encore confirmé : si le serveur partagé cesse de répondre à ce
-  // moment, on se comporte en détenteur (bail renouvelé, copie déposée, bail rendu) plutôt
-  // que de laisser les autres attendre un bail que personne ne renouvellerait.
-  let claimed: Lease | null = null
   try {
     const [currentVersion, found] = await withTimeout(Promise.all([versionOf(spreadsheetId), lookUp(scope)]), LOOKUP_TIMEOUT_MS)
     version = currentVersion
@@ -255,16 +270,12 @@ export async function sharedSheetRead(spreadsheetId: string, path: string, readG
     // du serveur partagé, et Google relu une seconde fois.
     if (markedOversize(holder)) rememberOversize(scope)
     else if (!worthWaiting(holder)) {
-      // Plusieurs installations peuvent poser leur bail au même instant : la dernière écrite
-      // l'emporte, et chacune relit pour savoir si c'est elle.
+      // Personne ne lit pour nous : on pose son bail (sans l'attendre, voir plus haut) et on
+      // lit Google tout de suite. Les autres installations voient le bail et attendent la copie.
       const since = Date.now()
       const mine: Lease = { by: INSTALLATION, at: since, since }
-      claimed = mine
-      await withTimeout(writeSharedRecord(scope, "lease", JSON.stringify(mine)), LOOKUP_TIMEOUT_MS)
-      await sleep(LEASE_SETTLE_MS)
-      holder = parseJson<Lease>((await withTimeout(readSharedRecord(scope, "lease"), LOOKUP_TIMEOUT_MS))?.value)
-      claimed = null
-      if (!holder || holder.by === INSTALLATION) ownLease = mine
+      ownLease = mine
+      void writeSharedRecord(scope, "lease", JSON.stringify(mine)).catch(() => undefined)
     }
     // Une autre installation lit Google : sa copie arrive dès qu'elle a sa réponse. On
     // l'attend tant que son bail est renouvelé ; rendu, abandonné, ou rendu parce que la
@@ -281,7 +292,6 @@ export async function sharedSheetRead(spreadsheetId: string, path: string, readG
   } catch (error) {
     // Le serveur partagé ne répond pas (ou trop lentement) : Google directement, comme avant.
     if (!(error instanceof Error && error.message === "SHARED_READ_TIMEOUT")) console.error("SHARED_READ_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    if (claimed) ownLease = claimed
   }
   // Trop grosse pour être partagée (une autre installation vient de le signaler) : Google
   // directement, sans bail ni copie.

@@ -5,6 +5,7 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ObjectIndexManager } from "@/components/eraser/object-index-manager"
 import { listObjectIndexTablesForDisplay } from "@/lib/google-sheets"
+import { packTableRows } from "@/lib/index-rows-wire"
 import { objectSchemas } from "@/lib/object-schema"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -23,7 +24,7 @@ async function ObjectIndexesData() {
       // Le code de Google (quota, délai…) aide à comprendre un échec qui se répète.
       : `Les tableaux du dossier « Objets » n’ont pas pu être chargés${error instanceof Error && error.message ? ` (${error.message.slice(0, 160)})` : ""}. Réessaie avec « Actualiser ».`
   }
-  return <ObjectIndexManager initialTables={initialTables} initialSchemas={initialSchemas} initialError={initialError} />
+  return <ObjectIndexManager initialTables={initialTables.map(packTableRows)} initialSchemas={initialSchemas} initialError={initialError} />
 }
 
 export default async function ObjectIndexesPage() {
