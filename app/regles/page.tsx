@@ -1,12 +1,15 @@
 import { BookText, Compass, ScrollText, Sparkles, Swords } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { MenuPage } from "@/components/eraser/menu-page"
 
 export const dynamic = "force-dynamic"
 
 /** La page de la section Règles du menu. */
-export default function RulesPage() {
+export default async function RulesPage() {
+  // Les pages du créateur de pages rangées dans Règles suivent celles d’Eraser.
+  const pages = await customPageLinks("regles")
   return (
     <AuthenticatedShell pageLabel="Règles">
       <MenuPage
@@ -22,6 +25,7 @@ export default function RulesPage() {
           { href: "/regles/vocabulaire", label: "Vocabulaire", description: "Les mots de la table et leur définition.", icon: BookText },
           { href: "/regles/combat", label: "Combat", description: "Tours, actions, états et résolution des affrontements.", icon: Swords },
           { href: "/regles/hors-combat", label: "Hors combat", description: "Exploration, social, repos et tout ce qui se passe entre deux combats.", icon: Compass },
+          ...pages,
         ]}
       />
     </AuthenticatedShell>

@@ -1,8 +1,10 @@
-import { LibraryBig } from "lucide-react"
+import { Files, LibraryBig } from "lucide-react"
 import { redirect } from "next/navigation"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
+import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { IndexDirectory } from "@/components/eraser/index-directory"
+import { MenuLinkPanel } from "@/components/eraser/menu-page"
 import { NewIndexButton } from "@/components/eraser/new-index-dialog"
 import { authorizedAccount } from "@/lib/server-auth"
 
@@ -12,6 +14,7 @@ export const dynamic = "force-dynamic"
 export default async function IndexHomePage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
+  const pages = await customPageLinks("ressources", "", "size-4")
   return (
     <AuthenticatedShell pageLabel="Index" roles={["admin", "mj"]}>
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
@@ -35,6 +38,7 @@ export default async function IndexHomePage() {
         </section>
         <div className="flex justify-end"><NewIndexButton /></div>
         </div>
+        {pages.length > 0 && <div className="mt-8 max-w-md"><MenuLinkPanel title="Pages" icon={Files} links={pages} /></div>}
         <IndexDirectory />
       </div>
     </AuthenticatedShell>

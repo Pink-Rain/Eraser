@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server"
 
 import type { AppLinkTarget } from "@/lib/app-links"
+import { pageLinkTargets } from "@/lib/custom-pages-server"
 import { listAllCampaignsForAdmin, listAllCharactersForAdmin, listCampaignsForMj, listCachedClassOptions, listCharactersForUser } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import { indexHomeHref, indexPages } from "@/lib/index-pages"
@@ -13,11 +14,13 @@ export async function GET() {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const manager = account.role === "admin" || account.role === "mj"
-  const [classes, campaigns, characters] = await Promise.all([
+  const [classes, campaigns, characters, customPages] = await Promise.all([
     // Les classes déjà connues de cette installation : ce menu n'interroge jamais Google.
     listCachedClassOptions().catch(() => []),
     account.role === "admin" ? listAllCampaignsForAdmin().catch(() => []) : account.role === "mj" ? listCampaignsForMj(account.uid).catch(() => []) : Promise.resolve([]),
     account.role === "admin" ? listAllCharactersForAdmin().catch(() => []) : listCharactersForUser(account.uid).catch(() => []),
+    // Les pages du créateur de pages publiées et ouvertes au compte (serveur partagé, sans Google).
+    pageLinkTargets(account).catch(() => []),
   ])
   const targets: AppLinkTarget[] = [
     { label: "Accueil", href: "/", group: "Pages" },
@@ -33,8 +36,11 @@ export async function GET() {
       { label: "Tabletop", href: "/bac-a-sable/tabletop", group: "Bac à sable" },
       { label: "Magasin", href: "/bac-a-sable/magasin", group: "Bac à sable" },
       { label: "PNJs", href: "/bac-a-sable/pnjs", group: "Bac à sable" },
+      { label: "Index des pages", href: "/pages", group: "Pages", hint: "Créateur de pages" },
+      { label: "Nouvelle page", href: "/pages?nouvelle=1", group: "Pages", hint: "Créateur de pages" },
     )
   }
+  targets.push(...customPages)
   const seenCampaigns = new Set<string>()
   const campaignLinks = (id: string, name: string) => {
     if (seenCampaigns.has(id)) return

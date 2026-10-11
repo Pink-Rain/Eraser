@@ -25,6 +25,8 @@ const fixed: Record<string, Omit<Crumb, "path">> = {
   "/bac-a-sable": { label: "Bac à sable", href: "/bac-a-sable" },
   "/profil": { label: "Profil", href: "/profil" },
   "/reference": { label: "Référence" },
+  // Les pages hors menu du créateur de pages (/pages/…) : l'étape ouvre leur liste.
+  "/pages": { label: "Pages" },
 }
 
 const campaignPages: Record<string, string> = {

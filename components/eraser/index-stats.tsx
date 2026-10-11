@@ -30,6 +30,8 @@ export type IndexStatsProps = {
   groups?: StatColumnGroup[]
   /** L'onglet stat : seulement les épinglées, sans constructeur. */
   pinnedOnly?: boolean
+  /** Avec `pinnedOnly` : une seule statistique, sur toute la largeur (bloc « Stat épinglée » d'une page). */
+  single?: boolean
   /** L'onglet stat : ouvrir « Modifier › Stats ». */
   onManage?: () => void
   /** Les lignes de l'index (recherche comprise), tous onglets de données. */
@@ -318,7 +320,7 @@ function startStat(columns: string[], orderOf: (column: string) => string[], num
 
 type Toast = { text: string; action?: { label: string; run: () => void } }
 
-export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
+export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, single = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
   // Un groupe créé ou modifié se voit tout de suite, avant même la réponse du serveur.
   const [pendingGroups, setPendingGroups] = useState<StatColumnGroup[] | null>(null)
   const groups = useMemo(() => pendingGroups ?? groupsProp ?? [], [groupsProp, pendingGroups])
@@ -530,7 +532,7 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
 
   const manage = onManage && <Button type="button" variant="outline" size="sm" onClick={onManage}><Pencil />Créer et épingler des stats</Button>
   if (pinnedOnly) return pinned.length
-    ? <div className="grid grid-cols-[minmax(0,1fr)] gap-3">{manage && <div className="flex justify-end">{manage}</div>}<section aria-label="Statistiques épinglées" className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-2">
+    ? <div className="grid grid-cols-[minmax(0,1fr)] gap-3">{manage && <div className="flex justify-end">{manage}</div>}<section aria-label="Statistiques épinglées" className={`grid grid-cols-[minmax(0,1fr)] gap-3 ${single ? "" : "lg:grid-cols-2"}`}>
       {pinned.map((stat) => <article key={stat.id} className="grid min-w-0 content-start gap-2.5 rounded-2xl border bg-card p-4">
         <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase"><Pin className="size-3 shrink-0 text-[#a87a1f]" /><span className="truncate">{stat.title}</span></span>
         <StatResult stat={stat} data={data} expanded={expanded} onToggle={onToggle} />

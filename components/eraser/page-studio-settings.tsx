@@ -1,0 +1,400 @@
+"use client"
+
+import { useEffect, useState, type ReactNode } from "react"
+import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, TriangleAlert } from "lucide-react"
+
+import { IconPicker } from "@/components/eraser/index-gauge"
+import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
+import { blockIcons } from "@/components/eraser/page-studio-icons"
+import {
+  blockCatalog,
+  blockVisibilities,
+  blockVisibleTo,
+  cleanImageSource,
+  pageHref,
+  pagePlaces,
+  pageRoles,
+  pageVisibilities,
+  roleLabels,
+  slugify,
+  slugProblem,
+  viewBlockKinds,
+  viewHeights,
+  type BlockVisibility,
+  type PageBlock,
+  type PageDraft,
+  type PagePlace,
+  type PageRole,
+  type PageSummary,
+  type StudioPage,
+  type ViewBlockKind,
+} from "@/lib/custom-pages"
+
+/**
+ * Le volet de droite de l'atelier : les réglages du bloc choisi, ou ceux de la page entière
+ * (place, adresse, visibilité, version publiée, modèle). Tout ce qui s'écrit dans la page se
+ * fait dans le bloc lui-même ; ici, seulement ce qui ne se voit pas.
+ */
+
+/* ---------- Petites pièces ---------- */
+
+export const fieldClass = "h-8 w-full min-w-0 rounded-lg border border-input bg-background/70 px-2.5 text-[13px] outline-none transition placeholder:text-muted-foreground/60 focus:border-ring focus:ring-2 focus:ring-ring/20"
+
+export function Field({ label, hint, children, error }: { label: string; hint?: ReactNode; children: ReactNode; error?: string }) {
+  return <div className="grid min-w-0 gap-1">
+    <span className="text-xs font-semibold text-muted-foreground">{label}</span>
+    {children}
+    {error ? <span className="flex items-start gap-1 text-[11.5px] text-destructive"><TriangleAlert className="mt-0.5 size-3 shrink-0" />{error}</span> : hint ? <span className="text-[11.5px] leading-snug text-muted-foreground/90">{hint}</span> : null}
+  </div>
+}
+
+export function Segmented<T extends string>({ value, options, onChange, label, size = "md" }: { value: T; options: Array<{ value: T; label: ReactNode; title?: string }>; onChange: (value: T) => void; label: string; size?: "sm" | "md" }) {
+  return <div role="group" aria-label={label} className="inline-flex max-w-full flex-wrap gap-0.5 rounded-[11px] border bg-card p-0.5">
+    {options.map((option) => <button key={option.value} type="button" title={option.title} aria-pressed={option.value === value} onClick={() => onChange(option.value)}
+      className={`inline-flex items-center gap-1.5 rounded-lg ${size === "sm" ? "px-2 py-0.5 text-xs" : "px-2.5 py-1 text-[13px]"} text-muted-foreground transition hover:bg-muted hover:text-foreground aria-pressed:bg-foreground aria-pressed:font-semibold aria-pressed:text-background`}>{option.label}</button>)}
+  </div>
+}
+
+export function Group({ title, badge, children, open = true }: { title: string; badge?: ReactNode; children: ReactNode; open?: boolean }) {
+  return <details open={open} className="group/settings border-t border-border/70 first:border-t-0 [&_summary::-webkit-details-marker]:hidden">
+    <summary className="flex cursor-pointer list-none items-center gap-2 px-4 py-2.5 text-[11px] font-bold uppercase tracking-[0.14em] text-muted-foreground hover:text-foreground">
+      <span>{title}</span>{badge}
+      <ChevronDown className="ml-auto size-3.5 transition group-open/settings:rotate-180" />
+    </summary>
+    <div className="grid gap-3 px-4 pb-4">{children}</div>
+  </details>
+}
+
+export const roleDot: Record<PageRole, string> = { joueur: "bg-[#0f7a65]", mj: "bg-[#3b5c8a]", admin: "bg-primary" }
+const visDot: Record<BlockVisibility, string> = { tous: "", joueurs: roleDot.joueur, mj: roleDot.mj, admin: roleDot.admin }
+
+export function VisibilityPill({ vis }: { vis: BlockVisibility }) {
+  if (vis === "tous") return null
+  const tone = { joueurs: "text-[#0f7a65] border-[#0f7a65]/35 bg-[#0f7a65]/8", mj: "text-[#3b5c8a] border-[#3b5c8a]/35 bg-[#3b5c8a]/8", admin: "text-primary border-primary/35 bg-primary/8" }[vis]
+  return <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 text-[10.5px] font-semibold normal-case tracking-normal ${tone}`}>{blockVisibilities.find((item) => item.value === vis)?.short}</span>
+}
+
+function RadioCards<T extends string>({ name, value, options, onChange, disabled }: { name: string; value: T; options: Array<{ value: T; label: string; hint: string; dot?: string }>; onChange: (value: T) => void; disabled?: boolean }) {
+  return <div role="radiogroup" className="grid gap-1">
+    {options.map((option) => <label key={option.value} className={`grid cursor-pointer grid-cols-[auto_minmax(0,1fr)] items-start gap-x-2 rounded-xl border px-2.5 py-2 transition has-[:checked]:border-primary/60 has-[:checked]:bg-primary/[0.05] ${disabled ? "pointer-events-none opacity-55" : "hover:border-border hover:bg-background/60"} border-border/60`}>
+      <input type="radio" name={name} checked={value === option.value} onChange={() => onChange(option.value)} disabled={disabled} className="mt-0.5 accent-primary" />
+      <span className="flex items-center gap-1.5 text-[13px] font-semibold">{option.dot && <span className={`size-2 rounded-full ${option.dot}`} />}{option.label}</span>
+      <span className="col-start-2 text-[11.5px] leading-snug text-muted-foreground">{option.hint}</span>
+    </label>)}
+  </div>
+}
+
+/* ---------- Les index (blocs Vue et Stat) ---------- */
+
+type IndexEntry = { key: string; title: string; path: string }
+type IndexDetails = { tabs: Array<{ name: string; kinds: ViewBlockKind[]; cards: boolean }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
+
+let catalogPromise: Promise<IndexEntry[]> | null = null
+const detailsCache = new Map<string, Promise<IndexDetails | null>>()
+
+function loadCatalog() {
+  if (!catalogPromise) catalogPromise = fetch("/api/pages/block-data?catalog=1").then(async (response) => response.ok ? ((await response.json()) as { indexes: IndexEntry[] }).indexes : Promise.reject(new Error("CATALOG"))).catch(() => { catalogPromise = null; return [] })
+  return catalogPromise
+}
+
+function loadDetails(key: string) {
+  let promise = detailsCache.get(key)
+  if (!promise) {
+    promise = fetch(`/api/pages/block-data?catalog=1&index=${encodeURIComponent(key)}`).then(async (response) => response.ok ? (await response.json()) as IndexDetails : null).catch(() => null)
+    promise.then((value) => { if (!value) detailsCache.delete(key) })
+    detailsCache.set(key, promise)
+  }
+  return promise
+}
+
+function useIndexCatalog() {
+  const [indexes, setIndexes] = useState<IndexEntry[] | null>(null)
+  useEffect(() => { let alive = true; void loadCatalog().then((list) => { if (alive) setIndexes(list) }); return () => { alive = false } }, [])
+  return indexes
+}
+
+function useIndexDetails(key: string) {
+  const [state, setState] = useState<{ key: string; details: IndexDetails | null; loading: boolean }>({ key, details: null, loading: Boolean(key) })
+  useEffect(() => {
+    if (!key) return
+    let alive = true
+    // eslint-disable-next-line react-hooks/set-state-in-effect -- un autre index repart d'un état « chargement »
+    setState({ key, details: null, loading: true })
+    void loadDetails(key).then((details) => { if (alive) setState({ key, details, loading: false }) })
+    return () => { alive = false }
+  }, [key])
+  return state.key === key ? state : { key, details: null, loading: Boolean(key) }
+}
+
+function IndexPicker({ value, onChange }: { value: string; onChange: (key: string) => void }) {
+  const indexes = useIndexCatalog()
+  return <Field label="Index" hint="L’Index des items (objets) n’est pas encore proposé : ce n’est pas un index du monde.">
+    <select className={fieldClass} value={value} onChange={(event) => onChange(event.target.value)} disabled={!indexes}>
+      <option value="">{indexes ? "Choisir un index…" : "Chargement des index…"}</option>
+      {(indexes ?? []).map((entry) => <option key={entry.key} value={entry.key}>{entry.title}</option>)}
+      {value && indexes && !indexes.some((entry) => entry.key === value) && <option value={value}>{value} (introuvable)</option>}
+    </select>
+  </Field>
+}
+
+function ViewSettings({ block, onChange }: { block: Extract<PageBlock, { type: "view" }>; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
+  const { details, loading } = useIndexDetails(block.index)
+  const tab = details?.tabs.find((item) => item.name === block.tab)
+  const kinds = tab?.kinds ?? ["table", "cards"]
+  return <>
+    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", kind: "table" })} />
+    {block.index && <Field label="Onglet">
+      <select className={fieldClass} value={block.tab} disabled={loading} onChange={(event) => onChange({ tab: event.target.value, kind: "table" })}>
+        <option value="">{loading ? "Lecture de l’index…" : "Choisir un onglet…"}</option>
+        {(details?.tabs ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
+      </select>
+    </Field>}
+    {block.tab && <Field label="Vue" hint="La forme de chaque vue se règle dans l’index (Modifier › Vues, Modifier › Cartes) : la page ne fait que la montrer.">
+      <div className="flex flex-wrap gap-1">
+        {viewBlockKinds.filter((kind) => kinds.includes(kind.value)).map((kind) => {
+          const Icon = blockIcons.views[kind.value]
+          return <button key={kind.value} type="button" aria-pressed={block.kind === kind.value} onClick={() => onChange({ kind: kind.value })} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">
+            <Icon className="size-3.5" />{kind.label}{kind.value === "cards" && tab && !tab.cards ? " (d’office)" : ""}
+          </button>
+        })}
+      </div>
+    </Field>}
+    <div className="grid grid-cols-2 gap-2">
+      <Field label="Au plus (lignes)" hint="0 : toutes">
+        <input type="number" min={0} max={500} className={fieldClass} value={block.limit} onChange={(event) => onChange({ limit: Math.max(0, Math.min(500, Number.parseInt(event.target.value, 10) || 0)) })} />
+      </Field>
+      <Field label="Hauteur">
+        <select className={fieldClass} value={block.height} onChange={(event) => onChange({ height: event.target.value as typeof block.height })}>
+          {viewHeights.map((height) => <option key={height.value} value={height.value}>{height.label}</option>)}
+        </select>
+      </Field>
+    </div>
+    <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
+  </>
+}
+
+function StatSettings({ block, onChange }: { block: Extract<PageBlock, { type: "stat" }>; onChange: (patch: Partial<Extract<PageBlock, { type: "stat" }>>) => void }) {
+  const { details, loading } = useIndexDetails(block.index)
+  return <>
+    <IndexPicker value={block.index} onChange={(index) => onChange({ index, statId: "" })} />
+    {block.index && <Field label="Statistique" hint={details && !details.stats.length ? "Cet index n’a pas encore de statistique : crée-la dans l’index (Modifier › Stats)." : "Les statistiques se créent dans l’index (Modifier › Stats)."}>
+      <select className={fieldClass} value={block.statId} disabled={loading} onChange={(event) => onChange({ statId: event.target.value })}>
+        <option value="">{loading ? "Lecture de l’index…" : "Choisir une statistique…"}</option>
+        {(details?.stats ?? []).map((stat) => <option key={stat.id} value={stat.id}>{stat.pinned ? "📌 " : ""}{stat.title}</option>)}
+      </select>
+    </Field>}
+    <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
+  </>
+}
+
+/* ---------- Réglages d'un bloc ---------- */
+
+export function BlockSettings({ block, pages, live, onChange, onDuplicate, onRemove, onPage }: {
+  block: PageBlock
+  pages: PageSummary[]
+  live?: StudioPage["live"][string]
+  onChange: (patch: Partial<PageBlock>, coalesce?: string) => void
+  onDuplicate: () => void
+  onRemove: () => void
+  onPage: () => void
+}) {
+  const entry = blockCatalog.find((item) => item.type === block.type)!
+  const Icon = blockIcons.blocks[block.type]
+  const set = (patch: Record<string, unknown>, coalesce?: string) => onChange(patch as Partial<PageBlock>, coalesce)
+  let content: ReactNode = null
+  switch (block.type) {
+    case "title":
+      content = <>
+        <Field label="Taille"><Segmented label="Taille" value={block.level} onChange={(level) => set({ level })} options={[{ value: "h2", label: "Grand" }, { value: "h3", label: "Moyen" }]} /></Field>
+        <Field label="Alignement"><Segmented label="Alignement" value={block.align} onChange={(align) => set({ align })} options={[{ value: "left", label: "À gauche" }, { value: "center", label: "Centré" }]} /></Field>
+        <Hint>Le titre et sa petite ligne s’écrivent dans le bloc.</Hint>
+      </>
+      break
+    case "text":
+      content = <Hint>Écris directement dans le bloc : gras, listes, couleurs, liens. Tape « {"{"} » pour citer une ligne d’un index (son nom, son survol).</Hint>
+      break
+    case "callout":
+      content = <>
+        <Field label="Ton"><Segmented label="Ton" value={block.tone} onChange={(tone) => set({ tone })} options={(Object.keys(calloutTones) as Array<keyof typeof calloutTones>).map((tone) => ({ value: tone, label: calloutTones[tone].label }))} /></Field>
+        <Hint>Le titre et le texte s’écrivent dans l’encadré. Un encadré « MJ » reste visible de tous : pour le cacher aux joueurs, règle « Qui voit » plus bas.</Hint>
+      </>
+      break
+    case "quote":
+      content = <Hint>La citation et sa source s’écrivent dans le bloc.</Hint>
+      break
+    case "image": {
+      const valid = !block.src || cleanImageSource(block.src) === block.src
+      content = <>
+        <Field label="Adresse de l’image" error={valid ? undefined : "Une adresse https:// ou un fichier d’Eraser (/api/…)."} hint="Une image du Drive partagé, d’un index (clic droit › copier l’adresse de l’image) ou du web (https).">
+          <input className={fieldClass} value={block.src} placeholder="https://…" onChange={(event) => set({ src: event.target.value.trim() }, "src")} />
+        </Field>
+        <Field label="Légende"><input className={fieldClass} value={block.caption} maxLength={300} placeholder="Facultative (sert aussi de texte de remplacement)" onChange={(event) => set({ caption: event.target.value }, "caption")} /></Field>
+        <Field label="Format"><Segmented size="sm" label="Format" value={block.ratio} onChange={(ratio) => set({ ratio })} options={[{ value: "auto", label: "Libre" }, { value: "21/9", label: "21:9" }, { value: "16/9", label: "16:9" }, { value: "4/3", label: "4:3" }, { value: "1/1", label: "1:1" }, { value: "3/4", label: "3:4" }]} /></Field>
+        <Field label="Cadrage"><Segmented label="Cadrage" value={block.fit} onChange={(fit) => set({ fit })} options={[{ value: "cover", label: "Remplir le cadre" }, { value: "contain", label: "Image entière" }]} /></Field>
+      </>
+      break
+    }
+    case "separator":
+      content = <Field label="Ornement"><Segmented label="Ornement" value={block.glyph} onChange={(glyph) => set({ glyph })} options={[{ value: "ornement", label: "◆ ◆ ◆" }, { value: "etoile", label: "✶" }, { value: "points", label: "· · ·" }, { value: "trait", label: "Trait" }]} /></Field>
+      break
+    case "link": {
+      const kind = block.pageId ? "page" : "href"
+      content = <>
+        <Field label="Mène à"><Segmented label="Mène à" value={kind} onChange={(next) => set(next === "page" ? { pageId: pages[0]?.id ?? "", href: "" } : { pageId: "", href: block.href || "/" })} options={[{ value: "page", label: "Une page créée ici" }, { value: "href", label: "Une adresse d’Eraser" }]} /></Field>
+        {kind === "page"
+          ? <Field label="Page" hint="Le lien n’apparaît qu’à ceux qui peuvent ouvrir cette page.">
+            <select className={fieldClass} value={block.pageId} onChange={(event) => set({ pageId: event.target.value })}>
+              {!pages.length && <option value="">Aucune autre page pour l’instant</option>}
+              {pages.map((page) => <option key={page.id} value={page.id}>{page.title}{page.status !== "publiee" ? " (brouillon)" : ""}</option>)}
+            </select>
+          </Field>
+          : <Field label="Adresse" hint="Une page d’Eraser (/regles/combat, /campagne/…) ou un site https.">
+            <input className={fieldClass} value={block.href} placeholder="/regles/combat" onChange={(event) => set({ href: event.target.value.trim() }, "href")} />
+          </Field>}
+        <Field label="Style"><Segmented label="Style" value={block.style} onChange={(style) => set({ style })} options={[{ value: "card", label: "Carte" }, { value: "compact", label: "Compacte" }]} /></Field>
+        <Hint>Le titre (vide : celui de la page) et la description s’écrivent sur la carte-lien.</Hint>
+      </>
+      break
+    }
+    case "secret":
+      content = <>
+        <div className={`flex items-start gap-2 rounded-xl border px-3 py-2 text-xs ${live?.revealedAt ? "border-[#0f7a65]/35 bg-[#0f7a65]/8 text-[#0f7a65]" : "border-[#927640]/40 bg-[#927640]/8 text-[#7a5f22]"}`}>
+          {live?.revealedAt ? <Check className="mt-0.5 size-3.5 shrink-0" /> : <TriangleAlert className="mt-0.5 size-3.5 shrink-0" />}
+          <span>{live?.revealedAt ? `Révélé aux joueurs${live.revealedBy ? ` par ${live.revealedBy}` : ""} le ${formatWhen(live.revealedAt)}.` : "Caché aux joueurs : le serveur ne leur envoie rien de ce bloc."}</span>
+        </div>
+        <Hint>On le révèle pendant la partie, sur la page publiée : bouton « Révéler aux joueurs » (MJ et admins). « Recacher » reste possible.</Hint>
+      </>
+      break
+    case "notes":
+      content = <>
+        <Field label="Qui peut écrire une fois la page publiée">
+          <div className="flex flex-wrap gap-1" role="group" aria-label="Qui peut écrire">
+            {pageRoles.map((role) => {
+              const on = block.editors.includes(role)
+              return <button key={role} type="button" aria-pressed={on} onClick={() => set({ editors: on ? block.editors.filter((item) => item !== role) : [...block.editors, role] })} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground transition hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">
+                <span className={`size-2 rounded-full ${roleDot[role]}`} />{roleLabels[role]}
+              </button>
+            })}
+          </div>
+        </Field>
+        <AccessTable block={block} />
+        {live?.editedAt && <Hint>Écrit sur la page par {live.editedBy || "quelqu’un"} le {formatWhen(live.editedAt)} : c’est ce texte que les lecteurs voient.</Hint>}
+      </>
+      break
+    case "view":
+      content = <ViewSettings block={block} onChange={(patch) => set(patch)} />
+      break
+    case "stat":
+      content = <StatSettings block={block} onChange={(patch) => set(patch)} />
+      break
+  }
+  return <div>
+    <div className="flex items-center gap-2.5 px-4 pb-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><Icon className="size-4" /></span>
+      <span className="min-w-0"><b className="block font-display text-[15px]">{entry.label}</b><small className="block text-xs leading-snug text-muted-foreground">{entry.hint}</small></span>
+    </div>
+    <Group title="Contenu">{content}</Group>
+    <Group title="Qui voit" badge={<VisibilityPill vis={block.vis} />}>
+      <RadioCards name={`vis-${block.id}`} value={block.vis} onChange={(vis) => set({ vis })} options={blockVisibilities.map((item) => ({ value: item.value, label: item.label, hint: item.hint, dot: visDot[item.value] || undefined }))} />
+      <Hint>Vérifié sur le serveur : un bloc masqué n’est jamais envoyé au navigateur de qui ne le voit pas.</Hint>
+    </Group>
+    <div className="flex flex-wrap gap-1.5 border-t border-border/70 px-4 pt-3">
+      <button type="button" onClick={onDuplicate} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs hover:border-ring">Dupliquer</button>
+      <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs text-destructive hover:border-destructive/50">Supprimer</button>
+      <button type="button" onClick={onPage} className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Régler la page</button>
+    </div>
+  </div>
+}
+
+function Hint({ children }: { children: ReactNode }) {
+  return <p className="text-[12px] leading-relaxed text-muted-foreground">{children}</p>
+}
+
+/** Qui voit et qui écrit un carnet, rôle par rôle. */
+function AccessTable({ block }: { block: Extract<PageBlock, { type: "notes" }> }) {
+  const rows = [...pageRoles].reverse().map((role) => ({ role, sees: blockVisibleTo(block.vis, role), writes: block.editors.includes(role) }))
+  const useless = rows.filter((row) => row.writes && !row.sees)
+  return <div className="grid gap-1.5">
+    <table className="w-full text-xs">
+      <thead><tr className="text-left text-[10.5px] uppercase tracking-[0.08em] text-muted-foreground"><th className="py-1 font-semibold">Rôle</th><th className="font-semibold">Voit</th><th className="font-semibold">Écrit</th></tr></thead>
+      <tbody>{rows.map((row) => <tr key={row.role} className="border-t border-border/60">
+        <th scope="row" className="py-1 text-left font-medium"><span className="inline-flex items-center gap-1.5"><span className={`size-2 rounded-full ${roleDot[row.role]}`} />{roleLabels[row.role]}</span></th>
+        <td>{row.sees ? <Check className="size-3.5 text-[#0f7a65]" /> : "—"}</td>
+        <td>{row.writes && row.sees ? <span className="font-semibold text-[#0f7a65]">oui</span> : row.writes ? <span className="text-destructive">ne voit pas</span> : <span className="text-muted-foreground">lecture</span>}</td>
+      </tr>)}</tbody>
+    </table>
+    {useless.length > 0 && <p className="rounded-lg border border-destructive/30 bg-destructive/5 px-2.5 py-1.5 text-[11.5px] text-destructive">{useless.map((row) => roleLabels[row.role]).join(", ")} : droit d’écrire, mais ne voit pas le carnet. Élargis « Qui voit ».</p>}
+  </div>
+}
+
+/* ---------- Réglages de la page ---------- */
+
+export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveError, onChange, onRevert, onTemplate, onTrash, busy }: {
+  page: StudioPage
+  pages: PageSummary[]
+  campaigns: Array<{ id: string; name: string }>
+  isAdmin: boolean
+  linking: Array<{ id: string; title: string; href: string }>
+  saveError: string
+  onChange: (patch: Partial<PageDraft>, coalesce?: string) => void
+  onRevert: () => void
+  onTemplate: () => void
+  onTrash: () => void
+  busy: boolean
+}) {
+  const [copied, setCopied] = useState(false)
+  const others = pages.filter((other) => other.id !== page.id && !other.trashedAt && other.place === page.place && (page.place !== "campagne" || other.campaignId === page.campaignId))
+  const slugError = slugProblem(page.slug, page.place, others.map((other) => other.slug))
+  const href = pageHref(page)
+  const places = pagePlaces.filter((place) => isAdmin || place.value !== "administration")
+  const prefix = href.slice(0, href.lastIndexOf("/") + 1)
+  return <div>
+    <div className="flex items-center gap-2.5 px-4 pb-3">
+      <span className="flex size-9 shrink-0 items-center justify-center rounded-xl bg-secondary text-primary"><PageIcon icon={page.icon} emoji={page.emoji} className="size-4" /></span>
+      <span className="min-w-0"><b className="block truncate font-display text-[15px]">{page.title || "Sans titre"}</b><small className="block text-xs text-muted-foreground">Réglages de la page entière</small></span>
+    </div>
+    <Group title="Page">
+      <Field label="Titre"><input className={fieldClass} value={page.title} maxLength={120} onChange={(event) => onChange({ title: event.target.value }, "title")} /></Field>
+      <Field label="Description" hint="Une phrase sous le titre, et sur les cartes qui mènent à la page.">
+        <textarea className={`${fieldClass} h-auto min-h-16 resize-y py-1.5 leading-snug`} value={page.description} maxLength={400} placeholder="Facultative" onChange={(event) => onChange({ description: event.target.value }, "description")} />
+      </Field>
+      <Field label="Icône"><IconPicker icon={page.icon || undefined} emoji={page.emoji || undefined} allowNone onChange={(value) => onChange({ icon: value.icon ?? "", emoji: value.emoji ?? "" })} /></Field>
+    </Group>
+    <Group title="Place et adresse" badge={<span className="rounded-full border bg-card px-1.5 text-[10.5px] font-semibold normal-case tracking-normal">{pagePlaces.find((place) => place.value === page.place)?.label.replace(" (lien direct)", "")}</span>}>
+      <Field label="Rangée dans" hint={page.place === "hors-menu" ? "Dans aucun menu : on y arrive par un lien, la recherche (Ctrl + K) ou l’Index des pages." : page.place === "campagne" ? "Dans le dossier de la campagne ; ouverte à ses joueurs et à son MJ." : "La page apparaît sur la page de la section, et sous son adresse."}>
+        <select className={fieldClass} value={page.place} onChange={(event) => onChange({ place: event.target.value as PagePlace, campaignId: event.target.value === "campagne" ? page.campaignId || campaigns[0]?.id || "" : "", ...(event.target.value === "administration" ? { vis: "admin" as const } : {}) })}>
+          {places.map((place) => <option key={place.value} value={place.value}>{place.label}</option>)}
+        </select>
+      </Field>
+      {page.place === "campagne" && <Field label="Campagne" error={campaigns.length ? undefined : "Aucune campagne dont tu es le MJ."}>
+        <select className={fieldClass} value={page.campaignId} onChange={(event) => onChange({ campaignId: event.target.value })}>
+          {!page.campaignId && <option value="">Choisir une campagne…</option>}
+          {campaigns.map((campaign) => <option key={campaign.id} value={campaign.id}>{campaign.name}</option>)}
+        </select>
+      </Field>}
+      <Field label="Adresse" error={slugError || saveError || undefined} hint="Lettres sans accent, chiffres et tirets. Changer l’adresse casse les liens déjà copiés ailleurs.">
+        <div className="flex min-w-0 items-center overflow-hidden rounded-lg border border-input bg-background/70 focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+          <span className="max-w-[45%] shrink-0 truncate border-r bg-muted/60 px-2 py-1.5 font-mono text-[11.5px] text-muted-foreground" title={prefix}>{prefix}</span>
+          <input className="h-8 min-w-0 flex-1 bg-transparent px-2 font-mono text-[12.5px] outline-none" value={page.slug} onChange={(event) => onChange({ slug: event.target.value.toLowerCase().replace(/[^a-z0-9-]/g, "-") }, "slug")} onBlur={() => onChange({ slug: slugify(page.slug) || slugify(page.title) || "page" })} />
+          <button type="button" title="Copier le lien" aria-label="Copier le lien" className="flex h-8 w-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => { void navigator.clipboard?.writeText(`http://127.0.0.1:32147${href}`).then(() => { setCopied(true); window.setTimeout(() => setCopied(false), 1500) }) }}>{copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}</button>
+        </div>
+      </Field>
+      {page.slug !== slugify(page.title) && <button type="button" onClick={() => onChange({ slug: slugify(page.title) || "page" })} className="justify-self-start text-xs font-medium text-primary hover:underline">Reprendre l’adresse du titre ({slugify(page.title) || "page"})</button>}
+    </Group>
+    <Group title="Qui voit la page">
+      <RadioCards name="vis-page" value={page.vis} disabled={page.place === "administration"} onChange={(vis) => onChange({ vis })} options={pageVisibilities.filter((item) => isAdmin || item.value !== "admin").map((item) => ({ value: item.value, label: item.label, hint: item.hint, dot: item.value === "mj" ? roleDot.mj : item.value === "admin" ? roleDot.admin : undefined }))} />
+      <Hint>{page.place === "administration" ? "Une page d’Administration n’est ouverte qu’aux admins." : page.place === "ressources" || page.place === "bac-a-sable" ? "Cette section n’est ouverte qu’aux MJ et aux admins : les joueurs n’y ont pas accès." : "Vérifié sur le serveur : une page fermée à un rôle n’apparaît ni dans sa recherche ni à son adresse."}</Hint>
+    </Group>
+    <Group title="Version publiée" badge={page.unpublished && page.published ? <span className="rounded-full border border-[#9a6512]/40 bg-[#9a6512]/10 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-[#9a6512]">modifiée</span> : undefined}>
+      <Hint>{page.published ? `Publiée le ${formatWhen(page.publishedAt)}. Les lecteurs voient cette version tant que tu ne publies pas tes modifications.` : "Jamais publiée : seuls ceux qui peuvent la modifier la voient."}</Hint>
+      {page.published && <button type="button" disabled={!page.unpublished || busy} onClick={onRevert} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:border-ring disabled:opacity-50">Revenir à la version publiée</button>}
+      {page.status === "publiee" && <a href={href} target="_self" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Ouvrir la page publiée</a>}
+      <Field label="Pages qui mènent ici">{linking.length ? <div className="flex flex-wrap gap-1">{linking.map((item) => <a key={item.id} href={`/pages/atelier?id=${encodeURIComponent(item.id)}`} className="rounded-full border bg-background/60 px-2 py-0.5 text-xs hover:border-ring">{item.title}</a>)}</div> : <span className="text-xs text-muted-foreground">Aucune pour l’instant.</span>}</Field>
+    </Group>
+    <Group title="Modèle et corbeille" open={false}>
+      <button type="button" onClick={onTemplate} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:border-ring disabled:opacity-50">Enregistrer comme modèle…</button>
+      <Hint>Un modèle garde les blocs, les vues et les réglages des blocs ; « Nouvelle page › depuis un modèle » le recrée.</Hint>
+      <button type="button" onClick={onTrash} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium text-destructive hover:border-destructive/50 disabled:opacity-50">{busy && <LoaderCircle className="size-3.5 animate-spin" />}Mettre à la corbeille</button>
+    </Group>
+  </div>
+}

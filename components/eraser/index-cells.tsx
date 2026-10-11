@@ -237,6 +237,14 @@ export function forgetWorldIndexData(index: WorldIndexKey) {
   for (const key of [...namesCache.keys()]) if (key.startsWith(`${index}:`)) namesCache.delete(key)
 }
 
+/**
+ * Pose les données d'un index déjà reçues autrement (une page du créateur de pages les
+ * envoie à un joueur, qui ne peut pas lire l'index lui-même). Rien n'est remplacé.
+ */
+export function primeWorldIndexData(index: WorldIndexKey, data: LoadedWorldIndex) {
+  if (!dataCache.has(index)) dataCache.set(index, Promise.resolve(data))
+}
+
 export function loadWorldIndexData(index: WorldIndexKey) {
   let promise = dataCache.get(index)
   if (!promise) {
