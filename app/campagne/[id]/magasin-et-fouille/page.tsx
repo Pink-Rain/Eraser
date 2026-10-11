@@ -6,15 +6,16 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { ShopGenerator } from "@/components/eraser/shop-generator"
 import { getCampaignDashboard, listAllCampaignsForAdmin, listCampaignNpcs, listCampaignsForMj, listLatestShops } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
-import { loadShopGeneratorItems, type ShopGeneratorItem } from "@/lib/shop-schema"
+import type { ShopGeneratorItem } from "@/lib/shop-schema"
+import { catalogState, loadShopGeneratorData } from "@/lib/shop-types-server"
 
 export const dynamic = "force-dynamic"
 
 async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaignId: string; accountUid: string; isAdmin: boolean }) {
   let items: ShopGeneratorItem[] = []
   let loadError = ""
-  const [loadedItems, npcs, campaigns, latestDraw] = await Promise.all([
-    loadShopGeneratorItems().catch(() => null),
+  const [{ catalog, items: loadedItems }, npcs, campaigns, latestDraw] = await Promise.all([
+    loadShopGeneratorData(),
     listCampaignNpcs(campaignId),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
     listLatestShops(campaignId),
@@ -33,6 +34,8 @@ async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaign
       npcs={npcs}
       sourcePages={sourcePages}
       initialDraw={latestDraw}
+      types={catalog.types}
+      catalog={catalogState(catalog, isAdmin)}
     />
   )
 }

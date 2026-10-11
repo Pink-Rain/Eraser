@@ -607,3 +607,56 @@ test("États : les colonnes lues par la fiche (type, descriptions, règles) sont
   // Une colonne que rien ne lit reste libre.
   assert.equal(definitions.worldColumnPolicy("states", tab, "Note", []).rename, true);
 });
+
+test("Lieux › Magasin : « Préparer l'onglet » ajoute colonnes et types sans rien effacer, puis l'onglet règle les magasins", async () => {
+  const shopTypes = await vite.ssrLoadModule("/lib/shop-types-server.ts");
+  const id = fresh("places");
+  const tabs = definitions.worldIndexDefinitions.places.tabs.map((tab) => ({ title: tab.name, grid: [tab.headers] }));
+  // L'onglet « Magasin » ajouté à la main dans l'éditeur : un nom, un ID, une ligne déjà là.
+  tabs.push({ title: "Magasin", grid: [["Nom", "ID"], ["Marché noir", "LIE-9"]] });
+  tabs.push({ title: SCHEMA_TAB, grid: [SCHEMA_HEADERS, ["Magasin", "", "", JSON.stringify({ kind: "tab", itemLabel: "un magasin" }), "ajouté", ""]] });
+  google.addSpreadsheet(id, tabs);
+  await link("places", id, tabs[0].title);
+
+  const before = await shopTypes.loadShopTypeCatalog({ refresh: true });
+  assert.equal(before.tab, "Magasin");
+  assert.equal(before.error, "");
+  assert.ok(before.missingColumns.includes("Apparaît dans"));
+  // La ligne « Marché noir » est reconnue par son nom : pas de second Marché noir.
+  assert.equal(before.types.filter((type) => type.key === "black-market").length, 1);
+  assert.equal(before.types.length, 8);
+
+  const prepared = await shopTypes.prepareShopTypeTab();
+  assert.equal(prepared.added.length, 8);
+  const grid = google.grid(id, "Magasin");
+  assert.deepEqual(grid[0].slice(0, 2), ["Nom", "ID"]);
+  for (const header of shopTypes.shopTypeHeaders) assert.ok(grid[0].includes(header), header);
+  const rows = grid.slice(1).filter((row) => row[0]);
+  // « Marché noir » complétée à sa place (même ID), les autres ajoutées dessous.
+  assert.deepEqual(rows.map((row) => row[0]), ["Marché noir", "Marché", "Librairie", "Antiquaire", "Armurerie", "Alchimiste", "Taverne", "Marché ambulant"]);
+  assert.equal(rows[0][1], "LIE-9");
+  const column = (name) => grid[0].indexOf(name);
+  assert.equal(rows[0][column("Clé")], "black-market");
+  assert.equal(rows.find((row) => row[0] === "Marché ambulant")[column("Nombre d'items")], "4-8");
+  assert.equal(rows.find((row) => row[0] === "Marché ambulant")[column("Apparaît dans")], "Événements");
+
+  // Une seconde fois : rien de plus.
+  assert.deepEqual((await shopTypes.prepareShopTypeTab()).added, []);
+  assert.equal(google.grid(id, "Magasin").slice(1).filter((row) => row[0]).length, 8);
+
+  // Réglages faits dans l'onglet : la Taverne n'apparaît plus, un Maquignon vend items et créatures.
+  const headers = google.grid(id, "Magasin")[0];
+  const tavern = google.grid(id, "Magasin").findIndex((row) => row[0] === "Taverne");
+  await engine.updateWorldIndexFields("places", "Magasin", { rowNumber: tavern + 1, id: google.grid(id, "Magasin")[tavern][1], name: "Taverne" }, { "Apparaît dans": "Aucun" });
+  await engine.addWorldIndexRow("places", "Magasin", headers.map((header) => ({ "Nom": "Maquignon", "Emplacements": "Maquignon", "Trouvailles": "Items - Créatures", "Nombre d'items": "3 à 5", "Chance Village (%)": "40", "Apparaît dans": "Les deux" })[header] ?? ""), headers);
+  const after = await shopTypes.loadShopTypeCatalog({ refresh: true });
+  assert.deepEqual(after.missingColumns, []);
+  assert.deepEqual(after.missingTypes, []);
+  const byKey = Object.fromEntries(after.types.map((type) => [type.key, type]));
+  assert.equal(byKey.tavern.appearsIn, "none");
+  assert.deepEqual(byKey.maquignon.finds, ["objects", "creatures"]);
+  assert.deepEqual(byKey.maquignon.count, { min: 3, max: 5 });
+  assert.equal(byKey.maquignon.chances.village, 40);
+  assert.equal(byKey.maquignon.appearsIn, "both");
+  assert.deepEqual(byKey.market.chances, { bourg: 100, village: 100, "small-city": 100, "medium-city": 100, "large-city": 100, capital: 100 });
+});

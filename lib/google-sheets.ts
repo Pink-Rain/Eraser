@@ -89,8 +89,8 @@ import { parseItemAttachments, parseItemCharges, parseItemModifiers, parseItemOv
 import { ownedBy, ownersCell, ownersOf } from "@/lib/ownership"
 import { companionsOfTabs, isCompanionInventoryOwner } from "@/lib/companions"
 import { displayedMultipleValue } from "@/lib/multiple-values"
-import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopKey, ShopSize } from "@/lib/shop-schema"
-import { shopKeyList } from "@/lib/shop-keys"
+import type { CampaignNpcRecord, CityKey, GeneratedShop, SavedShopRecord, ShopSize } from "@/lib/shop-schema"
+import { isShopKey } from "@/lib/shop-keys"
 import type { TabletopActivityRecord, TabletopEntityRecord, TabletopFolderRecord, TabletopMapRecord, TabletopTokenRecord } from "@/lib/tabletop-schema"
 import { matchValueRanges, normalizeGoogleSheetRows, sheetNumber, sheetRangeStartRow, textCell, type GoogleSheetCellValue } from "@/lib/google-sheet-values"
 import { campaignSheetHeaders, classDifficultyValues, classSheetHeaders, classTypeValues, npcSheetHeaders } from "@/lib/entity-sheets"
@@ -4572,7 +4572,6 @@ export async function createCampaignForMj(mjUid: string, input: { id?: string; n
   return campaign
 }
 
-const shopKeys = new Set<ShopKey>(shopKeyList)
 const shopSizes = new Set<ShopSize>(["Minuscule", "Petit", "Moyen", "Grand", "Géant"])
 const cityKeys = new Set<CityKey>(["bourg", "village", "small-city", "medium-city", "large-city", "capital"])
 
@@ -4610,6 +4609,8 @@ function savedShopFromRow(cells: readonly (string | undefined)[], columns: Sheet
         subtype: typeof item.subtype === "string" ? item.subtype : "",
         price: typeof item.price === "string" ? item.price : "",
         icon: typeof item.icon === "string" ? item.icon : "",
+        // Une trouvaille d'un autre index (une créature…) garde son index d'origine.
+        ...(typeof item.source === "string" && item.source ? { source: item.source } : {}),
         locations: Array.isArray(item.locations) ? item.locations as Array<{ place: string; rarity: string }> : [],
         rarity,
       }]
@@ -4622,7 +4623,7 @@ function savedShopFromRow(cells: readonly (string | undefined)[], columns: Sheet
     pageLinked: row[1],
     cityName: row[2] || "Ville",
     cityKey: cityKeys.has(row[3] as CityKey) ? row[3] as CityKey : "village",
-    key: shopKeys.has(row[4] as ShopKey) ? row[4] as ShopKey : "market",
+    key: isShopKey(row[4]) ? row[4] : "market",
     name: row[5] || "Magasin",
     size: shopSizes.has(row[6] as ShopSize) ? row[6] as ShopSize : "Petit",
     items,

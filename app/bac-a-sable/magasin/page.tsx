@@ -5,7 +5,8 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
 import { ShopGenerator } from "@/components/eraser/shop-generator"
 import { listAllCampaignsForAdmin, listCampaignsForMj, listSavedShops } from "@/lib/google-sheets"
-import { loadShopGeneratorItems, type ShopGeneratorItem } from "@/lib/shop-schema"
+import type { ShopGeneratorItem } from "@/lib/shop-schema"
+import { catalogState, loadShopGeneratorData } from "@/lib/shop-types-server"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
@@ -13,8 +14,8 @@ export const dynamic = "force-dynamic"
 async function SandboxShopData({ accountUid, isAdmin }: { accountUid: string; isAdmin: boolean }) {
   let items: ShopGeneratorItem[] = []
   let loadError = ""
-  const [loadedItems, campaigns, latestDraw] = await Promise.all([
-    loadShopGeneratorItems().catch(() => null),
+  const [{ catalog, items: loadedItems }, campaigns, latestDraw] = await Promise.all([
+    loadShopGeneratorData(),
     isAdmin ? listAllCampaignsForAdmin() : listCampaignsForMj(accountUid),
     // Dans le bac à sable, le tirage *est* la sauvegarde : « replace » réécrit
     // les lignes de la page à chaque tirage.
@@ -22,7 +23,7 @@ async function SandboxShopData({ accountUid, isAdmin }: { accountUid: string; is
   ])
   if (loadedItems) items = loadedItems
   else loadError = "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."
-  return <ShopGenerator items={items} loadError={loadError} pageLinked="bac-a-sable" destinationPages={campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))} initialDraw={latestDraw} />
+  return <ShopGenerator items={items} loadError={loadError} pageLinked="bac-a-sable" destinationPages={campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))} initialDraw={latestDraw} types={catalog.types} catalog={catalogState(catalog, isAdmin)} />
 }
 
 export default async function ShopPage() {

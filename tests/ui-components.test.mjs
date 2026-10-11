@@ -167,6 +167,33 @@ test("Marché ambulant : 4 à 8 items vendus « ambulant », que le Marché ne v
   assert.equal(visualShopKey("tavern"), "tavern");
 });
 
+test("Types de magasin : le plus précis l'emporte, types/sous-types filtrés, trouvailles d'autres index", async () => {
+  const types = await vite.ssrLoadModule("/lib/shop-types.ts");
+  const { rerollShop, pickedShopItem, generateEventShop, eventShopTypes } = await vite.ssrLoadModule("/components/eraser/shop-generator.tsx");
+  const match = types.shopPlaceMatcher(types.builtinShopTypes);
+  assert.ok(match("Marché ordinaire - Marché ambulant", "market"));
+  assert.ok(match("Marché ordinaire - Marché ambulant", "travelling-market"));
+  assert.ok(!match("Marché noir", "market"));
+  assert.ok(match("Marché noir", "black-market"));
+  assert.ok(match("Maison ordinaire -\nArmurier", "armory"));
+  assert.ok(!match("Maison ambulant", "travelling-market"));
+  // Une ligne d'onglet : cases vides = valeurs d'origine, réglages lus sinon.
+  const custom = types.shopTypeFromRow({ "Nom": "Maquignon", "Emplacements": "Maquignon", "Types autorisés": "Monture", "Trouvailles": "Items - Créatures", "Nombre d'items": "2", "Apparaît dans": "Événements" });
+  assert.deepEqual([custom.key, custom.types, custom.finds, custom.count, custom.appearsIn], ["maquignon", ["Monture"], ["objects", "creatures"], { min: 2, max: 2 }, "events"]);
+  assert.equal(types.shopTypeFromRow({ "Nom": "Librairie" }).chances.capital, 70);
+  const catalog = types.mergeShopTypes([custom]);
+  assert.equal(catalog.length, 9);
+  assert.deepEqual(eventShopTypes(catalog).map((type) => type.key), ["maquignon", "travelling-market"]);
+  const entry = (id, place, extra = {}) => ({ id, name: id, description: "", effect: "", nameHtml: "", descriptionHtml: "", effectHtml: "", type: "Objet", subtype: "", price: "", icon: "", locations: [{ place, rarity: "Commun" }], ...extra });
+  const stock = [entry("selle", "Maquignon", { type: "Monture" }), entry("corde", "Maquignon"), entry("cheval", "Maquignon", { type: "Monture", source: "creatures" }), entry("loup", "Maquignon", { type: "Monture", source: "monsters" })];
+  const shop = generateEventShop(stock, catalog, "maquignon", "random");
+  assert.equal(shop.items.length, 2);
+  assert.deepEqual(shop.items.map((item) => item.id).sort(), ["cheval", "selle"]);
+  // Un ancien magasin sans catalogue garde le comportement d'origine.
+  assert.equal(rerollShop([entry("x", "Marché ordinaire")], { id: "m", key: "market", name: "Marché", size: "Petit", cityKey: "village", cityName: "Brume", items: [] }).items.length, 1);
+  assert.equal(pickedShopItem(entry("cheval", "Maquignon", { type: "Monture", source: "creatures" }), "maquignon", catalog).rarity, "common");
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),

@@ -284,11 +284,12 @@ test("Magasins : enregistrés et vérifiés par nom de colonne", async () => {
   assert.equal(saved.cityName, "Brume");
   const listed = await sheets.listSavedShops("CAMP-1");
   assert.deepEqual(listed.map((shop) => shop.name), ["Le Pot"]);
-  // Le Marché ambulant garde son type ; un type inconnu retombe sur Marché, comme avant.
-  await sheets.saveGeneratedShops("CAMP-1", [{ id: "SHOP-2", key: "travelling-market", name: "Caravane", size: "Petit", cityKey: "village", cityName: "Itinérant", items: [] }, { id: "SHOP-3", key: "boulangerie", name: "Four", size: "Petit", cityKey: "village", cityName: "Brume", items: [] }]);
+  // Le Marché ambulant et un type créé dans Lieux › Magasin gardent leur clé ; une clé illisible retombe sur Marché.
+  await sheets.saveGeneratedShops("CAMP-1", [{ id: "SHOP-2", key: "travelling-market", name: "Caravane", size: "Petit", cityKey: "village", cityName: "Itinérant", items: [] }, { id: "SHOP-3", key: "boulangerie", name: "Four", size: "Petit", cityKey: "village", cityName: "Brume", items: [] }, { id: "SHOP-4", key: "Pas une clé !", name: "Bizarre", size: "Petit", cityKey: "village", cityName: "Brume", items: [] }]);
   const keys = Object.fromEntries((await sheets.listSavedShops("CAMP-1")).map((shop) => [shop.id, shop.key]));
   assert.equal(keys["SHOP-2"], "travelling-market");
-  assert.equal(keys["SHOP-3"], "market");
+  assert.equal(keys["SHOP-3"], "boulangerie");
+  assert.equal(keys["SHOP-4"], "market");
 });
 
 test("Fiche rangée comme Eraser : une seule plage écrite dès la colonne C, comme avant", async () => {

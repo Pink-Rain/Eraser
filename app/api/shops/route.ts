@@ -2,6 +2,7 @@ import { NextResponse } from "next/server"
 
 import { copySavedShopsToPage, deleteSavedShops, getCampaignDashboard, listCampaignNpcs, listLatestShops, listSavedShops, saveGeneratedShops } from "@/lib/google-sheets"
 import type { GeneratedShop } from "@/lib/shop-schema"
+import { isShopKey } from "@/lib/shop-keys"
 import { authorizedAccount } from "@/lib/server-auth"
 
 function shopErrorMessage(error: unknown, isAdmin = false) {
@@ -45,12 +46,14 @@ function validShops(value: unknown): value is GeneratedShop[] {
       && (candidate.type === undefined || typeof candidate.type === "string" && candidate.type.length <= 300)
       && (candidate.subtype === undefined || typeof candidate.subtype === "string" && candidate.subtype.length <= 300)
       && (candidate.icon === undefined || typeof candidate.icon === "string" && candidate.icon.length <= 2_000)
+      && (candidate.source === undefined || typeof candidate.source === "string" && candidate.source.length <= 60)
       && ["skill", "distance", "action", "reload", "value", "attributes", "materials", "runes"].every((key) => candidate[key] === undefined || typeof candidate[key] === "string" && (candidate[key] as string).length <= 2_000)
   }
   return Array.isArray(value) && value.length <= 100 && value.every((shop) => {
     if (!shop || typeof shop !== "object") return false
     const candidate = shop as Partial<GeneratedShop>
     return typeof candidate.id === "string" && candidate.id.length <= 200
+      && (candidate.key === undefined || isShopKey(candidate.key))
       && typeof candidate.name === "string" && candidate.name.length <= 200
       && typeof candidate.cityName === "string" && candidate.cityName.length <= 200
       && Array.isArray(candidate.items) && candidate.items.length <= 30

@@ -5,7 +5,7 @@ import { shopObjectId } from "@/lib/object-item-id"
 
 export type ShopRarity = "very-common" | "common" | "rare" | "very-rare" | "ultimate"
 export type { ShopKey, VisualShopKey } from "@/lib/shop-keys"
-export { shopKeyList, visualShopKey } from "@/lib/shop-keys"
+export { isShopKey, visualShopKey } from "@/lib/shop-keys"
 import type { ShopKey } from "@/lib/shop-keys"
 export type ShopSize = "Minuscule" | "Petit" | "Moyen" | "Grand" | "Géant"
 export type CityKey = "bourg" | "village" | "small-city" | "medium-city" | "large-city" | "capital"
@@ -25,6 +25,8 @@ export type ShopGeneratorItem = {
   subtype: string
   price: string
   icon: string
+  /** L'index d'où vient la trouvaille (« creatures »…) ; absent : l'Index des items. */
+  source?: string
   locations: Array<{ place: string; rarity: string }>
 } & ObjectCombatFields
 

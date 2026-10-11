@@ -21,6 +21,7 @@ import { SessionEvents } from "@/components/eraser/session-events"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import type { CampaignNpcRecord, SavedShopRecord, ShopGeneratorItem } from "@/lib/shop-schema"
+import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 
 export type SessionMember = { id: string; name: string; people: string; classes: string; level: string; honoraryTitle: string }
 
@@ -63,7 +64,7 @@ function PlayerCard({ member, pending, onRemove }: { member: SessionMember; pend
   </article>
 }
 
-export function SessionCreator({ campaignId, initialSessions, initialSessionId, members, npcs, shops, generatorItems }: {
+export function SessionCreator({ campaignId, initialSessions, initialSessionId, members, npcs, shops, generatorItems, shopTypes = builtinShopTypes }: {
   campaignId: string
   initialSessions: CampaignSessionRecord[]
   initialSessionId: string
@@ -71,6 +72,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
   npcs: CampaignNpcRecord[]
   shops: SavedShopRecord[]
   generatorItems: ShopGeneratorItem[]
+  shopTypes?: ShopTypeDefinition[]
 }) {
   const [sessions, setSessions] = useState(initialSessions)
   const [selectedId, setSelectedId] = useState(initialSessionId || initialSessions.at(-1)?.id || "")
@@ -227,7 +229,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
 
       <section className="border-t pt-8">
         <SectionTitle count={session.shopIds.length}>Magasins</SectionTitle>
-        <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} mode="session" session={{
+        <SavedShopCollection initialShops={shops} pageLinked={campaignId} npcs={npcs} generatorItems={generatorItems} types={shopTypes} mode="session" session={{
           currentId: session.id,
           ids: session.shopIds,
           onAdd: (ids) => change({ add: { shopIds: ids } }),
@@ -237,7 +239,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
 
       <section className="border-t pt-8">
         <SectionTitle count={session.events.length}>Événements</SectionTitle>
-        <SessionEvents campaignId={campaignId} session={session} npcs={npcs} shops={shops} generatorItems={generatorItems} onUpdated={replace} />
+        <SessionEvents campaignId={campaignId} session={session} npcs={npcs} shops={shops} generatorItems={generatorItems} shopTypes={shopTypes} onUpdated={replace} />
       </section>
       </>}
     </>}

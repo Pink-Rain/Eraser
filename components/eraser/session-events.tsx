@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useEffect, useMemo, useState } from "react"
+import { useEffect, useState } from "react"
 import {
   Anchor, ArrowUpRight, Bug, CalendarClock, Caravan, Castle, ChevronDown, CircleMinus, CloudLightning, Coins, Crown, Dices, Drama, Eye, Flame,
   Footprints, Gem, Ghost, HeartPulse, KeyRound, LoaderCircle, Map as MapIcon, MessageCircle, Moon, Mountain, PawPrint, Pencil, Plus, Scroll,
@@ -15,7 +15,8 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
 import { AddToSessionDialog, patchSession } from "@/components/eraser/session-picker"
-import { generateTravellingMarket, shopSummary, travellingMarketCounts } from "@/components/eraser/shop-generator"
+import { countChoices, eventShopTypes, generateEventShop, shopSummary } from "@/components/eraser/shop-generator"
+import { builtinShopTypes, type ShopTypeDefinition } from "@/lib/shop-types"
 import { persistShops } from "@/components/eraser/shop-persistence"
 import { richTextPlainText } from "@/components/eraser/rich-text"
 import type { CampaignSessionRecord, SessionEvent, SessionEventKind } from "@/lib/campaign-sessions"
@@ -94,13 +95,18 @@ function EventGlyph({ event, className = "size-5" }: { event: Pick<SessionEvent,
 }
 
 /** Ajouter un événement : une créature, un PNJ, un PNJ générique, un marché ambulant ou « Autre ». */
-function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, pending, onClose, onAdd }: { open: boolean; campaignId: string; npcs: CampaignNpcRecord[]; shops: SavedShopRecord[]; generatorItems: ShopGeneratorItem[]; pending: boolean; onClose: () => void; onAdd: (event: SessionEvent) => Promise<void> }) {
+function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, shopTypes, pending, onClose, onAdd }: { open: boolean; campaignId: string; npcs: CampaignNpcRecord[]; shops: SavedShopRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes: ShopTypeDefinition[]; pending: boolean; onClose: () => void; onAdd: (event: SessionEvent) => Promise<void> }) {
   const router = useRouter()
   const [kind, setKind] = useState<SessionEventKind>("creature")
   const [query, setQuery] = useState("")
   const [remote, setRemote] = useState<Partial<Record<SessionEventKind, Candidate[]>>>({})
   const [loadError, setLoadError] = useState("")
   const [count, setCount] = useState("random")
+  // Les magasins d'événement : « Apparaît dans » Événements ou Les deux (Lieux › Magasin).
+  const eventTypes = eventShopTypes(shopTypes)
+  const [typeKey, setTypeKey] = useState("")
+  const eventType = eventTypes.find((type) => type.key === typeKey) ?? eventTypes[0]
+  const marketLabel = eventTypes.length === 1 ? eventTypes[0].name : "Magasins"
   const [generating, setGenerating] = useState(false)
   const [error, setError] = useState("")
 
@@ -113,12 +119,12 @@ function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, pending
     return () => { active = false }
   }, [kind, open, remote])
 
-  const candidates = useMemo<Candidate[] | null>(() => {
+  const candidates = ((): Candidate[] | null => {
     if (kind === "npc") return npcs.map(npcCandidate)
-    if (kind === "market") return shops.filter((shop) => shop.key === "travelling-market").map((shop) => ({ refId: shop.id, name: shop.name, detail: shopSummary(shop), image: "" }))
+    if (kind === "market") return shops.filter((shop) => eventTypes.some((type) => type.key === shop.key)).map((shop) => ({ refId: shop.id, name: shop.name, detail: shopSummary(shop, shopTypes), image: "" }))
     if (kind === "other") return []
     return remote[kind] ?? null
-  }, [kind, npcs, remote, shops])
+  })()
   const words = fold(query).split(/\s+/).filter(Boolean)
   const filtered = (candidates || []).filter((candidate) => words.every((word) => fold(`${candidate.name} ${candidate.detail}`).includes(word)))
 
@@ -132,8 +138,9 @@ function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, pending
   async function generateMarket() {
     setGenerating(true); setError("")
     try {
-      const market = generateTravellingMarket(generatorItems, count === "random" ? "random" : Number(count))
-      if (!market.items.length) throw new Error("Aucun item de l’index ne se vend dans un marché ambulant (emplacement « Marché ambulant »).")
+      if (!eventType) throw new Error("Aucun magasin n’apparaît dans les événements (colonne « Apparaît dans » de Lieux › Magasin).")
+      const market = generateEventShop(generatorItems, shopTypes, eventType.key, count === "random" ? "random" : Number(count))
+      if (!market.items.length) throw new Error(`Rien dans les index ne se vend ici (emplacements de « ${eventType.name} » dans Lieux › Magasin).`)
       await persistShops("save", campaignId, [market])
       router.refresh()
       await add({ refId: market.id, name: market.name, detail: "", image: "" })
@@ -146,15 +153,16 @@ function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, pending
       <DialogHeader><DialogTitle>Ajouter un événement</DialogTitle></DialogHeader>
       <div className="space-y-4">
         <div className="flex flex-wrap gap-1.5" role="tablist" aria-label="Type d’événement">
-          {kindOrder.map((candidate) => { const Icon = kindIcons[candidate]; return <Button key={candidate} type="button" role="tab" aria-selected={kind === candidate} size="sm" variant={kind === candidate ? "default" : "outline"} onClick={() => { setKind(candidate); setQuery(""); setError(""); setLoadError("") }}><Icon />{kindLabels[candidate]}</Button> })}
+          {kindOrder.map((candidate) => { const Icon = kindIcons[candidate]; return <Button key={candidate} type="button" role="tab" aria-selected={kind === candidate} size="sm" variant={kind === candidate ? "default" : "outline"} onClick={() => { setKind(candidate); setQuery(""); setError(""); setLoadError("") }}><Icon />{candidate === "market" ? marketLabel : kindLabels[candidate]}</Button> })}
         </div>
         {kind === "other"
           ? <EventForm key="new" submitLabel="Ajouter" pending={pending} onCancel={close} onSubmit={async (fields) => { setError(""); try { await onAdd({ id: crypto.randomUUID(), kind: "other", refId: "", image: "", ...fields }); close() } catch (caught) { setError(caught instanceof Error ? caught.message : "Ajout impossible.") } }} />
           : <>
-            <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder={`Rechercher ${kind === "creature" ? "une créature" : kind === "market" ? "un marché ambulant sauvegardé" : "un PNJ"}…`} /></div>
-            {kind === "market" && <div className="flex flex-col gap-2 rounded-xl border bg-muted/25 p-3 sm:flex-row sm:items-center">
-              <NativeSelect value={count} onChange={(event) => setCount(event.target.value)} aria-label="Nombre d’items" className="w-full sm:w-auto"><NativeSelectOption value="random">Au hasard (4 à 8 items)</NativeSelectOption>{travellingMarketCounts.map((value) => <NativeSelectOption key={value} value={String(value)}>{value} items</NativeSelectOption>)}</NativeSelect>
-              <Button type="button" disabled={pending || generating || !generatorItems.length} onClick={() => void generateMarket()}>{generating ? <LoaderCircle className="animate-spin" /> : <Dices />}Générer un marché ambulant</Button>
+            <div className="relative"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input autoFocus value={query} onChange={(event) => setQuery(event.target.value)} className="pl-9" placeholder={`Rechercher ${kind === "creature" ? "une créature" : kind === "market" ? `parmi : ${eventTypes.map((type) => type.name).join(", ") || "magasins"}` : "un PNJ"}…`} /></div>
+            {kind === "market" && eventType && <div className="flex flex-col gap-2 rounded-xl border bg-muted/25 p-3 sm:flex-row sm:flex-wrap sm:items-center">
+              {eventTypes.length > 1 && <NativeSelect value={eventType.key} onChange={(event) => { setTypeKey(event.target.value); setCount("random") }} aria-label="Magasin d’événement" className="w-full sm:w-auto">{eventTypes.map((type) => <NativeSelectOption key={type.key} value={type.key}>{type.name}</NativeSelectOption>)}</NativeSelect>}
+              {eventType.count && <NativeSelect value={count} onChange={(event) => setCount(event.target.value)} aria-label="Nombre d’items" className="w-full sm:w-auto"><NativeSelectOption value="random">Au hasard ({eventType.count.min} à {eventType.count.max} items)</NativeSelectOption>{countChoices(eventType).map((value) => <NativeSelectOption key={value} value={String(value)}>{value} items</NativeSelectOption>)}</NativeSelect>}
+              <Button type="button" disabled={pending || generating || !generatorItems.length} onClick={() => void generateMarket()}>{generating ? <LoaderCircle className="animate-spin" /> : <Dices />}Générer : {eventType.name}</Button>
             </div>}
             {loadError && <p className="text-sm text-destructive">{loadError}</p>}
             <div className="max-h-80 space-y-1 overflow-y-auto rounded-xl border p-2">
@@ -167,7 +175,7 @@ function AddEventDialog({ open, campaignId, npcs, shops, generatorItems, pending
                   <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{candidate.name}</span>{candidate.detail && <span className="block truncate text-xs text-muted-foreground">{candidate.detail}</span>}</span>
                   <Plus className="size-4 text-muted-foreground" />
                 </button>)
-                : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{(candidates || []).length ? "Rien ne correspond." : kind === "market" ? "Aucun marché ambulant sauvegardé : génère-en un ci-dessus." : kind === "npc" ? "Aucun PNJ dans cette campagne." : "Rien à proposer."}</p>}
+                : <p className="px-3 py-8 text-center text-sm text-muted-foreground">{(candidates || []).length ? "Rien ne correspond." : kind === "market" ? (eventType ? "Aucun magasin d’événement sauvegardé : génère-en un ci-dessus." : "Aucun magasin n’apparaît dans les événements : règle « Apparaît dans » dans Lieux › Magasin.") : kind === "npc" ? "Aucun PNJ dans cette campagne." : "Rien à proposer."}</p>}
             </div>
           </>}
         {error && <p className="text-sm text-destructive">{error}</p>}
@@ -196,7 +204,7 @@ function EventForm({ initial, fixedName = false, submitLabel, pending, onCancel,
   </form>
 }
 
-function EventCard({ event, campaignId, shop, pending, onEdit, onSend, onRemove }: { event: SessionEvent; campaignId: string; shop?: SavedShopRecord; pending: boolean; onEdit: () => void; onSend: () => void; onRemove: () => void }) {
+function EventCard({ event, campaignId, shop, shopTypes, pending, onEdit, onSend, onRemove }: { event: SessionEvent; campaignId: string; shop?: SavedShopRecord; shopTypes: ShopTypeDefinition[]; pending: boolean; onEdit: () => void; onSend: () => void; onRemove: () => void }) {
   const [open, setOpen] = useState(false)
   const href = eventHref(event, campaignId)
   return <article className="group relative flex min-w-0 flex-col overflow-hidden rounded-2xl border bg-card/80 shadow-sm">
@@ -207,10 +215,10 @@ function EventCard({ event, campaignId, shop, pending, onEdit, onSend, onRemove 
         {event.image && <img src={event.image} alt={`Portrait de ${event.name}`} loading="lazy" className="absolute inset-0 size-full object-cover" onError={(error) => { error.currentTarget.style.display = "none" }} />}
       </div>
       <div className="min-w-0">
-        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary/65">{kindLabels[event.kind]}</p>
+        <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-primary/65">{event.kind === "market" && shop ? shopTypes.find((type) => type.key === shop.key)?.name ?? kindLabels.market : kindLabels[event.kind]}</p>
         <h3 className="font-display truncate text-lg font-semibold leading-tight">{event.name || "Sans nom"}</h3>
         {event.tag && <span className="mt-1 inline-flex max-w-full items-center rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: event.tagColor || "#525252" }}><span className="truncate">{event.tag}</span></span>}
-        {event.kind === "market" && <p className="mt-1 text-xs text-muted-foreground">{shop ? shopSummary(shop) : "Magasin introuvable (supprimé ?)"}</p>}
+        {event.kind === "market" && <p className="mt-1 text-xs text-muted-foreground">{shop ? shopSummary(shop, shopTypes) : "Magasin introuvable (supprimé ?)"}</p>}
       </div>
     </div>
     {event.description && <p className="whitespace-pre-line px-3 pb-3 text-sm text-muted-foreground">{event.description}</p>}
@@ -231,7 +239,7 @@ function EventCard({ event, campaignId, shop, pending, onEdit, onSend, onRemove 
  * Les événements d'une session : créatures, PNJs, PNJs génériques, marchés ambulants et
  * événements libres. Ils vivent dans la ligne de la session (« Événements (JSON) »).
  */
-export function SessionEvents({ campaignId, session, npcs, shops, generatorItems, onUpdated }: { campaignId: string; session: CampaignSessionRecord; npcs: CampaignNpcRecord[]; shops: SavedShopRecord[]; generatorItems: ShopGeneratorItem[]; onUpdated: (session: CampaignSessionRecord) => void }) {
+export function SessionEvents({ campaignId, session, npcs, shops, generatorItems, shopTypes = builtinShopTypes, onUpdated }: { campaignId: string; session: CampaignSessionRecord; npcs: CampaignNpcRecord[]; shops: SavedShopRecord[]; generatorItems: ShopGeneratorItem[]; shopTypes?: ShopTypeDefinition[]; onUpdated: (session: CampaignSessionRecord) => void }) {
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<SessionEvent | null>(null)
   const [sending, setSending] = useState<SessionEvent | null>(null)
@@ -259,9 +267,9 @@ export function SessionEvents({ campaignId, session, npcs, shops, generatorItems
     {error && <p className="text-sm text-destructive">{error}</p>}
     {notice && <p className="text-sm text-primary">{notice}</p>}
     {session.events.length
-      ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{session.events.map((event) => <EventCard key={event.id} event={event} campaignId={campaignId} shop={event.kind === "market" ? shops.find((shop) => shop.id === event.refId) : undefined} pending={pending} onEdit={() => setEditing(event)} onSend={() => setSending(event)} onRemove={() => void patch({ events: { remove: [event.id] } }).catch(() => undefined)} />)}</div>
+      ? <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">{session.events.map((event) => <EventCard key={event.id} event={event} campaignId={campaignId} shop={event.kind === "market" ? shops.find((shop) => shop.id === event.refId) : undefined} shopTypes={shopTypes} pending={pending} onEdit={() => setEditing(event)} onSend={() => setSending(event)} onRemove={() => void patch({ events: { remove: [event.id] } }).catch(() => undefined)} />)}</div>
       : <p className="rounded-2xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Aucun événement : ajoute une créature, un PNJ, un marché ambulant ou un événement libre.</p>}
-    <AddEventDialog open={adding} campaignId={campaignId} npcs={npcs} shops={shops} generatorItems={generatorItems} pending={pending} onClose={() => setAdding(false)} onAdd={(event) => patch({ events: { add: [event] } }, `${event.name} ajouté aux événements.`)} />
+    <AddEventDialog open={adding} campaignId={campaignId} npcs={npcs} shops={shops} generatorItems={generatorItems} shopTypes={shopTypes} pending={pending} onClose={() => setAdding(false)} onAdd={(event) => patch({ events: { add: [event] } }, `${event.name} ajouté aux événements.`)} />
     <Dialog open={Boolean(editing)} onOpenChange={(open) => { if (!open && !pending) setEditing(null) }}>
       <DialogContent className="sm:max-w-xl">
         <DialogHeader><DialogTitle>Modifier {editing?.name}</DialogTitle></DialogHeader>
