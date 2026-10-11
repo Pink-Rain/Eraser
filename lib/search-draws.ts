@@ -89,8 +89,11 @@ export function searchPlaceMatcher(places: readonly string[]) {
       const words = new Set(placeWords(part))
       if (!words.size) continue
       const matches = known.filter((entry) => entry.words.every((word) => words.has(word)))
-      const longest = Math.max(0, ...matches.map((entry) => entry.words.length))
-      for (const entry of matches) if (entry.words.length === longest) found.add(entry.place)
+      // Un lieu dont les mots sont tous dans un lieu plus précis s'efface (« Forêt » devant « Forêt noire ») ;
+      // deux lieux sans rapport dans le même morceau (« Forêt noire / Plaine ») comptent tous les deux.
+      for (const entry of matches) {
+        if (!matches.some((other) => other.words.length > entry.words.length && entry.words.every((word) => other.words.includes(word)))) found.add(entry.place)
+      }
     }
     return [...found]
   }

@@ -89,18 +89,25 @@ function KanbanLayout({ layout, rows, nameOf, valueOf, optionsOf, onOpen, onComm
   const [over, setOver] = useState<string | null>(null)
   const options = column ? optionsOf?.(column) ?? [] : []
   const firstValue = (row: string) => plain(valueOf(row, column)).split(/\s*[,;]\s*/)[0] ?? ""
+  // Glisser réécrit toute la case : seulement si elle tient une seule valeur, sans mise en forme
+  // (« Commun, Elfique » ou un texte en gras ne perdent jamais une partie de leur contenu).
+  const movable = (row: string) => {
+    const raw = valueOf(row, column).trim()
+    return Boolean(onCommit) && plain(raw) === raw && !/[,;\n]/.test(raw)
+  }
+  const same = (left: string, right: string) => left.toLocaleLowerCase("fr") === right.toLocaleLowerCase("fr")
   // Les colonnes : les choix de la liste dans leur ordre, puis les valeurs écrites, puis « Sans valeur ».
   const names = [...new Set([...options.map((option) => option.value), ...rows.map(firstValue).filter(Boolean)])]
   const lanes = [...names, ""].map((name) => ({ name, color: options.find((option) => option.value === name)?.color, rows: rows.filter((row) => firstValue(row).toLocaleLowerCase("fr") === name.toLocaleLowerCase("fr")) }))
   if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans « Modifier la vue ».</p>
   return <div className="flex gap-3 overflow-x-auto pb-2">
     {lanes.filter((lane) => lane.name || lane.rows.length).map((lane) => <section key={lane.name || "*"}
-      onDragOver={(event) => { if (onCommit && dragged) { event.preventDefault(); setOver(lane.name) } }}
+      onDragOver={(event) => { if (dragged && movable(dragged)) { event.preventDefault(); setOver(lane.name) } }}
       onDragLeave={() => setOver((current) => current === lane.name ? null : current)}
-      onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && firstValue(dragged) !== lane.name) onCommit(dragged, column, lane.name); setDragged("") }}
+      onDrop={(event) => { event.preventDefault(); setOver(null); if (onCommit && dragged && movable(dragged) && !same(firstValue(dragged), lane.name)) onCommit(dragged, column, lane.name); setDragged("") }}
       className={`flex w-64 shrink-0 flex-col gap-2 rounded-xl border bg-muted/30 p-2 transition-colors ${over === lane.name ? "border-primary bg-primary/5" : ""}`}>
       <p className="flex items-center justify-between gap-2 px-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground"><span className="flex items-center gap-1.5">{lane.color && <span className="size-2.5 rounded-full" style={{ backgroundColor: lane.color }} />}{lane.name || "Sans valeur"}</span><span>{lane.rows.length}</span></p>
-      {lane.rows.map((row) => <article key={row} draggable={Boolean(onCommit)} onDragStart={() => setDragged(row)} onDragEnd={() => { setDragged(""); setOver(null) }} className={`rounded-lg border bg-card p-2.5 shadow-sm ${onCommit ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`}>
+      {lane.rows.map((row) => <article key={row} draggable={movable(row)} onDragStart={() => setDragged(row)} onDragEnd={() => { setDragged(""); setOver(null) }} title={onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined} className={`rounded-lg border bg-card p-2.5 shadow-sm ${movable(row) ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`}>
         <button type="button" onClick={() => onOpen(row)} className="text-left text-sm font-semibold hover:text-primary hover:underline">{nameOf(row) || "Sans nom"}</button>
         <FieldValues fields={(layout.fields ?? []).filter((field) => field !== column)} rowKey={row} valueOf={valueOf} />
       </article>)}

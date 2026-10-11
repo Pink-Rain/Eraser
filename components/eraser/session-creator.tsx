@@ -231,7 +231,7 @@ export function SessionCreator({ campaignId, initialSessions, initialSessionId, 
       </section>
 
       <section className="border-t pt-8">
-        <SectionTitle count={session.eventIds.length + session.legacyEvents.length}>Événements</SectionTitle>
+        <SectionTitle count={session.legacyEvents.length + session.eventIds.filter((id) => id.startsWith("shop:") ? shops.some((shop) => `shop:${shop.id}` === id) : events.some((event) => event.id === id)).length}>Événements</SectionTitle>
         <SessionEvents campaignId={campaignId} session={session} events={events} shops={shops} shopTypes={shopTypes} onUpdated={replace} />
       </section>
     </>}

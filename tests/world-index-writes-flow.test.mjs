@@ -285,10 +285,12 @@ test("Colonne « Onglet » de la vue Tout : libellé, place et onglets d'arrivé
   await engine.applyWorldSchemaOperations("places", [{ op: "tab-column", settings: { label: "  Rangé  dans ", after: "Type", targets: [second, "Ruines", "Inconnu"] } }]);
   let data = await engine.getWorldIndex("places", { refresh: true });
   assert.deepEqual(data.definition.tabColumn, { label: "Rangé dans", after: "Type", targets: [second, "Ruines"] });
-  await assert.rejects(() => engine.moveWorldIndexRows("places", first, third, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]), /INDEX_SCHEMA_LOCKED/);
-  assert.deepEqual(ids(google.grid(id, first)), ["LIE-1", "LIE-2"]);
-  await engine.moveWorldIndexRows("places", first, second, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]);
+  // La colonne « Onglet » a quitté l'éditeur : un ancien réglage d'onglets d'arrivée ne bloque plus rien.
+  await engine.moveWorldIndexRows("places", first, third, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]);
+  assert.deepEqual(ids(google.grid(id, third)), ["LIE-1"]);
+  await engine.moveWorldIndexRows("places", third, second, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]);
   assert.deepEqual(ids(google.grid(id, second)), ["LIE-1"]);
+  assert.deepEqual(ids(google.grid(id, first)), ["LIE-2"]);
   // L'onglet d'arrivée renommé reste un onglet d'arrivée, sous son nouveau nom.
   await engine.applyWorldSchemaOperations("places", [{ op: "rename-tab", tab: "Ruines", to: "Ruines anciennes" }]);
   data = await engine.getWorldIndex("places", { refresh: true });

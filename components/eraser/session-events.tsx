@@ -347,6 +347,7 @@ function AddSessionEventDialog({ open, candidates, pending, eventsHref, onClose,
  * (nom, image, texte) dans la page Événements.
  */
 export function SessionEvents({ campaignId, session, events, shops, shopTypes = builtinShopTypes, onUpdated }: { campaignId: string; session: CampaignSessionRecord; events: CampaignEvent[]; shops: SavedShopRecord[]; shopTypes?: ShopTypeDefinition[]; onUpdated: (session: CampaignSessionRecord) => void }) {
+  const router = useRouter()
   const [picking, setPicking] = useState(false)
   const [sending, setSending] = useState<SessionEntry | null>(null)
   const [pending, setPending] = useState(false)
@@ -388,8 +389,11 @@ export function SessionEvents({ campaignId, session, events, shops, shopTypes = 
     <AddToSessionDialog open={Boolean(sending)} campaignId={campaignId} title="Envoyer dans une autre session" confirmLabel="Envoyer" excludeId={session.id} subject={sending ? `${sending.event.name} reste dans cette session et rejoint celle choisie.` : ""} pending={pending} onClose={() => setSending(null)} onConfirm={(sessionId) => void guarded(async () => {
       if (!sending) return
       // Un ancien événement complet n'a pas d'identifiant ailleurs : il devient un événement de la page Événements.
-      const id = session.legacyEvents.some((event) => event.id === sending.id) ? (await saveEvent(campaignId, { ...sending.event, id: crypto.randomUUID() })).id : sending.id
+      const legacy = session.legacyEvents.some((event) => event.id === sending.id)
+      const id = legacy ? (await saveEvent(campaignId, { ...sending.event, id: crypto.randomUUID() })).id : sending.id
       await patchSession(campaignId, sessionId, { events: { add: [id] } })
+      // L'événement créé doit apparaître dans l'autre session sans recharger la page.
+      if (legacy) router.refresh()
       setNotice(`${sending.event.name} a aussi été ajouté à l’autre session.`); setSending(null)
     })} />
   </div>

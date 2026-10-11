@@ -535,8 +535,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   useLayoutEffect(() => { refreshRef.current = refresh })
 
-  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux), et
-  // seulement vers les onglets d'arrivée choisis dans « Modifier » (colonne « Onglet »).
+  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
   const moveTargetsOf = useCallback((fromTab: string) => {
     const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
     const from = definition.tabs.find((tab) => tab.name === fromTab)

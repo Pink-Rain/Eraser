@@ -1651,9 +1651,8 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     assertRowCommands(key, "move")
     const sheet = await writableWorkbook(key)
     if (!(await tabsOf(key)).some((tab) => tab.name === toTab)) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
-    // Les onglets d'arrivée choisis dans « Modifier » (colonne « Onglet ») : les autres sont refusés.
-    const targets = (await workbook(key)).definition.tabColumn?.targets
-    if (targets && !targets.includes(toTab)) throw new Error(`INDEX_SCHEMA_LOCKED:Une ligne ne peut pas aller dans « ${toTab} » : cet onglet n’est pas un onglet d’arrivée de la colonne « Onglet » (réglage dans « Modifier »).`)
+    // L'ancien réglage « onglets d'arrivée » de la colonne « Onglet » (retirée) n'est plus
+    // modifiable : un réglage resté dans la feuille ne bloque plus le déplacement.
     const source = await plainTable(key, fromTab)
     const target = await plainTable(key, toTab)
     const moved: WorldIndexRowRef[] = []

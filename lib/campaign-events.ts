@@ -11,6 +11,7 @@ import {
   namedAppendRange,
   namedRowWrites,
   readNamedSheet,
+  resolveJdrSheet,
   updateRanges,
 } from "@/lib/google-sheets"
 import { withAsyncLock } from "@/lib/async-lock"
@@ -55,9 +56,16 @@ function eventCells(event: CampaignEvent): Record<string, string> {
   return Object.fromEntries(campaignEventSheetHeaders.map((header, index) => [header, eventRow(event)[index] ?? ""]))
 }
 
+/**
+ * Les événements d'une campagne, pour l'affichage : la feuille n'est jamais créée ici (elle
+ * l'est au premier événement enregistré) et la lecture est partagée entre installations,
+ * comme les autres affichages. Seules les écritures relisent la feuille fraîchement.
+ */
 export async function listCampaignEvents(campaignId: string) {
-  const { rows } = await readEventRows()
-  return rows.map(eventFromRow)
+  const sheet = await resolveJdrSheet("campaign_events")
+  if (!sheet) return []
+  const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, campaignEventSheetHeaders)
+  return named.rows.map((row) => eventFromRow(canonicalRow(named.columns, row)))
     .filter((event): event is CampaignEvent => Boolean(event && event.campaignId === campaignId))
     .sort((left, right) => left.createdAt.localeCompare(right.createdAt))
 }

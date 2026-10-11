@@ -177,6 +177,10 @@ test("Types de magasin : le plus précis l'emporte, types/sous-types filtrés, t
   assert.ok(match("Marché noir", "black-market"));
   assert.ok(match("Maison ordinaire -\nArmurier", "armory"));
   assert.ok(!match("Maison ambulant", "travelling-market"));
+  // Deux emplacements sans rapport dans un morceau comptent tous les deux ; les racines d'origine restent reconnues.
+  for (const [value, keys] of [["Marché/Taverne", ["market", "tavern"]], ["Antiquaire / Marché", ["market", "antique"]], ["Marché ordinaire-Marché noir", ["market", "black-market"]], ["Antiquités", ["antique"]], ["Libraire", ["bookshop"]], ["Alchimie", ["alchemist"]], ["Tavernier", ["tavern"]], ["Armurerie", ["armory"]]]) {
+    assert.deepEqual(types.builtinShopTypes.map((type) => type.key).filter((key) => match(value, key)).sort(), keys.sort(), value);
+  }
   // Une ligne d'onglet : cases vides = valeurs d'origine, réglages lus sinon.
   const custom = types.shopTypeFromRow({ "Nom": "Maquignon", "Emplacements": "Maquignon", "Types autorisés": "Monture", "Trouvailles": "Items - Créatures", "Nombre d'items": "2", "Apparaît dans": "Événements" });
   assert.deepEqual([custom.key, custom.types, custom.finds, custom.count, custom.appearsIn], ["maquignon", ["Monture"], ["objects", "creatures"], { min: 2, max: 2 }, "events"]);
@@ -206,6 +210,8 @@ test("Fouilles : les lieux viennent de Lieux › Environnement, reconnus même m
   assert.deepEqual(match("Ville/Rue"), ["Ville"]);
   assert.deepEqual(match("Ruines - grotte - navire"), ["Donjon", "Caverne", "Bateau"]);
   assert.deepEqual(match("Marché ordinaire"), []);
+  assert.deepEqual(match("Forêt noire / Plaine"), ["Forêt noire", "Plaine"]);
+  assert.deepEqual(match("Maison noble et forêt"), ["Forêt", "Maison noble"]);
   // Un lieu ajouté dans l'onglet est trouvé aussitôt ; sans l'onglet, la liste d'origine sert.
   assert.deepEqual(match("Tropique"), ["Tropique"]);
   assert.deepEqual(searchPlacesIn("Donjon - Forêt noire"), ["Ruine / donjon", "Forêt noire"]);

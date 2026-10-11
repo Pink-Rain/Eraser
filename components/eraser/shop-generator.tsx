@@ -670,11 +670,14 @@ export function SavedShopCollection({ initialShops, pageLinked, npcs = [], gener
     const selected = withNames(chosen, names)
     try {
       const npcId = newNpcName ? await createVendor(pageLinked, newNpcName) : chosenNpcId
-      await persistShops(action, pageLinked, selected, npcId)
-      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: action === "add-to-campaign" })
+      // Un marché ambulant envoyé comme événement n'est pas un magasin de la campagne : il est
+      // seulement enregistré (sinon le pont Roll20 l'exportait encore une fois retiré de la session).
+      const persistAction = action === "add-to-campaign" && sessionList === "events" ? "save" : action
+      await persistShops(persistAction, pageLinked, selected, npcId)
+      const persisted = await fetchPersistedShops<SavedShopRecord>(pageLinked, { inCampaign: persistAction === "add-to-campaign" })
       requirePersistedShops(selected, persisted, "Le magasin n’est pas retrouvé avec son état de campagne après l’enregistrement.", (candidate) => {
         const saved = candidate as SavedShopRecord
-        if (action === "add-to-campaign" && !saved.inCampaign) return false
+        if (persistAction === "add-to-campaign" && !saved.inCampaign) return false
         return !npcId || saved.npcId === npcId
       })
       if (action === "add-to-campaign" && sessionId) await patchSession(pageLinked, sessionId, sessionList === "events" ? { events: { add: selected.map((shop) => `shop:${shop.id}`) } } : { add: { shopIds: selected.map((shop) => shop.id) } })

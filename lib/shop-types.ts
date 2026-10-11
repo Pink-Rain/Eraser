@@ -186,21 +186,33 @@ export function mergeShopTypes(rows: ShopTypeDefinition[]) {
  * type dont l'emplacement correspond le plus précisément (« Marché noir » plutôt que « Marché »).
  */
 export function shopPlaceMatcher(types: ShopTypeDefinition[]) {
-  const entries = types.flatMap((type) => type.places.map((place) => ({ key: type.key, place: foldText(place) }))).filter((entry) => entry.place)
+  const entries = [
+    ...types.flatMap((type) => type.places.map((place) => ({ key: type.key, place: foldText(place), stem: false }))),
+    // Les racines reconnues avant l'onglet Lieux › Magasin (« Antiquités », « Libraire », « Tavernier »…).
+    ...types.flatMap((type) => (legacyPlaceStems[type.key] ?? []).map((place) => ({ key: type.key, place, stem: true }))),
+  ].filter((entry) => entry.place)
   const cache = new Map<string, Set<string>>()
   return (value: string, key: string) => {
     let owners = cache.get(value)
     if (!owners) {
       owners = new Set<string>()
       for (const segment of listCell(value).map(foldText)) {
-        const matches = entries.filter((entry) => ` ${segment} `.includes(` ${entry.place} `) || segment.startsWith(entry.place))
-        const longest = Math.max(0, ...matches.map((entry) => entry.place.length))
-        for (const entry of matches) if (entry.place.length === longest) owners.add(entry.key)
+        const matches = entries.filter((entry) => entry.stem ? ` ${segment}`.includes(` ${entry.place}`) : ` ${segment} `.includes(` ${entry.place} `) || segment.startsWith(entry.place))
+        // Un emplacement contenu dans un autre plus précis s'efface (« Marché » dans « Marché noir ») ;
+        // deux emplacements sans rapport (« Marché/Taverne ») comptent tous les deux.
+        for (const entry of matches) {
+          if (!matches.some((other) => other.key !== entry.key && other.place.length > entry.place.length && other.place.includes(entry.place))) owners.add(entry.key)
+        }
       }
       cache.set(value, owners)
     }
     return owners.has(key)
   }
+}
+
+/** Les racines des sept types d'origine, comme les reconnaissait le générateur avant l'alpha 194. */
+const legacyPlaceStems: Record<string, string[]> = {
+  market: ["marche"], "black-market": ["marche noir"], bookshop: ["librair"], antique: ["antiqu"], armory: ["armur"], alchemist: ["alchimi"], tavern: ["tavern"],
 }
 
 /** Le type et le sous-type d'un item sont-ils permis par ce type de magasin ? */

@@ -137,7 +137,7 @@ function idList(value: string | undefined, strict = false) {
   }
 }
 
-function sessionFromRow(row: string[], strict = false): CampaignSessionRecord | null {
+function sessionFromRow(row: string[], strict = false, strictEvents = false): CampaignSessionRecord | null {
   if (!row[0] || !row[1]) return null
   return {
     id: row[0],
@@ -152,7 +152,7 @@ function sessionFromRow(row: string[], strict = false): CampaignSessionRecord | 
     updatedAt: row[9] || "",
     places: row[10] || "",
     document: row[11] || "",
-    ...(() => { const events = eventList(row[12], strict); return { eventIds: events.ids, legacyEvents: events.legacy } })(),
+    ...(() => { const events = eventList(row[12], strictEvents); return { eventIds: events.ids, legacyEvents: events.legacy } })(),
   }
 }
 
@@ -246,14 +246,14 @@ async function getCampaignSession(campaignId: string, sessionId: string) {
  * depuis une lecture plus ancienne perdait un ajout fait entre-temps (deux ajouts
  * simultanés : un seul restait).
  */
-async function updateSession(campaignId: string, sessionId: string, change: (current: CampaignSessionRecord) => Partial<CampaignSessionRecord>, options: { lists?: boolean } = {}) {
+async function updateSession(campaignId: string, sessionId: string, change: (current: CampaignSessionRecord) => Partial<CampaignSessionRecord>, options: { lists?: boolean; events?: boolean } = {}) {
   // Dans ce processus, une modification de session à la fois : deux ajouts simultanés
   // partaient de la même lecture et le second effaçait le premier.
   return withAsyncLock("sessions", async () => {
     const { sheet, columns, rows, startRow } = await readSessionRows()
     const index = rows.findIndex((row) => row[0] === sessionId && row[1] === campaignId)
     // Des listes illisibles n'empêchent que ce qui les réécrit (pas un titre ni une bannière).
-    const current = index >= 0 ? sessionFromRow(rows[index], options.lists) : null
+    const current = index >= 0 ? sessionFromRow(rows[index], options.lists, options.events) : null
     if (!current) throw new Error("SESSION_NOT_FOUND")
     const patch = { ...change(current), updatedAt: new Date().toISOString() }
     await updateRanges(sheet.spreadsheetId, namedRowWrites(sheet.tabName, columns, startRow + index, sessionCells(patch)), { valueInputOption: "RAW" })
@@ -325,12 +325,20 @@ export async function updateSessionTexts(campaignId: string, sessionId: string, 
  * pour un événement complet de l'alpha 193.
  */
 export async function updateSessionEvents(campaignId: string, sessionId: string, change: { add?: string[]; remove?: string[] }) {
-  return updateSession(campaignId, sessionId, (session) => {
+  const next = await updateSession(campaignId, sessionId, (session) => {
     const removed = new Set(change.remove ?? [])
     const eventIds = [...new Set([...session.eventIds, ...(change.add ?? [])])].filter((id) => !removed.has(id)).slice(0, 300)
     const legacyEvents = session.legacyEvents.filter((event) => !removed.has(event.id))
     return { eventIds, legacyEvents }
-  }, { lists: true })
+  }, { events: true })
+  // Un marché ambulant retiré : les alphas 194-195 l'avaient marqué « dans la campagne ». S'il n'est
+  // dans les magasins d'aucune session, la marque s'enlève (le pont Roll20 ne l'exporte plus).
+  const marketIds = (change.remove ?? []).filter((id) => id.startsWith("shop:")).map((id) => id.slice(5))
+  if (marketIds.length) {
+    const others = (await listCampaignSessions(campaignId)).filter((candidate) => candidate.id !== sessionId)
+    await syncCampaignFlags(campaignId, next, others, {}, { shopIds: marketIds })
+  }
+  return next
 }
 
 function merged(current: string[], add: string[] = [], remove: string[] = []) {
@@ -391,7 +399,8 @@ export async function deleteCampaignSession(campaignId: string, sessionId: strin
   await updateRanges(sheet.spreadsheetId, canonicalWrites(sheet.tabName, columns, `A${rowNumber}:${LAST_COLUMN}${rowNumber}`, [Array(COLUMNS).fill("")]), { valueInputOption: "RAW" })
   clearSpreadsheetReadCache(sheet.spreadsheetId)
   const emptied = { ...session, npcIds: [], shopIds: [], characterIds: [] }
-  await syncCampaignFlags(campaignId, emptied, sessions.filter((candidate) => candidate.id !== sessionId), {}, { npcIds: session.npcIds, shopIds: session.shopIds })
+  const markets = session.eventIds.filter((id) => id.startsWith("shop:")).map((id) => id.slice(5))
+  await syncCampaignFlags(campaignId, emptied, sessions.filter((candidate) => candidate.id !== sessionId), {}, { npcIds: session.npcIds, shopIds: [...session.shopIds, ...markets] })
 }
 
 function bannerKey(campaignId: string, sessionId: string) {

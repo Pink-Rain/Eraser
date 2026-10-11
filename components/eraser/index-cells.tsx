@@ -153,8 +153,10 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
     }
     if (!next) { commit([]); return }
     const key = foldName(next)
-    const kept = current.map((item) => item.option?.value ?? item.raw)
-    commit(kept.some((item) => foldName(item) === key) ? kept.filter((item) => foldName(item) !== key) : [...kept, next])
+    // Les noms déjà dans la case restent écrits comme dans la feuille (« Marché ordinaire » ne devient pas « Marché ») ;
+    // seul celui qu'on coche ou décoche change.
+    const isKey = (item: (typeof current)[number]) => foldName(item.option?.value ?? item.raw) === key || foldName(item.raw) === key
+    commit(current.some(isKey) ? current.filter((item) => !isKey(item)).map((item) => item.raw) : [...current.map((item) => item.raw), next])
     setQuery("")
   }
 
@@ -371,7 +373,8 @@ export function LinkedChoicePicker({ source, moreSources, value, onChange, compa
     disabled={disabled}
     multiple={multiple}
     createLabel={isBuiltinWorldIndexKey(source.index) ? `l’index ${worldIndexDefinitions[source.index].title}` : "l’index lié"}
-    onCreate={(name) => ensureWorldIndexName(source, name)}
+    // Liste stricte (emplacements des items) : un nom en rouge se corrige, il ne s'ajoute jamais à l'index lié.
+    onCreate={strict ? undefined : (name) => ensureWorldIndexName(source, name)}
     onChange={(next) => { setShown(next); onChange(next) }}
   />
 }
