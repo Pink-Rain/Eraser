@@ -150,7 +150,16 @@ function ToneSwatches({ value, onChange, allowColumn = true, disabled, compact =
     {named.map((entry) => <button key={entry.value} type="button" disabled={disabled} title={entry.label} aria-label={entry.label} aria-pressed={current === entry.value} onClick={() => onChange(entry.value === "default" ? undefined : entry.value)} className={cn("grid size-6 place-items-center rounded-md border", current === entry.value ? "border-primary bg-primary/10 ring-1 ring-primary" : "hover:bg-muted")}>{entry.swatch}</button>)}
     {!compact && <span className="mx-0.5 h-4 w-px bg-border" />}
     {(compact ? cardPalette.slice(0, 6) : cardPalette).map((color) => <button key={color.value} type="button" disabled={disabled} title={color.label} aria-label={color.label} aria-pressed={current === color.value} onClick={() => onChange(color.value)} className={cn("size-5 rounded-full border", current === color.value && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color.value }} />)}
+    {!compact && <FreeColor value={current.startsWith("#") && !cardPalette.some((color) => color.value === current) ? current : undefined} onChange={onChange} disabled={disabled} />}
   </span>
+}
+
+/** Une couleur libre (pipette), en plus de la palette : marquée quand elle est choisie. */
+function FreeColor({ value, onChange, disabled }: { value: string | undefined; onChange: (value: string) => void; disabled?: boolean }) {
+  return <label title="Une couleur libre" className={cn("relative grid size-6 cursor-pointer place-items-center overflow-hidden rounded-full border bg-[conic-gradient(#e11d48,#f59e0b,#84cc16,#06b6d4,#6366f1,#d946ef,#e11d48)]", value && "ring-2 ring-primary ring-offset-1", disabled && "pointer-events-none opacity-50")} style={value ? { background: value } : undefined}>
+    <span className="sr-only">Couleur libre</span>
+    <input type="color" disabled={disabled} value={value ?? "#927640"} onChange={(event) => onChange(event.target.value)} className="absolute inset-0 size-full cursor-pointer opacity-0" />
+  </label>
 }
 
 const sizeOptions = [{ value: "xs", label: "XS" }, { value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }, { value: "xl", label: "XL" }] as const
@@ -236,7 +245,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
     </div>
     <span className={label}>Couleur<ToneSwatches value={block.tone} onChange={(tone) => set({ tone })} disabled={disabled} allowColumn={block.type !== "line"} /></span>
     <div className="flex flex-wrap gap-3">
-      <Toggle checked={Boolean(block.bold)} onChange={(bold) => set({ bold: bold || undefined })} disabled={disabled}>Gras</Toggle>
+      {block.type !== "title" && <Toggle checked={Boolean(block.bold)} onChange={(bold) => set({ bold: bold || undefined })} disabled={disabled}>Gras</Toggle>}
       <Toggle checked={Boolean(block.italic)} onChange={(italic) => set({ italic: italic || undefined })} disabled={disabled}>Italique</Toggle>
       {block.type !== "title" && <Toggle checked={Boolean(block.caps)} onChange={(caps) => set({ caps: caps || undefined })} disabled={disabled}>Petites capitales</Toggle>}
     </div>
@@ -294,7 +303,11 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         <span className={label}>Couleur<ToneSwatches value={block.tone ?? "column"} onChange={(tone) => set({ tone: tone === "column" ? undefined : tone })} disabled={disabled} /></span>
         <div className="flex flex-wrap items-center gap-3">
           <Toggle checked={Boolean(block.stacked)} onChange={(stacked) => set({ stacked: stacked || undefined })} disabled={disabled}>Une par ligne</Toggle>
-          <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptions]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
+          <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptions, { value: "right", label: "Droite" }]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
+        </div>
+        <div className="flex flex-wrap items-center gap-3">
+          <Toggle checked={Boolean(block.showLabel)} onChange={(showLabel) => set({ showLabel: showLabel || undefined, label: showLabel ? block.label || (block.columns ?? [])[0] : block.label })} disabled={disabled}>Un titre au-dessus</Toggle>
+          {block.showLabel && <Input value={block.label ?? ""} disabled={disabled} onChange={(event) => set({ label: event.target.value || undefined })} placeholder="Traits, Mots-clés…" className="h-7 w-40 text-xs" aria-label="Titre des pastilles" />}
         </div>
       </div>
     case "field":
@@ -331,6 +344,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
           <span className={label}>Forme<Segmented ariaLabel="Forme" value={block.shape ?? "rect"} options={[{ value: "rect", label: "Carrée" }, { value: "rounded", label: "Arrondie" }, { value: "circle", label: "Ronde" }]} onChange={(shape) => set({ shape: shape === "rect" ? undefined : shape })} disabled={disabled} /></span>
         </div>
         <label className={label}>Largeur : {block.width ?? 100} %<input type="range" min={15} max={100} step={5} value={block.width ?? 100} disabled={disabled} onChange={(event) => set({ width: Number(event.target.value) })} className="accent-primary" /></label>
+        {(block.width ?? 100) < 100 && <span className={label}>Place<Segmented ariaLabel="Place de l’image" value={block.align ?? "left"} options={[...alignOptions, { value: "right", label: "Droite" }]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>}
       </div>
     case "value":
       return <div className="grid gap-3">
@@ -468,7 +482,8 @@ function CardSettings({ card, columns, selectedBlock, onSelectBlock, onChange, d
       <div className="grid gap-2 sm:grid-cols-2">
         <label className={label}>Couleur d’accent prise dans<ColumnSelect value={card.accent?.column} columns={accentColumns.length ? accentColumns : columns} onChange={(column) => set({ accent: { ...card.accent, column } })} disabled={disabled} ariaLabel="Colonne de la couleur d’accent" empty="— Une couleur fixe —" /></label>
         <span className={label}>{card.accent?.column ? "Sinon (case vide)" : "Couleur fixe"}
-          <span className="flex flex-wrap gap-1">{cardPalette.map((color) => <button key={color.value} type="button" disabled={disabled} title={color.label} aria-label={color.label} aria-pressed={(card.accent?.color ?? DEFAULT_CARD_ACCENT) === color.value} onClick={() => set({ accent: { ...card.accent, color: color.value } })} className={cn("size-5 rounded-full border", (card.accent?.color ?? DEFAULT_CARD_ACCENT) === color.value && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color.value }} />)}</span>
+          <span className="flex flex-wrap items-center gap-1">{cardPalette.map((color) => <button key={color.value} type="button" disabled={disabled} title={color.label} aria-label={color.label} aria-pressed={(card.accent?.color ?? DEFAULT_CARD_ACCENT) === color.value} onClick={() => set({ accent: { ...card.accent, color: color.value } })} className={cn("size-5 rounded-full border", (card.accent?.color ?? DEFAULT_CARD_ACCENT) === color.value && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color.value }} />)}
+            <FreeColor value={card.accent?.color && !cardPalette.some((color) => color.value === card.accent?.color) ? card.accent.color : undefined} onChange={(color) => set({ accent: { ...card.accent, color } })} disabled={disabled} /></span>
         </span>
       </div>
       <span className={label}>Bordure<Segmented ariaLabel="Bordure" value={card.border ?? "subtle"} options={[{ value: "none", label: "Aucune" }, { value: "subtle", label: "Fine" }, { value: "accent", label: "Accent" }, { value: "left", label: "Liseré à gauche" }, { value: "top", label: "Liseré en haut" }]} onChange={(border) => set({ border: border === "subtle" ? undefined : border })} disabled={disabled} /></span>

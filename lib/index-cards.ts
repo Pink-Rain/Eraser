@@ -652,6 +652,102 @@ export const cardStarters: CardStarter[] = [
     },
   },
   {
+    key: "playing",
+    label: "Carte à jouer",
+    hint: "Grande illustration, titre centré, pastilles et petites tuiles en bas : un sort, un objet, une créature.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Carte à jouer", width: "sm", align: "center", border: "accent", shadow: true, lift: true, radius: "lg",
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        ...(roles.image || roles.glyph ? { media: { column: (roles.image ?? roles.glyph)!, position: "top" as const, aspect: "3/4" as const, fit: "cover" as const, tint: !roles.image } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "lg", font: "display", align: "center" }),
+          roles.choices.length > 0 && block("pills", { columns: roles.choices.slice(0, 2), align: "center" }),
+          roles.description && block("text", { column: roles.description, clamp: 3, size: "xs", align: "center", italic: true, tone: "muted" }),
+          roles.numbers.length > 0 && block("divider"),
+          roles.numbers.length > 0 && block("stats", { columns: roles.numbers.slice(0, 4) }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "combat",
+    label: "Fiche de combat",
+    hint: "Le nom et son rang, une barre de vie, les caractéristiques en tuiles, le reste replié : un PNJ, un monstre.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      const life = roles.numbers.find((column) => /pv|vie|sant[ée]|hp|points/i.test(column)) ?? roles.numbers[0]
+      const lifeMax = roles.numbers.find((column) => column !== life && /max/i.test(column))
+      const tiles = roles.numbers.filter((column) => column !== life && column !== lifeMax).slice(0, 7)
+      return {
+        id: cardId(), name: "Fiche de combat", width: "lg", border: "left", density: "compact",
+        accent: roles.color ? { column: roles.color } : { color: "#a83a33" },
+        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "1/1" as const, fit: "cover" as const, size: "sm" as const, shape: "rounded" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "md", font: "display", ...(roles.choices[0] ? { badges: [roles.choices[0]] } : {}) }),
+          life && block("bar", { column: life, ...(lifeMax ? { maxColumn: lifeMax } : { max: 100 }), label: life, showValue: true }),
+          tiles.length > 0 && block("stats", { columns: tiles }),
+          (roles.description || roles.texts.length > 0) && block("details", { label: "Détails", columns: [roles.description, ...roles.texts].filter((column): column is string => Boolean(column)).slice(0, 4) }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "dossier",
+    label: "Dossier",
+    hint: "Une fiche d’enquête : portrait à gauche, champs libellés, la description en citation.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      const fields = [...roles.choices, ...roles.numbers].slice(0, 3)
+      return {
+        id: cardId(), name: "Dossier", width: "xl", border: "top", surface: "tint",
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "4/5" as const, fit: "cover" as const, size: "md" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display" }),
+          ...fields.map((column) => block("field", { column })),
+          roles.description && block("text", { column: roles.description, clamp: 4, size: "sm", quote: true, italic: true }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "banner",
+    label: "Bannière",
+    hint: "Une image large en bandeau, le nom en grand, une ligne et deux lignes de texte : une campagne, un lieu, une faction.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Bannière", width: "xl", lift: true, band: true, border: "subtle",
+        ...(roles.color ? { accent: { column: roles.color } } : {}),
+        ...(roles.image ? { media: { column: roles.image, position: "top" as const, aspect: "16/6" as const, fit: "cover" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display", tone: "accent" }),
+          roles.choices.length > 0 && block("line", { parts: roles.choices.slice(0, 3).map((column) => ({ column })), separator: " • ", size: "xs", caps: true, tone: "muted" }),
+          roles.description && block("text", { column: roles.description, clamp: 2, size: "sm" }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "token",
+    label: "Vignette ronde",
+    hint: "Petite et centrée : un portrait rond et le nom, pour un trombinoscope serré.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Vignette ronde", width: "xs", align: "center", border: "none", surface: "plain", density: "compact", lift: true,
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        blocks: [
+          (roles.image ?? roles.glyph) && block("image", { column: (roles.image ?? roles.glyph)!, aspect: "1/1", fit: "cover", shape: "circle", width: 75, align: "center" }),
+          roles.name && block("title", { column: roles.name, size: "sm", font: "display", align: "center", clamp: 2 }),
+          roles.choices[0] && block("line", { parts: [{ column: roles.choices[0], tone: "column" }], size: "xs", align: "center" }),
+        ].filter(present),
+      }
+    },
+  },
+  {
     key: "cover",
     label: "Image de fond",
     hint: "L’image couvre toute la carte, le texte posé dessus : un lieu, une scène.",
