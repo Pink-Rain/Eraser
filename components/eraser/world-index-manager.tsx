@@ -1150,7 +1150,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   return (
     <ReferenceScopeProvider scope={referenceScope}>
-    <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3 ${fullscreen.className}`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
+    <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
       <div className="flex flex-wrap items-end gap-2">
         {/* Intégrée : la vue de la page, puis les onglets-fenêtres de l'index (combinés à elle). */}
         {embed && settings.views.length > 0 && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
@@ -1188,7 +1188,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {data?.webViewLink && <SheetsLinkButton href={data.webViewLink} />}
-          <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />
+          {table && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {table && <DrawRowButton
@@ -1258,6 +1258,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />
       ) : table ? (
         <SheetGrid
+          fullscreen={fullscreen.fullscreen}
+          onExitFullscreen={fullscreen.exit}
           layoutKey={`eraser:world-index:grid:${storeKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
           columns={columns}
           rows={displayedRows}

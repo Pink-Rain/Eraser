@@ -2,7 +2,7 @@
 
 import { createContext, memo, startTransition, useCallback, useContext, useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type MutableRefObject, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
 import { hasRememberedScroll, rememberScroll } from "@/lib/scroll-memory"
-import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, LoaderCircle, Plus, RotateCcw, Scissors, Trash2 } from "lucide-react"
+import { ArrowDownAZ, ArrowUpAZ, ClipboardPaste, Copy, CornerDownLeft, Eraser, Eye, EyeOff, Filter, ListPlus, LoaderCircle, Plus, RotateCcw, Scissors, Trash2, Minimize2 } from "lucide-react"
 
 import {
   AlertDialog,
@@ -394,6 +394,7 @@ function NewRowDraft({ columns, firstKey, settings, disabled, onDone }: {
 export function SheetGrid({
   layoutKey, columns: allColumns, rows: sourceRows, valueOf, onCommit, renderCustomCell, rowCommands, rowMenuExtras, addRowLabel = "Ajouter une ligne",
   sort, onSort, toolbarLeading, toolbarTrailing, empty, disabled = false, readOnly = false, version = 0, rowVersions, fit = false,
+  fullscreen = false, onExitFullscreen,
 }: {
   layoutKey: string
   columns: SheetGridColumn[]
@@ -422,6 +423,9 @@ export function SheetGrid({
   rowVersions?: Record<string, number>
   /** Petit tableau posé dans une page (statistiques, diagnostic) : à la hauteur de ses lignes, sans se figer sous l'en-tête. */
   fit?: boolean
+  /** Le tableau seul, par-dessus toute la fenêtre (sous la barre de titre), avec sa barre de mise en forme. */
+  fullscreen?: boolean
+  onExitFullscreen?: () => void
 }) {
   const [layout, setLayout] = usePersistentState<SheetGridLayout>(layoutKey, emptyLayout, isSheetGridLayout)
   // Revenir sur ce tableau (autre onglet d'Eraser, autre page) le remet là où on était.
@@ -734,7 +738,7 @@ export function SheetGrid({
   // titre, la recherche et les onglets s'effacent vers le haut, la barre d'outils et
   // les noms de colonnes restent. La hauteur retire l'en-tête (3.5rem) et, sur
   // l'application Windows, la barre de titre.
-  return <SheetGridMenuContext.Provider value={menu}><div className={`${fit ? "relative flex max-h-[70svh]" : "sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))]"} flex-col overflow-hidden rounded-xl border bg-background/60`}>
+  return <SheetGridMenuContext.Provider value={menu}><div className={`${fullscreen ? "fixed inset-x-0 bottom-0 top-[var(--eraser-titlebar,0px)] z-50 flex bg-background" : fit ? "relative flex max-h-[70svh] rounded-xl border bg-background/60" : "sticky top-0 z-20 flex h-[calc(100svh-3.5rem-var(--eraser-titlebar,0px))] rounded-xl border bg-background/60"} flex-col overflow-hidden`}>
     <SheetGridToolbar
       targetRef={activeRef}
       ready={toolbarReady}
@@ -744,6 +748,7 @@ export function SheetGrid({
         {hiddenCount > 0 && <button type="button" onClick={() => setShowHidden(!showHidden)} className="flex items-center gap-1 rounded-md px-1.5 py-1 text-[11px] text-muted-foreground hover:bg-muted hover:text-foreground" title={showHidden ? "Cacher à nouveau les colonnes masquées" : "Montrer les colonnes masquées (identifiant…)"}>{showHidden ? <EyeOff className="size-3.5" /> : <Eye className="size-3.5" />}{showHidden ? "Cacher" : "Colonnes masquées"} ({hiddenCount})</button>}
         {activeFilters.length > 0 && <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><Filter className="size-3 fill-current text-primary" />{rows.length} ligne{rows.length > 1 ? "s" : ""} sur {sourceRows.length}<button type="button" className="text-primary underline" onClick={() => setFilters({})}>Retirer les filtres</button></span>}
         {notice && <span className="text-[11px] text-muted-foreground">{notice}</span>}{toolbarTrailing}
+        {fullscreen && onExitFullscreen && <button type="button" onClick={onExitFullscreen} className="flex items-center gap-1.5 rounded-md px-2 py-1 text-xs font-medium text-muted-foreground hover:bg-muted hover:text-foreground" title="Quitter le plein écran (Échap)"><Minimize2 className="size-3.5" />Quitter le plein écran</button>}
       </>}
       onReset={() => { setLayout(emptyLayout); setPreview({ columns: {}, rows: {} }) }}
     />

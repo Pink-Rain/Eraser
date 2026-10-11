@@ -605,7 +605,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
 
   return (
     <ReferenceScopeProvider scope={referenceScope}>
-    <section className={`flex flex-col gap-3 ${fullscreen.className}`} {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
+    <section className="flex flex-col gap-3" {...{ [IN_PLACE_ATTRIBUTE]: pathname }}>
       <div className="flex flex-wrap items-end gap-2">
         <label className="grid w-full min-w-0 gap-1 text-xs font-semibold text-muted-foreground sm:w-72">
           Onglet
@@ -629,7 +629,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         {selected && !activeView && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {selected?.webViewLink && <SheetsLinkButton href={selected.webViewLink} />}
-          <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />
+          {selected && !activeView && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
           <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les objets répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
@@ -682,6 +682,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
         <SheetGrid
+          fullscreen={fullscreen.fullscreen}
+          onExitFullscreen={fullscreen.exit}
           layoutKey={`eraser:object-index:grid:${selected.fileId}:${selected.sheetId}`}
           columns={columns}
           rows={displayedRows}

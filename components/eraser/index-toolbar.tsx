@@ -31,17 +31,21 @@ export function SheetsLinkButton({ href }: { href: string }) {
 }
 
 /**
- * Le tableau en plein écran : la page d'index passe par-dessus le menu et l'en-tête, barre
- * d'outils comprise. Échap (ou le même bouton) la remet à sa place. Les fenêtres et menus
- * ouverts depuis le tableau restent au-dessus (ils sont rendus à la racine de la page).
+ * Le tableau en plein écran : seul le tableau (avec sa barre de mise en forme) passe
+ * par-dessus le menu et la page. Échap (hors d'une case en cours de saisie) ou le bouton de
+ * sa barre le remet à sa place. Les fenêtres et menus ouverts depuis le tableau restent
+ * au-dessus (ils sont rendus à la racine de la page).
  */
 export function useFullscreenPanel() {
   const [fullscreen, setFullscreen] = useState(false)
   useEffect(() => {
     if (!fullscreen) return
     const leave = (event: KeyboardEvent) => {
-      // Échap ferme d'abord la fenêtre ou le menu ouvert par-dessus.
-      if (event.key !== "Escape" || event.defaultPrevented || document.querySelector("[role=dialog],[role=menu],[data-radix-popper-content-wrapper]")) return
+      if (event.key !== "Escape" || event.defaultPrevented) return
+      // Échap ferme d'abord la fenêtre ou le menu ouvert, ou quitte la case en cours de saisie.
+      if (document.querySelector("[role=dialog],[role=menu],[data-radix-popper-content-wrapper]")) return
+      const active = document.activeElement
+      if (active instanceof HTMLElement && (active.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(active.tagName))) return
       setFullscreen(false)
     }
     window.addEventListener("keydown", leave)
@@ -52,7 +56,7 @@ export function useFullscreenPanel() {
   return {
     fullscreen,
     toggle: () => setFullscreen((current) => !current),
-    className: fullscreen ? "fixed inset-x-0 bottom-0 top-[var(--eraser-titlebar,0px)] z-40 overflow-auto bg-background p-4" : "",
+    exit: () => setFullscreen(false),
   }
 }
 
