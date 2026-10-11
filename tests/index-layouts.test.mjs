@@ -88,3 +88,19 @@ test("créatures : listes et types modifiables, sauf ce que recopie un compagnon
   assert.ok(policy("Portrait").reasons.some((reason) => /token/.test(reason)));
   assert.equal(definitions.worldColumnSpec("creatures", "Créatures", "Portrait").file.store, "creature-portraits");
 });
+
+test("cadrage du token : le visage choisi recadre les avatars rognés, et resserre les petites vignettes", async () => {
+  const framing = await vite.ssrLoadModule("/lib/portrait-framing-shared.ts");
+  // Image deux fois plus haute que large, centrée et couvrant juste le cercle : tout au milieu.
+  assert.deepEqual(framing.framingFromPlacement({ x: 256, y: 256, width: 432 }, 2, 512, 216), { x: 0.5, y: 0.5, span: 1 });
+  // Agrandie deux fois et descendue : le cercle montre le haut de l'image (le visage), sur la moitié de sa largeur.
+  const face = framing.framingFromPlacement({ x: 256, y: 256 + 432, width: 864 }, 2, 512, 216);
+  assert.deepEqual(face, { x: 0.5, y: 0.25, span: 0.5 });
+  const small = framing.framedImageStyle(face, { width: 36, height: 36 }, { width: 100, height: 200 });
+  // 36 px : l'image (36 × 72) est doublée et le visage (au quart de sa hauteur) ramené au centre.
+  assert.equal(small.transform, "translate(-18.0px, -18.0px) scale(2.000)");
+  // Une grande carte garde l'image entière en largeur : seul le point du visage compte.
+  assert.equal(framing.framedImageStyle(face, { width: 104, height: 144 }, { width: 100, height: 200 }).transform, "");
+  assert.equal(framing.cleanPortraitFraming({ x: "a" }), null);
+  assert.deepEqual(framing.cleanPortraitFraming({ x: 2, y: -1, span: 9 }), { x: 1, y: 0, span: 4 });
+});

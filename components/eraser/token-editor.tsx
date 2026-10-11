@@ -8,6 +8,8 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { cn } from "@/lib/utils"
 import type { ShopKey } from "@/lib/shop-schema"
 import type { TokenKind } from "@/lib/tokens"
+import { framingFromPlacement } from "@/lib/portrait-framing-shared"
+import { announcePortraitFraming } from "@/components/eraser/portrait-framing"
 import "@/integrations/roll20/extension/token-art.js"
 
 /* ---------- dessin ---------- */
@@ -149,9 +151,13 @@ export function TokenEditorDialog({ open, kind, ownerId, name, source, style, on
       if (!blob) throw new Error("Le token n’a pas pu être préparé.")
       const form = new FormData()
       form.append("token", new File([blob], "token.png", { type: "image/png" }))
+      // Le cadrage choisi ici recadre aussi l'avatar dans les cartes et les vignettes.
+      const framing = image ? framingFromPlacement(placement, image.naturalHeight / image.naturalWidth, SIZE, INNER) : null
+      if (framing) form.append("framing", JSON.stringify(framing))
       const response = await fetch(`/api/tokens/${kind}/${encodeURIComponent(ownerId)}`, { method: "POST", body: form })
       const payload = (await response.json().catch(() => ({}))) as { url?: string; error?: string }
       if (!response.ok || !payload.url) throw new Error(payload.error || "Le token n’a pas pu être enregistré.")
+      if (framing) announcePortraitFraming(kind, ownerId, framing)
       onSaved(payload.url)
       onClose()
     } catch (caught) { setError(caught instanceof Error ? caught.message : "Le token n’a pas pu être enregistré.") }

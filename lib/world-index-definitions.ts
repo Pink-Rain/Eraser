@@ -426,7 +426,7 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     path: "/ressources/index-des-campagnes",
     itemLabel: "une campagne",
     tabs: [{ name: "Campagnes", itemLabel: "une campagne", headers: campaignSheetHeaders, widths: [160, 200, 280, 420, 260, 140], idPrefix: "CAM" }],
-    entity: { nameHeader: "Nom de la campagne", nameHref: "/campagne/{id}", addHref: "/creation-de-campagne", trashKind: "campaign" },
+    entity: { nameHeader: "Nom de la campagne", nameHref: "/campagne/{id}/dossier", addHref: "/creation-de-campagne", trashKind: "campaign" },
   },
   characters: {
     key: "characters",

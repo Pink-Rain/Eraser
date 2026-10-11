@@ -2,7 +2,7 @@ import { notFound, redirect } from "next/navigation"
 import { BookOpen, CalendarDays, ChartColumn, ChevronDown, Drama, LayoutDashboard, Map, PackageSearch, Store, Waypoints } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
-import { CampaignGroupTable, GroupNpcsPanel, MetNpcsPanel, type FolderMember, type FolderNpc, type MetNpc } from "@/components/eraser/campaign-folder"
+import { CampaignGroupTable, GroupNpcsPanel, MetNpcsPanel, type FolderCharacter, type FolderMember, type FolderNpc, type MetNpc, type NpcRelation } from "@/components/eraser/campaign-folder"
 import { MenuLinkPanel } from "@/components/eraser/menu-page"
 import { Roll20BridgePanel } from "@/components/eraser/roll20-bridge-panel"
 import { readAchievements } from "@/lib/achievements"
@@ -77,17 +77,26 @@ async function folderData(campaign: CampaignRecord, account: AuthorizedUser) {
     }
   })
   const subtitle = (npc: { title: string; occupation: string }) => [npc.title, npc.occupation].filter(Boolean).join(" · ")
-  const groupNpcs: FolderNpc[] = (npcs ?? []).filter((npc) => npc.inPlayerGroup).map((npc) => ({ id: npc.id, name: npc.name, portrait: npc.portrait, subtitle: subtitle(npc), currentHp: npc.currentHp, totalHp: npc.totalHp }))
+  // Ce que chaque personnage pense de chaque PNJ (sa relation notée, sinon aucune).
+  const levelOf = new globalThis.Map<string, number>()
+  for (const relation of relations ?? []) if (relation.targetKind === "npc") levelOf.set(`${relation.characterId}\u0000${relation.targetId}`, relation.level)
+  const relationsOf = (npcId: string): NpcRelation[] => members.map((member) => ({ characterId: member.id, level: levelOf.get(`${member.id}\u0000${npcId}`) ?? null }))
+  // Amis, neutres ou hostiles : la moyenne des relations notées.
+  const attitudeOf = (list: NpcRelation[]) => {
+    const levels = list.flatMap((relation) => relation.level === null ? [] : [relation.level])
+    const mean = levels.length ? levels.reduce((total, value) => total + value, 0) / levels.length : 0
+    return mean > 0 ? "ami" as const : mean < 0 ? "hostile" as const : "neutre" as const
+  }
+  const withRelations = <T extends { id: string }>(npc: T) => { const list = relationsOf(npc.id); return { ...npc, relations: list, attitude: attitudeOf(list) } }
+  const byName = (left: { name: string }, right: { name: string }) => left.name.localeCompare(right.name, "fr")
+  const groupNpcs: FolderNpc[] = (npcs ?? []).filter((npc) => npc.inPlayerGroup).map((npc) => withRelations({ id: npc.id, name: npc.name, portrait: npc.portrait, subtitle: subtitle(npc), currentHp: npc.currentHp, totalHp: npc.totalHp })).sort(byName)
   // Les PNJ croisés : ceux d'une session, du créateur de session, ou notés dans les relations du groupe.
   const inSessions = new Set((sessions ?? []).flatMap((session) => session.npcIds))
-  const levels = new globalThis.Map<string, number[]>()
-  for (const relation of relations ?? []) if (relation.targetKind === "npc") levels.set(relation.targetId, [...(levels.get(relation.targetId) ?? []), relation.level])
-  const metNpcs: MetNpc[] = (npcs ?? []).filter((npc) => !npc.inPlayerGroup && (inSessions.has(npc.id) || npc.inCampaign || levels.has(npc.id))).map((npc) => {
-    const list = levels.get(npc.id) ?? []
-    const mean = list.length ? list.reduce((total, value) => total + value, 0) / list.length : 0
-    return { id: npc.id, name: npc.name, portrait: npc.portrait, subtitle: subtitle(npc), attitude: mean > 0 ? "ami" as const : mean < 0 ? "hostile" as const : "neutre" as const }
-  }).sort((left, right) => left.name.localeCompare(right.name, "fr"))
-  return { rows, groupNpcs, metNpcs, membersFailed: !listed }
+  const noted = new Set((relations ?? []).flatMap((relation) => relation.targetKind === "npc" ? [relation.targetId] : []))
+  const metNpcs: MetNpc[] = (npcs ?? []).filter((npc) => !npc.inPlayerGroup && (inSessions.has(npc.id) || npc.inCampaign || noted.has(npc.id)))
+    .map((npc) => withRelations({ id: npc.id, name: npc.name, portrait: npc.portrait, subtitle: subtitle(npc) })).sort(byName)
+  const characters: FolderCharacter[] = rows.map((row) => ({ id: row.id, name: row.name, portrait: row.portrait }))
+  return { rows, groupNpcs, metNpcs, characters, membersFailed: !listed }
 }
 
 /**
@@ -129,8 +138,8 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">
           <div className="min-w-0 space-y-5">
             <div className="grid gap-5 md:grid-cols-2">
-              <GroupNpcsPanel npcs={data.groupNpcs} />
-              <MetNpcsPanel npcs={data.metNpcs} />
+              <GroupNpcsPanel npcs={data.groupNpcs} characters={data.characters} />
+              <MetNpcsPanel npcs={data.metNpcs} characters={data.characters} />
             </div>
             <details id="roll20" className="group rounded-2xl border bg-card/70 [&_summary::-webkit-details-marker]:hidden">
               <summary className="flex cursor-pointer list-none items-center gap-3 px-5 py-4">

@@ -1,35 +1,29 @@
-# Eraser 0.1.1-alpha.189 — Les créatures passent sur le moteur des index
+# Eraser 0.1.1-alpha.190 — Un dossier de campagne plus lisible, des avatars bien cadrés
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Index des créatures
+## Dossier de campagne
 
-- **La fiche d'une créature est celle de tous les index** : elle s'ouvre d'un clic sur le nom,
-  s'enregistre toute seule à chaque champ (plus de bouton « Enregistrer la fiche »), passe à la
-  créature suivante ou précédente sans se fermer, et suit les types de colonnes réglés dans
-  « Modifier ».
-- Elle garde la disposition de l'ancienne fiche, comme **mise en page d'office** : portrait à
-  gauche (avec son bouton **Token**), identité, « Où la trouver », caractéristiques encadrées,
-  « Description, Histoire, Lore, Autre », puis les sorts **Actifs** et **Passifs**. Elle se modifie
-  dans « Modifier › Fiche » comme celle de n'importe quel onglet ; « Revenir à la fiche d'Eraser »
-  la remet telle quelle.
-- **Listes modifiables** : Emplacement, Rareté, Organisation, Comportement, Langue, Taille, Poids…
-  ne sont plus verrouillées (valeurs de liste, type, nom). Type, Sous-type et Rang gardent leur nom
-  (un compagnon les recopie) mais leurs valeurs et leur type se changent. Restent verrouillés : le
-  portrait (le token en est fait), les caractéristiques et les sorts, que lisent les compagnons et
-  la fusion des sorts.
-- Le formulaire « Ajouter » propose tous les champs de la fiche, rangés comme elle.
-- Les colonnes de la fiche restent masquées dans le tableau ; « Colonnes masquées » les montre
-  maintenant d'un clic. Une colonne ajoutée à la main dans Sheets apparaît dans le tableau, comme
-  ailleurs.
-- **Fusion de sorts** (Doublons) : le sort gardé remplace les sorts supprimés chez les créatures
-  **et chez les PNJ** qui les citaient (avant : les créatures seulement), comme pour un renommage.
-  Un nom encore porté par un autre sort n'est pas touché.
+- **Le groupe, personnage par personnage**, plus agréable à lire : une ligne sur deux légèrement
+  plus foncée, une icône par colonne, les colonnes **Or**, **Cuivre** et **Or noir** teintées de
+  la couleur de leur pièce, le portrait cerclé selon la vie (en forme, blessé, à terre, mort), les
+  états de niveau II plus marqués, et une petite **couronne** sur le meilleur du groupe (succès,
+  objets reçus, or). La phrase d'explication sous le tableau est retirée.
+- **PNJs du groupe** et **PNJ rencontrés** : la liste des noms laisse la place à l'anneau seul.
+  **Survoler** (ou toucher) une part de l'anneau ou une ligne de la légende montre ses PNJ :
+  portrait, nom, et **la relation de chaque personnage** avec lui (+1 à +3 allié·e, 0
+  connaissance, -1 à -3 ennemi·e, « – » sans relation). Un même PNJ peut être ami de l'un et
+  hostile à l'autre. Les PNJ du groupe montrent aussi leurs PV.
 
-## Mises en page des fiches (tous les index)
+## Index des campagnes
 
-- Chaque champ placé peut porter **son propre libellé** (bouton « Libellé » du champ, dans
-  « Modifier › Fiche ») : « Actifs » au lieu de « Sorts actifs »…
-- Une colonne Image peut afficher un portrait en hauteur ; sur téléphone, l'image de la colonne
-  latérale ne prend plus tout l'écran.
-- Une case à cocher s'aligne sur le bas des champs de sa ligne.
+- Le nom d'une campagne mène maintenant à son **Dossier**.
+
+## Avatars
+
+- Le cadrage choisi dans l'**éditeur de token** (où se trouve le visage) sert aussi aux avatars
+  rognés de l'application : cartes de personnages, listes, petites vignettes du menu, dossier…
+  Elles montrent le visage au lieu du milieu de l'image (les jambes, parfois les pieds). Les
+  petites vignettes se resserrent sur le visage, comme le token. Il suffit de **réenregistrer le
+  token** une fois pour qu'un personnage (ou un PNJ) en profite ; le cadrage est partagé entre
+  toutes les installations.

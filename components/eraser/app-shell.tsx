@@ -2,6 +2,7 @@
 
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { installNavigationCacheGuard } from "@/lib/navigation-cache"
+import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
 import { rememberScroll } from "@/lib/scroll-memory"
 import Link from "next/link"
 import dynamic from "next/dynamic"
@@ -476,6 +477,8 @@ export function AppShell({
 
   return (
     <PageLabelContext.Provider value={setShellLabel}>
+    {/* Les avatars rognés montrent le visage choisi dans l'éditeur de token. */}
+    <PortraitFramingEffect />
     {/* Les onglets enveloppent la barre de titre, qui les affiche, et toute la coque :
         le clic droit sur un lien est capté au niveau du document. */}
     <AppTabsProvider pathname={pathname} label={currentPageLabel}>

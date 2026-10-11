@@ -1,0 +1,85 @@
+"use client"
+
+import { useEffect } from "react"
+
+import { cleanPortraitFraming, framedImageStyle, type PortraitFraming } from "@/lib/portrait-framing-shared"
+
+/**
+ * Recadre les avatars des personnages (et des PNJ) partout où une vue les rogne
+ * (`object-fit: cover`) : le visage choisi dans l'éditeur de token reste visible au lieu
+ * du milieu de l'image (souvent les jambes, ou les pieds). Les avatars sont reconnus à
+ * leur adresse ; une image marquée `data-no-framing` garde son cadrage.
+ */
+const EVENT = "eraser:portrait-framing"
+const PATTERNS: Array<[RegExp, string]> = [[/\/api\/characters\/portrait\/([^/?#]+)/, "character"], [/\/api\/npcs\/portrait\/([^/?#]+)/, "npc"]]
+const MARK = "data-eraser-framed"
+
+let framings: Record<string, PortraitFraming> = {}
+
+/** Un token vient d'être enregistré : son cadrage s'applique tout de suite, sans relire. */
+export function announcePortraitFraming(kind: string, id: string, framing: PortraitFraming) {
+  window.dispatchEvent(new CustomEvent(EVENT, { detail: { key: `${kind}:${id}`, framing } }))
+}
+
+function keyOf(image: HTMLImageElement) {
+  const source = image.getAttribute("src") ?? ""
+  for (const [pattern, kind] of PATTERNS) {
+    const match = source.match(pattern)
+    if (match) { try { return `${kind}:${decodeURIComponent(match[1])}` } catch { return `${kind}:${match[1]}` } }
+  }
+  return ""
+}
+
+function frame(image: HTMLImageElement) {
+  if (image.hasAttribute("data-no-framing")) return
+  const key = keyOf(image)
+  const framing = key ? framings[key] : undefined
+  if (!framing || getComputedStyle(image).objectFit !== "cover") {
+    // Plus de cadrage (une autre image dans la même balise) : on rend la place à la vue.
+    if (image.hasAttribute(MARK)) { image.style.objectPosition = ""; image.style.transformOrigin = ""; image.style.transform = ""; image.removeAttribute(MARK) }
+    return
+  }
+  if (!image.naturalWidth) { image.addEventListener("load", () => frame(image), { once: true }); return }
+  const style = framedImageStyle(framing, { width: image.clientWidth, height: image.clientHeight }, { width: image.naturalWidth, height: image.naturalHeight })
+  image.style.objectPosition = style.objectPosition
+  image.style.transformOrigin = style.transformOrigin
+  image.style.transform = style.transform
+  image.setAttribute(MARK, key)
+}
+
+function frameAll(root: ParentNode = document) {
+  root.querySelectorAll<HTMLImageElement>("img").forEach((image) => { if (keyOf(image) || image.hasAttribute(MARK)) frame(image) })
+}
+
+export function PortraitFramingEffect() {
+  useEffect(() => {
+    let alive = true
+    fetch("/api/portrait-framing", { cache: "no-store" })
+      .then((response) => response.ok ? response.json() : null)
+      .then((payload: { framings?: Record<string, unknown> } | null) => {
+        if (!alive || !payload?.framings) return
+        framings = Object.fromEntries(Object.entries(payload.framings).flatMap(([key, value]) => { const framing = cleanPortraitFraming(value); return framing ? [[key, framing]] : [] }))
+        frameAll()
+      })
+      .catch(() => {})
+    const announced = (event: Event) => {
+      const detail = (event as CustomEvent<{ key: string; framing: PortraitFraming }>).detail
+      if (!detail?.key) return
+      framings = { ...framings, [detail.key]: detail.framing }
+      frameAll()
+    }
+    window.addEventListener(EVENT, announced)
+    const observer = new MutationObserver((mutations) => {
+      for (const mutation of mutations) {
+        if (mutation.type === "attributes" && mutation.target instanceof HTMLImageElement) frame(mutation.target)
+        mutation.addedNodes.forEach((node) => {
+          if (node instanceof HTMLImageElement) { if (keyOf(node)) frame(node) }
+          else if (node instanceof Element) frameAll(node)
+        })
+      }
+    })
+    observer.observe(document.body, { childList: true, subtree: true, attributes: true, attributeFilter: ["src"] })
+    return () => { alive = false; observer.disconnect(); window.removeEventListener(EVENT, announced) }
+  }, [])
+  return null
+}
