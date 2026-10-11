@@ -1312,6 +1312,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
         headers={detailsFound.table.headers}
         values={detailsFound.row.values}
         html={detailsFound.row.html}
+        columnSpec={(header) => specOf(detailsFound.table.tabName, header)}
         onClose={() => setDetails(null)}
         onSave={async (fields, previous) => {
           if (!Object.keys(fields).length) return

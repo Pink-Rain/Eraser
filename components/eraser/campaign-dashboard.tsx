@@ -4,7 +4,7 @@ import { NO_CLASS } from "@/lib/class-visibility"
 import Link from "next/link"
 import dynamic from "next/dynamic"
 import { useEffect, useRef, useState, type CSSProperties, type FormEvent } from "react"
-import { ArrowUpRight, Backpack, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
+import { ArrowUpRight, Backpack, BookOpen, Check, CircleUserRound, ImagePlus, Pencil, Plus, Save, Trash2, Upload, Users, X } from "lucide-react"
 
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle } from "@/components/ui/alert-dialog"
 import { RichTextView } from "@/components/eraser/rich-text"
@@ -271,6 +271,16 @@ export function CampaignDashboard({
 
         <section className="deferred-section mt-12 border-t pt-8">
           <GroupNpcs key={npcsUnavailable ? "indisponibles" : "lus"} campaignId={campaign.id} initialNpcs={initialGroupNpcs} unavailable={npcsUnavailable} canManage={canManage} />
+        </section>
+
+        {/* Le journal : la dernière session y sera résumée ; pour l'instant, le chemin vers le journal. */}
+        <section className="deferred-section mt-12 border-t pt-8" aria-labelledby="journal-derniere-session">
+          <h2 id="journal-derniere-session" className="mb-6 flex items-center gap-2 font-display text-2xl font-semibold"><BookOpen className="size-5" />Journal<span className="font-sans text-base font-normal text-muted-foreground">• Dernière session</span></h2>
+          <Link href={`/campagne/${encodeURIComponent(campaign.id)}/journal`} prefetch={false} className="group flex items-center gap-4 rounded-2xl border bg-card/75 p-4 shadow-sm transition hover:-translate-y-0.5 hover:shadow-md" style={{ borderColor: `${campaign.accentColor}44` }}>
+            <span className="flex size-11 shrink-0 items-center justify-center rounded-xl" style={{ color: campaign.accentColor, backgroundColor: `${campaign.accentColor}18` }}><BookOpen className="size-5" /></span>
+            <span className="min-w-0 flex-1 font-display text-xl font-semibold">Journal de {campaign.name}</span>
+            <ArrowUpRight className="size-5 shrink-0 text-muted-foreground transition group-hover:translate-x-0.5 group-hover:-translate-y-0.5" />
+          </Link>
         </section>
 
         <section className="deferred-section mt-12 border-t pt-8">

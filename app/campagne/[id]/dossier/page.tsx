@@ -1,5 +1,5 @@
 import { notFound, redirect } from "next/navigation"
-import { CalendarDays, ChartColumn, ChevronDown, Drama, LayoutDashboard, Map, PackageSearch, Store, Waypoints } from "lucide-react"
+import { BookOpen, CalendarDays, ChartColumn, ChevronDown, Drama, LayoutDashboard, Map, PackageSearch, Store, Waypoints } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { MenuPage } from "@/components/eraser/menu-page"
@@ -36,6 +36,7 @@ export default async function CampaignFolderPage({ params }: { params: Promise<{
         </div> : undefined}
         links={[
           { href, label: "Tableau de bord", description: "Les personnages, le groupe, l’inventaire et le chat de la campagne.", icon: LayoutDashboard },
+          { href: `${href}/journal`, label: `Journal de ${campaign.name}`, description: "Les sessions, de la première à la dernière.", icon: BookOpen },
           { href: `${href}/lieux-et-rencontres`, label: "Créateur de session", description: "Préparer les lieux et les rencontres de la prochaine session.", icon: Waypoints },
           { href: `${href}/evenements`, label: "Événements", description: "Les événements à déclencher pendant la partie.", icon: CalendarDays },
           { href: `${href}/magasin-et-fouille`, label: "Magasins", description: "Les boutiques de la campagne et leurs stocks.", icon: Store },

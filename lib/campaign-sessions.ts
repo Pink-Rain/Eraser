@@ -13,6 +13,7 @@ import {
   namedRowWrites,
   readNamedSheet,
   repairJdrSheet,
+  resolveJdrSheet,
   saveGeneratedShops,
   saveNpcs,
   sessionSheetHeaders,
@@ -134,6 +135,20 @@ function byCreation(left: CampaignSessionRecord, right: CampaignSessionRecord) {
 export async function listCampaignSessions(campaignId: string) {
   const { rows } = await readSessionRows()
   return rows.map((row) => sessionFromRow(row))
+    .filter((session): session is CampaignSessionRecord => Boolean(session && session.campaignId === campaignId))
+    .sort(byCreation)
+}
+
+/**
+ * Les sessions d'une campagne pour les afficher (journal) : la lecture partagée entre
+ * installations, sans rien vérifier ni écrire dans la feuille. Cinq joueurs qui ouvrent le
+ * journal ensemble ne coûtent qu'une lecture à Google.
+ */
+export async function listCampaignSessionsForDisplay(campaignId: string) {
+  const sheet = await resolveJdrSheet("sessions")
+  if (!sheet) return []
+  const named = await readNamedSheet(sheet.spreadsheetId, sheet.tabName, sessionSheetHeaders)
+  return named.rows.map((row) => sessionFromRow(canonicalRow(named.columns, row)))
     .filter((session): session is CampaignSessionRecord => Boolean(session && session.campaignId === campaignId))
     .sort(byCreation)
 }

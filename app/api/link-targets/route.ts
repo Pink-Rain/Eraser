@@ -41,6 +41,7 @@ export async function GET() {
     seenCampaigns.add(id)
     const base = `/campagne/${encodeURIComponent(id)}`
     targets.push({ label: `Campagne - ${name}`, href: base, group: "Campagnes" })
+    targets.push({ label: `Journal de ${name}`, href: `${base}/journal`, group: "Campagnes" })
     if (!manager) return
     for (const [slug, label] of [["dossier", "Dossier (Roll20 compris)"], ["lieux-et-rencontres", "Créateur de session"], ["evenements", "Événements"], ["magasin-et-fouille", "Magasins"], ["fouilles", "Fouilles"], ["pnjs", "PNJs"], ["tabletop", "Tabletop"]]) {
       targets.push({ label: `${label}`, href: `${base}/${slug}`, group: "Campagnes", hint: name })

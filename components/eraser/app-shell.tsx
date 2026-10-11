@@ -619,6 +619,7 @@ export function AppShell({
                       const campaignHref = `/campagne/${encodeURIComponent(selectedCampaign.id)}`
                       return <>
                         <NavSubLink href={campaignHref} label={`Campagne - ${selectedCampaign.name}`} active={pathname === campaignHref} />
+                        <NavSubLink nested href={`${campaignHref}/journal`} label={`Journal de ${selectedCampaign.name}`} active={pathname === `${campaignHref}/journal`} />
                         <NavSubLink href={`${campaignHref}/lieux-et-rencontres`} label="Créateur de session" active={pathname === `${campaignHref}/lieux-et-rencontres`} />
                         <NavSubLink nested href={`${campaignHref}/evenements`} label="Événements" active={pathname === `${campaignHref}/evenements`} />
                         <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
@@ -643,19 +644,27 @@ export function AppShell({
                         <SidebarMenuSub>
                           {selectedCharacter.campaigns.map((campaign) => {
                             const href = `/campagne/${encodeURIComponent(campaign.id)}`
-                            return <div key={campaign.id}><NavSubLink href={href} label={`Campagne - ${campaign.name}`} active={pathname === href} /></div>
+                            return <div key={campaign.id}><NavSubLink href={href} label={`Campagne - ${campaign.name}`} active={pathname === href} /><NavSubLink nested href={`${href}/journal`} label={`Journal de ${campaign.name}`} active={pathname === `${href}/journal`} /></div>
                           })}
                         </SidebarMenuSub>
                       )}
                       {/* Menu replié, la liste des campagnes disparaît : chacune garde une icône cliquable. */}
                       {selectedCharacter.campaigns.map((campaign) => {
                         const href = `/campagne/${encodeURIComponent(campaign.id)}`
-                        return <SidebarMenuButton key={campaign.id} asChild tooltip={`Campagne - ${campaign.name}`} isActive={pathname === href} className="mt-1 hidden group-data-[collapsible=icon]:flex">
-                          <IntentLink href={href} aria-label={`Campagne - ${campaign.name}`}>
-                            <Map style={{ color: campaign.accentColor }} />
-                            <span>{campaign.name}</span>
-                          </IntentLink>
-                        </SidebarMenuButton>
+                        return <div key={campaign.id} className="contents">
+                          <SidebarMenuButton asChild tooltip={`Campagne - ${campaign.name}`} isActive={pathname === href} className="mt-1 hidden group-data-[collapsible=icon]:flex">
+                            <IntentLink href={href} aria-label={`Campagne - ${campaign.name}`}>
+                              <Map style={{ color: campaign.accentColor }} />
+                              <span>{campaign.name}</span>
+                            </IntentLink>
+                          </SidebarMenuButton>
+                          <SidebarMenuButton asChild tooltip={`Journal de ${campaign.name}`} isActive={pathname === `${href}/journal`} className="mt-1 hidden group-data-[collapsible=icon]:flex">
+                            <IntentLink href={`${href}/journal`} aria-label={`Journal de ${campaign.name}`}>
+                              <BookOpen style={{ color: campaign.accentColor }} />
+                              <span>Journal de {campaign.name}</span>
+                            </IntentLink>
+                          </SidebarMenuButton>
+                        </div>
                       })}
                     </SidebarMenuItem>
                   )

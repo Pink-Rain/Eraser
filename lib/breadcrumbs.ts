@@ -29,6 +29,7 @@ const fixed: Record<string, Omit<Crumb, "path">> = {
 
 const campaignPages: Record<string, string> = {
   "dossier": "Dossier",
+  "journal": "Journal",
   "roll20": "Roll20",
   "lieux-et-rencontres": "Créateur de session",
   "evenements": "Événements",

@@ -596,6 +596,8 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_APPLY_HEADER)) reasons.push("La fiche de personnage dessine les FX de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
   }
+  // Le Type des modificateurs range Attributs, Matériaux et Runes : les objets et les citations « { » le lisent par son nom.
+  if (index === "weapon-modifiers" && folded === "type") reasons.push("Les colonnes Attributs, Matériaux et Runes des objets filtrent les modificateurs par cette colonne (« Attribut », « Matériau », « Rune ») ; les citations « { » en tirent leurs étiquettes.")
   if (index === "vocabulary" && foldName(header) === foldName("Contenu")) reasons.push("La page Règles › Vocabulaire affiche cette colonne (la définition de chaque mot) et la lit par son nom.")
   if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header, context))
   if (index === "skills") {

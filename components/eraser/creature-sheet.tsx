@@ -8,7 +8,7 @@ import { ImageField, IndexField, SpellsField } from "@/components/eraser/index-c
 import { TokenButton } from "@/components/eraser/token-editor"
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
-import { isImageSource, isRichSpec } from "@/lib/index-columns"
+import { isImageSource, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import {
   creatureCharacteristics,
   creatureNoteHeader,
@@ -21,7 +21,7 @@ const identityFields = ["Nom", "Rang", "Taille", "Poids", "Type", "Sous-type", "
 const placeFields = ["Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire"]
 const allFields = ["Portrait", ...identityFields, ...placeFields, ...creatureCharacteristics, creatureNoteHeader, "Sorts actifs", "Sorts passifs"]
 
-const specOf = (header: string) => worldColumnSpec("creatures", "Créatures", header)
+const defaultSpecOf = (header: string) => worldColumnSpec("creatures", "Créatures", header)
 
 /** Le token d'une créature suit l'image importée dans Drive (elle n'a pas d'autre identifiant). */
 function creatureTokenId(portrait: string) {
@@ -46,8 +46,10 @@ async function uploadCreaturePortrait(file: File, previous: string) {
  * déjà, et enregistre toutes les colonnes de la feuille — y compris les colonnes
  * formulaire, que le tableau n'affiche pas. Chaque champ est celui de son type.
  */
-export function CreatureSheetDialog({ open, headers, values, html, onClose, onSave }: {
+export function CreatureSheetDialog({ open, headers, values, html, columnSpec, onClose, onSave }: {
   open: boolean
+  /** Le type de chaque colonne tel que réglé dans « Modifier » (sinon celui prévu par Eraser). */
+  columnSpec?: (header: string) => IndexColumnSpec
   headers: string[]
   values: string[]
   /** Les mêmes cellules avec leur mise en forme, pour les champs de texte enrichi. */
@@ -56,11 +58,12 @@ export function CreatureSheetDialog({ open, headers, values, html, onClose, onSa
   /** Les champs changés, et ce que la fiche en montrait : le serveur refuse si l'un a changé ailleurs entre-temps. */
   onSave: (fields: Record<string, string>, previous: Record<string, string>) => Promise<void>
 }) {
+  const specOf = columnSpec ?? defaultSpecOf
   const initial = useMemo(() => Object.fromEntries(allFields.map((field) => {
     const index = headers.findIndex((header) => foldName(header) === foldName(field))
     const rich = isRichSpec(specOf(field))
     return [field, index >= 0 ? (rich ? html[index] || values[index] : values[index]) ?? "" : ""]
-  })), [headers, html, values])
+  })), [headers, html, specOf, values])
   const [fields, setFields] = useState<Record<string, string>>(initial)
   const [pending, setPending] = useState(false)
   const [error, setError] = useState("")
