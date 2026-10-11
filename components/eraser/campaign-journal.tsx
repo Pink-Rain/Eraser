@@ -1,13 +1,26 @@
 "use client"
 
-import { useEffect, useMemo, useState, type ReactNode } from "react"
-import { BookOpen, Check, ChevronDown, ChevronLeft, ChevronRight, Feather, Gem, MapPin, PawPrint, ScrollText, Sparkles, Store, Users, UserRound } from "lucide-react"
+import { createContext, useContext, useEffect, useId, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent as ReactKeyboardEvent, type MouseEvent as ReactMouseEvent, type PointerEvent as ReactPointerEvent, type ReactNode } from "react"
+import { BookOpen, CalendarDays, Check, ChevronDown, ChevronLeft, ChevronRight, Feather, Lock, NotebookPen, Plus, type LucideIcon } from "lucide-react"
 
 import { replaceAppUrl } from "@/components/eraser/app-tabs"
 import { RichTextView } from "@/components/eraser/rich-text"
-import { LinkChip, SessionNotesBoard, SessionQuestChains, type JournalEntity, type SessionNoteEntities } from "@/components/eraser/session-notes"
+import {
+  EmptyHint,
+  LinkChip,
+  SessionNotesBoard,
+  SessionQuestChains,
+  linkKindLabels,
+  noteTypeIcons,
+  tone,
+  useLinkLabel,
+  type JournalEntity,
+  type SessionNoteEntities,
+  type SessionNotesHandle,
+} from "@/components/eraser/session-notes"
+import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { sessionNoteType, type SessionNote } from "@/lib/session-note-rules"
+import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
 import { cn } from "@/lib/utils"
 
 export type JournalSession = { id: string; name: string; createdAt: string }
@@ -21,40 +34,250 @@ function sessionDate(value: string) {
   return Number.isNaN(date.getTime()) ? "" : dateFormat.format(date)
 }
 
-const initials = (name: string) => name.split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?"
+const initials = (name: string) => name.replace(/^(Frère|Sœur|Dame|Sire|Maître|Le|La|Les|L’|L')\s+/i, "").split(/\s+/).filter(Boolean).slice(0, 2).map((part) => part[0]).join("").toUpperCase() || "?"
 
-function Avatar({ entity, color }: { entity: JournalEntity; color: string }) {
-  // eslint-disable-next-line @next/next/no-img-element -- portraits servis par l'app ou Google Drive
-  return entity.image ? <img src={entity.image} alt="" className="size-10 shrink-0 rounded-full border object-cover" />
-    : <span className="flex size-10 shrink-0 items-center justify-center rounded-full font-display text-sm font-semibold text-white" style={{ backgroundColor: color }} aria-hidden>{initials(entity.name)}</span>
+/** Une couleur d'avatar stable pour un nom, prise dans une palette accordée au parchemin. */
+const avatarPalette = ["#8d6618", "#3b5c8a", "#2f7558", "#a3402f", "#6a4a8a", "#8a5a2b", "#1d7589", "#7f3a5a"]
+function avatarColor(name: string) {
+  let hash = 0
+  for (const char of name) hash = (hash * 31 + char.charCodeAt(0)) >>> 0
+  return avatarPalette[hash % avatarPalette.length]
 }
 
-function NotesBadge({ count }: { count: number }) {
-  return count ? <span className="rounded-full bg-primary/10 px-1.5 text-[11px] font-semibold tabular-nums text-primary" title={`${count} note${count > 1 ? "s" : ""} liée${count > 1 ? "s" : ""}`}>{count}</span> : null
+const LootIcon = noteTypeIcons.butin
+
+const prefersReducedMotion = () => typeof window !== "undefined" && window.matchMedia("(prefers-reduced-motion: reduce)").matches
+
+/** Ce que partagent les cartes de la page : les notes liées à un élément, et comment en ouvrir une. */
+type JournalContext = {
+  notesFor: (links: string[]) => SessionNote[]
+  sessionNumber: (sessionId: string) => number
+  currentId: string
+  openNote: (noteId: string) => void
+  /** Les couleurs de la campagne, pour les fenêtres posées hors de la page (portails). */
+  vars: CSSProperties
+}
+const JournalCtx = createContext<JournalContext | null>(null)
+const useJournal = () => useContext(JournalCtx)!
+
+/* ---------- Petits éléments ---------- */
+
+/** Un portrait, ou à défaut une pastille (initiales ou icône) ; un portrait cassé redevient pastille. */
+function Avatar({ name, image, icon: Icon, color, square = false, muted = false }: { name: string; image?: string; icon?: LucideIcon; color: string; square?: boolean; muted?: boolean }) {
+  const [broken, setBroken] = useState("")
+  const shape = square ? "rounded-xl" : "rounded-full"
+  const ring = "ring-2 ring-card shadow-[0_0_0_3px_var(--border)]"
+  if (image && broken !== image) {
+    // eslint-disable-next-line @next/next/no-img-element -- portraits servis par l'app ou Google Drive
+    return <img src={image} alt="" loading="lazy" onError={() => setBroken(image)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBroken(image) }}
+      className={cn("size-10 shrink-0 bg-muted object-cover", shape, ring, muted && "opacity-50 grayscale")} />
+  }
+  return <span className={cn("flex size-10 shrink-0 items-center justify-center bg-tone font-display text-[15px] font-semibold text-white", shape, ring, muted && "opacity-45 grayscale")} style={tone(color)} aria-hidden>
+    {Icon ? <Icon className="size-[18px]" /> : initials(name)}
+  </span>
 }
 
-function Section({ id, icon, title, count, children }: { id: string; icon: ReactNode; title: string; count?: number; children: ReactNode }) {
-  return <section id={id} tabIndex={-1} className="scroll-mt-24 outline-none">
-    <h2 className="mb-3 flex items-center gap-2 font-display text-xl font-semibold">{icon}{title}{count !== undefined && <span className="rounded-full bg-muted px-2 text-xs font-medium tabular-nums text-muted-foreground">{count}</span>}</h2>
+function Tag({ children, fresh = false, dot }: { children: ReactNode; fresh?: boolean; dot?: string }) {
+  return <span className={cn("inline-flex max-w-full items-center gap-1 rounded-full px-2 text-[11px] leading-5 whitespace-nowrap", fresh ? "bg-journal/12 font-semibold text-journal-ink" : "bg-muted text-muted-foreground")}>
+    {dot && <span className="size-2 shrink-0 rounded-full bg-tone" style={tone(dot)} aria-hidden />}
+    <span className="truncate">{children}</span>
+  </span>
+}
+
+/** Un bouton discret posé à droite du titre d'une section (« + Quête », « + Événement »). */
+function HeadAction({ color, onClick, children }: { color: string; onClick: () => void; children: ReactNode }) {
+  return <button type="button" onClick={onClick} style={tone(color)} className="inline-flex items-center gap-1 rounded-full border border-border bg-card px-2.5 py-0.5 text-xs font-medium outline-none transition-colors hover:border-tone/60 hover:bg-tone/5 focus-visible:ring-2 focus-visible:ring-ring/50">
+    <Plus className="size-3 text-tone" strokeWidth={2.5} aria-hidden />{children}
+  </button>
+}
+
+function Section({ id, icon: Icon, title, count, action, children }: { id: string; icon: LucideIcon; title: string; count?: ReactNode; action?: ReactNode; children: ReactNode }) {
+  return <section id={id} aria-labelledby={`${id}-titre`} tabIndex={-1} className="scroll-mt-24 outline-none">
+    <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1.5">
+      <span className="flex size-8 shrink-0 items-center justify-center rounded-full bg-journal/10 text-journal-ink ring-1 ring-journal/15" aria-hidden><Icon className="size-4" /></span>
+      <h2 id={`${id}-titre`} className="font-display text-[1.35rem] font-semibold leading-tight">{title}</h2>
+      {count !== undefined && <span className="rounded-full bg-muted px-2 py-0.5 text-xs font-medium tabular-nums text-muted-foreground">{count}</span>}
+      {action && <div className="ml-auto">{action}</div>}
+    </div>
+    <div className="journal-rule mb-4 mt-2.5 h-px" aria-hidden />
     {children}
   </section>
 }
 
-const empty = (text: string) => <p className="rounded-xl border border-dashed px-4 py-4 text-sm text-muted-foreground">{text}</p>
+const cardGrid = "grid gap-2.5 grid-cols-[repeat(auto-fill,minmax(min(100%,14.5rem),1fr))]"
 
-function EntityCard({ entity, color, notes, extra }: { entity: JournalEntity; color: string; notes: number; extra?: ReactNode }) {
-  return <div className="flex min-w-0 items-center gap-3 rounded-xl border bg-card/70 p-2.5">
-    <Avatar entity={entity} color={color} />
-    <span className="min-w-0 flex-1"><span className="flex items-center gap-1.5 font-medium"><span className="truncate">{entity.name}</span><NotesBadge count={notes} /></span>
-      {entity.hint && <span className="block truncate text-xs text-muted-foreground">{entity.hint}</span>}{extra}</span>
+/* ---------- Cartes et notes liées ---------- */
+
+/**
+ * Le survol (souris) d'une carte montre ses notes liées ; au clavier ou au doigt, la pastille
+ * « n notes » ouvre la même liste. Ouverte au survol, la fenêtre ne prend pas le focus.
+ */
+function useHoverPopover(enabled: boolean) {
+  const [open, setOpen] = useState(false)
+  const timer = useRef(0)
+  const hovered = useRef(false)
+  useEffect(() => () => window.clearTimeout(timer.current), [])
+  const later = (next: boolean, delay: number) => {
+    window.clearTimeout(timer.current)
+    timer.current = window.setTimeout(() => setOpen(next), delay)
+  }
+  const isMouse = (event: ReactPointerEvent) => event.pointerType === "mouse"
+  return {
+    open,
+    setOpen: (next: boolean) => { window.clearTimeout(timer.current); if (!next) hovered.current = false; setOpen(next) },
+    card: {
+      onPointerEnter: (event: ReactPointerEvent) => { if (enabled && isMouse(event)) { hovered.current = true; later(true, open ? 0 : 280) } },
+      onPointerLeave: (event: ReactPointerEvent) => { if (enabled && isMouse(event) && hovered.current) later(false, 180) },
+    },
+    content: {
+      onPointerEnter: () => window.clearTimeout(timer.current),
+      onPointerLeave: (event: ReactPointerEvent) => { if (isMouse(event) && hovered.current) later(false, 180) },
+      onOpenAutoFocus: (event: Event) => { if (hovered.current) event.preventDefault() },
+    },
+    /** Un clic sur la pastille : ouvre (ou garde ouverte) la liste et y passe le focus. */
+    onTrigger: (event: ReactMouseEvent) => {
+      event.preventDefault()
+      window.clearTimeout(timer.current)
+      const wasHover = hovered.current && open
+      hovered.current = false
+      if (wasHover) { setOpen(false); window.setTimeout(() => setOpen(true), 0) } else setOpen(!open)
+    },
+  }
+}
+
+function EntityCard({ name, hint, image, kind, link, color, icon, square, tags, absent = false, children }: {
+  name: string
+  hint?: string
+  image?: string
+  kind: SessionLinkKind
+  /** Les liens que portent les notes (« npc:ID », « place:Nom ») : la pastille et la liste en dépendent. */
+  link?: string | string[]
+  color?: string
+  icon?: LucideIcon
+  square?: boolean
+  tags?: ReactNode
+  absent?: boolean
+  children?: ReactNode
+}) {
+  const journal = useJournal()
+  const meta = linkKindLabels[kind]
+  const related = link ? journal.notesFor(typeof link === "string" ? [link] : link) : []
+  const hover = useHoverPopover(related.length > 0)
+  const here = related.filter((note) => note.sessionId === journal.currentId).length
+  return <div {...hover.card} style={tone(meta.color)} className={cn(
+    "group/card relative flex min-w-0 items-start gap-3 rounded-xl border p-3 transition-[border-color,box-shadow,transform] duration-200",
+    absent ? "border-dashed border-border bg-transparent" : "border-border/70 bg-card shadow-[0_1px_2px_rgb(67_50_31/0.05)] hover:-translate-y-px hover:border-tone/45 hover:shadow-[0_6px_18px_rgb(67_50_31/0.09)]",
+  )}>
+    <Avatar name={name} image={image} icon={icon} color={color ?? meta.color} square={square} muted={absent} />
+    <div className="min-w-0 flex-1">
+      <div className="flex items-start gap-2">
+        <p className={cn("min-w-0 flex-1 font-display text-[15.5px] font-semibold leading-snug [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{name}</p>
+        {related.length > 0 && <Popover open={hover.open} onOpenChange={hover.setOpen}>
+          <PopoverTrigger asChild>
+            <button type="button" onClick={hover.onTrigger} aria-label={`${related.length} note${related.length > 1 ? "s" : ""} liée${related.length > 1 ? "s" : ""} à ${name}`} title={here === related.length ? undefined : here ? `${here} dans cette session, ${related.length} en tout` : "Notes d’autres sessions"}
+              className={cn("mt-0.5 inline-flex shrink-0 items-center gap-1 rounded-full px-1.5 text-[11px] font-semibold leading-5 tabular-nums outline-none transition-colors focus-visible:ring-2 focus-visible:ring-ring/50",
+                // Aucune note de cette session : la pastille reste discrète.
+                here ? "bg-journal/10 text-journal-ink hover:bg-journal/20 data-[state=open]:bg-journal/20" : "bg-muted text-muted-foreground hover:bg-accent data-[state=open]:bg-accent")}>
+              <NotebookPen className="size-3" aria-hidden />{related.length}
+            </button>
+          </PopoverTrigger>
+          <PopoverContent align="end" sideOffset={8} onOpenAutoFocus={hover.content.onOpenAutoFocus} onPointerEnter={hover.content.onPointerEnter} onPointerLeave={hover.content.onPointerLeave}
+            style={{ ...journal.vars, ...tone(meta.color) }} className="w-[min(21rem,calc(100vw-1rem))] rounded-xl border-border/80 p-1.5 shadow-[0_18px_44px_rgb(33_30_26/0.18)]">
+            <LinkedNotesList name={name} kindLabel={meta.one} icon={meta.icon} notes={related} onPick={(noteId) => { hover.setOpen(false); journal.openNote(noteId) }} />
+          </PopoverContent>
+        </Popover>}
+      </div>
+      {hint && <p className="truncate text-xs text-muted-foreground">{hint}</p>}
+      {tags && <div className="mt-1.5 flex flex-wrap gap-1">{tags}</div>}
+      {children}
+    </div>
   </div>
 }
+
+function LinkedNotesList({ name, kindLabel, icon: Icon, notes, onPick }: { name: string; kindLabel: string; icon: LucideIcon; notes: SessionNote[]; onPick: (noteId: string) => void }) {
+  const journal = useJournal()
+  return <div aria-label={`Notes liées à ${name}`}>
+    <div className="flex min-w-0 items-center gap-2 border-b border-border/70 px-2 pb-1.5 pt-1">
+      <Icon className="size-4 shrink-0 text-tone" aria-hidden />
+      <b className="min-w-0 truncate font-display text-[15px] font-semibold">{name}</b>
+      <span className="ml-auto shrink-0 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground">{kindLabel}</span>
+    </div>
+    <ul className="max-h-72 space-y-px overflow-y-auto overscroll-contain py-1 scrollbar-thin">{notes.map((note) => {
+      const type = sessionNoteType(note.type)
+      const TypeIcon = noteTypeIcons[note.type]
+      const elsewhere = note.sessionId !== journal.currentId
+      return <li key={note.id}>
+        <button type="button" onClick={() => onPick(note.id)} style={tone(type.color)} className="grid w-full grid-cols-[1rem_minmax(0,1fr)] gap-x-2 rounded-lg px-2 py-1.5 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40">
+          <TypeIcon className="row-span-2 mt-0.5 size-3.5 text-tone" aria-hidden />
+          <span className="text-[10.5px] font-bold uppercase tracking-[0.08em] text-tone">{type.label}{elsewhere && <span className="text-muted-foreground"> · S{journal.sessionNumber(note.sessionId)}</span>}{note.type === "quete" && <span className="text-muted-foreground"> · {note.quest?.done ? "accomplie" : "en cours"}</span>}</span>
+          <span className={cn("line-clamp-2 text-[12.5px] leading-snug", note.type === "citation" && "font-display italic")}>{note.type === "citation" ? `« ${note.text} »` : note.title && note.text ? `${note.title} — ${note.text}` : note.title || note.text}</span>
+        </button>
+      </li>
+    })}</ul>
+    <p className="px-2 pb-1 pt-0.5 text-[11px] text-muted-foreground">Une note s’ouvre dans le panneau des notes.</p>
+  </div>
+}
+
+/* ---------- Bannière ---------- */
+
+/** Le décor de la bannière : écailles, crêtes lointaines et rose des vents, très discrets. */
+function BannerOrnament() {
+  const id = useId().replace(/:/g, "")
+  return <svg className="absolute inset-0 size-full" viewBox="0 0 1200 240" preserveAspectRatio="xMidYMid slice" aria-hidden>
+    <defs>
+      <pattern id={`${id}-scales`} width="44" height="22" patternUnits="userSpaceOnUse">
+        <g fill="none" stroke="#fffaee" strokeOpacity=".07" strokeWidth="1">
+          <circle cx="22" cy="22" r="20" /><circle cx="22" cy="22" r="13" />
+          <circle cx="0" cy="11" r="20" /><circle cx="0" cy="11" r="13" />
+          <circle cx="44" cy="11" r="20" /><circle cx="44" cy="11" r="13" />
+        </g>
+      </pattern>
+      <linearGradient id={`${id}-fade`} x1="0" y1="0" x2="0" y2="1"><stop offset="0" stopColor="#fff" /><stop offset=".85" stopColor="#fff" stopOpacity=".2" /></linearGradient>
+      <mask id={`${id}-mask`}><rect width="1200" height="240" fill={`url(#${id}-fade)`} /></mask>
+      <radialGradient id={`${id}-glow`} cx="50%" cy="38%" r="55%"><stop offset="0" stopColor="#f3d9a6" stopOpacity=".18" /><stop offset="1" stopColor="#f3d9a6" stopOpacity="0" /></radialGradient>
+    </defs>
+    <rect width="1200" height="240" fill={`url(#${id}-scales)`} mask={`url(#${id}-mask)`} />
+    <rect width="1200" height="240" fill={`url(#${id}-glow)`} />
+    <path d="M0 200 L70 168 L120 182 L190 140 L250 170 L300 150 L360 176 L430 132 L500 172 L560 158 L620 186 L700 146 L760 170 L830 128 L900 166 L960 150 L1020 178 L1090 138 L1150 164 L1200 150 V240 H0Z" fill="#0b0805" fillOpacity=".2" />
+    <path d="M0 222 L90 196 L150 210 L240 182 L320 206 L400 190 L470 214 L560 186 L640 210 L720 192 L800 216 L880 188 L960 208 L1040 194 L1120 214 L1200 196 V240 H0Z" fill="#0b0805" fillOpacity=".26" />
+    <g transform="translate(1085 62)" fill="none" stroke="#fffaee" strokeOpacity=".16">
+      <circle r="34" /><circle r="27" strokeDasharray="2 4" />
+      <path d="M0 -44 L6 -6 L0 0 L-6 -6Z M0 44 L6 6 L0 0 L-6 6Z M-44 0 L-6 6 L0 0 L-6 -6Z M44 0 L6 6 L0 0 L6 -6Z" fill="#fffaee" fillOpacity=".06" />
+    </g>
+    <g transform="translate(110 70) rotate(18)" fill="none" stroke="#fffaee" strokeOpacity=".1"><circle r="22" /><path d="M0 -30V30M-30 0H30" /></g>
+  </svg>
+}
+
+function Eyebrow({ children }: { children: ReactNode }) {
+  return <p className="flex items-center justify-center gap-2.5 text-[11px] font-semibold uppercase tracking-[0.2em] text-banner-ink/85 sm:gap-3 sm:tracking-[0.22em]">
+    <span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden /><BookOpen className="size-3.5 shrink-0" aria-hidden /><span className="min-w-0 truncate">{children}</span><span className="h-px w-5 bg-current opacity-60 sm:w-8" aria-hidden />
+  </p>
+}
+
+function BannerArrow({ side, session, number, onClick }: { side: "prev" | "next"; session?: JournalSessionDetail; number: number; onClick: () => void }) {
+  const Icon = side === "prev" ? ChevronLeft : ChevronRight
+  const word = side === "prev" ? "précédente" : "suivante"
+  return <button type="button" onClick={onClick} disabled={!session} title={`Session ${word} (${side === "prev" ? "←" : "→"})`}
+    aria-label={session ? `Session ${word} : S${number} - ${session.name}` : `Pas de session ${word}`}
+    className={cn("group/arrow flex min-w-0 items-center gap-2.5 rounded-full p-0.5 text-banner-ink outline-none focus-visible:ring-2 focus-visible:ring-white/80 disabled:cursor-default", side === "prev" ? "justify-self-end" : "flex-row-reverse justify-self-start")}>
+    <span className={cn("hidden min-w-0 max-w-[11rem] text-[12px] leading-tight text-banner-ink/80 md:block", side === "prev" ? "text-right" : "text-left", !session && "opacity-60")}>
+      <b className="block text-[10.5px] font-semibold uppercase tracking-[0.12em] opacity-80">{session ? `S${number}` : "—"}</b>
+      <span className="block truncate">{session ? session.name : side === "prev" ? "Début du journal" : "Pas encore jouée"}</span>
+    </span>
+    <span className={cn("flex size-11 shrink-0 items-center justify-center rounded-full border border-banner-ink/45 bg-banner-ink/10 backdrop-blur-[2px] transition-[background-color,transform] duration-150 group-hover/arrow:bg-banner-ink/22 group-disabled/arrow:opacity-35",
+      side === "prev" ? "group-hover/arrow:-translate-x-0.5 group-disabled/arrow:translate-x-0" : "group-hover/arrow:translate-x-0.5 group-disabled/arrow:translate-x-0")}>
+      <Icon className="size-5" strokeWidth={2.2} aria-hidden />
+    </span>
+  </button>
+}
+
+/* ---------- Page ---------- */
 
 /**
  * Le journal d'une campagne : une session à la fois, la dernière d'abord. Les flèches (et
  * ← → au clavier) passent à la session voisine ; un clic sur le nom déroule toutes les
- * sessions. La page raconte la session (bilan, groupe, lieux, PNJs, créatures, objets,
- * magasins, quêtes, événements) et range à droite ses notes publiques.
+ * sessions. À gauche, les notes publiques de la session ; au centre, son récit : bilan,
+ * groupe, lieux, PNJs, créatures, objets, magasins, quêtes et frise des événements.
  */
 export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events }: {
   campaignId: string
@@ -75,7 +298,15 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   const [index, setIndex] = useState(initial >= 0 ? initial : sessions.length - 1)
   const [listOpen, setListOpen] = useState(false)
   const [notes, setNotes] = useState(initialNotes)
+  const [brokenBanner, setBrokenBanner] = useState("")
+  const [toast, setToast] = useState("")
+  const [openLinks, setOpenLinks] = useState<Set<string>>(new Set())
+  const toastTimer = useRef(0)
+  const board = useRef<SessionNotesHandle>(null)
+  const menu = useRef<HTMLDivElement>(null)
   const current = sessions[index]
+  // La couleur de la campagne, posée une fois : toutes les teintes de la page en dérivent.
+  const vars = useMemo(() => ({ "--journal-accent": accentColor }) as CSSProperties, [accentColor])
 
   function go(next: number) {
     if (next < 0 || next >= sessions.length) return
@@ -87,6 +318,13 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
     replaceAppUrl(url.pathname + url.search)
   }
 
+  function say(text: string) {
+    setToast(text)
+    window.clearTimeout(toastTimer.current)
+    toastTimer.current = window.setTimeout(() => setToast(""), 2600)
+  }
+  useEffect(() => () => window.clearTimeout(toastTimer.current), [])
+
   useEffect(() => {
     const onKey = (event: KeyboardEvent) => {
       const target = event.target as HTMLElement | null
@@ -95,180 +333,342 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
       if (event.key === "ArrowRight") go(index + 1)
     }
     // Une note liée d'une autre session : la page passe à sa session.
-    const onGo = (event: Event) => { const position = sessions.findIndex((session) => session.id === (event as CustomEvent<string>).detail); if (position >= 0) go(position) }
+    const onGo = (event: Event) => {
+      const position = sessions.findIndex((session) => session.id === (event as CustomEvent<string>).detail)
+      if (position < 0 || position === index) return
+      go(position)
+      say(`Passage à S${position + 1} - ${sessions[position].name}`)
+    }
     window.addEventListener("keydown", onKey)
     window.addEventListener("eraser-journal-go", onGo)
     return () => { window.removeEventListener("keydown", onKey); window.removeEventListener("eraser-journal-go", onGo) }
   })
 
   const entities: SessionNoteEntities = useMemo(() => ({ characters: members, npcs, shops, events: events.map((event) => ({ id: event.id, name: event.name, hint: event.tag })) }), [members, npcs, shops, events])
-  const refs = sessions.map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt }))
-  const here = current ? notes.filter((note) => note.sessionId === current.id) : []
-  // Combien de notes de cette session citent un élément.
-  const linked = (link: string) => here.filter((note) => note.links.includes(link)).length
-  const namesIn = (kind: "place" | "creature" | "item") => [...new Set(here.flatMap((note) => note.links.filter((link) => link.startsWith(`${kind}:`)).map((link) => link.slice(kind.length + 1))))]
+  const linkLabel = useLinkLabel(entities, notes)
+  const refs = useMemo(() => sessions.map((session) => ({ id: session.id, name: session.name, createdAt: session.createdAt })), [sessions])
+  const rank = useMemo(() => new Map(sessions.map((session, position) => [session.id, position])), [sessions])
+  // Où chaque élément apparaît pour la première fois : « Nouveau » ou « Depuis S3 ».
+  const firstSeen = useMemo(() => {
+    const first = new Map<string, number>()
+    const mark = (key: string, position: number) => { if ((first.get(key) ?? Infinity) > position) first.set(key, position) }
+    sessions.forEach((session, position) => {
+      session.npcIds.forEach((id) => mark(`npc:${id}`, position))
+      session.shopIds.forEach((id) => mark(`shop:${id}`, position))
+      session.eventIds.forEach((id) => mark(`event:${id}`, position))
+    })
+    for (const note of notes) {
+      const position = rank.get(note.sessionId)
+      if (position === undefined) continue
+      for (const link of note.links) if (/^(place|creature|item):/.test(link)) mark(link, position)
+    }
+    return first
+  }, [sessions, notes, rank])
 
-  const arrow = "flex size-11 shrink-0 items-center justify-center rounded-full border bg-card/80 text-muted-foreground shadow-sm transition hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-30"
+  if (!current) return <div className="journal w-full flex-1 px-4 py-9 sm:px-8 md:py-12" style={vars}>
+    <div className="mx-auto max-w-xl overflow-hidden rounded-[1.6rem] border border-border/70 bg-card text-center shadow-sm">
+      <div className="journal-banner-bg relative px-6 py-8 text-banner-ink"><BannerOrnament /><div className="relative"><Eyebrow>Journal de {campaignName}</Eyebrow></div></div>
+      <div className="px-6 py-10">
+        <Feather className="mx-auto size-8 text-journal-ink/60" aria-hidden />
+        <p className="mt-4 font-display text-2xl font-semibold">Aucune session pour l’instant</p>
+        <p className="mt-2 text-sm text-muted-foreground">Le journal s’ouvrira à la première session créée dans le Créateur de session.</p>
+      </div>
+    </div>
+  </div>
+
+  const journal: JournalContext = {
+    // Les notes qui citent un élément : celles de la session d'abord, puis les autres dans l'ordre.
+    notesFor: (links: string[]) => notes.filter((note) => links.some((link) => note.links.includes(link)))
+      .sort((left, right) => Number(right.sessionId === current.id) - Number(left.sessionId === current.id) || (rank.get(left.sessionId) ?? 0) - (rank.get(right.sessionId) ?? 0)),
+    sessionNumber: (sessionId: string) => (rank.get(sessionId) ?? 0) + 1,
+    currentId: current.id,
+    openNote: (noteId: string) => board.current?.focusNote(noteId),
+    vars,
+  }
+  const here = notes.filter((note) => note.sessionId === current.id)
   const byId = <T extends { id: string }>(list: T[], ids: string[]) => ids.flatMap((id) => list.find((item) => item.id === id) ?? [])
-  const group = current ? byId(members, current.characterIds) : []
-  const sessionNpcs = current ? byId(npcs, current.npcIds) : []
-  const sessionEvents = current ? byId(events, current.eventIds) : []
+  const group = byId(members, current.characterIds)
+  // Les membres de la campagne qui n'ont pas été ajoutés à cette session (si elle a un groupe).
+  const absents = current.characterIds.length ? members.filter((member) => !current.characterIds.includes(member.id)) : []
+  const sessionNpcs = byId(npcs, current.npcIds)
+  const sessionEvents = byId(events, current.eventIds)
   const npcEvents = sessionEvents.filter((event) => event.kind === "npc" || event.kind === "generic-npc")
   const creatureEvents = sessionEvents.filter((event) => event.kind === "creature")
   const otherEvents = sessionEvents.filter((event) => event.kind === "other")
-  const sessionShops = current ? byId(shops, current.shopIds) : []
+  const sessionShops = byId(shops, current.shopIds)
+  const namesIn = (kind: "place" | "creature" | "item") => [...new Set(here.flatMap((note) => note.links.filter((link) => link.startsWith(`${kind}:`)).map((link) => link.slice(kind.length + 1))))]
   const places = namesIn("place")
-  const creatures = namesIn("creature")
-  const items = namesIn("item")
   const loot = here.filter((note) => note.type === "butin")
+  // Un objet déjà raconté par un butin, une créature déjà présente comme événement : une seule carte.
+  const same = (name: string) => name.trim().toLocaleLowerCase("fr")
+  const lootNames = new Set(loot.map((note) => same(note.title)))
+  const creatureNames = new Set(creatureEvents.map((event) => same(event.name)))
+  const creatures = namesIn("creature").filter((name) => !creatureNames.has(same(name)))
+  const items = namesIn("item").filter((name) => !lootNames.has(same(name)))
   const timeline = here.filter((note) => note.type === "evenement")
-  const summary = here.find((note) => note.type === "resume")
-  const tiles = [
-    { to: "journal-groupe", label: "Groupe", value: group.length, icon: Users },
-    { to: "journal-lieux", label: "Lieux", value: places.length, icon: MapPin },
-    { to: "journal-pnjs", label: "PNJs", value: sessionNpcs.length + npcEvents.length, icon: UserRound },
-    { to: "journal-creatures", label: "Créatures", value: creatureEvents.length + creatures.length, icon: PawPrint },
-    { to: "journal-objets", label: "Objets", value: loot.length + items.length, icon: Gem },
-    { to: "journal-magasins", label: "Magasins", value: sessionShops.length, icon: Store },
-    { to: "journal-evenements", label: "Événements", value: otherEvents.length + timeline.length, icon: Sparkles },
+  const summaries = here.filter((note) => note.type === "resume")
+  const isNew = (key: string) => firstSeen.get(key) === index
+  const seenTag = (key: string) => {
+    const first = firstSeen.get(key)
+    if (first === undefined || first > index) return null
+    return first === index ? <Tag fresh>Nouveau</Tag> : <Tag>Depuis S{first + 1}</Tag>
+  }
+  const countNew = (keys: string[]) => keys.filter(isNew).length
+  const plural = (count: number, one: string, many: string) => `${count} ${count > 1 ? many : one}`
+
+  const npcCount = sessionNpcs.length + npcEvents.length
+  const newNpcs = countNew([...sessionNpcs.map((npc) => `npc:${npc.id}`), ...npcEvents.map((event) => `event:${event.id}`)])
+  const newPlaces = countNew(places.map((name) => `place:${name}`))
+  const tiles: Array<{ to: string; label: string; value: number; sub?: string; kind: SessionLinkKind; icon?: LucideIcon }> = [
+    { to: "journal-groupe", label: "Groupe", value: group.length, sub: absents.length ? plural(absents.length, "absent", "absents") : undefined, kind: "character" },
+    { to: "journal-lieux", label: "Lieux", value: places.length, sub: newPlaces ? plural(newPlaces, "nouveau", "nouveaux") : undefined, kind: "place" },
+    { to: "journal-pnjs", label: "PNJs", value: npcCount, sub: newNpcs ? plural(newNpcs, "nouveau", "nouveaux") : undefined, kind: "npc" },
+    { to: "journal-creatures", label: "Créatures", value: creatureEvents.length + creatures.length, kind: "creature" },
+    { to: "journal-objets", label: "Objets", value: loot.length + items.length, sub: loot.length ? plural(loot.length, "butin", "butins") : undefined, kind: "item" },
+    { to: "journal-magasins", label: "Magasins", value: sessionShops.length, kind: "shop" },
+    { to: "journal-evenements", label: "Événements", value: otherEvents.length + timeline.length, sub: timeline.length ? `${timeline.length} dans la frise` : undefined, kind: "event" },
   ]
-  const scrollTo = (id: string) => { const target = document.getElementById(id); target?.scrollIntoView({ behavior: "smooth", block: "start" }); target?.focus({ preventScroll: true }) }
+  function scrollTo(id: string, focus?: () => void) {
+    const target = document.getElementById(id)
+    target?.scrollIntoView({ behavior: prefersReducedMotion() ? "auto" : "smooth", block: "start" })
+    if (focus) focus(); else target?.focus({ preventScroll: true })
+  }
+  const showNotes = () => scrollTo("journal-notes", () => board.current?.focusSearch())
+  const newNote = (type: SessionNoteType) => board.current?.newNote(type)
 
-  // Avec une bannière : le titre et les flèches sont posés dessus, en clair sur un voile sombre.
-  const onBanner = Boolean(current?.bannerUrl)
-  const arrowClass = onBanner
-    ? "flex size-11 shrink-0 items-center justify-center rounded-full border border-white/35 bg-black/35 text-white shadow-sm backdrop-blur-sm transition hover:bg-black/55 disabled:pointer-events-none disabled:opacity-30"
-    : arrow
-  const soft = onBanner ? "text-white/80" : "text-muted-foreground"
-  const label = <div className={cn("mb-6 flex items-center justify-center gap-2 text-xs font-semibold uppercase tracking-[0.22em]", onBanner && "text-white")} style={onBanner ? undefined : { color: accentColor }}>
-    <span className="h-px w-7" style={{ backgroundColor: onBanner ? "rgba(255,255,255,.7)" : accentColor }} />
-    <BookOpen className="size-3.5" />Journal de {campaignName}
-    <span className="h-px w-7" style={{ backgroundColor: onBanner ? "rgba(255,255,255,.7)" : accentColor }} />
-  </div>
+  const prev = sessions[index - 1]
+  const next = sessions[index + 1]
+  const date = sessionDate(current.createdAt)
+  const banner = current.bannerUrl && brokenBanner !== current.bannerUrl ? current.bannerUrl : ""
+  const eventColor = sessionNoteType("evenement").color
 
-  return <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-12">
-    {!current ? <>{label}<div className="mx-auto max-w-xl rounded-[1.5rem] border border-dashed bg-card/55 px-6 py-14 text-center">
-      <Feather className="mx-auto size-8 text-primary/50" />
-      <p className="mt-4 font-display text-2xl font-semibold">Aucune session pour l’instant</p>
-      <p className="mt-2 text-sm text-muted-foreground">Le journal s’ouvrira à la première session créée dans le Créateur de session.</p>
-    </div></> : <>
-      <header className={cn("relative mx-auto max-w-6xl", onBanner && "overflow-hidden rounded-[1.5rem] border px-4 py-10 shadow-sm sm:py-14")}>
-        {onBanner && <>
-          {/* eslint-disable-next-line @next/next/no-img-element -- bannière servie par l'app */}
-          <img src={current.bannerUrl} alt="" className="absolute inset-0 size-full object-cover" />
-          <div className="absolute inset-0 bg-gradient-to-b from-black/55 via-black/40 to-black/60" aria-hidden />
-        </>}
-        <div className="relative">
-          {label}
-          <nav className="mx-auto flex max-w-3xl items-center justify-center gap-3 sm:gap-5" aria-label="Sessions">
-            <button type="button" className={arrowClass} onClick={() => go(index - 1)} disabled={index <= 0} aria-label="Session précédente" title="Session précédente (←)"><ChevronLeft className="size-5" /></button>
-            <Popover open={listOpen} onOpenChange={setListOpen}>
-              <PopoverTrigger asChild>
-                <button type="button" className={cn("group min-w-0 flex-1 rounded-2xl px-4 py-2 text-center transition", onBanner ? "text-white [text-shadow:0_2px_12px_rgba(0,0,0,.6)] hover:bg-black/25" : "hover:bg-accent/60")} aria-label={`S${index + 1} - ${current.name} : voir toutes les sessions`}>
-                  <span className={cn("block text-[11px] font-semibold uppercase tracking-[0.2em]", soft)}>{index === sessions.length - 1 ? "Dernière session" : `Session ${index + 1} sur ${sessions.length}`}</span>
-                  <span className="mt-1 flex items-center justify-center gap-2 font-display text-3xl font-semibold leading-tight sm:text-4xl">
-                    <span className="truncate"><span style={onBanner ? undefined : { color: accentColor }}>S{index + 1}</span> - {current.name}</span>
-                    <ChevronDown className={cn("size-5 shrink-0 transition-transform", soft, listOpen && "rotate-180")} />
-                  </span>
-                  {sessionDate(current.createdAt) && <span className={cn("mt-1 block text-xs", soft)}>{sessionDate(current.createdAt)}</span>}
+  // Le menu des sessions : ↑ ↓ passent d'une session à l'autre, Début et Fin vont aux bouts.
+  function onMenuKey(event: ReactKeyboardEvent<HTMLDivElement>) {
+    const items = [...(menu.current?.querySelectorAll<HTMLButtonElement>("button[data-session]") ?? [])]
+    const at = items.indexOf(document.activeElement as HTMLButtonElement)
+    const move = (to: number) => { event.preventDefault(); items[(to + items.length) % items.length]?.focus() }
+    if (event.key === "ArrowDown") move(at + 1)
+    else if (event.key === "ArrowUp") move(at - 1)
+    else if (event.key === "Home") move(0)
+    else if (event.key === "End") move(items.length - 1)
+  }
+
+  return <JournalCtx.Provider value={journal}>
+    <div className="journal w-full flex-1 px-4 pb-12 pt-6 sm:px-6 md:pt-8 lg:px-8" style={vars}>
+      <div className="mx-auto max-w-[76rem]">
+        {/* Bannière : l'image de la session, ou à défaut (ou si elle ne charge pas) les couleurs de la campagne. */}
+        <header className="relative isolate z-[1] overflow-hidden rounded-[1.4rem] text-banner-ink shadow-[0_10px_30px_rgb(33_30_26/0.18)] sm:rounded-[1.6rem]">
+          <div className="journal-banner-bg absolute inset-0 -z-10" aria-hidden><BannerOrnament /></div>
+          {banner && <>
+            {/* eslint-disable-next-line @next/next/no-img-element -- bannière servie par l'app */}
+            <img src={banner} alt="" onError={() => setBrokenBanner(banner)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBrokenBanner(banner) }} className="absolute inset-0 -z-10 size-full object-cover" />
+            <div className="absolute inset-0 -z-10 bg-gradient-to-b from-black/50 via-black/30 to-black/65" aria-hidden />
+          </>}
+          <div className="pointer-events-none absolute inset-2 rounded-[1rem] border border-banner-ink/20 sm:inset-2.5 sm:rounded-[1.15rem]" aria-hidden />
+          <div className="grid gap-3 px-3 pb-6 pt-6 text-center sm:px-6 sm:pb-7 sm:pt-7 md:min-h-[14rem] md:content-center">
+            <Eyebrow>Journal de {campaignName}</Eyebrow>
+            <nav className="mx-auto grid w-full max-w-4xl grid-cols-[2.75rem_minmax(0,1fr)_2.75rem] items-center gap-1.5 sm:gap-3 md:grid-cols-[minmax(0,1fr)_minmax(0,2.4fr)_minmax(0,1fr)]" aria-label="Navigation entre les sessions">
+              <BannerArrow side="prev" session={prev} number={index} onClick={() => go(index - 1)} />
+              <Popover open={listOpen} onOpenChange={setListOpen}>
+                <PopoverTrigger asChild>
+                  <button type="button" className="group/title min-w-0 rounded-2xl px-2 py-1.5 outline-none transition-colors hover:bg-banner-ink/8 focus-visible:ring-2 focus-visible:ring-white/80 sm:px-4" aria-label={`S${index + 1} - ${current.name}. Ouvrir la liste des sessions`}>
+                    <span className="block text-[10.5px] font-semibold uppercase tracking-[0.2em] text-banner-ink/75">{index === sessions.length - 1 ? "Dernière session" : `Session ${index + 1} sur ${sessions.length}`}</span>
+                    <span className="mt-1 block text-balance font-display text-[1.7rem] font-semibold leading-[1.12] tracking-[-0.01em] [text-shadow:0_2px_14px_rgb(0_0_0/0.3)] sm:text-[2.1rem] lg:text-[2.6rem]">
+                      <span className="text-banner-gold">S{index + 1}</span> — {current.name}
+                    </span>
+                    <span className="mt-1.5 inline-flex items-center gap-1.5 text-[12.5px] text-banner-ink/80">
+                      {date && <><CalendarDays className="size-3.5" aria-hidden />{date}<span className="hidden sm:inline" aria-hidden>·</span></>}
+                      <span className="hidden sm:inline">toutes les sessions</span>
+                      <ChevronDown className={cn("size-3.5 transition-transform", listOpen && "rotate-180")} aria-hidden />
+                    </span>
+                  </button>
+                </PopoverTrigger>
+                <PopoverContent align="center" sideOffset={10} style={vars} ref={menu} onKeyDown={onMenuKey}
+                  onOpenAutoFocus={(event) => { event.preventDefault(); menu.current?.querySelector<HTMLButtonElement>("button[aria-current=true]")?.focus() }}
+                  className="w-[min(22rem,calc(100vw-2rem))] rounded-2xl border-border/80 p-1.5 shadow-[0_18px_44px_rgb(33_30_26/0.2)]">
+                  <p className="px-2.5 pb-1 pt-1.5 text-[10.5px] font-semibold uppercase tracking-[0.16em] text-muted-foreground">Aller à la session</p>
+                  <div className="max-h-[min(26rem,65svh)] space-y-px overflow-y-auto overscroll-contain scrollbar-thin">
+                    {/* La plus récente en haut, comme la page s'ouvre. */}
+                    {sessions.map((session, position) => ({ session, position })).reverse().map(({ session, position }) => <button
+                      key={session.id}
+                      type="button"
+                      data-session
+                      aria-current={position === index}
+                      onClick={() => go(position)}
+                      className={cn("grid w-full grid-cols-[2.5rem_minmax(0,1fr)_1rem] items-center gap-1.5 rounded-xl px-2.5 py-2 text-left outline-none hover:bg-muted focus-visible:bg-muted focus-visible:ring-2 focus-visible:ring-ring/40", position === index && "bg-journal/10 hover:bg-journal/15")}
+                    >
+                      <span className="font-display font-semibold tabular-nums text-journal-ink">S{position + 1}</span>
+                      <span className="min-w-0"><span className="block truncate font-display text-[15px]">{session.name}</span>{sessionDate(session.createdAt) && <span className="block text-[11.5px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
+                      {position === index && <Check className="size-4 text-journal-ink" aria-hidden />}
+                    </button>)}
+                  </div>
+                </PopoverContent>
+              </Popover>
+              <BannerArrow side="next" session={next} number={index + 2} onClick={() => go(index + 1)} />
+            </nav>
+            <div className="flex items-center justify-center gap-2.5 text-banner-ink/50" aria-hidden>
+              <span className="h-px w-14 bg-current" />
+              <svg viewBox="0 0 12 12" className="size-3 fill-current"><path d="M6 0l1.6 4.4L12 6 7.6 7.6 6 12 4.4 7.6 0 6l4.4-1.6z" /></svg>
+              <span className="h-px w-14 bg-current" />
+            </div>
+            <p className="hidden text-[11.5px] text-banner-ink/70 md:block">Touches <kbd className="rounded border border-b-2 border-banner-ink/40 px-1.5 font-sans text-[10.5px]">←</kbd> <kbd className="rounded border border-b-2 border-banner-ink/40 px-1.5 font-sans text-[10.5px]">→</kbd> pour changer de session</p>
+          </div>
+        </header>
+        <p className="sr-only" aria-live="polite">Session affichée : S{index + 1} - {current.name}</p>
+
+        {/* Téléphone : bilan, notes, puis le récit ; ordinateur : les notes à gauche, collées en défilant. */}
+        <div className="mt-6 grid items-start gap-6 lg:mt-7 lg:grid-cols-[21.25rem_minmax(0,1fr)] lg:grid-rows-[auto_1fr] lg:gap-x-7 lg:gap-y-7">
+          <section key={`bilan-${current.id}`} aria-labelledby="journal-bilan" className="journal-rise relative min-w-0 overflow-hidden rounded-2xl border border-border/70 bg-card p-4 pl-5 shadow-[0_1px_2px_rgb(67_50_31/0.06)] sm:p-5 sm:pl-6 lg:col-start-2 lg:row-start-1">
+            <span className="absolute inset-y-0 left-0 w-1 bg-journal" aria-hidden />
+            <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
+              <h2 id="journal-bilan" className="font-display text-[1.35rem] font-semibold">Bilan de la session</h2>
+              {date && <span className="inline-flex items-center gap-1 text-xs text-muted-foreground"><CalendarDays className="size-3.5 text-journal-ink" aria-hidden />{date}</span>}
+            </div>
+            {summaries.length ? <div className="mt-2.5 space-y-3">{summaries.map((note, position) => <figure key={note.id} className="max-w-[70ch]">
+              <p className={cn("whitespace-pre-wrap font-display text-[1.05rem] leading-relaxed sm:text-[1.12rem]", position === 0 && "first-letter:float-left first-letter:mr-2 first-letter:mt-1.5 first-letter:font-semibold first-letter:text-[3.15rem] first-letter:leading-[0.78] first-letter:text-journal-ink")}>{note.text || note.title}</p>
+              <figcaption className="mt-1 text-xs text-muted-foreground">
+                <button type="button" onClick={() => journal.openNote(note.id)} className="rounded-sm underline-offset-4 outline-none hover:text-foreground hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">{note.authorName ? `Résumé de ${note.authorName}` : "Voir la note"}</button>
+              </figcaption>
+            </figure>)}</div>
+              : <EmptyHint icon={BookOpen} className="mt-3" action={<Button type="button" size="xs" variant="outline" onClick={() => newNote("resume")}><Feather />Écrire le résumé</Button>}>Pas encore de résumé pour cette session.</EmptyHint>}
+            <div className="mt-4 grid grid-cols-2 gap-2 min-[520px]:grid-cols-4">
+              {tiles.map((tile) => {
+                const meta = linkKindLabels[tile.kind]
+                const Icon = tile.icon ?? meta.icon
+                return <button key={tile.to} type="button" onClick={() => scrollTo(tile.to)} style={tone(meta.color)} aria-label={`${tile.label} : ${tile.value}${tile.sub ? `, ${tile.sub}` : ""}. Aller à la section`}
+                  className={cn("flex min-w-0 flex-col items-start gap-0.5 rounded-xl border border-border/70 bg-background/70 px-3 py-2.5 text-left outline-none transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-tone/50 hover:bg-card focus-visible:ring-2 focus-visible:ring-ring/50", !tile.value && "opacity-65")}>
+                  <span className="flex items-center gap-1.5 font-display text-2xl font-semibold leading-none tabular-nums"><Icon className="size-4 text-tone" aria-hidden />{tile.value}</span>
+                  <span className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">{tile.label}</span>
+                  {tile.sub && <span className="max-w-full truncate text-[11px] text-muted-foreground/85">{tile.sub}</span>}
                 </button>
-              </PopoverTrigger>
-              <PopoverContent align="center" className="max-h-[min(26rem,70svh)] w-80 overflow-y-auto p-1">
-                {/* La plus récente en haut, comme la page s'ouvre. */}
-                {sessions.map((session, position) => ({ session, position })).reverse().map(({ session, position }) => <button
-                  key={session.id}
-                  type="button"
-                  onClick={() => go(position)}
-                  className={cn("flex w-full items-center gap-3 rounded-md px-2.5 py-2 text-left text-sm hover:bg-accent", position === index && "bg-accent/60")}
-                >
-                  <span className="w-9 shrink-0 font-display font-semibold tabular-nums" style={{ color: accentColor }}>S{position + 1}</span>
-                  <span className="min-w-0 flex-1"><span className="block truncate font-medium">{session.name}</span>{sessionDate(session.createdAt) && <span className="block text-[11px] text-muted-foreground">{sessionDate(session.createdAt)}</span>}</span>
-                  {position === index && <Check className="size-4 shrink-0 text-primary" />}
-                </button>)}
-              </PopoverContent>
-            </Popover>
-            <button type="button" className={arrowClass} onClick={() => go(index + 1)} disabled={index >= sessions.length - 1} aria-label="Session suivante" title="Session suivante (→)"><ChevronRight className="size-5" /></button>
-          </nav>
-        </div>
-      </header>
-
-      {/* Téléphone : bilan, notes, puis le récit ; ordinateur : les notes à droite, collées en défilant. */}
-      <div className="mx-auto mt-8 grid max-w-6xl gap-6 lg:grid-cols-[minmax(0,1fr)_22rem]">
-          <section className="min-w-0 rounded-2xl border bg-card/70 p-4 shadow-sm lg:col-start-1 lg:row-start-1" aria-labelledby="journal-bilan">
-            <h2 id="journal-bilan" className="font-display text-xl font-semibold">Bilan de la session</h2>
-            {summary ? <p className="mt-2 whitespace-pre-wrap text-sm leading-relaxed">{summary.text}</p> : <p className="mt-2 text-sm text-muted-foreground">Pas encore de résumé : ajoute une note « Résumé ».</p>}
-            <div className="mt-4 grid grid-cols-2 gap-2 sm:grid-cols-4">
-              {tiles.map((tile) => <button key={tile.to} type="button" onClick={() => scrollTo(tile.to)} className="flex items-center gap-2 rounded-xl border bg-background/60 px-3 py-2 text-left transition hover:border-primary/40 hover:bg-accent/50">
-                <tile.icon className="size-4 shrink-0" style={{ color: accentColor }} />
-                <span className="min-w-0"><span className="block font-display text-lg font-semibold leading-none tabular-nums">{tile.value}</span><span className="block truncate text-xs text-muted-foreground">{tile.label}</span></span>
-              </button>)}
-              <div className="flex items-center gap-2 rounded-xl border border-dashed px-3 py-2"><ScrollText className="size-4 shrink-0 text-muted-foreground" /><span><span className="block font-display text-lg font-semibold leading-none tabular-nums">{here.length}</span><span className="block text-xs text-muted-foreground">Notes</span></span></div>
+              })}
+              <button type="button" onClick={showNotes} aria-label={`Notes : ${here.length}. Aller aux notes de session`}
+                className="flex min-w-0 flex-col items-start gap-0.5 rounded-xl border border-journal/30 bg-journal/5 px-3 py-2.5 text-left outline-none transition-[border-color,background-color,transform] duration-150 hover:-translate-y-px hover:border-journal/60 hover:bg-journal/10 focus-visible:ring-2 focus-visible:ring-ring/50">
+                <span className="flex items-center gap-1.5 font-display text-2xl font-semibold leading-none tabular-nums"><NotebookPen className="size-4 text-journal-ink" aria-hidden />{here.length}</span>
+                <span className="text-[10.5px] font-semibold uppercase tracking-[0.07em] text-muted-foreground">Notes</span>
+                <span className="max-w-full truncate text-[11px] text-journal-ink">Voir le panneau</span>
+              </button>
             </div>
           </section>
 
-        <div className="min-w-0 space-y-9 lg:col-start-1 lg:row-start-2">
-          <Section id="journal-groupe" icon={<Users className="size-5" style={{ color: accentColor }} />} title="Groupe" count={group.length}>
-            {group.length ? <div className="grid gap-2 sm:grid-cols-2">{group.map((member) => <EntityCard key={member.id} entity={member} color={accentColor} notes={linked(`character:${member.id}`)} />)}</div> : empty("Personne n’a été ajouté à cette session.")}
-          </Section>
+          <aside className="min-w-0 lg:sticky lg:top-4 lg:col-start-1 lg:row-span-2 lg:row-start-1 lg:max-h-[calc(100svh-2rem)] lg:overflow-y-auto lg:overscroll-contain lg:rounded-2xl lg:scrollbar-thin">
+            {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
+            <SessionNotesBoard id="journal-notes" handle={board} campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
+          </aside>
 
-          <Section id="journal-lieux" icon={<MapPin className="size-5" style={{ color: accentColor }} />} title="Lieux" count={places.length}>
-            {current.places && <RichTextView html={current.places} className="mb-3 rounded-xl border bg-card/70 p-3 text-sm" />}
-            {places.length ? <div className="flex flex-wrap gap-1.5">{places.map((name) => <LinkChip key={name} kind="place" label={`${name}${linked(`place:${name}`) > 1 ? ` · ${linked(`place:${name}`)} notes` : ""}`} />)}</div>
-              : !current.places && empty("Aucun lieu noté. Lie une note à un lieu de l’Index des lieux.")}
-          </Section>
+          <div key={`recit-${current.id}`} className="journal-rise min-w-0 space-y-10 lg:col-start-2 lg:row-start-2">
+            <Section id="journal-groupe" icon={linkKindLabels.character.icon} title="Le groupe" count={absents.length ? `${group.length} · ${plural(absents.length, "absent", "absents")}` : group.length}>
+              {group.length + absents.length ? <div className={cardGrid}>
+                {group.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} />)}
+                {absents.map((member) => <EntityCard key={member.id} kind="character" name={member.name} hint={member.hint} image={member.image} color={avatarColor(member.name)} link={`character:${member.id}`} absent tags={<Tag>absent</Tag>} />)}
+              </div> : <EmptyHint icon={linkKindLabels.character.icon}>Personne n’a été ajouté à cette session.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-pnjs" icon={<UserRound className="size-5" style={{ color: accentColor }} />} title="PNJs" count={sessionNpcs.length + npcEvents.length}>
-            {sessionNpcs.length + npcEvents.length ? <div className="grid gap-2 sm:grid-cols-2">
-              {sessionNpcs.map((npc) => <EntityCard key={npc.id} entity={npc} color="#64748b" notes={linked(`npc:${npc.id}`)} />)}
-              {npcEvents.map((event) => <EntityCard key={event.id} entity={{ ...event, hint: event.tag || "PNJ" }} color="#64748b" notes={linked(`event:${event.id}`)} />)}
-            </div> : empty("Aucun PNJ dans cette session.")}
-          </Section>
+            <Section id="journal-lieux" icon={linkKindLabels.place.icon} title="Lieux" count={places.length}>
+              {current.places && <div className="mb-3 rounded-xl border border-border/70 bg-card/60 p-3">
+                <p className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground"><Lock className="size-3" aria-hidden />Préparation du MJ · visible par toi seul</p>
+                <RichTextView html={current.places} className="text-sm" />
+              </div>}
+              {places.length ? <div className={cardGrid}>{places.map((name) => <EntityCard key={name} kind="place" name={name} icon={linkKindLabels.place.icon} square link={`place:${name}`} tags={seenTag(`place:${name}`)} />)}</div>
+                : !current.places && <EmptyHint icon={linkKindLabels.place.icon}>Aucun lieu noté. Lie une note à un lieu de l’Index des lieux.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-creatures" icon={<PawPrint className="size-5" style={{ color: accentColor }} />} title="Créatures" count={creatureEvents.length + creatures.length}>
-            {creatureEvents.length + creatures.length ? <div className="space-y-2">
-              {creatureEvents.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{creatureEvents.map((event) => <EntityCard key={event.id} entity={{ ...event, hint: event.tag }} color="#7f1d1d" notes={linked(`event:${event.id}`)} />)}</div>}
-              {creatures.length > 0 && <div className="flex flex-wrap gap-1.5">{creatures.map((name) => <LinkChip key={name} kind="creature" label={name} />)}</div>}
-            </div> : empty("Aucune créature dans cette session.")}
-          </Section>
+            <Section id="journal-pnjs" icon={linkKindLabels.npc.icon} title="PNJs" count={npcCount}>
+              {npcCount ? <div className={cardGrid}>
+                {sessionNpcs.map((npc) => <EntityCard key={npc.id} kind="npc" name={npc.name} hint={npc.hint} image={npc.image} color={avatarColor(npc.name)} square link={`npc:${npc.id}`} tags={seenTag(`npc:${npc.id}`)} />)}
+                {npcEvents.map((event) => <EntityCard key={event.id} kind="npc" name={event.name} hint={event.tag ? undefined : "PNJ"} image={event.image} color={avatarColor(event.name)} square link={`event:${event.id}`}
+                  tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.npc.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>} />)}
+              </div> : <EmptyHint icon={linkKindLabels.npc.icon}>Aucun PNJ dans cette session.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-objets" icon={<Gem className="size-5" style={{ color: accentColor }} />} title="Objets" count={loot.length + items.length}>
-            {loot.length + items.length ? <div className="space-y-2">
-              {loot.map((note) => <p key={note.id} className="rounded-xl border bg-card/70 px-3 py-2 text-sm"><span className="mr-2 inline-block size-2 rounded-full align-middle" style={{ backgroundColor: sessionNoteType("butin").color }} />{note.title || note.text}</p>)}
-              {items.length > 0 && <div className="flex flex-wrap gap-1.5">{items.map((name) => <LinkChip key={name} kind="item" label={name} />)}</div>}
-            </div> : empty("Aucun objet noté. Ajoute une note « Butin » ou lie un objet à une note.")}
-          </Section>
+            <Section id="journal-creatures" icon={linkKindLabels.creature.icon} title="Créatures" count={creatureEvents.length + creatures.length}>
+              {creatureEvents.length + creatures.length ? <div className={cardGrid}>
+                {creatureEvents.map((event) => <EntityCard key={event.id} kind="creature" name={event.name} image={event.image} icon={linkKindLabels.creature.icon} square link={[`event:${event.id}`, `creature:${event.name}`]}
+                  tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.creature.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>} />)}
+                {creatures.map((name) => <EntityCard key={name} kind="creature" name={name} icon={linkKindLabels.creature.icon} square link={`creature:${name}`} tags={seenTag(`creature:${name}`)} />)}
+              </div> : <EmptyHint icon={linkKindLabels.creature.icon}>Aucune créature dans cette session.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-magasins" icon={<Store className="size-5" style={{ color: accentColor }} />} title="Magasins" count={sessionShops.length}>
-            {sessionShops.length ? <div className="grid gap-2 sm:grid-cols-2">{sessionShops.map((shop) => <EntityCard key={shop.id} entity={shop} color="#b45309" notes={linked(`shop:${shop.id}`)} />)}</div> : empty("Aucun magasin dans cette session.")}
-          </Section>
+            <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length}>
+              {loot.length + items.length ? <div className={cardGrid}>
+                {loot.map((note) => <EntityCard key={note.id} kind="item" name={note.title || sessionNoteLabel(note, 80)} icon={LootIcon} color={sessionNoteType("butin").color} square
+                  link={[`note:${note.id}`, ...(note.title ? [`item:${note.title}`] : [])]} tags={<><Tag dot={sessionNoteType("butin").color}>Butin</Tag>{note.authorName && <Tag>noté par {note.authorName}</Tag>}</>}>
+                  {note.title && note.text && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.text}</p>}
+                  <button type="button" onClick={() => journal.openNote(note.id)} className="mt-1.5 rounded-sm text-[11.5px] font-medium text-journal-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">Ouvrir la note</button>
+                </EntityCard>)}
+                {items.map((name) => <EntityCard key={name} kind="item" name={name} icon={linkKindLabels.item.icon} square link={`item:${name}`} tags={seenTag(`item:${name}`)} />)}
+              </div> : <EmptyHint icon={linkKindLabels.item.icon}>Aucun objet noté. Ajoute une note « Butin » ou lie un objet à une note.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-quetes" icon={<ScrollText className="size-5" style={{ color: accentColor }} />} title="Quêtes">
-            <SessionQuestChains campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} />
-          </Section>
+            <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>
+              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)} />)}</div>
+                : <EmptyHint icon={linkKindLabels.shop.icon}>Aucun magasin dans cette session.</EmptyHint>}
+            </Section>
 
-          <Section id="journal-evenements" icon={<Sparkles className="size-5" style={{ color: accentColor }} />} title="Événements" count={otherEvents.length + timeline.length}>
-            {otherEvents.length + timeline.length ? <div className="space-y-3">
-              {otherEvents.length > 0 && <div className="grid gap-2 sm:grid-cols-2">{otherEvents.map((event) => <div key={event.id} className="rounded-xl border bg-card/70 p-3">
-                <p className="flex items-center gap-2 font-medium">{event.name}{event.tag && <span className="rounded-full px-2 py-0.5 text-[11px] font-semibold text-white" style={{ backgroundColor: event.tagColor || "#64748b" }}>{event.tag}</span>}<NotesBadge count={linked(`event:${event.id}`)} /></p>
-                {event.description && <RichTextView html={event.description} className="mt-1 text-sm text-muted-foreground" />}
-              </div>)}</div>}
-              {timeline.length > 0 && <ol className="relative space-y-3 border-l-2 pl-5" style={{ borderColor: `${accentColor}55` }} aria-label="Frise de la session">
-                {timeline.map((note, position) => <li key={note.id} className="relative">
-                  <span className="absolute -left-[1.95rem] top-0.5 flex size-6 items-center justify-center rounded-full border-2 bg-background text-[11px] font-semibold tabular-nums" style={{ borderColor: accentColor }}>{position + 1}</span>
-                  {note.moment && <p className="text-xs font-medium text-muted-foreground">{note.moment}</p>}
-                  <p className="font-medium">{note.title || note.text}</p>
-                  {note.title && note.text && <p className="text-sm text-muted-foreground">{note.text}</p>}
-                </li>)}
-              </ol>}
-            </div> : empty("Aucun événement. Ajoute une note « Événement » pour remplir la frise.")}
-          </Section>
+            <Section id="journal-quetes" icon={noteTypeIcons.quete} title="Quêtes" action={<HeadAction color={sessionNoteType("quete").color} onClick={() => newNote("quete")}>Quête</HeadAction>}>
+              <SessionQuestChains campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} onOpenNote={journal.openNote} />
+            </Section>
+
+            <Section id="journal-evenements" icon={linkKindLabels.event.icon} title="Événements" count={otherEvents.length + timeline.length} action={<HeadAction color={eventColor} onClick={() => newNote("evenement")}>Événement</HeadAction>}>
+              {otherEvents.length + timeline.length ? <div className="space-y-5">
+                {otherEvents.length > 0 && <div className={cardGrid}>{otherEvents.map((event) => <EntityCard key={event.id} kind="event" name={event.name} image={event.image} icon={linkKindLabels.event.icon} square link={`event:${event.id}`}
+                  tags={<>{event.tag && <Tag dot={event.tagColor || eventColor}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>}>
+                  {event.description && <RichTextView html={event.description} className="mt-1.5 text-[13px] text-muted-foreground" />}
+                </EntityCard>)}</div>}
+                {timeline.length > 0 && <div>
+                  {otherEvents.length > 0 && <p className="mb-3 text-[10.5px] font-bold uppercase tracking-[0.09em] text-muted-foreground">Frise de la session</p>}
+                  <ol aria-label="Frise de la session" style={tone(eventColor)}>
+                    {timeline.map((note, position) => {
+                      const last = position === timeline.length - 1
+                      const links = note.links.flatMap((link) => { const found = linkLabel(link); return found?.label ? [{ link, kind: found.kind, label: found.label }] : [] })
+                      const all = openLinks.has(note.id)
+                      return <li key={note.id} className="grid grid-cols-[2rem_minmax(0,1fr)] gap-x-3 sm:grid-cols-[6.5rem_2rem_minmax(0,1fr)]">
+                        <p className={cn("col-start-2 row-start-1 pb-1 text-[11.5px] font-semibold leading-tight text-tone [overflow-wrap:anywhere] sm:col-start-1 sm:pb-0 sm:pt-2 sm:text-right", !note.moment && "hidden sm:block")}>{note.moment || <span className="font-normal text-muted-foreground/60">—</span>}</p>
+                        <div className="col-start-1 row-span-2 row-start-1 flex flex-col items-center sm:col-start-2 sm:row-span-1" aria-hidden>
+                          <span className="flex size-8 shrink-0 items-center justify-center rounded-full border-[1.5px] border-tone bg-card font-display text-sm font-semibold tabular-nums text-tone shadow-[0_0_0_4px_var(--background)]">{position + 1}</span>
+                          {!last && <span className="my-1 w-[1.5px] flex-1 rounded-full bg-gradient-to-b from-tone/55 to-border" />}
+                        </div>
+                        <div className={cn("col-start-2 row-start-2 min-w-0 sm:col-start-3 sm:row-start-1", !last && "pb-4")}>
+                          <div className="rounded-xl border border-border/70 bg-card px-3 py-2 shadow-[0_1px_2px_rgb(67_50_31/0.05)] transition-colors hover:border-tone/45">
+                            <h3 className="font-display text-[15.5px] font-semibold leading-snug">
+                              <button type="button" onClick={() => journal.openNote(note.id)} className="rounded-sm text-left outline-none hover:underline hover:decoration-border hover:underline-offset-4 focus-visible:ring-2 focus-visible:ring-ring/50">
+                                <span className="sr-only">Événement {position + 1}{note.moment ? `, ${note.moment}` : ""} : </span>{note.title || sessionNoteLabel(note, 70)}
+                              </button>
+                            </h3>
+                            {note.title && note.text && <p className="mt-0.5 whitespace-pre-wrap text-[13px] leading-relaxed text-muted-foreground">{note.text}</p>}
+                            {links.length > 0 && <div className="mt-1.5 flex flex-wrap gap-1">
+                              {(all ? links : links.slice(0, 3)).map((link) => <LinkChip key={link.link} kind={link.kind} label={link.label} onClick={link.kind === "note" ? () => journal.openNote(link.link.slice(5)) : undefined} />)}
+                              {links.length > 3 && <button type="button" onClick={() => setOpenLinks((open) => { const nextOpen = new Set(open); if (all) nextOpen.delete(note.id); else nextOpen.add(note.id); return nextOpen })}
+                                className="rounded-md border border-border/80 bg-background px-1.5 text-[11.5px] font-semibold leading-[1.35rem] tabular-nums text-muted-foreground outline-none hover:border-journal/50 hover:text-foreground focus-visible:ring-2 focus-visible:ring-ring/50"
+                                aria-label={all ? "Montrer moins de liens" : `Voir les ${links.length} liens`}>{all ? "moins" : `+${links.length - 3}`}</button>}
+                            </div>}
+                          </div>
+                        </div>
+                      </li>
+                    })}
+                  </ol>
+                </div>}
+              </div> : <EmptyHint icon={linkKindLabels.event.icon} action={<Button type="button" size="xs" variant="outline" onClick={() => newNote("evenement")}><Plus />Ajouter un événement</Button>}>Aucun événement. Une note « Événement » remplit la frise.</EmptyHint>}
+            </Section>
+          </div>
         </div>
 
-        <aside className="min-w-0 lg:sticky lg:top-6 lg:col-start-2 lg:row-span-2 lg:row-start-1 lg:self-start">
-          {notesError && <p className="mb-3 rounded-xl border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">Les notes n’ont pas pu être lues dans Google Sheets. Actualise dans un instant.</p>}
-          <SessionNotesBoard campaignId={campaignId} sessions={refs} sessionId={current.id} notes={notes} onNotesChange={setNotes} entities={entities} viewer={viewer} className="lg:max-h-[calc(100svh-3rem)] lg:overflow-y-auto" />
-        </aside>
+        {/* Pied de page : la session d'avant et celle d'après, pour lire le journal d'un trait. */}
+        <nav className="mt-10 grid grid-cols-2 gap-2.5 lg:ml-[calc(21.25rem+1.75rem)]" aria-label="Session précédente et suivante">
+          {([["prev", prev, index], ["next", next, index + 2]] as const).map(([side, session, number]) => <button key={side} type="button" disabled={!session}
+            onClick={() => { go(side === "prev" ? index - 1 : index + 1); window.scrollTo({ top: 0, behavior: prefersReducedMotion() ? "auto" : "smooth" }) }}
+            className={cn("group/foot grid min-w-0 gap-0.5 rounded-xl border border-border/80 bg-card px-4 py-2.5 outline-none transition-[border-color,transform] duration-150 hover:border-journal/50 focus-visible:ring-2 focus-visible:ring-ring/50 disabled:cursor-default disabled:border-dashed disabled:bg-transparent disabled:opacity-60 disabled:hover:border-border/80", side === "next" ? "text-right" : "text-left")}>
+            <small className={cn("flex items-center gap-1 text-[11.5px] text-muted-foreground", side === "next" && "justify-end")}>
+              {side === "prev" && <ChevronLeft className="size-3.5 transition-transform group-hover/foot:-translate-x-0.5" aria-hidden />}
+              {side === "prev" ? "Session précédente" : "Session suivante"}
+              {side === "next" && <ChevronRight className="size-3.5 transition-transform group-hover/foot:translate-x-0.5" aria-hidden />}
+            </small>
+            <span className="truncate font-display text-[15px]">{session ? <><span className="text-journal-ink">S{number}</span> — {session.name}</> : side === "prev" ? "Début du journal" : "Pas encore jouée"}</span>
+          </button>)}
+        </nav>
       </div>
-    </>}
-  </div>
+
+      <div role="status" aria-live="polite" className={cn("pointer-events-none fixed bottom-5 left-1/2 z-50 max-w-[calc(100vw-2rem)] -translate-x-1/2 rounded-xl bg-foreground px-3.5 py-2 text-[13px] text-background shadow-[0_18px_44px_rgb(33_30_26/0.25)] transition-[opacity,transform] duration-200", toast ? "translate-y-0 opacity-100" : "translate-y-3 opacity-0")}>{toast}</div>
+    </div>
+  </JournalCtx.Provider>
 }
