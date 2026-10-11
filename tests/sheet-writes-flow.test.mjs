@@ -32,7 +32,10 @@ const jdr = await vite.ssrLoadModule("/lib/jdr-sheets.ts");
 let serial = 0;
 const fresh = (name) => `${name}-${++serial}`;
 
+const driveFolders = await vite.ssrLoadModule("/lib/google-drive.ts");
 beforeEach(async () => {
+  // Les dossiers Drive trouvés sont gardés en mémoire entre deux lectures : pas entre deux tests.
+  driveFolders.forgetKnownDriveFolders();
   google.reset();
   const db = getDb();
   await db.delete(schema.jdrGoogleSheets);
@@ -415,6 +418,9 @@ test("Visuels et icônes : faute de dossier dédié, celui où ils sont déjà r
   assert.equal((await drive.findDriveFolderByName("Objets")).id, "F-OBJ");
   assert.equal(await drive.findDriveFolderByName("Eraser - Visuels"), null);
   google.world.drive.push({ id: "F-VIS", name: "Eraser - Visuels", mimeType: folder });
+  // Un dossier introuvable est retenu une minute : créé entre-temps ailleurs, il est vu à la lecture suivante.
+  assert.equal(await drive.driveFolderWithLegacy("Eraser - Visuels", "Images Classe"), "F-IMG");
+  drive.forgetKnownDriveFolders();
   assert.equal(await drive.driveFolderWithLegacy("Eraser - Visuels", "Images Classe"), "F-VIS");
 });
 

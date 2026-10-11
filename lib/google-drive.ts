@@ -64,9 +64,32 @@ async function listFilesMatching(query: string) {
   return files
 }
 
+/**
+ * Les dossiers déjà cherchés par leur nom, gardés dix minutes (trouvés) ou une minute
+ * (introuvables) : chaque page froide qui lit un classeur d'objets, une image de classe ou
+ * un son redemandait le même dossier à Google Drive, et un dossier absent faisait lister
+ * tous les dossiers du Drive à chaque fois. Un dossier créé par Eraser est connu aussitôt.
+ */
+const FOUND_FOLDER_MS = 10 * 60_000
+const MISSING_FOLDER_MS = 60_000
+const knownFolders = new Map<string, { at: number; folder: DriveFile | null }>()
+
 export async function findDriveFolderByName(name: string) {
   const normalizedName = name.trim()
   if (!normalizedName) throw new Error("INVALID_FOLDER_NAME")
+  const known = knownFolders.get(normalizedName)
+  if (known && Date.now() - known.at < (known.folder ? FOUND_FOLDER_MS : MISSING_FOLDER_MS)) return known.folder
+  const folder = await findDriveFolderByNameUncached(normalizedName)
+  knownFolders.set(normalizedName, { at: Date.now(), folder })
+  return folder
+}
+
+/** Pour les tests : oublier les dossiers connus. */
+export function forgetKnownDriveFolders() {
+  knownFolders.clear()
+}
+
+async function findDriveFolderByNameUncached(normalizedName: string): Promise<DriveFile | null> {
   const folders = await listFilesMatching(
     `name = '${driveQueryValue(normalizedName)}' and mimeType = '${FOLDER_MIME_TYPE}' and trashed = false`,
   )
@@ -163,6 +186,7 @@ export async function ensureDriveFolder(name: string) {
     method: "POST",
     body: JSON.stringify({ name: name.trim(), mimeType: FOLDER_MIME_TYPE }),
   })
+  knownFolders.set(name.trim(), { at: Date.now(), folder: created })
   return created.id
 }
 

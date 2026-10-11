@@ -84,7 +84,10 @@ async function pageSpells() {
   return Object.fromEntries(spells.map((spell) => [spell.name, spell]));
 }
 
+const driveFolders = await vite.ssrLoadModule("/lib/google-drive.ts");
 beforeEach(async () => {
+  // Les dossiers Drive trouvés sont gardés en mémoire entre deux lectures : pas entre deux tests.
+  driveFolders.forgetKnownDriveFolders();
   google.reset();
   const db = getDb();
   // Les feuilles reliées sont aussi gardées en mémoire quelques minutes : oubliées une à une.
