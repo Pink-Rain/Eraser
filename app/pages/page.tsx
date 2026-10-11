@@ -34,6 +34,8 @@ export default async function PagesIndexPage({ searchParams }: { searchParams: P
   return (
     <AuthenticatedShell pageLabel="Index des pages" roles={["admin", "mj"]}>
       <PageDirectory
+        // « Nouvelle page » depuis le menu, alors que l'Index est déjà ouvert : la fenêtre s'ouvre quand même.
+        key={wantsNew ? `nouvelle:${single(parameters.section) ?? ""}` : "index"}
         pages={summaries}
         templates={templates.map((template) => ({ id: template.id, name: template.name, createdAt: template.createdAt, createdBy: template.createdBy.name, title: template.content.title, icon: template.content.icon, emoji: template.content.emoji, blocks: template.content.sections.reduce((total, section) => total + section.cols.flat().length, 0) }))}
         campaigns={campaigns.filter((campaign) => admin || campaign.mine).map((campaign) => ({ id: campaign.id, name: campaign.name }))}

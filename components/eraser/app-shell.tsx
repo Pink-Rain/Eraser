@@ -14,6 +14,7 @@ import {
   CircleUserRound,
   Crown,
   DownloadCloud,
+  FilePlus2,
   FlaskConical,
   Home,
   LibraryBig,
@@ -696,6 +697,15 @@ export function AppShell({
                       <NavSubLink href="/bac-a-sable/magasin" label="Magasin" active={pathname === "/bac-a-sable/magasin"} />
                       <NavSubLink href="/bac-a-sable/pnjs" label="PNJs" active={pathname === "/bac-a-sable/pnjs"} />
                     </NavSection>
+                    {/* Le créateur de pages : l'Index des pages, et « + » pour une page neuve d'un clic. */}
+                    <SidebarMenuItem>
+                      <SidebarMenuButton asChild tooltip="Pages" isActive={pathname === "/pages" || pathname.startsWith("/pages/")} className="h-10">
+                        <IntentLink href="/pages"><FilePlus2 /><span>Pages</span></IntentLink>
+                      </SidebarMenuButton>
+                      <SidebarMenuAction asChild showOnHover={false} className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
+                        <IntentLink href="/pages?nouvelle=1" aria-label="Nouvelle page" title="Nouvelle page"><Plus /></IntentLink>
+                      </SidebarMenuAction>
+                    </SidebarMenuItem>
                   </>
                 )}
 
