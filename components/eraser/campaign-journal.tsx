@@ -21,10 +21,15 @@ import {
 import { Button } from "@/components/ui/button"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { sessionNoteLabel, sessionNoteType, type SessionLinkKind, type SessionNote, type SessionNoteType } from "@/lib/session-note-rules"
+import { ObjectIcon } from "@/components/eraser/object-icon"
 import { cn } from "@/lib/utils"
 
 export type JournalSession = { id: string; name: string; createdAt: string }
 export type JournalSessionDetail = JournalSession & { bannerUrl: string; characterIds: string[]; npcIds: string[]; shopIds: string[]; eventIds: string[]; places: string }
+/** Ce que l'index montre d'un lieu, d'une créature ou d'un objet cité par une note (« place:Nom »). */
+export type JournalVisual = { image?: string; type?: string; color?: string; object?: { icon: string; type: string; subtype: string } }
+/** Un magasin et quelques objets de sa vitrine (icônes de l'Index des items). */
+export type JournalShop = JournalEntity & { items?: Array<{ name: string; icon: string; type: string; subtype: string }> }
 export type JournalEvent = JournalEntity & { kind: string; tag: string; tagColor: string; description: string }
 
 const dateFormat = new Intl.DateTimeFormat("fr-FR", { day: "numeric", month: "long", year: "numeric" })
@@ -63,14 +68,15 @@ const useJournal = () => useContext(JournalCtx)!
 /* ---------- Petits éléments ---------- */
 
 /** Un portrait, ou à défaut une pastille (initiales ou icône) ; un portrait cassé redevient pastille. */
-function Avatar({ name, image, icon: Icon, color, square = false, muted = false }: { name: string; image?: string; icon?: LucideIcon; color: string; square?: boolean; muted?: boolean }) {
+function Avatar({ name, image, icon: Icon, color, square = false, muted = false, media }: { name: string; image?: string; icon?: LucideIcon; color: string; square?: boolean; muted?: boolean; /** Une icône d'objet de l'index, posée sur fond clair. */ media?: ReactNode }) {
   const [broken, setBroken] = useState("")
   const shape = square ? "rounded-xl" : "rounded-full"
   const ring = "ring-2 ring-card shadow-[0_0_0_3px_var(--border)]"
+  if (media && !(image && broken !== image)) return <span className={cn("flex size-12 shrink-0 items-center justify-center overflow-hidden bg-tone/10 p-1", shape, ring, muted && "opacity-50 grayscale")} style={tone(color)} aria-hidden>{media}</span>
   if (image && broken !== image) {
     // eslint-disable-next-line @next/next/no-img-element -- portraits servis par l'app ou Google Drive
     return <img src={image} alt="" loading="lazy" onError={() => setBroken(image)} ref={(node) => { if (node?.complete && !node.naturalWidth) setBroken(image) }}
-      className={cn("size-10 shrink-0 bg-muted object-cover", shape, ring, muted && "opacity-50 grayscale")} />
+      className={cn("size-12 shrink-0 bg-muted object-cover", shape, ring, muted && "opacity-50 grayscale")} />
   }
   return <span className={cn("flex size-10 shrink-0 items-center justify-center bg-tone font-display text-[15px] font-semibold text-white", shape, ring, muted && "opacity-45 grayscale")} style={tone(color)} aria-hidden>
     {Icon ? <Icon className="size-[18px]" /> : initials(name)}
@@ -145,10 +151,11 @@ function useHoverPopover(enabled: boolean) {
   }
 }
 
-function EntityCard({ name, hint, image, kind, link, color, icon, square, tags, absent = false, children }: {
+function EntityCard({ name, hint, image, media, kind, link, color, icon, square, tags, absent = false, children }: {
   name: string
   hint?: string
   image?: string
+  media?: ReactNode
   kind: SessionLinkKind
   /** Les liens que portent les notes (« npc:ID », « place:Nom ») : la pastille et la liste en dépendent. */
   link?: string | string[]
@@ -168,7 +175,7 @@ function EntityCard({ name, hint, image, kind, link, color, icon, square, tags, 
     "group/card relative flex min-w-0 items-start gap-3 rounded-xl border p-3 transition-[border-color,box-shadow,transform] duration-200",
     absent ? "border-dashed border-border bg-transparent" : "border-border/70 bg-card shadow-[0_1px_2px_rgb(67_50_31/0.05)] hover:-translate-y-px hover:border-tone/45 hover:shadow-[0_6px_18px_rgb(67_50_31/0.09)]",
   )}>
-    <Avatar name={name} image={image} icon={icon} color={color ?? meta.color} square={square} muted={absent} />
+    <Avatar name={name} image={image} media={media} icon={icon} color={color ?? meta.color} square={square} muted={absent} />
     <div className="min-w-0 flex-1">
       <div className="flex items-start gap-2">
         <p className={cn("min-w-0 flex-1 font-display text-[15.5px] font-semibold leading-snug [overflow-wrap:anywhere]", absent && "text-muted-foreground")}>{name}</p>
@@ -279,7 +286,7 @@ function BannerArrow({ side, session, number, onClick }: { side: "prev" | "next"
  * sessions. À gauche, les notes publiques de la session ; au centre, son récit : bilan,
  * groupe, lieux, PNJs, créatures, objets, magasins, quêtes et frise des événements.
  */
-export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events }: {
+export function CampaignJournal({ campaignId, campaignName, accentColor, sessions, initialSessionId, initialNotes, notesError = false, viewer, members, npcs, shops, events, visuals = {} }: {
   campaignId: string
   campaignName: string
   accentColor: string
@@ -291,9 +298,22 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
   viewer: { uid: string; manager: boolean; characterIds: string[] }
   members: JournalEntity[]
   npcs: JournalEntity[]
-  shops: JournalEntity[]
+  shops: JournalShop[]
   events: JournalEvent[]
+  /** Images et icônes des lieux, créatures et objets cités par les notes, lues dans leurs index. */
+  visuals?: Record<string, JournalVisual>
 }) {
+  // L'image ou l'icône qu'un index donne à un lieu, une créature, un objet cité par les notes.
+  const visualOf = (link: string): JournalVisual | undefined => visuals[link] ?? visuals[link.toLocaleLowerCase("fr")]
+  const objectMedia = (link: string, name: string) => {
+    const object = visualOf(link)?.object
+    return object && (object.icon || object.type) ? <ObjectIcon icon={object.icon} name={name} type={object.type} subtype={object.subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined
+  }
+  // Un butin lié à un objet de l'index (ou titré comme lui) prend l'icône de cet objet.
+  const lootMedia = (note: SessionNote) => {
+    const link = (note.links ?? []).find((entry) => entry.startsWith("item:")) ?? (note.title ? `item:${note.title}` : "")
+    return link ? objectMedia(link, link.slice(5)) : undefined
+  }
   const initial = sessions.findIndex((session) => session.id === initialSessionId)
   const [index, setIndex] = useState(initial >= 0 ? initial : sessions.length - 1)
   const [listOpen, setListOpen] = useState(false)
@@ -569,7 +589,7 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
                 <p className="mb-1.5 flex items-center gap-1.5 text-[10.5px] font-bold uppercase tracking-[0.08em] text-muted-foreground"><Lock className="size-3" aria-hidden />Préparation du MJ · visible par toi seul</p>
                 <RichTextView html={current.places} className="text-sm" />
               </div>}
-              {places.length ? <div className={cardGrid}>{places.map((name) => <EntityCard key={name} kind="place" name={name} icon={linkKindLabels.place.icon} square link={`place:${name}`} tags={seenTag(`place:${name}`)} />)}</div>
+              {places.length ? <div className={cardGrid}>{places.map((name) => <EntityCard key={name} kind="place" name={name} hint={visualOf(`place:${name}`)?.type} image={visualOf(`place:${name}`)?.image} icon={linkKindLabels.place.icon} square link={`place:${name}`} tags={seenTag(`place:${name}`)} />)}</div>
                 : !current.places && <EmptyHint icon={linkKindLabels.place.icon}>Aucun lieu noté. Lie une note à un lieu de l’Index des lieux.</EmptyHint>}
             </Section>
 
@@ -583,25 +603,27 @@ export function CampaignJournal({ campaignId, campaignName, accentColor, session
 
             <Section id="journal-creatures" icon={linkKindLabels.creature.icon} title="Créatures" count={creatureEvents.length + creatures.length}>
               {creatureEvents.length + creatures.length ? <div className={cardGrid}>
-                {creatureEvents.map((event) => <EntityCard key={event.id} kind="creature" name={event.name} image={event.image} icon={linkKindLabels.creature.icon} square link={[`event:${event.id}`, `creature:${event.name}`]}
+                {creatureEvents.map((event) => <EntityCard key={event.id} kind="creature" name={event.name} image={event.image || visualOf(`creature:${event.name}`)?.image} icon={linkKindLabels.creature.icon} square link={[`event:${event.id}`, `creature:${event.name}`]}
                   tags={<>{event.tag && <Tag dot={event.tagColor || linkKindLabels.creature.color}>{event.tag}</Tag>}{seenTag(`event:${event.id}`)}</>} />)}
-                {creatures.map((name) => <EntityCard key={name} kind="creature" name={name} icon={linkKindLabels.creature.icon} square link={`creature:${name}`} tags={seenTag(`creature:${name}`)} />)}
+                {creatures.map((name) => <EntityCard key={name} kind="creature" name={name} hint={visualOf(`creature:${name}`)?.type} image={visualOf(`creature:${name}`)?.image} icon={linkKindLabels.creature.icon} square link={`creature:${name}`} tags={seenTag(`creature:${name}`)} />)}
               </div> : <EmptyHint icon={linkKindLabels.creature.icon}>Aucune créature dans cette session.</EmptyHint>}
             </Section>
 
             <Section id="journal-objets" icon={linkKindLabels.item.icon} title="Objets" count={loot.length + items.length}>
               {loot.length + items.length ? <div className={cardGrid}>
-                {loot.map((note) => <EntityCard key={note.id} kind="item" name={note.title || sessionNoteLabel(note, 80)} icon={LootIcon} color={sessionNoteType("butin").color} square
+                {loot.map((note) => <EntityCard key={note.id} kind="item" name={note.title || sessionNoteLabel(note, 80)} media={lootMedia(note)} icon={LootIcon} color={sessionNoteType("butin").color} square
                   link={[`note:${note.id}`, ...(note.title ? [`item:${note.title}`] : [])]} tags={<><Tag dot={sessionNoteType("butin").color}>Butin</Tag>{note.authorName && <Tag>noté par {note.authorName}</Tag>}</>}>
                   {note.title && note.text && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{note.text}</p>}
                   <button type="button" onClick={() => journal.openNote(note.id)} className="mt-1.5 rounded-sm text-[11.5px] font-medium text-journal-ink underline-offset-4 outline-none hover:underline focus-visible:ring-2 focus-visible:ring-ring/50">Ouvrir la note</button>
                 </EntityCard>)}
-                {items.map((name) => <EntityCard key={name} kind="item" name={name} icon={linkKindLabels.item.icon} square link={`item:${name}`} tags={seenTag(`item:${name}`)} />)}
+                {items.map((name) => <EntityCard key={name} kind="item" name={name} hint={[visualOf(`item:${name}`)?.object?.type, visualOf(`item:${name}`)?.object?.subtype].filter(Boolean).join(" · ") || undefined} media={objectMedia(`item:${name}`, name)} image={visualOf(`item:${name}`)?.image} icon={linkKindLabels.item.icon} square link={`item:${name}`} tags={seenTag(`item:${name}`)} />)}
               </div> : <EmptyHint icon={linkKindLabels.item.icon}>Aucun objet noté. Ajoute une note « Butin » ou lie un objet à une note.</EmptyHint>}
             </Section>
 
             <Section id="journal-magasins" icon={linkKindLabels.shop.icon} title="Magasins" count={sessionShops.length}>
-              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)} />)}</div>
+              {sessionShops.length ? <div className={cardGrid}>{sessionShops.map((shop) => <EntityCard key={shop.id} kind="shop" name={shop.name} hint={shop.hint} media={shop.items?.[0] ? <ObjectIcon icon={shop.items[0].icon} name={shop.items[0].name} type={shop.items[0].type} subtype={shop.items[0].subtype} className="size-full" emojiClassName="text-xl leading-none" /> : undefined} icon={linkKindLabels.shop.icon} square link={`shop:${shop.id}`} tags={seenTag(`shop:${shop.id}`)}>
+                {(shop.items?.length ?? 0) > 1 && <ul aria-label="En vitrine" className="mt-2 flex flex-wrap gap-1">{shop.items!.slice(0, 6).map((item, position) => <li key={`${item.name}:${position}`} title={item.name} className="flex size-7 items-center justify-center overflow-hidden rounded-md border border-border/70 bg-background/60 p-0.5"><ObjectIcon icon={item.icon} name={item.name} type={item.type} subtype={item.subtype} className="size-full" emojiClassName="text-sm leading-none" fallback={<span className="text-[10px] font-semibold text-muted-foreground">{item.name.slice(0, 1)}</span>} /></li>)}</ul>}
+              </EntityCard>)}</div>
                 : <EmptyHint icon={linkKindLabels.shop.icon}>Aucun magasin dans cette session.</EmptyHint>}
             </Section>
 
