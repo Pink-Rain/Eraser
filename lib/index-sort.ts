@@ -92,7 +92,7 @@ export function indexSortKey(value: string, input?: IndexColumnSpec, options: So
     case "choice": {
       // Le choix tel que la liste l'écrit : « Aggressif » se range à « Agressif ».
       const options = spec.options ?? []
-      const values = spec.multiple ? splitListValue(text, options) : [text]
+      const values = spec.multiple ? splitListValue(text, options, spec.listSeparator) : [text]
       const shown = values.map((item) => matchChoice(item, options)?.value ?? item).join(", ")
       return { empty: false, number: null, text: textKey(shown) }
     }

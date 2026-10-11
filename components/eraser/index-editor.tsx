@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
@@ -33,6 +33,7 @@ import {
   rollupLabels,
   type ActionButton,
   type ActionStep,
+  type ChoiceSource,
   type ColumnStyle,
   type FileAccept,
   type FormulaResult,
@@ -587,7 +588,23 @@ function TypeSettings(props: SettingsProps) {
           <label className={smallLabel}>Index d’où viennent les noms<NativeSelect disabled={disabled} value={source.index} onChange={(event) => set({ source: { index: event.target.value as typeof source.index, tab: targetOf(event.target.value)?.tabs[0]?.name ?? "" } })}>{targets.map((item) => <NativeSelectOption key={item.index} value={item.index}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
           <label className={smallLabel}>Onglet où créer un nom absent<NativeSelect disabled={disabled} value={source.tab} onChange={(event) => set({ source: { ...source, tab: event.target.value } })}>{(target?.tabs ?? []).map((tab) => <NativeSelectOption key={tab.name} value={tab.name}>{tab.name}</NativeSelectOption>)}</NativeSelect></label>
         </div>
+        <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(source.onlyTab)} onCheckedChange={(checked) => set({ source: { ...source, onlyTab: checked === true || undefined } })} /><span><b>Seulement cet onglet</b> (sinon : tous les onglets de l’index)</span></label>
+        <div className="grid gap-1.5">
+          <span className="text-xs font-semibold">Autres sources de noms</span>
+          {(spec.moreSources ?? []).map((extra, position) => {
+            const extraTarget = targetOf(extra.index)
+            const update = (next: ChoiceSource | null) => set({ moreSources: (spec.moreSources ?? []).flatMap((item, index) => index === position ? next ? [next] : [] : [item]) })
+            return <div key={position} className="grid grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto] items-end gap-2">
+              <label className={smallLabel}>Index<NativeSelect disabled={disabled} value={extra.index} onChange={(event) => update({ index: event.target.value as typeof extra.index, tab: targetOf(event.target.value)?.tabs[0]?.name ?? "", onlyTab: true })}>{targets.map((item) => <NativeSelectOption key={item.index} value={item.index}>{item.title}</NativeSelectOption>)}</NativeSelect></label>
+              <label className={smallLabel}>Onglet<NativeSelect disabled={disabled} value={extra.onlyTab ? extra.tab : "*"} onChange={(event) => update(event.target.value === "*" ? { ...extra, tab: extraTarget?.tabs[0]?.name ?? extra.tab, onlyTab: undefined } : { ...extra, tab: event.target.value, onlyTab: true })}><NativeSelectOption value="*">Tous les onglets</NativeSelectOption>{(extraTarget?.tabs ?? []).map((tab) => <NativeSelectOption key={tab.name} value={tab.name}>{tab.name}</NativeSelectOption>)}</NativeSelect></label>
+              <Button type="button" size="icon-sm" variant="ghost" disabled={disabled} aria-label="Retirer cette source" onClick={() => update(null)}><X /></Button>
+            </div>
+          })}
+          <Button type="button" size="sm" variant="outline" className="justify-self-start" disabled={disabled} onClick={() => set({ moreSources: [...(spec.moreSources ?? []), { index: source.index, tab: target?.tabs[0]?.name ?? source.tab, onlyTab: true }] })}><Plus />Ajouter une source</Button>
+        </div>
         <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.multiple)} onCheckedChange={(checked) => set({ multiple: checked === true })} /><span><b>Choix multiple</b> : plusieurs noms par case</span></label>
+        {spec.multiple && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={spec.listSeparator?.trim() === "-"} onCheckedChange={(checked) => set({ listSeparator: checked === true ? "-" : undefined })} /><span>Séparer les noms par un tiret (« Forêt - Ville ») plutôt qu’une virgule</span></label>}
+        <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.strict)} onCheckedChange={(checked) => set({ strict: checked === true || undefined })} /><span><b>Signaler les noms introuvables</b> : en rouge, pour les corriger (rien n’est effacé)</span></label>
       </>
     }
     case "linked": {

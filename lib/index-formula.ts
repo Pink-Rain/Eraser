@@ -116,7 +116,7 @@ export function columnFormulaValue(raw: string, input?: IndexColumnSpec): Formul
       return splitNamesOf(text)
     case "choice":
     case "linked-choice":
-      return spec.multiple ? splitListValue(text, spec.options ?? []) : text || null
+      return spec.multiple ? splitListValue(text, spec.options ?? [], spec.listSeparator) : text || null
     case "file":
       return spec.file?.multiple ? text.split("\n").map((item) => item.trim()).filter(Boolean) : text || null
     default:

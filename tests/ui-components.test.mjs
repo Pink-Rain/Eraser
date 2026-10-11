@@ -213,6 +213,24 @@ test("Fouilles : les lieux viennent de Lieux › Environnement, reconnus même m
   assert.equal(parseSearchDraws([{ id: "d1", result: "success", place: "Ruine / donjon", roll: 12, rarity: "rare" }]).length, 1);
 });
 
+test("Emplacements des items : liste liée à Environnement et Magasin, « - » gardé, alias reconnus, fautes en rouge", async () => {
+  const columns = await vite.ssrLoadModule("/lib/index-columns.ts");
+  const spec = columns.objectColumnSpec("Emplacement principal", ["Nom", "Emplacement principal"]);
+  assert.equal(spec.kind, "linked-choice");
+  assert.equal(spec.strict, true);
+  assert.deepEqual([spec.source.tab, spec.moreSources[0].tab, spec.moreSources[0].aliasColumn], ["Environnement", "Magasin", "Emplacements"]);
+  const options = [{ value: "Forêt" }, { value: "Marché noir" }, { value: "Marché", aliases: ["Marché ordinaire"] }];
+  const values = columns.splitListValue("Marché ordinaire - Marché noir -\nForêt - Foret ordinaire", options, "-");
+  assert.deepEqual(values, ["Marché ordinaire", "Marché noir", "Forêt", "Foret ordinaire"]);
+  assert.deepEqual(values.map((value) => columns.matchChoice(value, options)?.value ?? null), ["Marché", "Marché noir", "Forêt", null]);
+  assert.equal(columns.joinListValue(["Forêt", "Marché noir"], "-"), "Forêt - Marché noir");
+  assert.equal(columns.joinListValue(["Forêt", "Ville"]), "Forêt, Ville");
+  const { ChoicePicker } = await vite.ssrLoadModule("/components/eraser/index-cells.tsx");
+  const html = renderToStaticMarkup(React.createElement(ChoicePicker, { label: "Emplacement principal", value: "Forêt - Forêt ordinaire", options, multiple: true, separator: "-", strict: true, onChange() {} }));
+  assert.match(html, /border-destructive[^>]*>Forêt ordinaire</);
+  assert.match(html, /Introuvable : Forêt ordinaire/);
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),

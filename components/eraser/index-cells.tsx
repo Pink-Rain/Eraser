@@ -94,11 +94,17 @@ type PickerProps = {
   compact?: boolean
   /** Rendu de la valeur fermée (pastille colorée d'un type de sort…). */
   renderValue?: (value: string) => ReactNode
+  /** Choix multiple : le séparateur écrit dans la feuille (« - » pour « Forêt - Ville »). */
+  separator?: string
+  /** Une valeur hors liste s'affiche en erreur, pour la corriger (jamais effacée). */
+  strict?: boolean
 }
 
 /** Une valeur de liste en pastille, à la couleur de son option (ou de son groupe). */
-function ChoicePill({ value, option, group, outside, renderValue, boxed = false }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode; boxed?: boolean }) {
+function ChoicePill({ value, option, group, outside, renderValue, boxed = false, strict = false }: { value: string; option?: ChoiceOption; group?: { color?: string }; outside?: boolean; renderValue?: (value: string) => ReactNode; boxed?: boolean; strict?: boolean }) {
   const color = option?.color ?? group?.color
+  // Liste stricte : un nom introuvable est une erreur à corriger, bien visible.
+  if (outside && strict) return <span className="inline-flex max-w-full min-w-0 items-center gap-1 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border border-dashed border-destructive/60 bg-destructive/10 px-2 py-0.5 text-xs font-medium text-destructive" title="Introuvable dans la liste : corrige le nom">{value}</span>
   if (renderValue) return <span className="min-w-0 whitespace-normal break-words [overflow-wrap:anywhere]">{renderValue(value)}</span>
   // Plusieurs valeurs sans couleur : une pastille neutre chacune, pour bien les séparer.
   if (!color && boxed) return <span className={`inline-block max-w-full min-w-0 whitespace-normal break-words [overflow-wrap:anywhere] rounded-full border bg-muted/40 px-2 py-0.5 text-xs ${outside ? "italic text-muted-foreground" : ""}`}>{value}</span>
@@ -113,14 +119,14 @@ function ChoicePill({ value, option, group, outside, renderValue, boxed = false 
  * hors liste reste affichée en italique, pour ne jamais être effacée par mégarde.
  * À choix multiple, un clic coche ou décoche une option et le menu reste ouvert.
  */
-export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue }: PickerProps) {
+export function ChoicePicker({ label, value, options, onChange, disabled = false, loading = false, allowCustom = false, multiple = false, groups = [], onCreate, createLabel, compact = true, renderValue, separator, strict = false }: PickerProps) {
   const [open, setOpen] = useState(false)
   const [query, setQuery] = useState("")
   const [creating, setCreating] = useState(false)
   const trimmed = value.trim()
   // Une case à un seul choix peut tenir une valeur par mode d'une arme, séparées par « | ».
   const modes = !multiple && trimmed.includes("|")
-  const values = multiple ? splitListValue(trimmed, options) : modes ? trimmed.split("|").map((part) => part.trim()).filter(Boolean) : trimmed ? [trimmed] : []
+  const values = multiple ? splitListValue(trimmed, options, separator) : modes ? trimmed.split("|").map((part) => part.trim()).filter(Boolean) : trimmed ? [trimmed] : []
   const current = values.map((item) => ({ raw: item, option: matchChoice(item, options) }))
   const selected = new Set(current.map((item) => item.option?.value ?? item.raw).map(foldName))
   const outsideValues = current.filter((item) => !item.option).map((item) => item.raw)
@@ -135,7 +141,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
     : [{ group: null, items: shown }]
 
   function commit(next: string[]) {
-    onChange(multiple ? joinListValue(next) : next[0] ?? "")
+    onChange(multiple ? joinListValue(next, separator) : next[0] ?? "")
   }
 
   function choose(next: string) {
@@ -159,12 +165,12 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
   }
 
   const closed = values.length
-    ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} /></span>)}</span>
+    ? <span className={`flex min-w-0 ${multiple || modes ? "flex-wrap gap-1 py-1" : ""} items-center`}>{current.map((item, index) => <span key={`${item.raw}:${index}`} className="contents">{modes && index > 0 && <span className="text-muted-foreground">|</span>}<ChoicePill value={item.option?.value ?? item.raw} option={item.option} group={groupOf(item.option)} outside={!item.option} renderValue={renderValue} boxed={multiple && current.length > 1} strict={strict} /></span>)}</span>
     : <span className="text-muted-foreground">—</span>
 
   return <Popover open={open} onOpenChange={(next) => { setOpen(next); if (!next) setQuery("") }}>
     <PopoverTrigger asChild>
-      <button type="button" aria-label={label} disabled={disabled} title={current[0]?.option?.hint ?? (outsideValues.length ? "Valeur hors de la liste" : undefined)} className={compact ? `${cellButton} ${multiple ? "h-auto" : ""}` : `${cellButton} min-h-9 border-input bg-background/50`}>
+      <button type="button" aria-label={label} disabled={disabled} title={current[0]?.option?.hint ?? (outsideValues.length ? (strict ? `Introuvable : ${outsideValues.join(", ")}` : "Valeur hors de la liste") : undefined)} className={compact ? `${cellButton} ${multiple ? "h-auto" : ""}` : `${cellButton} min-h-9 border-input bg-background/50`}>
         {closed}
         <ChevronDown className="size-4 shrink-0 opacity-50" />
       </button>
@@ -187,7 +193,7 @@ export function ChoicePicker({ label, value, options, onChange, disabled = false
       <div className="max-h-72 overflow-y-auto p-1">
         <button type="button" onClick={() => { commit([]); if (!multiple) setOpen(false) }} className="flex w-full rounded-md px-2 py-1.5 text-left text-sm text-muted-foreground hover:bg-accent">{multiple ? "Tout décocher" : "—"}</button>
         {!folded && outsideValues.map((outside) => <div key={outside} className="flex items-center gap-1">
-          <button type="button" onClick={() => choose(outside)} className="flex min-w-0 flex-1 items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-left text-sm italic text-muted-foreground hover:bg-accent" title="Valeur de la feuille, hors de la liste"><span className="truncate">{outside}</span>{multiple && <Check className="size-3.5 shrink-0" />}</button>
+          <button type="button" onClick={() => choose(outside)} className={`flex min-w-0 flex-1 items-center justify-between gap-2 truncate rounded-md px-2 py-1.5 text-left text-sm italic hover:bg-accent ${strict ? "text-destructive" : "text-muted-foreground"}`} title={strict ? "Introuvable dans la liste : décoche-le et choisis le bon nom" : "Valeur de la feuille, hors de la liste"}><span className="truncate">{outside}</span>{multiple && <Check className="size-3.5 shrink-0" />}</button>
           {onCreate && <button type="button" disabled={creating} onClick={() => void create(outside)} className="shrink-0 rounded-md px-2 py-1 text-[11px] font-semibold text-primary hover:bg-primary/10">Créer</button>}
         </div>)}
         {loading && <p className="flex items-center gap-2 px-2 py-2 text-xs text-muted-foreground"><LoaderCircle className="size-3.5 animate-spin" />Chargement…</p>}
@@ -221,7 +227,7 @@ export type LoadedWorldIndex = {
   columns?: Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
 }
 const dataCache = new Map<string, Promise<LoadedWorldIndex | null>>()
-const namesCache = new Map<string, Promise<string[]>>()
+const namesCache = new Map<string, Promise<ChoiceOption[]>>()
 
 /** Oublie les données gardées d'un index (après y avoir créé une ligne). */
 export function forgetWorldIndexData(index: WorldIndexKey) {
@@ -246,10 +252,15 @@ export function loadWorldIndexData(index: WorldIndexKey) {
 }
 
 function sourceKey(source: ChoiceSource) {
-  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.exclude ? `${source.exclude.column}=${[source.exclude.value, ...(source.exclude.others ?? [])].join("|")}` : ""}:${source.include ? `${source.include.column}^${source.include.value}` : ""}:${(source.extra ?? []).join("|")}`
+  return `${source.index}:${source.tab}:${source.onlyTab ? "1" : "*"}:${source.aliasColumn ?? ""}:${source.exclude ? `${source.exclude.column}=${[source.exclude.value, ...(source.exclude.others ?? [])].join("|")}` : ""}:${source.include ? `${source.include.column}^${source.include.value}` : ""}:${(source.extra ?? []).join("|")}`
 }
 
 export function loadWorldIndexNames(source: ChoiceSource) {
+  return loadWorldIndexOptions(source).then((options) => options.map((option) => option.value))
+}
+
+/** Les noms d'une source et, si elle en a une, leurs autres écritures (`aliasColumn`). */
+export function loadWorldIndexOptions(source: ChoiceSource) {
   const key = sourceKey(source)
   let promise = namesCache.get(key)
   if (!promise) {
@@ -262,13 +273,20 @@ export function loadWorldIndexNames(source: ChoiceSource) {
         const excluded = source.exclude ? table.headers.findIndex((header) => foldName(header) === foldName(source.exclude!.column)) : -1
         const excludedValues = new Set(source.exclude ? [source.exclude.value, ...(source.exclude.others ?? [])].map(foldName) : [])
         const included = source.include ? table.headers.findIndex((header) => foldName(header) === foldName(source.include!.column)) : -1
+        const aliasAt = source.aliasColumn ? table.headers.findIndex((header) => foldName(header) === foldName(source.aliasColumn!)) : -1
         if (source.include && included < 0) return []
         return column >= 0 ? table.rows
           .filter((row) => excluded < 0 || !excludedValues.has(foldName(row.values[excluded] ?? "")))
           .filter((row) => included < 0 || foldName(row.values[included] ?? "").startsWith(foldName(source.include!.value)))
-          .map((row) => row.values[column]?.trim() ?? "") : []
+          .map((row) => ({ value: row.values[column]?.replace(/<[^>]+>/g, "").trim() ?? "", aliases: aliasAt >= 0 ? splitListValue((row.values[aliasAt] ?? "").replace(/<[^>]+>/g, " "), [], "-") : [] })) : []
       })
-      return [...new Set([...names.filter(Boolean), ...(source.extra ?? [])])].sort((left, right) => left.localeCompare(right, "fr"))
+      const byName = new Map<string, ChoiceOption>()
+      for (const entry of [...names, ...(source.extra ?? []).map((value) => ({ value, aliases: [] }))]) {
+        if (!entry.value) continue
+        const known = byName.get(foldName(entry.value))
+        byName.set(foldName(entry.value), known ? { ...known, aliases: [...(known.aliases ?? []), ...entry.aliases] } : { value: entry.value, ...(entry.aliases.length ? { aliases: entry.aliases } : {}) })
+      }
+      return [...byName.values()].sort((left, right) => left.value.localeCompare(right.value, "fr"))
     })
     namesCache.set(key, promise)
   }
@@ -289,7 +307,8 @@ export async function ensureWorldIndexName(source: ChoiceSource, name: string) {
     body: JSON.stringify({ action: "ensure", key: source.index, tabName: source.tab, name: clean, fields: source.include ? { [source.include.column]: source.include.value } : undefined }),
   })
   if (!response.ok) throw new Error("Le nom n’a pas pu être ajouté à l’index.")
-  namesCache.set(sourceKey(source), Promise.resolve([...known, clean].sort((left, right) => left.localeCompare(right, "fr"))))
+  const options = await loadWorldIndexOptions(source)
+  namesCache.set(sourceKey(source), Promise.resolve([...options, { value: clean }].sort((left, right) => left.value.localeCompare(right.value, "fr"))))
   announceWorldIndexChange([source.index])
 }
 
@@ -312,30 +331,42 @@ export function useWorldIndexVersion(index: string) {
   return version
 }
 
-function useWorldIndexNames(source: ChoiceSource) {
-  const [names, setNames] = useState<string[] | null>(null)
-  const version = useWorldIndexVersion(source.index)
+/** Les choix d'une liste liée : ceux de chaque source, réunis (un même nom une seule fois). */
+function useWorldIndexOptions(sources: ChoiceSource[]) {
+  const [options, setOptions] = useState<ChoiceOption[] | null>(null)
+  const versions = sources.map((source) => source.index)
+  const version = useWorldIndexVersion(versions[0] ?? "")
+  const key = sources.map(sourceKey).join("|")
   useEffect(() => {
     let alive = true
-    void loadWorldIndexNames(source).then((loaded) => { if (alive) setNames(loaded) })
+    void Promise.all(sources.map(loadWorldIndexOptions)).then((lists) => {
+      if (!alive) return
+      const byName = new Map<string, ChoiceOption>()
+      for (const option of lists.flat()) if (!byName.has(foldName(option.value))) byName.set(foldName(option.value), option)
+      setOptions([...byName.values()].sort((left, right) => left.value.localeCompare(right.value, "fr")))
+    })
     return () => { alive = false }
-  }, [source, version])
-  return names
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- `key` résume les sources
+  }, [key, version])
+  return options
 }
 
 /**
  * Liste déroulante liée : les noms viennent d'un autre index (les peuples d'un PNJ…).
  * Choisir ou saisir un nom absent le crée dans cet index, comme une colonne liée.
  */
-export function LinkedChoicePicker({ source, value, onChange, compact = true, disabled = false, multiple = false, label }: { source: ChoiceSource; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; multiple?: boolean; label: string }) {
-  const names = useWorldIndexNames(source)
+export function LinkedChoicePicker({ source, moreSources, value, onChange, compact = true, disabled = false, multiple = false, label, separator, strict = false }: { source: ChoiceSource; /** D'autres onglets ou index dont les noms s'ajoutent. */ moreSources?: ChoiceSource[]; value: string; onChange: (value: string) => void; compact?: boolean; disabled?: boolean; multiple?: boolean; label: string; separator?: string; strict?: boolean }) {
+  const sources = useMemo(() => [source, ...(moreSources ?? [])], [moreSources, source])
+  const loaded = useWorldIndexOptions(sources)
   const [shown, setShown] = useOptimistic(value)
-  const options = useMemo(() => (names ?? []).map((name) => ({ value: name })), [names])
+  const options = loaded ?? []
   return <ChoicePicker
     label={label}
     value={shown}
     options={options}
-    loading={names === null}
+    loading={loaded === null}
+    separator={separator}
+    strict={strict}
     compact={compact}
     disabled={disabled}
     multiple={multiple}
@@ -998,7 +1029,7 @@ export function indexGridColumn(key: string, label: string, input: IndexColumnSp
       column.control = (rowKey) => <ChoiceCell label={label} value={valueOf(rowKey, key)} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={off(rowKey)} renderValue={extra.renderValue} onChange={(value) => commit(rowKey, key, value)} />
       break
     case "linked-choice":
-      if (spec.source) { const source = spec.source; column.control = (rowKey) => <LinkedChoicePicker label={label} source={source} multiple={spec.multiple} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} /> }
+      if (spec.source) { const source = spec.source; column.control = (rowKey) => <LinkedChoicePicker label={label} source={source} moreSources={spec.moreSources} separator={spec.listSeparator} strict={spec.strict} multiple={spec.multiple} value={valueOf(rowKey, key)} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} /> }
       break
     case "checkbox":
       column.control = (rowKey) => <CheckCell label={label} value={valueOf(rowKey, key)} emptyChecked={spec.emptyChecked} disabled={off(rowKey)} onChange={(value) => commit(rowKey, key, value)} />
@@ -1154,7 +1185,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     case "tab-sort":
       return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={(row?.tabNames ?? []).map((name) => ({ value: name }))} allowCustom disabled={disabled} onChange={onChange} />)}</div>
     case "linked-choice":
-      return spec.source ? <div className={fieldLabel}>{title}{styled(<LinkedChoicePicker compact={false} label={label} source={spec.source} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} />)}</div> : null
+      return spec.source ? <div className={fieldLabel}>{title}{styled(<LinkedChoicePicker compact={false} label={label} source={spec.source} moreSources={spec.moreSources} separator={spec.listSeparator} strict={spec.strict} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} />)}</div> : null
     case "checkbox":
       return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
     case "file":

@@ -104,6 +104,11 @@ export type ChoiceSource = {
   include?: { column: string; value: string }
   /** Des noms proposés en plus de ceux de l'index, jamais ajoutés à l'index (« Points de vie actuels »). */
   extra?: string[]
+  /**
+   * Une colonne de l'onglet qui donne d'autres façons d'écrire le nom (« Emplacements » de
+   * Lieux › Magasin : « Marché ordinaire » est le Marché). Une valeur écrite ainsi est reconnue.
+   */
+  aliasColumn?: string
 }
 
 export type ChoiceOption = {
@@ -399,6 +404,12 @@ export type IndexColumnSpec = {
   groups?: Array<{ name: string; color?: string }>
   /** Liste venant d'un index : l'index et l'onglet d'où viennent les noms. */
   source?: ChoiceSource
+  /** Liste liée : d'autres onglets ou index dont les noms s'ajoutent à ceux de `source`. */
+  moreSources?: ChoiceSource[]
+  /** Liste à choix multiple : le séparateur écrit dans la feuille (« , » par défaut ; « - » pour « Forêt - Ville »). */
+  listSeparator?: string
+  /** Liste liée : un nom introuvable dans les sources s'affiche en erreur (jamais effacé). */
+  strict?: boolean
   /**
    * Colonne liée créée depuis l'éditeur : la colonne qui lui répond dans l'autre index
    * (`tab: "*"` : n'importe quel onglet). Les liens prévus par Eraser n'en ont pas besoin.
@@ -588,8 +599,10 @@ export function isComputedSpec(spec: IndexColumnSpec) {
  * Les valeurs d'une case à plusieurs choix. Le séparateur est la virgule, mais une
  * option qui en contient une (« Bluff, mensonge ») reste entière.
  */
-export function splitListValue(value: string, options: ChoiceOption[] = []) {
-  const tokens = value.split(/\s*[,;\n]\s*/).map((token) => token.trim()).filter(Boolean)
+export function splitListValue(value: string, options: ChoiceOption[] = [], separator = ",") {
+  // « Forêt - Ville » : le tiret entouré d'espaces (ou suivi d'un retour à la ligne) sépare aussi.
+  const pattern = separator.trim() === "-" ? /\s+-\s+|\s*-\s*\n\s*|\s+-\s*$|^\s*-\s+|\s*[,;\n]\s*/ : /\s*[,;\n]\s*/
+  const tokens = value.split(pattern).map((token) => token.trim()).filter(Boolean)
   const known = new Set(options.map((option) => choiceKey(option.value)))
   const result: string[] = []
   for (let index = 0; index < tokens.length; index += 1) {
@@ -603,8 +616,8 @@ export function splitListValue(value: string, options: ChoiceOption[] = []) {
   return result
 }
 
-export function joinListValue(values: string[]) {
-  return values.map((value) => value.trim()).filter(Boolean).join(", ")
+export function joinListValue(values: string[], separator = ",") {
+  return values.map((value) => value.trim()).filter(Boolean).join(separator.trim() === "-" ? " - " : ", ")
 }
 
 export function foldName(value: string) {
@@ -723,6 +736,9 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
   // Matériaux et runes : masqués du tableau, remplis dans la fiche de l'objet.
   if (["materiaux", "materiau"].includes(folded)) return { kind: "linked-choice", multiple: true, hidden: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Matériau" } } }
   if (["runes", "rune"].includes(folded)) return { kind: "linked-choice", multiple: true, hidden: true, source: { index: "weapon-modifiers", tab: "Tout", include: { column: "Type", value: "Rune" } } }
+  // Où l'on trouve l'objet : les lieux de Lieux › Environnement et les magasins de Lieux › Magasin.
+  // La feuille garde « Forêt - Marché noir » ; un nom introuvable reste affiché, en erreur.
+  if (["emplacement principal", "emplacement secondaire", "emplacement", "emplacements"].includes(folded)) return { kind: "linked-choice", multiple: true, strict: true, listSeparator: "-", source: { index: "places", tab: "Environnement", onlyTab: true }, moreSources: [{ index: "places", tab: "Magasin", onlyTab: true, aliasColumn: "Emplacements" }], description: "Les lieux de Lieux › Environnement et les magasins de Lieux › Magasin. Un nom en rouge n’y est pas : corrige-le à la main." }
   return { kind: "rich" }
 }
 

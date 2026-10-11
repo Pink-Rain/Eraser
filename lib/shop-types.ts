@@ -46,7 +46,7 @@ const base = { color: "", types: [], subtypes: [], finds: ["objects"], count: nu
 
 /** Les types d'origine d'Eraser : exactement le générateur d'avant l'onglet « Magasin ». */
 export const builtinShopTypes: ShopTypeDefinition[] = [
-  { ...base, key: "market", name: "Marché", icon: "Boutique", places: ["Marché"], chances: chances([100, 100, 100, 100, 100, 100]) },
+  { ...base, key: "market", name: "Marché", icon: "Boutique", places: ["Marché", "Marché ordinaire"], chances: chances([100, 100, 100, 100, 100, 100]) },
   { ...base, key: "bookshop", name: "Librairie", icon: "Livre", places: ["Librairie"], chances: chances([20, 20, 40, 40, 50, 70]) },
   { ...base, key: "antique", name: "Antiquaire", icon: "Gemme", places: ["Antiquaire"], chances: chances([10, 30, 50, 70, 90, 100]) },
   { ...base, key: "armory", name: "Armurerie", icon: "Bouclier", places: ["Armurier", "Armurerie"], chances: chances([30, 50, 70, 90, 100, 100]) },
