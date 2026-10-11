@@ -56,7 +56,9 @@ async function worldSource(key: WorldIndexKey): Promise<Source> {
       const columns = data.columns[table.tabName] ?? []
       const specs = new Map(columns.map((column) => [foldName(column.header), normalizeSpec(column.spec)]))
       const id = table.headers.findIndex(isIdHeader)
-      const name = table.headers.findIndex(isNameColumn)
+      // Un onglet sans colonne Nom se cite par la colonne réglée « Nomme la ligne » (s'il en a une).
+      const named = table.headers.findIndex(isNameColumn)
+      const name = named >= 0 ? named : table.headers.findIndex((header) => header.trim() && specs.get(foldName(header))?.rowLabel)
       return {
         tab: table.tabName,
         headers: table.headers,

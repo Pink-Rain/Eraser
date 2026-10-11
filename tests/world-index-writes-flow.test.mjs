@@ -113,6 +113,47 @@ test("Le nom d'une ligne se règle par onglet dans « Modifier » et revient à 
   assert.deepEqual(google.grid(id, "Peuples")[0], headers);
 });
 
+test("« Nomme la ligne » : un onglet sans colonne Nom (les attributions de succès) se cite par la colonne réglée", async () => {
+  const [succes, obtenus] = definitions.worldIndexDefinitions.achievements.tabs;
+  const id = fresh("achievements");
+  google.addSpreadsheet(id, [
+    { title: succes.name, grid: [succes.headers, line(succes.headers, { "Nom": "Premier sang", "ID": "SUC-1" })] },
+    { title: obtenus.name, grid: [obtenus.headers, line(obtenus.headers, { [obtenus.headers[0]]: "Premier sang", [obtenus.headers[1]]: "Ayla", "ID": "OBT-1" })] },
+  ]);
+  await link("achievements", id, succes.name);
+  const data = await engine.getWorldIndex("achievements", { refresh: true });
+  assert.equal(data.columns[obtenus.name].find((column) => column.header === obtenus.headers[0]).spec.rowLabel, true);
+  const references = await vite.ssrLoadModule("/lib/index-references-server.ts");
+  const catalog = await references.referenceCatalog({ fresh: true });
+  const rows = catalog.indexes.find((index) => index.key === "achievements").rows;
+  assert.deepEqual(rows.filter((row) => row.tab === obtenus.name).map((row) => [row.id, row.name]), [["OBT-1", "Premier sang"]]);
+});
+
+test("Liens de départ : chaque bout est une colonne liée qui nomme celle d'en face", () => {
+  const ends = Object.keys(definitions.worldIndexDefinitions).flatMap((key) => definitions.defaultLinkEnds(key));
+  assert.ok(ends.length >= 10, `${ends.length} bouts`);
+  for (const [end, other] of ends) {
+    const tab = end.tab === "*" ? definitions.worldIndexDefinitions[end.index].tabs[0].name : end.tab;
+    const spec = definitions.worldColumnSpec(end.index, tab, end.column);
+    assert.equal(spec.kind, "linked", `${end.index} › ${tab} › ${end.column}`);
+    assert.deepEqual(spec.link, other, `${end.index} › ${tab} › ${end.column}`);
+  }
+});
+
+test("Étiquettes « { » : les valeurs d'un rangement en onglets deviennent des mots du menu", async () => {
+  const [tab] = definitions.worldIndexDefinitions["weapon-modifiers"].tabs;
+  const id = fresh("weapon-modifiers");
+  const type = tab.headers[1];
+  google.addSpreadsheet(id, [{ title: tab.name, grid: [tab.headers, line(tab.headers, { "Nom": "Feu", [type]: "Attribut", "ID": "MOD-1" }), line(tab.headers, { "Nom": "Mithril", [type]: "Matériau", "ID": "MOD-2" })] }]);
+  await link("weapon-modifiers", id, tab.name);
+  const references = await vite.ssrLoadModule("/lib/index-references-server.ts");
+  const catalog = await references.referenceCatalog({ fresh: true });
+  const rows = catalog.indexes.find((index) => index.key === "weapon-modifiers").rows;
+  assert.deepEqual(rows.map((row) => [row.name, row.tags]), [["Feu", ["Attribut"]], ["Mithril", ["Matériau"]]]);
+  const words = catalog.entries.filter((entry) => entry.index === "weapon-modifiers" && entry.tag).map((entry) => entry.tag).sort();
+  assert.deepEqual(words, ["Attribut", "Matériau"]);
+});
+
 test("Supprimer vise la ligne par son identifiant, même décalée ailleurs, sans confondre deux homonymes", async () => {
   const id = await linkCreatures([{ "Nom": "Loup", "Type": "Bête", "ID": "CRE-1" }, { "Nom": "Loup", "Type": "Garou", "ID": "CRE-2" }, { "Nom": "Ours", "Type": "Bête", "ID": "CRE-3" }]);
   const data = await engine.getWorldIndex("creatures", { refresh: true });
@@ -212,6 +253,40 @@ test("Une ligne ajoutée par le moteur et une autre ajoutée au même moment ail
   assert.ok(byId(google.grid(id, "Créatures"))["CRE-7"]);
 });
 
+test("Colonne « Onglet » de la vue Tout : libellé, place et onglets d'arrivée réglés dans « Modifier », suivis au renommage", async () => {
+  const id = fresh("places");
+  const headers = definitions.worldIndexDefinitions.places.tabs[0].headers;
+  const tabs = definitions.worldIndexDefinitions.places.tabs.map((tab) => ({ title: tab.name, grid: [tab.headers] }));
+  tabs[0].grid.push(line(headers, { "Nom": "Brume", "ID": "LIE-1" }), line(headers, { "Nom": "Val", "ID": "LIE-2" }));
+  google.addSpreadsheet(id, tabs);
+  await link("places", id, tabs[0].title);
+  const [first, second, third] = tabs.map((tab) => tab.title);
+  // Rien de réglé : l'éditeur propose la colonne, sans réglage.
+  assert.deepEqual((await engine.worldEditorModel("places")).tabColumn, {});
+  // Un onglet ajouté aux mêmes colonnes, puis la colonne réglée : seuls « second » et lui reçoivent des lignes.
+  const columns = headers.filter((header) => !["Nom", "ID"].includes(header)).map((header) => ({ header, spec: { kind: "rich" } }));
+  await engine.applyWorldSchemaOperations("places", [{ op: "add-tab", name: "Ruines", columns }]);
+  await engine.applyWorldSchemaOperations("places", [{ op: "tab-column", settings: { label: "  Rangé  dans ", after: "Type", targets: [second, "Ruines", "Inconnu"] } }]);
+  let data = await engine.getWorldIndex("places", { refresh: true });
+  assert.deepEqual(data.definition.tabColumn, { label: "Rangé dans", after: "Type", targets: [second, "Ruines"] });
+  await assert.rejects(() => engine.moveWorldIndexRows("places", first, third, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]), /INDEX_SCHEMA_LOCKED/);
+  assert.deepEqual(ids(google.grid(id, first)), ["LIE-1", "LIE-2"]);
+  await engine.moveWorldIndexRows("places", first, second, [{ rowNumber: 2, id: "LIE-1", name: "Brume" }]);
+  assert.deepEqual(ids(google.grid(id, second)), ["LIE-1"]);
+  // L'onglet d'arrivée renommé reste un onglet d'arrivée, sous son nouveau nom.
+  await engine.applyWorldSchemaOperations("places", [{ op: "rename-tab", tab: "Ruines", to: "Ruines anciennes" }]);
+  data = await engine.getWorldIndex("places", { refresh: true });
+  assert.deepEqual(data.definition.tabColumn.targets, [second, "Ruines anciennes"]);
+  await engine.moveWorldIndexRows("places", first, "Ruines anciennes", [{ rowNumber: 2, id: "LIE-2", name: "Val" }]);
+  assert.deepEqual(ids(google.grid(id, "Ruines anciennes")), ["LIE-2"]);
+  // Tout effacé : la colonne redevient celle d'Eraser, tous les onglets aux mêmes colonnes sont permis.
+  await engine.applyWorldSchemaOperations("places", [{ op: "tab-column", settings: {} }]);
+  data = await engine.getWorldIndex("places", { refresh: true });
+  assert.equal(data.definition.tabColumn, undefined);
+  // Les colonnes de la feuille n'ont pas bougé.
+  assert.deepEqual(google.grid(id, first)[0], headers);
+});
+
 test("Déplacer, dupliquer et insérer visent les lignes par leur identifiant", async () => {
   const id = fresh("places");
   const headers = definitions.worldIndexDefinitions.places.tabs[0].headers;
@@ -294,6 +369,33 @@ test("Schéma : une colonne liée aux créatures garde les réglages des sorts d
   await engine.applyWorldSchemaOperations("creatures", [{ op: "add-column", tab: "Créatures", header: "Proies", spec: { kind: "linked", link: { index: "creatures", tab: "Créatures", column: "Prédateurs" } } }]);
   rows = google.grid(id, SCHEMA_TAB).slice(1).filter((row) => row[0]);
   for (const column of ["Rareté", "Peuples", "Proies", "Prédateurs", "Odeur"]) assert.ok(rows.some((row) => row[1] === column), `${column} : ${JSON.stringify(rows)}`);
+});
+
+test("Corbeille : la liste se lit sans relecture forcée, et un schéma illisible n'est pas pris pour une corbeille vide", async () => {
+  const id = await linkCreatures([{ "Nom": "Loup", "ID": "CRE-1" }], [
+    { title: SCHEMA_TAB, grid: [SCHEMA_HEADERS, ["Créatures", "Odeur", "", "{\"kind\":\"rich\"}", "ajouté", "2026-01-01T00:00:00.000Z"]] },
+  ]);
+  let items = await engine.listWorldIndexTrash();
+  assert.deepEqual(items.filter((item) => item.key === "creatures").map((item) => item.column), ["Odeur"]);
+  // Le schéma gardé en mémoire sert à la liste suivante.
+  const stop = google.failReads(SCHEMA_TAB);
+  try {
+    items = await engine.listWorldIndexTrash();
+    assert.deepEqual(items.filter((item) => item.key === "creatures").map((item) => item.column), ["Odeur"]);
+    // Un classeur jamais lu dont le schéma est illisible : passé (noté dans le journal), sans
+    // faire échouer la page ni la corbeille des autres index.
+    const peoples = fresh("peoples");
+    google.addSpreadsheet(peoples, [{ title: "Peuples", grid: [definitions.worldIndexDefinitions.peoples.tabs[0].headers] }, { title: SCHEMA_TAB, grid: [SCHEMA_HEADERS, ["Peuples", "Totem", "", "", "ajouté", "2026-01-01T00:00:00.000Z"]] }]);
+    await link("peoples", peoples, "Peuples");
+    items = await engine.listWorldIndexTrash();
+    assert.equal(items.filter((item) => item.key === "peoples").length, 0);
+    assert.equal(items.filter((item) => item.key === "creatures").length, 1);
+  } finally {
+    stop();
+  }
+  // Restaurer relit le schéma à l'instant.
+  await engine.restoreWorldIndexTrash("creatures", "Créatures", "Odeur");
+  assert.equal(google.grid(id, SCHEMA_TAB).slice(1).find((row) => row[1] === "Odeur")[5], "");
 });
 
 test("Corbeille : une colonne en double n'est jamais effacée à l'aveugle", async () => {
@@ -476,4 +578,16 @@ test("Index des caractéristiques : les trois actions de déplacement s'ajoutent
   engine.forgetEffectiveIndex("skills");
   await engine.getWorldIndex("skills", { refresh: true });
   assert.equal(google.grid(id, tabs[0].name).length, 3);
+});
+
+test("États : les colonnes lues par la fiche (type, descriptions, règles) sont verrouillées avec leur raison", () => {
+  const states = definitions.worldIndexDefinitions.states;
+  const tab = states.tabs[0].name;
+  for (const header of ["Type", "Description niveau 1", "Description niveau 2", "Règles liées aux états"]) {
+    const policy = definitions.worldColumnPolicy("states", tab, header, []);
+    assert.equal(policy.rename, false, header);
+    assert.ok(policy.reasons.length > 0, header);
+  }
+  // Une colonne que rien ne lit reste libre.
+  assert.equal(definitions.worldColumnPolicy("states", tab, "Note", []).rename, true);
 });

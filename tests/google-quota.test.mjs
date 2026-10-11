@@ -88,3 +88,11 @@ test("sans copie partagée, rien n'est inventé", async () => {
   const reader = await vite.ssrLoadModule(`/lib/class-catalog-share.ts?installation=6`);
   assert.equal(await reader.sharedClassCatalog(), null);
 });
+
+test("journal des erreurs : les avertissements de Node et les pages fermées en route n'y entrent pas", async () => {
+  const journal = await vite.ssrLoadModule("/lib/error-journal.ts");
+  assert.equal(journal.isJournaledError("(node:328) [DEP0180] DeprecationWarning: fs.Stats constructor is deprecated."), false);
+  assert.equal(journal.isJournaledError("[vinext] Server error: Error [ERR_STREAM_UNABLE_TO_PIPE]: Cannot pipe to a closed or destroyed stream"), false);
+  assert.equal(journal.isJournaledError("WORLD_INDEX_TRASH_READ_FAILED states SHEETS_API_ERROR:429"), true);
+  assert.equal(journal.isJournaledError("CLASS_COLUMNS_CHECK_FAILED SHEET_KEY_COLUMN_MISSING:Classes:ID"), true);
+});

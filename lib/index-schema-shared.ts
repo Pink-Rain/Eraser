@@ -3,7 +3,7 @@
  * colonnes sont verrouillées. Partagé par l'éditeur (interface) et le serveur, qui
  * refuse une opération verrouillée même si l'interface la laissait passer.
  */
-import { foldName, isIdHeader, isSameDataKind, normalizeSpec, type IndexColumnKind, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isIdHeader, isSameDataKind, normalizeSpec, type IndexColumnKind, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
 import type { WorldIndexKey } from "@/lib/world-index-definitions"
 
 /** L'onglet discret de chaque classeur qui décrit ses colonnes. */
@@ -79,6 +79,8 @@ export type IndexEditorModel = {
   readOnly?: boolean
   readOnlyReason?: string
   relationTargets: RelationTarget[]
+  /** La colonne « Onglet » de la vue « Tout » : absente quand l'index n'a qu'un onglet. */
+  tabColumn?: TabColumnSettings
 }
 
 export type SchemaOperation =
@@ -99,6 +101,8 @@ export type SchemaOperation =
   | { op: "order-tabs"; tabs: string[] }
   /** Comment s'appelle une ligne de l'onglet (« un sort ») ; vide : celui d'Eraser. */
   | { op: "tab-label"; tab: string; label: string }
+  /** La colonne « Onglet » de la vue « Tout » : libellé, place, masquée, onglets d'arrivée. */
+  | { op: "tab-column"; settings: TabColumnSettings }
 
 /** Les types proposés à la création ou au changement de type d'une colonne. */
 // « Nom formulaire » n'y est pas : chaque index a déjà le sien, créé d'office ; on n'en veut pas deux.

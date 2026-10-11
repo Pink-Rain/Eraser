@@ -14,6 +14,7 @@ import { useCommitOnLeave } from "@/components/eraser/use-commit-on-leave"
 import { TokenButton } from "@/components/eraser/token-editor"
 import { IndexImage } from "@/components/eraser/index-image"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { nextNotebookPageName, notebookPageName, readNotebook, writeNotebook, type NotebookPage } from "@/lib/notebook-pages"
 import { CharacterSummons, type SummonsUpdate } from "@/components/eraser/character-summons"
 import { parseSummonsData, type SummonsData } from "@/lib/summons"
 import { ClassGaugeView, useClassGauges } from "@/components/eraser/class-gauges"
@@ -227,6 +228,67 @@ function NotesEditor({ value, onCommit, label = "Carnet de notes", compact = fal
       minHeight={compact || plain ? "min-h-20" : "min-h-32"}
       className={plain ? "border-0 bg-transparent" : "rounded-none border-0 bg-transparent"}
     />}
+  </section>
+}
+
+/**
+ * Le carnet de notes en pages nommées, comme des onglets (« Notes », « Quêtes », « Lieux »…).
+ * Toutes les pages tiennent dans la case « Note » (voir lib/notebook-pages.ts) : un carnet
+ * d'une seule page « Notes » reste écrit comme avant.
+ */
+function NotebookEditor({ value, onCommit }: { value: string; onCommit: (value: string) => Promise<void> }) {
+  const pages = useMemo(() => readNotebook(value), [value])
+  const [active, setActive] = useState(0)
+  const [renaming, setRenaming] = useState<number | null>(null)
+  const [draftName, setDraftName] = useState("")
+  const [confirming, setConfirming] = useState<number | null>(null)
+  const current = Math.min(active, pages.length - 1)
+  const save = (next: NotebookPage[]) => onCommit(writeNotebook(next))
+  const startRename = (index: number) => { setRenaming(index); setDraftName(pages[index].name); setConfirming(null) }
+  const finishRename = () => {
+    if (renaming === null) return
+    // La page n'est plus là (enregistrement refusé, carnet relu) : rien à renommer.
+    if (!pages[renaming]) { setRenaming(null); return }
+    const name = notebookPageName(draftName, pages[renaming].name)
+    if (name !== pages[renaming].name) void save(pages.map((page, index) => index === renaming ? { ...page, name } : page))
+    setRenaming(null)
+  }
+  const addPage = () => {
+    const name = nextNotebookPageName(pages)
+    void save([...pages, { name, html: "" }])
+    setActive(pages.length)
+    setRenaming(pages.length)
+    setDraftName(name)
+  }
+  const removePage = (index: number) => {
+    void save(pages.filter((_, position) => position !== index))
+    setConfirming(null)
+    setActive((selected) => Math.max(0, selected >= index ? selected - 1 : selected))
+  }
+
+  return <section className="overflow-hidden rounded-2xl border border-[#74664f55] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.015))] shadow-sm">
+    <div className="flex flex-wrap items-end gap-1 border-b border-border/45 px-3 pt-2">
+      <div className="mr-2 flex items-center gap-2 pb-2 text-sm font-medium" style={{ color: "var(--character-accent, #d7b77d)" }}><NotebookPen className="size-4" />Carnet de notes</div>
+      <div role="tablist" aria-label="Pages du carnet" className="flex min-w-0 flex-wrap items-end gap-1">
+        {pages.map((page, index) => renaming === index
+          ? <Input key={index} autoFocus value={draftName} maxLength={40} onChange={(event) => setDraftName(event.target.value)} onBlur={finishRename} onKeyDown={(event) => { if (event.key === "Enter") finishRename(); if (event.key === "Escape") setRenaming(null) }} aria-label="Nom de la page" className="mb-1 h-7 w-36 text-xs" />
+          : <span key={index} className={`group/page inline-flex items-center rounded-t-lg border border-b-0 text-xs ${index === current ? "border-border/60 bg-background/45 font-semibold" : "border-transparent text-muted-foreground hover:bg-background/25"}`}>
+            <button type="button" role="tab" aria-selected={index === current} onClick={() => { setActive(index); setConfirming(null) }} onDoubleClick={() => startRename(index)} title="Double-clic pour renommer" className="max-w-40 truncate px-2.5 py-1.5">{page.name}</button>
+            {index === current && pages.length > 1 && (confirming === index
+              ? <span className="mr-1 flex items-center gap-1 text-[11px] font-normal">Supprimer ?<button type="button" onClick={() => removePage(index)} className="rounded px-1 text-destructive hover:bg-destructive/10">Oui</button><button type="button" onClick={() => setConfirming(null)} className="rounded px-1 hover:bg-muted">Non</button></span>
+              : <button type="button" onClick={() => setConfirming(index)} className="mr-1 rounded p-0.5 text-muted-foreground opacity-60 hover:text-destructive hover:opacity-100" aria-label={`Supprimer la page ${page.name}`} title="Supprimer cette page"><X className="size-3" /></button>)}
+          </span>)}
+        <button type="button" onClick={addPage} className="mb-1 flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-background/40 hover:text-primary" aria-label="Ajouter une page" title="Ajouter une page"><Plus className="size-3.5" /></button>
+      </div>
+    </div>
+    <RichTextField
+      key={`${current}:${pages[current]?.name}`}
+      value={pages[current]?.html ?? ""}
+      onCommit={(html) => void save(pages.map((page, index) => index === current ? { ...page, html } : page))}
+      placeholder="Écrire…"
+      minHeight="min-h-32"
+      className="rounded-none border-0 bg-transparent"
+    />
   </section>
 }
 
@@ -1617,7 +1679,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       return spellGauges.length || spellForms.length || spellDecks.length ? <div className="space-y-4">{(spellGauges.length > 0 || spellForms.length > 0) && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{spellForms}{spellGauges.map((resolved) => gaugeView(resolved))}</div>}{spellDecks}{progression}</div> : progression
     }
     if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
-    if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotesEditor embedded value={values[8]} onCommit={(value) => commit(8, value)} /></div>
+    if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotebookEditor value={values[8]} onCommit={(value) => commit(8, value)} /></div>
     if (tab.type === "invocation") return <CharacterSummons data={parseSummonsData(tab.summons)} onUpdate={updateSummons(tab.id)} suggestions={summonSuggestions} />
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }

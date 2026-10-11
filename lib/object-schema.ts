@@ -126,6 +126,8 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       if (requests.length) await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
       continue
     }
+    // La colonne « Onglet » des objets est celle du regroupement : « Modifier » ne la propose pas ici.
+    if (operation.op === "tab-column") throw new Error("INDEX_SCHEMA_LOCKED:La colonne « Onglet » des objets se règle avec le regroupement des classeurs.")
     const table = tables.find((candidate) => candidate.tabName === operation.tab)
     if (!table) throw new Error("OBJECT_INDEX_NOT_FOUND")
     if (operation.op === "rename-tab") {

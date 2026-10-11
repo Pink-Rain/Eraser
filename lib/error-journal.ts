@@ -23,6 +23,21 @@ function text(value: unknown) {
   try { return JSON.stringify(value) } catch { return String(value) }
 }
 
+/**
+ * Ce qui passe par `console.error` sans être une erreur d'Eraser : gardé dans la sortie du
+ * serveur (le log de démarrage), mais pas dans le journal de la page Administration.
+ */
+const NOT_ERRORS = [
+  // Les avertissements de dépréciation de Node (DEP0180 : lu dans l'archive .asar par Electron).
+  /\[DEP\d+\] DeprecationWarning/,
+  // La page a fermé sa connexion (F5, page quittée) avant la fin de la réponse : rien n'a échoué.
+  /ERR_STREAM_UNABLE_TO_PIPE|ERR_STREAM_PREMATURE_CLOSE/,
+]
+
+export function isJournaledError(message: string) {
+  return !NOT_ERRORS.some((pattern) => pattern.test(message))
+}
+
 /** Branche le journal sur `console.error` (une seule fois par processus). */
 export function installErrorJournal() {
   const state = journal()
@@ -31,7 +46,8 @@ export function installErrorJournal() {
   const original = console.error.bind(console)
   console.error = (...values: unknown[]) => {
     try {
-      state.entries.push({ at: new Date().toISOString(), message: values.map(text).join(" ").slice(0, 2000) })
+      const message = values.map(text).join(" ").slice(0, 2000)
+      if (isJournaledError(message)) state.entries.push({ at: new Date().toISOString(), message })
       if (state.entries.length > MAX_ENTRIES) state.entries.splice(0, state.entries.length - MAX_ENTRIES)
     } catch {
       // Le journal ne doit jamais empêcher l'erreur d'être écrite.

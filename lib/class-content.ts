@@ -1572,5 +1572,7 @@ export async function addRankBonusRow() {
 // « Actualiser » (administrateur, MJ) : sorts, présentations et bonus de rang relus dans Google.
 onForgetGoogleData(() => {
   invalidateClassContentCaches()
+  // Le classeur des créatures a pu être relié à un autre fichier : son emplacement est relu.
+  creatureSpellFileCache = null
   googleFirstUntil = Date.now() + 60_000
 })

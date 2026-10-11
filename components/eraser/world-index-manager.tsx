@@ -528,12 +528,14 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   const refreshRef = useRef<() => Promise<void>>(async () => undefined)
   useLayoutEffect(() => { refreshRef.current = refresh })
 
-  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux).
+  // Déplacer une ligne n'a de sens qu'entre onglets aux mêmes colonnes (les lieux), et
+  // seulement vers les onglets d'arrivée choisis dans « Modifier » (colonne « Onglet »).
   const moveTargetsOf = useCallback((fromTab: string) => {
     const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
     const from = definition.tabs.find((tab) => tab.name === fromTab)
     if (!from) return []
-    return definition.tabs.filter((tab) => tab.name !== fromTab && signature(tab.headers) === signature(from.headers)).map((tab) => tab.name)
+    const allowed = definition.tabColumn?.targets
+    return definition.tabs.filter((tab) => tab.name !== fromTab && signature(tab.headers) === signature(from.headers) && (!allowed || allowed.includes(tab.name))).map((tab) => tab.name)
   }, [definition])
 
   const busy = Boolean(pending)
@@ -561,10 +563,29 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
     else setDetails(rowKey)
   }, [entity, rawOf, router])
   /**
-   * Le portrait d'un personnage, la bannière d'une campagne : importés comme depuis la
-   * fiche ou le tableau de bord (même adresse, même stockage), pas comme une image d'index.
+   * Le portrait d'un personnage ou d'un PNJ, la bannière d'une campagne : importés comme
+   * depuis la fiche, la page du PNJ ou le tableau de bord (même adresse, même stockage),
+   * pas comme une image d'index.
    */
   const entityImage = useMemo(() => {
+    if (indexKey === "npcs") return {
+      header: "portrait",
+      upload: async (file: File, rowKey: string, columnKey: string) => {
+        const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+        if (!id) throw new Error("Cette ligne n’a pas encore d’identifiant.")
+        const form = new FormData()
+        form.append("portrait", file)
+        const response = await fetch(`/api/npcs/${encodeURIComponent(id)}`, { method: "PATCH", body: form })
+        const payload = await response.json().catch(() => ({})) as { npc?: { portrait?: string }; error?: string }
+        if (!response.ok || !payload.npc?.portrait) throw new Error(payload.error || "Le portrait n’a pas pu être importé.")
+        // La page du PNJ vient d'écrire cette adresse dans la case : la page la tient pour vue.
+        const written = payload.npc.portrait
+        localEdits.current[`${rowKey}:${columnKey}`] = written
+        editsSettledAt.current[`${rowKey}:${columnKey}`] = requestSeq.current
+        // La même adresse qu'avant : `?v=` fait voir la nouvelle image tout de suite.
+        return `${written}${written.includes("?") ? "&" : "?"}v=${Date.now()}`
+      },
+    }
     if (indexKey !== "characters" && indexKey !== "campaigns") return null
     const characters = indexKey === "characters"
     return {
@@ -927,7 +948,12 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       },
       entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey, header) } : {},
     ))
-    if (spanning) list.splice(1, 0, { key: TAB_COLUMN, label: "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
+    // La colonne « Onglet », réglée dans « Modifier » : libellé, place (après une colonne), masquée.
+    const tabColumn = definition.tabColumn
+    if (spanning && !tabColumn?.hidden) {
+      const after = tabColumn?.after ? list.findIndex((column) => foldName(column.key) === foldName(tabColumn.after!)) : -1
+      list.splice(after >= 0 ? after + 1 : 1, 0, { key: TAB_COLUMN, label: tabColumn?.label || "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
+    }
     // Les colonnes propres à la page qui accueille la vue (« Classes et rangs »).
     for (const extra of embed?.extraColumns ?? []) {
       const at = extra.after ? list.findIndex((column) => foldName(column.key) === foldName(extra.after!)) : -1
@@ -954,7 +980,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [ask, busy, commitCell, computed, drawCell, embed, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [ask, busy, commitCell, computed, definition.tabColumn, drawCell, embed, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])

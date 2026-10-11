@@ -41,7 +41,7 @@ import { markChecked, recentlyChecked } from "@/lib/sheet-checks"
 import { mustReread } from "@/lib/request-freshness"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
-import { choiceCorrection, newIndexId, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, newIndexId, type IndexColumnSpec, type SpellSource, type TabColumnSettings } from "@/lib/index-columns"
 import { findEntry, readSchema, rewriteSchema, upsertEntry } from "@/lib/index-schema"
 import { columnMoves, headerProblem, isDisplayOnlyChange, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import {
@@ -62,6 +62,8 @@ import {
   worldIndexSeeds,
   worldColumnSpec,
   defaultLinkEnds,
+  TAB_COLUMN_ENTRY,
+  type BuiltinWorldIndexKey,
   type EntityWorldIndexKey,
   type WorldIndexKey,
   type WorldIndexDefinition,
@@ -214,7 +216,7 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
       const tabs = base.tabs.map((tab, index) => index === 0 ? { ...tab, name: sheet.tabName } : tab)
       const own = (entry: SchemaEntry) => tabs.some((tab) => foldName(tab.name) === foldName(entry.tab))
       const schema = all.filter(own)
-      return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter((entry) => !own(entry)), definition: { ...base, tabs: effectiveTabs(tabs, schema) }, degraded }
+      return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter((entry) => !own(entry)), definition: { ...base, tabs: effectiveTabs(tabs, schema), tabColumn: tabColumnOf(all) }, degraded }
     }
     const sheet = await ensureJdrSheet(key as JdrSheetKey)
     if (!sheet) throw new Error("WORLD_INDEX_SHEET_UNAVAILABLE")
@@ -222,7 +224,7 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
     // L'onglet des sorts des créatures vit dans le classeur des créatures : ses réglages sont les siens.
     const foreign = (entry: SchemaEntry) => key === "creatures" && foldName(entry.tab) === foldName(CREATURE_SPELLS_TAB)
     const schema = all.filter((entry) => !foreign(entry))
-    return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter(foreign), definition: { ...base, tabs: effectiveTabs(base.tabs, schema) }, degraded }
+    return { spreadsheetId: sheet.spreadsheetId, webViewLink: sheet.webViewLink, schema, foreign: all.filter(foreign), definition: { ...base, tabs: effectiveTabs(base.tabs, schema), tabColumn: tabColumnOf(all) }, degraded }
   }
   const entry = await customIndexEntry(key)
   if (!entry) throw new Error("WORLD_INDEX_NOT_FOUND")
@@ -232,7 +234,7 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
     webViewLink: `https://docs.google.com/spreadsheets/d/${entry.spreadsheetId}/edit`,
     schema,
     foreign: [],
-    definition: { key, sheetName: entry.sheetName, title: entry.title, path: `/ressources/index/${key}`, tabs: effectiveTabs([], schema), custom: true, description: entry.description },
+    definition: { key, sheetName: entry.sheetName, title: entry.title, path: `/ressources/index/${key}`, tabs: effectiveTabs([], schema), custom: true, description: entry.description, tabColumn: tabColumnOf(schema) },
     degraded,
   }
 }
@@ -650,8 +652,9 @@ function scheduleIdBackfill(key: WorldIndexKey) {
         const cell = `${columnName(column + 1)}${index + 1}`
         data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[id]] })
         const cells = [{ header: table.headers[column], html: id }]
-        // La ligne d'un PNJ saisie sans page reçoit celle de la bibliothèque, comme un ajout.
-        for (const [header, value] of Object.entries(entity?.addDefaults ?? {})) {
+        // Une ligne tapée dans Sheets reçoit, avec son identifiant, les valeurs d'une nouvelle
+        // ligne réglées sur ses colonnes (la page de bibliothèque d'un PNJ…), comme un ajout.
+        for (const [header, value] of defaultValuesOf(key, tab.name, table.headers)) {
           const at = columnOf(table.headers, header)
           if (at < 0 || (row[at] ?? "").trim()) continue
           const target = `${columnName(at + 1)}${index + 1}`
@@ -874,15 +877,24 @@ function entityOf(key: WorldIndexKey) {
   return isBuiltinWorldIndexKey(key) ? worldIndexDefinitions[key].entity : undefined
 }
 
+/** Un nom saisi ailleurs (lien, liste) peut-il créer sa ligne ? Pas un personnage, une campagne ni une classe. */
+function bornFromNames(key: WorldIndexKey) {
+  const entity = entityOf(key)
+  return !entity?.addHref && !entity?.addRows
+}
+
 /**
- * Personnages, campagnes et classes naissent de leurs pages (compte, dossier, liens) et
- * partent à la corbeille : le tableau n'en ajoute, n'en copie ni n'en supprime aucune ligne.
+ * Personnages et campagnes naissent de leurs pages (compte, dossier, liens) et partent à la
+ * corbeille ; les classes s'ajoutent par le formulaire : le tableau n'en insère, n'en copie
+ * (sauf personnages et campagnes) ni n'en supprime aucune ligne.
  */
 function assertRowCommands(key: WorldIndexKey, action: "add" | "insert" | "duplicate" | "delete" | "move" = "add") {
   const entity = entityOf(key)
   if (!entity || entity.rowCommands) return
   // Personnages et campagnes : seulement dupliquer (supprimer passe par la corbeille).
   if (entity.trashKind && action === "duplicate") return
+  // Les classes : seulement ajouter, par le formulaire du moteur.
+  if (entity.addRows && action === "add") return
   throw new Error("WORLD_INDEX_ROWS_LOCKED")
 }
 
@@ -1083,16 +1095,18 @@ async function writeNewRow(key: WorldIndexKey, table: PlainTable, tabName: strin
   // Toute nouvelle ligne reçoit son identifiant (une ligne déplacée garde le sien).
   const idColumn = columnOf(current.headers, ID_HEADER)
   if (idColumn >= 0 && !(named[idColumn] ?? "").trim()) named[idColumn] = newIndexId(tabDefinition(key, tabName).idPrefix)
-  // Une ligne d'index d'entités reçoit ce que son code attend (la page d'un PNJ, ses dates).
+  // Une case vide reçoit la valeur d'une nouvelle ligne réglée sur sa colonne (la page d'un
+  // PNJ…) ; une ligne d'index d'entités, ses dates.
   const entity = entityOf(key)
   const now = new Date().toISOString()
-  const values = entity ? current.headers.map((header, index) => {
+  const defaults = new Map(defaultValuesOf(key, tabName, current.headers).map(([header, value]) => [foldName(header), value]))
+  const values = current.headers.map((header, index) => {
     const value = named[index] ?? ""
     if (value.trim()) return value
-    const preset = Object.entries(entity.addDefaults ?? {}).find(([candidate]) => foldName(candidate) === foldName(header))?.[1]
+    const preset = defaults.get(foldName(header))
     if (preset !== undefined) return preset
-    return [foldName("Créé le"), foldName("Modifié le")].includes(foldName(header)) ? now : value
-  }) : named
+    return entity && [foldName("Créé le"), foldName("Modifié le")].includes(foldName(header)) ? now : value
+  })
   const { updatedRange } = await appendRows(current.spreadsheetId, sheetTabRange(tabName, `A:${columnName(Math.max(1, values.length))}`), [values], { valueInputOption: "RAW" })
   const id = idColumn >= 0 ? (values[idColumn] ?? "").trim() : ""
   // appendRows la retrouve par son texte, depuis le bas ; à défaut, son identifiant la désigne.
@@ -1120,7 +1134,7 @@ async function addLink(end: WorldIndexLinkEnd, targetName: string, value: string
   const linkColumn = columnOf(table.headers, end.column)
   if (nameColumn < 0 || linkColumn < 0) return false
   // Un personnage, une campagne ou une classe ne naît pas d'un nom saisi ailleurs.
-  if (rowIndex <= 0 && entityOf(end.index)?.addHref) return false
+  if (rowIndex <= 0 && !bornFromNames(end.index)) return false
   if (rowIndex > 0) {
     const current = splitNames(table.rows[rowIndex][linkColumn] || "")
     if (current.some((name) => foldName(name) === foldName(value))) return false
@@ -1213,6 +1227,52 @@ async function renameLinkedChoices(key: WorldIndexKey, tabName: string, oldName:
   if (touched) invalidateWorldIndexes([key])
 }
 
+/** Les sorts de chaque index de sorts, tels que les colonnes « Sorts » les citent (`spells.source`). */
+const spellSources: Partial<Record<WorldIndexKey, SpellSource>> = { "creature-spells": "creature", "class-spells": "class" }
+
+/**
+ * Un sort renommé : les colonnes de type « Sorts » qui le citent (les Sorts actifs et passifs
+ * des créatures et des PNJs) prennent le nouveau nom. Seules les cases qui le citaient sont
+ * réécrites ; un classeur qui n'existe pas n'est pas créé. Renvoie les index modifiés.
+ */
+async function renameSpellReferences(key: WorldIndexKey, oldName: string, newName: string): Promise<WorldIndexKey[]> {
+  const source = spellSources[key]
+  if (!source) return []
+  const cites = (spec: IndexColumnSpec) => spec.kind === "spells" && (spec.spells?.source === source || spec.spells?.source === "all")
+  const touched: WorldIndexKey[] = []
+  for (const reader of Object.keys(worldIndexDefinitions) as BuiltinWorldIndexKey[]) {
+    if (reader === key) continue
+    // Seulement les index dont une colonne cite ces sorts : aucun autre classeur n'est lu.
+    const definition = worldIndexDefinitions[reader]
+    if (!definition.tabs.some((tab) => tab.headers.some((header) => cites(worldColumnSpec(reader, tab.name, header))))) continue
+    if (!await existingWorkbook(reader).catch(() => false)) continue
+    const { schema } = await workbook(reader)
+    for (const tab of await tabsOf(reader)) {
+      const known = [...tab.headers, ...schema.filter((entry) => entry.tab === tab.name && entry.column).map((entry) => entry.column)]
+      const columns = known.filter((header) => cites(effectiveColumnSpec(reader, tab.name, header, schema)))
+      if (!columns.length) continue
+      const table = await plainTable(reader, tab.name, columns)
+      const data: Array<{ range: string; values: string[][] }> = []
+      table.headers.forEach((header, column) => {
+        if (!columns.some((wanted) => foldName(wanted) === foldName(header))) return
+        table.rows.forEach((row, rowIndex) => {
+          if (rowIndex === 0) return
+          const names = splitNames(row[column] ?? "")
+          if (!names.some((name) => foldName(name) === foldName(oldName))) return
+          const cell = `${columnName(column + 1)}${rowIndex + 1}`
+          data.push({ range: sheetTabRange(tab.name, `${cell}:${cell}`), values: [[names.map((name) => foldName(name) === foldName(oldName) ? newName : name).join(", ")]] })
+        })
+      })
+      if (!data.length) continue
+      await googleSheetsJson(`spreadsheets/${table.spreadsheetId}/values:batchUpdate`, { method: "POST", body: JSON.stringify({ valueInputOption: "RAW", data }) })
+      clearSpreadsheetReadCache(table.spreadsheetId)
+      if (!touched.includes(reader)) touched.push(reader)
+    }
+  }
+  if (touched.length) invalidateWorldIndexes(touched)
+  return touched
+}
+
 /**
  * Une cellule, avec sa mise en forme. La ligne est celle que la page a vue (retrouvée par son
  * identifiant), la colonne celle qui porte ce nom ; `previous` est ce que la page y montrait :
@@ -1255,7 +1315,10 @@ export function updateWorldIndexCell(key: WorldIndexKey, tabName: string, row: W
 async function propagateCellLinks(key: WorldIndexKey, tabName: string, before: Awaited<ReturnType<typeof plainTable>>, rowIndex: number, column: number, target: string, current: string, html: string, changed: Set<WorldIndexKey>) {
   const newValue = htmlToRichText(html).text.replace(/\s+/g, " ").trim()
   const previousName = isNameColumn(target) ? current.replace(/\s+/g, " ").trim() : ""
-  if (previousName && newValue && foldName(previousName) !== foldName(newValue)) await renameLinkedChoices(key, tabName, previousName, newValue)
+  if (previousName && newValue && foldName(previousName) !== foldName(newValue)) {
+    await renameLinkedChoices(key, tabName, previousName, newValue)
+    for (const renamed of await renameSpellReferences(key, previousName, newValue)) changed.add(renamed)
+  }
   const ends = linkEndsOf(key, tabName)
   const linkedEnd = ends.find(([end]) => foldName(end.column) === foldName(target))
   if (!linkedEnd && !(isNameColumn(target) && ends.length > 0)) return []
@@ -1525,7 +1588,10 @@ export function updateWorldIndexFields(key: WorldIndexKey, tabName: string, row:
     await patchCachedRow(key, tabName, cachedIdentityOf(table, rowIndex), written)
     const nameField = Object.entries(fields).find(([header]) => columnOf(table.headers, header) === nameColumn)?.[1]
     const newName = nameField === undefined ? "" : htmlToRichText(String(nameField)).text.replace(/\s+/g, " ").trim()
-    if (oldName && newName && foldName(oldName) !== foldName(newName)) await renameLinkedChoices(key, tabName, oldName, newName)
+    if (oldName && newName && foldName(oldName) !== foldName(newName)) {
+      await renameLinkedChoices(key, tabName, oldName, newName)
+      await renameSpellReferences(key, oldName, newName)
+    }
     return written.length
   })
 }
@@ -1543,6 +1609,9 @@ export function moveWorldIndexRows(key: WorldIndexKey, fromTab: string, toTab: s
     assertRowCommands(key, "move")
     const sheet = await writableWorkbook(key)
     if (!(await tabsOf(key)).some((tab) => tab.name === toTab)) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
+    // Les onglets d'arrivée choisis dans « Modifier » (colonne « Onglet ») : les autres sont refusés.
+    const targets = (await workbook(key)).definition.tabColumn?.targets
+    if (targets && !targets.includes(toTab)) throw new Error(`INDEX_SCHEMA_LOCKED:Une ligne ne peut pas aller dans « ${toTab} » : cet onglet n’est pas un onglet d’arrivée de la colonne « Onglet » (réglage dans « Modifier »).`)
     const source = await plainTable(key, fromTab)
     const target = await plainTable(key, toTab)
     const moved: WorldIndexRowRef[] = []
@@ -1644,7 +1713,7 @@ export function ensureWorldIndexEntry(key: WorldIndexKey, tabName: string, name:
     }
     const table = await plainTable(key, tabName)
     const nameColumn = nameColumnIndex(table.headers)
-    if (nameColumn < 0 || entityOf(key)?.addHref) return false
+    if (nameColumn < 0 || !bornFromNames(key)) return false
     // Les autres champs donnés (le Type d'une liste filtrée) sont écrits avec le nom.
     const extra = new Map(Object.entries(fields).map(([header, value]) => [foldName(header), value.trim()]))
     await writeNewRow(key, table, tabName, table.headers.map((header, index) => index === nameColumn ? clean : extra.get(foldName(header)) ?? ""))
@@ -1712,7 +1781,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
   const deleteIndex = isBuiltinWorldIndexKey(key)
     ? { allowed: false, reason: "Index prévu par Eraser : le code le lit (fiches, colonnes liées, création de personnage, statistiques). On peut en supprimer des onglets et des colonnes, pas l’index entier." }
     : { allowed: true }
-  return { family: "world", key, title: data.definition.title, tabs, addTabs: !entity, relationTargets: await worldRelationTargets(), deleteIndex }
+  return { family: "world", key, title: data.definition.title, tabs, addTabs: !entity, relationTargets: await worldRelationTargets(), deleteIndex, ...(data.definition.tabs.length > 1 ? { tabColumn: data.definition.tabColumn ?? {} } : {}) }
 }
 
 /** Les index du monde qu'une relation peut viser, avec leurs onglets et colonnes. */
@@ -1767,6 +1836,31 @@ async function ensureReciprocal(key: WorldIndexKey, tab: string, header: string,
     for (const targetTab of tabs) upsertEntry(entries, targetTab, link.column, { spec: { kind: "linked", also: ["rich"], link: { index: key, tab, column: header } }, deletedAt: "" })
   })
   forgetWorkbook(target.spreadsheetId)
+}
+
+/** Les valeurs d'une nouvelle ligne réglées sur les colonnes d'un onglet (« Valeur d'une nouvelle ligne »). */
+function defaultValuesOf(key: WorldIndexKey, tabName: string, headers: string[]): Array<[string, string]> {
+  const schema = effectiveIndexes.get(key)?.schema ?? []
+  return headers.flatMap((header): Array<[string, string]> => {
+    if (!header.trim() || foldName(header) === foldName(ID_HEADER)) return []
+    const value = effectiveColumnSpec(key, tabName, header, schema).defaultValue
+    return value?.trim() ? [[header, value]] : []
+  })
+}
+
+/** Les réglages de la colonne « Onglet » tels qu'ils s'enregistrent (rien de réglé : `undefined`). */
+function cleanTabColumn(settings: TabColumnSettings, tabNames: string[]): TabColumnSettings | undefined {
+  const label = (settings.label ?? "").replace(/\s+/g, " ").trim().slice(0, 40)
+  const after = (settings.after ?? "").trim()
+  const targets = settings.targets?.filter((name) => tabNames.includes(name))
+  const clean: TabColumnSettings = { ...(label ? { label } : {}), ...(settings.hidden ? { hidden: true } : {}), ...(after ? { after } : {}), ...(targets ? { targets } : {}) }
+  return Object.keys(clean).length ? clean : undefined
+}
+
+/** La colonne « Onglet » réglée dans le schéma (ligne « * › Onglet »). */
+function tabColumnOf(schema: SchemaEntry[]): TabColumnSettings | undefined {
+  const spec = findEntry(schema, TAB_COLUMN_ENTRY.tab, TAB_COLUMN_ENTRY.column)?.spec
+  return spec?.kind === "tab" && spec.tabColumn ? spec.tabColumn : undefined
 }
 
 /** La ligne d'un onglet dans le schéma : sa place, et pour un index d'entités l'ordre d'affichage de ses colonnes. */
@@ -1825,6 +1919,14 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           if (requests.length) await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
           continue
         }
+        if (operation.op === "tab-column") {
+          // La colonne « Onglet » de la vue « Tout » : un réglage d'affichage, sur la ligne « * › Onglet ».
+          const names = sheet.definition.tabs.map((candidate) => candidate.name)
+          if (names.length < 2) throw new Error("INDEX_SCHEMA_INVALID:Cet index n’a qu’un onglet : il n’a pas de colonne « Onglet ».")
+          const settings = cleanTabColumn(operation.settings, names)
+          edit((entries) => upsertEntry(entries, TAB_COLUMN_ENTRY.tab, TAB_COLUMN_ENTRY.column, { spec: settings ? { kind: "tab", tabColumn: settings } : null }))
+          continue
+        }
         const tab = sheet.definition.tabs.find((candidate) => candidate.name === operation.tab)
         if (!tab) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
         if (operation.op === "tab-label") {
@@ -1844,7 +1946,13 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
           const sheetId = existing.find((candidate) => candidate.title === tab.name)?.sheetId
           if (sheetId === undefined) throw new Error("WORLD_INDEX_TAB_NOT_FOUND")
           await googleSheetsJson(`spreadsheets/${sheet.spreadsheetId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests: [{ updateSheetProperties: { properties: { sheetId, title: to }, fields: "title" } }] }) })
-          edit((entries) => { for (const entry of entries) if (entry.tab === tab.name) entry.tab = to })
+          edit((entries) => {
+            for (const entry of entries) if (entry.tab === tab.name) entry.tab = to
+            // Les onglets d'arrivée de la colonne « Onglet » suivent le nouveau nom.
+            const column = findEntry(entries, TAB_COLUMN_ENTRY.tab, TAB_COLUMN_ENTRY.column)
+            const targets = column?.spec?.tabColumn?.targets
+            if (column?.spec?.tabColumn && targets?.includes(tab.name)) column.spec = { ...column.spec, tabColumn: { ...column.spec.tabColumn, targets: targets.map((name) => name === tab.name ? to : name) } }
+          })
           clearSpreadsheetReadCache(sheet.spreadsheetId)
           continue
         }
@@ -1955,20 +2063,33 @@ async function existingWorkbook(key: WorldIndexKey) {
 
 /** Les colonnes et onglets à la corbeille de tous les index du monde. */
 export async function listWorldIndexTrash(): Promise<IndexTrashItem[]> {
-  const keys: WorldIndexKey[] = [...Object.keys(worldIndexDefinitions) as WorldIndexKey[], ...(await listCustomIndexes()).map((entry) => entry.key)]
+  // Le registre des index créés illisible : les index d'Eraser restent montrés.
+  const custom = await listCustomIndexes().catch((error: unknown) => {
+    console.error("WORLD_INDEX_TRASH_READ_FAILED", "custom", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return []
+  })
+  const keys: WorldIndexKey[] = [...Object.keys(worldIndexDefinitions) as WorldIndexKey[], ...custom.map((entry) => entry.key)]
   const unreadable = (key: WorldIndexKey) => (error: unknown) => {
     // La corbeille de cet index n'est pas montrée cette fois : on le dit dans le journal, sans la croire vide.
     console.error("WORLD_INDEX_TRASH_READ_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return null
   }
-  const items = await Promise.all(keys.map(async (key) => {
+  const trashOf = async (key: WorldIndexKey): Promise<IndexTrashItem[]> => {
     // Un index jamais ouvert n'a ni classeur ni corbeille : il n'est pas créé pour autant.
     if (isBuiltinWorldIndexKey(key) && !await existingWorkbook(key).catch(unreadable(key))) return []
-    const effective = await loadEffectiveIndex(key, { strict: true }).catch(unreadable(key))
+    // Pour afficher : le schéma gardé en mémoire ou sa copie partagée, sans lecture fraîche ni
+    // vérification d'en-têtes. Restaurer et supprimer relisent, eux, à l'instant.
+    const cached = effectiveIndexes.get(key)
+    const effective = cached && !cached.degraded ? cached : await loadEffectiveIndex(key).catch(unreadable(key))
     if (!effective) return []
+    if (effective.degraded) return unreadable(key)(new Error("WORLD_INDEX_SCHEMA_UNREADABLE")) ?? []
+    if (!cached) effectiveIndexes.set(key, effective)
     return effective.schema.filter((entry) => entry.deletedAt && entry.state !== "supprimé").map((entry): IndexTrashItem => ({ family: "world", key, title: effective.definition.title, tab: entry.tab, column: entry.column, deletedAt: entry.deletedAt, filled: 0 }))
-  }))
-  return items.flat()
+  }
+  // Trois index à la fois : vingt classeurs lus d'un coup dépassaient le quota Google (429).
+  const items: IndexTrashItem[] = []
+  for (let start = 0; start < keys.length; start += 3) for (const found of await Promise.all(keys.slice(start, start + 3).map(trashOf))) items.push(...found)
+  return items
 }
 
 /** Restaure une colonne ou un onglet de la corbeille, dans le schéma relu à l'instant. */

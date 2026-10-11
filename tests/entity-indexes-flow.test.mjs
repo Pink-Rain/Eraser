@@ -111,6 +111,9 @@ test("PNJs : un ajout depuis l'index rejoint la bibliothèque, même si le nom e
   assert.match(added["ID"], /^PNJ-[0-9A-F]{8}$/);
   assert.equal(added["Nom du PNJ"], "Aldor");
   assert.equal(added["Page lié"], "index-des-pnjs");
+  // Les valeurs d'une nouvelle ligne, réglées sur les colonnes (plus codées à part).
+  assert.equal(added["Dans le groupe joueur"], "Non");
+  assert.equal(added["PNJ important"], "Non");
   assert.ok(added["Créé le"]);
   // Le PNJ de la campagne n'a pas été complété à sa place.
   assert.deepEqual(record(google.grid(id, "PNJs"), 1), { "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor" });
@@ -286,4 +289,42 @@ test("Vocabulaire : la feuille existante passe au moteur (Titre → Nom, ID masq
   assert.equal(entries.find((entry) => entry.title === "Destin").content, "<p>Le <u>destin</u>.</p>");
   await vocabulary.updateVocabularyEntry(entries.find((entry) => entry.title === "Destin").rowNumber, "Destin", { title: "Destinée", content: "<p>Le destin.</p>" });
   assert.deepEqual(google.grid(id, "Vocabulaire")[3].slice(0, 2), ["Destinée", "<p>Le destin.</p>"]);
+});
+
+test("Classes : « Ajouter » crée la ligne par le formulaire du moteur ; supprimer, insérer et dupliquer restent refusés", async () => {
+  const { classSheetHeaders } = await vite.ssrLoadModule("/lib/entity-sheets.ts");
+  const id = fresh("classes");
+  google.addSpreadsheet(id, [{ title: "Classes", grid: [classSheetHeaders, classSheetHeaders.map((header) => ({ "ID": "CLA-0001", "Nom de la classe": "Berserker", "Type": "Solide" })[header] ?? "")] }]);
+  await link("classes", id, "Classes");
+  await engine.getWorldIndex("classes", { refresh: true });
+  await engine.addWorldIndexRow("classes", "Classes", classSheetHeaders.map((header) => header === "Nom de la classe" ? "Nécromancien" : header === "Type" ? "Fourbe" : ""), classSheetHeaders);
+  const grid = google.grid(id, "Classes");
+  assert.equal(grid.length, 3);
+  const added = Object.fromEntries(grid[0].map((header, column) => [header, grid[2][column] ?? ""]));
+  assert.equal(added["Nom de la classe"], "Nécromancien");
+  assert.match(added["ID"], /^CLA-[0-9A-F]{8}$/);
+  // La première classe n'a pas bougé, et le tableau n'en supprime ni n'en copie aucune.
+  assert.equal(grid[1][grid[0].indexOf("ID")], "CLA-0001");
+  await assert.rejects(() => engine.deleteWorldIndexRows("classes", "Classes", [{ rowNumber: 2, id: "CLA-0001", name: "Berserker" }]), /WORLD_INDEX_ROWS_LOCKED/);
+  await assert.rejects(() => engine.duplicateWorldIndexRows("classes", "Classes", [{ rowNumber: 2, id: "CLA-0001", name: "Berserker" }]), /WORLD_INDEX_ROWS_LOCKED/);
+  assert.equal(google.grid(id, "Classes").length, 3);
+});
+
+test("Sorts des créatures : un sort renommé dans l'index est renommé chez les créatures et les PNJs qui le citent", async () => {
+  // « Actualiser » : l'emplacement des sorts (le classeur des créatures d'un test précédent) est relu.
+  await (await vite.ssrLoadModule("/lib/data-refresh.ts")).forgetGoogleData();
+  const id = fresh("creatures");
+  google.addSpreadsheet(id, [
+    { title: "Créatures", grid: [["Nom", "Sorts actifs", "Sorts passifs", "ID"], ["Loup", "Morsure, Hurlement", "", "CRE-1"], ["Ours", "Griffes", "Morsure", "CRE-2"], ["Chat", "Morsures", "", "CRE-3"]] },
+    { title: "Sorts des créatures", grid: [["ID", "Nom", "Effet", "Description", "Type", "Compétences", "Distance", "Charges"], ["SOR-1", "Morsure", "2d6", "", "Actif", "", "", ""]] },
+  ]);
+  await link("creatures", id, "Créatures");
+  const npcs = await linkNpcs(npcGrid([{ "ID": "PNJ-1", "Page lié": "CAMP-1", "Nom du PNJ": "Aldor", "Sorts actifs": "Morsure" }, { "ID": "PNJ-2", "Page lié": "CAMP-1", "Nom du PNJ": "Bria", "Sorts actifs": "Soin" }]));
+  await engine.getWorldIndex("creature-spells", { refresh: true });
+  await engine.updateWorldIndexCell("creature-spells", "Sorts des créatures", { rowNumber: 2, id: "SOR-1", name: "Morsure" }, "Nom", "Morsure profonde");
+  const creatures = google.grid(id, "Créatures");
+  assert.deepEqual(creatures.slice(1).map((row) => [row[1], row[2]]), [["Morsure profonde, Hurlement", ""], ["Griffes", "Morsure profonde"], ["Morsures", ""]]);
+  const npcRows = google.grid(npcs, "PNJs");
+  const spells = npcRows[0].indexOf("Sorts actifs");
+  assert.deepEqual(npcRows.slice(1).map((row) => row[spells]), ["Morsure profonde", "Soin"]);
 });

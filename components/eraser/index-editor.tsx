@@ -42,6 +42,7 @@ import {
   type RandomSettings,
   type RandomSource,
   type RollupFunction,
+  type TabColumnSettings,
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
 import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
@@ -150,6 +151,42 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
   return operations
 }
 
+/**
+ * La colonne « Onglet » des vues qui couvrent plusieurs onglets (« Tout ») : son libellé, sa
+ * place, masquée ou non, et les onglets vers lesquels une ligne peut être déplacée.
+ */
+/** Les types dont une case peut recevoir une valeur d'office à l'ajout d'une ligne. */
+const DEFAULT_VALUE_KINDS = new Set<IndexColumnKind>(["rich", "number", "checkbox", "choice", "color", "fixed", "tab-sort", "linked-choice"])
+
+const tabColumnKey = (value?: TabColumnSettings) => JSON.stringify([value?.label?.trim() || "", Boolean(value?.hidden), value?.after || "", value?.targets ?? null])
+
+function TabColumnSettingsBox({ value, onChange, disabled, tabs, columns }: { value: TabColumnSettings; onChange: (next: TabColumnSettings) => void; disabled: boolean; tabs: string[]; columns: string[] }) {
+  const targets = value.targets ?? tabs
+  const toggle = (name: string, on: boolean) => {
+    const next = on ? [...new Set([...targets, name])] : targets.filter((item) => item !== name)
+    // Tous cochés : rien d'enregistré (un onglet ajouté plus tard sera aussi permis).
+    onChange({ ...value, targets: tabs.every((item) => next.includes(item)) ? undefined : tabs.filter((item) => next.includes(item)) })
+  }
+  return <details className="mt-2 rounded-lg border border-dashed bg-background/40 p-2 text-[11px]">
+    <summary className="cursor-pointer font-semibold">Colonne « Onglet » (vue « Tout »)</summary>
+    <div className="mt-2 grid gap-2">
+      <label className="grid gap-1">Libellé<Input disabled={disabled} value={value.label ?? ""} maxLength={40} onChange={(event) => onChange({ ...value, label: event.target.value || undefined })} placeholder="Onglet" className="h-7 text-xs" /></label>
+      <label className="flex items-center gap-2"><Checkbox disabled={disabled} checked={Boolean(value.hidden)} onCheckedChange={(checked) => onChange({ ...value, hidden: checked === true || undefined })} />Masquée</label>
+      <label className="grid gap-1">Place
+        <NativeSelect disabled={disabled || value.hidden} value={value.after ?? ""} onChange={(event) => onChange({ ...value, after: event.target.value || undefined })} className="h-7 text-[11px]">
+          <NativeSelectOption value="">Après le nom</NativeSelectOption>
+          {columns.filter((column) => foldName(column) !== "nom").map((column) => <NativeSelectOption key={column} value={column}>Après « {column} »</NativeSelectOption>)}
+        </NativeSelect>
+      </label>
+      <fieldset className="grid gap-1" disabled={disabled}>
+        <legend className="mb-1">Une ligne peut aller dans</legend>
+        {tabs.map((name) => <label key={name} className="flex items-center gap-2"><Checkbox checked={targets.includes(name)} onCheckedChange={(checked) => toggle(name, checked === true)} />{name}</label>)}
+        <span className="text-muted-foreground">Seulement entre onglets aux mêmes colonnes. Une ligne déjà dans un onglet décoché y reste.</span>
+      </fieldset>
+    </div>
+  </details>
+}
+
 function describe(operation: SchemaOperation) {
   const text = describeOperation(operation)
   return "force" in operation && operation.force ? `${text} · colonne déverrouillée` : text
@@ -167,6 +204,7 @@ function describeOperation(operation: SchemaOperation) {
     case "rename-tab": return `Onglet « ${operation.tab} » renommé « ${operation.to} »`
     case "order-tabs": return `Nouvel ordre des onglets : ${operation.tabs.join(", ")}`
     case "tab-label": return `Onglet « ${operation.tab} » : une ligne s’appelle « ${operation.label || "(par défaut)"} »`
+    case "tab-column": return `Colonne « Onglet » de la vue « Tout » : ${[operation.settings.hidden ? "masquée" : `« ${operation.settings.label || "Onglet"} »`, operation.settings.after ? `après « ${operation.settings.after} »` : "", operation.settings.targets ? `onglets d’arrivée : ${operation.settings.targets.join(", ") || "aucun"}` : ""].filter(Boolean).join(", ")}`
   }
 }
 
@@ -837,7 +875,14 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const readOnly = Boolean(model.readOnly)
   const tab = tabs.find((candidate) => candidate.id === selectedTab) ?? tabs[0]
   const column = tab?.columns.find((candidate) => candidate.id === selectedColumn) ?? tab?.columns[0]
-  const operations = useMemo(() => operationsOf(tabs, originalTabOrder), [originalTabOrder, tabs])
+  // La colonne « Onglet » de la vue « Tout » : réglée avant les renommages d'onglets (ses onglets
+  // d'arrivée sont nommés comme dans la feuille ; le serveur les renomme avec l'onglet).
+  const [tabColumn, setTabColumn] = useState<TabColumnSettings | undefined>(model.tabColumn)
+  const tabColumnChanged = Boolean(model.tabColumn && tabColumn) && tabColumnKey(tabColumn) !== tabColumnKey(model.tabColumn)
+  const operations = useMemo(() => [
+    ...(tabColumnChanged && tabColumn ? [{ op: "tab-column" as const, settings: tabColumn }] : []),
+    ...operationsOf(tabs, originalTabOrder),
+  ], [originalTabOrder, tabColumn, tabColumnChanged, tabs])
   const liveTabs = tabs.filter((candidate) => !candidate.removed)
   const problems = useMemo(() => tabs.flatMap((candidate) => candidate.removed ? [] : [
     ...(candidate.name.trim() !== candidate.original ? [tabProblem(candidate.name, tabs.filter((other) => other.id !== candidate.id && !other.removed).map((other) => other.name))] : []),
@@ -1069,6 +1114,13 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             Une ligne de « {tab.name} » s’appelle
             <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
           </label>}
+          {tabColumn && <TabColumnSettingsBox
+            value={tabColumn}
+            onChange={setTabColumn}
+            disabled={readOnly}
+            tabs={tabs.filter((candidate) => candidate.original && !candidate.removed).map((candidate) => candidate.original!)}
+            columns={(tabs.find((candidate) => !candidate.removed)?.columns ?? []).filter((item) => !item.removed && item.original && !item.spec.hidden).map((item) => item.original!)}
+          />}
           {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2">
             <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
               <Columns3 />Aligner les autres onglets sur « {tab.name} »
@@ -1199,6 +1251,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 sampleRows={sampleRows[tab.original ?? tab.name] ?? []}
                 openGuide={(section) => setGuide(section)}
               />
+              {model.family === "world" && DEFAULT_VALUE_KINDS.has(column.spec.kind) && <label className="grid gap-1 text-xs">
+                <span><b>Valeur d’une nouvelle ligne</b> : écrite dans la case laissée vide quand une ligne est ajoutée (ou tapée dans Sheets puis reçue par Eraser).</span>
+                <Input disabled={typeDisabled} value={column.spec.defaultValue ?? ""} maxLength={200} onChange={(event) => updateColumn({ ...column, spec: { ...column.spec, defaultValue: event.target.value || undefined } })} placeholder={column.spec.kind === "checkbox" ? "Oui ou Non" : "Vide"} className="h-8 text-xs" />
+              </label>}
               {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
             </div>
             <DisplaySettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />

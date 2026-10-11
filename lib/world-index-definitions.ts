@@ -3,7 +3,7 @@
  * Ce fichier ne dépend de rien côté serveur : l'interface s'en sert aussi pour savoir
  * quelles colonnes sont des listes de noms reliées à un autre index.
  */
-import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isIdHeader, type ChoiceOption, type IndexColumnSpec, type TabColumnSettings } from "@/lib/index-columns"
 import type { ColumnPolicy } from "@/lib/index-schema-shared"
 import { stateFxList } from "@/lib/state-fx"
 import {
@@ -148,10 +148,10 @@ export type EntityIndexOptions = {
   nameHref?: string
   /** « Ajouter » mène à cette page ; sans elle, le formulaire du moteur ajoute la ligne. */
   addHref?: string
-  /** Valeurs données d'office à une ligne ajoutée par le formulaire (la page d'un PNJ…). */
-  addDefaults?: Record<string, string>
   /** Ajouter, insérer, dupliquer et supprimer des lignes depuis le tableau (les PNJs, les sorts). */
   rowCommands?: boolean
+  /** Seulement « Ajouter », par le formulaire du moteur (les classes : jamais supprimées d'ici). */
+  addRows?: boolean
   /**
    * Personnages et campagnes : le tableau les duplique, et « Supprimer » les met à la
    * corbeille (restaurables depuis Administration) au lieu d'effacer leur ligne.
@@ -175,7 +175,12 @@ export type WorldIndexDefinition = {
   description?: string
   /** Index d'entités (PNJs, campagnes, personnages, classes, sorts). */
   entity?: EntityIndexOptions
+  /** La colonne « Onglet » de la vue « Tout », réglée dans « Modifier » (ligne « * › Onglet » du schéma). */
+  tabColumn?: TabColumnSettings
 }
+
+/** La ligne du schéma qui garde les réglages de la colonne « Onglet » (vue « Tout »). */
+export const TAB_COLUMN_ENTRY = { tab: "*", column: "Onglet" } as const
 
 /** Colonnes de l'Index des créatures visibles dans le tableau. */
 export const creatureGridHeaders = ["Nom", "Type", "Sous-type", "Rang", "Dressable", "Emplacement principal", "Rareté", "Emplacement secondaire", "Rareté secondaire", "Comportement", "Extension"]
@@ -413,8 +418,6 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     entity: {
       nameHeader: "Nom du PNJ",
       rowCommands: true,
-      // Un PNJ ajouté depuis l'index rejoint sa bibliothèque, hors de toute campagne.
-      addDefaults: { "Page lié": "index-des-pnjs", "Ajouté au créateur de session": "Non", "Dans le groupe joueur": "Non", "PNJ important": "Non" },
     },
   },
   campaigns: {
@@ -442,7 +445,8 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     path: "/ressources/index-des-classes",
     itemLabel: "une classe",
     tabs: [{ name: "Classes", itemLabel: "une classe", headers: classSheetHeaders, widths: [130, 150, 240, 160, 180, 180, 180, 130, 110, 150, 150], idPrefix: "CLA" }],
-    entity: { nameHeader: "Nom de la classe", nameHref: "/regles/classes/{id}", addHref: "/creation-de-classe" },
+    // « Ajouter » ouvre le formulaire du moteur : la page Création de classe ne crée pas de classe.
+    entity: { nameHeader: "Nom de la classe", nameHref: "/regles/classes/{id}", addRows: true },
   },
   "class-spells": {
     key: "class-spells",
@@ -590,6 +594,10 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_HEADER)) reasons.push("La fiche de personnage dessine ces FX (codés dans Eraser) là où « FX appliqué à » le dit.")
     if (tab === EFFECTS_TAB && folded === foldName(EFFECT_FX_APPLY_HEADER)) reasons.push("La fiche de personnage dessine les FX de l’effet là où c’est choisi : page entière, compétences liées, portrait.")
     if (tab === STATES_TAB && STATE_LEVEL_HEADERS.some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage applique les effets liés au niveau atteint par l’état.")
+    // Lues par leur nom (lib/character-states.ts) : la fiche, le survol des états et les citations « { ».
+    if (tab === STATES_TAB && ["Type", "Type de l'état"].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage et le survol d’un état affichent son type, lu dans cette colonne par son nom.")
+    if (tab === STATES_TAB && ["Description", "Description niveau 1", "Description niveau 2", "Niveau 1 description", "Niveau 2 description"].some((name) => foldName(name) === folded)) reasons.push("La fiche de personnage montre la description du niveau atteint par l’état ; une description de niveau 2 vide fait un état à un seul niveau.")
+    if (tab === STATES_TAB && ["Règles liées aux états", "Règles"].some((name) => foldName(name) === folded)) reasons.push("Le survol d’un état sur la fiche (et ses citations « { ») affiche ces règles sous les descriptions.")
   }
   // Le Type des modificateurs range Attributs, Matériaux et Runes : les objets et les citations « { » le lisent par son nom.
   if (index === "weapon-modifiers" && folded === "type") reasons.push("Les colonnes Attributs, Matériaux et Runes des objets filtrent les modificateurs par cette colonne (« Attribut », « Matériau », « Rune ») ; les citations « { » en tirent leurs étiquettes.")
@@ -806,11 +814,15 @@ const spellTypeOptions = classSpellTypeSuggestions.map((value) => ({ value, colo
 function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColumnSpec {
   const is = (...candidates: string[]) => isHeader(header, candidates)
   if (index === "npcs") {
-    if (is("Page lié", "Inventaire JSON (archive)", "Créé le", "Modifié le", "Créé par", "Dossier")) return { kind: "rich", hidden: true }
-    if (is("Ajouté au créateur de session", "Dans le groupe joueur")) return { kind: "checkbox", hidden: true }
-    if (is("PNJ important")) return { kind: "checkbox" }
+    // Un PNJ ajouté depuis l'index rejoint sa bibliothèque, hors de toute campagne.
+    if (is("Page lié")) return { kind: "rich", hidden: true, defaultValue: "index-des-pnjs" }
+    if (is("Inventaire JSON (archive)", "Créé le", "Modifié le", "Créé par", "Dossier")) return { kind: "rich", hidden: true }
+    if (is("Ajouté au créateur de session", "Dans le groupe joueur")) return { kind: "checkbox", hidden: true, defaultValue: "Non" }
+    if (is("PNJ important")) return { kind: "checkbox", defaultValue: "Non" }
     if (is("Peuple")) return { kind: "linked-choice", source: { index: "peoples", tab: "Peuples" } }
     if (is("Vie actuelle", "Vie totale", "Rapidité", "Force", "Dextérité", "Intelligence", "Sagesse", "Charisme", "Capacité de combat", "Capacité de tir", "Capacité magique", "Force mentale", "Constitution")) return { kind: "number" }
+    // Le portrait se voit, s'importe ou se colle comme sur la page du PNJ (même stockage).
+    if (is("Portrait")) return { kind: "file", file: { accept: "image" }, description: "Le portrait du PNJ. Importer une image (ou coller une adresse) le remplace, comme sur sa page." }
     if (is("Sorts actifs")) return { kind: "spells", spells: { source: "creature", category: "actif" } }
     if (is("Sorts passifs")) return { kind: "spells", spells: { source: "creature", category: "passif" } }
     return { kind: "rich" }

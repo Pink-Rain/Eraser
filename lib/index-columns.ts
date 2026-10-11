@@ -412,8 +412,15 @@ export type IndexColumnSpec = {
    * affiche avec ses listes) : lu et réécrit comme ce texte, jamais converti en mise en forme Sheets.
    */
   htmlText?: boolean
+  /**
+   * La valeur d'une case laissée vide dans une nouvelle ligne (ajoutée par Eraser, ou tapée
+   * dans Sheets et reçue avec son identifiant) : « Non », « index-des-pnjs »…
+   */
+  defaultValue?: string
   /** Ligne d'onglet du schéma : comment s'appelle une ligne (« un sort » : « Ajouter un sort »). */
   itemLabel?: string
+  /** Ligne « * › Onglet » du schéma : la colonne « Onglet » des vues qui couvrent plusieurs onglets. */
+  tabColumn?: TabColumnSettings
   /**
    * Lecture seule : la colonne s'affiche (tri, recherche, survol, fiche) mais ne se modifie
    * pas depuis l'index ; ses données viennent d'ailleurs (la fiche d'un personnage…).
@@ -434,6 +441,13 @@ export type IndexColumnSpec = {
    */
   columns?: string[]
 }
+
+/**
+ * La colonne « Onglet » de la vue « Tout » (et des onglets-fenêtres sur plusieurs onglets) :
+ * son libellé, sa place (après quelle colonne ; absente : après le nom), masquée ou non, et
+ * les onglets vers lesquels une ligne peut être déplacée (absents : tous ceux aux mêmes colonnes).
+ */
+export type TabColumnSettings = { label?: string; hidden?: boolean; after?: string; targets?: string[] }
 
 const displayStyles: Record<NonNullable<IndexColumnSpec["display"]>, ColumnStyle> = {
   bold: { bold: true },

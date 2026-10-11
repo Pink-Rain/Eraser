@@ -714,12 +714,16 @@ test("hides masked columns until the toolbar shows them", async () => {
   assert.match(html, /Colonnes masquées \(1\)/);
 });
 
-test("renders the read-only editor of a system index with its locks", async () => {
-  const { spellEditorModel, npcEditorModel } = await vite.ssrLoadModule("/lib/system-index-models.ts");
-  const spells = spellEditorModel("classes");
-  assert.equal(spells.readOnly, true);
-  assert.ok(spells.tabs[0].columns.every((column) => column.policy.reasons.length > 0));
-  assert.ok(npcEditorModel().tabs[0].columns.some((column) => column.header === "ID" && column.spec.hidden));
+test("PNJs and spells are set in the engine's editor: locks, hidden columns, portrait, new-row values", async () => {
+  const { worldColumnSpec, worldColumnPolicy } = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const { npcSheetHeaders, spellSheetHeaders } = await vite.ssrLoadModule("/lib/entity-sheets.ts");
+  // Chaque colonne lue par Eraser dit pourquoi elle est verrouillée.
+  assert.ok(npcSheetHeaders.every((header) => worldColumnPolicy("npcs", "PNJs", header, []).reasons.length > 0));
+  assert.ok(spellSheetHeaders.every((header) => worldColumnPolicy("class-spells", "Sorts", header, []).reasons.length > 0));
+  assert.equal(worldColumnSpec("npcs", "PNJs", "Page lié").hidden, true);
+  assert.deepEqual(worldColumnSpec("npcs", "PNJs", "Portrait").file, { accept: "image" });
+  assert.equal(worldColumnSpec("npcs", "PNJs", "Page lié").defaultValue, "index-des-pnjs");
+  assert.equal(worldColumnSpec("npcs", "PNJs", "PNJ important").defaultValue, "Non");
 });
 
 test("counts each spell's own charges instead of filling a shared gauge", async () => {
@@ -1195,4 +1199,23 @@ test("offers a column type that sorts rows into tabs, and no second name column"
   assert.equal(indexColumnKinds["name-form"].creatable, false);
   // Chaque type proposé a sa phrase courte, pour une liste compacte.
   for (const kind of creatableKinds) assert.ok(indexColumnKinds[kind].short, kind);
+});
+
+test("carnet de notes : une seule page « Notes » reste écrite comme avant, plusieurs pages se relisent telles quelles", async () => {
+  const { readNotebook, writeNotebook, nextNotebookPageName } = await vite.ssrLoadModule("/lib/notebook-pages.ts");
+  // Le carnet d'avant : une page « Notes », la case n'est pas réécrite autrement.
+  assert.deepEqual(readNotebook("<p>Ancien carnet</p>"), [{ name: "Notes", html: "<p>Ancien carnet</p>" }]);
+  assert.equal(writeNotebook(readNotebook("<p>Ancien carnet</p>")), "<p>Ancien carnet</p>");
+  assert.deepEqual(readNotebook(""), [{ name: "Notes", html: "" }]);
+  // Plusieurs pages, des noms avec guillemets et chevrons, du HTML dans les pages.
+  const pages = [{ name: "Notes", html: "<p>Un</p>" }, { name: "Quêtes \"urgentes\" <3", html: "<ul><li>Deux</li></ul>" }];
+  const written = writeNotebook(pages);
+  assert.deepEqual(readNotebook(written), pages);
+  // Une page renommée seule reste une page nommée.
+  assert.deepEqual(readNotebook(writeNotebook([{ name: "Journal", html: "x" }])), [{ name: "Journal", html: "x" }]);
+  // Une section collée dans une page ne la coupe pas en deux.
+  assert.deepEqual(readNotebook(writeNotebook([{ name: "A", html: "<section>a</section>b" }, { name: "B", html: "c" }])), [{ name: "A", html: "ab" }, { name: "B", html: "c" }]);
+  // Du texte ajouté à la main dans Sheets hors des pages : gardé en tête.
+  assert.deepEqual(readNotebook(`avant${written}`)[0], { name: "Notes", html: "avant" });
+  assert.equal(nextNotebookPageName(pages), "Page 3");
 });
