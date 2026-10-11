@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { AppWindow, ArrowLeft, CalendarDays, ChartColumnBig, Columns3, Filter, Gauge, LayoutGrid, LayoutList, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
+import { AppWindow, ArrowLeft, BookOpen, CalendarDays, ChartColumnBig, Columns3, Filter, Gauge, GitCommitVertical, Images, LayoutGrid, LayoutList, ListTree, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -16,9 +16,9 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import type { StatDefinition } from "@/lib/index-stats"
-import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
+import { cleanViewLayout, dashboardTileKinds, DEFAULT_ITEM_CARD, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
 
-export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
+export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
 
 /** Les noms des calendriers de l'Index des calendriers (le calendrier réel en tête). */
 function useCalendarNames(active: boolean) {
@@ -36,9 +36,11 @@ function useCalendarNames(active: boolean) {
  * La présentation d'une vue : tableau, cartes, liste (compacte, repliable), kanban,
  * maître-détail, calendrier, tableau de bord ; et ses sections. Elle s'enregistre avec la vue.
  */
-export function LayoutSettings({ layout, columns, onChange, fixedKind = false }: { layout: ViewLayout; columns: string[]; onChange: (layout: ViewLayout) => void; /** Modifier › Vues : la présentation est déjà choisie, seuls ses réglages se montrent. */ fixedKind?: boolean }) {
+export function LayoutSettings({ layout, columns, onChange, fixedKind = false, cards }: { layout: ViewLayout; columns: string[]; onChange: (layout: ViewLayout) => void; /** Modifier › Vues : la présentation est déjà choisie, seuls ses réglages se montrent. */ fixedKind?: boolean; /** Les cartes de l'onglet (Modifier › Cartes), pour dessiner chaque élément. */ cards?: Array<{ id: string; name: string }> }) {
   const set = (changes: Partial<ViewLayout>) => onChange({ ...layout, ...changes })
-  const calendars = useCalendarNames(layout.kind === "calendar")
+  const calendars = useCalendarNames(layout.kind === "calendar" || layout.kind === "timeline")
+  const usesCards = ["list", "kanban", "master-detail", "timeline"].includes(layout.kind)
+  const segmented = <T extends string>(label: string, value: T, choices: Array<[T, string]>, onPick: (value: T) => void) => <div className="grid gap-1 text-xs font-semibold">{label}<span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="radiogroup" aria-label={label}>{choices.map(([key, text]) => <button key={key} type="button" role="radio" aria-checked={value === key} onClick={() => onPick(key)} className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${value === key ? "bg-background text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>{text}</button>)}</span></div>
   const columnSelect = (value: string | undefined, onPick: (value: string | undefined) => void, label: string, none = "Aucune") => <label className="grid gap-1 text-xs font-semibold">{label}<NativeSelect value={value ?? ""} onChange={(event) => onPick(event.target.value || undefined)} className="h-9 text-sm"><NativeSelectOption value="">{none}</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect></label>
   const fields = layout.fields ?? []
   const toggleField = (column: string) => set({ fields: fields.includes(column) ? fields.filter((field) => field !== column) : [...fields, column].slice(0, 4) })
@@ -50,7 +52,18 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
       {viewLayoutKinds.map((kind) => { const Icon = layoutIcons[kind.value]; return <button key={kind.value} type="button" role="radio" aria-checked={layout.kind === kind.value} title={kind.hint} onClick={() => set({ kind: kind.value })} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-xs font-semibold transition-colors ${layout.kind === kind.value ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"}`}><Icon className="size-4 shrink-0" />{kind.label}</button> })}
     </div></>}
     <p className="text-xs text-muted-foreground">{viewLayoutKinds.find((kind) => kind.value === layout.kind)?.hint}</p>
-    {["list", "cards", "master-detail"].includes(layout.kind) && <div className="grid gap-2 sm:grid-cols-2">
+    {usesCards && <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
+      <label className="grid gap-1 text-xs font-semibold">Chaque élément s’affiche
+        <NativeSelect value={layout.itemCard ?? ""} onChange={(event) => set({ itemCard: event.target.value || undefined })} className="h-9 text-sm">
+          <NativeSelectOption value="">En ligne simple (nom et colonnes choisies)</NativeSelectOption>
+          <NativeSelectOption value={DEFAULT_ITEM_CARD}>Avec la carte par défaut de l’onglet</NativeSelectOption>
+          {(cards ?? []).map((card) => <NativeSelectOption key={card.id} value={card.id}>Avec la carte « {card.name} »</NativeSelectOption>)}
+          {layout.itemCard && layout.itemCard !== DEFAULT_ITEM_CARD && !(cards ?? []).some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte par défaut la remplace)</NativeSelectOption>}
+        </NativeSelect>
+      </label>
+      <p className="text-[11px] leading-4 text-muted-foreground">{layout.itemCard ? "Les cartes se dessinent et se règlent dans « Modifier › Cartes » : image, couleurs, blocs, badges… Une carte changée là change aussi ici." : "Choisis une carte pour donner aux éléments le même visuel que la vue Cartes."}</p>
+    </div>}
+    {["list", "cards", "master-detail", "gallery", "codex"].includes(layout.kind) && <div className="grid gap-2 sm:grid-cols-2">
       {columnSelect(layout.groupBy, (groupBy) => set({ groupBy }), "Ranger en sections par", "Pas de sections")}
       {layout.groupBy && <div className="grid content-end gap-1.5 text-xs">
         <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.collapsible)} onCheckedChange={(checked) => set({ collapsible: checked === true || undefined, collapsed: checked === true ? layout.collapsed : undefined })} />Sections repliables</label>
@@ -68,8 +81,29 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
       <label className="grid gap-1 text-xs font-semibold">Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} onChange={(event) => set({ calendar: event.target.value })} className="h-9 text-sm">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
       <p className="text-xs text-muted-foreground sm:col-span-2">Les calendriers (mois, saisons, jours de la semaine) se créent dans l’Index des calendriers.</p>
     </div>}
-    {["list", "kanban", "master-detail"].includes(layout.kind) && <div className="grid gap-1.5">
-      <span className="text-xs font-semibold">Montrer sous le nom (4 au plus)</span>
+    {layout.kind === "gallery" && <div className="grid gap-2 sm:grid-cols-2">
+      {columnSelect(layout.imageColumn, (imageColumn) => set({ imageColumn }), "Colonne des images", "Choisir…")}
+      {segmented("Forme", layout.galleryShape ?? "portrait", [["portrait", "Portrait"], ["square", "Carrée"], ["landscape", "Paysage"]], (galleryShape) => set({ galleryShape: galleryShape === "portrait" ? undefined : galleryShape }))}
+      {segmented("Taille", layout.gallerySize ?? "md", [["sm", "Petite"], ["md", "Moyenne"], ["lg", "Grande"]], (gallerySize) => set({ gallerySize: gallerySize === "md" ? undefined : gallerySize }))}
+      <label className="flex items-center gap-2 self-end pb-1.5 text-xs"><Checkbox checked={Boolean(layout.captionOnHover)} onCheckedChange={(checked) => set({ captionOnHover: checked === true || undefined })} />Nom seulement au survol</label>
+    </div>}
+    {layout.kind === "timeline" && <div className="grid gap-2 sm:grid-cols-2">
+      {columnSelect(layout.dateColumn, (dateColumn) => set({ dateColumn }), "Colonne de la date (ou de l’année)", "Choisir…")}
+      <label className="grid gap-1 text-xs font-semibold">Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} onChange={(event) => set({ calendar: event.target.value })} className="h-9 text-sm">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
+      {segmented("Disposition", layout.timelineSide ?? "alternate", [["alternate", "Des deux côtés"], ["right", "D’un seul côté"]], (timelineSide) => set({ timelineSide: timelineSide === "alternate" ? undefined : timelineSide }))}
+      <p className="self-end text-[11px] leading-4 text-muted-foreground">Une date du calendrier (« 12 Brumaire 1023 ») ou une année seule (« 1023 ») : un jalon marque chaque nouvelle année.</p>
+    </div>}
+    {layout.kind === "tree" && <div className="grid gap-2 sm:grid-cols-2">
+      {columnSelect(layout.parentColumn, (parentColumn) => set({ parentColumn }), "Colonne du parent", "Choisir…")}
+      <div className="grid content-end gap-1.5 text-xs">
+        <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.collapsed)} onCheckedChange={(checked) => set({ collapsed: checked === true || undefined })} />Branches repliées à l’ouverture</label>
+        <label className="flex items-center gap-2"><Checkbox checked={Boolean(layout.hideCounts)} onCheckedChange={(checked) => set({ hideCounts: checked === true || undefined })} />Sans le nombre de lignes</label>
+      </div>
+      <p className="text-[11px] leading-4 text-muted-foreground sm:col-span-2">La case du parent nomme une autre ligne du même onglet (une ville dont « Pays » vaut « Valdor » se range sous Valdor). Une ligne sans parent connu est une racine.</p>
+    </div>}
+    {layout.kind === "codex" && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.showToc)} onCheckedChange={(checked) => set({ showToc: checked === true || undefined })} />Sommaire à côté des fiches</label>}
+    {["list", "kanban", "master-detail", "gallery", "timeline", "tree"].includes(layout.kind) && <div className="grid gap-1.5">
+      <span className="text-xs font-semibold">{layout.kind === "gallery" ? "Montrer sous le nom" : layout.kind === "tree" ? "Montrer à droite du nom" : "Montrer sous le nom"} (4 au plus){layout.itemCard && usesCards ? <span className="font-normal text-muted-foreground"> · sans effet sur les cartes</span> : null}</span>
       <div className="flex flex-wrap gap-1">{columns.map((column) => <button key={column} type="button" aria-pressed={fields.includes(column)} onClick={() => toggleField(column)} className={`rounded-full border px-2 py-0.5 text-xs ${fields.includes(column) ? "border-primary bg-primary/10 font-semibold text-primary" : "hover:bg-muted"}`}>{column}</button>)}</div>
     </div>}
     {layout.kind === "dashboard" && <div className="grid gap-2">
@@ -87,7 +121,7 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
         {columnSelect(layout.sortBy, (sortBy) => set({ sortBy, sortDesc: sortBy ? layout.sortDesc : undefined }), "Trier par", "Ordre de la feuille")}
         {layout.sortBy ? <label className="flex items-center gap-2 self-end pb-2 text-xs"><Checkbox checked={Boolean(layout.sortDesc)} onCheckedChange={(checked) => set({ sortDesc: checked === true || undefined })} />Ordre décroissant</label> : <span />}
         {columnSelect(layout.colorBy, (colorBy) => set({ colorBy }), "Couleur des lignes selon", "Aucune")}
-        {columnSelect(layout.imageColumn, (imageColumn) => set({ imageColumn }), "Image à côté du nom", "Aucune")}
+        {layout.kind !== "gallery" && columnSelect(layout.imageColumn, (imageColumn) => set({ imageColumn }), layout.kind === "codex" ? "Image de chaque fiche" : "Image à côté du nom", "Aucune")}
       </>}
       {(layout.groupBy || layout.kind === "kanban") && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.hideEmpty)} onCheckedChange={(checked) => set({ hideEmpty: checked === true || undefined })} />Masquer « Sans valeur »</label>}
       {layout.groupBy && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.hideCounts)} onCheckedChange={(checked) => set({ hideCounts: checked === true || undefined })} />Sans le nombre de lignes</label>}
@@ -95,8 +129,8 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
       {layout.kind === "kanban" && <label className="grid gap-1 text-xs font-semibold">Largeur des colonnes<NativeSelect value={layout.laneWidth ?? "normal"} onChange={(event) => set({ laneWidth: event.target.value === "normal" ? undefined : event.target.value as "narrow" | "wide" })} className="h-9 text-sm"><NativeSelectOption value="narrow">Serrées</NativeSelectOption><NativeSelectOption value="normal">Normales</NativeSelectOption><NativeSelectOption value="wide">Larges</NativeSelectOption></NativeSelect></label>}
       {layout.kind === "calendar" && <label className="flex items-center gap-2 text-xs"><Checkbox checked={Boolean(layout.showUndated)} onCheckedChange={(checked) => set({ showUndated: checked === true || undefined })} />Lister les lignes sans date</label>}
       {layout.kind === "dashboard" && <label className="grid gap-1 text-xs font-semibold">Tuiles par rangée<NativeSelect value={String(layout.tileColumns ?? 3)} onChange={(event) => set({ tileColumns: Number(event.target.value) === 3 ? undefined : Number(event.target.value) as 1 | 2 | 4 })} className="h-9 text-sm">{[1, 2, 3, 4].map((count) => <NativeSelectOption key={count} value={String(count)}>{count}</NativeSelectOption>)}</NativeSelect></label>}
-      {layout.kind === "master-detail" && <div className="grid gap-1.5 sm:col-span-2">
-        <span className="text-xs font-semibold">Colonnes du détail <span className="font-normal text-muted-foreground">(toutes si aucune choisie, 12 au plus)</span></span>
+      {(layout.kind === "master-detail" || layout.kind === "codex") && <div className="grid gap-1.5 sm:col-span-2">
+        <span className="text-xs font-semibold">{layout.kind === "codex" ? "Colonnes de chaque fiche" : "Colonnes du détail"} <span className="font-normal text-muted-foreground">(toutes si aucune choisie, 12 au plus)</span></span>
         <div className="flex flex-wrap gap-1">{columns.map((column) => { const chosen = (layout.detailFields ?? []).includes(column); return <button key={column} type="button" aria-pressed={chosen} onClick={() => set({ detailFields: chosen ? (layout.detailFields ?? []).filter((field) => field !== column) : [...(layout.detailFields ?? []), column].slice(0, 12) })} className={`rounded-full border px-2 py-0.5 text-xs ${chosen ? "border-primary bg-primary/10 font-semibold text-primary" : "hover:bg-muted"}`}>{column}</button> })}</div>
       </div>}
     </div>}
@@ -395,7 +429,7 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
         {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
       </div>
       <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
-      {["list", "kanban", "master-detail", "calendar", "dashboard"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier » (onglets Liste, Kanban, Maître-détail, Calendrier, Tableau de bord : presets, tri, couleurs, images…).</p>}
+      {["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier » (un onglet par vue : Liste, Kanban, Galerie, Chronologie…) ; ce que tu laisses vide ici reprend ceux de « Modifier », cartes comprises.</p>}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}

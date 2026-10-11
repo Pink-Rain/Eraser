@@ -1198,6 +1198,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             onSavePreset={onSaveViewPreset}
             onDeletePreset={onDeleteViewPreset}
             optionsOf={optionsOf ? (header) => optionsOf(tab.original ?? tab.name.trim(), header) : undefined}
+            cards={cardsEnabled ? cardsOf(tab).cards : []}
+            cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
           />
         </section>}
 

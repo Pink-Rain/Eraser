@@ -7,15 +7,18 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { IndexCard } from "@/components/eraser/index-card"
+import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
+import { foldName } from "@/lib/index-columns"
 import { LayoutSettings } from "@/components/eraser/index-views"
-import { builtinViewPresets, fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { builtinViewPresets, DEFAULT_ITEM_CARD, fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 
 /**
  * « Modifier › Vues » d'un onglet : la liste, le kanban, le maître-détail, le calendrier et le
  * tableau de bord, chacun avec ses réglages, ses presets et un aperçu sur les vraies lignes.
  * Les onglets-fenêtres qui choisissent une de ces vues la montrent avec ces réglages.
  */
-export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, presets, onSavePreset, onDeletePreset, optionsOf, disabled = false }: {
+export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, presets, onSavePreset, onDeletePreset, optionsOf, cards = [], cardColumns = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
   tabName: string
@@ -29,6 +32,9 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
   onSavePreset?: (preset: { name: string; layout: ViewLayout }) => Promise<unknown>
   onDeletePreset?: (id: string) => Promise<unknown>
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
+  /** Les cartes de l'onglet (Modifier › Cartes, brouillon compris) et ses colonnes typées, pour l'aperçu. */
+  cards?: CardTemplate[]
+  cardColumns?: CardColumn[]
   disabled?: boolean
 }) {
   const [presetName, setPresetName] = useState("")
@@ -48,6 +54,13 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
     setBusy(true); setMessage("")
     try { await task(); setMessage(done) } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Le preset n’a pas pu être enregistré.") }
     setBusy(false)
+  }
+  const specs = new Map(cardColumns.map((column) => [foldName(column.header), column.spec]))
+  const renderCard = (key: string, cardId: string) => {
+    const card = pickCard({ cards }, cardId === DEFAULT_ITEM_CARD ? null : cardId)
+    const sample = rows[Number(key)] ?? {}
+    const values = new Map(Object.entries(sample).map(([header, cell]) => [foldName(header), cell]))
+    return card ? <IndexCard card={card} row={{ value: (header) => values.get(foldName(header)) ?? "", spec: (header) => specs.get(foldName(header)) }} /> : null
   }
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
   return <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
@@ -73,7 +86,7 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
         {message && <p className="flex items-center gap-1.5 text-xs text-primary"><Check className="size-3.5" />{message}</p>}
       </div>
 
-      <LayoutSettings layout={layout} columns={columns} onChange={(next) => setLayout(next)} fixedKind />
+      <LayoutSettings layout={layout} columns={columns} onChange={(next) => setLayout(next)} fixedKind cards={cards.map((card) => ({ id: card.id, name: card.name }))} />
       {value[kind] && !disabled && <Button type="button" variant="ghost" size="sm" className="justify-self-start" onClick={() => setLayout(null)}><RotateCcw />Revenir aux réglages d’office</Button>}
     </div>
 
@@ -88,6 +101,7 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
           valueOf={(key, header) => rows[Number(key)]?.[header] ?? ""}
           optionsOf={optionsOf}
           onOpen={() => undefined}
+          renderCard={renderCard}
           empty="Pas encore de ligne dans cet onglet."
         />
       </div>

@@ -5,6 +5,8 @@ import { LoaderCircle, Search } from "lucide-react"
 
 import { indexGridColumn } from "@/components/eraser/index-cells"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/eraser/index-card"
+import { pickCard, tabCardsOf, type TabCards } from "@/lib/index-cards"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
@@ -13,7 +15,7 @@ import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { shownReferenceText } from "@/components/eraser/reference-store"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type SchemaEntry } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, matchesView, type IndexView } from "@/lib/index-views"
-import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
+import { DEFAULT_ITEM_CARD, isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { objectIndexCellRef } from "@/lib/object-index-refs"
 
 export function objectTableKey(table: ObjectIndexTable) {
@@ -35,9 +37,11 @@ export function specIn(table: ObjectIndexTable, header: string, schemas: Record<
  * d'origine ; rien n'est copié. Ajouter, supprimer ou les boutons se font depuis
  * l'onglet d'origine de la ligne.
  */
-export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout }: { view: IndexView; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
+export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout, cards }: { view: IndexView; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
   /** La vue choisie par l'onglet-fenêtre (liste, kanban…), réglée dans « Modifier › Vues » ; sinon le tableau. */
-  layout?: ViewLayout | null }) {
+  layout?: ViewLayout | null
+  /** Les cartes des onglets (Modifier › Cartes) : vue Cartes, et éléments dessinés en cartes. */
+  cards?: Record<string, TabCards> }) {
   const sources = useMemo(() => view.source === ALL_SOURCES ? tables : tables.filter((table) => objectTableKey(table) === view.source), [tables, view.source])
   const byKey = useMemo(() => new Map(sources.map((table) => [objectTableKey(table), table])), [sources])
   // Un seul classeur (index regroupés) : la colonne « Tableau » montre l'onglet seul.
@@ -128,6 +132,21 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
   }, [commit, disabled, headers, rawOf, schemas, sources])
   /* eslint-enable react-hooks/refs */
 
+  // Chaque ligne avec une carte de son tableau d'origine (celle demandée, sinon la carte par défaut).
+  const cardSource = useCallback((rowKey: string): CardRowSource => {
+    const table = locate(rowKey)?.table
+    return { value: (header) => rawOf(rowKey, header), spec: (header) => table ? specIn(table, header, schemas) : undefined }
+  }, [locate, rawOf, schemas])
+  const cardOfRow = useCallback((rowKey: string, wanted: string | null) => {
+    const table = locate(rowKey)?.table
+    return table && cards ? pickCard(tabCardsOf(cards, "objects", table.tabName), wanted) : null
+  }, [cards, locate])
+  const renderCard = useCallback((rowKey: string, cardId: string) => {
+    const card = cardOfRow(rowKey, cardId === DEFAULT_ITEM_CARD ? null : cardId)
+    return card ? <IndexCard card={card} row={cardSource(rowKey)} /> : null
+  }, [cardOfRow, cardSource])
+  const firstCard = rows[0] ? cardOfRow(rows[0].key, null) : null
+
   return <div className="grid gap-3">
     <div className="relative min-w-0 lg:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans cet onglet-fenêtre…" className="pl-9" /></div>
     {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
@@ -140,6 +159,14 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       optionsOf={(header) => (sources[0] ? specIn(sources[0], header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))}
       onOpen={() => undefined}
       onCommit={disabled ? undefined : (rowKey, header, value) => void commit(rowKey, header, value)}
+      renderCard={cards ? renderCard : undefined}
+      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
+    /> : layout?.kind === "cards" && firstCard ? <IndexCardGrid
+      card={firstCard}
+      cardOf={(rowKey) => cardOfRow(rowKey, null) ?? firstCard}
+      rows={rows}
+      rowSource={cardSource}
+      onOpen={() => undefined}
       empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
     /> : <SheetGrid
       layoutKey={`eraser:object-index:fenetre:${view.id}`}

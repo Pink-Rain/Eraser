@@ -12,7 +12,7 @@ import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/in
 
 export { cellNumber }
 
-export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "stats"
+export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
 
 export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown"
 export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string }
@@ -58,7 +58,26 @@ export type ViewLayout = {
   showUndated?: boolean
   /** Tableau de bord : nombre de tuiles par rangée. */
   tileColumns?: 1 | 2 | 3 | 4
+  /**
+   * Liste, kanban, maître-détail, chronologie : chaque élément dessiné avec une carte de
+   * « Modifier › Cartes » (son identifiant, ou « * » pour la carte par défaut de l'onglet) ;
+   * absent : le nom et les colonnes choisies, comme avant.
+   */
+  itemCard?: string
+  /** Arborescence : la colonne qui nomme la ligne parente (« Pays » d'une ville, « Région »…). */
+  parentColumn?: string
+  /** Galerie : forme et taille des images, légende au survol seulement. */
+  galleryShape?: "square" | "portrait" | "landscape"
+  gallerySize?: "sm" | "md" | "lg"
+  captionOnHover?: boolean
+  /** Chronologie : éléments des deux côtés de la ligne du temps, ou tous à droite. */
+  timelineSide?: "alternate" | "right"
+  /** Codex : le sommaire à côté des fiches. */
+  showToc?: boolean
 }
+
+/** La valeur d'`itemCard` qui veut dire « la carte par défaut de l'onglet ». */
+export const DEFAULT_ITEM_CARD = "*"
 
 /** Une case de Google Sheets en tient 50 000 : la présentation d'une vue reste bien en deçà. */
 export const MAX_VIEW_LAYOUT_JSON = 40_000
@@ -75,6 +94,10 @@ export const viewLayoutKinds: Array<{ value: ViewLayoutKind; label: string; hint
   { value: "master-detail", label: "Maître-détail", hint: "La liste d’un côté, la ligne choisie de l’autre." },
   { value: "calendar", label: "Calendrier", hint: "Les lignes placées à leur date, dans un calendrier du monde." },
   { value: "dashboard", label: "Tableau de bord", hint: "Des chiffres et des répartitions." },
+  { value: "gallery", label: "Galerie", hint: "Les images en mosaïque, le nom en légende : portraits, cartes, illustrations." },
+  { value: "timeline", label: "Chronologie", hint: "Les lignes le long d’une ligne du temps, rangées par date ou par année." },
+  { value: "tree", label: "Arborescence", hint: "Les lignes rangées sous leur parent : Continent › Pays › Ville, Panthéon › Dieu…" },
+  { value: "codex", label: "Codex", hint: "Les fiches l’une après l’autre, à lire comme un livre, avec un sommaire." },
 ]
 
 export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string; needsColumn: boolean }> = [
@@ -130,6 +153,13 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (detailFields.length) layout.detailFields = detailFields
   if (raw.showUndated === true) layout.showUndated = true
   if (raw.tileColumns === 1 || raw.tileColumns === 2 || raw.tileColumns === 4) layout.tileColumns = raw.tileColumns
+  if (text(raw.itemCard, 80)) layout.itemCard = text(raw.itemCard, 80)
+  if (text(raw.parentColumn)) layout.parentColumn = text(raw.parentColumn)
+  if (raw.galleryShape === "square" || raw.galleryShape === "portrait" || raw.galleryShape === "landscape") layout.galleryShape = raw.galleryShape
+  if (raw.gallerySize === "sm" || raw.gallerySize === "md" || raw.gallerySize === "lg") layout.gallerySize = raw.gallerySize
+  if (raw.captionOnHover === true) layout.captionOnHover = true
+  if (raw.timelineSide === "alternate" || raw.timelineSide === "right") layout.timelineSide = raw.timelineSide
+  if (raw.showToc === true) layout.showToc = true
   return layout.kind === "table" && !layout.groupBy ? undefined : layout
 }
 
@@ -228,7 +258,7 @@ export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewL
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
   return cleanViewLayout(next) ?? { kind: layout.kind }
 }
 
@@ -246,6 +276,15 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:master-sections", name: "Maître-détail en sections", builtin: true, layout: { kind: "master-detail", collapsible: true } },
   { id: "eraser:calendar-real", name: "Calendrier réel", builtin: true, layout: { kind: "calendar", calendar: "Calendrier réel", showUndated: true } },
   { id: "eraser:dashboard-count", name: "Tableau de bord simple", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }], tileColumns: 3 } },
+  { id: "eraser:list-cards", name: "Liste de cartes", builtin: true, layout: { kind: "list", itemCard: DEFAULT_ITEM_CARD, listColumns: 2 } },
+  { id: "eraser:kanban-cards", name: "Kanban de cartes", builtin: true, layout: { kind: "kanban", itemCard: DEFAULT_ITEM_CARD, hideEmpty: true } },
+  { id: "eraser:master-card", name: "Maître-détail avec carte", builtin: true, layout: { kind: "master-detail", itemCard: DEFAULT_ITEM_CARD } },
+  { id: "eraser:gallery-portraits", name: "Trombinoscope", builtin: true, layout: { kind: "gallery", galleryShape: "portrait", gallerySize: "md" } },
+  { id: "eraser:gallery-wall", name: "Mur d’images", builtin: true, layout: { kind: "gallery", galleryShape: "square", gallerySize: "sm", captionOnHover: true } },
+  { id: "eraser:timeline-alternate", name: "Chronique alternée", builtin: true, layout: { kind: "timeline", timelineSide: "alternate" } },
+  { id: "eraser:timeline-cards", name: "Chronologie de cartes", builtin: true, layout: { kind: "timeline", timelineSide: "right", itemCard: DEFAULT_ITEM_CARD } },
+  { id: "eraser:tree-folded", name: "Arbre replié", builtin: true, layout: { kind: "tree", collapsed: true } },
+  { id: "eraser:codex-toc", name: "Codex avec sommaire", builtin: true, layout: { kind: "codex", showToc: true } },
 ]
 
 export function cleanViewPreset(value: unknown): ViewPreset | null {
@@ -255,4 +294,66 @@ export function cleanViewPreset(value: unknown): ViewPreset | null {
   const layout = cleanViewLayout(raw.layout)
   if (!name || !layout || !isPresentationKind(layout.kind)) return null
   return { id: text(raw.id, 80) || "", name, layout, ...(text(raw.updatedAt, 40) ? { updatedAt: text(raw.updatedAt, 40) } : {}) }
+}
+
+
+/* ---------- Arborescence et chronologie : règles pures ---------- */
+
+export type RowTreeNode<T> = { row: T; depth: number; children: RowTreeNode<T>[] }
+
+/**
+ * Les lignes rangées sous leur parent : la case `parentOf` d'une ligne nomme une autre ligne
+ * (premier nom de la case, sans tenir compte des accents ni des majuscules). Une ligne dont
+ * le parent est inconnu, vide, elle-même ou pris dans une boucle est une racine.
+ */
+export function rowTree<T>(rows: T[], nameOf: (row: T) => string, parentOf: (row: T) => string): RowTreeNode<T>[] {
+  const fold = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  const byName = new Map<string, T>()
+  for (const row of rows) { const name = fold(nameOf(row)); if (name && !byName.has(name)) byName.set(name, row) }
+  const parent = new Map<T, T>()
+  for (const row of rows) {
+    const named = cellParts(parentOf(row)).map(fold).find(Boolean)
+    const found = named ? byName.get(named) : undefined
+    if (found !== undefined && found !== row) parent.set(row, found)
+  }
+  // Une boucle (A sous B, B sous A) : la première ligne rencontrée redevient une racine.
+  for (const row of rows) {
+    const seen = new Set<T>([row])
+    let current = parent.get(row)
+    while (current !== undefined) {
+      if (seen.has(current)) { parent.delete(row); break }
+      seen.add(current)
+      current = parent.get(current)
+    }
+  }
+  const children = new Map<T, T[]>()
+  for (const row of rows) { const up = parent.get(row); if (up !== undefined) children.set(up, [...(children.get(up) ?? []), row]) }
+  const build = (row: T, depth: number): RowTreeNode<T> => ({ row, depth, children: (children.get(row) ?? []).map((child) => build(child, depth + 1)) })
+  return rows.filter((row) => !parent.has(row)).map((row) => build(row, 0))
+}
+
+/** Le nombre de lignes sous un nœud (lui non compris). */
+export function treeSize<T>(node: RowTreeNode<T>): number {
+  return node.children.reduce((sum, child) => sum + 1 + treeSize(child), 0)
+}
+
+export type TimelineDate = { year: number; month: number; day: number; /** Seule l'année est connue (« 1023 », « An 1023 »). */ yearOnly?: boolean }
+
+/**
+ * Les lignes dans l'ordre du temps : la date lue par `parse` (un calendrier du monde), sinon
+ * un nombre seul dans la case, pris comme une année. Les lignes sans date restent à part.
+ */
+export function timelineEntries<T>(rows: T[], textOf: (row: T) => string, parse: (text: string) => { year: number; month: number; day: number } | null) {
+  const dated: Array<{ row: T; date: TimelineDate }> = []
+  const undated: T[] = []
+  for (const row of rows) {
+    const value = textOf(row).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
+    const date = value ? parse(value) : null
+    if (date) { dated.push({ row, date }); continue }
+    const year = value ? cellNumber(value) : null
+    if (year !== null && Number.isInteger(year)) dated.push({ row, date: { year, month: 0, day: 0, yearOnly: true } })
+    else undated.push(row)
+  }
+  dated.sort((left, right) => left.date.year - right.date.year || left.date.month - right.date.month || left.date.day - right.date.day)
+  return { dated, undated }
 }

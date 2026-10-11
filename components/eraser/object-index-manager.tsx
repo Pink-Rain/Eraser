@@ -742,7 +742,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       />}
 
       {activeView && activeView.layout?.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={false} onManage={() => void openEditor("stats")} />
-        : activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
+        : activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
         ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (

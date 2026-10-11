@@ -19,8 +19,8 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatDefinition } from "@/lib/index-stats"
-import { groupRowsBy, isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
-import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
+import { DEFAULT_ITEM_CARD, groupRowsBy, isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
+import { IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { layoutPlaces } from "@/lib/index-layouts"
@@ -1142,6 +1142,11 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
   // eslint-disable-next-line react-hooks/exhaustive-deps -- une ligne réécrite depuis sa fiche redessine ses cartes
   }), [locate, specOf, valueOf, rowVersions])
+  // Une ligne dessinée avec une carte de son onglet, dans une vue qui le demande (liste, kanban…).
+  const renderViewCard = useCallback((rowKey: string, cardId: string) => {
+    const card = pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? null : cardId)
+    return card ? <IndexCard card={card} row={cardRow(rowKey)} onOpen={() => openRow(rowKey)} href={rowHref(rowKey)} /> : null
+  }, [cardRow, indexKey, openRow, rowHref, settings.cards])
   // La présentation de l'onglet-fenêtre ouvert (liste, kanban, calendrier…), réglée dans « Modifier la vue ».
   // Une vue choisie par l'onglet-fenêtre (liste, kanban…) part des réglages de « Modifier › Vues »
   // pour cet onglet ; ce que l'onglet-fenêtre règle lui-même passe par-dessus.
@@ -1443,6 +1448,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         optionsOf={layoutOptionsOf}
         onOpen={openRow}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
+        renderCard={renderViewCard}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
         ? viewLayout?.groupBy
