@@ -87,6 +87,42 @@ export type StatDefinition = {
   colors?: StatColors
   /** Épinglée en tête de l'onglet. */
   pinned?: true
+  /** Dans l'onglet stat : sa largeur (absente : selon sa forme, voir `pinnedWidth`). */
+  width?: StatWidth
+  /** Dans l'onglet stat : ses lignes concernées repliées ou masquées (absent : affichées). */
+  rows?: "folded" | "hidden"
+}
+
+/** La largeur d'une statistique épinglée dans l'onglet stat, sur une grille de six colonnes. */
+export type StatWidth = "third" | "half" | "two-thirds" | "full"
+export const statWidths: Array<{ value: StatWidth; label: string; span: number }> = [
+  { value: "third", label: "⅓", span: 2 },
+  { value: "half", label: "½", span: 3 },
+  { value: "two-thirds", label: "⅔", span: 4 },
+  { value: "full", label: "Pleine", span: 6 },
+]
+const widthSet = new Set<string>(statWidths.map((width) => width.value))
+
+/**
+ * La largeur d'une épinglée : la sienne, sinon selon sa forme — un chiffre ou une jauge sur un
+ * tiers, un tableau ou un flux sur toute la ligne, le reste sur une demi-ligne.
+ */
+export function pinnedWidth(stat: Pick<StatDefinition, "width" | "form">): StatWidth {
+  if (stat.width) return stat.width
+  if (stat.form === "number" || stat.form === "gauge") return "third"
+  if (stat.form === "table" || stat.form === "cross" || stat.form === "sankey" || stat.form === "scatter") return "full"
+  return "half"
+}
+
+/** Avance (-1) ou recule (+1) une épinglée parmi les épinglées ; les autres ne bougent pas. */
+export function movePinned<T extends { id: string; pinned?: true }>(stats: T[], id: string, step: -1 | 1) {
+  const pinnedAt = stats.flatMap((stat, index) => stat.pinned ? [index] : [])
+  const position = pinnedAt.findIndex((index) => stats[index].id === id)
+  const swapWith = pinnedAt[position + step]
+  if (position < 0 || swapWith === undefined) return stats
+  const next = [...stats]
+  ;[next[pinnedAt[position]], next[swapWith]] = [next[swapWith], next[pinnedAt[position]]]
+  return next
 }
 
 export const STAT_LIMITS = { stats: 24, levels: 3, columnLevels: 2, blocks: 3, conditions: 6, or: 4, title: 90, colorValues: 24 } as const
@@ -357,6 +393,8 @@ export function cleanStat(value: unknown, fallbackId = "stat"): StatDefinition |
     ...(scatterX && scatterY && form === "scatter" ? { scatter: { x: scatterX, y: scatterY } } : {}),
     ...(colors ? { colors } : {}),
     ...(raw.pinned === true ? { pinned: true as const } : {}),
+    ...(typeof raw.width === "string" && widthSet.has(raw.width) ? { width: raw.width as StatWidth } : {}),
+    ...(raw.rows === "folded" || raw.rows === "hidden" ? { rows: raw.rows } : {}),
   }
   const fitted = fitForm(stat)
   fitted.title = text(raw.title, STAT_LIMITS.title) || autoStatTitle(fitted)

@@ -421,3 +421,22 @@ test("chaque forme se dessine (page serveur), groupes compris", async () => {
   const twins = renderToStaticMarkup(React.createElement(IndexStats, props(stats.cleanStat({ id: "st-1", measure: "count", by: ["Type"], cols: ["Rareté principale"], blocks: [["Rareté secondaire"]], form: "table" }))));
   assert.match(twins, /fusionner principale et secondaire/);
 });
+
+test("onglet stat : largeur, lignes et ordre des épinglées", () => {
+  const clean = stats.cleanStat({ id: "st-1", title: "A", measure: "count", by: ["Type"], form: "bars", pinned: true, width: "two-thirds", rows: "folded" });
+  assert.equal(clean.width, "two-thirds");
+  assert.equal(clean.rows, "folded");
+  const bad = stats.cleanStat({ id: "st-2", title: "B", measure: "count", by: ["Type"], form: "bars", width: "géante", rows: "partout" });
+  assert.equal(bad.width, undefined);
+  assert.equal(bad.rows, undefined);
+  // Sans largeur choisie : selon la forme.
+  assert.equal(stats.pinnedWidth({ form: "number" }), "third");
+  assert.equal(stats.pinnedWidth({ form: "cross" }), "full");
+  assert.equal(stats.pinnedWidth({ form: "donut" }), "half");
+  assert.equal(stats.pinnedWidth({ form: "donut", width: "full" }), "full");
+  // Avancer une épinglée ne déplace que les épinglées.
+  const list = [{ id: "a", pinned: true }, { id: "x" }, { id: "b", pinned: true }, { id: "c", pinned: true }];
+  assert.deepEqual(stats.movePinned(list, "b", -1).map((stat) => stat.id), ["b", "x", "a", "c"]);
+  assert.deepEqual(stats.movePinned(list, "c", 1).map((stat) => stat.id), ["a", "x", "b", "c"]);
+  assert.deepEqual(stats.movePinned(list, "x", 1).map((stat) => stat.id), ["a", "x", "b", "c"]);
+});

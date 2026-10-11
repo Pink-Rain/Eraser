@@ -177,8 +177,23 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     return spec?.multiple ? spec.listSeparator : undefined
   }, [schemas, tables])
   // Les lignes concernées ne s'ouvrent pas ici : la fiche d'un item dépend du tableau affiché.
-  const statsProps = { stats: indexStats, groups: settings.statGroups, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, separatorOf: statSeparatorOf, onSave: settings.saveStats }
-  const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
+  // Une ligne ouverte depuis les stats peut venir d'un autre tableau : sa fiche se lit dans ce
+  // tableau-là le temps qu'elle reste ouverte (`rows` : les lignes concernées, pour passer de l'une à l'autre).
+  const [statSheet, setStatSheet] = useState<{ table: string; rows: string[] } | null>(null)
+  const [details, setDetails] = useState<string | null>(null)
+  const [sheetError, setSheetError] = useState("")
+  const openStatRow = useCallback((rowKey: string, list?: string[]) => {
+    const found = statLocate(rowKey)
+    if (!found) return
+    const table = tableKey(found.table)
+    const rows = (list ?? []).flatMap((key) => { const other = statLocate(key); return other && tableKey(other.table) === table ? [String(other.row.rowNumber)] : [] })
+    setStatSheet({ table, rows })
+    setSheetError("")
+    setDetails(String(found.row.rowNumber))
+  }, [statLocate])
+  const statsProps = { stats: indexStats, groups: settings.statGroups, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, separatorOf: statSeparatorOf, onOpen: openStatRow, onSave: settings.saveStats }
+  const selectedTableKey = statSheet?.table ?? selectedKey
+  const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedTableKey) ?? tables[0] ?? null, [selectedTableKey, tables])
   // « {Prix} » écrit dans une description : le menu « { » propose les colonnes de l'objet.
   const selectedTab = selected?.tabName
   const referenceScope = useMemo(() => ({ index: OBJECT_REFERENCE_INDEX, tab: selectedTab }), [selectedTab])
@@ -332,11 +347,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const router = useRouter()
   const { notify, view: noticesView } = useIndexNotices()
   const { ask, view: choiceView } = useChoiceDialog()
-  const [details, setDetails] = useState<string | null>(null)
   // « Envoyer » et « Déplacer » de la colonne Actions : la ligne visée.
   const [sendRow, setSendRow] = useState<{ itemId: string; name: string } | null>(null)
   const [moveRow, setMoveRow] = useState<{ rowKey: string; name: string } | null>(null)
-  const [sheetError, setSheetError] = useState("")
   const [guideOpen, setGuideOpen] = useState(false)
   const [seed, setSeed] = useState(() => `objets:${Date.now()}`)
 
@@ -748,7 +761,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((header, index) => [header, values[String(index)] ?? ""]) }, "add")}
       />}
 
-      {activeView && activeView.layout?.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={false} onManage={() => void openEditor("stats")} />
+      {activeView && activeView.layout?.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
         : activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
         ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
@@ -799,13 +812,13 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         rowFor={sheetRow}
         error={sheetError}
         navigation={{
-          rows: displayedRows.map((row) => row.key),
+          rows: statSheet?.rows.length ? statSheet.rows : displayedRows.map((row) => row.key),
           labelOf: (rowKey) => nameColumn >= 0 ? rawOf(rowKey, String(nameColumn)).replace(/<[^>]+>/g, "") : `Ligne ${rowKey}`,
           onGo: (rowKey) => { setSheetError(""); setDetails(rowKey) },
         }}
         onSave={saveSheet}
         // Le tableau remonte ses cases : il montre ce qui vient d'être écrit dans la fiche.
-        onClose={() => { setDetails(null); setSheetError(""); setVersion((current) => current + 1) }}
+        onClose={() => { setDetails(null); setStatSheet(null); setSheetError(""); setVersion((current) => current + 1) }}
       />}
       {viewDialog && <IndexViewDialog
         open

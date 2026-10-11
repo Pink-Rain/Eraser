@@ -1445,8 +1445,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         tabOf={statTabOf}
         nameOf={layoutNameOf}
         optionsOf={statOptionsOf}
-        onOpen={openRow}
-        canEdit={false}
+        onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); openRow(rowKey) }}
+        canEdit={!busy}
         onSave={saveStats}
         onManage={() => void openEditor("stats")}
       /> : table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexViewLayout

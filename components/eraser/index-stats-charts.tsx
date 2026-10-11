@@ -526,7 +526,8 @@ function DonutResult(ctx: Ctx) {
       <span className="text-right tabular-nums text-muted-foreground">{percentText(part.value)}</span>
     </div>
   }
-  return <div className="grid items-start gap-4 sm:grid-cols-[minmax(0,15rem)_minmax(0,1fr)]">
+  // Selon la place de la carte (et non de l'écran) : un tiers de ligne empile l'anneau et sa légende.
+  return <div className="@container"><div className="grid items-start gap-4 @lg:grid-cols-[minmax(0,15rem)_minmax(0,34rem)]">
     <div className="mx-auto w-full max-w-60">{ring}</div>
     <div className="grid min-w-0 justify-items-start gap-2">
       <ul className={`grid w-full gap-0.5 ${parts.length > 12 ? "max-h-96 overflow-auto pr-1" : ""}`}>
@@ -542,7 +543,7 @@ function DonutResult(ctx: Ctx) {
       {open && <MoreToggle open hidden={positive.length - 7} column={label} onToggle={() => onToggle(place)} openLabel={`◂ regrouper les ${positive.length - 7} plus petites parts en « Autres »`} />}
       <p className="text-xs text-muted-foreground">{multiNote(ctx, column, all, "parts")}</p>
     </div>
-  </div>
+  </div></div>
 }
 
 /* --- Mosaïque (treemap) : une ou deux colonnes imbriquées (Type › Sous-type) --- */

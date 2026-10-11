@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useId, useMemo, useState, type ReactNode } from "react"
-import { Combine, Copy, LoaderCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, TextCursorInput, Trash2, X } from "lucide-react"
+import { ChevronLeft, ChevronRight, Combine, Copy, LayoutGrid, LoaderCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, TextCursorInput, Trash2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
@@ -9,9 +9,9 @@ import { colorColumn, colorModeOf, FormIcon, hueOf, mini, prepareFor, rampOf, St
 import { splitListValue } from "@/lib/index-columns"
 import {
   autoStatTitle, cellParts, cellText, cleanColumnGroups, cleanStat, cleanStats, columnFamilies, COMPARE_FORMS, defaultGroupName, fitForm, formProblem, GROUP_LIMITS, groupOf,
-  groupRef, groupStatRows, isGroupRef, memberLabels, newStatId, numericColumns, percentChoices, pinnedFirst, RANK_COLUMN, RANK_LABEL, STAT_LIMITS, statColumnBlocks,
-  statColumnLabel, statDimensions, statForms, statMeasures, statOperators, statSlots, suggestColumnGroups, tableTopChoices, unitRows,
-  type StatColorMode, type StatColumnGroup, type StatCondition, type StatDefinition, type StatForm, type StatLeaf, type StatOperator,
+  groupRef, groupStatRows, isGroupRef, memberLabels, movePinned, newStatId, numericColumns, percentChoices, pinnedFirst, pinnedWidth, RANK_COLUMN, RANK_LABEL, STAT_LIMITS, statColumnBlocks,
+  statColumnLabel, statDimensions, statForms, statMeasures, statOperators, statSlots, statWidths, suggestColumnGroups, tableTopChoices, unitRows,
+  type StatColorMode, type StatColumnGroup, type StatCondition, type StatDefinition, type StatForm, type StatLeaf, type StatOperator, type StatWidth,
 } from "@/lib/index-stats"
 
 export { FormIcon }
@@ -308,7 +308,7 @@ function GroupsPanel({ groups, columns, canEdit, pending, usage, onSave }: { gro
 /* ---------- L'onglet ---------- */
 
 // La phrase seule (sans nom ni épingle), dans l'ordre que lui donne le nettoyage : deux réglages égaux s'écrivent pareil.
-const comparable = (stat: StatDefinition) => JSON.stringify(cleanStat({ ...stat, id: "x", title: "x", pinned: false }))
+const comparable = (stat: StatDefinition) => JSON.stringify(cleanStat({ ...stat, id: "x", title: "x", pinned: false, width: undefined, rows: undefined }))
 
 function startStat(columns: string[], orderOf: (column: string) => string[], numeric: string[]): StatDefinition {
   // Une première colonne à répartir : une liste (ses choix), sinon Type, sinon la première qui n'est pas un nombre.
@@ -317,6 +317,87 @@ function startStat(columns: string[], orderOf: (column: string) => string[], num
 }
 
 type Toast = { text: string; action?: { label: string; run: () => void } }
+
+/**
+ * « Lignes concernées » : les lignes que compte une statistique, ou celles de la part cliquée
+ * dans son graphique. Chacune ouvre sa fiche ; la fiche passe ensuite de l'une à l'autre.
+ */
+function ConcernedRows({ rows, label, extra, onReset, metaOf, nameOf, onOpen, max = 300, className = "max-h-60" }: { rows: string[]; label: string; extra?: string; onReset?: () => void; metaOf: (row: string) => string; nameOf: (row: string) => string; onOpen?: (rowKey: string, rows?: string[]) => void; max?: number; className?: string }) {
+  return <div className="grid gap-2">
+    <div className="flex flex-wrap items-center gap-2">
+      <span className={sectionLabel}>Lignes concernées</span>
+      <span className="max-w-full rounded-full bg-muted px-2.5 py-0.5 text-xs [overflow-wrap:anywhere]">{label} · {rows.length}{extra ?? ""}</span>
+      {onReset && <button type="button" className={mini} onClick={onReset}>Toutes</button>}
+    </div>
+    <ul className={`grid grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-1.5 overflow-auto pr-0.5 ${className}`}>
+      {rows.slice(0, max).map((row) => {
+        const meta = metaOf(row)
+        const body = <><span className="min-w-0"><span className="block truncate font-semibold">{nameOf(row) || "Sans nom"}</span>{meta && <span className="block truncate text-xs text-muted-foreground">{meta}</span>}</span>{onOpen && <span className="text-muted-foreground" aria-hidden="true">›</span>}</>
+        return <li key={row}>{onOpen
+          ? <button type="button" onClick={() => onOpen(row, rows)} aria-haspopup="dialog" className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-left text-[13px] hover:bg-muted focus-visible:outline-2 focus-visible:outline-[#3b5c8a]" title={`Ouvrir la fiche de « ${nameOf(row) || "Sans nom"} »`}>{body}</button>
+          : <div className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-[13px]">{body}</div>}</li>
+      })}
+      {!rows.length && <li className="text-sm text-muted-foreground">Aucune ligne.</li>}
+    </ul>
+    {rows.length > max && <p className="text-xs text-muted-foreground">… et {rows.length - max} autres lignes.</p>}
+  </div>
+}
+
+/** La place d'une épinglée sur la grille de six colonnes (une seule colonne sur un écran étroit). */
+const widthClass: Record<StatWidth, string> = {
+  third: "md:col-span-3 lg:col-span-2",
+  half: "md:col-span-3",
+  "two-thirds": "md:col-span-6 lg:col-span-4",
+  full: "md:col-span-6",
+}
+
+type Arrange = { pending: boolean; first: boolean; last: boolean; onWidth: (width: StatWidth | null) => void; onRows: (rows: StatDefinition["rows"] | null) => void; onMove: (step: -1 | 1) => void; onUnpin: () => void }
+
+const seg = "rounded-md px-2 py-0.5 text-xs aria-pressed:bg-card aria-pressed:font-semibold aria-pressed:text-foreground aria-pressed:shadow-[0_0_0_1px_var(--border)] text-muted-foreground hover:text-foreground disabled:opacity-50"
+
+/** « Organiser » : la largeur, la place et les lignes d'une épinglée. */
+function ArrangeBar({ stat, arrange }: { stat: StatDefinition; arrange: Arrange }) {
+  const auto = pinnedWidth({ form: stat.form })
+  return <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-[#3b5c8a]/50 bg-[#3b5c8a]/5 px-2 py-1.5">
+    <span className="inline-flex items-center rounded-lg bg-muted/70 p-0.5" role="group" aria-label="Largeur">
+      <button type="button" className={seg} aria-pressed={!stat.width} disabled={arrange.pending} onClick={() => arrange.onWidth(null)} title={`Selon sa forme (${statWidths.find((width) => width.value === auto)?.label})`}>Auto</button>
+      {statWidths.map((width) => <button key={width.value} type="button" className={seg} aria-pressed={stat.width === width.value} disabled={arrange.pending} onClick={() => arrange.onWidth(width.value)} title={width.value === "full" ? "Toute la ligne" : `${width.label} de la ligne`}>{width.label}</button>)}
+    </span>
+    <span className="inline-flex items-center rounded-lg bg-muted/70 p-0.5" role="group" aria-label="Lignes concernées">
+      {([[null, "Lignes"], ["folded", "Repliées"], ["hidden", "Sans lignes"]] as const).map(([value, label]) => <button key={label} type="button" className={seg} aria-pressed={(stat.rows ?? null) === value} disabled={arrange.pending} onClick={() => arrange.onRows(value)}>{label}</button>)}
+    </span>
+    <span className="ml-auto inline-flex items-center gap-0.5">
+      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.first} onClick={() => arrange.onMove(-1)} aria-label="Avancer" title="Avancer"><ChevronLeft className="size-4" /></button>
+      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending || arrange.last} onClick={() => arrange.onMove(1)} aria-label="Reculer" title="Reculer"><ChevronRight className="size-4" /></button>
+      <button type="button" className="rounded-md p-1 text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-40" disabled={arrange.pending} onClick={arrange.onUnpin} aria-label="Ne plus épingler" title="Ne plus épingler"><PinOff className="size-4" /></button>
+    </span>
+  </div>
+}
+
+/**
+ * Une statistique épinglée, dans l'onglet stat : son graphique, dont chaque part se clique,
+ * et ses lignes concernées en dessous (affichées, repliées ou masquées : « Organiser »).
+ */
+function PinnedStat({ stat, data, expanded, onToggle, tabs, tabOf, nameOf, onOpen, arrange }: { stat: StatDefinition; data: StatData; expanded: Set<string>; onToggle: (key: string) => void; tabs: string[]; tabOf: (rowKey: string) => string; nameOf: (rowKey: string) => string; onOpen?: (rowKey: string, rows?: string[]) => void; arrange?: Arrange }) {
+  const prepared = useMemo(() => prepareFor(stat, data), [data, stat])
+  const [picked, setPicked] = useState<{ label: string; rows: string[]; id: string } | null>(null)
+  const [unfolded, setUnfolded] = useState<boolean | null>(null)
+  const open = unfolded ?? stat.rows !== "folded"
+  const withRows = stat.rows !== "hidden"
+  const concerned = picked?.rows ?? unitRows(prepared.units)
+  const slots = prepared.size
+  const width = pinnedWidth(stat)
+  const metaOf = (row: string) => [tabs.length > 1 ? tabOf(row) : "", stat.by[0] ? cellText(prepared.valueOf({ row, slot: -1 }, stat.by[0])) : ""].filter(Boolean).join(" · ")
+  return <article className={`grid min-w-0 content-start gap-2.5 rounded-2xl border bg-card p-4 ${widthClass[width]} ${arrange ? "border-[#3b5c8a]/60" : ""}`}>
+    <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase"><Pin className="size-3 shrink-0 text-[#a87a1f]" /><span className="truncate">{stat.title}</span></span>
+    {arrange && <ArrangeBar stat={stat} arrange={arrange} />}
+    <StatResult stat={stat} data={data} prepared={prepared} expanded={expanded} onToggle={onToggle} onPick={withRows ? (label, rows, id) => { setPicked((current) => current?.id === id ? null : { label, rows, id }); setUnfolded(true) } : undefined} picked={picked?.id} />
+    {withRows && <div className="grid gap-2 border-t border-border/60 pt-2.5">
+      {open && <ConcernedRows rows={concerned} label={picked?.label ?? (stat.where?.length ? "Lignes retenues" : "Toutes les lignes")} extra={!picked && slots ? ` (${prepared.units.length.toLocaleString("fr-FR")} ${unitWord(slots, prepared.units.length)})` : ""} onReset={picked ? () => setPicked(null) : undefined} metaOf={metaOf} nameOf={nameOf} onOpen={onOpen} max={200} className="max-h-56" />}
+      <button type="button" aria-expanded={open} onClick={() => setUnfolded(!open)} className="justify-self-start text-xs text-muted-foreground hover:text-foreground">{open ? "Replier les lignes" : `Voir les ${concerned.length.toLocaleString("fr-FR")} lignes concernées${picked ? ` (${picked.label})` : ""}`}</button>
+    </div>}
+  </article>
+}
 
 export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, separatorOf, onOpen, canEdit, onSave }: IndexStatsProps) {
   // Un groupe créé ou modifié se voit tout de suite, avant même la réponse du serveur.
@@ -351,6 +432,7 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
   const [allForms, setAllForms] = useState(false)
   const [groupsOpen, setGroupsOpen] = useState(false)
   const [toast, setToast] = useState<Toast | null>(null)
+  const [arranging, setArranging] = useState(false)
 
   const saved = editing ? stats.find((stat) => stat.id === editing) ?? null : null
   const shownTitle = title.trim() || autoStatTitle(draft, labelOf)
@@ -426,8 +508,11 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
     const id = current?.id ?? newStatId(stats)
     const entry: StatDefinition = { ...fitForm(draft), id, title: copy ? `${shownTitle} (copie)`.slice(0, STAT_LIMITS.title) : shownTitle }
     // Une copie ou une nouvelle n'est pas épinglée ; une mise à jour garde son épingle.
-    delete entry.pinned
+    delete entry.pinned; delete entry.width; delete entry.rows
     if (current?.pinned) entry.pinned = true
+    // Sa place dans l'onglet stat (largeur, lignes) se règle là-bas : une mise à jour la garde.
+    if (current?.width) entry.width = current.width
+    if (current?.rows) entry.rows = current.rows
     const next = current ? stats.map((stat) => stat.id === id ? entry : stat) : copy && saved ? stats.flatMap((stat) => stat.id === saved.id ? [stat, entry] : [stat]) : [entry, ...stats]
     if (await persist(next, current ? `« ${entry.title} » mise à jour.` : copy ? `Copie enregistrée : « ${entry.title} ».` : `« ${entry.title} » enregistrée.`)) {
       setEditing(id); setDraft(entry); setTitle(entry.title)
@@ -441,12 +526,24 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
     await persist(next, target.pinned ? `« ${target.title} » n’est plus épinglée.` : `« ${target.title} » épinglée en tête.`)
   }
 
+  /** L'onglet stat : la largeur ou les lignes d'une épinglée, enregistrées tout de suite. */
+  async function arrange(id: string, patch: { width?: StatWidth | null; rows?: StatDefinition["rows"] | null }) {
+    const next = stats.map((stat) => {
+      if (stat.id !== id) return stat
+      const copy = { ...stat }
+      if (patch.width !== undefined) { if (patch.width) copy.width = patch.width; else delete copy.width }
+      if (patch.rows !== undefined) { if (patch.rows) copy.rows = patch.rows; else delete copy.rows }
+      return copy
+    })
+    await persist(next, "Disposition enregistrée.")
+  }
+
   async function duplicate(id: string) {
     const target = stats.find((stat) => stat.id === id)
     if (!target) return
     if (stats.length >= STAT_LIMITS.stats) { setError(`${STAT_LIMITS.stats} statistiques au plus par index : supprime-en une d’abord.`); return }
     const copy: StatDefinition = { ...target, id: newStatId(stats), title: `${target.title} (copie)`.slice(0, STAT_LIMITS.title) }
-    delete copy.pinned
+    delete copy.pinned; delete copy.width; delete copy.rows
     await persist(stats.flatMap((stat) => stat.id === id ? [stat, copy] : [stat]), `« ${target.title} » dupliquée.`)
   }
 
@@ -530,12 +627,19 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
 
   const manage = onManage && <Button type="button" variant="outline" size="sm" onClick={onManage}><Pencil />Créer et épingler des stats</Button>
   if (pinnedOnly) return pinned.length
-    ? <div className="grid grid-cols-[minmax(0,1fr)] gap-3">{manage && <div className="flex justify-end">{manage}</div>}<section aria-label="Statistiques épinglées" className="grid grid-cols-[minmax(0,1fr)] gap-3 lg:grid-cols-2">
-      {pinned.map((stat) => <article key={stat.id} className="grid min-w-0 content-start gap-2.5 rounded-2xl border bg-card p-4">
-        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase"><Pin className="size-3 shrink-0 text-[#a87a1f]" /><span className="truncate">{stat.title}</span></span>
-        <StatResult stat={stat} data={data} expanded={expanded} onToggle={onToggle} />
-      </article>)}
-    </section></div>
+    ? <div className="grid grid-cols-[minmax(0,1fr)] gap-3">
+      {(manage || canEdit) && <div className="flex flex-wrap items-center justify-end gap-2">
+        {arranging && <span className="mr-auto text-xs text-muted-foreground">Largeur, ordre et lignes de chaque statistique : tout s’enregistre aussitôt.</span>}
+        {canEdit && <Button type="button" variant={arranging ? "default" : "outline"} size="sm" aria-pressed={arranging} onClick={() => setArranging((value) => !value)}><LayoutGrid />{arranging ? "Terminé" : "Organiser"}</Button>}
+        {manage}
+      </div>}
+      {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">{error}</p>}
+      <section aria-label="Statistiques épinglées" className="grid grid-cols-[minmax(0,1fr)] items-start gap-3 md:grid-cols-6">
+        {pinned.map((stat, index) => <PinnedStat key={stat.id} stat={stat} data={data} expanded={expanded} onToggle={onToggle} tabs={tabs} tabOf={tabOf} nameOf={nameOf} onOpen={onOpen}
+          arrange={arranging && canEdit ? { pending, first: index === 0, last: index === pinned.length - 1, onWidth: (width) => void arrange(stat.id, { width }), onRows: (rows) => void arrange(stat.id, { rows }), onMove: (step) => void persist(movePinned(stats, stat.id, step), "Ordre enregistré."), onUnpin: () => void togglePin(stat.id) } : undefined} />)}
+      </section>
+      {toastView}
+    </div>
     : <div className="grid place-items-center gap-3 rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground"><p>Aucune statistique épinglée. Crée-les et épingle-les dans « Modifier › Stats ».</p>{manage}</div>
 
   return <div className="grid grid-cols-[minmax(0,1fr)] gap-4">
@@ -587,23 +691,9 @@ export function IndexStats({ stats, groups: groupsProp, pinnedOnly = false, onMa
           <StatResult key={`${draft.id}|${draft.form}|${statDimensions(draft).join("›")}`} stat={draft} data={data} prepared={prepared} expanded={expanded} onToggle={onToggle} onPick={pick} picked={picked?.id} onChange={change} />
         </div>
         <div className="grid gap-2 border-t border-border/60 bg-background/30 px-3.5 pt-3 pb-4 sm:px-4">
-          <div className="flex flex-wrap items-center gap-2">
-            <span className={sectionLabel}>Lignes concernées</span>
-            <span className="max-w-full rounded-full bg-muted px-2.5 py-0.5 text-xs [overflow-wrap:anywhere]">{picked?.label ?? (draft.where?.length ? "Lignes retenues" : "Toutes les lignes")} · {concerned.length}{!picked && slots.size ? ` (${prepared.units.length.toLocaleString("fr-FR")} ${unitWord(slots.size, prepared.units.length)})` : ""}</span>
-            {picked && <button type="button" className={mini} onClick={() => setSelection(null)}>Toutes</button>}
-          </div>
-          <ul className="grid max-h-60 grid-cols-[repeat(auto-fill,minmax(min(15rem,100%),1fr))] gap-1.5 overflow-auto pr-0.5">
-            {concerned.slice(0, 300).map((row) => {
-              // Sous le nom : son onglet et sa valeur dans la première colonne de « réparties par ».
-              const meta = [tabs.length > 1 ? tabOf(row) : "", draft.by[0] ? cellText(prepared.valueOf({ row, slot: -1 }, draft.by[0])) : ""].filter(Boolean).join(" · ")
-              const body = <><span className="min-w-0"><span className="block truncate font-semibold">{nameOf(row) || "Sans nom"}</span>{meta && <span className="block truncate text-xs text-muted-foreground">{meta}</span>}</span>{onOpen && <span className="text-muted-foreground" aria-hidden="true">›</span>}</>
-              return <li key={row}>{onOpen
-                ? <button type="button" onClick={() => onOpen(row, concerned)} aria-haspopup="dialog" className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-left text-[13px] hover:bg-muted focus-visible:outline-2 focus-visible:outline-[#3b5c8a]" title={`Ouvrir la fiche de « ${nameOf(row) || "Sans nom"} »`}>{body}</button>
-                : <div className="flex w-full min-w-0 items-center justify-between gap-2 rounded-lg border border-border/60 bg-card px-2.5 py-1 text-[13px]">{body}</div>}</li>
-            })}
-            {!concerned.length && <li className="text-sm text-muted-foreground">Aucune ligne.</li>}
-          </ul>
-          {concerned.length > 300 && <p className="text-xs text-muted-foreground">… et {concerned.length - 300} autres lignes.</p>}
+          {/* Sous le nom : son onglet et sa valeur dans la première colonne de « réparties par ». */}
+          <ConcernedRows rows={concerned} label={picked?.label ?? (draft.where?.length ? "Lignes retenues" : "Toutes les lignes")} extra={!picked && slots.size ? ` (${prepared.units.length.toLocaleString("fr-FR")} ${unitWord(slots.size, prepared.units.length)})` : ""} onReset={picked ? () => setSelection(null) : undefined}
+            metaOf={(row) => [tabs.length > 1 ? tabOf(row) : "", draft.by[0] ? cellText(prepared.valueOf({ row, slot: -1 }, draft.by[0])) : ""].filter(Boolean).join(" · ")} nameOf={nameOf} onOpen={onOpen} />
         </div>
         {error && <p className="border-t border-destructive/25 bg-destructive/5 px-4 py-2 text-sm text-destructive" role="alert">{error}</p>}
       </section>
