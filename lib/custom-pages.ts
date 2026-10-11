@@ -216,6 +216,11 @@ export function pageHref(page: Pick<CustomPage, "place" | "slug" | "campaignId">
   return `/${page.place}/${slug}`
 }
 
+/** L'atelier d'une page : son identifiant dans le chemin (jamais en « ?id= », voir app/pages/atelier). */
+export function studioHref(id: string) {
+  return `/pages/atelier/${encodeURIComponent(id)}`
+}
+
 /** Où se range la page, en mots (« Règles », « Campagne », « Hors menu »). */
 export function placeLabel(place: PagePlace) {
   return pagePlaces.find((item) => item.value === place)?.label.replace(" (lien direct)", "") ?? "Hors menu"

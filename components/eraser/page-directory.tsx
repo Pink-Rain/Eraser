@@ -9,7 +9,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { PageIcon, formatWhen } from "@/components/eraser/custom-page-view"
 import { fieldClass, Field } from "@/components/eraser/page-studio-settings"
-import { pagePlaces, pageVisibilities, placeLabel, type PagePlace, type PageRole, type PageSummary } from "@/lib/custom-pages"
+import { pagePlaces, pageVisibilities, placeLabel, type PagePlace, type PageRole, type PageSummary, studioHref } from "@/lib/custom-pages"
 
 /**
  * L'Index des pages (admins et MJ) : toutes les pages du créateur de pages, leur place,
@@ -85,7 +85,7 @@ export function PageDirectory({ pages: initialPages, templates: initialTemplates
     setError("")
     const result = await post({ action: "create", templateId: draft.template || undefined, page: { title: draft.title.trim() || (draft.template ? templates.find((item) => item.id === draft.template)?.title : "") || "Nouvelle page", place: draft.place, campaignId: draft.place === "campagne" ? draft.campaignId : "", vis: draft.place === "administration" ? "admin" : "tous" } })
     if (!result.ok || !result.page) { setBusy(""); setError(result.error); return }
-    router.push(`/pages/atelier?id=${encodeURIComponent(result.page.id)}`)
+    router.push(studioHref(result.page.id))
   }
 
   async function act(page: PageSummary, action: "publish" | "unpublish" | "trash" | "restore" | "delete") {
@@ -114,7 +114,7 @@ export function PageDirectory({ pages: initialPages, templates: initialTemplates
       {isAdmin && <Button type="button" size="xs" variant="ghost" className="text-destructive hover:text-destructive" disabled={Boolean(busy)} onClick={() => setConfirm({ kind: "delete-page", id: page.id, name: page.title })}><Trash2 />Supprimer</Button>}
     </>
     : <>
-      {page.editable && <Button asChild size="xs" variant="outline"><Link href={`/pages/atelier?id=${encodeURIComponent(page.id)}`} prefetch={false}><PenLine />Ouvrir</Link></Button>}
+      {page.editable && <Button asChild size="xs" variant="outline"><Link href={studioHref(page.id)} prefetch={false}><PenLine />Ouvrir</Link></Button>}
       <Button asChild size="icon-xs" variant="ghost" title="Voir la page" aria-label={`Voir ${page.title}`}><Link href={page.href} prefetch={false}><Eye /></Link></Button>
       {page.editable && (page.status !== "publiee" || page.unpublished) && <Button type="button" size="xs" variant="ghost" disabled={Boolean(busy)} onClick={() => void act(page, "publish")}>{busy === `publish:${page.id}` ? <LoaderCircle className="animate-spin" /> : <WandSparkles />}Publier</Button>}
       {page.editable && <Button type="button" size="icon-xs" variant="ghost" className="hover:text-destructive" title="Mettre à la corbeille" aria-label={`Mettre ${page.title} à la corbeille`} disabled={Boolean(busy)} onClick={() => void act(page, "trash")}><Trash2 /></Button>}
@@ -181,7 +181,7 @@ export function PageDirectory({ pages: initialPages, templates: initialTemplates
             <thead><tr>{["Page", "Emplacement", "Visibilité", "Statut", "Modifiée", "Blocs", ""].map((label) => <th key={label} scope="col" className="whitespace-nowrap border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{label || <span className="sr-only">Actions</span>}</th>)}</tr></thead>
             <tbody>{rows.map((page) => <tr key={page.id} className="border-b border-border/60 last:border-b-0 hover:bg-background/50">
               <td className="px-3 py-2">
-                <Link href={page.editable && !page.trashedAt ? `/pages/atelier?id=${encodeURIComponent(page.id)}` : page.href} prefetch={false} className="group flex items-center gap-2.5">
+                <Link href={page.editable && !page.trashedAt ? studioHref(page.id) : page.href} prefetch={false} className="group flex items-center gap-2.5">
                   <span className="flex size-8 shrink-0 items-center justify-center rounded-[9px] border border-primary/20 bg-primary/8 text-primary"><PageIcon icon={page.icon} emoji={page.emoji} className="size-4" /></span>
                   <span className="min-w-0"><b className="block whitespace-nowrap font-display text-[15px] group-hover:text-primary group-hover:underline group-hover:underline-offset-3">{page.title}</b><small className="block font-mono text-[11px] text-muted-foreground">{page.href}</small></span>
                 </Link>

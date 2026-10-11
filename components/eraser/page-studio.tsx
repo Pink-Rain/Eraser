@@ -41,6 +41,7 @@ import {
   type PageSummary,
   type SectionLayout,
   type StudioPage,
+  studioHref,
 } from "@/lib/custom-pages"
 
 /**
@@ -519,7 +520,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
       notify(result.error || "Cette action n’a pas pu être faite.")
       return
     }
-    if (name === "duplicate") { router.push(`/pages/atelier?id=${encodeURIComponent(result.page.id)}`); return }
+    if (name === "duplicate") { router.push(studioHref(result.page.id)); return }
     if (name === "trash") { router.push("/pages"); return }
     const server = result.page
     if (name === "revert") {
