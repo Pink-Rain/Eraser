@@ -3,7 +3,7 @@
 import Link from "next/link"
 import { useRouter } from "next/navigation"
 import { useMemo, useState } from "react"
-import { ArchiveRestore, Eye, FilePlus2, LayoutGrid, LayoutTemplate, LibraryBig, LoaderCircle, PenLine, Search, Table2, Trash2, WandSparkles } from "lucide-react"
+import { ArchiveRestore, Eye, FilePlus2, LayoutGrid, PanelLeft, LayoutTemplate, LibraryBig, LoaderCircle, PenLine, Search, Table2, Trash2, WandSparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -132,7 +132,10 @@ export function PageDirectory({ pages: initialPages, templates: initialTemplates
           </div>
         </div>
       </section>
-      <div className="flex justify-end"><Button type="button" onClick={() => { setError(""); setCreating(true) }}><FilePlus2 />Nouvelle page</Button></div>
+      <div className="flex flex-wrap justify-end gap-2">
+        <Button asChild variant="outline"><Link href="/pages/menu" prefetch={false}><PanelLeft />Menu</Link></Button>
+        <Button type="button" onClick={() => { setError(""); setCreating(true) }}><FilePlus2 />Nouvelle page</Button>
+      </div>
     </div>
 
     <div className="mt-9 flex flex-wrap items-center gap-2">

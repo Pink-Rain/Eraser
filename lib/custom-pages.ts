@@ -9,13 +9,15 @@
  * partir vers un navigateur que ce que son lecteur a le droit de voir (`pageForViewer`) :
  * un bloc masqué ou un secret pas encore révélé ne quitte jamais le serveur.
  *
- * Préparé pour la suite (rien ne s'en sert encore) : `replaces` (l'adresse d'une page
- * d'Eraser que la page remplacera) et `rowOf` (une page dessinée une fois pour chaque ligne
- * d'un index). Le menu modifiable aura son propre enregistrement, à part des pages.
+ * Une page peut aussi remplacer ou compléter une page d'Eraser (`replaces`, `replaceMode` :
+ * lib/page-replacements.ts), ou servir de modèle à la page de chaque ligne d'un index
+ * (`rowOf` : lib/custom-pages-rows.ts). Le menu modifiable a son propre enregistrement
+ * (lib/app-menu.ts).
  */
 import type { SiteRole } from "@/lib/auth-types"
 import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
+import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
 
 /* ---------- Les types ---------- */
 
@@ -31,7 +33,7 @@ export type PagePlace = PageSection | "campagne" | "hors-menu"
 export type PageStatus = "brouillon" | "publiee"
 export type SectionLayout = "1" | "2" | "3" | "side-r" | "side-l"
 
-export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat"
+export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks"
 export type CalloutTone = "info" | "mj" | "secret" | "alerte"
 export type ImageRatio = "auto" | "21/9" | "16/9" | "4/3" | "1/1" | "3/4"
 export type SeparatorGlyph = "ornement" | "etoile" | "points" | "trait"
@@ -52,9 +54,14 @@ export type LinkBlock = Common & { type: "link"; pageId: string; href: string; t
 export type SecretBlock = Common & { type: "secret"; title: string; html: string }
 /** Un carnet qu'on continue d'écrire sur la page publiée ; `html` : son texte de départ. */
 export type NotesBlock = Common & { type: "notes"; title: string; html: string; editors: PageRole[] }
-export type ViewBlock = Common & { type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string }
+/** `rowMatch` (page de ligne) : seulement les lignes dont cette colonne cite la ligne de la page. */
+export type ViewBlock = Common & { type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string; rowMatch: string }
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
-export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock
+/** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
+export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" }
+/** Page de ligne : les lignes des autres index qui citent celle-ci (« Cité dans »). */
+export type BacklinksBlock = Common & { type: "backlinks"; heading: string }
+export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock
 
 export type PageSectionBlock = { id: string; layout: SectionLayout; framed: boolean; cols: PageBlock[][] }
 
@@ -74,9 +81,10 @@ export type CustomPage = PageContent & {
   campaignId: string
   vis: PageVisibility
   status: PageStatus
-  /** Plus tard : l'adresse d'une page d'Eraser que celle-ci remplace (« /regles/combat »). */
+  /** L'adresse d'une page d'Eraser que celle-ci remplace ou complète (« /regles/combat »). */
   replaces?: string
-  /** Plus tard : un modèle de page pour chaque ligne d'un index. */
+  replaceMode?: ReplaceMode
+  /** Un modèle de page pour chaque ligne d'un index (ou d'un de ses onglets). */
   rowOf?: { index: string; tab?: string }
   createdAt: string
   createdBy: PageAuthor
@@ -95,7 +103,7 @@ export type CustomPage = PageContent & {
 export type PageTemplate = { id: string; name: string; content: PageContent; createdAt: string; createdBy: PageAuthor }
 
 /** Ce que l'atelier envoie quand il enregistre : le brouillon et les réglages de la page. */
-export type PageDraft = PageContent & { slug: string; place: PagePlace; campaignId: string; vis: PageVisibility; replaces?: string; rowOf?: { index: string; tab?: string } }
+export type PageDraft = PageContent & { slug: string; place: PagePlace; campaignId: string; vis: PageVisibility; replaces?: string; replaceMode?: ReplaceMode; rowOf?: { index: string; tab?: string } }
 
 /* ---------- Les libellés ---------- */
 
@@ -197,7 +205,7 @@ export const reservedSlugs: Record<PagePlace, string[]> = {
   "hors-menu": [],
 }
 /** Réservés partout : les pages de l'atelier, et ce qui ressemblerait à une adresse technique. */
-const reservedEverywhere = ["atelier", "pages", "nouvelle", "api", "index-des-pages", "modeles"]
+const reservedEverywhere = ["atelier", "pages", "nouvelle", "api", "index-des-pages", "modeles", "menu", "fiche"]
 
 /** Le problème d'une adresse, ou "" si elle convient. `taken` : les adresses des autres pages au même endroit. */
 export function slugProblem(slug: string, place: PagePlace, taken: string[] = []) {
@@ -233,7 +241,7 @@ export function samePlace(left: Pick<CustomPage, "place" | "campaignId">, right:
 
 /* ---------- Les blocs ---------- */
 
-export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" }> = [
+export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" | "Page de ligne" }> = [
   { type: "title", label: "Titre", hint: "Un titre de partie, avec une petite ligne au-dessus", group: "Texte" },
   { type: "text", label: "Texte riche", hint: "Gras, listes, liens, couleurs et citations « { »", group: "Texte" },
   { type: "callout", label: "Encadré", hint: "Info, conseil du MJ, secret ou alerte", group: "Texte" },
@@ -245,6 +253,8 @@ export const blockCatalog: Array<{ type: BlockType; label: string; hint: string;
   { type: "link", label: "Lien vers une page", hint: "Une carte-lien vers une page d’Eraser", group: "Navigation" },
   { type: "view", label: "Vue d’index", hint: "Une vue réglée dans un index : liste, kanban, cartes…", group: "Données d’index" },
   { type: "stat", label: "Stat épinglée", hint: "Une statistique enregistrée dans un index", group: "Données d’index" },
+  { type: "rowfields", label: "Valeurs de la ligne", hint: "Page de ligne : les colonnes de la ligne affichée", group: "Page de ligne" },
+  { type: "backlinks", label: "Cité dans", hint: "Page de ligne : les lignes d’autres index qui la citent", group: "Page de ligne" },
 ]
 export const blockTypes = blockCatalog.map((item) => item.type)
 export const blockLabel = (type: BlockType) => blockCatalog.find((item) => item.type === type)?.label ?? type
@@ -262,14 +272,20 @@ export function newBlock(type: BlockType, id = newId("b")): PageBlock {
     case "link": return { ...common, type, pageId: "", href: "", title: "", description: "", style: "card" }
     case "secret": return { ...common, type, title: "Secret", html: "" }
     case "notes": return { ...common, type, title: "Notes", html: "", editors: ["mj", "admin"] }
-    case "view": return { ...common, type, index: "", tab: "", kind: "table", limit: 0, height: "auto", heading: "" }
+    case "view": return { ...common, type, index: "", tab: "", kind: "table", limit: 0, height: "auto", heading: "", rowMatch: "" }
     case "stat": return { ...common, type, index: "", statId: "", heading: "" }
+    case "rowfields": return { ...common, type, columns: [], heading: "", style: "grid" }
+    case "backlinks": return { ...common, type, heading: "Cité dans" }
   }
 }
 
-/** Une adresse d'image acceptée : https, ou un fichier servi par Eraser (/api/…). */
+/**
+ * Une adresse d'image acceptée : https, un fichier servi par Eraser (/api/…), ou (page de
+ * ligne) une colonne de la ligne : « {Image} ».
+ */
 export function cleanImageSource(value: unknown) {
   const source = typeof value === "string" ? value.trim().slice(0, PAGE_LIMITS.src) : ""
+  if (/^\{[^{}<>"']{1,80}\}$/.test(source)) return source
   if (/^https:\/\/[^\s"'<>]+$/i.test(source)) return source
   if (/^\/api\/[^\s"'<>]*$/.test(source) && !source.includes("..")) return source
   return ""
@@ -308,9 +324,11 @@ export function cleanBlock(input: unknown): PageBlock | null {
     }
     case "view": {
       const limit = Number(raw.limit)
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160) }
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
+    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid"] as const, "grid") }
+    case "backlinks": return { ...common, type, heading: text(raw.heading, 160) }
   }
 }
 
@@ -364,11 +382,14 @@ export function cleanCustomPage(input: unknown): PageDraft {
   const campaignId = place === "campagne" && typeof raw.campaignId === "string" && /^[A-Za-z0-9_-]{1,80}$/.test(raw.campaignId) ? raw.campaignId : ""
   const slug = slugify(typeof raw.slug === "string" && raw.slug.trim() ? raw.slug : content.title) || "page"
   const vis = place === "administration" ? "admin" : oneOf(raw.vis, pageVisValues, "tous")
-  const replaces = typeof raw.replaces === "string" ? internalAppPath(raw.replaces.trim()).split(/[?#]/)[0] : ""
+  // Seules les adresses d'Eraser prévues (jamais une route technique) se remplacent.
+  const replaces = typeof raw.replaces === "string" && isReplaceablePath(raw.replaces.trim()) ? raw.replaces.trim() : ""
   const rowOf = raw.rowOf && typeof raw.rowOf === "object" ? { index: text((raw.rowOf as Record<string, unknown>).index, 90), tab: text((raw.rowOf as Record<string, unknown>).tab, 120) } : null
+  // Un modèle de page de ligne (« {Nom} »…) ou une page de campagne (lisible selon ses
+  // membres, ce que la coque ne sait pas sans Google) ne remplace jamais une page d'Eraser.
   return {
     ...content, slug, place, campaignId, vis,
-    ...(replaces && !replaces.startsWith("/api") ? { replaces } : {}),
+    ...(replaces && !rowOf?.index && place !== "campagne" ? { replaces, replaceMode: cleanReplaceMode(raw.replaceMode) } : {}),
     ...(rowOf?.index ? { rowOf: rowOf.tab ? rowOf : { index: rowOf.index } } : {}),
   }
 }
@@ -615,7 +636,7 @@ export type StudioPage = PageDraft & {
 export function studioPage(page: CustomPage): StudioPage {
   return {
     ...contentOf(page), slug: page.slug, place: page.place, campaignId: page.campaignId, vis: page.vis,
-    ...(page.replaces ? { replaces: page.replaces } : {}), ...(page.rowOf ? { rowOf: page.rowOf } : {}),
+    ...(page.replaces ? { replaces: page.replaces, replaceMode: page.replaceMode ?? "after" } : {}), ...(page.rowOf ? { rowOf: page.rowOf } : {}),
     id: page.id, status: page.status, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, publishedAt: page.publishedAt,
     published: Boolean(page.published), unpublished: hasUnpublishedChanges(page), trashedAt: page.trashedAt, live: page.live,
   }

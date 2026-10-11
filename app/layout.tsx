@@ -1,9 +1,13 @@
 import type { Metadata } from "next";
 
 import { AppShell } from "@/components/eraser/app-shell";
+import { ReplacementView } from "@/components/eraser/custom-page-route";
 import { OpenInAppPrompt } from "@/components/eraser/open-in-app-prompt";
 import { UpdatePrompt } from "@/components/eraser/update-prompt";
 import { listCampaignsForMj, listCharactersForUser } from "@/lib/google-sheets";
+import { canManagePages } from "@/lib/custom-pages";
+import { replacementFor, shellMenu } from "@/lib/custom-pages-server";
+import { currentRequestPath } from "@/lib/request-path";
 import { currentAccount, currentViewAccount } from "@/lib/server-auth";
 import "./globals.css";
 
@@ -25,16 +29,38 @@ export default async function RootLayout({
   let content = children;
   if (account?.role && viewAccount) {
     // Cette coque est rendue à chaque navigation (vinext relance le layout racine, requêtes
-    // RSC comprises). Attendre ici la liste des personnages ou des campagnes — qui peut
-    // attendre la resynchronisation des index Google jusqu'à 2,5 s (premier lancement,
-    // « Actualiser ») — retardait le premier octet de *toutes* les pages, même de celles qui
-    // n'en ont aucun besoin. Les promesses sont transmises en vol : la page s'affiche tout de
-    // suite et la barre latérale se remplit dès qu'elles arrivent. Aucune ne rejette. Les
-    // pages qui décident d'un accès (fiche, campagne) font toujours leur propre vérification.
+    // RSC comprises), et même deux fois par page : une première fois « à blanc », sans
+    // paramètres de requête, pour y détecter une redirection, puis pour de vrai. Attendre ici
+    // la liste des personnages ou des campagnes — qui peut attendre la resynchronisation des
+    // index Google jusqu'à 2,5 s (premier lancement, « Actualiser ») — retardait le premier
+    // octet de *toutes* les pages, même de celles qui n'en ont aucun besoin. Les promesses
+    // sont transmises en vol : la page s'affiche tout de suite et la barre latérale se remplit
+    // dès qu'elles arrivent. Aucune ne rejette. Les pages qui décident d'un accès (fiche,
+    // campagne) font toujours leur propre vérification.
     const characters = viewAccount.role === "joueur" ? listCharactersForUser(account.uid).catch(() => []) : Promise.resolve([]);
     const campaigns = viewAccount.role === "mj" ? listCampaignsForMj(account.uid).catch(() => []) : Promise.resolve([]);
+    // Le menu réglé dans l'éditeur du menu et la page du créateur de pages qui remplace ou
+    // complète celle demandée viennent de la copie en mémoire du serveur partagé
+    // (lib/app-menu-store.ts, lib/custom-pages-store.ts) : rien n'est attendu ici, ni du
+    // serveur partagé ni de Google ; la copie se relit en arrière-plan.
+    const { pathname, searchParams } = currentRequestPath();
+    const { items: menu, campaignPages } = shellMenu(viewAccount);
+    const replacement = pathname ? replacementFor(pathname, viewAccount) : null;
+    // « Voir la page d'origine » (admins et MJ) : la page d'Eraser telle quelle. Le paramètre
+    // ne décide que de ce qui s'affiche, jamais d'une redirection : le rendu « à blanc » ne le voit pas.
+    const original = searchParams.get("origine") === "1" && canManagePages(viewAccount.role);
+    const page = replacement && !original
+      ? <ReplacementView page={replacement.page} view={replacement.view} mode={replacement.mode} pathname={pathname} account={viewAccount}>{children}</ReplacementView>
+      : children;
+    // Les pages créées d'une campagne, sous son dossier (vue MJ) : seulement celles de ses
+    // campagnes, connues quand la liste en vol arrive — aucune lecture de plus.
+    const ownCampaignPages = viewAccount.role === "mj"
+      ? campaigns.then((list) => Object.fromEntries(list.flatMap((campaign) => campaignPages[campaign.id] ? [[campaign.id, campaignPages[campaign.id]]] : [])))
+      : {};
     content = (
       <AppShell
+        menu={menu}
+        campaignPages={ownCampaignPages}
         user={{ uid: account.uid, email: account.email, displayName: account.displayName, role: account.role }}
         initialViewRole={viewAccount.role}
         characters={characters}
@@ -42,7 +68,7 @@ export default async function RootLayout({
         todos={[]}
         pageLabel="Eraser"
       >
-        {children}
+        {page}
       </AppShell>
     );
   }

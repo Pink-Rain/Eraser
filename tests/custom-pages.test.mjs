@@ -118,10 +118,17 @@ test("Nettoyage : rien d'exécutable, blocs inconnus écartés, colonnes ajusté
   assert.equal(pages.cleanImageSource("http://exemple.fr/x.png"), "");
   assert.equal(pages.cleanLinkHref("http://127.0.0.1:32147/campagne/C1"), "/campagne/C1");
   assert.equal(pages.cleanLinkHref("/api/admin/accounts"), "");
-  // Prévu pour la suite : remplacer une page d'Eraser, une page par ligne d'index.
-  const later = pages.cleanCustomPage({ title: "Combat", replaces: "/regles/combat?x=1", rowOf: { index: "creatures", tab: "" } });
+  // Remplacer une page d'Eraser ; une page par ligne d'index (jamais les deux à la fois).
+  const later = pages.cleanCustomPage({ title: "Combat", replaces: "/regles/combat", replaceMode: "before" });
   assert.equal(later.replaces, "/regles/combat");
-  assert.deepEqual(later.rowOf, { index: "creatures" });
+  assert.equal(later.replaceMode, "before");
+  assert.equal(pages.cleanCustomPage({ title: "x", replaces: "/api/admin/accounts" }).replaces, undefined);
+  assert.equal(pages.cleanCustomPage({ title: "x", replaces: "/regles/combat?x=1" }).replaces, undefined);
+  const row = pages.cleanCustomPage({ title: "{Nom}", replaces: "/regles/combat", rowOf: { index: "creatures", tab: "" } });
+  assert.deepEqual(row.rowOf, { index: "creatures" });
+  assert.equal(row.replaces, undefined);
+  // Une page de campagne (lisible selon ses membres) ne remplace pas une page d'Eraser.
+  assert.equal(pages.cleanCustomPage({ title: "x", place: "campagne", campaignId: "C1", replaces: "/regles/combat" }).replaces, undefined);
 });
 
 test("Ce que reçoit chaque rôle : blocs masqués et secrets non révélés ne quittent pas le serveur", () => {

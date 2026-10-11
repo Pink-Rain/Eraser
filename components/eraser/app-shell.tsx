@@ -15,6 +15,10 @@ import {
   Crown,
   DownloadCloud,
   FilePlus2,
+  Folder,
+  Link2,
+  PanelLeft,
+  Star,
   FlaskConical,
   Home,
   LibraryBig,
@@ -73,11 +77,12 @@ import { PendingPage, usePendingPage } from "@/components/eraser/page-transition
 import { useIndexDirectoryLayout, useIndexEntries, useIndexStars } from "@/components/eraser/index-entries"
 import { useStoredText } from "@/hooks/use-persistent-state"
 import { indexDirectoryOrder } from "@/lib/index-directory"
-import { indexHomeHref } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { campaignCreatedEvent, characterCreatedEvent } from "@/lib/selection-events"
 import { cn } from "@/lib/utils"
+import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { menuItemActive, resolveMenu, type MenuIconKey, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
 // Seul le numéro de version est gardé (import nommé d'un JSON) : c'est celui du serveur
 // qui tourne, donc aussi d'une mise à jour reçue sans réinstallation.
 import { version as appVersion } from "@/package.json"
@@ -142,6 +147,22 @@ const roleViewLabels: Record<SiteRole, string> = {
   joueur: "Vue joueur",
 }
 
+/** Les icônes des entrées du menu d'Eraser. */
+const menuIcons: Record<MenuIconKey, typeof BookOpen> = {
+  home: Home,
+  map: Map,
+  user: CircleUserRound,
+  scroll: ScrollText,
+  library: LibraryBig,
+  flask: FlaskConical,
+  shield: ShieldCheck,
+  "file-plus": FilePlus2,
+  menu: PanelLeft,
+  link: Link2,
+  folder: Folder,
+  star: Star,
+}
+
 const roleIcons = {
   joueur: UserRound,
   mj: Crown,
@@ -162,7 +183,7 @@ function NavSection({
   children,
 }: {
   label: string
-  icon: typeof BookOpen
+  icon: (props: { className?: string }) => ReactNode
   active: boolean
   href?: string
   pageActive?: boolean
@@ -224,9 +245,15 @@ export function AppShell({
   todos,
   initialViewRole,
   pageLabel,
+  menu = null,
+  campaignPages,
   children,
 }: {
   user: ShellUser
+  /** Le menu réglé dans l'éditeur, déjà filtré pour la vue du compte ; `null` : celui d'Eraser. */
+  menu?: ResolvedMenuItem[] | null
+  /** Les pages créées de chaque campagne, sous son dossier (vue MJ) ; en vol avec la liste des campagnes. */
+  campaignPages?: Record<string, MenuPageEntry[]> | Promise<Record<string, MenuPageEntry[]>>
   /** Listes de la barre latérale, encore en vol : la coque ne les attend jamais (app/layout.tsx). */
   characters: CharacterRecord[] | Promise<CharacterRecord[]>
   campaigns: CampaignRecord[] | Promise<CampaignRecord[]>
@@ -258,6 +285,7 @@ export function AppShell({
   const [selectedCampaignId, setSelectedCampaignId] = useStoredText(campaignStorageKey)
   const [visibleCharacters, setVisibleCharacters] = useState<CharacterRecord[]>(() => Array.isArray(characters) ? characters : [])
   const [visibleCampaigns, setVisibleCampaigns] = useState<CampaignRecord[]>(() => Array.isArray(campaigns) ? campaigns : [])
+  const [visibleCampaignPages, setVisibleCampaignPages] = useState<Record<string, MenuPageEntry[]>>(() => campaignPages && !(campaignPages instanceof Promise) ? campaignPages : {})
   // Tant que les listes n'ont jamais répondu, la barre latérale et l'accueil disent qu'elles
   // arrivent, au lieu d'annoncer « aucun personnage ».
   const [listsLoaded, setListsLoaded] = useState(() => Array.isArray(characters) && Array.isArray(campaigns))
@@ -338,6 +366,15 @@ export function AppShell({
     })
     return () => { active = false }
   }, [campaigns, characters])
+
+  useEffect(() => {
+    let active = true
+    void Promise.resolve(campaignPages ?? {}).then((next) => {
+      if (!active) return
+      setVisibleCampaignPages((current) => JSON.stringify(current) === JSON.stringify(next) ? current : next)
+    })
+    return () => { active = false }
+  }, [campaignPages])
 
   useEffect(() => {
     if (!accountMenuOpen || viewRole !== "admin" || user.role !== "admin" || todosLoaded || todosLoadingRef.current) return
@@ -433,6 +470,122 @@ export function AppShell({
       })}
     </span>
   )
+
+  // Le menu : celui d'Eraser, ou celui réglé dans l'éditeur du menu (même rendu, mêmes rôles).
+  const menuItems = useMemo(() => menu ?? resolveMenu(null, { role: viewRole, pages: {} }), [menu, viewRole])
+  const managesMenu = (user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj")
+
+  function menuIcon(item: ResolvedMenuItem) {
+    if (item.icon || item.emoji) return <IndexIconGlyph icon={item.icon} emoji={item.emoji} filled={Boolean(item.emoji)} className="size-4" />
+    const Icon = menuIcons[item.builtinIcon ?? "link"]
+    return <Icon />
+  }
+
+  function renderSubItem(item: ResolvedMenuItem) {
+    if (item.dynamic === "index-etoiles") {
+      // Les index étoilés, dans l'ordre de la page Index ; les autres restent sur la page.
+      return orderedIndexes.filter((entry) => starOf(entry.key) === "star" || (starOf(entry.key) === "none" && pathname === entry.href)).map((entry) => (
+        <NavSubLink key={entry.key} href={entry.href} label={entry.label} active={pathname === entry.href} />
+      ))
+    }
+    if (item.dynamic === "section-pages") {
+      // Les pages du créateur de pages rangées dans la section, sous ses pages d'Eraser.
+      return (item.pages ?? []).map((page) => <NavSubLink key={`${item.key}:${page.href}`} href={page.href} label={page.title} active={pathname === page.href} />)
+    }
+    if (!item.href) return null
+    return <NavSubLink key={item.key} href={item.href} label={item.label} active={menuItemActive(item, pathname)} />
+  }
+
+  function renderMenuItem(item: ResolvedMenuItem): ReactNode {
+    if (item.dynamic === "dossier") {
+      if (viewRole !== "mj" || !selectedCampaign) return null
+      const campaignHref = `/campagne/${encodeURIComponent(selectedCampaign.id)}`
+      return <NavSection key={item.key} label={`Dossier - ${selectedCampaign.name}`} icon={Map} active={pathname.startsWith("/campagne/")} href={`${campaignHref}/dossier`} pageActive={pathname === `${campaignHref}/dossier`}>
+        <NavSubLink href={campaignHref} label={`Campagne - ${selectedCampaign.name}`} active={pathname === campaignHref} />
+        <NavSubLink nested href={`${campaignHref}/journal`} label={`Journal de ${selectedCampaign.name}`} active={pathname === `${campaignHref}/journal`} />
+        <NavSubLink href={`${campaignHref}/lieux-et-rencontres`} label="Créateur de session" active={pathname === `${campaignHref}/lieux-et-rencontres`} />
+        <NavSubLink nested href={`${campaignHref}/evenements`} label="Événements" active={pathname === `${campaignHref}/evenements`} />
+        <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
+        <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
+        <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
+        <NavSubLink nested href={`${campaignHref}/document`} label="Document" active={pathname === `${campaignHref}/document`} />
+        {(visibleCampaignPages[selectedCampaign.id] ?? []).map((page) => <NavSubLink key={page.href} href={page.href} label={page.title} active={pathname === page.href} />)}
+      </NavSection>
+    }
+    if (item.dynamic === "personnage") {
+      if (viewRole !== "joueur" || !selectedCharacter) return null
+      const characterHref = `/personnage/${encodeURIComponent(selectedCharacter.id)}`
+      return (
+        <SidebarMenuItem key={item.key}>
+          <SidebarMenuButton asChild tooltip={selectedCharacter.name} isActive={pathname === characterHref} className="h-10">
+            <IntentLink href={characterHref}>
+              <CircleUserRound />
+              <span>{selectedCharacter.name}</span>
+            </IntentLink>
+          </SidebarMenuButton>
+          {selectedCharacter.campaigns.length > 0 && (
+            <SidebarMenuSub>
+              {selectedCharacter.campaigns.map((campaign) => {
+                const href = `/campagne/${encodeURIComponent(campaign.id)}`
+                return <div key={campaign.id}><NavSubLink href={href} label={`Campagne - ${campaign.name}`} active={pathname === href} /><NavSubLink nested href={`${href}/journal`} label={`Journal de ${campaign.name}`} active={pathname === `${href}/journal`} /></div>
+              })}
+            </SidebarMenuSub>
+          )}
+          {/* Menu replié, la liste des campagnes disparaît : chacune garde une icône cliquable. */}
+          {selectedCharacter.campaigns.map((campaign) => {
+            const href = `/campagne/${encodeURIComponent(campaign.id)}`
+            return <div key={campaign.id} className="contents">
+              <SidebarMenuButton asChild tooltip={`Campagne - ${campaign.name}`} isActive={pathname === href} className="mt-1 hidden group-data-[collapsible=icon]:flex">
+                <IntentLink href={href} aria-label={`Campagne - ${campaign.name}`}>
+                  <Map style={{ color: campaign.accentColor }} />
+                  <span>{campaign.name}</span>
+                </IntentLink>
+              </SidebarMenuButton>
+              <SidebarMenuButton asChild tooltip={`Journal de ${campaign.name}`} isActive={pathname === `${href}/journal`} className="mt-1 hidden group-data-[collapsible=icon]:flex">
+                <IntentLink href={`${href}/journal`} aria-label={`Journal de ${campaign.name}`}>
+                  <BookOpen style={{ color: campaign.accentColor }} />
+                  <span>Journal de {campaign.name}</span>
+                </IntentLink>
+              </SidebarMenuButton>
+            </div>
+          })}
+        </SidebarMenuItem>
+      )
+    }
+    if (item.dynamic === "index-rouges") {
+      if (!managesMenu) return null
+      // Les index à l'étoile rouge (le créateur de classe et l'index des items d'abord), directement dans le menu.
+      return orderedIndexes.filter((entry) => starOf(entry.key) === "red").map((entry) => {
+        const EntryIcon = entry.icon
+        return <SidebarMenuItem key={`${item.key}:${entry.key}`}>
+          <SidebarMenuButton asChild tooltip={entry.label} isActive={pathname === entry.href || pathname.startsWith(`${entry.href}/`)} className="h-10">
+            <IntentLink href={entry.href}>
+              <EntryIcon />
+              <span>{entry.label}</span>
+            </IntentLink>
+          </SidebarMenuButton>
+        </SidebarMenuItem>
+      })
+    }
+    if (item.section) {
+      const childActive = (item.children ?? []).some((child) => menuItemActive(child, pathname) || (child.pages ?? []).some((page) => page.href === pathname))
+      return <NavSection key={item.key} label={item.label} icon={() => menuIcon(item)} href={item.href} pageActive={Boolean(item.href) && pathname === item.href} active={childActive || (Boolean(item.href) && menuItemActive(item, pathname))}>
+        {(item.children ?? []).map((child) => renderSubItem(child))}
+      </NavSection>
+    }
+    if (!item.href) return null
+    const external = item.href.startsWith("http")
+    return <SidebarMenuItem key={item.key}>
+      <SidebarMenuButton asChild tooltip={item.label} isActive={menuItemActive(item, pathname)} className="h-10">
+        {external
+          ? <a href={item.href} target="_blank" rel="noreferrer">{menuIcon(item)}<span>{item.label}</span></a>
+          : <IntentLink href={item.href}>{menuIcon(item)}<span>{item.label}</span></IntentLink>}
+      </SidebarMenuButton>
+      {item.action && <SidebarMenuAction asChild showOnHover={false} className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
+        <IntentLink href={item.action.href} aria-label={item.action.label} title={item.action.label}><Plus /></IntentLink>
+      </SidebarMenuAction>}
+    </SidebarMenuItem>
+  }
 
   async function signOut() {
     await fetch("/api/auth/logout", { method: "POST" })
@@ -594,141 +747,7 @@ export function AppShell({
           <SidebarGroup>
             <SidebarGroupContent>
               <SidebarMenu>
-                <SidebarMenuItem>
-                  <SidebarMenuButton asChild tooltip="Accueil" isActive={pathname === "/"} className="h-10">
-                    <IntentLink href="/">
-                      <Home />
-                      <span>Accueil</span>
-                    </IntentLink>
-                  </SidebarMenuButton>
-                </SidebarMenuItem>
-
-                {viewRole === "mj" && selectedCampaign && (
-                  <NavSection label={`Dossier - ${selectedCampaign.name}`} icon={Map} active={pathname.startsWith("/campagne/")} href={`/campagne/${encodeURIComponent(selectedCampaign.id)}/dossier`} pageActive={pathname === `/campagne/${encodeURIComponent(selectedCampaign.id)}/dossier`}>
-                    {(() => {
-                      const campaignHref = `/campagne/${encodeURIComponent(selectedCampaign.id)}`
-                      return <>
-                        <NavSubLink href={campaignHref} label={`Campagne - ${selectedCampaign.name}`} active={pathname === campaignHref} />
-                        <NavSubLink nested href={`${campaignHref}/journal`} label={`Journal de ${selectedCampaign.name}`} active={pathname === `${campaignHref}/journal`} />
-                        <NavSubLink href={`${campaignHref}/lieux-et-rencontres`} label="Créateur de session" active={pathname === `${campaignHref}/lieux-et-rencontres`} />
-                        <NavSubLink nested href={`${campaignHref}/evenements`} label="Événements" active={pathname === `${campaignHref}/evenements`} />
-                        <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
-                        <NavSubLink nested href={`${campaignHref}/fouilles`} label="Fouilles" active={pathname === `${campaignHref}/fouilles`} />
-                        <NavSubLink nested href={`${campaignHref}/pnjs`} label="PNJs" active={pathname === `${campaignHref}/pnjs`} />
-                        <NavSubLink nested href={`${campaignHref}/document`} label="Document" active={pathname === `${campaignHref}/document`} />
-                      </>
-                    })()}
-                  </NavSection>
-                )}
-
-                {viewRole === "joueur" && selectedCharacter && (() => {
-                  const characterHref = `/personnage/${encodeURIComponent(selectedCharacter.id)}`
-                  return (
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild tooltip={selectedCharacter.name} isActive={pathname === characterHref} className="h-10">
-                        <IntentLink href={characterHref}>
-                          <CircleUserRound />
-                          <span>{selectedCharacter.name}</span>
-                        </IntentLink>
-                      </SidebarMenuButton>
-                      {selectedCharacter.campaigns.length > 0 && (
-                        <SidebarMenuSub>
-                          {selectedCharacter.campaigns.map((campaign) => {
-                            const href = `/campagne/${encodeURIComponent(campaign.id)}`
-                            return <div key={campaign.id}><NavSubLink href={href} label={`Campagne - ${campaign.name}`} active={pathname === href} /><NavSubLink nested href={`${href}/journal`} label={`Journal de ${campaign.name}`} active={pathname === `${href}/journal`} /></div>
-                          })}
-                        </SidebarMenuSub>
-                      )}
-                      {/* Menu replié, la liste des campagnes disparaît : chacune garde une icône cliquable. */}
-                      {selectedCharacter.campaigns.map((campaign) => {
-                        const href = `/campagne/${encodeURIComponent(campaign.id)}`
-                        return <div key={campaign.id} className="contents">
-                          <SidebarMenuButton asChild tooltip={`Campagne - ${campaign.name}`} isActive={pathname === href} className="mt-1 hidden group-data-[collapsible=icon]:flex">
-                            <IntentLink href={href} aria-label={`Campagne - ${campaign.name}`}>
-                              <Map style={{ color: campaign.accentColor }} />
-                              <span>{campaign.name}</span>
-                            </IntentLink>
-                          </SidebarMenuButton>
-                          <SidebarMenuButton asChild tooltip={`Journal de ${campaign.name}`} isActive={pathname === `${href}/journal`} className="mt-1 hidden group-data-[collapsible=icon]:flex">
-                            <IntentLink href={`${href}/journal`} aria-label={`Journal de ${campaign.name}`}>
-                              <BookOpen style={{ color: campaign.accentColor }} />
-                              <span>Journal de {campaign.name}</span>
-                            </IntentLink>
-                          </SidebarMenuButton>
-                        </div>
-                      })}
-                    </SidebarMenuItem>
-                  )
-                })()}
-
-                <NavSection label="Règles" icon={ScrollText} active={pathname.startsWith("/regles")} href="/regles" pageActive={pathname === "/regles"}>
-                  <NavSubLink
-                    href="/regles/classes"
-                    label="Classe"
-                    active={pathname.startsWith("/regles/classes")}
-                  />
-                  <NavSubLink href="/regles/vocabulaire" label="Vocabulaire" active={pathname === "/regles/vocabulaire"} />
-                  <NavSubLink href="/regles/combat" label="Combat" active={pathname === "/regles/combat"} />
-                  <NavSubLink href="/regles/hors-combat" label="Hors combat" active={pathname === "/regles/hors-combat"} />
-                </NavSection>
-
-                {(user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj") && (
-                  <>
-                    {/* Les index à l'étoile rouge (le créateur de classe et l'index des items d'abord), directement dans le menu. */}
-                    {orderedIndexes.filter((entry) => starOf(entry.key) === "red").map((entry) => {
-                      const EntryIcon = entry.icon
-                      return <SidebarMenuItem key={entry.key}>
-                        <SidebarMenuButton asChild tooltip={entry.label} isActive={pathname === entry.href || pathname.startsWith(`${entry.href}/`)} className="h-10">
-                          <IntentLink href={entry.href}>
-                            <EntryIcon />
-                            <span>{entry.label}</span>
-                          </IntentLink>
-                        </SidebarMenuButton>
-                      </SidebarMenuItem>
-                    })}
-                    <NavSection label="Index" icon={LibraryBig} href={indexHomeHref} pageActive={pathname === indexHomeHref} active={pathname.startsWith(indexHomeHref)}>
-                      {/* Les index étoilés, dans l'ordre de la page Index ; les autres restent sur la page. */}
-                      {orderedIndexes.filter((entry) => starOf(entry.key) === "star" || (starOf(entry.key) === "none" && pathname === entry.href)).map((entry) => (
-                        <NavSubLink key={entry.key} href={entry.href} label={entry.label} active={pathname === entry.href} />
-                      ))}
-                    </NavSection>
-                    <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable")} href="/bac-a-sable" pageActive={pathname === "/bac-a-sable"}>
-                      <NavSubLink href="/bac-a-sable/tabletop" label="Tabletop" active={pathname === "/bac-a-sable/tabletop"} />
-                      <NavSubLink href="/bac-a-sable/magasin" label="Magasin" active={pathname === "/bac-a-sable/magasin"} />
-                      <NavSubLink href="/bac-a-sable/pnjs" label="PNJs" active={pathname === "/bac-a-sable/pnjs"} />
-                    </NavSection>
-                    {/* Le créateur de pages : l'Index des pages, et « + » pour une page neuve d'un clic. */}
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild tooltip="Pages" isActive={pathname === "/pages" || pathname.startsWith("/pages/")} className="h-10">
-                        <IntentLink href="/pages"><FilePlus2 /><span>Pages</span></IntentLink>
-                      </SidebarMenuButton>
-                      <SidebarMenuAction asChild showOnHover={false} className="text-sidebar-foreground/60 hover:text-sidebar-foreground">
-                        <IntentLink href="/pages?nouvelle=1" aria-label="Nouvelle page" title="Nouvelle page"><Plus /></IntentLink>
-                      </SidebarMenuAction>
-                    </SidebarMenuItem>
-                  </>
-                )}
-
-                {user.role === "admin" && viewRole === "admin" && (
-                  <NavSection
-                    label="Administration"
-                    icon={ShieldCheck}
-                    active={pathname.startsWith("/administration")}
-                    href="/administration"
-                    pageActive={pathname === "/administration"}
-                  >
-                    <NavSubLink
-                      href="/administration/comptes-et-roles"
-                      label="Comptes et rôles"
-                      active={pathname === "/administration/comptes-et-roles"}
-                    />
-                    <NavSubLink
-                      href="/administration/google-drive"
-                      label="Google Drive et Sheets"
-                      active={pathname === "/administration/google-drive"}
-                    />
-                  </NavSection>
-                )}
+                {menuItems.map((item) => renderMenuItem(item))}
               </SidebarMenu>
             </SidebarGroupContent>
           </SidebarGroup>

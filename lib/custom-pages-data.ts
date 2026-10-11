@@ -55,22 +55,24 @@ export type StatBlockData = {
 }
 
 export type BlockDataOptions = {
-  /** Le lecteur est un joueur : colonnes privées retirées, lignes sans lien. */
+  /** Le lecteur est un joueur : colonnes privées retirées, lignes sans lien vers l'index. */
   player: boolean
   hiddenForPlayers?: (column: string) => boolean
+  /** La page de ligne d'une ligne (modèle publié pour son index) : le lien de la ligne, pour tous les lecteurs. */
+  rowPageOf?: (index: string, tab: string, id: string) => string | undefined
 }
 
 const MAX_ROWS = 500
 
-function specIn(source: IndexSource, tab: string, header: string): IndexColumnSpec {
+export function columnSpecIn(source: IndexSource, tab: string, header: string): IndexColumnSpec {
   return source.columns[tab]?.find((column) => foldName(column.header) === foldName(header))?.spec ?? { kind: "rich" }
 }
 
 /** Les colonnes qu'un bloc montre : ni identifiant, ni colonne masquée, ni formule (calculée dans l'index), ni colonne privée. */
-function shownHeaders(source: IndexSource, table: IndexSource["tables"][number], options: BlockDataOptions) {
+export function shownColumns(source: IndexSource, table: IndexSource["tables"][number], options: BlockDataOptions) {
   return table.headers.filter((header) => {
     if (!header.trim() || isIdHeader(header)) return false
-    const spec = specIn(source, table.tabName, header)
+    const spec = columnSpecIn(source, table.tabName, header)
     if (spec.hidden || spec.kind === "archived" || isComputedSpec(spec)) return false
     return !(options.player && options.hiddenForPlayers?.(header))
   })
@@ -87,19 +89,30 @@ function plain(value: string) {
 
 function rowsOf(source: IndexSource, table: IndexSource["tables"][number], headers: string[], options: BlockDataOptions) {
   const at = headers.map((header) => table.headers.findIndex((candidate) => foldName(candidate) === foldName(header)))
-  const rich = headers.map((header) => isRichSpec(specIn(source, table.tabName, header)))
+  const rich = headers.map((header) => isRichSpec(columnSpecIn(source, table.tabName, header)))
   const id = table.headers.findIndex(isIdHeader)
   const named = source.nameHeader ? table.headers.findIndex((header) => foldName(header) === foldName(source.nameHeader!)) : -1
-  const name = named >= 0 ? named : nameColumn(table.headers, (header) => specIn(source, table.tabName, header))
+  const name = named >= 0 ? named : nameColumn(table.headers, (header) => columnSpecIn(source, table.tabName, header))
   return table.rows.flatMap((row, position): BlockRow[] => {
     const cells = at.map((column, index) => column < 0 ? "" : (rich[index] ? row.html[column] : row.values[column]) ?? "")
     if (!cells.some((cell) => cell.trim())) return []
     const rowId = id >= 0 ? plain(row.values[id] ?? "") : ""
     const label = name >= 0 ? plain(row.values[name] ?? "") : ""
-    // Un joueur lit la ligne sans l'ouvrir : les pages des index ne lui sont pas ouvertes.
-    const href = options.player || !rowId ? undefined : source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : `${source.path}?ligne=${encodeURIComponent(rowId)}`
+    // La page de la ligne (un modèle existe) pour tous ; sinon sa fiche dans l'index, pour les MJ
+    // et admins seulement : un joueur lit la ligne sans l'ouvrir.
+    const rowPage = rowId ? options.rowPageOf?.(source.key, table.tabName, rowId) : undefined
+    const href = rowPage ?? (options.player || !rowId ? undefined : source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
     return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
   })
+}
+
+/** La case cite-t-elle la ligne : son nom dans la liste, ou une référence « { » vers elle ? */
+export function cellCitesRow(cell: string, separator: string | undefined, target: { index: string; id: string; name: string }) {
+  if (cell.includes(`/reference/${encodeURIComponent(target.index)}/${encodeURIComponent(target.id)}`)) return true
+  const wanted = foldName(target.name)
+  if (!wanted) return false
+  const parts = plain(cell).split(/\s*[,;|]\s*/).flatMap((part) => separator?.trim() ? part.split(separator.trim()).map((piece) => piece.trim()) : [part])
+  return parts.some((part) => foldName(part) === wanted)
 }
 
 /** Le tableau d'un onglet, retrouvé par son nom (sans tenir compte des accents ni de la casse). */
@@ -108,13 +121,19 @@ export function findTable(source: IndexSource, tab: string) {
 }
 
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
-export function viewBlockData(source: IndexSource, input: { tab: string; kind: ViewBlockKind; limit: number }, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
+export function viewBlockData(source: IndexSource, input: { tab: string; kind: ViewBlockKind; limit: number; match?: { column: string; index: string; id: string; name: string } }, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
   const table = findTable(source, input.tab)
   if (!table) return null
-  const headers = shownHeaders(source, table, options)
-  const all = rowsOf(source, table, headers, options)
+  const headers = shownColumns(source, table, options)
+  let all = rowsOf(source, table, headers, options)
+  // Page de ligne : seulement les lignes dont la colonne choisie cite la ligne de la page.
+  if (input.match) {
+    const at = headers.findIndex((header) => foldName(header) === foldName(input.match!.column))
+    const separator = at >= 0 ? columnSpecIn(source, table.tabName, headers[at]).listSeparator : undefined
+    all = at < 0 ? [] : all.filter((row) => cellCitesRow(row.cells[at] ?? "", separator, input.match!))
+  }
   const limit = input.limit > 0 ? Math.min(input.limit, MAX_ROWS) : MAX_ROWS
-  const specs = Object.fromEntries(headers.map((header) => [header, specIn(source, table.tabName, header)]))
+  const specs = Object.fromEntries(headers.map((header) => [header, columnSpecIn(source, table.tabName, header)]))
   const base: ViewBlockData = { kind: "view", index: source.key, title: source.title, tab: table.tabName, view: input.kind, headers, specs, rows: all.slice(0, limit), total: all.length }
   if (input.kind === "cards") return { ...base, cards: tabCardsOf(settings.cards, source.key, table.tabName) }
   if (isPresentationKind(input.kind)) {
@@ -135,7 +154,7 @@ export function statBlockData(source: IndexSource, record: { stats: StatDefiniti
   const columns: string[] = []
   const seen = new Set<string>()
   const owner = new Map<string, string>()
-  for (const table of source.tables) for (const header of shownHeaders(source, table, options)) {
+  for (const table of source.tables) for (const header of shownColumns(source, table, options)) {
     if (seen.has(foldName(header))) continue
     seen.add(foldName(header))
     owner.set(header, table.tabName)
@@ -150,7 +169,7 @@ export function statBlockData(source: IndexSource, record: { stats: StatDefiniti
   for (const column of columns) {
     const tab = owner.get(column)
     if (!tab) continue
-    const spec = specIn(source, tab, column)
+    const spec = columnSpecIn(source, tab, column)
     if (spec.options?.length) options_[column] = spec.options.map((option) => ({ value: option.value, ...(option.color ? { color: option.color } : {}) }))
     if (spec.multiple && spec.listSeparator) separators[column] = spec.listSeparator
   }

@@ -27,6 +27,8 @@ const fixed: Record<string, Omit<Crumb, "path">> = {
   "/reference": { label: "Référence" },
   // Les pages hors menu du créateur de pages (/pages/…) : l'étape ouvre leur liste.
   "/pages": { label: "Pages" },
+  // Les pages de ligne d'index (/fiche/<index>/<ID>) : l'index et l'identifiant ne sont pas des étapes.
+  "/fiche": { label: "Fiches" },
 }
 
 const campaignPages: Record<string, string> = {

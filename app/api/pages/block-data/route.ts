@@ -1,13 +1,13 @@
 import { NextResponse } from "next/server"
 
 import { canManagePages, pageForViewer, viewBlockKinds, type ViewBlockKind } from "@/lib/custom-pages"
-import { statBlockData, viewBlockData, viewKindsOf, type IndexSource } from "@/lib/custom-pages-data"
+import { statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
+import { backlinksOf, rowContextOf, rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
 import { readCustomPage } from "@/lib/custom-pages-store"
-import { viewerFor } from "@/lib/custom-pages-server"
+import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
 import { listIndexPresentations, listIndexStatsRecord } from "@/lib/index-presentations-store"
-import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
@@ -15,43 +15,35 @@ import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
 const denied = () => NextResponse.json({ error: "Accès refusé." }, { status: 403 })
 const kinds = viewBlockKinds.map((kind) => kind.value)
 
-async function sourceOf(key: WorldIndexKey): Promise<IndexSource> {
-  const data = await getWorldIndexQuick(key)
-  return {
-    key,
-    title: data.definition.title,
-    path: data.definition.path,
-    nameHref: data.definition.entity?.nameHref,
-    nameHeader: data.definition.entity?.nameHeader,
-    tables: data.tables.map((table) => ({ tabName: table.tabName, headers: table.headers, rows: table.rows })),
-    columns: data.columns,
-  }
-}
-
 /** Les calendriers de l'Index des calendriers, pour une vue Calendrier (un joueur ne peut pas les lire ailleurs). */
 async function calendarTables() {
   const data = await getWorldIndexQuick("calendars").catch(() => null)
   return data ? data.tables.map((table) => ({ tabName: table.tabName, headers: table.headers, rows: table.rows.map((row) => ({ values: row.values })) })) : []
 }
 
-async function viewData(key: WorldIndexKey, input: { tab: string; kind: ViewBlockKind; limit: number }, player: boolean) {
-  const [source, presentations, cards] = await Promise.all([sourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({}))])
-  const data = viewBlockData(source, input, { presentations, cards }, { player, hiddenForPlayers: (column) => entityColumnHiddenForPlayers(key, column) })
+type RowPageOf = BlockDataOptions["rowPageOf"]
+
+async function viewData(key: WorldIndexKey, input: Parameters<typeof viewBlockData>[1], player: boolean, rowPageOf: RowPageOf) {
+  const [source, presentations, cards] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({}))])
+  const data = viewBlockData(source, input, { presentations, cards }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(input.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
 }
 
-async function statData(key: WorldIndexKey, statId: string, player: boolean) {
-  const [source, record] = await Promise.all([sourceOf(key), listIndexStatsRecord(key)])
-  return statBlockData(source, record, statId, { player, hiddenForPlayers: (column) => entityColumnHiddenForPlayers(key, column) })
+async function statData(key: WorldIndexKey, statId: string, player: boolean, rowPageOf: RowPageOf) {
+  const [source, record] = await Promise.all([indexSourceOf(key), listIndexStatsRecord(key)])
+  return statBlockData(source, record, statId, readOptions(key, player, rowPageOf))
 }
 
 /**
- * Les données d'un bloc Vue d'index ou Stat épinglée.
- * - ?page=&block= : pour tout lecteur de la page qui voit ce bloc (les joueurs n'ont pas
- *   accès aux routes des index : seul ce que le bloc montre leur est envoyé).
- * - ?index=&tab=&kind=&limit= ou ?index=&stat= : pour l'atelier (MJ et admins).
+ * Les données d'un bloc Vue d'index, Stat épinglée ou « Cité dans ».
+ * - ?page=&block= (&rowIndex=&rowId= pour une page de ligne) : pour tout lecteur de la page qui
+ *   voit ce bloc (les joueurs n'ont pas accès aux routes des index : seul ce que le bloc montre
+ *   leur est envoyé, sans colonne masquée ni privée).
+ * - ?index=&tab=&kind=&limit= ou ?index=&stat= : pour l'atelier (MJ et admins ; &as=joueur :
+ *   ce que recevrait un joueur).
  * - ?catalog=1 (&index=) : les index, leurs onglets, leurs vues et leurs stats (atelier).
+ * - ?row-templates=1 : les index dont les lignes ont une page (fiche de l'index).
  */
 export async function GET(request: Request) {
   const account = await authorizedAccount(["admin", "mj", "joueur"])
@@ -59,6 +51,11 @@ export async function GET(request: Request) {
   const parameters = new URL(request.url).searchParams
   const player = account.role === "joueur"
   try {
+    const templates = await rowTemplates(account).catch(() => [])
+    const rowPageOf: RowPageOf = templates.length ? (index, tab, id) => templateForRow(templates, index, tab) ? rowPageHref(index, id) : undefined : undefined
+
+    if (parameters.get("row-templates")) return NextResponse.json({ templates: templates.map((page) => ({ index: page.rowOf!.index, tab: page.rowOf!.tab ?? "" })) })
+
     if (parameters.get("catalog")) {
       if (!canManagePages(account.role)) return denied()
       const wanted = parameters.get("index")
@@ -71,7 +68,7 @@ export async function GET(request: Request) {
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
       const [data, presentations, cards, record] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] }))])
       return NextResponse.json({
-        tabs: data.tables.map((table) => ({ name: table.tabName, kinds: viewKindsOf(presentations, table.tabName), cards: Object.entries(cards).some(([name, entry]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr") && entry.cards.length > 0) })),
+        tabs: data.tables.map((table) => ({ name: table.tabName, kinds: viewKindsOf(presentations, table.tabName), cards: Object.entries(cards).some(([name, entry]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr") && entry.cards.length > 0), columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)) })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
       })
     }
@@ -81,10 +78,19 @@ export async function GET(request: Request) {
       const page = await readCustomPage(pageId)
       const view = page ? pageForViewer(page, await viewerFor(account, page), { draft: parameters.get("draft") === "1" }) : null
       const block = view?.sections.flatMap((section) => section.cols.flat()).find((item) => item.id === parameters.get("block"))
-      if (!block || (block.type !== "view" && block.type !== "stat")) return NextResponse.json({ error: "Ce bloc n’existe pas, ou il ne t’est pas ouvert." }, { status: 404 })
+      if (!block || (block.type !== "view" && block.type !== "stat" && block.type !== "backlinks")) return NextResponse.json({ error: "Ce bloc n’existe pas, ou il ne t’est pas ouvert." }, { status: 404 })
+      // Page de ligne : la ligne affichée, lue comme le lecteur peut la lire.
+      const rowKey = page?.rowOf?.index ? await knownWorldIndexKey(parameters.get("rowIndex")) : null
+      const row = rowKey && rowKey === page?.rowOf?.index ? rowContextOf(await indexSourceOf(rowKey), parameters.get("rowId") ?? "", readOptions(rowKey, player)) : null
+      if (block.type === "backlinks") {
+        if (!row) return NextResponse.json({ data: { kind: "backlinks", items: [] } })
+        const items = backlinksOf(await backlinkSources(), row, { ...readOptions(row.index, player), hrefOf: (index, tab, id) => rowPageOf?.(index, tab, id) ?? (player ? undefined : `${(worldIndexDefinitions as Record<string, { path: string } | undefined>)[index]?.path ?? `/ressources/index/${encodeURIComponent(index)}`}?ligne=${encodeURIComponent(id)}`) })
+        return NextResponse.json({ data: { kind: "backlinks", items } })
+      }
       const key = await knownWorldIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
-      const data = block.type === "view" ? await viewData(key, block, player) : await statData(key, block.statId, player)
+      const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
+      const data = block.type === "view" ? await viewData(key, { tab: block.tab, kind: block.kind, limit: block.limit, match }, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 
@@ -95,12 +101,12 @@ export async function GET(request: Request) {
     if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
     const statId = parameters.get("stat")
     if (statId) {
-      const data = await statData(key, statId, asPlayer)
+      const data = await statData(key, statId, asPlayer, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
     const kind = kinds.includes(parameters.get("kind") as ViewBlockKind) ? parameters.get("kind") as ViewBlockKind : "table"
     const limit = Math.max(0, Math.min(500, Number.parseInt(parameters.get("limit") ?? "0", 10) || 0))
-    const data = await viewData(key, { tab: parameters.get("tab") ?? "", kind, limit }, asPlayer)
+    const data = await viewData(key, { tab: parameters.get("tab") ?? "", kind, limit }, asPlayer, rowPageOf)
     return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cet onglet n’existe pas dans l’index." }, { status: 404 })
   } catch (error) {
     console.error("PAGE_BLOCK_DATA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
