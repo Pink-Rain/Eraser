@@ -1,32 +1,28 @@
-# Eraser 0.1.1-alpha.201 — Liens à ouvrir dans l'app, raretés en liste, stats épinglées vivantes
+# Eraser 0.1.1-alpha.202 — Le créateur de pages
 
-Cette version passe une fois par l'installateur, en silence : Eraser apprend à Windows
-à ouvrir les liens « eraser:// ». Rien n'est écrit dans Google Sheets à l'installation.
+Cette version arrive par la mise à jour sans réinstallation. Rien n'est écrit dans Google
+Sheets. Les pages sont enregistrées sur le serveur partagé d'Eraser.
 
-## Liens « à la Discord »
+## Créer ses propres pages (admin et MJ)
 
-- **Copier le lien** d'une page donne maintenant un lien qui, ouvert par quelqu'un d'autre,
-  propose d'**ouvrir la page dans l'application** (et l'essaie tout seul), avec « Continuer
-  dans le navigateur » en secours.
-- Si Eraser est déjà ouvert, le lien arrive dans la fenêtre existante, sur la bonne page.
-- Eraser ouvert dans un navigateur : une petite bulle propose de passer dans l'application.
-  « Rester ici » la fait taire jusqu'à la fermeture de l'onglet.
-- Seules les adresses de pages d'Eraser sont acceptées ; la page d'ouverture n'affiche
-  aucune donnée.
+- **Index des pages** (`/pages`, aussi dans Ctrl + K) : toutes les pages créées, leur place,
+  leur état. « Nouvelle page » choisit un nom, une icône et une place.
+- **L'atelier à trois volets** : les blocs à gauche, la page au centre, les réglages à droite.
+  Glisser-déposer, Ctrl + Z, sections à une, deux, trois colonnes ou avec colonne latérale.
+  « Voir comme Admin / MJ / Joueur » montre la page telle que chacun la verra.
+- **Les blocs** : titre, texte riche (avec le menu « { »), encadré (info, MJ, secret, alerte),
+  citation, image, séparateur, lien vers une page, **secret à révéler** (le MJ le révèle aux
+  joueurs d'un clic), **bloc-notes** (un carnet qu'on continue d'écrire sur la page publiée),
+  **vue d'index** (une vue réglée dans un index) et **stat épinglée**.
+- Chaque bloc a son **« Qui voit »** ; le bloc-notes a son **« Qui peut écrire »**. Ce qu'un
+  joueur ne doit pas voir ne lui est jamais envoyé.
+- **Où vit une page** : dans une section du menu (Règles, Ressources, Bac à sable,
+  Administration), dans une campagne, ou hors menu. Son adresse suit sa section
+  (`/regles/guide-du-joueur`).
+- Brouillon et version publiée, « Revenir à la version publiée », corbeille, modèles de page
+  enregistrés.
+- Les pages d'Eraser existantes gardent leur adresse et leur contenu.
 
-## Index des items : raretés
+## Aussi
 
-- **Rareté principale** et **Rareté secondaire** sont des listes à pastilles colorées :
-  Très commun, Commun, Rare, Très rare, Ultime (couleurs de la fouille et des magasins).
-- Une autre rareté se tape dans la case : elle rejoint la liste.
-- Rien n'est réécrit dans la feuille. Une colonne déjà réglée dans « Modifier » garde son type.
-
-## Onglet stat : les stats épinglées
-
-- Chaque stat montre ses **lignes concernées**. Un clic sur une part du graphique les
-  restreint ; un clic sur une ligne **ouvre sa fiche**, qui passe ensuite d'une ligne
-  concernée à l'autre (Index des items compris).
-- **Organiser** : la largeur de chaque stat (auto, ⅓, ½, ⅔, pleine ligne), son ordre, ses
-  lignes affichées, repliées ou masquées. Tout s'enregistre aussitôt.
-- Les blocs gardent leur propre hauteur ; l'anneau range sa légende dessous quand la place
-  manque.
+- La stat épinglée d'une page montre ses lignes concernées, comme dans l'onglet stat.
