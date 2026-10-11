@@ -662,3 +662,22 @@ test("Lieux › Magasin : « Préparer l'onglet » ajoute colonnes et types sans
   assert.equal(byKey.maquignon.appearsIn, "both");
   assert.deepEqual(byKey.market.chances, { bourg: 100, village: 100, "small-city": 100, "medium-city": 100, "large-city": 100, capital: 100 });
 });
+
+test("Lieux › Magasin : complété tout seul à la première ouverture par un admin, une seule fois", async () => {
+  const shopTypes = await vite.ssrLoadModule("/lib/shop-types-server.ts");
+  const id = fresh("places");
+  const tabs = definitions.worldIndexDefinitions.places.tabs.map((tab) => ({ title: tab.name, grid: [tab.headers] }));
+  // L'onglet tel qu'il est chez l'utilisateur : créé, mais vide.
+  tabs.push({ title: "Magasin", grid: [["Nom", "ID"]] });
+  tabs.push({ title: SCHEMA_TAB, grid: [SCHEMA_HEADERS, ["Magasin", "", "", JSON.stringify({ kind: "tab", itemLabel: "un magasin" }), "ajouté", ""]] });
+  google.addSpreadsheet(id, tabs);
+  await link("places", id, tabs[0].title);
+  await shopTypes.ensureShopTypeTabPrepared();
+  const grid = google.grid(id, "Magasin");
+  for (const header of shopTypes.shopTypeHeaders) assert.ok(grid[0].includes(header), header);
+  assert.equal(grid.slice(1).filter((row) => row[0]).length, 8);
+  // Une deuxième ouverture n'ajoute rien.
+  await shopTypes.ensureShopTypeTabPrepared();
+  assert.equal(google.grid(id, "Magasin").slice(1).filter((row) => row[0]).length, 8);
+  assert.equal((await shopTypes.loadShopTypeCatalog({ refresh: true })).missingTypes.length, 0);
+});

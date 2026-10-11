@@ -515,3 +515,57 @@ test("Tabletop : un pion déplacé après un changement fait ailleurs touche le 
   assert.equal(record(tokens, 1)["Y"], "400");
   assert.notEqual(first.id, second.id);
 });
+
+test("Notes de session : publiques pour la table, privées pour leur seul auteur, chacun ne modifie que les siennes", async () => {
+  const notesModule = await vite.ssrLoadModule("/lib/session-notes.ts");
+  // Rien de créé à la lecture : la feuille n'existe qu'à la première note.
+  assert.deepEqual(await notesModule.listSessionNotes("CAMP-N", { uid: "aelis", manager: false }), []);
+  const sheet = fresh("notes");
+  // Colonnes dans le désordre et incomplètes : les manquantes s'ajoutent à droite.
+  google.addSpreadsheet(sheet, [{ title: "Notes", grid: [["Texte", "ID", "ID campagne", "ID session", "Type"]] }]);
+  await link("session_notes", sheet, "Notes");
+  const sessions = ["S-1", "S-2"];
+  const aelis = { uid: "aelis", manager: false, name: "Aelis" };
+  const brin = { uid: "brin", manager: false, name: "Brin" };
+  const mj = { uid: "mj", manager: true, name: "MJ" };
+  const forge = await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-1", type: "indice", text: "Le forgeron ment sur l'épée", links: ["npc:PNJ-1", "note:inconnue", "piege:x"] }, aelis, sessions);
+  assert.equal(forge.authorUid, "aelis");
+  assert.deepEqual(forge.links, ["npc:PNJ-1", "note:inconnue"]);
+  const secret = await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-2", type: "pense", text: "Je soupçonne Brin", private: true, characterId: "PERSO-A" }, aelis, sessions);
+  // Une note sans texte, dans une session inconnue, ou privée sans personnage : refusée.
+  await assert.rejects(notesModule.saveSessionNote("CAMP-N", { sessionId: "S-1", type: "indice", text: "  " }, aelis, sessions), /INVALID_NOTE/);
+  await assert.rejects(notesModule.saveSessionNote("CAMP-N", { sessionId: "S-9", type: "indice", text: "x" }, aelis, sessions), /SESSION_NOT_FOUND/);
+  await assert.rejects(notesModule.saveSessionNote("CAMP-N", { sessionId: "S-1", type: "pense", text: "x", private: true }, aelis, sessions), /INVALID_NOTE/);
+  // Brin et le MJ lisent la note publique, jamais la note privée d'Aelis.
+  assert.deepEqual((await notesModule.listSessionNotes("CAMP-N", brin)).map((note) => note.id), [forge.id]);
+  assert.deepEqual((await notesModule.listSessionNotes("CAMP-N", mj)).map((note) => note.id), [forge.id]);
+  assert.deepEqual((await notesModule.listSessionNotes("CAMP-N", aelis)).map((note) => note.id), [forge.id, secret.id]);
+  assert.deepEqual(await notesModule.listSessionNotes("CAMP-AUTRE", aelis), []);
+  // Brin ne modifie ni ne supprime la note d'Aelis ; le MJ, si (note publique), sans en changer l'auteur.
+  await assert.rejects(notesModule.saveSessionNote("CAMP-N", { ...forge, text: "Effacé" }, brin, sessions), /NOTE_FORBIDDEN/);
+  await assert.rejects(notesModule.deleteSessionNote("CAMP-N", forge.id, brin), /NOTE_FORBIDDEN/);
+  await assert.rejects(notesModule.saveSessionNote("CAMP-N", { ...secret, text: "Lu" }, mj, sessions), /NOTE_FORBIDDEN/);
+  const fixed = await notesModule.saveSessionNote("CAMP-N", { ...forge, text: "Le forgeron ment sur l'épée runique", private: true }, mj, sessions);
+  assert.equal(fixed.authorUid, "aelis");
+  assert.equal(fixed.private, false);
+  // Une note d'une autre campagne ne se modifie pas en passant par celle-ci.
+  await assert.rejects(notesModule.saveSessionNote("CAMP-AUTRE", { ...forge, text: "Volé" }, aelis, ["S-1"]), /NOTE_FORBIDDEN/);
+  // Quêtes : une étape suit l'autre ; cochée, elle garde sa session.
+  const quest = await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-1", type: "quete", text: "Retrouver l'épée", quest: { done: true } }, aelis, sessions);
+  assert.equal(quest.quest.doneIn, "S-1");
+  const step = await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-2", type: "quete", text: "La rendre au temple", quest: { after: quest.id } }, brin, sessions);
+  const chains = notesModule.sessionQuestChains(await notesModule.listSessionNotes("CAMP-N", brin), sessions);
+  assert.equal(chains.length, 1);
+  assert.deepEqual(chains[0].steps.map((note) => note.id), [quest.id, step.id]);
+  assert.equal(chains[0].done, false);
+  // Dans la feuille : une ligne par note, visibilité lisible, en-têtes complétés sans rien déplacer.
+  const grid = google.grid(sheet, "Notes");
+  assert.deepEqual(grid[0].slice(0, 5), ["Texte", "ID", "ID campagne", "ID session", "Type"]);
+  assert.equal(record(grid, 2)["Visibilité"], "Privée");
+  assert.equal(record(grid, 1)["Texte"], "Le forgeron ment sur l'épée runique");
+  // Supprimer blanchit la ligne ; la note suivante la réutilise.
+  await notesModule.deleteSessionNote("CAMP-N", secret.id, aelis);
+  assert.deepEqual((await notesModule.listSessionNotes("CAMP-N", aelis)).map((note) => note.id), [forge.id, quest.id, step.id]);
+  await notesModule.saveSessionNote("CAMP-N", { sessionId: "S-2", type: "rumeur", text: "On dit que…" }, brin, sessions);
+  assert.equal(google.grid(sheet, "Notes").length, 5);
+});

@@ -7,6 +7,7 @@ import { Backpack, BookOpen, Check, ChevronDown, ChevronUp, CircleUserRound, Gra
 
 import { Checkbox } from "@/components/ui/checkbox"
 import { InlineEdit } from "@/components/eraser/inline-edit"
+import { CharacterSessionNotes } from "@/components/eraser/character-session-notes"
 import { showItemNotifications, unseenItemNotifications, useInventoryReceived } from "@/components/eraser/item-notifications"
 import type { ItemNotification } from "@/lib/item-notifications"
 import { markNewSlots, receivedSlots, useNewSlots } from "@/components/eraser/new-inventory-items"
@@ -1683,7 +1684,8 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       return spellGauges.length || spellForms.length || spellDecks.length ? <div className="space-y-4">{(spellGauges.length > 0 || spellForms.length > 0) && <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">{spellForms}{spellGauges.map((resolved) => gaugeView(resolved))}</div>}{spellDecks}{progression}</div> : progression
     }
     if (tab.type === "compagnon") return <CharacterCompanions characterId={character.id} companions={tab.companions ?? []} onChange={(update) => updateTabCompanions(tab.id, update)} />
-    if (tab.type === "journal") return <div className="space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotebookEditor value={values[8]} onCommit={(value) => commit(8, value)} /></div>
+    // À gauche le journal de relation et le carnet ; à droite les notes privées par session.
+    if (tab.type === "journal") return <div className="grid gap-8 xl:grid-cols-[minmax(0,1fr)_24rem]"><div className="min-w-0 space-y-8"><CharacterRelations characterId={character.id} campaigns={character.campaigns} /><NotebookEditor value={values[8]} onCommit={(value) => commit(8, value)} /></div><aside className="min-w-0"><CharacterSessionNotes characterId={character.id} campaigns={character.campaigns} /></aside></div>
     if (tab.type === "invocation") return <CharacterSummons data={parseSummonsData(tab.summons)} onUpdate={updateSummons(tab.id)} suggestions={summonSuggestions} />
     return <div className="min-h-56 rounded-2xl border border-dashed border-border/55 bg-card/20" />
   }

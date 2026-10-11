@@ -9,6 +9,7 @@ import { worldIndexDefinitions, type BuiltinWorldIndexKey, type WorldIndexKey } 
 import { withEntityExtras } from "@/lib/entity-index-extras"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
 import { getWorldIndex, type WorldIndexData } from "@/lib/world-indexes"
+import { ensureShopTypeTabPrepared } from "@/lib/shop-types-server"
 
 async function IndexData({ indexKey, sheetName }: { indexKey: WorldIndexKey; sheetName: string }) {
   let data: WorldIndexData | null = null
@@ -72,6 +73,8 @@ export function worldIndexRoute(indexKey: BuiltinWorldIndexKey) {
   return async function IndexRoute() {
     const account = await authorizedAccount(["admin", "mj"])
     if (!account) redirect("/")
+    // Lieux, pour un admin : l'onglet Magasin se complète tout seul la première fois.
+    if (indexKey === "places" && account.role === "admin") await ensureShopTypeTabPrepared()
     return (
       <AuthenticatedShell pageLabel={specifics.label ?? worldIndexDefinitions[indexKey].title} roles={["admin", "mj"]}>
         <WorldIndexPage

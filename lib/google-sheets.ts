@@ -3264,6 +3264,7 @@ const NPC_LAST_COLUMN = columnName(npcSheetHeaders.length)
 
 // Les trois dernières sont venues après : dans une feuille existante, elles s'ajoutent à droite.
 export const campaignEventSheetHeaders = ["ID", "ID campagne", "Type", "Référence", "Nom", "Icône", "Image", "Étiquette", "Couleur", "Description", "Créé par", "Créé le", "Modifié le"]
+export const sessionNoteSheetHeaders = ["ID", "ID campagne", "ID session", "Visibilité", "ID personnage", "Type", "Titre", "Texte", "Moment", "Liens (JSON)", "Quête (JSON)", "Auteur", "UID auteur", "Créé le", "Modifié le"]
 export const sessionSheetHeaders = ["ID", "ID campagne", "Titre", "Bannière", "Personnages (JSON)", "PNJs (JSON)", "Magasins (JSON)", "Créée par", "Créée le", "Modifiée le", "Lieux de la session", "Document", "Événements (JSON)"]
 
 const npcSheetColumnWidths = [
@@ -3399,6 +3400,16 @@ export const jdrSheetDefinitions: StructuredSheetDefinition[] = [
     frozenColumns: 3,
     headers: campaignEventSheetHeaders,
     columnWidths: [180, 180, 140, 180, 240, 140, 320, 160, 110, 420, 190, 170, 170],
+  },
+  {
+    // Les notes du journal de session : publiques (journal de la campagne) ou privées
+    // (fiche du personnage, lues par leur seul auteur). Créée à la première note écrite.
+    key: "session_notes",
+    name: "Notes de session",
+    tabName: "Notes",
+    frozenColumns: 3,
+    headers: sessionNoteSheetHeaders,
+    columnWidths: [180, 180, 180, 110, 180, 120, 220, 480, 140, 260, 220, 160, 190, 170, 170],
   },
   {
     key: "tabletop",

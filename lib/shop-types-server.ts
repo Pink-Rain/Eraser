@@ -154,6 +154,34 @@ export async function prepareShopTypeTab() {
   return { tab: table.tabName, added }
 }
 
+let autoPreparation: Promise<void> | null = null
+let autoFailedAt = 0
+
+/**
+ * Pour un admin, sans clic : l'onglet Lieux › Magasin complété comme par « Préparer l'onglet »
+ * (colonnes ajoutées à droite, types d'Eraser en bas, rien d'effacé ni de déplacé). Seulement
+ * si l'onglet manque, s'il lui manque des colonnes, ou s'il n'a encore aucun type d'Eraser :
+ * un type retiré à la main ensuite ne revient pas. Une fois par lancement ; un échec réessaie
+ * dix minutes plus tard.
+ */
+export function ensureShopTypeTabPrepared() {
+  if (autoPreparation) return autoPreparation
+  if (Date.now() - autoFailedAt < 10 * 60_000) return Promise.resolve()
+  autoPreparation = (async () => {
+    const catalog = await loadShopTypeCatalog({ refresh: true })
+    if (catalog.error) throw new Error("SHOP_TYPES_UNREADABLE")
+    const untouched = catalog.missingTypes.length === builtinShopTypes.length
+    if (catalog.tab && !catalog.missingColumns.length && !untouched) return
+    const result = await prepareShopTypeTab()
+    console.info("SHOP_TYPES_TAB_PREPARED", result.tab, result.added.join(", ") || "colonnes seulement")
+  })().catch((error) => {
+    autoFailedAt = Date.now()
+    autoPreparation = null
+    console.error("SHOP_TYPES_AUTO_PREPARE_FAILED", error instanceof Error ? error.message : error)
+  })
+  return autoPreparation
+}
+
 // Pour les tests : les en-têtes attendus, dans l'ordre.
 export const shopTypeHeaders = ["Nom", ...shopTypeColumns().map((column) => column.header)]
 export { cityChanceHeader, cityKeys, SHOP_TYPE_HEADERS }

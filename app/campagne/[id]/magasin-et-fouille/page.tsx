@@ -7,11 +7,13 @@ import { ShopGenerator } from "@/components/eraser/shop-generator"
 import { getCampaignDashboard, listAllCampaignsForAdmin, listCampaignNpcs, listCampaignsForMj, listLatestShops } from "@/lib/google-sheets"
 import { authorizedAccount } from "@/lib/server-auth"
 import type { ShopGeneratorItem } from "@/lib/shop-schema"
-import { catalogState, loadShopGeneratorData } from "@/lib/shop-types-server"
+import { catalogState, ensureShopTypeTabPrepared, loadShopGeneratorData } from "@/lib/shop-types-server"
 
 export const dynamic = "force-dynamic"
 
 async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaignId: string; accountUid: string; isAdmin: boolean }) {
+  // Un admin : l'onglet Lieux › Magasin se complète tout seul la première fois.
+  if (isAdmin) await ensureShopTypeTabPrepared()
   let items: ShopGeneratorItem[] = []
   let loadError = ""
   const [{ catalog, items: loadedItems }, npcs, campaigns, latestDraw] = await Promise.all([

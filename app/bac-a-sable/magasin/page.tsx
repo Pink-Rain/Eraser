@@ -6,12 +6,14 @@ import { DeferredContentLoading } from "@/components/eraser/deferred-content-loa
 import { ShopGenerator } from "@/components/eraser/shop-generator"
 import { listAllCampaignsForAdmin, listCampaignsForMj, listSavedShops } from "@/lib/google-sheets"
 import type { ShopGeneratorItem } from "@/lib/shop-schema"
-import { catalogState, loadShopGeneratorData } from "@/lib/shop-types-server"
+import { catalogState, ensureShopTypeTabPrepared, loadShopGeneratorData } from "@/lib/shop-types-server"
 import { authorizedAccount } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
 async function SandboxShopData({ accountUid, isAdmin }: { accountUid: string; isAdmin: boolean }) {
+  // Un admin : l'onglet Lieux › Magasin se complète tout seul la première fois.
+  if (isAdmin) await ensureShopTypeTabPrepared()
   let items: ShopGeneratorItem[] = []
   let loadError = ""
   const [{ catalog, items: loadedItems }, campaigns, latestDraw] = await Promise.all([

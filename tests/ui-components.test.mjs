@@ -1417,3 +1417,28 @@ test("boutons tout faits : « Envoyer dans un autre onglet » demande l'onglet, 
   assert.equal(await runActionButton({ ...move.button, id: "y" }, { ...runtime, moveAsk: undefined }), false);
   assert.match(calls[0], /pas possible dans cet index/);
 });
+
+test("Notes de session : nettoyage, droits, « Mon perso » et quêtes en boucle sans blocage", async () => {
+  const rules = await vite.ssrLoadModule("/lib/session-note-rules.ts");
+  const base = { campaignId: "C", sessionId: "S1", authorUid: "a", createdAt: "1" };
+  assert.equal(rules.cleanSessionNote({ ...base, type: "inconnu", text: "x" }), null);
+  const note = rules.cleanSessionNote({ ...base, id: "N1", type: "indice", text: "x", links: ["note:N1", "npc:P", "npc:P", "html:<b>"], quest: { done: true } });
+  assert.deepEqual(note.links, ["npc:P"]);
+  assert.equal(note.quest, null);
+  const viewer = (uid, manager = false) => ({ uid, manager });
+  assert.ok(rules.canEditSessionNote(note, viewer("a")));
+  assert.ok(!rules.canEditSessionNote(note, viewer("b")));
+  assert.ok(rules.canEditSessionNote(note, viewer("mj", true)));
+  const secret = { ...note, private: true };
+  assert.ok(!rules.canReadSessionNote(secret, viewer("mj", true)));
+  assert.ok(!rules.canEditSessionNote(secret, viewer("mj", true)));
+  assert.ok(rules.isMySessionNote({ ...note, authorUid: "b", links: ["character:PJ-1"] }, "a", ["PJ-1"]));
+  assert.ok(!rules.isMySessionNote({ ...note, authorUid: "b", links: [] }, "a", ["PJ-1"]));
+  const quest = (id, sessionId, after, done = false) => rules.cleanSessionNote({ ...base, id, sessionId, type: "quete", text: id, quest: { after, done } });
+  // A suit B et B suit A : la boucle s'arrête, chaque étape est rangée une seule fois.
+  const chains = rules.sessionQuestChains([quest("A", "S1", "B"), quest("B", "S2", "A"), quest("C", "S1", "", true), quest("D", "S2", "C", true)], ["S1", "S2"]);
+  assert.equal(chains.flatMap((chain) => chain.steps).length, 4);
+  const done = chains.find((chain) => chain.steps.some((step) => step.id === "C"));
+  assert.deepEqual(done.steps.map((step) => step.id), ["C", "D"]);
+  assert.equal(done.done, true);
+});
