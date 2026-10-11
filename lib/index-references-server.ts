@@ -86,8 +86,8 @@ async function objectSource(): Promise<Source> {
   const tables = await listObjectIndexTablesForDisplay()
   return {
     key: OBJECT_REFERENCE_INDEX,
-    title: "Objets",
-    itemLabel: "un objet",
+    title: "Items",
+    itemLabel: "un item",
     tabs: tables.map((table) => ({ name: table.tabName })),
     tables: tables.map((table) => {
       const name = columnAt(table.headers, objectNameHeaders)

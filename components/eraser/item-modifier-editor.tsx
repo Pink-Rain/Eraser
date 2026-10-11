@@ -61,7 +61,7 @@ const aspectTones: Record<ItemModifierAspect, string> = {
 }
 
 function AspectPicker({ value, onChange }: { value: ItemModifierAspect; onChange: (aspect: ItemModifierAspect) => void }) {
-  return <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Ce que l’objet modifie">
+  return <div className="flex flex-wrap gap-1" role="radiogroup" aria-label="Ce que l’item modifie">
     {aspects.map((aspect) => <button
       key={aspect}
       type="button"
@@ -149,11 +149,11 @@ const modifierFamilies: Array<{ kind: ItemAttachmentKind; key: "attributes" | "m
 
 /** Comment remplir chaque partie de la fenêtre, au survol du petit « ? ». */
 const forgeHelp: Partial<Record<ItemOverrideKey, string>> & Record<"effect" | "links" | "rune" | "draw", string> = {
-  skill: "Les compétences (ou caractéristiques) avec lesquelles l’objet s’utilise, une ou plusieurs. La fiche de personnage le montre sous chacune, avec sa case pour l’équiper.",
+  skill: "Les compétences (ou caractéristiques) avec lesquelles l’item s’utilise, une ou plusieurs. La fiche de personnage le montre sous chacune, avec sa case pour l’équiper.",
   value: OBJECT_VALUE_HELP,
   distance: OBJECT_DISTANCE_HELP,
-  effect: "Le texte de l’effet. {Valeur} y affiche la valeur de l’objet ; s’il en a plusieurs (« 20 | 1d30+20 »), {Valeur 2} affiche la deuxième. Tape « { » pour citer un état, un attribut, un lieu…",
-  links: "Un nombre (+2, -10) et la caractéristique ou la compétence qu’il change. Il ne compte que lorsque l’objet est équipé. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.",
+  effect: "Le texte de l’effet. {Valeur} y affiche la valeur de l’item ; s’il en a plusieurs (« 20 | 1d30+20 »), {Valeur 2} affiche la deuxième. Tape « { » pour citer un état, un attribut, un lieu…",
+  links: "Un nombre (+2, -10) et la caractéristique ou la compétence qu’il change. Il ne compte que lorsque l’item est équipé. Pour une caractéristique ou une compétence, choisis ensuite sa valeur ou l’un de ses seuils critiques.",
   draw: "« Tirer » en ajoute un au hasard parmi ceux qui ne sont pas encore posés : le Nombre de sa ligne est son % de chance, vide c’est la chance normale. La recherche porte sur le nom ; Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",
   rune: "Cherche par sous-type et nombre, par exemple « Feu 2 » ; le nom s’affiche à côté. Entrée ajoute le premier résultat. Chaque carte a ses propres compétences liées, qui partent avec elle.",
 }
@@ -168,12 +168,12 @@ function FieldHelp({ text }: { text: string }) {
   </HoverCard>
 }
 
-/** Un champ : son titre coloré quand il diffère de l'Index des objets, et de quoi y revenir. */
+/** Un champ : son titre coloré quand il diffère de l'Index des items, et de quoi y revenir. */
 function ForgeField({ label, changed, base, onReset, help, className = "", children }: { label: string; changed: boolean; base: string; onReset: () => void; help?: string; className?: string; children: ReactNode }) {
   return <div className={`min-w-0 ${className}`}>
     <div className="mb-1 flex min-h-4 items-center justify-between gap-2">
       <span className={`inline-flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider ${changed ? "text-primary" : "text-muted-foreground"}`}>{label}{changed && <span className="inline-block size-1.5 rounded-full bg-primary" />}{help && <FieldHelp text={help} />}</span>
-      {changed && <button type="button" onClick={onReset} className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary" title={`Dans l’Index des objets : ${base.trim() || "vide"}`}><RotateCcw className="size-3" />Index</button>}
+      {changed && <button type="button" onClick={onReset} className="inline-flex items-center gap-0.5 text-[10px] text-muted-foreground hover:text-primary" title={`Dans l’Index des items : ${base.trim() || "vide"}`}><RotateCcw className="size-3" />Index</button>}
     </div>
     {children}
   </div>
@@ -182,7 +182,7 @@ function ForgeField({ label, changed, base, onReset, help, className = "", child
 const boxed = "rounded-md border bg-background/70"
 
 /**
- * Les compétences liées d'un objet, d'un attribut, d'un matériau ou d'une rune : le même
+ * Les compétences liées d'un item, d'un attribut, d'un matériau ou d'une rune : le même
  * principe partout, une valeur et sa cible. `compact` : un bouton tant qu'il n'y en a aucune.
  */
 function LinksEditor({ links, onChange, tone, compact = false }: { links: ItemModifier[]; onChange: (links: ItemModifier[]) => void; tone: string; compact?: boolean }) {
@@ -316,7 +316,7 @@ function ItemModifierForm({ base, effective, modifiers, effectHtml, pending, onS
   const ownLinks = links.filter((link) => !link.from)
 
   async function save() {
-    // Seul ce qui diffère de l'Index des objets est gardé : le reste suit l'index.
+    // Seul ce qui diffère de l'Index des items est gardé : le reste suit l'index.
     const overrides: ItemOverrides = Object.fromEntries(itemOverrideKeys.filter(changed).map((key) => [key, fields[key].trim()]))
     // Un lien dont l'attribut, le matériau ou la rune a été retiré part avec lui.
     const kept = links.filter((link) => !link.from || modifierFamilies.some((family) => splitNames(fields[family.key]).some((name) => isFromSource(link, family.kind, name))))
@@ -339,7 +339,7 @@ function ItemModifierForm({ base, effective, modifiers, effectHtml, pending, onS
         {field("value", <Input value={fields.value} onChange={(event) => setField("value", event.target.value)} placeholder="1d20 | 2d6" className="h-8 bg-background/70 font-semibold" />)}
         {field("distance", <div className="relative"><Input value={fields.distance} onChange={(event) => setField("distance", event.target.value)} placeholder="12" className="h-8 bg-background/70 pr-7" /><span className="pointer-events-none absolute right-2.5 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">m</span></div>)}
         <div className="min-w-0">
-          <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Compétences liées à l’objet<FieldHelp text={forgeHelp.links} /></p>
+          <p className="mb-1 flex items-center gap-1 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Compétences liées à l’item<FieldHelp text={forgeHelp.links} /></p>
           <LinksEditor tone="var(--primary)" links={ownLinks} onChange={(next) => setLinks([...next, ...links.filter((link) => link.from)])} compact />
         </div>
       </div>
@@ -354,7 +354,7 @@ function ItemModifierForm({ base, effective, modifiers, effectHtml, pending, onS
       onLinks={setLinks}
     />)}
     <div className="flex items-center justify-between gap-2">
-      <p className="text-[11px] text-muted-foreground">Les compétences liées comptent quand l’objet est équipé.</p>
+      <p className="text-[11px] text-muted-foreground">Les compétences liées comptent quand l’item est équipé.</p>
       <div className="flex gap-2">
         <Button type="button" variant="ghost" onClick={onClose}>Annuler</Button>
         <Button type="button" disabled={pending} onClick={() => void save()}>{pending ? <LoaderCircle className="animate-spin" /> : <Check />}Enregistrer</Button>
@@ -386,7 +386,7 @@ export function ItemModifierDialog({ open, onOpenChange, itemName, base, effecti
     <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-3xl">
       <DialogHeader className="gap-0.5">
         <DialogTitle className="flex items-center gap-2"><span className="flex size-7 items-center justify-center rounded-lg bg-primary text-primary-foreground"><Anvil className="size-4" /></span>{itemName}</DialogTitle>
-        <DialogDescription className="text-xs">Pour cet exemplaire seulement : l’Index des objets ne bouge pas.</DialogDescription>
+        <DialogDescription className="text-xs">Pour cet exemplaire seulement : l’Index des items ne bouge pas.</DialogDescription>
       </DialogHeader>
       {open && <ItemModifierForm base={base} effective={effective} modifiers={modifiers} effectHtml={effectHtml} pending={pending} onSave={onSave} onSaveEffect={onSaveEffect} onClose={() => onOpenChange(false)} />}
     </DialogContent>

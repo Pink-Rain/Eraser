@@ -20,7 +20,7 @@ export const indexPages: IndexPage[] = ([
   { key: "creatures", href: "/ressources/index-des-creatures", label: "Créatures", description: "Le bestiaire, ses caractéristiques et ses sorts." },
   { key: "langues", href: "/ressources/index-des-langues", label: "Langues", description: "Les langues parlées dans le monde." },
   { key: "lieux", href: "/ressources/index-des-lieux", label: "Lieux", description: "Des continents aux lieux-dits." },
-  { key: "objets", href: "/ressources/index-des-objets", label: "Objets", description: "Armes, équipement, consommables et ressources." },
+  { key: "objets", href: "/ressources/index-des-objets", label: "Items", description: "Armes, équipement, consommables, ressources et autres objets." },
   { key: "peuples", href: "/ressources/index-des-peuples", label: "Peuples", description: "Peuples, ancêtres et descendants." },
   { key: "personnages", href: "/ressources/index-des-personnages", label: "Personnages", description: "Toutes les fiches de personnages joueurs." },
   { key: "pnjs", href: "/ressources/index-des-pnjs", label: "PNJs", description: "Tous les PNJ, ceux de la bibliothèque et ceux des campagnes." },

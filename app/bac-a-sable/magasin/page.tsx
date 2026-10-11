@@ -21,7 +21,7 @@ async function SandboxShopData({ accountUid, isAdmin }: { accountUid: string; is
     listSavedShops("bac-a-sable"),
   ])
   if (loadedItems) items = loadedItems
-  else loadError = "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."
+  else loadError = "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."
   return <ShopGenerator items={items} loadError={loadError} pageLinked="bac-a-sable" destinationPages={campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name }))} initialDraw={latestDraw} />
 }
 

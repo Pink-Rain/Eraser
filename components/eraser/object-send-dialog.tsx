@@ -26,7 +26,7 @@ let knownDestinations: GiveDestination[] | null = null
 let knownCreatures: GiveDestination[] | null = null
 
 /**
- * Envoyer un objet de l'index dans un inventaire : d'une campagne, d'un joueur, d'un PNJ ou
+ * Envoyer un item de l'index dans un inventaire : d'une campagne, d'un joueur, d'un PNJ ou
  * d'une créature nommée (compagnon d'un personnage). En vue MJ, la campagne en cours est
  * proposée en premier. Un inventaire plein pose l'objet « Au sol » du personnage.
  */
@@ -90,7 +90,7 @@ export function ObjectSendDialog({ open, onOpenChange, itemId, itemName, current
     try {
       const response = await fetch("/api/items/give", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ targetId: destination.id, campaignId: destination.campaignId, itemId, itemName }) })
       const payload = (await response.json().catch(() => ({}))) as { landedOnGround?: boolean; error?: string }
-      if (!response.ok) { setError(payload.error || "L’objet n’a pas pu être envoyé."); return }
+      if (!response.ok) { setError(payload.error || "L’item n’a pas pu être envoyé."); return }
       const where = destination.kind === "campaign" ? destination.name : `${destination.name}${destination.ownerName ? ` (${destination.ownerName})` : ""}`
       onSent(payload.landedOnGround ? `« ${itemName} » envoyé à ${where} : plus de place, il l’attend au sol.` : `« ${itemName} » envoyé : ${where}.`)
       onOpenChange(false)
@@ -111,7 +111,7 @@ export function ObjectSendDialog({ open, onOpenChange, itemId, itemName, current
     <DialogContent className="sm:max-w-lg">
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2"><Send className="size-4 text-primary" />Envoyer « {itemName} »</DialogTitle>
-        <DialogDescription>Dans quel inventaire ? S’il est plein, l’objet est posé au sol du personnage.</DialogDescription>
+        <DialogDescription>Dans quel inventaire ? S’il est plein, l’item est posé au sol du personnage.</DialogDescription>
       </DialogHeader>
       {currentCampaign && <div className="rounded-xl border bg-muted/25 p-2">
         <p className="px-1 pb-1.5 text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">Campagne en cours · {currentCampaign.campaignName}</p>

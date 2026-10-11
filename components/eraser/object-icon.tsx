@@ -5,7 +5,7 @@ import { useState, type ReactNode } from "react"
 import { objectIconImage } from "@/lib/object-icons"
 
 /**
- * Icône d'un objet : ce que contient sa case « Icône » (image du Drive, adresse
+ * Icône d'un item : ce que contient sa case « Icône » (image du Drive, adresse
  * d'image, émoji). Une case vide ou une ancienne icône générée prend l'icône
  * d'Eraser ; une image qui ne se charge pas aussi.
  */

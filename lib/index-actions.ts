@@ -47,13 +47,23 @@ export const actionStepCatalog: ActionStepInfo[] = [
   { type: "roll", group: "Jeu", label: "Tirer au sort", description: "Relance le tirage d’une colonne Aléatoire de la ligne (même si elle est figée) et écrit le résultat.", fields: [{ key: "column", label: "Colonne Aléatoire", kind: "column" }] },
   { type: "duplicate", group: "Gérer la ligne", label: "Dupliquer la ligne", description: "Ajoute une copie de la ligne juste en dessous (nouvel identifiant).", fields: [] },
   { type: "delete", group: "Gérer la ligne", label: "Supprimer la ligne", description: "Supprime la ligne de la feuille. Pense à demander une confirmation. Dernière étape : celles qui suivent ne sont pas faites.", fields: [] },
+  { type: "move-ask", group: "Gérer la ligne", label: "Envoyer dans un autre onglet", description: "Demande au clic l’onglet d’arrivée (ou le tableau d’items) et y envoie la ligne, avec toutes ses colonnes. Dernière étape : celles qui suivent ne sont pas faites.", fields: [] },
   { type: "move", group: "Gérer la ligne", label: "Déplacer vers un onglet", description: "Déplace la ligne dans un autre onglet aux mêmes colonnes. Dernière étape : celles qui suivent ne sont pas faites.", fields: [{ key: "tab", label: "Onglet", kind: "tab" }], only: "world" },
   { type: "create", group: "Créer ailleurs", label: "Créer une ligne dans un index", description: "Ajoute une ligne pré-remplie dans un index (celui-ci ou un autre) : chaque colonne reçoit un texte, une {Colonne} de cette ligne ou une =formule. Sert aussi à copier une ligne vers un autre index.", fields: [{ key: "index", label: "Index", kind: "index" }, { key: "tab", label: "Onglet", kind: "tab" }, { key: "values", label: "Valeurs", kind: "mapping" }, { key: "open", label: "Ouvrir l’index ensuite", kind: "boolean" }], only: "world" },
-  { type: "campaign-inventory", group: "Créer ailleurs", label: "Ajouter à un inventaire", description: "Ajoute l’objet à un inventaire d’une campagne : celui de la campagne, d’un personnage ou d’un PNJ (choisis au clic).", fields: [], only: "objects" },
+  { type: "campaign-inventory", group: "Créer ailleurs", label: "Ajouter à un inventaire", description: "Ajoute l’item à un inventaire : celui d’une campagne, d’un personnage, d’un PNJ ou d’une créature compagnon (choisi au clic).", fields: [], only: "objects" },
   { type: "chat", group: "Jeu", label: "Envoyer dans le chat d’une campagne", description: "Envoie un message dans le chat d’une campagne (choisie au clic, la dernière est retenue), pour tous ou pour le MJ seulement.", fields: [{ key: "message", label: "Message", kind: "text", hint: "{Nom} attaque ! — ou =formule" }, { key: "audience", label: "Pour", kind: "audience" }] },
   { type: "copy", group: "Copier", label: "Copier une valeur", description: "Copie un texte dans le presse-papiers.", fields: [{ key: "value", label: "Texte", kind: "text", hint: "{Nom} — {Effet}, ou =formule" }] },
   { type: "copy-card", group: "Copier", label: "Copier la carte", description: "Copie toute la ligne mise en forme (nom en titre, puis chaque champ), à coller dans un document ou un message.", fields: [] },
   { type: "notify", group: "Afficher", label: "Afficher un message", description: "Affiche un message à l’écran : un résultat de dés, un rappel…", fields: [{ key: "message", label: "Message", kind: "text", hint: "Dégâts : =DES(\"2d6\") — ou {Colonne}" }] },
+]
+
+/**
+ * Des boutons tout faits, à poser dans n'importe quelle colonne Boutons (« Modifier ›
+ * Préréglages ») : le même geste partout, réglé une fois.
+ */
+export const buttonPresets: Array<{ key: string; label: string; description: string; button: Omit<ActionButton, "id">; only?: "objects" | "world" }> = [
+  { key: "move-ask", label: "Envoyer dans un autre onglet", description: "Une icône ⇄ : au clic, choisir l’onglet d’arrivée.", button: { label: "Envoyer dans un autre onglet", icon: "arrow-right-left", iconOnly: true, steps: [{ type: "move-ask" }] } },
+  { key: "inventory", label: "Envoyer dans un inventaire", description: "Une icône ➤ : au clic, choisir la campagne, le personnage, le PNJ ou la créature.", button: { label: "Envoyer dans un inventaire", icon: "send", iconOnly: true, color: "#7a2e2a", steps: [{ type: "campaign-inventory" }] }, only: "objects" },
 ]
 
 export function stepInfo(type: ActionStepType) {
@@ -95,6 +105,7 @@ export function describeStep(step: ActionStep): string {
     case "duplicate": return "Dupliquer la ligne"
     case "delete": return "Supprimer la ligne"
     case "move": return `Déplacer vers « ${step.tab || "?"} »`
+    case "move-ask": return "Envoyer dans un autre onglet (choisi au clic)"
     case "create": return `Créer une ligne dans ${step.index}${step.tab ? ` · ${step.tab}` : ""}`
     case "copy": return `Copier « ${step.value || "…"} »`
     case "copy-card": return "Copier la carte"
@@ -164,6 +175,8 @@ export type ActionRuntime = {
   duplicate?: () => Promise<void>
   remove?: () => Promise<void>
   move?: (tab: string) => Promise<void>
+  /** Demande l'onglet d'arrivée, puis y envoie la ligne ; rien si on annule. */
+  moveAsk?: () => Promise<void>
   create?: (index: string, tab: string, values: Record<string, string>) => Promise<{ href?: string }>
   copy: (text: string, html?: string) => Promise<void>
   card?: () => { text: string; html: string }
@@ -252,6 +265,7 @@ async function runStep(step: ActionStep, runtime: ActionRuntime) {
       await runtime.chat(message, step.audience === "gm" ? "gm" : "public")
       return runtime.notify("Message envoyé.")
     }
+    case "move-ask": return runtime.moveAsk ? runtime.moveAsk() : unavailable("Envoyer dans un autre onglet")
     case "campaign-inventory": {
       if (!runtime.campaignInventory) return unavailable("Ajouter à l’inventaire")
       await runtime.campaignInventory()
@@ -274,7 +288,7 @@ export async function runActionButton(button: ActionButton, runtime: ActionRunti
     }
     for (const step of button.steps) {
       await runStep(step, runtime)
-      if (step.type === "delete" || step.type === "move") break
+      if (step.type === "delete" || step.type === "move" || step.type === "move-ask") break
     }
     return true
   } catch (error) {

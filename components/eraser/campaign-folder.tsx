@@ -147,7 +147,7 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
             {header("level", "Classe · rang", "left", Shield)}
             {header("achievements", "Succès", "right", Trophy)}
             {header("falls", "Chutes / retours", "left", Skull)}
-            {header("items", "Objets reçus", "left", PackageOpen)}
+            {header("items", "Items reçus", "left", PackageOpen)}
             {header("or", "Or", "right", undefined, "or")}
             {header("cuivre", "Cuivre", "right", undefined, "cuivre")}
             {header("orNoir", "Or noir", "right", undefined, "orNoir")}
@@ -167,7 +167,7 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
             <td className="px-3 py-2.5 text-right tabular-nums">{bestAchievements(member) && <>{crown("Le plus de succès du groupe")} </>}{shown(member.achievements, 0)}</td>
             <td className="px-3 py-2.5 text-xs tabular-nums">{member.falls === null ? <span className="text-muted-foreground">—</span> : <><span className="font-semibold">{member.falls} chute{member.falls > 1 ? "s" : ""}</span><span className="block text-muted-foreground">{member.returns} retour{(member.returns ?? 0) > 1 ? "s" : ""}</span></>}</td>
             <td className="px-3 py-2.5 text-xs tabular-nums">{member.items === null ? <span className="text-muted-foreground">—</span> : <button type="button" disabled={!member.items} onClick={() => setOpen(open === member.id ? null : member.id)} aria-expanded={open === member.id} className="inline-flex items-center gap-1.5 rounded-lg border bg-background/60 px-2 py-1 text-left hover:border-primary/40 disabled:cursor-default disabled:opacity-70">
-              <span><span className="block font-semibold">{bestItems(member) && <>{crown("Le plus d’objets reçus du groupe")} </>}{member.items} objet{member.items > 1 ? "s" : ""}</span>{(member.rareItems ?? 0) > 0 && <span className="block text-[10px] text-amber-700 dark:text-amber-300">{member.rareItems} rare{(member.rareItems ?? 0) > 1 ? "s" : ""} ou mieux</span>}</span>
+              <span><span className="block font-semibold">{bestItems(member) && <>{crown("Le plus d’items reçus du groupe")} </>}{member.items} item{member.items > 1 ? "s" : ""}</span>{(member.rareItems ?? 0) > 0 && <span className="block text-[10px] text-amber-700 dark:text-amber-300">{member.rareItems} rare{(member.rareItems ?? 0) > 1 ? "s" : ""} ou mieux</span>}</span>
               {member.items > 0 && <ChevronDown className={`size-3.5 transition ${open === member.id ? "rotate-180" : ""}`} />}
             </button>}</td>
             {(["or", "cuivre", "orNoir"] as const).map((kind) => <td key={kind} className="whitespace-nowrap px-3 py-2.5 text-right tabular-nums" style={{ background: `${coins[kind].color}0f` }}>
@@ -199,8 +199,8 @@ export function CampaignGroupTable({ members }: { members: FolderMember[] }) {
         </tfoot>
       </table>
     </div>
-    {opened && <div className="rounded-2xl border bg-card/85 p-4" role="region" aria-label={`Objets reçus par ${opened.name}`}>
-      <div className="mb-2 flex items-center gap-2"><PackageOpen className="size-4 text-primary" /><h3 className="flex-1 font-display text-lg font-semibold">Objets reçus par {opened.name}</h3><button type="button" onClick={() => setOpen(null)} className="rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Fermer"><X className="size-4" /></button></div>
+    {opened && <div className="rounded-2xl border bg-card/85 p-4" role="region" aria-label={`Items reçus par ${opened.name}`}>
+      <div className="mb-2 flex items-center gap-2"><PackageOpen className="size-4 text-primary" /><h3 className="flex-1 font-display text-lg font-semibold">Items reçus par {opened.name}</h3><button type="button" onClick={() => setOpen(null)} className="rounded p-1 text-muted-foreground hover:bg-muted" aria-label="Fermer"><X className="size-4" /></button></div>
       <ul className="grid gap-1 sm:grid-cols-2">{opened.lastItems.map((item, index) => <li key={`${item.name}:${index}`} className="flex items-center justify-between gap-2 rounded-lg bg-muted/40 px-3 py-1.5 text-sm"><span className="truncate">{item.name}</span>{item.rarity && <span className="shrink-0 text-xs text-muted-foreground">{item.rarity}</span>}</li>)}</ul>
       {(opened.items ?? 0) > opened.lastItems.length && <p className="mt-2 text-xs text-muted-foreground">Les {opened.lastItems.length} derniers sur {opened.items}.</p>}
     </div>}

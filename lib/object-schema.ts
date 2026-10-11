@@ -50,7 +50,7 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
     title: tables[0].fileName,
     addTabs: true,
     relationTargets: await worldRelationTargets(),
-    deleteIndex: { allowed: false, reason: "Les objets de ce classeur peuvent être dans des inventaires et des boutiques. Mets plutôt ses tableaux à la corbeille un par un : ils restent restaurables." },
+    deleteIndex: { allowed: false, reason: "Les items de ce classeur peuvent être dans des inventaires et des boutiques. Mets plutôt ses tableaux à la corbeille un par un : ils restent restaurables." },
     tabs: tables.map((table) => ({
       name: table.tabName,
       columns: table.headers.filter((header) => header.trim() && !trashed(findEntry(schema, table.tabName, header))).map((header) => ({
@@ -91,7 +91,7 @@ async function appendHeader(fileId: string, tabName: string, header: string) {
 // onglets n'existe pas encore dans l'index des objets (l'éditeur ne le propose pas non plus).
 const relationKinds = ["linked", "lookup", "rollup", "tab-sort"]
 function assertNoRelation(spec: IndexColumnSpec) {
-  if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les objets : les cases d’objets sont lues comme du texte par l’inventaire et les boutiques.")
+  if (relationKinds.includes(spec.kind)) throw new Error("INDEX_SCHEMA_INVALID:Les relations entre index ne sont pas encore proposées pour les items : les cases d’items sont lues comme du texte par l’inventaire et les boutiques.")
 }
 
 function locked(allowed: boolean, reasons: string[]) {
@@ -127,7 +127,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       continue
     }
     // La colonne « Onglet » des objets est celle du regroupement : « Modifier » ne la propose pas ici.
-    if (operation.op === "tab-column") throw new Error("INDEX_SCHEMA_LOCKED:La colonne « Onglet » des objets se règle avec le regroupement des classeurs.")
+    if (operation.op === "tab-column") throw new Error("INDEX_SCHEMA_LOCKED:La colonne « Onglet » des items se règle avec le regroupement des classeurs.")
     const table = tables.find((candidate) => candidate.tabName === operation.tab)
     if (!table) throw new Error("OBJECT_INDEX_NOT_FOUND")
     if (operation.op === "rename-tab") {
@@ -150,7 +150,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
       continue
     }
     // Le nom d'une ligne vient des onglets d'objets eux-mêmes : « Modifier » ne le propose pas ici.
-    if (operation.op === "tab-label") throw new Error("INDEX_SCHEMA_LOCKED:Le nom d’une ligne ne se règle pas dans l’index des objets.")
+    if (operation.op === "tab-label") throw new Error("INDEX_SCHEMA_LOCKED:Le nom d’une ligne ne se règle pas dans l’index des items.")
     if (operation.op === "remove-tab") {
       locked(tables.length > 1, ["C’est le seul tableau de ce classeur : il doit en garder au moins un."])
       upsertEntry(schema, table.tabName, "", { deletedAt: now })
@@ -213,7 +213,7 @@ export async function listObjectIndexTrash(): Promise<IndexTrashItem[]> {
   const files = new Map(tables.map((table) => [table.fileId, table.fileName]))
   const items = await Promise.all([...files].map(async ([fileId, fileName]) => (await readSchema(fileId).catch(() => [] as SchemaEntry[]))
     .filter((entry) => entry.deletedAt && entry.state !== "supprimé")
-    .map((entry): IndexTrashItem => ({ family: "objects", key: fileId, title: `Objets · ${fileName}`, tab: entry.tab, column: entry.column, deletedAt: entry.deletedAt, filled: 0 }))))
+    .map((entry): IndexTrashItem => ({ family: "objects", key: fileId, title: `Items · ${fileName}`, tab: entry.tab, column: entry.column, deletedAt: entry.deletedAt, filled: 0 }))))
   return items.flat()
 }
 

@@ -285,7 +285,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
     onChange={(value) => change(item, value)}
   />
   // Une mise en page réglée dans « Modifier » : ses sections, ses lignes et sa colonne latérale.
-  // Rangés par le nom de leur colonne (l'index des objets désigne ses champs par leur place).
+  // Rangés par le nom de leur colonne (l'index des items désigne ses champs par leur place).
   const arranged = layout ? arrangeLayout(layout, fields.filter((item) => normalizeSpec(item.spec).kind !== "id"), (item) => item.label) : null
 
   return <div className="min-h-0 flex-1 overflow-y-auto pr-1">

@@ -7,7 +7,7 @@ import { usePathname, useRouter } from "next/navigation"
 import { ArrowRightLeft, CircleHelp, Coins, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Send, Settings2 } from "lucide-react"
 
 import { usePersistentState } from "@/hooks/use-persistent-state"
-import { addToInventory, chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
+import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { indexGridColumn, IndexEntryForm, type IndexFieldProps } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
@@ -31,7 +31,7 @@ import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/component
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
-import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
+import { buttonPresets, runActionButton, type ActionRuntime } from "@/lib/index-actions"
 import { foldName, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, objectColumnSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
@@ -71,11 +71,14 @@ function isLongField(header: string) {
   return /description|effet|note|prerequis|attribut/.test(normalize(header))
 }
 
-/** Colonne virtuelle : l'identifiant que l'inventaire donne à un objet d'une feuille sans colonne ID. */
+/** Colonne virtuelle : l'identifiant que l'inventaire donne à un item d'une feuille sans colonne ID. */
 const COMPUTED_ID = "__id"
 /** La colonne des boutons d’Eraser (envoyer, déplacer) : jamais écrite dans Sheets. */
 const ACTIONS_COLUMN = "__actions"
 const idSpec: IndexColumnSpec = { kind: "id", hidden: true }
+const presetButton = (key: string): ActionButton => { const preset = buttonPresets.find((item) => item.key === key)!; return { ...preset.button, id: `preset:${key}` } }
+const inventoryPreset = presetButton("inventory")
+const movePreset = presetButton("move-ask")
 
 function isIconHeader(header: string) {
   return ["icone", "icon"].includes(normalize(header).trim())
@@ -106,7 +109,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     "eraser:object-index:sort", null,
     (v): v is SheetGridSort => v === null || (typeof v === "object" && v !== null && typeof (v as { column?: unknown }).column === "string" && ((v as { direction?: unknown }).direction === "asc" || (v as { direction?: unknown }).direction === "desc")),
   )
-  // Les onglets-fenêtres de l'index des objets : des lignes de un ou plusieurs tableaux, selon des conditions.
+  // Les onglets-fenêtres de l'index des items : des lignes de un ou plusieurs tableaux, selon des conditions.
   const settings = useIndexSettings("objects")
   // Tableau ou cartes, et la carte choisie : retenus sur ce poste.
   const [display, setDisplay] = usePersistentState<IndexDisplay>("eraser:object-index:display", "table", isIndexDisplay)
@@ -423,11 +426,10 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       if (!campaign) throw new Error("Aucune campagne choisie : le message n’est pas parti.")
       await sendToCampaignChat(campaign, message, audience)
     },
-    campaignInventory: async () => {
-      const target = await addToInventory(ask, itemIdOf(rowKey))
-      if (target) notify(`Objet ajouté : ${target}.`)
-    },
-  }), [ask, columnOfHeader, commitCell, drawCell, engine, itemIdOf, notify, rawOf, rowRefOf, router, selected, sheetColumns, specs, valueOf])
+    // Les deux préréglages de la colonne Actions : les mêmes fenêtres que ses icônes.
+    campaignInventory: async () => { openSend(rowKey) },
+    moveAsk: async () => { openMove(rowKey) },
+  }), [ask, columnOfHeader, commitCell, drawCell, engine, notify, openMove, openSend, rawOf, rowRefOf, router, selected, sheetColumns, specs, valueOf])
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
   // Chaque colonne passe par le moteur des index : son type décide de sa cellule.
@@ -468,14 +470,16 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       maxWidth: 84,
       sortable: false,
       computed: true,
-      description: "Envoyer l’objet dans un inventaire, ou le déplacer vers un autre onglet.",
+      description: "Envoyer l’item dans un inventaire, ou le déplacer vers un autre onglet.",
+      // Les deux boutons tout faits du moteur (« Envoyer dans un inventaire », « Envoyer dans un
+      // autre onglet ») : les mêmes que dans « Modifier › Boutons », posés d'office ici.
       control: (rowKey) => <span className="flex items-center justify-center gap-0.5 py-0.5">
-        <button type="button" onClick={() => openSend(rowKey)} className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-primary/10" title="Envoyer dans un inventaire (campagne, joueur, PNJ, créature)" aria-label="Envoyer dans un inventaire"><Send className="size-3.5" /></button>
-        <button type="button" onClick={() => openMove(rowKey)} disabled={tables.length < 2} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30" title="Déplacer vers un autre onglet (Objets → Équipement…)" aria-label="Déplacer vers un autre onglet"><ArrowRightLeft className="size-3.5" /></button>
+        <button type="button" onClick={() => void runButton(rowKey, inventoryPreset)} className="flex size-7 items-center justify-center rounded-md text-primary hover:bg-primary/10" title="Envoyer dans un inventaire (campagne, joueur, PNJ, créature)" aria-label="Envoyer dans un inventaire"><Send className="size-3.5" /></button>
+        <button type="button" onClick={() => void runButton(rowKey, movePreset)} disabled={tables.length < 2} className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground disabled:opacity-30" title="Envoyer dans un autre onglet (Objets → Équipement…)" aria-label="Envoyer dans un autre onglet"><ArrowRightLeft className="size-3.5" /></button>
       </span>,
     })
     return list
-  }, [columnOfHeader, commitCell, drawCell, engine, hasIdColumn, iconPreview, openMove, openSend, rowHref, runButton, selected, shownColumns, specs, tables.length, uploadIcon, valueOf])
+  }, [columnOfHeader, commitCell, drawCell, engine, hasIdColumn, iconPreview, rowHref, runButton, selected, shownColumns, specs, tables.length, uploadIcon, valueOf])
   /* eslint-enable react-hooks/refs */
 
   async function refresh(keepSeed = false) {
@@ -633,7 +637,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           {selected && !activeView && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
-          <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les objets répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
+          <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les items répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
           {selected && !activeView && <DrawRowButton
             rows={displayedRows}
             weightColumns={weightColumns}
@@ -645,7 +649,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           />}
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={!selected || busy || Boolean(activeView)} title="Colonnes, types, réglages et tableaux de ce classeur">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
-          <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy || Boolean(activeView)}><Plus />Ajouter un objet</Button>
+          <Button type="button" onClick={() => setCreating(true)} disabled={!selected || busy || Boolean(activeView)}><Plus />Ajouter un item</Button>
         </div>
       </div>
 
@@ -670,7 +674,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 
       {creating && selected && <IndexEntryForm
-        title="Nouvel objet"
+        title="Nouvel item"
         fields={sheetColumns.filter((index) => !isComputedSpec(specs[index]) && !["random", "id"].includes(specs[index].kind)).map((index) => ({ key: String(index), label: selected.headers[index], spec: specs[index], long: isLongField(selected.headers[index]) }))}
         pending={pending === "add"}
         layout={tabLayout(settings.layouts, selected.tabName, "form")}
@@ -679,7 +683,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       />}
 
       {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
-        ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier objet."} />
+        ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
         <SheetGrid
@@ -700,7 +704,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
             // La ligne naît dans le tableau, son nom tapé dans sa case (sans formulaire).
             appendNamed: nameColumn >= 0 ? {
               nameColumn: String(nameColumn),
-              placeholder: "Nom du nouvel objet…",
+              placeholder: "Nom du nouvel item…",
               add: async (name: string) => {
                 if (!await mutate({ action: "add", values: selected.headers.map((header, index) => [header, index === nameColumn ? name : ""]) }, "add")) throw new Error("NOT_ADDED")
               },
@@ -741,7 +745,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index="objects"
         view={viewDialog === "edit" ? activeView : null}
-        sources={[{ value: ALL_SOURCES, label: "Tous les index d’objets" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
+        sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}
         onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(viewSelectKey(id)); return id }}
         onDelete={async (id) => { await settings.deleteView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
@@ -758,15 +762,15 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
       {selected && moveRow !== null && <Dialog open onOpenChange={(open) => { if (!open && pending !== "move") setMoveRow(null) }}>
         <DialogContent className="sm:max-w-md">
           <DialogHeader>
-            <DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="size-4 text-primary" />Déplacer « {moveRow.name || "cet objet"} »</DialogTitle>
-            <DialogDescription>Vers quel onglet ? L’objet garde son ID : les inventaires qui le contiennent le retrouvent. Une colonne remplie que l’onglet d’arrivée n’a pas y est ajoutée.</DialogDescription>
+            <DialogTitle className="flex items-center gap-2"><ArrowRightLeft className="size-4 text-primary" />Déplacer « {moveRow.name || "cet item"} »</DialogTitle>
+            <DialogDescription>Vers quel onglet ? L’item garde son ID : les inventaires qui le contiennent le retrouvent. Une colonne remplie que l’onglet d’arrivée n’a pas y est ajoutée.</DialogDescription>
           </DialogHeader>
           <div className="grid max-h-80 gap-1 overflow-y-auto">
             {tables.filter((table) => tableKey(table) !== tableKey(selected)).map((table) => <Button key={tableKey(table)} type="button" variant="outline" className="h-auto justify-start py-2" disabled={busy} onClick={async () => {
               const name = moveRow.name
               if (await mutate({ action: "move", row: rowRefOf(moveRow.rowKey), targetFileId: table.fileId, targetTabName: table.tabName }, "move")) {
                 setMoveRow(null)
-                notify(`${name ? `« ${name} »` : "L’objet"} est maintenant dans « ${tableLabel(table)} ».`)
+                notify(`${name ? `« ${name} »` : "L’item"} est maintenant dans « ${tableLabel(table)} ».`)
               }
             }}>{pending === "move" ? <LoaderCircle className="animate-spin" /> : <ArrowRightLeft />}<span className="min-w-0 flex-1 truncate text-left">{tableLabel(table)}</span><span className="text-xs text-muted-foreground">{table.rows.length}</span></Button>)}
           </div>

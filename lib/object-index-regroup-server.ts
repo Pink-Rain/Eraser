@@ -117,7 +117,7 @@ async function remapViews(mapping: Map<string, string>, warnings: string[]) {
     return await remapIndexViewSources("objects", mapping)
   } catch (error) {
     console.error("OBJECT_REGROUP_VIEWS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
-    warnings.push("Les onglets-fenêtres de l’index des objets n’ont pas pu suivre : ouvre chacun d’eux et choisis de nouveau son tableau.")
+    warnings.push("Les onglets-fenêtres de l’index des items n’ont pas pu suivre : ouvre chacun d’eux et choisis de nouveau son tableau.")
     return 0
   }
 }

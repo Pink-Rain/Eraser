@@ -90,7 +90,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
     const message = code === "INVENTORY_FULL" ? "Il n’y a plus d’emplacement disponible dans cet inventaire."
       : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Le destinataire n’a pas de contenant compatible disponible."
         : code === "INVALID_INVENTORY_CONTAINER" ? "Donne un nom et une limite comprise entre 1 et 10 000."
-          : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’objet."
+          : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’item."
             : "La modification de l’inventaire de campagne n’a pas pu être enregistrée."
     return NextResponse.json({ error: message }, { status: 400 })
   }

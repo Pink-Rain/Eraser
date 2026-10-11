@@ -32,7 +32,7 @@ export default async function ClassCreationPage({ searchParams }: { searchParams
   if (!account) redirect("/")
   const { classe } = await searchParams
   return <AuthenticatedShell pageLabel="Création de classe" roles={["admin", "mj"]}>
-    {/* Même disposition que l’Index des objets : la page défile, le tableau se fige. */}
+    {/* Même disposition que l’Index des items : la page défile, le tableau se fige. */}
     <div className="w-full px-4 pt-4 sm:px-6">
       <div className="shrink-0">
         <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Classes</p>

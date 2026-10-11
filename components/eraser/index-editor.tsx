@@ -16,7 +16,7 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Textarea } from "@/components/ui/textarea"
-import { actionStepCatalog, describeStep, newStep, stepInfo } from "@/lib/index-actions"
+import { actionStepCatalog, buttonPresets, describeStep, newStep, stepInfo } from "@/lib/index-actions"
 import {
   columnTypeLabel,
   fileAcceptLabels,
@@ -42,7 +42,6 @@ import {
   type RandomSettings,
   type RandomSource,
   type RollupFunction,
-  type TabColumnSettings,
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
 import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
@@ -158,35 +157,6 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
  */
 /** Les types dont une case peut recevoir une valeur d'office à l'ajout d'une ligne. */
 const DEFAULT_VALUE_KINDS = new Set<IndexColumnKind>(["rich", "number", "checkbox", "choice", "color", "fixed", "tab-sort", "linked-choice"])
-
-const tabColumnKey = (value?: TabColumnSettings) => JSON.stringify([value?.label?.trim() || "", Boolean(value?.hidden), value?.after || "", value?.targets ?? null])
-
-function TabColumnSettingsBox({ value, onChange, disabled, tabs, columns }: { value: TabColumnSettings; onChange: (next: TabColumnSettings) => void; disabled: boolean; tabs: string[]; columns: string[] }) {
-  const targets = value.targets ?? tabs
-  const toggle = (name: string, on: boolean) => {
-    const next = on ? [...new Set([...targets, name])] : targets.filter((item) => item !== name)
-    // Tous cochés : rien d'enregistré (un onglet ajouté plus tard sera aussi permis).
-    onChange({ ...value, targets: tabs.every((item) => next.includes(item)) ? undefined : tabs.filter((item) => next.includes(item)) })
-  }
-  return <details className="mt-2 rounded-lg border border-dashed bg-background/40 p-2 text-[11px]">
-    <summary className="cursor-pointer font-semibold">Colonne « Onglet » (vue « Tout »)</summary>
-    <div className="mt-2 grid gap-2">
-      <label className="grid gap-1">Libellé<Input disabled={disabled} value={value.label ?? ""} maxLength={40} onChange={(event) => onChange({ ...value, label: event.target.value || undefined })} placeholder="Onglet" className="h-7 text-xs" /></label>
-      <label className="flex items-center gap-2"><Checkbox disabled={disabled} checked={Boolean(value.hidden)} onCheckedChange={(checked) => onChange({ ...value, hidden: checked === true || undefined })} />Masquée</label>
-      <label className="grid gap-1">Place
-        <NativeSelect disabled={disabled || value.hidden} value={value.after ?? ""} onChange={(event) => onChange({ ...value, after: event.target.value || undefined })} className="h-7 text-[11px]">
-          <NativeSelectOption value="">Après le nom</NativeSelectOption>
-          {columns.filter((column) => foldName(column) !== "nom").map((column) => <NativeSelectOption key={column} value={column}>Après « {column} »</NativeSelectOption>)}
-        </NativeSelect>
-      </label>
-      <fieldset className="grid gap-1" disabled={disabled}>
-        <legend className="mb-1">Une ligne peut aller dans</legend>
-        {tabs.map((name) => <label key={name} className="flex items-center gap-2"><Checkbox checked={targets.includes(name)} onCheckedChange={(checked) => toggle(name, checked === true)} />{name}</label>)}
-        <span className="text-muted-foreground">Seulement entre onglets aux mêmes colonnes. Une ligne déjà dans un onglet décoché y reste.</span>
-      </fieldset>
-    </div>
-  </details>
-}
 
 function describe(operation: SchemaOperation) {
   const text = describeOperation(operation)
@@ -577,7 +547,14 @@ function ButtonsEditor({ spec, onChange, disabled, siblings, tabs, targets, fami
         <div><Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => update(button.id, { steps: [...button.steps, newStep("notify")] })}><Plus />Ajouter une étape</Button></div>
       </div>
     </div>)}
-    <div><Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setButtons([...buttons, { id: nextId(), label: "Bouton", icon: "zap", steps: [] }])}><Plus />Ajouter un bouton</Button></div>
+    <div className="flex flex-wrap items-center gap-2">
+      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setButtons([...buttons, { id: nextId(), label: "Bouton", icon: "zap", steps: [] }])}><Plus />Ajouter un bouton</Button>
+      {/* Des boutons tout faits, les mêmes dans tous les index. */}
+      <NativeSelect disabled={disabled} value="" aria-label="Ajouter un bouton tout fait" onChange={(event) => { const preset = buttonPresets.find((item) => item.key === event.target.value); if (preset) setButtons([...buttons, { ...structuredClone(preset.button), id: nextId() }]) }} className="h-8 w-60 text-xs">
+        <NativeSelectOption value="">+ Bouton tout fait…</NativeSelectOption>
+        {buttonPresets.filter((preset) => !preset.only || (preset.only === "objects" ? family === "objects" : family !== "objects")).map((preset) => <NativeSelectOption key={preset.key} value={preset.key} title={preset.description}>{preset.label}</NativeSelectOption>)}
+      </NativeSelect>
+    </div>
   </>
 }
 
@@ -593,7 +570,7 @@ function TypeSettings(props: SettingsProps) {
     </div>
     case "name-form": return <p className="text-xs text-muted-foreground">Un clic sur le nom ouvre la fiche de la ligne, avec tous ses champs (masqués compris, rangés selon sa mise en page). Le nom se modifie dans la fiche, qui s’enregistre d’elle-même.</p>
     case "number": return <NumberFormatSettings spec={spec} onChange={onChange} disabled={disabled} />
-    case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des objets)</label>
+    case "checkbox": return <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.emptyChecked)} onCheckedChange={(checked) => set({ emptyChecked: checked === true })} />Une case vide compte comme cochée (comme « Actif » des items)</label>
     case "color": return <p className="text-xs text-muted-foreground">Une pastille et un sélecteur de couleur ; la feuille garde le code (#aa3355).</p>
     case "glyph": return <div className="grid gap-2 text-xs">
       <p className="text-muted-foreground">Chaque case propose toutes les icônes (recherche en français ou en anglais) ou un émoji ; la feuille garde le nom de l’icône.</p>
@@ -745,7 +722,7 @@ function TypePicker({ spec, onPick, policy, disabled, family }: { spec: IndexCol
     if (kind === spec.kind) return ""
     if (!policy.type && !(["name", "name-form"].includes(kind) && ["name", "name-form"].includes(spec.kind))) return "Type verrouillé : voir le cadenas."
     // Comme le serveur (lib/object-schema.ts) : une Liste liée écrit un simple nom, elle est permise.
-    if (objects && ["linked", "lookup", "rollup", "tab-sort"].includes(kind)) return "Pas encore dans l’index des objets : l’inventaire et les boutiques lisent leurs cases comme du texte."
+    if (objects && ["linked", "lookup", "rollup", "tab-sort"].includes(kind)) return "Pas encore dans l’index des items : l’inventaire et les boutiques lisent leurs cases comme du texte."
     return ""
   }
   const current = indexColumnKinds[spec.kind]
@@ -876,14 +853,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const readOnly = Boolean(model.readOnly)
   const tab = tabs.find((candidate) => candidate.id === selectedTab) ?? tabs[0]
   const column = tab?.columns.find((candidate) => candidate.id === selectedColumn) ?? tab?.columns[0]
-  // La colonne « Onglet » de la vue « Tout » : réglée avant les renommages d'onglets (ses onglets
-  // d'arrivée sont nommés comme dans la feuille ; le serveur les renomme avec l'onglet).
-  const [tabColumn, setTabColumn] = useState<TabColumnSettings | undefined>(model.tabColumn)
-  const tabColumnChanged = Boolean(model.tabColumn && tabColumn) && tabColumnKey(tabColumn) !== tabColumnKey(model.tabColumn)
-  const operations = useMemo(() => [
-    ...(tabColumnChanged && tabColumn ? [{ op: "tab-column" as const, settings: tabColumn }] : []),
-    ...operationsOf(tabs, originalTabOrder),
-  ], [originalTabOrder, tabColumn, tabColumnChanged, tabs])
+  const operations = useMemo(() => operationsOf(tabs, originalTabOrder), [originalTabOrder, tabs])
   const liveTabs = tabs.filter((candidate) => !candidate.removed)
   const problems = useMemo(() => tabs.flatMap((candidate) => candidate.removed ? [] : [
     ...(candidate.name.trim() !== candidate.original ? [tabProblem(candidate.name, tabs.filter((other) => other.id !== candidate.id && !other.removed).map((other) => other.name))] : []),
@@ -1018,7 +988,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   }
 
   /**
-   * Index des objets : tous les onglets prennent les colonnes de `reference` — noms bien
+   * Index des items : tous les onglets prennent les colonnes de `reference` — noms bien
    * écrits (« Cout » → « Prix », « Rareté principal » → « Rareté principale »), types,
    * styles imposés et ordre. Les colonnes absentes sont ajoutées ; celles que la référence
    * n'a pas restent à la fin, sans rien supprimer. Rien n'est écrit avant « Enregistrer ».
@@ -1127,13 +1097,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             Une ligne de « {tab.name} » s’appelle
             <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
           </label>}
-          {tabColumn && <TabColumnSettingsBox
-            value={tabColumn}
-            onChange={setTabColumn}
-            disabled={readOnly}
-            tabs={tabs.filter((candidate) => candidate.original && !candidate.removed).map((candidate) => candidate.original!)}
-            columns={(tabs.find((candidate) => !candidate.removed)?.columns ?? []).filter((item) => !item.removed && item.original && !item.spec.hidden).map((item) => item.original!)}
-          />}
           {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2">
             <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
               <Columns3 />Aligner les autres onglets sur « {tab.name} »

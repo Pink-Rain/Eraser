@@ -80,7 +80,7 @@ function WindowHeader({ window, onClose, onToggle }: { window: TabletopDetailWin
 }
 
 function ShopContent({ shop }: { shop: TabletopShopDetail | null }) {
-  if (!shop?.items.length) return <div className="grid min-h-36 place-items-center p-5 text-center"><div><PackageOpen className="mx-auto size-6 text-muted-foreground" /><p className="mt-2 text-sm text-muted-foreground">Aucun objet dans ce magasin.</p></div></div>
+  if (!shop?.items.length) return <div className="grid min-h-36 place-items-center p-5 text-center"><div><PackageOpen className="mx-auto size-6 text-muted-foreground" /><p className="mt-2 text-sm text-muted-foreground">Aucun item dans ce magasin.</p></div></div>
   return (
     <ul className="divide-y">
       {shop.items.map((item) => (

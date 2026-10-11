@@ -58,7 +58,7 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
     {status.state === "séparé"
       ? <div className="flex flex-wrap items-center gap-3 rounded-xl border border-dashed border-primary/30 bg-primary/5 px-4 py-2.5 text-sm">
         <Combine className="size-4 shrink-0 text-primary" />
-        <span className="min-w-0 flex-1">{status.files.length} classeurs d’objets dans le dossier « Objets ». Ils peuvent devenir un seul classeur « {MERGED_OBJECT_INDEX_NAME} », un onglet par index.</span>
+        <span className="min-w-0 flex-1">{status.files.length} classeurs d’items dans le dossier « Objets ». Ils peuvent devenir un seul classeur « {MERGED_OBJECT_INDEX_NAME} », un onglet par index.</span>
         <Button type="button" size="sm" variant="outline" onClick={() => { setError(null); setDone(null); setDialog("regroup") }}><Combine />Regrouper…</Button>
       </div>
       : <div className="flex flex-wrap items-center gap-3 rounded-xl border bg-card/60 px-4 py-2 text-xs text-muted-foreground">
@@ -71,7 +71,7 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
     <Dialog open={dialog === "regroup"} onOpenChange={(open) => { if (!open && !pending) { if (done) window.location.reload(); else setDialog(null) } }}>
       <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-xl">
         <DialogHeader>
-          <DialogTitle className="flex items-center gap-2"><Combine className="size-4 text-primary" />Regrouper les index d’objets</DialogTitle>
+          <DialogTitle className="flex items-center gap-2"><Combine className="size-4 text-primary" />Regrouper les index d’items</DialogTitle>
           <DialogDescription>Un seul classeur « {MERGED_OBJECT_INDEX_NAME} », un onglet par index. Rien n’est supprimé : c’est une copie, vérifiée avant de remplacer les anciens classeurs.</DialogDescription>
         </DialogHeader>
         {done
@@ -95,12 +95,12 @@ export function ObjectIndexRegroup({ onChanged }: { onChanged: () => void }) {
                 <li>Chaque tableau est copié tel quel (valeurs, couleurs, images) dans un onglet :
                   <span className="mt-1 flex flex-wrap gap-1">{planned && planned.order.map((key) => <span key={key} className="rounded-full border bg-background px-2 py-0.5 text-xs text-foreground">{planned.names.get(key)}</span>)}</span>
                 </li>
-                <li>Les objets sans identifiant gardent celui que connaissent les inventaires, boutiques et fouilles (écrit dans une colonne ID).</li>
+                <li>Les items sans identifiant gardent celui que connaissent les inventaires, boutiques et fouilles (écrit dans une colonne ID).</li>
                 <li>Les types de colonnes (« Modifier ») et les onglets-fenêtres suivent.</li>
                 <li>La copie est relue et comparée ligne par ligne. À la moindre différence, rien ne change.</li>
                 <li>Les anciens classeurs, intacts, sont rangés dans le sous-dossier « {OBJECT_INDEX_BACKUP_FOLDER} ».</li>
               </ol>
-              <p className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">Évite de modifier les index d’objets pendant l’opération (une minute environ). « Annuler le regroupement » remet les anciens classeurs en place ; ce qui aura été changé entre-temps dans le classeur regroupé y restera.</p>
+              <p className="rounded-lg border border-amber-500/30 bg-amber-50 px-3 py-2 text-xs text-amber-950">Évite de modifier les index d’items pendant l’opération (une minute environ). « Annuler le regroupement » remet les anciens classeurs en place ; ce qui aura été changé entre-temps dans le classeur regroupé y restera.</p>
             </div>
             {error && <div className="rounded-lg border border-destructive/30 bg-destructive/5 px-3 py-2 text-sm text-destructive" role="alert">
               {error.message}

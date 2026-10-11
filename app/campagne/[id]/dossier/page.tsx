@@ -16,7 +16,7 @@ import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 
 export const dynamic = "force-dynamic"
 
-/** Les raretés comptées « rares ou mieux » (l'ordre de l'Index des objets). */
+/** Les raretés comptées « rares ou mieux » (l'ordre de l'Index des items). */
 const RARE_OR_BETTER = ["Rare", "Très rare", "Ultime", "Épique", "Légendaire"]
 
 const failed = (code: string) => (error: unknown) => {

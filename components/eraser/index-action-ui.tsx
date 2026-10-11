@@ -96,7 +96,7 @@ export async function sendToCampaignChat(campaignId: string, message: string, au
 }
 
 /**
- * Ajoute un objet à un inventaire d'une campagne : celui de la campagne, d'un de ses
+ * Ajoute un item à un inventaire d'une campagne : celui de la campagne, d'un de ses
  * personnages ou d'un de ses PNJ (choisis au clic). Renvoie le nom de l'inventaire.
  */
 export async function addToInventory(ask: ReturnType<typeof useChoiceDialog>["ask"], itemId: string) {
@@ -110,7 +110,7 @@ export async function addToInventory(ask: ReturnType<typeof useChoiceDialog>["as
   const [kind, id] = [chosen.slice(0, chosen.indexOf(":")), chosen.slice(chosen.indexOf(":") + 1)]
   const url = kind === "character" ? `/api/characters/${encodeURIComponent(id)}/inventory` : kind === "npc" ? `/api/npcs/${encodeURIComponent(id)}/inventory` : `/api/campaigns/${encodeURIComponent(campaign)}/inventory`
   const added = await fetch(url, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add-item", itemId }) })
-  if (!added.ok) throw new Error(((await added.json().catch(() => ({}))) as { error?: string }).error || "L’objet n’a pas pu être ajouté.")
+  if (!added.ok) throw new Error(((await added.json().catch(() => ({}))) as { error?: string }).error || "L’item n’a pas pu être ajouté.")
   return targets.find((target) => `${target.kind}:${target.id}` === chosen)?.name ?? "l’inventaire"
 }
 

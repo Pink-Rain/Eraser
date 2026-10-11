@@ -172,17 +172,17 @@ const DrawCard = memo(function DrawCard({ draw, item, fresh, targets, targetsLoa
         {item && (item.descriptionHtml?.trim() || item.description) && <ObjectText as="div" html={item.descriptionHtml} text={item.description} item={item} className={`mt-1.5 text-xs leading-5 text-muted-foreground ${richText}`} />}
         {item && (item.effectHtml?.trim() || item.effect) && <p className="mt-1 text-xs leading-5"><span className="font-semibold">Effet :</span> <ObjectText html={item.effectHtml} text={item.effect} item={item} className={richText} /></p>}
         {item && <ObjectTraits item={item} className="mt-1.5" />}
-        {!item && <p className="mt-1 text-xs text-muted-foreground">Cet objet n’est plus dans l’index Objets.</p>}
-        {draw.elsewhere && <p className="mt-1.5 text-[11px] italic text-muted-foreground">Trouvé hors de ce lieu : aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’y est répertorié.</p>}
+        {!item && <p className="mt-1 text-xs text-muted-foreground">Cet item n’est plus dans l’Index des items.</p>}
+        {draw.elsewhere && <p className="mt-1.5 text-[11px] italic text-muted-foreground">Trouvé hors de ce lieu : aucun item {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’y est répertorié.</p>}
         {draw.givenTo && <p className="mt-2 inline-flex items-center gap-1 rounded-full border border-emerald-300 bg-emerald-50 px-2 py-0.5 text-[11px] font-medium text-emerald-800"><Check className="size-3" />Donné à {draw.givenTo}</p>}
       </div>
     </div> : <div className="mt-3 rounded-xl border border-dashed px-4 py-4 text-sm text-muted-foreground">
-      <p>Aucun objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’est répertorié pour « {draw.place} » dans l’index Objets.</p>
-      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => onElsewhere(draw.id)}><Shuffle />Prendre un objet {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} d’un autre lieu</Button>
+      <p>Aucun item {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} n’est répertorié pour « {draw.place} » dans l’Index des items.</p>
+      <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => onElsewhere(draw.id)}><Shuffle />Prendre un item {searchRarityLabels[draw.rarity].toLocaleLowerCase("fr")} d’un autre lieu</Button>
     </div>}
     <div className="mt-3 flex items-center justify-end gap-1 border-t pt-2">
       <Button type="button" variant={draw.pinned ? "secondary" : "ghost"} size="icon-sm" onClick={() => onPin(draw.id)} aria-pressed={draw.pinned} aria-label={draw.pinned ? "Ne plus garder ce tirage" : "Garder ce tirage"} title={draw.pinned ? "Épinglé : ce tirage reste dans la liste" : "Épingler : ce tirage ne s’effacera pas"}><Pin className={draw.pinned ? "fill-current text-primary" : ""} /></Button>
-      {draw.itemId && <Button type="button" variant="ghost" size="icon-sm" onClick={() => onReroll(draw.id)} aria-label="Relancer l’objet" title="Un autre objet de même rareté, au même lieu"><RefreshCw /></Button>}
+      {draw.itemId && <Button type="button" variant="ghost" size="icon-sm" onClick={() => onReroll(draw.id)} aria-label="Relancer l’item" title="Un autre item de même rareté, au même lieu"><RefreshCw /></Button>}
       {draw.itemId && <Popover open={moving} onOpenChange={(open) => { setMoving(open); if (open) onOpenTargets() }}>
         <PopoverTrigger asChild><Button type="button" variant="ghost" size="icon-sm" disabled={giving} aria-label={`Transférer ${name}`} title="Transférer">{giving ? <LoaderCircle className="animate-spin" /> : <MoveRight />}</Button></PopoverTrigger>
         <PopoverContent align="end" side="bottom" className="w-80 p-3"><TransferPicker itemName={name} targets={targets} loading={targetsLoading} pending={giving} onGive={(target) => void onGive(draw.id, target).then((done) => { if (done) setMoving(false) })} /></PopoverContent>
@@ -336,7 +336,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavaila
       <div className="mt-3 flex flex-wrap gap-1.5" role="radiogroup" aria-label="Lieu de fouille">
         {searchPlaces.map((candidate) => {
           const count = [...(catalog.byPlace.get(candidate)?.values() ?? [])].reduce((sum, pool) => sum + pool.length, 0)
-          return <button key={candidate} type="button" role="radio" aria-checked={candidate === place} onClick={() => setPlace(candidate)} title={`${count} objet${count > 1 ? "s" : ""} répertorié${count > 1 ? "s" : ""} ici`} className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${candidate === place ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"} ${count ? "" : "opacity-60"}`}>{candidate}</button>
+          return <button key={candidate} type="button" role="radio" aria-checked={candidate === place} onClick={() => setPlace(candidate)} title={`${count} item${count > 1 ? "s" : ""} répertorié${count > 1 ? "s" : ""} ici`} className={`rounded-full border px-3 py-1.5 text-sm font-medium transition-colors ${candidate === place ? "border-primary bg-primary text-primary-foreground" : "bg-background/60 hover:bg-muted"} ${count ? "" : "opacity-60"}`}>{candidate}</button>
         })}
       </div>
       <p className="mt-5 text-xs font-semibold uppercase tracking-[0.18em] text-primary/70">Résultat du test de Fouille</p>
@@ -344,7 +344,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavaila
         {searchResults.map((result) => <button key={result.key} type="button" onClick={() => search(result.key)} disabled={!items.length} className={`group flex min-h-20 flex-col items-start justify-between rounded-xl border px-4 py-3 text-left shadow-sm transition active:scale-[.98] disabled:opacity-50 ${resultStyles[result.key].button}`}>
           <span className="flex w-full items-center justify-between gap-2"><span className="font-display text-lg font-semibold">{result.label}</span><span className="flex items-center gap-1.5 text-xs opacity-70"><kbd className="rounded border border-current/30 px-1.5 font-sans text-[10px]">{result.shortcut}</kbd><Dices className="size-4" /></span></span>
           <span className="mt-1 text-[11px] leading-4 opacity-80">{tableSummary(result.key)}</span>
-          <span className="mt-1 flex flex-wrap gap-1">{[...new Set(searchTables[result.key].map((range) => range.rarity))].filter((rarity) => !available.has(rarity)).map((rarity) => <span key={rarity} className="text-[10px] italic opacity-70">Aucun objet {searchRarityLabels[rarity].toLocaleLowerCase("fr")} ici</span>)}</span>
+          <span className="mt-1 flex flex-wrap gap-1">{[...new Set(searchTables[result.key].map((range) => range.rarity))].filter((rarity) => !available.has(rarity)).map((rarity) => <span key={rarity} className="text-[10px] italic opacity-70">Aucun item {searchRarityLabels[rarity].toLocaleLowerCase("fr")} ici</span>)}</span>
         </button>)}
       </div>
     </section>
@@ -358,7 +358,7 @@ export function SearchGenerator({ campaignId, items, initialDraws, drawsUnavaila
       </div>
       {draws.length
         ? <div className="grid items-start gap-3 lg:grid-cols-2 2xl:grid-cols-3">{draws.map((draw) => <DrawCard key={draw.id} draw={draw} item={draw.itemId ? catalog.byId.get(draw.itemId) : undefined} fresh={draw.id === freshId} targets={targets} targetsLoading={targetsLoading} giving={giving === draw.id} onPin={onPin} onRemove={onRemove} onReroll={onReroll} onElsewhere={onElsewhere} onOpenTargets={onOpenTargets} onGive={onGive} />)}</div>
-        : <div className="grid min-h-40 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><Dices className="mx-auto size-8 text-primary/45" /><p className="mt-3 font-display text-xl font-semibold">Aucun tirage</p><p className="mt-1 text-sm text-muted-foreground">Choisis le lieu, puis le résultat du test : le d100 et l’objet sont tirés aussitôt.</p></div></div>}
+        : <div className="grid min-h-40 place-items-center rounded-2xl border border-dashed bg-card/35 p-8 text-center"><div><Dices className="mx-auto size-8 text-primary/45" /><p className="mt-3 font-display text-xl font-semibold">Aucun tirage</p><p className="mt-1 text-sm text-muted-foreground">Choisis le lieu, puis le résultat du test : le d100 et l’item sont tirés aussitôt.</p></div></div>}
     </section>
   </div>
 }

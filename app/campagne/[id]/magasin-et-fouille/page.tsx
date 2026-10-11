@@ -20,7 +20,7 @@ async function CampaignShopsData({ campaignId, accountUid, isAdmin }: { campaign
     listLatestShops(campaignId),
   ])
   if (loadedItems) items = loadedItems
-  else loadError = "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."
+  else loadError = "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."
   const baseHref = `/campagne/${encodeURIComponent(campaignId)}/magasin-et-fouille`
   const sourcePages = [{ id: "bac-a-sable", name: "Bac à sable" }, ...campaigns.filter((item) => item.id !== campaignId).map((item) => ({ id: item.id, name: item.name }))]
   return (

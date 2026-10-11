@@ -527,7 +527,7 @@ export const ImageCell = memo(function ImageCell({ label, value, disabled = fals
   label: string
   value: string
   disabled?: boolean
-  /** Vignette propre à la colonne (l'icône d'Eraser d'un objet…). */
+  /** Vignette propre à la colonne (l'icône d'Eraser d'un item…). */
   preview?: ReactNode
   /** Import vers un rangement propre à la colonne (dossier « icone objet »…). */
   upload?: (file: File, previous: string) => Promise<string>

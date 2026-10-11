@@ -28,7 +28,7 @@ function specIn(table: ObjectIndexTable, header: string, schemas: Record<string,
 }
 
 /**
- * Un onglet-fenêtre de l'index des objets : les lignes de plusieurs tableaux (ou d'un
+ * Un onglet-fenêtre de l'index des items : les lignes de plusieurs tableaux (ou d'un
  * seul) qui remplissent ses conditions. Chaque case modifiée est écrite dans son tableau
  * d'origine ; rien n'est copié. Ajouter, supprimer ou les boutons se font depuis
  * l'onglet d'origine de la ligne.
@@ -137,7 +137,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
       onSort={setSort}
       disabled={disabled}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : <span className="text-[11px] text-muted-foreground">Fenêtre sur {sources.length > 1 ? `${sources.length} tableaux` : "un tableau"} : les cases modifiées sont écrites à la source.</span>}
-      empty="Aucun objet ne remplit les conditions de cet onglet-fenêtre."
+      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
     />
   </div>
 }

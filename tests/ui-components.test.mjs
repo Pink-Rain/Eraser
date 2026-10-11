@@ -1221,3 +1221,21 @@ test("carnet de notes : une seule page « Notes » reste écrite comme avant, pl
   assert.deepEqual(readNotebook('<section data-eraser-page="A">1</section><section data-eraser-page="a">2</section>').map((page) => page.name), ["A", "a 2"]);
   assert.equal(nextNotebookPageName(pages), "Page 3");
 });
+
+test("boutons tout faits : « Envoyer dans un autre onglet » demande l'onglet, puis arrête le bouton", async () => {
+  const { runActionButton, buttonPresets, stepInfo } = await vite.ssrLoadModule("/lib/index-actions.ts");
+  const move = buttonPresets.find((preset) => preset.key === "move-ask");
+  assert.ok(move && !move.only, "proposé dans tous les index");
+  assert.equal(stepInfo("move-ask").label, "Envoyer dans un autre onglet");
+  const calls = [];
+  const runtime = { row: () => ({ column: () => undefined }), cell: () => "", specOf: () => undefined, setCell: async () => {}, confirm: async () => true, notify: (message) => calls.push(`notify:${message}`), openUrl: () => {}, navigate: () => {}, copy: async () => {}, moveAsk: async () => { calls.push("moveAsk") } };
+  await runActionButton({ ...move.button, id: "x", steps: [...move.button.steps, { type: "notify", message: "après" }] }, runtime);
+  // Comme « Déplacer » : la ligne est partie, l'étape suivante n'est pas faite.
+  assert.deepEqual(calls, ["moveAsk"]);
+  // L'index des items l'a aussi, avec « Envoyer dans un inventaire » (réservé aux items).
+  assert.equal(buttonPresets.find((preset) => preset.key === "inventory").only, "objects");
+  // Une page qui ne sait pas déplacer : le bouton le dit, sans rien casser.
+  calls.length = 0;
+  assert.equal(await runActionButton({ ...move.button, id: "y" }, { ...runtime, moveAsk: undefined }), false);
+  assert.match(calls[0], /pas possible dans cet index/);
+});

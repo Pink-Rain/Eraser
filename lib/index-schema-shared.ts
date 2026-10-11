@@ -213,7 +213,7 @@ export const objectReadHeaders: Array<{ names: string[]; label: string }> = [
   { names: ["Runes", "Rune"], label: "les runes (affichées sous l’effet)" },
   { names: ["Prérequis", "Prerequis"], label: "les prérequis" },
   { names: ["Édition", "Edition"], label: "l’édition" },
-  { names: ["Actif", "Active", "Disponible"], label: "la disponibilité (boutiques, recherche d’objets)" },
+  { names: ["Actif", "Active", "Disponible"], label: "la disponibilité (boutiques, recherche d’items)" },
   { names: ["Compétence", "Competence", "Compétences", "Competences"], label: "la compétence (affichée avec la description)" },
   { names: ["Distance", "Portée", "Portee"], label: "la distance (affichée avec la description)" },
   { names: ["Action", "Actions"], label: "l’action (affichée sous l’effet)" },
@@ -223,7 +223,7 @@ export const objectReadHeaders: Array<{ names: string[]; label: string }> = [
 
 /** Pourquoi une colonne d'un tableau d'objets est verrouillée, ou `null` si elle est libre. */
 export function objectColumnPolicy(header: string): ColumnPolicy {
-  if (isIdHeader(header)) return lockedPolicy(["L’identifiant relie chaque objet aux inventaires des personnages et aux boutiques : le changer ferait perdre ces objets."])
+  if (isIdHeader(header)) return lockedPolicy(["L’identifiant relie chaque item aux inventaires des personnages et aux boutiques : le changer ferait perdre ces items."])
   const read = objectReadHeaders.find((entry) => entry.names.some((name) => foldName(name) === foldName(header)))
   if (!read) return freePolicy
   return lockedPolicy(

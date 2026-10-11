@@ -7,7 +7,7 @@ import { ExternalLink, Gift, Link2, X } from "lucide-react"
 import type { ItemNotification } from "@/lib/item-notifications"
 import { playItemReceived } from "@/lib/sounds"
 
-/** Annoncé quand un objet vient d'arriver : l'inventaire concerné, s'il est ouvert, se recharge. */
+/** Annoncé quand un item vient d'arriver : l'inventaire concerné, s'il est ouvert, se recharge. */
 export const inventoryReceivedEvent = "eraser:inventory-received"
 
 export function announceInventoryReceived(targetId: string) {
@@ -38,7 +38,7 @@ export function showItemNotifications(notifications: ItemNotification[]) {
   if (notifications.length) window.dispatchEvent(new CustomEvent(SHOW_EVENT, { detail: notifications }))
 }
 
-/** Appelle `onReceived` quand l'un de ces inventaires (personnage, PNJ, `CAMPAGNE:<id>`) reçoit un objet. */
+/** Appelle `onReceived` quand l'un de ces inventaires (personnage, PNJ, `CAMPAGNE:<id>`) reçoit un item. */
 export function useInventoryReceived(ids: string[], onReceived: () => void) {
   const callback = useRef(onReceived)
   useEffect(() => { callback.current = onReceived })
@@ -58,14 +58,14 @@ const POLL_MS = 15_000
 const VISIBLE_MS = 12_000
 
 /**
- * Relève régulièrement les objets reçus (plus souvent quand la fenêtre est active) et
+ * Relève régulièrement les items reçus (plus souvent quand la fenêtre est active) et
  * les annonce dans une petite carte, au-dessus du bouton du chat.
  */
 export function ItemNotifications() {
   const router = useRouter()
   const [shown, setShown] = useState<ItemNotification[]>([])
 
-  // Les objets reçus par un personnage, relevés par sa fiche à son ouverture.
+  // Les items reçus par un personnage, relevés par sa fiche à son ouverture.
   useEffect(() => {
     const listener = (event: Event) => {
       const received = (event as CustomEvent<ItemNotification[]>).detail ?? []
@@ -124,7 +124,7 @@ export function ItemNotifications() {
     }
   }, [])
 
-  // Un objet reçu s'efface seul ; une page envoyée attend qu'on l'ouvre ou qu'on la ferme.
+  // Un item reçu s'efface seul ; une page envoyée attend qu'on l'ouvre ou qu'on la ferme.
   const oldest = shown.find((notification) => notification.kind !== "page")?.id
   useEffect(() => {
     if (!oldest) return

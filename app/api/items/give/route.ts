@@ -67,10 +67,10 @@ export async function POST(request: Request) {
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     const message = code === "INVENTORY_FULL" ? "Cet inventaire est plein."
-      : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ce destinataire n’a pas de contenant compatible avec cet objet."
-        : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet objet n’est pas encore lu par les inventaires : actualise l’index puis recommence."
+      : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Ce destinataire n’a pas de contenant compatible avec cet item."
+        : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’est pas encore lu par les inventaires : actualise l’index puis recommence."
           : code === "INVENTORY_TRANSFER_FORBIDDEN" ? "Cet inventaire ne fait pas partie de tes campagnes."
-            : "L’objet n’a pas pu être envoyé."
+            : "L’item n’a pas pu être envoyé."
     return NextResponse.json({ error: message }, { status: 400 })
   }
 }

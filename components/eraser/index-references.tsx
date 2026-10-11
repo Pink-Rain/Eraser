@@ -183,7 +183,7 @@ function ModifierName({ modifier, color }: { modifier: WeaponModifierRef; color:
 }
 
 /**
- * L'icône d'un objet (colonne Icône, ou celle qu'Eraser lui choisit) teintée d'une couleur :
+ * L'icône d'un item (colonne Icône, ou celle qu'Eraser lui choisit) teintée d'une couleur :
  * son dessin sert de pochoir. Sans couleur, l'image telle quelle.
  */
 function ObjectGlyph({ object, name, color, className = "size-[1em]" }: { object: NonNullable<ResolvedReference["object"]>; name: string; color?: string; className?: string }) {
@@ -411,7 +411,7 @@ function Cited({ citation, value, depth, states, modifiers }: { citation: Citati
 
 /**
  * Un texte d'index affiché hors tableau. `html` est la case mise en forme (ou son texte) ;
- * `fill` remplace d'abord les accolades propres à la ligne (« {Valeur 2} » d'un objet).
+ * `fill` remplace d'abord les accolades propres à la ligne (« {Valeur 2} » d'un item).
  *
  * Les références posées par le menu « { » s'affichent avec le nom actuel de leur ligne
  * (avec son détail au survol) ou la valeur de la case citée (sans survol, dans le style

@@ -30,7 +30,7 @@ import { usePersistentState } from "@/hooks/use-persistent-state"
 import { IN_PLACE_ATTRIBUTE, replaceAppUrl, URL_CHANGE_EVENT } from "@/components/eraser/app-tabs"
 import { IndexTabPicker, useIndexTabParam } from "@/components/eraser/index-tab-picker"
 import { runActionButton, type ActionRuntime } from "@/lib/index-actions"
-import { choiceCorrection, columnTypeLabel, computeRollup, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
+import { choiceCorrection, computeRollup, isComputedSpec, isRichSpec, isSheetSpec, normalizeSpec, type ActionButton, type IndexColumnSpec } from "@/lib/index-columns"
 import { columnFormulaValue, numericCellValue } from "@/lib/index-formula"
 import { cryptoRandom, drawRandom, drawText, type RandomCandidateRow } from "@/lib/index-random"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
@@ -82,8 +82,6 @@ function columnWidthFor(header: string, fallback?: number) {
   return isNameColumn(header) ? 220 : 170
 }
 
-/** L'onglet de la vue « Tout » est une colonne comme une autre, de type Onglet. */
-const tabSpec: IndexColumnSpec = { kind: "tab" }
 
 /** Les cellules de liste mal orthographiées (« Aggressif »), que « Corriger » réécrit. */
 function countCorrections(tables: WorldIndexTable[], specOf: (tab: string, header: string) => IndexColumnSpec) {
@@ -541,8 +539,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const signature = (headers: string[]) => [...headers].map(foldName).sort().join("|")
     const from = definition.tabs.find((tab) => tab.name === fromTab)
     if (!from) return []
-    const allowed = definition.tabColumn?.targets
-    return definition.tabs.filter((tab) => tab.name !== fromTab && signature(tab.headers) === signature(from.headers) && (!allowed || allowed.includes(tab.name))).map((tab) => tab.name)
+    return definition.tabs.filter((tab) => tab.name !== fromTab && signature(tab.headers) === signature(from.headers)).map((tab) => tab.name)
   }, [definition])
 
   const busy = Boolean(pending)
@@ -980,6 +977,13 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       duplicate: () => mutateRowsRef.current("duplicate", targets, "duplicate", {}, { rethrow: true }),
       remove: () => mutateRowsRef.current("delete", targets, "delete", {}, { rethrow: true }),
       move: (toTab) => mutateRowsRef.current("move", targets, "move", { toTab }, { rethrow: true }),
+      // « Envoyer dans un autre onglet » : les onglets aux mêmes colonnes, choisis au clic.
+      moveAsk: async () => {
+        const choices = moveTargetsOf(tab)
+        if (!choices.length) throw new Error("Aucun autre onglet n’a les mêmes colonnes : la ligne ne peut aller nulle part.")
+        const toTab = await ask(`Envoyer « ${nameOf(rowKey)} » dans…`, choices.map((name) => ({ value: name, label: name })))
+        if (toTab) await mutateRowsRef.current("move", targets, "move", { toTab }, { rethrow: true })
+      },
       create: async (index, targetTab, values) => {
         const source = index === indexKey ? { tables: tables as LoadedWorldIndex["tables"] } : await loadWorldIndexData(index as WorldIndexKey)
         const table = source?.tables.find((candidate) => !targetTab || candidate.tabName === targetTab) ?? source?.tables[0]
@@ -1005,7 +1009,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         await sendToCampaignChat(campaign, message, audience)
       },
     }
-  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, nameOf, notify, ownNameColumn, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
+  }, [applyData, ask, commitCell, origin, data, drawCell, engine, indexKey, locate, moveTargetsOf, nameOf, notify, ownNameColumn, pathOf, rawOf, relationOf, router, rowTargetOf, specOf, tables, valueOf])
 
   const runButton = useCallback(async (rowKey: string, button: ActionButton) => { await runActionButton(button, runtimeFor(rowKey)) }, [runtimeFor])
 
@@ -1034,12 +1038,6 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       },
       entityImage && foldName(header) === entityImage.header ? { upload: (file: File, _previous: string, rowKey: string) => entityImage.upload(file, rowKey, header) } : {},
     ))
-    // La colonne « Onglet », réglée dans « Modifier » : libellé, place (après une colonne), masquée.
-    const tabColumn = definition.tabColumn
-    if (spanning && !tabColumn?.hidden) {
-      const after = tabColumn?.after ? list.findIndex((column) => foldName(column.key) === foldName(tabColumn.after!)) : -1
-      list.splice(after >= 0 ? after + 1 : 1, 0, { key: TAB_COLUMN, label: tabColumn?.label || "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
-    }
     // Les colonnes propres à la page qui accueille la vue (« Classes et rangs »).
     for (const extra of pageColumns) {
       const at = extra.after ? list.findIndex((column) => foldName(column.key) === foldName(extra.after!)) : -1
@@ -1066,7 +1064,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [ask, busy, commitCell, computed, definition.tabColumn, drawCell, engine, entity, entityImage, extras, extrasOf, notify, openRow, pageColumns, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [ask, busy, commitCell, computed, drawCell, engine, entity, entityImage, extras, extrasOf, notify, openRow, pageColumns, rawOf, rowHref, runButton, sortTabs, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])

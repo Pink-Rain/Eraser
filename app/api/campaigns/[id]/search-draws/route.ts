@@ -54,8 +54,8 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
   } catch (error) {
     const code = error instanceof Error ? error.message : ""
     const message = code === "INVENTORY_FULL" ? "Cet inventaire est plein."
-      : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Le destinataire n’a pas de contenant compatible avec cet objet."
-        : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet objet n’est plus dans l’index Objets."
+      : code === "INVENTORY_NO_COMPATIBLE_CONTAINER" ? "Le destinataire n’a pas de contenant compatible avec cet item."
+        : code === "INVENTORY_ITEM_NOT_FOUND" ? "Cet item n’est plus dans l’Index des items."
           : code === "INVENTORY_TRANSFER_FORBIDDEN" ? "Ce destinataire ne fait pas partie de la campagne."
             : "Le tirage n’a pas pu être enregistré."
     return NextResponse.json({ error: message }, { status: 400 })

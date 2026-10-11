@@ -35,7 +35,7 @@ export async function GET(request: Request) {
     const code = error instanceof Error ? error.message : ""
     return NextResponse.json({ error: code === "OBJECT_INDEX_FOLDER_NOT_FOUND"
       ? "Le dossier « Objets » est introuvable dans le Drive connecté."
-      : `Les index d’objets n’ont pas pu être chargés${code ? ` (${code.slice(0, 160)})` : ""}.` }, { status: 400 })
+      : `Les index d’items n’ont pas pu être chargés${code ? ` (${code.slice(0, 160)})` : ""}.` }, { status: 400 })
   }
 }
 
@@ -53,7 +53,7 @@ const regroupMessages: Record<string, string> = {
 /** Regrouper les index d'objets en un classeur à onglets (ou l'annuler) : réservé à la vue administrateur. */
 async function regroupAction(action: string) {
   const account = await authorized()
-  if (account?.role !== "admin") return NextResponse.json({ error: "Le regroupement des index d’objets se fait depuis la vue administrateur." }, { status: 403 })
+  if (account?.role !== "admin") return NextResponse.json({ error: "Le regroupement des index d’items se fait depuis la vue administrateur." }, { status: 403 })
   try {
     if (action === "regroup-status") return NextResponse.json({ status: await objectIndexRegroupStatus() })
     const result = action === "regroup" ? await regroupObjectIndexes() : await revertObjectIndexRegroup()

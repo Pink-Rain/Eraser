@@ -599,7 +599,7 @@ function builtinReaders(index: WorldIndexKey, tab: string, header: string, conte
     if (tab === STATES_TAB && ["Règles liées aux états", "Règles"].some((name) => foldName(name) === folded)) reasons.push("Le survol d’un état sur la fiche (et ses citations « { ») affiche ces règles sous les descriptions.")
   }
   // Le Type des modificateurs range Attributs, Matériaux et Runes : les objets et les citations « { » le lisent par son nom.
-  if (index === "weapon-modifiers" && folded === "type") reasons.push("Les colonnes Attributs, Matériaux et Runes des objets filtrent les modificateurs par cette colonne (« Attribut », « Matériau », « Rune ») ; les citations « { » en tirent leurs étiquettes.")
+  if (index === "weapon-modifiers" && folded === "type") reasons.push("Les colonnes Attributs, Matériaux et Runes des items filtrent les modificateurs par cette colonne (« Attribut », « Matériau », « Rune ») ; les citations « { » en tirent leurs étiquettes.")
   if (index === "vocabulary" && foldName(header) === foldName("Contenu")) reasons.push("La page Règles › Vocabulaire affiche cette colonne (la définition de chaque mot) et la lit par son nom.")
   if (isEntityWorldIndexKey(index)) reasons.push(...entityReaders(index, header, context))
   if (index === "skills") {

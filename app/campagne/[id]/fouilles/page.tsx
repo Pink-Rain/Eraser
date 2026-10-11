@@ -21,7 +21,7 @@ async function CampaignSearchData({ campaignId }: { campaignId: string }) {
     items={items ?? []}
     initialDraws={draws === "error" ? [] : draws}
     drawsUnavailable={draws === "error"}
-    loadError={items ? "" : "Les index d’objets n’ont pas pu être chargés. Réessaie dans un instant."}
+    loadError={items ? "" : "Les index d’items n’ont pas pu être chargés. Réessaie dans un instant."}
   />
 }
 
@@ -38,7 +38,7 @@ export default async function CampaignSearchPage({ params }: { params: Promise<{
       <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
         <p className="text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">{campaign.name}</p>
         <h1 className="mt-3 font-display text-4xl font-semibold sm:text-5xl">Fouilles</h1>
-        <Suspense key={id} fallback={<DeferredContentLoading label="Chargement des objets…" />}>
+        <Suspense key={id} fallback={<DeferredContentLoading label="Chargement des items…" />}>
           <CampaignSearchData campaignId={campaign.id} />
         </Suspense>
       </div>

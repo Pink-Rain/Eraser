@@ -29,8 +29,8 @@ function StyledValues({ values, look, fallback }: { values: string[]; look?: Obj
 }
 
 /**
- * Ce qui s'affiche sous l'effet d'un objet, sans titres. D'abord ses attributs (dans le
- * style de leur colonne de l'Index des objets), ses matériaux et ses runes (à leur couleur,
+ * Ce qui s'affiche sous l'effet d'un item, sans titres. D'abord ses attributs (dans le
+ * style de leur colonne de l'Index des items), ses matériaux et ses runes (à leur couleur,
  * leur icône dans celle de leur colonne), avec leur nom et leur description au survol.
  * Puis, si elles sont remplies, sa compétence, sa distance, son action et son action de
  * rechargement (précédée de son icône), chacune dans le style de sa colonne. La Valeur n'y est
@@ -71,7 +71,7 @@ export function ObjectTraits({ item, className = "" }: { item: ObjectCombatField
 }
 
 /**
- * La description ou l'effet d'un objet hors du tableau : « {Valeur} » et les autres
+ * La description ou l'effet d'un item hors du tableau : « {Valeur} » et les autres
  * colonnes de la ligne remplacées, puis les lignes d'index citées (menu « { ») affichées
  * avec leur nom actuel et leur détail au survol. Le texte mis en forme prime sur le texte brut.
  */

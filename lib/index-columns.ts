@@ -361,6 +361,7 @@ export type ActionStep =
   | { type: "notify"; message: string }
   | { type: "chat"; message: string; audience?: "public" | "gm" }
   | { type: "campaign-inventory" }
+  | { type: "move-ask" }
 
 export type ActionButton = {
   id: string

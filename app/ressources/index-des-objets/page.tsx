@@ -30,15 +30,15 @@ export default async function ObjectIndexesPage() {
   const account = await authorizedAccount(["admin", "mj"])
   if (!account) redirect("/")
   return (
-    <AuthenticatedShell pageLabel="Objets" roles={["admin", "mj"]}>
+    <AuthenticatedShell pageLabel="Items" roles={["admin", "mj"]}>
       {/* La page défile normalement ; le tableau se fige sous l’en-tête dès que le
           titre et la recherche sont passés, et occupe alors tout l’écran. */}
       <div className="w-full px-4 pt-4 sm:px-6">
         <div className="shrink-0">
           <p className="text-[10px] font-semibold uppercase tracking-[0.22em] text-primary/75">Index</p>
-          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Objets</h1>
+          <h1 className="font-display text-2xl font-semibold sm:text-3xl">Items</h1>
         </div>
-        <Suspense fallback={<DeferredContentLoading label="Chargement des index d’objets…" />}>
+        <Suspense fallback={<DeferredContentLoading label="Chargement des index d’items…" />}>
           <ObjectIndexesData />
         </Suspense>
       </div>

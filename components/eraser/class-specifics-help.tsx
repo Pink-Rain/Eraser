@@ -34,7 +34,7 @@ const Part = ({ children }: { children: ReactNode }) => <p className="pt-1 text-
 const formulaBasics = <>
   <p>Une <b>formule</b> mélange des nombres et des valeurs de la fiche écrites entre accolades. Le bouton <b>« Valeur de la fiche »</b> les insère pour toi, sans faute de frappe.</p>
   <ul>
-    <li><K>{"{Points de vie max}"}</K> : la valeur telle qu’elle s’affiche sur la fiche (objets, états et formes compris).</li>
+    <li><K>{"{Points de vie max}"}</K> : la valeur telle qu’elle s’affiche sur la fiche (items, états et formes compris).</li>
     <li>Opérations : <K>+</K> <K>-</K> <K>*</K> <K>/</K>, les parenthèses, et <K>%</K> : <K>{"{Maximum} * 50%"}</K> = la moitié.</li>
     <li>Majuscules et accents ne comptent pas : <K>{"{points de vie max}"}</K> marche aussi.</li>
   </ul>

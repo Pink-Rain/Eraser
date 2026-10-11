@@ -687,7 +687,7 @@ export function AppShell({
 
                 {(user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj") && (
                   <>
-                    {/* Les index à l'étoile rouge (le créateur de classe et l'index des objets d'abord), directement dans le menu. */}
+                    {/* Les index à l'étoile rouge (le créateur de classe et l'index des items d'abord), directement dans le menu. */}
                     {orderedIndexes.filter((entry) => starOf(entry.key) === "red").map((entry) => {
                       const EntryIcon = entry.icon
                       return <SidebarMenuItem key={entry.key}>

@@ -860,7 +860,7 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
       }]
     case "objects":
       return [{
-        id: "eraser-objet-carte", name: "Carte d’objet", width: "lg", border: "subtle",
+        id: "eraser-objet-carte", name: "Carte d’item", width: "lg", border: "subtle",
         media: { column: "Icône", position: "left", aspect: "1/1", fit: "contain", size: "sm", shape: "rounded", tint: true },
         blocks: [
           { id: "b1", type: "title", column: "Nom", size: "lg", font: "display" },

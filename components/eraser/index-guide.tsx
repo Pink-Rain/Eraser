@@ -178,7 +178,7 @@ function ButtonsSection() {
       <h3 className={h3}>{group}</h3>
       <div className="mt-2 grid gap-2 md:grid-cols-2">
         {actionStepCatalog.filter((step) => step.group === group).map((step) => <article key={step.type} className="rounded-xl border bg-card/60 p-3">
-          <p className="font-semibold">{step.label}{step.only && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{step.only === "objects" ? "index des objets" : "index du monde"}</span>}</p>
+          <p className="font-semibold">{step.label}{step.only && <span className="ml-2 rounded-full bg-muted px-2 py-0.5 text-[10px] font-medium text-muted-foreground">{step.only === "objects" ? "index des items" : "index du monde"}</span>}</p>
           <p className="mt-1 text-sm text-muted-foreground">{step.description}</p>
           {step.fields.length > 0 && <p className="mt-1 text-xs text-muted-foreground">Réglages : {step.fields.map((field) => field.label).join(", ")}.</p>}
         </article>)}

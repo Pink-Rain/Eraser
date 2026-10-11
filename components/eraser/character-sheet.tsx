@@ -309,7 +309,7 @@ function sheetNumber(value: string) {
   return Number.isFinite(parsed) ? parsed : 0
 }
 
-/** Affiche un total en y ajoutant les modificateurs d’objets, sans toucher à la valeur de la feuille. */
+/** Affiche un total en y ajoutant les modificateurs d’items, sans toucher à la valeur de la feuille. */
 function totalWithModifier(raw: string, modifier: number, fallback = "0", rule?: ModifierRule) {
   if (!modifier && !hasRule(rule)) return raw || fallback
   // Une case vide vaut 0 : Folie vide avec un état à +100 donne 100.
@@ -363,7 +363,7 @@ type SlotToggle = { pendingSlot: string; onToggle: (slotId: string, equipped: bo
 function ModifierBadge({ amount, plain = false }: { amount: number; plain?: boolean }) {
   if (!amount) return null
   const tone = plain ? "bg-white/25 text-white" : amount < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300"
-  return <span className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`} title="Apporté par les objets équipés">{formatModifierAmount(amount)}</span>
+  return <span className={`inline-flex shrink-0 items-center rounded-full px-1.5 py-0.5 text-[10px] font-semibold tabular-nums ${tone}`} title="Apporté par les items équipés">{formatModifierAmount(amount)}</span>
 }
 
 /**
@@ -390,18 +390,18 @@ function LinkedItemsPanel({ items, toggle, borderColor, total }: { items: Linked
         <span className={`shrink-0 font-semibold tabular-nums ${entry.amount < 0 ? "text-rose-300" : "text-emerald-300"} ${entry.equipped ? "" : "opacity-40"}`}>{formatModifierAmount(entry.amount)}</span>
       </label>)}
     </div>
-    {total !== undefined && <p className="mt-1.5 text-right text-[10px] text-muted-foreground">Total avec {items.some((entry) => entry.source === "état") ? "objets et états" : "objets"} : <b className="text-foreground">{total}</b></p>}
+    {total !== undefined && <p className="mt-1.5 text-right text-[10px] text-muted-foreground">Total avec {items.some((entry) => entry.source === "état") ? "items et états" : "items"} : <b className="text-foreground">{total}</b></p>}
   </div>
 }
 
 /**
- * Les objets qui s'utilisent avec cette compétence (leur colonne Compétence), à équiper ou
- * déséquiper d'ici, en plus des objets liés par un modificateur.
+ * Les items qui s'utilisent avec cette compétence (leur colonne Compétence), à équiper ou
+ * déséquiper d'ici, en plus des items liés par un modificateur.
  */
 function UsageItemsPanel({ items, toggle, borderColor }: { items: UsageItem[]; toggle: SlotToggle; borderColor: string }) {
   if (!items.length) return null
   return <div className="mt-2 border-t pt-2" style={{ borderColor }}>
-    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Swords className="size-3" />Objets qui l’utilisent</p>
+    <p className="mb-1.5 flex items-center gap-1.5 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground"><Swords className="size-3" />Items qui l’utilisent</p>
     <div className="space-y-1">
       {items.map((entry) => <label key={entry.slotId} className="flex cursor-pointer items-center gap-2 rounded-lg border bg-background/45 px-2 py-1.5 text-xs" style={{ borderColor }}>
         <Checkbox checked={entry.equipped} disabled={toggle.pendingSlot === entry.slotId} onCheckedChange={(checked) => toggle.onToggle(entry.slotId, checked === true)} aria-label={`${entry.equipped ? "Déséquiper" : "Équiper"} ${entry.name}`} />
@@ -432,7 +432,7 @@ function ModifierHoverShell({ items, toggle, title, color, total, children }: { 
 /** Les neuf colonnes d'une compétence dans la fiche, dans l'ordre de `characterSkillMetrics`. */
 type SkillCells = number[]
 
-function SkillRow({ help = "", skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, usageItems = [], tint = "", fx = [], skillRule, characteristicRule, toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les objets qui s'utilisent avec cette compétence. */ usageItems?: UsageItem[]; skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
+function SkillRow({ help = "", skill, cells, characteristicCell, values, color, commit, abilities, charges, setCharges, skillModifier, characteristicModifier, successModifier, failureModifier, linkedItems, usageItems = [], tint = "", fx = [], skillRule, characteristicRule, toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les items qui s'utilisent avec cette compétence. */ usageItems?: UsageItem[]; skill: CatalogSkill; cells: SkillCells; characteristicCell: number; values: string[]; color: GroupColor; commit: (index: number, value: string) => Promise<void>; abilities: ClassSpell[]; charges: Record<string, number>; setCharges: (spell: ClassSpell, value: number) => void; skillModifier: number; characteristicModifier: number; successModifier: number; failureModifier: number; linkedItems: LinkedModifierItem[]; /** La couleur d'un état qui vise cette compétence. */ tint?: string; /** Les FX d'un état qui vise cette compétence. */ fx?: ReturnType<typeof stateFxOf>; skillRule?: ModifierRule; characteristicRule?: ModifierRule; toggle: SlotToggle }) {
   const [open, setOpen] = useState(false)
   const shortName = skill.name
     .replace(/^Maîtrise\b/, "Maît")
@@ -464,7 +464,7 @@ function SkillRow({ help = "", skill, cells, characteristicCell, values, color, 
       {[{ label: "Stat", bonus: 0 }, { label: "Réussite critique", bonus: 3 }, { label: "Échec critique", bonus: 6 }].map((line, lineIndex) => {
         const bonusIndex = cells[line.bonus]
         const lineModifier = metricModifiers[lineIndex]
-        return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className={`rounded px-1.5 py-1 text-center font-semibold ${lineModifier ? (lineModifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted font-normal text-muted-foreground"}`} title="Apporté par les objets équipés et la classe">{lineModifier ? formatModifierAmount(lineModifier) : "0"}</span></div>
+        return <div key={line.label} className="grid grid-cols-[1fr_3.5rem_3.5rem] items-center gap-2 border-t py-2 text-xs"><span>{line.label}</span><InlineEdit compact numeric singleClick label={`${skill.name} — ${line.label}`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="rounded bg-primary/10 px-1.5 py-1 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit><span className={`rounded px-1.5 py-1 text-center font-semibold ${lineModifier ? (lineModifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted font-normal text-muted-foreground"}`} title="Apporté par les items équipés et la classe">{lineModifier ? formatModifierAmount(lineModifier) : "0"}</span></div>
       })}
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={color.border} total={statModifier || ruled ? statTotal : undefined} />
       <UsageItemsPanel items={usageItems} toggle={toggle} borderColor={color.border} />
@@ -483,9 +483,9 @@ function SkillRow({ help = "", skill, cells, characteristicCell, values, color, 
 
 /**
  * En-tête coloré d’une caractéristique. Son survol montre les seuils critiques propres à la
- * caractéristique et les objets liés, au-dessus quand la place manque en dessous.
+ * caractéristique et les items liés, au-dessus quand la place manque en dessous.
  */
-function CharacteristicHeader({ help = "", characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, usageItems = [], toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les objets qui s'utilisent avec cette caractéristique. */ usageItems?: UsageItem[]; characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
+function CharacteristicHeader({ help = "", characteristic, cells, color, values, commit, statModifier, statRule, criticalModifiers, linkedItems, usageItems = [], toggle }: { /** La description de l'index (HTML), au survol du « ? ». */ help?: string; /** Les items qui s'utilisent avec cette caractéristique. */ usageItems?: UsageItem[]; characteristic: CatalogCharacteristic; cells: { value: number; success: number; failure: number }; color: GroupColor; values: string[]; commit: (index: number, value: string) => Promise<void>; statModifier: number; statRule?: ModifierRule; criticalModifiers: Record<"success" | "failure", number>; linkedItems: LinkedModifierItem[]; toggle: SlotToggle }) {
   const { anchorRef, above, measure } = useFlipPlacement()
   const panelRef = useRef<HTMLDivElement>(null)
   const place = () => measure(panelRef.current)
@@ -518,13 +518,13 @@ function CalculatedSecondaryCard({ fieldIndex, label, popupLabel, help = "", col
   const fx = stateFxOf(linkedItems)
   return <div ref={anchorRef} className="group/help relative h-full min-w-0" onMouseEnter={() => setOpen(true)} onMouseLeave={() => setOpen(false)}>
     <button type="button" onClick={(event) => setOpen((current) => clickKeepsOpen(event) || !current)} className={`relative flex h-full w-full flex-col items-center justify-center rounded-lg text-center ${compact ? "min-h-14 px-2 py-2" : "min-h-20 px-3 py-3"}`} style={{ backgroundColor: `${color}${compact ? "24" : "12"}`, borderBottom: compact ? `2px solid ${color}66` : undefined, borderTop: compact ? undefined : `2px solid ${color}` }}><span className="whitespace-normal text-[9px] font-semibold uppercase leading-tight tracking-wide text-muted-foreground">{label}<HelpMark title={popupLabel || label} className="ml-0.5 size-3 normal-case opacity-0 hover:text-foreground group-hover/help:opacity-100">{help && <IndexRichText html={help} />}</HelpMark></span><span className={`${compact ? "mt-1 text-lg" : "mt-2 text-xl"} inline-block font-semibold tabular-nums ${portraitImageFxClass(fx)}`} style={{ color }}>{total}</span><FxOverlay fx={fx} /></button>
-    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier || hasRule(rule) ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés, les états et la classe">{modifierText(modifier, rule) || "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
+    {open && <div ref={measure} className={`absolute left-1/2 ${above ? "bottom-[calc(100%-3px)]" : "top-[calc(100%-3px)]"} z-40 w-56 -translate-x-1/2 rounded-xl border bg-popover p-3 shadow-2xl`} style={{ borderColor: `${color}66` }}><p className="font-display text-sm font-semibold" style={{ color }}>{popupLabel || label}</p><p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p><div className="grid grid-cols-2 gap-2"><div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${popupLabel || label} bonus/malus`} value={values[bonusIndex]} onCommit={(value) => commit(bonusIndex, value)}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold text-primary">{values[bonusIndex] || "0"}</span></InlineEdit></div><div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold ${modifier || hasRule(rule) ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les items équipés, les états et la classe">{modifierText(modifier, rule) || "0"}</span></div></div><LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${color}40`} /></div>}
   </div>
 }
 
 /**
  * Un compteur (Folie, Destin, Notoriété, Moralité, secondaires ajoutées) : le total avec
- * objets et états, et au survol son calcul (valeur de base modifiable, modificateur) et ce
+ * items et états, et au survol son calcul (valeur de base modifiable, modificateur) et ce
  * qui le change. − et + changent la valeur de base ; un état coloré teinte la carte.
  */
 function CounterTile({ label, help = "", color, span, value, modifier, rule, linkedItems, toggle, onCommit }: { label: string; /** Description au survol du « ? ». */ help?: string; color: string; span: string; value: string; modifier: number; rule?: ModifierRule; linkedItems: LinkedModifierItem[]; toggle: SlotToggle; onCommit: (value: string) => Promise<void> }) {
@@ -549,7 +549,7 @@ function CounterTile({ label, help = "", color, span, value, modifier, rule, lin
       <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p>
       <div className="grid grid-cols-3 gap-2">
         <div><p className="mb-1 text-[10px] text-muted-foreground">Base</p><InlineEdit numeric singleClick compact label={`${label} : valeur de base`} value={value} onCommit={onCommit}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold tabular-nums text-primary">{value || "0"}</span></InlineEdit></div>
-        <div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Modificateur</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les items équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
         <div><p className="mb-1 text-[10px] text-muted-foreground">Total</p><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums" style={{ color: shown }}>{total}</span></div>
       </div>
       <LinkedItemsPanel items={linkedItems} toggle={toggle} borderColor={`${shown}40`} />
@@ -596,7 +596,7 @@ function MovementCell({ role, name, help = "", color: baseColor, value, own, sho
       <p className="mb-2 text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">Calcul du total</p>
       <div className="grid grid-cols-3 gap-2">
         <div><p className="mb-1 text-[10px] text-muted-foreground">Bonus/Malus</p><InlineEdit numeric singleClick compact label={`${name} : bonus/malus`} value={value} onCommit={onCommit}><span className="block rounded-lg bg-primary/10 px-2 py-1.5 text-center font-semibold tabular-nums text-primary">{value || "0"}</span></InlineEdit></div>
-        <div><p className="mb-1 text-[10px] text-muted-foreground">Mod.</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les objets équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
+        <div><p className="mb-1 text-[10px] text-muted-foreground">Mod.</p><span className={`block rounded-lg px-2 py-1.5 text-center font-semibold tabular-nums ${changed ? (modifier < 0 ? "bg-rose-500/15 text-rose-300" : "bg-emerald-500/15 text-emerald-300") : "bg-muted text-muted-foreground"}`} title="Apporté par les items équipés et les états">{modifierText(modifier, rule) || "0"}</span></div>
         <div><p className="mb-1 text-[10px] text-muted-foreground">Total</p><span className="block rounded-lg bg-muted px-2 py-1.5 text-center font-semibold tabular-nums" style={{ color }}>{own}</span></div>
       </div>
       {freeTotal !== null && <p className="mt-2 flex items-center justify-between gap-2 border-t pt-2 text-xs" style={{ borderColor: `${color}40` }}><span className="text-muted-foreground">Gratuite {freeTotal} + {role ? movementLabels[role].short.toLocaleLowerCase("fr") : "action"} {own}</span><b className="tabular-nums" style={{ color }}>{shown}</b></p>}
@@ -675,7 +675,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const [viewStateReady, setViewStateReady] = useState(false)
   const [addingTab, setAddingTab] = useState(false)
   const [newTabType, setNewTabType] = useState<CharacterTabType>("invocation")
-  // L’inventaire vit ici : l’onglet Compétences a besoin des objets équipés et de leurs liens.
+  // L’inventaire vit ici : l’onglet Compétences a besoin des items équipés et de leurs liens.
   const [inventory, setInventory] = useState<CharacterInventoryRecord | null>(initialInventory ?? null)
   const [inventoryLoading, setInventoryLoading] = useState(!initialInventory)
   const inventoryRef = useRef(inventory)
@@ -698,7 +698,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   // Les cases abandonnées au dernier conflit, nommées dans l'avertissement.
   const [conflictHeaders, setConflictHeaders] = useState<string[]>([])
   const inventoryEndpoint = `/api/characters/${encodeURIComponent(character.id)}/inventory`
-  // Les états posés (Index des états) changent les valeurs comme des objets équipés.
+  // Les états posés (Index des états) changent les valeurs comme des items équipés.
   const statesCatalog = useStatesCatalog()
   const postedStates = useMemo(() => parseClassChoices(values[characterClassChoicesIndex] || "").states, [values])
   const targetOfName = useCallback((name: string) => modifierTargetIdForName(catalog, name), [catalog])
@@ -778,7 +778,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const characterStates = useMemo(() => [...postedStates, ...formStates, ...autoLife.auto], [autoLife.auto, formStates, postedStates])
   const stateChanges = useMemo(() => stateContributions(statesCatalog.catalog, characterStates, targetOfName), [characterStates, statesCatalog.catalog, targetOfName])
   const modifierIndex = useMemo(() => withStateModifiers(indexInventoryModifiers(inventory?.containers || []), [...stateChanges, ...formChanges]), [formChanges, inventory, stateChanges])
-  // Les objets rangés par la compétence qu'ils utilisent (colonne Compétence de chaque exemplaire).
+  // Les items rangés par la compétence qu'ils utilisent (colonne Compétence de chaque exemplaire).
   const itemUsage = useMemo(() => indexItemUsage(inventory?.containers || []), [inventory])
   const portrait = useMemo(() => portraitLayers(statesCatalog.catalog, characterStates), [characterStates, statesCatalog.catalog])
   const modifiersByValueIndex = useMemo(() => {
@@ -1011,7 +1011,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
   const classChoiceState = parseClassChoices(classChoicesValue)
 
   // Spécificités de classe : les jauges des classes du personnage. Une formule lit les
-  // valeurs de la fiche telles qu'elles s'affichent (objets et états compris).
+  // valeurs de la fiche telles qu'elles s'affichent (items et états compris).
   // Les jauges affichées lisent la fiche avec tout : objets, états et formes actives.
   const gaugeValues = useMemo(() => characterGauges.length ? sheetFormulaValues(modifierIndex) : formulaValues([]), [characterGauges.length, modifierIndex, sheetFormulaValues])
   const resolvedGauges = useMemo(() => characterGauges.map((gauge) => resolveGauge(gauge, gaugeValues, gaugeStates[gauge.id])), [characterGauges, gaugeStates, gaugeValues])
@@ -1313,7 +1313,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     void commit(characterClassChoicesIndex, JSON.stringify({ ...classChoiceState, charges: { ...classChoiceState.charges, [spell.id]: Math.max(0, Math.min(spell.charges ?? 0, count)) } }))
   }
 
-  // Les objets reçus par ce personnage pendant qu'on n'était pas sur sa fiche (hors ligne,
+  // Les items reçus par ce personnage pendant qu'on n'était pas sur sa fiche (hors ligne,
   // en vue MJ, sur un autre personnage) : annoncés à l'ouverture, avec leur pastille.
   useEffect(() => {
     let alive = true
@@ -1336,7 +1336,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
         const names = new Set(fresh.filter((item) => !item.slotId).map((item) => item.itemName.trim().toLocaleLowerCase("fr")))
         markNewSlots(character.id, [
           ...fresh.flatMap((item) => item.slotId && slots.some((slot) => slot.id === item.slotId && slot.item) ? [item.slotId] : []),
-          // Une notification plus ancienne, sans case : les objets du même nom.
+          // Une notification plus ancienne, sans case : les items du même nom.
           ...slots.filter((slot) => slot.item && names.has(slot.item.name.trim().toLocaleLowerCase("fr"))).map((slot) => slot.id),
         ])
         setInventory((current) => keepCatalogFields(loaded, current))
@@ -1353,14 +1353,14 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     return () => { alive = false; window.clearInterval(timer); window.removeEventListener("focus", wake) }
   }, [character.id, inventoryEndpoint])
 
-  // Un objet envoyé à ce personnage : l'inventaire affiché se met à jour tout seul.
+  // Un item envoyé à ce personnage : l'inventaire affiché se met à jour tout seul.
   useInventoryReceived([character.id], () => {
     // Écrit par une autre installation : relu dans Google, pas dans la copie en mémoire.
     fetch(`${inventoryEndpoint}?summary=1&reload=1`)
       .then(async (response) => ({ ok: response.ok, payload: (await response.json()) as { inventory?: CharacterInventoryRecord } }))
       .then(({ ok, payload }) => {
         if (!ok || !payload.inventory) return
-        // La pastille de l'objet reçu, même si l'onglet Inventaire n'est pas ouvert.
+        // La pastille de l'item reçu, même si l'onglet Inventaire n'est pas ouvert.
         markNewSlots(character.id, receivedSlots(inventoryRef.current, payload.inventory))
         setInventory((current) => keepCatalogFields(payload.inventory!, current))
       })
@@ -1377,7 +1377,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
       .catch(() => { /* la fiche reste utilisable sans ses objets */ })
       .finally(() => { if (active) setInventoryLoading(false) })
     // Puis le catalogue complet, en tâche de fond : il porte la mise en forme et les
-    // icônes des objets rangés avant qu'elles ne soient recopiées dans l'inventaire.
+    // icônes des items rangés avant qu'elles ne soient recopiées dans l'inventaire.
     // Revenu sans le catalogue (Google occupé), il est redemandé quelques secondes plus tard.
     void loadFullInventory(inventoryEndpoint, (loaded) => setInventory((current) => keepCatalogFields(loaded, current)), () => active)
     return () => { active = false }
@@ -1599,7 +1599,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
 
   /**
    * Une caractéristique et ses compétences. Les seuils critiques d’une compétence cumulent
-   * les objets liés au seuil global, à celui de la caractéristique et au sien.
+   * les items liés au seuil global, à celui de la caractéristique et au sien.
    */
   function renderSkillGroup(group: CatalogGroup, groupIndex: number) {
     const color = groupColor(group.characteristic, groupIndex)
@@ -1766,7 +1766,7 @@ export function CharacterSheet({ initialCharacter, catalog: initialCatalog = bui
     <Tabs value={activeCharacterTab.id} onValueChange={setActiveTab} className="mt-9 rounded-2xl border border-[#74664f3d] bg-[linear-gradient(135deg,rgba(146,118,64,.10),rgba(255,255,255,.018))] p-2 shadow-sm">
       <div className="overflow-hidden">
         <TabsList variant="line" className="h-auto w-full min-w-0 flex-wrap justify-start bg-transparent">
-          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span className="relative">{tab.label}{tab.type === "classe" && pendingChoiceCount > 0 && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title={pendingChoiceCount > 1 ? `${pendingChoiceCount} nouveaux sorts à choisir` : "Un nouveau sort à choisir"} />}{tab.type === "inventaire" && hasNewItems && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title="Nouvel objet reçu" />}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); askRemoveCharacterTab(tab) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); askRemoveCharacterTab(tab) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
+          {characterTabs.map((tab) => <TabsTrigger key={tab.id} value={tab.id} className="h-10 gap-2 rounded-xl px-3 data-[state=active]:bg-[#92764018] data-[state=active]:shadow-sm"><CharacterTabIcon type={tab.type} /><span className="relative">{tab.label}{tab.type === "classe" && pendingChoiceCount > 0 && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title={pendingChoiceCount > 1 ? `${pendingChoiceCount} nouveaux sorts à choisir` : "Un nouveau sort à choisir"} />}{tab.type === "inventaire" && hasNewItems && <span className="absolute -right-2.5 -top-1 size-2 rounded-full bg-rose-400/90 ring-2 ring-card" title="Nouvel item reçu" />}</span>{tab.removable && <span role="button" tabIndex={0} className="ml-1 rounded-full p-0.5 text-muted-foreground hover:bg-destructive/10 hover:text-destructive" onClick={(event) => { event.stopPropagation(); askRemoveCharacterTab(tab) }} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); event.stopPropagation(); askRemoveCharacterTab(tab) } }} aria-label={`Retirer l’onglet ${tab.label}`}><X className="size-3" /></span>}</TabsTrigger>)}
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAddingTab(true)} aria-label="Ajouter un onglet" title="Ajouter un onglet"><Plus /></Button>
         </TabsList>
       </div>

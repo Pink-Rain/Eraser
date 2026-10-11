@@ -111,7 +111,7 @@ function parseStars(raw: string): Record<string, IndexStar> {
 export function useIndexStars() {
   const raw = useSyncExternalStore(subscribeStars, readStars, () => "legacy:[]")
   const stars = useMemo(() => parseStars(raw), [raw])
-  // Par défaut, un index est étoilé ; l'index des objets et le créateur de classe sont en rouge.
+  // Par défaut, un index est étoilé ; l'index des items et le créateur de classe sont en rouge.
   const starOf = useCallback((key: string): IndexStar => stars[key] ?? (defaultRed.has(key) ? "red" : "star"), [stars])
   const setStar = useCallback((key: string, star: IndexStar) => {
     const next = { ...parseStars(readStars()), [key]: star }

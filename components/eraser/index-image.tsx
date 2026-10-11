@@ -4,7 +4,7 @@ import { isImageSource } from "@/lib/index-columns"
 
 /**
  * Le contenu d'une colonne « Image » : une image (importée ou par adresse), ou le
- * symbole saisi à sa place — l'icône « 🗡️ » d'un objet reste un symbole.
+ * symbole saisi à sa place — l'icône « 🗡️ » d'un item reste un symbole.
  */
 export function IndexImage({ value, alt, className = "", fallback }: { value: string; alt: string; className?: string; fallback?: ReactNode }) {
   const trimmed = value.trim()
