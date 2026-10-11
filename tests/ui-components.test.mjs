@@ -270,6 +270,32 @@ test("Calendriers et présentations de vue : dates du monde, sections, tableau d
   assert.deepEqual(layouts.dashboardTileValue({ kind: "breakdown", column: "t" }, rows, (row, column) => row[column]).breakdown[0], { name: "Arme", count: 2 });
 });
 
+test("Items dans le moteur, étape 1 : les tableaux vus comme un index du moteur, sans rien changer", async () => {
+  const engine = await vite.ssrLoadModule("/lib/object-index-engine.ts");
+  const table = (fileId, fileName, tabName, rows) => ({ fileId, fileName, webViewLink: `https://sheets/${fileId}`, sheetId: 7, tabName, headers: ["Nom", "Type", "Prix", "Rareté", "Emplacement principal", "Rareté", "", "ID"], rows, columnSpecs: { type: { kind: "choice", options: [{ value: "Arme" }] } } });
+  const row = (rowNumber, name, id) => ({ rowNumber, values: [name, "Arme", "10 PO", "Commun", "Forêt", "Rare", "x", id], html: [`<b>${name}</b>`, "Arme", "10 PO", "Commun", "Forêt", "Rare", "x", id] });
+  // Après le regroupement : un seul classeur, les onglets gardent leur nom.
+  const grouped = engine.objectIndexEngineData([table("F1", "Index des objets", "Armes", [row(2, "Dague", "OBJ-1")]), table("F1", "Index des objets", "Livres", [])]);
+  assert.deepEqual(grouped.tables.map((entry) => entry.tabName), ["Armes", "Livres"]);
+  assert.deepEqual(grouped.origins.Armes, { fileId: "F1", fileName: "Index des objets", tabName: "Armes", sheetId: 7, webViewLink: "https://sheets/F1" });
+  // Les lignes et leur mise en forme sont recopiées telles quelles.
+  assert.deepEqual(grouped.tables[0].rows[0].html[0], "<b>Dague</b>");
+  // Types : reconnus par l'en-tête, réglages de « Modifier » par-dessus ; une colonne sans en-tête reste hors du moteur.
+  const specs = Object.fromEntries(grouped.columns.Armes.map((column) => [column.header, column.spec.kind]));
+  assert.deepEqual([specs.Nom, specs.Type, specs.Prix, specs["Emplacement principal"], specs.ID], ["name-form", "choice", "number", "linked-choice", "id"]);
+  assert.equal(grouped.columns.Armes.some((column) => column.header === ""), false);
+  assert.deepEqual(grouped.columns.Armes.find((column) => column.header === "Type").spec.options, [{ value: "Arme" }]);
+  // Avant le regroupement : deux classeurs avec un onglet « Armes » ne se mélangent pas.
+  const split = engine.objectIndexEngineData([table("F1", "Index Objet", "Armes", []), table("F2", "Index Armes", "Armes", []), table("F2", "Index Armes", "Runes", [])]);
+  assert.deepEqual(split.tables.map((entry) => entry.tabName), ["Index Objet › Armes", "Index Armes › Armes", "Runes"]);
+  // Une écriture traduite pour l'API des items : bon classeur, bon onglet, ID de ligne, seconde « Rareté ».
+  assert.deepEqual(engine.objectEngineCellWrite(grouped, { tabName: "Armes", rowNumber: 2, header: "Rareté", column: 5, html: "Rare" }), { action: "update-cell", fileId: "F1", tabName: "Armes", row: { id: "OBJ-1", rowNumber: 2, name: "Dague" }, header: "Rareté", occurrence: 1, html: "Rare" });
+  assert.equal(engine.objectEngineCellWrite(grouped, { tabName: "Armes", rowNumber: 2, header: "Rareté", html: "Rare" }).occurrence, 0);
+  // Une ligne ou un onglet que la page ne connaît plus : rien n'est écrit.
+  assert.throws(() => engine.objectEngineCellWrite(split, { tabName: "Index Armes › Armes", rowNumber: 2, header: "Prix", html: "12 PO" }), /OBJECT_INDEX_CHANGED/);
+  assert.throws(() => engine.objectEngineCellWrite(grouped, { tabName: "Inconnu", rowNumber: 2, header: "Prix", html: "" }), /OBJECT_INDEX_CHANGED/);
+});
+
 test("shop persistence bypasses stale caches and requires a real reread", async () => {
   const [sheets, route, generator, campaignPage, sandboxPage] = await Promise.all([
     readFile(new URL("../lib/google-sheets.ts", import.meta.url), "utf8"),
