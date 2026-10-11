@@ -15,6 +15,7 @@ import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
+import type { StatDefinition } from "@/lib/index-stats"
 import { cleanViewLayout, dashboardTileKinds, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewPreset } from "@/lib/index-view-layouts"
 
 export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, stats: ChartColumnBig }
@@ -102,9 +103,9 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false }:
   </div>
 }
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[] }
 
-const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [] }
+const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [] }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -127,7 +128,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [] }
         known.set(index, next)
         setSettings(next)
       })
@@ -189,6 +190,11 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "save-presentations", index, changes })
     if (payload.presentations) update({ presentations: payload.presentations })
   }, [index, update])
+  /** Les statistiques de cet index (Modifier › Stats), enregistrées toutes ensemble. */
+  const saveStats = useCallback(async (stats: StatDefinition[]) => {
+    const payload = await postSettings({ action: "save-stats", index, stats })
+    if (payload.stats) update({ stats: payload.stats })
+  }, [index, update])
   /** Les presets de vues, communs à tous les index. */
   const saveViewPreset = useCallback(async (preset: { id?: string; name: string; layout: ViewLayout }) => {
     const payload = await postSettings({ action: "save-view-preset", ...preset })
@@ -209,7 +215,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset }
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })
@@ -389,7 +395,7 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
         {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
       </div>
       <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
-      {["list", "kanban", "master-detail", "calendar", "dashboard"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier › Vues » (presets, tri, couleurs, images…), pris d’office pour cet onglet.</p>}
+      {["list", "kanban", "master-detail", "calendar", "dashboard"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier » (onglets Liste, Kanban, Maître-détail, Calendrier, Tableau de bord : presets, tri, couleurs, images…).</p>}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}

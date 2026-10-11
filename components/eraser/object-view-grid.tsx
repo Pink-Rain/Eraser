@@ -4,6 +4,7 @@ import { useCallback, useMemo, useRef, useState } from "react"
 import { LoaderCircle, Search } from "lucide-react"
 
 import { indexGridColumn } from "@/components/eraser/index-cells"
+import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { Input } from "@/components/ui/input"
 import type { ObjectIndexTable } from "@/lib/google-sheets"
@@ -12,6 +13,7 @@ import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { shownReferenceText } from "@/components/eraser/reference-store"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type SchemaEntry } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, matchesView, type IndexView } from "@/lib/index-views"
+import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { objectIndexCellRef } from "@/lib/object-index-refs"
 
 export function objectTableKey(table: ObjectIndexTable) {
@@ -21,7 +23,7 @@ export function objectTableKey(table: ObjectIndexTable) {
 const ORIGIN = "__origine"
 const originSpec: IndexColumnSpec = { kind: "rich" }
 
-function specIn(table: ObjectIndexTable, header: string, schemas: Record<string, SchemaEntry[]>) {
+export function specIn(table: ObjectIndexTable, header: string, schemas: Record<string, SchemaEntry[]>) {
   const base = objectColumnSpec(header, table.headers)
   const entry = findEntry(schemas[table.fileId] ?? [], table.tabName, header)
   return entry?.spec ? { ...base, ...entry.spec } : base
@@ -33,7 +35,9 @@ function specIn(table: ObjectIndexTable, header: string, schemas: Record<string,
  * d'origine ; rien n'est copié. Ajouter, supprimer ou les boutons se font depuis
  * l'onglet d'origine de la ligne.
  */
-export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { view: IndexView; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void }) {
+export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout }: { view: IndexView; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
+  /** La vue choisie par l'onglet-fenêtre (liste, kanban…), réglée dans « Modifier › Vues » ; sinon le tableau. */
+  layout?: ViewLayout | null }) {
   const sources = useMemo(() => view.source === ALL_SOURCES ? tables : tables.filter((table) => objectTableKey(table) === view.source), [tables, view.source])
   const byKey = useMemo(() => new Map(sources.map((table) => [objectTableKey(table), table])), [sources])
   // Un seul classeur (index regroupés) : la colonne « Tableau » montre l'onglet seul.
@@ -127,7 +131,17 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
   return <div className="grid gap-3">
     <div className="relative min-w-0 lg:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans cet onglet-fenêtre…" className="pl-9" /></div>
     {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
-    <SheetGrid
+    {layout && isPresentationKind(layout.kind) ? <IndexViewLayout
+      layout={layout}
+      rows={rows.map((row) => row.key)}
+      headers={headers}
+      nameOf={(rowKey) => rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "").trim()}
+      valueOf={rawOf}
+      optionsOf={(header) => (sources[0] ? specIn(sources[0], header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))}
+      onOpen={() => undefined}
+      onCommit={disabled ? undefined : (rowKey, header, value) => void commit(rowKey, header, value)}
+      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
+    /> : <SheetGrid
       layoutKey={`eraser:object-index:fenetre:${view.id}`}
       columns={columns}
       rows={rows}
@@ -138,6 +152,6 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited }: { 
       disabled={disabled}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : <span className="text-[11px] text-muted-foreground">Fenêtre sur {sources.length > 1 ? `${sources.length} tableaux` : "un tableau"} : les cases modifiées sont écrites à la source.</span>}
       empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
-    />
+    />}
   </div>
 }

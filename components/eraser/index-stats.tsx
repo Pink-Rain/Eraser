@@ -5,8 +5,7 @@ import { Copy, LoaderCircle, MoreHorizontal, Pencil, Pin, PinOff, Plus, Search, 
 
 import { Button } from "@/components/ui/button"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
-import { viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
-import { viewLayoutTooLarge } from "@/lib/index-view-layouts"
+import { viewOperators, type ViewCondition } from "@/lib/index-views"
 import {
   aggregate, autoStatTitle, cellParts, cleanStat, cleanStats, fitForm, formatStatNumber, formProblem, newStatId, numericColumns, percentChoices, percentOf, pinnedFirst,
   rankingTopChoices, scopeRows, STAT_LIMITS, STAT_OTHERS, statBreakdown, statForms, statKeyLabel, statMeasures, statRows, statTable, tableTopChoices,
@@ -14,13 +13,18 @@ import {
 } from "@/lib/index-stats"
 
 /**
- * L'onglet stat d'un index : la phrase à trous qui construit une statistique, son aperçu en
- * direct, les lignes concernées, et les statistiques enregistrées de l'onglet (épinglées en
- * tête). Tout se calcule sur les lignes déjà chargées : aucune lecture Google de plus. Les
- * enregistrer réécrit la présentation de l'onglet (« Présentation (JSON) »).
+ * Les statistiques d'un index. Dans « Modifier › Stats » : la phrase à trous qui construit une
+ * statistique, son aperçu en direct, les lignes concernées et les statistiques enregistrées.
+ * Dans un onglet stat (`pinnedOnly`) : seulement les statistiques épinglées. Tout se calcule
+ * sur les lignes déjà chargées : aucune lecture Google de plus.
  */
 export type IndexStatsProps = {
-  view: IndexView
+  /** Les statistiques de l'index (épinglées ou non). */
+  stats: StatDefinition[]
+  /** L'onglet stat : seulement les épinglées, sans constructeur. */
+  pinnedOnly?: boolean
+  /** L'onglet stat : ouvrir « Modifier › Stats ». */
+  onManage?: () => void
   /** Les lignes de l'index (recherche comprise), tous onglets de données. */
   rows: string[]
   /** Les colonnes proposées dans la phrase (en-têtes réels, sans l'identifiant). */
@@ -481,8 +485,7 @@ function startStat(columns: string[], data: StatData, numeric: string[]): StatDe
   return fitForm({ id: "", title: "", measure: "count", by: column ? [column] : [], form: "bars" })
 }
 
-export function IndexStats({ view, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, onOpen, canEdit, onSave }: IndexStatsProps) {
-  const stats = useMemo(() => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [], [view.layout])
+export function IndexStats({ stats, pinnedOnly = false, onManage, rows, columns, tabs, valueOf, tabOf, nameOf, optionsOf, onOpen, canEdit, onSave }: IndexStatsProps) {
   const ordered = useMemo(() => pinnedFirst(stats), [stats])
   const data = useMemo<StatData>(() => ({
     rows, valueOf, tabOf,
@@ -524,7 +527,6 @@ export function IndexStats({ view, rows, columns, tabs, valueOf, tabOf, nameOf, 
 
   async function persist(next: StatDefinition[], message: string, undo?: StatDefinition[]) {
     const cleaned = cleanStats(next)
-    if (viewLayoutTooLarge({ kind: "stats", stats: cleaned })) { setError("Cet onglet est trop long pour sa case Google Sheets : supprime une statistique ou retire quelques conditions."); return false }
     setPending(true); setError("")
     try {
       await onSave(cleaned)
@@ -596,6 +598,16 @@ export function IndexStats({ view, rows, columns, tabs, valueOf, tabOf, nameOf, 
   const pinned = ordered.filter((stat) => stat.pinned)
   const concerned = picked?.rows ?? statRows(draft, rows, valueOf, tabOf)
   const uniqueConcerned = [...new Set(concerned)]
+
+  const manage = onManage && <Button type="button" variant="outline" size="sm" onClick={onManage}><Pencil />Créer et épingler des stats</Button>
+  if (pinnedOnly) return pinned.length
+    ? <div className="grid gap-3">{manage && <div className="flex justify-end">{manage}</div>}<section aria-label="Statistiques épinglées" className="grid gap-3 lg:grid-cols-2">
+      {pinned.map((stat) => <article key={stat.id} className="grid min-w-0 content-start gap-2.5 rounded-2xl border bg-card p-4">
+        <span className="flex min-w-0 items-center gap-1.5 text-[11px] font-semibold tracking-[0.14em] text-muted-foreground uppercase"><Pin className="size-3 shrink-0 text-[#a87a1f]" /><span className="truncate">{stat.title}</span></span>
+        <StatResult stat={stat} data={data} expanded={expanded} onToggle={onToggle} />
+      </article>)}
+    </section></div>
+    : <div className="grid place-items-center gap-3 rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground"><p>Aucune statistique épinglée. Crée-les et épingle-les dans « Modifier › Stats ».</p>{manage}</div>
 
   return <div className="grid gap-4">
     {pinned.length > 0 && <section aria-label="Statistiques épinglées" className="grid gap-3 sm:grid-cols-2 xl:grid-cols-3">

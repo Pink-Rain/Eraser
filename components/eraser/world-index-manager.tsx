@@ -14,6 +14,7 @@ import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexDa
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
+import type { EditorMode } from "@/components/eraser/index-editor"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
@@ -260,7 +261,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const [display, setDisplay] = usePersistentState<IndexDisplay>(`eraser:world-index:${storeKey}:display`, "table", isIndexDisplay)
   const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${storeKey}:card`, "", isCardChoice)
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
-  const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
+  const [editorMode, setEditorMode] = useState<EditorMode>("columns")
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   // Les onglets-fenêtres prévus par Eraser (Actifs, Passifs, Bonus des sorts), puis ceux de l'index.
   // Une vue intégrée (Création de classe) est déjà limitée à ses sorts : seulement les siens.
@@ -1160,27 +1161,33 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     return groupBy ? groupRowsBy(displayedRows, (row) => valueOf(row.key, groupBy)) : null
   }, [displayedRows, valueOf, viewLayout])
   const layoutOptionsOf = useCallback((header: string) => (table ? specOf(table.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })), [specOf, table])
-  // L'onglet stat : ses statistiques portent sur tous les onglets de données (la phrase choisit l'onglet).
+  // Les statistiques de l'index (Modifier › Stats) portent sur tous ses onglets de données (la
+  // phrase choisit l'onglet). Un onglet stat ne fait que montrer les épinglées.
   const statsView = viewLayout?.kind === "stats" ? activeView : null
-  const statTabs = useMemo(() => statsView ? viewTables.map((owner) => owner.tabName) : [], [statsView, viewTables])
+  const statTabs = useMemo(() => tables.map((owner) => owner.tabName), [tables])
+  const statRowKeys = useMemo(() => tables.flatMap((owner) => owner.rows.map((row) => rowKeyOf(owner.tabName, row.rowNumber))), [tables])
   const statHeaders = useMemo(() => {
-    if (!statsView) return []
     const seen = new Map<string, string>()
-    for (const owner of viewTables) for (const header of owner.headers) {
+    for (const owner of tables) for (const header of owner.headers) {
       if (!header.trim() || isIdHeader(header) || seen.has(foldName(header)) || specOf(owner.tabName, header).kind === "archived") continue
       seen.set(foldName(header), header)
     }
     // Plusieurs onglets : la colonne virtuelle « Onglet » (sauf si une vraie colonne porte ce nom).
-    if (viewTables.length > 1 && !seen.has(foldName(TAB_PSEUDO))) seen.set(foldName(TAB_PSEUDO), TAB_PSEUDO)
+    if (tables.length > 1 && !seen.has(foldName(TAB_PSEUDO))) seen.set(foldName(TAB_PSEUDO), TAB_PSEUDO)
     return [...seen.values()]
-  }, [specOf, statsView, viewTables])
+  }, [specOf, tables])
   const statValueOf = useCallback((rowKey: string, column: string) => column === TAB_PSEUDO && !locate(rowKey)?.table.headers.some((header) => foldName(header) === foldName(TAB_PSEUDO)) ? parseRowKey(rowKey).tabName : valueOf(rowKey, column), [locate, valueOf])
   const statTabOf = useCallback((rowKey: string) => parseRowKey(rowKey).tabName, [])
-  const saveStats = useCallback(async (stats: StatDefinition[]) => {
-    if (!statsView) return
-    const { id, index, name, source, match, conditions } = statsView
-    await settings.saveView({ id, index, name, source, match, conditions, layout: { kind: "stats", stats } })
-  }, [settings, statsView])
+  const statOptionsOf = useCallback((header: string) => {
+    const owner = tables.find((candidate) => candidate.headers.some((name) => foldName(name) === foldName(header)))
+    return (owner ? specOf(owner.tabName, header).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))
+  }, [specOf, tables])
+  // Les statistiques de l'index, et celles qu'un onglet stat de l'alpha 197 gardait encore.
+  const indexStats = useMemo(() => {
+    const seen = new Set<string>()
+    return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
+  }, [settings.stats, settings.views])
+  const saveStats = useCallback(async (stats: StatDefinition[]) => { await settings.saveStats(stats) }, [settings])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
@@ -1266,7 +1273,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Colonnes qui peuvent pondérer « Tirer » : les nombres et les jauges.
   const weightColumns = table ? (data?.columns[table.tabName] ?? []).filter((column) => ["number", "gauge", "formula", "rollup"].includes(column.spec.kind)).map((column) => column.header) : []
 
-  async function openEditor(mode: "columns" | "cards" = "columns") {
+  async function openEditor(mode: EditorMode = "columns") {
     setEditorMode(mode)
     setPending("editor"); setEditorError("")
     try {
@@ -1387,6 +1394,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
+        statsPanel={<IndexStats stats={indexStats} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} onOpen={() => undefined} canEdit={!busy} onSave={saveStats} />}
         initialMode={editorMode}
         initialTab={table?.tabName}
       />}
@@ -1413,17 +1421,19 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
 
       {table && statsView ? <IndexStats
         key={statsView.id}
-        view={statsView}
-        rows={displayedRows.map((row) => row.key)}
+        stats={indexStats}
+        pinnedOnly
+        rows={statRowKeys}
         columns={statHeaders}
         tabs={statTabs}
         valueOf={statValueOf}
         tabOf={statTabOf}
         nameOf={layoutNameOf}
-        optionsOf={layoutOptionsOf}
+        optionsOf={statOptionsOf}
         onOpen={openRow}
-        canEdit={!statsView.builtin && !busy}
+        canEdit={false}
         onSave={saveStats}
+        onManage={() => void openEditor("stats")}
       /> : table && viewLayout && viewLayout.kind !== "cards" && viewLayout.kind !== "table" ? <IndexViewLayout
         layout={viewLayout}
         rows={displayedRows.map((row) => row.key)}

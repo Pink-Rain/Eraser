@@ -122,7 +122,7 @@ function KanbanLayout({ layout, rows, nameOf, valueOf, optionsOf, onOpen, onComm
   const lanes = [...names, ""].map((name) => ({ name, color: options.find((option) => option.value === name)?.color, rows: rows.filter((row) => firstValue(row).toLocaleLowerCase("fr") === name.toLocaleLowerCase("fr")) }))
     .filter((lane) => !layout.hideEmpty || lane.rows.length)
   const width = layout.laneWidth === "narrow" ? "w-52" : layout.laneWidth === "wide" ? "w-80" : "w-64"
-  if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans « Modifier › Vues ».</p>
+  if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans « Modifier › Kanban ».</p>
   return <div className="flex gap-3 overflow-x-auto pb-2">
     {lanes.filter((lane) => lane.name || lane.rows.length).map((lane) => <section key={lane.name || "*"}
       onDragOver={(event) => { if (dragged && movable(dragged)) { event.preventDefault(); setOver(lane.name) } }}
@@ -180,7 +180,7 @@ function CalendarLayout({ layout, rows, nameOf, valueOf, onOpen }: ViewLayoutPro
   const start = dated[0]?.date ?? (calendar === realCalendar ? { year: today.getFullYear(), month: today.getMonth(), day: 1 } : { year: 1, month: 0, day: 1 })
   const [shown, setShown] = useState<{ year: number; month: number } | null>(null)
   const current = shown ?? { year: start.year, month: start.month }
-  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans « Modifier › Vues ».</p>
+  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans « Modifier › Calendrier ».</p>
   if (!calendar) return <p className="py-10 text-center text-sm text-muted-foreground">Chargement du calendrier…</p>
   if (!calendar.months.length) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Le calendrier « {calendar.name} » n’a pas encore de mois : ajoute-les dans l’Index des calendriers, onglet Mois.</p>
   const week = calendar.weekdays.length || 7

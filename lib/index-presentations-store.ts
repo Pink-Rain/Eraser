@@ -8,6 +8,7 @@
  * `{ kanban: {...}, calendar: {...} }` en JSON. Revenir aux réglages d'office efface l'entrée.
  */
 import { cleanViewPreset, parseTabPresentations, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { cleanStats, type StatDefinition } from "@/lib/index-stats"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 const SCOPE = "index-presentations"
@@ -98,4 +99,27 @@ export async function saveViewPreset(input: { id?: string; name: string; layout:
 export async function deleteViewPreset(id: string) {
   if (!sharedStoreAvailable()) throw new Error("INDEX_PRESENTATIONS_UNAVAILABLE")
   await deleteSharedRecord(PRESET_SCOPE, id)
+}
+
+// ---------- Statistiques d'un index (Modifier › Stats ; l'onglet stat montre les épinglées) ----------
+
+const STATS_SCOPE = "index-stats"
+
+export async function listIndexStats(index: string): Promise<StatDefinition[]> {
+  if (!sharedStoreAvailable() || !index.trim()) return []
+  const record = (await listSharedRecords(STATS_SCOPE)).find((entry) => entry.key === index.trim())
+  if (!record) return []
+  try { return cleanStats((JSON.parse(record.value) as { stats?: unknown }).stats) } catch { return [] }
+}
+
+/** Enregistre toutes les statistiques d'un index (une liste vide efface l'entrée). */
+export async function saveIndexStats(index: string, stats: unknown) {
+  if (!index.trim()) throw new Error("INDEX_PRESENTATIONS_INVALID")
+  if (!sharedStoreAvailable()) throw new Error("INDEX_PRESENTATIONS_UNAVAILABLE")
+  const clean = cleanStats(stats)
+  if (!clean.length) { await deleteSharedRecord(STATS_SCOPE, index.trim()); return [] }
+  const value = JSON.stringify({ stats: clean })
+  if (value.length > MAX_VALUE) throw new Error("INDEX_STATS_TOO_LARGE")
+  await writeSharedRecord(STATS_SCOPE, index.trim(), value)
+  return clean
 }

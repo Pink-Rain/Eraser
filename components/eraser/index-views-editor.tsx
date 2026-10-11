@@ -7,7 +7,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import { LayoutSettings, layoutIcons } from "@/components/eraser/index-views"
+import { LayoutSettings } from "@/components/eraser/index-views"
 import { builtinViewPresets, fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 
 /**
@@ -15,7 +15,9 @@ import { builtinViewPresets, fitLayoutToColumns, presentationKinds, type Present
  * tableau de bord, chacun avec ses réglages, ses presets et un aperçu sur les vraies lignes.
  * Les onglets-fenêtres qui choisissent une de ces vues la montrent avec ces réglages.
  */
-export function IndexViewsEditor({ tabName, columns, rows, value, onChange, presets, onSavePreset, onDeletePreset, optionsOf, disabled = false }: {
+export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, presets, onSavePreset, onDeletePreset, optionsOf, disabled = false }: {
+  /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
+  kind: PresentationKind
   tabName: string
   /** Les colonnes de l'onglet (sans l'identifiant). */
   columns: string[]
@@ -29,7 +31,6 @@ export function IndexViewsEditor({ tabName, columns, rows, value, onChange, pres
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
 }) {
-  const [kind, setKind] = useState<PresentationKind>("list")
   const [presetName, setPresetName] = useState("")
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState("")
@@ -51,12 +52,6 @@ export function IndexViewsEditor({ tabName, columns, rows, value, onChange, pres
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
   return <div className="grid min-h-0 gap-3 lg:grid-cols-[minmax(0,22rem)_minmax(0,1fr)]">
     <div className="grid content-start gap-3">
-      <div className="flex flex-wrap gap-1" role="tablist" aria-label={`Vues de « ${tabName} »`}>
-        {presentationKinds.map((entry) => { const Icon = layoutIcons[entry.value]; return <Button key={entry.value} type="button" role="tab" aria-selected={kind === entry.value} size="sm" variant={kind === entry.value ? "default" : "outline"} className="h-8" onClick={() => { setKind(entry.value); setMessage("") }}>
-          <Icon />{entry.label}{value[entry.value] && <span className="size-1.5 rounded-full bg-current opacity-70" aria-label="réglée" />}
-        </Button> })}
-      </div>
-
       <div className="grid gap-2 rounded-xl border bg-muted/20 p-3">
         <p className="text-sm font-medium">Presets</p>
         <NativeSelect value="" disabled={disabled} onChange={(event) => {

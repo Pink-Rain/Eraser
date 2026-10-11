@@ -15,10 +15,12 @@ import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
 import { shownReferenceText } from "@/components/eraser/reference-store"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
+import type { EditorMode } from "@/components/eraser/index-editor"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
-import { ObjectViewGrid } from "@/components/eraser/object-view-grid"
+import { ObjectViewGrid, specIn } from "@/components/eraser/object-view-grid"
+import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import { ObjectSendDialog } from "@/components/eraser/object-send-dialog"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
@@ -40,6 +42,7 @@ import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
+import { isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
@@ -114,12 +117,60 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Tableau ou cartes, et la carte choisie : retenus sur ce poste.
   const [display, setDisplay] = usePersistentState<IndexDisplay>("eraser:object-index:display", "table", isIndexDisplay)
   const [cardChoice, setCardChoice] = usePersistentState<string>("eraser:object-index:card", "", isCardChoice)
-  const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
+  const [editorMode, setEditorMode] = useState<EditorMode>("columns")
   const { viewRole, selectedCampaignId } = useShellData()
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
   const editedInView = useRef(false)
   const activeView = useMemo(() => { const id = viewIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
+  // La vue de l'onglet-fenêtre (liste, kanban…) part des réglages de « Modifier › Vues » de son
+  // tableau (le premier si la fenêtre les couvre tous) ; ce qu'elle règle elle-même passe par-dessus.
+  const activeLayout = useMemo((): ViewLayout | null => {
+    const own = activeView?.layout ?? null
+    if (!own || !isPresentationKind(own.kind)) return own
+    const table = activeView!.source === ALL_SOURCES ? tables[0] : tables.find((candidate) => tableKey(candidate) === activeView!.source)
+    const base = table ? presentationFor(settings.presentations, table.tabName, own.kind) : { kind: own.kind }
+    const set = Object.fromEntries(Object.entries(own).filter(([, value]) => value !== undefined && !(Array.isArray(value) && !value.length)))
+    return { ...base, ...set, kind: own.kind } as ViewLayout
+  }, [activeView, settings.presentations, tables])
+
+  // Les statistiques des items (Modifier › Stats), sur tous les tableaux ; un onglet stat montre les épinglées.
+  const statKey = (table: ObjectIndexTable, rowNumber: number) => `${tableKey(table)}|${rowNumber}`
+  const statLocate = useCallback((rowKey: string) => {
+    const separator = rowKey.lastIndexOf("|")
+    const table = tables.find((candidate) => tableKey(candidate) === rowKey.slice(0, separator))
+    const row = table?.rows.find((candidate) => candidate.rowNumber === Number(rowKey.slice(separator + 1)))
+    return table && row ? { table, row } : null
+  }, [tables])
+  const statRowKeys = useMemo(() => tables.flatMap((table) => table.rows.map((row) => statKey(table, row.rowNumber))), [tables])
+  const statTabs = useMemo(() => tables.map((table) => table.tabName), [tables])
+  const statHeaders = useMemo(() => {
+    const seen = new Map<string, string>()
+    for (const table of tables) for (const header of table.headers) {
+      if (!header.trim() || /^(id|colonne \d+)$/i.test(header.trim()) || seen.has(foldName(header))) continue
+      seen.set(foldName(header), header)
+    }
+    if (tables.length > 1 && !seen.has(foldName(TAB_PSEUDO))) seen.set(foldName(TAB_PSEUDO), TAB_PSEUDO)
+    return [...seen.values()]
+  }, [tables])
+  const statValueOf = useCallback((rowKey: string, column: string) => {
+    const found = statLocate(rowKey)
+    if (!found) return ""
+    const index = objectHeaderIndex(found.table.headers, column)
+    if (index < 0) return foldName(column) === foldName(TAB_PSEUDO) ? found.table.tabName : ""
+    return found.row.values[index] ?? ""
+  }, [statLocate])
+  const statTabOf = useCallback((rowKey: string) => statLocate(rowKey)?.table.tabName ?? "", [statLocate])
+  const statNameOf = useCallback((rowKey: string) => statValueOf(rowKey, "Nom").replace(/<[^>]+>/g, "").trim(), [statValueOf])
+  const statOptionsOf = useCallback((header: string) => {
+    const table = tables.find((candidate) => objectHeaderIndex(candidate.headers, header) >= 0)
+    return (table ? specIn(table, header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))
+  }, [schemas, tables])
+  const indexStats = useMemo(() => {
+    const seen = new Set<string>()
+    return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
+  }, [settings.stats, settings.views])
+  const statsProps = { stats: indexStats, rows: statRowKeys, columns: statHeaders, tabs: statTabs, valueOf: statValueOf, tabOf: statTabOf, nameOf: statNameOf, optionsOf: statOptionsOf, onOpen: () => undefined, onSave: settings.saveStats }
   const selected = useMemo(() => tables.find((table) => tableKey(table) === selectedKey) ?? tables[0] ?? null, [selectedKey, tables])
   // « {Prix} » écrit dans une description : le menu « { » propose les colonnes de l'objet.
   const selectedTab = selected?.tabName
@@ -536,7 +587,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
     await refresh()
   }
 
-  async function openEditor(mode: "columns" | "cards" = "columns") {
+  async function openEditor(mode: EditorMode = "columns") {
     if (!selected) return
     setEditorMode(mode)
     setPending("editor"); setError("")
@@ -667,6 +718,14 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         cardsIndex="objects"
         cards={settings.cards}
         onSaveCards={settings.saveCards}
+        presentations={settings.presentations}
+        onSavePresentations={settings.savePresentations}
+        viewPresets={settings.viewPresets}
+        onSaveViewPreset={settings.saveViewPreset}
+        onDeleteViewPreset={settings.deleteViewPreset}
+        previewRows={Object.fromEntries(tables.filter((table) => table.fileId === editor.key).map((table) => [table.tabName, table.rows.slice(0, 40).map((row) => Object.fromEntries(table.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
+        optionsOf={(tabName, header) => { const table = tables.find((candidate) => candidate.fileId === editor.key && candidate.tabName === tabName); return (table ? specIn(table, header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color })) }}
+        statsPanel={<IndexStats {...statsProps} canEdit={!busy} />}
         initialMode={editorMode}
         initialTab={selected?.tabName}
       />}
@@ -682,7 +741,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((header, index) => [header, values[String(index)] ?? ""]) }, "add")}
       />}
 
-      {activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
+      {activeView && activeView.layout?.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={false} onManage={() => void openEditor("stats")} />
+        : activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
         ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
@@ -744,6 +804,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         open
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index="objects"
+        allowStats
         view={viewDialog === "edit" ? activeView : null}
         sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}

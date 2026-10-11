@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LayoutList, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
@@ -50,7 +50,11 @@ import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout,
 import { builtinLayoutFor, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { cardId, renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
-import type { TabPresentations, ViewLayout, ViewPreset } from "@/lib/index-view-layouts"
+import { presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { layoutIcons } from "@/components/eraser/index-views"
+
+/** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
+export type EditorMode = "columns" | LayoutKind | "cards" | `view:${PresentationKind}` | "stats"
 import {
   alignColumns,
   canonicalObjectHeader,
@@ -717,7 +721,7 @@ function DisplaySettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; 
     {!isComputedSpec(spec) && spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> : visible, triable et dans les survols, mais ne se modifie pas d’ici (ses données viennent d’ailleurs).</span></label>}
     {spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.rowLabel)} onCheckedChange={(checked) => onChange({ ...spec, rowLabel: checked === true || undefined })} /><span><b>Nomme la ligne</b> : dans un onglet sans colonne Nom, cette colonne donne son nom à la ligne (titre de la fiche, citations « {"{"} »).</span></label>}
     <label className={smallLabel}>Description (au survol de l’en-tête et dans la fiche)<Input disabled={disabled} value={spec.description ?? ""} onChange={(event) => onChange({ ...spec, description: event.target.value || undefined })} placeholder="À quoi sert cette colonne ?" /></label>
-    <p className="text-[11px] text-muted-foreground">Pour choisir les champs de la fiche et du survol (masqués compris) : « Mise en page de la fiche » et « Survol », en haut.</p>
+    <p className="text-[11px] text-muted-foreground">Pour choisir les champs de la fiche et du survol (masqués compris) : « Formulaire » et « Survol », en haut.</p>
   </div>
 }
 
@@ -821,7 +825,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -851,7 +855,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Enregistre les cartes changées (`null` : retour aux cartes d'Eraser). Absent : pas d'onglet « Cartes ». */
   onSaveCards?: (changes: Array<{ tab: string; cards: TabCards | null }>) => Promise<void>
   /** Ce que l'éditeur ouvre d'abord (« Cartes » depuis la vue en cartes). */
-  initialMode?: "columns" | LayoutKind | "cards" | "views"
+  initialMode?: EditorMode
   /** Les vues réglées (liste, kanban…), par onglet ; `onSavePresentations` absent : pas d'onglet « Vues ». */
   presentations?: Record<string, TabPresentations>
   onSavePresentations?: (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => Promise<void>
@@ -863,6 +867,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   previewRows?: Record<string, Array<Record<string, string>>>
   /** Les choix d'une colonne liste d'un onglet (couleurs des sections, du kanban). */
   optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
+  /** Le constructeur des statistiques de l'index (onglet « Stats ») ; absent : pas d'onglet. */
+  statsPanel?: ReactNode
   /** L'onglet ouvert d'abord (son nom). */
   initialTab?: string
 }) {
@@ -896,7 +902,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   ].filter(Boolean).map((problem) => `${candidate.name} : ${problem}`)), [tabs])
 
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
-  const [mode, setMode] = useState<"columns" | LayoutKind | "cards" | "views">(() => (initialMode === "cards" && !onSaveCards) || (initialMode === "views" && !onSavePresentations) ? "columns" : initialMode)
+  const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) ? "columns" : initialMode)
+  const viewKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
   // Les mises en page touchées, par onglet (identifiant du brouillon) ; `null` : automatique.
   const [layoutDrafts, setLayoutDrafts] = useState<Record<string, Partial<Record<LayoutKind, IndexLayout | null>>>>({})
   const [layoutSaving, setLayoutSaving] = useState(false)
@@ -1125,9 +1132,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           </div>
           <span className="flex flex-wrap items-center gap-2">
             {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
-              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Mise en page de la fiche"], ["hover", MessageSquareQuote, "Survol « { » d’une ligne"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? [["views", LayoutList, "Vues"]] as const : [])] as const).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
+              {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
-            <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />Guide « ? »</Button>
+            <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />?</Button>
           </span>
         </div>
       </DialogHeader>
@@ -1168,12 +1175,20 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
 
-        {mode === "views" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+        {mode === "stats" && statsPanel && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+            Les <b className="text-foreground">statistiques</b> de cet index, sur tous ses onglets. Une statistique <b className="text-foreground">épinglée</b> s’affiche dans les onglets stat de l’index. Enregistrées aussitôt dans Eraser, pour tout le monde.
+          </div>
+          {statsPanel}
+        </section>}
+
+        {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
             Les <b className="text-foreground">vues</b> de « {tab.name} » : liste, kanban, maître-détail, calendrier, tableau de bord. Un onglet-fenêtre qui en choisit une la montre avec ces réglages. Gardées dans Eraser, pour tout le monde ; les presets servent dans tous les index.
           </div>
           <IndexViewsEditor
-            key={tab.id}
+            key={`${tab.id}:${viewKind}`}
+            kind={viewKind}
             tabName={tab.name}
             columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
             rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
