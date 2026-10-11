@@ -9,7 +9,8 @@ import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/erase
 import { primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import type { StatBlock, ViewBlock } from "@/lib/custom-pages"
+import type { BacklinksBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
+import type { Backlink } from "@/lib/custom-pages-rows"
 import { viewHeights } from "@/lib/custom-pages"
 import type { StatBlockData, ViewBlockData } from "@/lib/custom-pages-data"
 import { pickCard } from "@/lib/index-cards"
@@ -24,16 +25,18 @@ import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-view-layouts"
  */
 
 type ViewData = ViewBlockData & { calendars?: Array<{ tabName: string; headers: string[]; rows: Array<{ values: string[] }> }> }
-type Loaded = { data: ViewData | StatBlockData | null; error: string; loading: boolean }
+type BacklinksData = { kind: "backlinks"; items: Backlink[] }
+type Loaded = { data: ViewData | StatBlockData | BacklinksData | null; error: string; loading: boolean }
 
 /**
  * Où lire les données : le bloc d'une page enregistrée (`pageId`), ou (atelier) l'index
  * directement ; `asPlayer` : l'aperçu « Voir comme Joueur » reçoit ce qu'un joueur recevrait.
  */
-export type BlockSource = { pageId: string; draft?: boolean } | { direct: true; asPlayer?: boolean }
+export type BlockSource = { pageId: string; draft?: boolean; row?: { index: string; id: string } } | { direct: true; asPlayer?: boolean }
 
-function dataUrl(block: ViewBlock | StatBlock, source: BlockSource) {
-  if ("pageId" in source) return `/api/pages/block-data?page=${encodeURIComponent(source.pageId)}&block=${encodeURIComponent(block.id)}${source.draft ? "&draft=1" : ""}`
+function dataUrl(block: ViewBlock | StatBlock | BacklinksBlock, source: BlockSource) {
+  if ("pageId" in source) return `/api/pages/block-data?page=${encodeURIComponent(source.pageId)}&block=${encodeURIComponent(block.id)}${source.draft ? "&draft=1" : ""}${source.row ? `&rowIndex=${encodeURIComponent(source.row.index)}&rowId=${encodeURIComponent(source.row.id)}` : ""}`
+  if (block.type === "backlinks") return ""
   if (!block.index) return ""
   const as = source.asPlayer ? "&as=joueur" : ""
   if (block.type === "stat") return block.statId ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&stat=${encodeURIComponent(block.statId)}${as}` : ""
@@ -49,7 +52,7 @@ function useBlockData(url: string, version: number) {
     setState((current) => ({ data: current.url === url ? current.data : null, error: "", loading: true, url }))
     fetch(url)
       .then(async (response) => {
-        const payload = (await response.json().catch(() => ({}))) as { data?: ViewData | StatBlockData; error?: string }
+        const payload = (await response.json().catch(() => ({}))) as { data?: ViewData | StatBlockData | BacklinksData; error?: string }
         if (!alive) return
         if (!response.ok || !payload.data) setState({ data: null, error: payload.error || "Les données de ce bloc n’ont pas pu être lues.", loading: false, url })
         else setState({ data: payload.data, error: "", loading: false, url })
@@ -190,5 +193,33 @@ export function PageStatBlock({ block, source }: { block: StatBlock; source: Blo
       canEdit={false}
       onSave={async () => undefined}
     /> : null}
+  </Frame>
+}
+
+/**
+ * Page de ligne : « Cité dans », les lignes des autres index qui citent celle de la page (par
+ * une référence « { » ou une colonne liée). Dans l'atelier, il attend une ligne à montrer.
+ */
+export function PageBacklinksBlock({ block, source }: { block: BacklinksBlock; source: BlockSource }) {
+  const [version, setVersion] = useState(0)
+  const url = "pageId" in source && source.row ? dataUrl(block, source) : ""
+  const state = useBlockData(url, version)
+  const items = state.data?.kind === "backlinks" ? (state.data as BacklinksData).items : null
+  if (!url) return <Frame heading={block.heading}><Placeholder>Sur la page d’une ligne : les lignes des autres index qui la citent.</Placeholder></Frame>
+  const groups = new Map<string, Backlink[]>()
+  for (const item of items ?? []) groups.set(item.indexTitle, [...(groups.get(item.indexTitle) ?? []), item])
+  return <Frame heading={block.heading}>
+    {state.loading && !items ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : items && !items.length ? <p className="rounded-2xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">Aucune ligne ne la cite pour l’instant.</p> : <div className="grid gap-3 rounded-2xl border bg-card p-3.5">
+      {[...groups.entries()].map(([title, list]) => <div key={title} className="grid gap-1">
+        <p className="text-[10.5px] font-bold uppercase tracking-[0.14em] text-muted-foreground">{title}</p>
+        <ul className="flex flex-wrap gap-1.5">
+          {list.map((item) => <li key={`${item.index}:${item.tab}:${item.id}:${item.name}`}>
+            {item.href
+              ? <Link href={item.href} prefetch={false} title={`${item.tab} · ${item.column}`} className="inline-flex items-center gap-1 rounded-full border bg-background/60 px-2.5 py-0.5 text-[13px] transition hover:border-primary/40 hover:text-primary">{item.name}<ChevronRight className="size-3 opacity-50" /></Link>
+              : <span title={`${item.tab} · ${item.column}`} className="inline-flex rounded-full border bg-background/60 px-2.5 py-0.5 text-[13px]">{item.name}</span>}
+          </li>)}
+        </ul>
+      </div>)}
+    </div>}
   </Frame>
 }

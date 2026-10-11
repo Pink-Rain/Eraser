@@ -60,7 +60,7 @@ type Dragged = { kind: "new"; type: BlockType } | { kind: "move"; id: string }
 type Toast = { text: string; action?: { label: string; run: () => void } }
 
 const DRAG_TYPE = "application/x-eraser-page-block"
-const draftKeys = ["title", "icon", "emoji", "description", "sections", "slug", "place", "campaignId", "vis", "replaces", "rowOf"] as const
+const draftKeys = ["title", "icon", "emoji", "description", "sections", "slug", "place", "campaignId", "vis", "replaces", "replaceMode", "rowOf"] as const
 
 function draftOf(page: StudioPage): PageDraft {
   const out: Record<string, unknown> = {}
@@ -221,6 +221,9 @@ function BlockEditor({ block, rev, live, links, viewAs, onChange }: EditorProps)
       return <PageViewBlock block={block} source={{ direct: true, asPlayer: viewAs === "joueur" }} />
     case "stat":
       return <PageStatBlock block={block} source={{ direct: true, asPlayer: viewAs === "joueur" }} />
+    case "rowfields":
+    case "backlinks":
+      return <BlockView block={block} context={{ source: { direct: true }, canReveal: false, links }} />
   }
 }
 
@@ -641,6 +644,8 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
               {statusPill}
               <span className="inline-flex items-center gap-1 rounded-full border bg-card px-2 py-0.5 text-[11px] font-semibold text-muted-foreground"><Eye className="size-3" />{doc.vis === "tous" ? "Tout le monde" : doc.vis === "mj" ? "MJ et admin" : "Admin"}</span>
               <span className="truncate rounded-full border bg-card px-2 py-0.5 font-mono text-[11px] text-muted-foreground">{href}</span>
+              {doc.replaces && <span className="inline-flex items-center gap-1 rounded-full border border-primary/35 bg-primary/8 px-2 py-0.5 text-[11px] font-semibold text-primary">{doc.replaceMode === "replace" ? "Remplace" : doc.replaceMode === "before" ? "Au-dessus de" : "En dessous de"} {doc.replaces}</span>}
+              {doc.rowOf?.index && <span className="inline-flex items-center gap-1 rounded-full border border-[#3b5c8a]/35 bg-[#3b5c8a]/8 px-2 py-0.5 text-[11px] font-semibold text-[#3b5c8a]">Page de chaque ligne · {doc.rowOf.index}{doc.rowOf.tab ? ` › ${doc.rowOf.tab}` : ""}</span>}
             </div>
           </header>
           {pageClosed && <p className="flex items-start gap-2 rounded-xl border border-dashed px-3.5 py-2.5 text-[13px] text-muted-foreground"><LockKeyhole className="mt-0.5 size-4 shrink-0" />Le rôle {roleLabels[viewAs]} ne voit pas cette page ({doc.place === "ressources" || doc.place === "bac-a-sable" ? "section réservée aux MJ et aux admins" : doc.place === "administration" ? "section réservée aux admins" : "réglage « Qui voit la page »"}).</p>}
@@ -714,7 +719,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
         </div>
         <div className="pb-4">
           {selectedBlock
-            ? <BlockSettings key={selectedBlock.id} block={selectedBlock} pages={pages} live={doc.live[selectedBlock.id]} onChange={(patch, coalesce) => updateBlock(selectedBlock.id, patch, coalesce ? `${selectedBlock.id}:${coalesce}` : undefined)} onDuplicate={() => duplicate(selectedBlock.id)} onRemove={() => remove(selectedBlock.id)} onPage={() => select(null)} />
+            ? <BlockSettings key={selectedBlock.id} block={selectedBlock} pages={pages} live={doc.live[selectedBlock.id]} rowOf={doc.rowOf} onChange={(patch, coalesce) => updateBlock(selectedBlock.id, patch, coalesce ? `${selectedBlock.id}:${coalesce}` : undefined)} onDuplicate={() => duplicate(selectedBlock.id)} onRemove={() => remove(selectedBlock.id)} onPage={() => select(null)} />
             : <PageSettings page={doc} pages={initialPages} campaigns={campaigns} isAdmin={isAdmin} linking={linking} busy={busy} saveError={save.kind === "error" && save.message && /adresse/i.test(save.message) ? save.message : ""}
               onChange={(patch, coalesce) => change((draft) => ({ ...draft, ...patch }), coalesce ? `page:${coalesce}` : undefined)}
               onRevert={() => void action("revert", "Brouillon remis comme la version publiée")}

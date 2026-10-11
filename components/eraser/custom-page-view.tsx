@@ -1,13 +1,14 @@
 "use client"
 
 import Link from "next/link"
-import { useState, type ReactNode } from "react"
+import { useMemo, useState, type ReactNode } from "react"
 import { ChevronRight, EyeOff, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexRichText } from "@/components/eraser/index-references"
-import { PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
+import { PageBacklinksBlock, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
+import { fillRowPage, type RowContext } from "@/lib/custom-pages-rows"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
@@ -195,6 +196,29 @@ export type BlockContext = {
   indexPaths?: Record<string, string>
   onReveal?: (blockId: string, reveal: boolean) => Promise<void>
   onNotes?: (blockId: string, html: string, base: string) => Promise<string | null>
+  /** Page de ligne : la ligne affichée (ses valeurs lisibles par le lecteur). */
+  row?: RowContext
+}
+
+/** Page de ligne : les valeurs de la ligne, toutes ou les colonnes choisies. */
+function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowfields" }>; row?: RowContext }) {
+  if (!row) return <div className="grid gap-2">
+    {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
+    <p className="rounded-2xl border border-dashed px-4 py-6 text-center text-sm text-muted-foreground">Sur la page d’une ligne : {block.columns.length ? block.columns.join(", ") : "toutes ses colonnes"}.</p>
+  </div>
+  const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
+  const columns = (block.columns.length ? block.columns.flatMap((name) => row.columns.filter((column) => fold(column.header) === fold(name))) : row.columns).filter((column) => column.text || /<img|https?:/.test(column.html))
+  return <section className="grid gap-2">
+    {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
+    {columns.length
+      ? <dl className={`grid gap-x-5 gap-y-2.5 rounded-2xl border bg-card p-4 ${block.style === "grid" ? "[grid-template-columns:repeat(auto-fill,minmax(min(12rem,100%),1fr))]" : ""}`}>
+        {columns.map((column) => <div key={column.header} className={`grid min-w-0 gap-0.5 ${block.style === "list" ? "grid-cols-[minmax(7rem,auto)_minmax(0,1fr)] items-baseline gap-x-4 border-b border-border/60 pb-2 last:border-b-0 last:pb-0" : ""}`}>
+          <dt className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{column.header}</dt>
+          <dd className="min-w-0 text-[14px] [overflow-wrap:anywhere]"><IndexRichText html={column.html} as="span" /></dd>
+        </div>)}
+      </dl>
+      : <p className="rounded-2xl border border-dashed px-4 py-5 text-center text-sm text-muted-foreground">Aucune valeur à montrer.</p>}
+  </section>
 }
 
 /** Un bloc dans sa forme de lecture. */
@@ -216,6 +240,8 @@ export function BlockView({ block, context }: { block: ViewedBlock; context: Blo
     case "notes": return <NotesView key={`${block.editedAt ?? ""}`} block={block} onSave={context.onNotes ? (html, base) => context.onNotes!(block.id, html, base) : undefined} />
     case "view": return <PageViewBlock block={block} source={context.source} path={context.indexPaths?.[block.index]} />
     case "stat": return <PageStatBlock block={block} source={context.source} />
+    case "rowfields": return <RowFieldsView block={block} row={context.row} />
+    case "backlinks": return <PageBacklinksBlock block={block} source={context.source} />
   }
 }
 
@@ -261,10 +287,25 @@ export function PageHeader({ eyebrow, title, description, icon, emoji, children 
  * Révéler un secret et écrire dans un carnet passent par /api/pages : la page revient
  * telle que le serveur la voit après le changement.
  */
-export function CustomPageView({ initial, links, campaignName, indexPaths }: { initial: PageView; links: Record<string, PageLinkTarget>; campaignName?: string; indexPaths?: Record<string, string> }) {
-  const [view, setView] = useState(initial)
+export function CustomPageView({ initial, links, campaignName, indexPaths, row, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false }: {
+  initial: PageView
+  links: Record<string, PageLinkTarget>
+  campaignName?: string
+  indexPaths?: Record<string, string>
+  /** Page de ligne : la ligne affichée ; « {Colonne} » prend ses valeurs. */
+  row?: RowContext
+  eyebrow?: string
+  /** Un bandeau sous l'en-tête (page qui en remplace une d'Eraser…). */
+  notice?: ReactNode
+  /** Des boutons de plus à côté de « Modifier dans l'atelier ». */
+  actions?: ReactNode
+  /** Seulement les blocs, sans en-tête (page qui complète une page d'Eraser). */
+  blocksOnly?: boolean
+}) {
+  const [raw, setView] = useState(initial)
+  const view = useMemo(() => row ? fillRowPage(raw, row) : raw, [raw, row])
   const [error, setError] = useState("")
-  const eyebrow = view.place === "campagne" ? `Campagne${campaignName ? ` · ${campaignName}` : ""}` : view.place === "hors-menu" ? "Page" : placeLabel(view.place)
+  const eyebrow = eyebrowOverride ?? (view.place === "campagne" ? `Campagne${campaignName ? ` · ${campaignName}` : ""}` : view.place === "hors-menu" ? "Page" : placeLabel(view.place))
 
   async function post(body: Record<string, unknown>) {
     const response = await fetch("/api/pages", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ id: view.id, ...body }) }).catch(() => null)
@@ -275,7 +316,8 @@ export function CustomPageView({ initial, links, campaignName, indexPaths }: { i
   }
 
   const context: BlockContext = {
-    source: { pageId: view.id, draft: view.draft },
+    source: { pageId: view.id, draft: view.draft, ...(row ? { row: { index: row.index, id: row.id } } : {}) },
+    row,
     canReveal: view.canReveal,
     links,
     indexPaths,
@@ -283,20 +325,29 @@ export function CustomPageView({ initial, links, campaignName, indexPaths }: { i
     onNotes: (blockId, html, base) => post({ action: "edit-notes", blockId, html, base }),
   }
 
+  const sections = view.sections.some((section) => section.cols.some((column) => column.length))
+    ? <PageSections sections={view.sections} render={(block) => <BlockView block={block} context={context} />} />
+    : null
+  if (blocksOnly) return <div className="w-full px-5 py-6 sm:px-8">
+    {notice}
+    {error && <p role="alert" className="mb-4 max-w-3xl rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
+    {sections}
+  </div>
+
   return <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
     <PageHeader eyebrow={eyebrow} title={view.title} description={view.description} icon={view.icon} emoji={view.emoji}>
-      {view.editable && <div className="mt-5 flex flex-wrap items-center gap-2">
-        <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${view.draft ? "border-[#9a6512]/40 bg-[#9a6512]/10 text-[#9a6512]" : "border-[#0f7a65]/40 bg-[#0f7a65]/10 text-[#0f7a65]"}`}>{view.draft ? "Brouillon" : "Publiée"}</span>
+      {(view.editable || actions) && <div className="mt-5 flex flex-wrap items-center gap-2">
+        {view.editable && <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${view.draft ? "border-[#9a6512]/40 bg-[#9a6512]/10 text-[#9a6512]" : "border-[#0f7a65]/40 bg-[#0f7a65]/10 text-[#0f7a65]"}`}>{view.draft ? "Brouillon" : "Publiée"}</span>}
         {view.unpublished && !view.draft && <span className="text-xs text-muted-foreground">Des modifications attendent d’être publiées.</span>}
-        <Button asChild size="sm" variant="outline" className="ml-1"><Link href={`/pages/atelier?id=${encodeURIComponent(view.id)}`} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>
+        {view.editable && <Button asChild size="sm" variant="outline" className="ml-1"><Link href={`/pages/atelier?id=${encodeURIComponent(view.id)}`} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>}
+        {actions}
       </div>}
     </PageHeader>
+    {notice && <div className="mt-6 max-w-3xl">{notice}</div>}
     {view.draft && view.editable && <p className="mt-6 flex max-w-3xl items-start gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"><EyeOff className="mt-0.5 size-4 shrink-0" />Ce brouillon n’est visible que de ceux qui peuvent modifier la page. Publie-le depuis l’atelier pour l’ouvrir aux autres.</p>}
     {error && <p role="alert" className="mt-6 max-w-3xl rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     <div className="mt-10">
-      {view.sections.some((section) => section.cols.some((column) => column.length))
-        ? <PageSections sections={view.sections} render={(block) => <BlockView block={block} context={context} />} />
-        : <p className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Cette page est encore vide.</p>}
+      {sections ?? <p className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Cette page est encore vide.</p>}
     </div>
   </div>
 }

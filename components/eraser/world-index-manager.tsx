@@ -13,6 +13,7 @@ import { builtinViewsFor, viewAddDefaults } from "@/lib/index-view-defaults"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
+import { RowPageLink } from "@/components/eraser/row-page-link"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
 import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-views"
@@ -1538,6 +1539,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           return extra ? <div className="grid content-start gap-1 text-xs font-semibold md:col-span-2">{extra.label}{extra.render(embedRow(details), false)}</div> : undefined
         }}
         error={sheetError}
+        footer={<RowPageLink index={indexKey} tab={detailsFound.table.tabName} id={savedCell(detailsFound, "ID").replace(/<[^>]+>/g, "").trim()} />}
         navigation={sheetNavigation}
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null) }}

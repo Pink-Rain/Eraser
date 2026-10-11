@@ -6,6 +6,7 @@ import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, TriangleAlert } f
 import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
+import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
   blockCatalog,
   blockVisibilities,
@@ -87,7 +88,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 /* ---------- Les index (blocs Vue et Stat) ---------- */
 
 type IndexEntry = { key: string; title: string; path: string }
-type IndexDetails = { tabs: Array<{ name: string; kinds: ViewBlockKind[]; cards: boolean }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
+type IndexDetails = { tabs: Array<{ name: string; kinds: ViewBlockKind[]; cards: boolean; columns?: string[] }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
 
 let catalogPromise: Promise<IndexEntry[]> | null = null
 const detailsCache = new Map<string, Promise<IndexDetails | null>>()
@@ -137,7 +138,7 @@ function IndexPicker({ value, onChange }: { value: string; onChange: (key: strin
   </Field>
 }
 
-function ViewSettings({ block, onChange }: { block: Extract<PageBlock, { type: "view" }>; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
+function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { type: "view" }>; rowOf?: { index: string; tab?: string }; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
   const { details, loading } = useIndexDetails(block.index)
   const tab = details?.tabs.find((item) => item.name === block.tab)
   const kinds = tab?.kinds ?? ["table", "cards"]
@@ -169,6 +170,31 @@ function ViewSettings({ block, onChange }: { block: Extract<PageBlock, { type: "
         </select>
       </Field>
     </div>
+    {rowOf?.index && block.tab && <Field label="Page de ligne : seulement les lignes liées" hint="Ne garde que les lignes dont cette colonne cite la ligne de la page (son nom dans une liste, ou une référence « { » vers elle).">
+      <select className={fieldClass} value={block.rowMatch} onChange={(event) => onChange({ rowMatch: event.target.value })}>
+        <option value="">Toutes les lignes (pas de filtre)</option>
+        {(tab?.columns ?? []).map((column) => <option key={column} value={column}>{column}</option>)}
+      </select>
+    </Field>}
+    <Field label="Titre au-dessus" hint={rowOf?.index ? "« {Nom} » y met le nom de la ligne." : undefined}><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
+  </>
+}
+
+/** Page de ligne : les colonnes montrées par « Valeurs de la ligne ». */
+function RowFieldsSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { type: "rowfields" }>; rowOf?: { index: string; tab?: string }; onChange: (patch: Partial<Extract<PageBlock, { type: "rowfields" }>>) => void }) {
+  const { details, loading } = useIndexDetails(rowOf?.index ?? "")
+  const columns = [...new Set((details?.tabs ?? []).filter((tab) => !rowOf?.tab || tab.name === rowOf.tab).flatMap((tab) => tab.columns ?? []))]
+  if (!rowOf?.index) return <Hint>Ce bloc sert sur la page de chaque ligne : règle d’abord la page (Réglages de la page › « Page de chaque ligne d’un index »).</Hint>
+  return <>
+    <Field label="Colonnes montrées" hint="Aucune choisie : toutes les colonnes que le lecteur peut voir, dans l’ordre de l’onglet. Un joueur ne voit jamais les colonnes masquées ni les notes MJ.">
+      {loading ? <span className="text-xs text-muted-foreground">Lecture de l’index…</span> : <div className="flex flex-wrap gap-1">
+        {columns.map((column) => {
+          const on = block.columns.includes(column)
+          return <button key={column} type="button" aria-pressed={on} onClick={() => onChange({ columns: on ? block.columns.filter((item) => item !== column) : [...block.columns, column] })} className="rounded-full border border-border/80 bg-background/60 px-2.5 py-0.5 text-xs text-muted-foreground transition hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">{column}</button>
+        })}
+      </div>}
+    </Field>
+    <Field label="Disposition"><Segmented label="Disposition" value={block.style} onChange={(style) => onChange({ style })} options={[{ value: "grid", label: "En grille" }, { value: "list", label: "En liste" }]} /></Field>
     <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
   </>
 }
@@ -189,8 +215,10 @@ function StatSettings({ block, onChange }: { block: Extract<PageBlock, { type: "
 
 /* ---------- Réglages d'un bloc ---------- */
 
-export function BlockSettings({ block, pages, live, onChange, onDuplicate, onRemove, onPage }: {
+export function BlockSettings({ block, pages, live, rowOf, onChange, onDuplicate, onRemove, onPage }: {
   block: PageBlock
+  /** La page est le modèle des pages de ligne de cet index. */
+  rowOf?: { index: string; tab?: string }
   pages: PageSummary[]
   live?: StudioPage["live"][string]
   onChange: (patch: Partial<PageBlock>, coalesce?: string) => void
@@ -225,7 +253,7 @@ export function BlockSettings({ block, pages, live, onChange, onDuplicate, onRem
     case "image": {
       const valid = !block.src || cleanImageSource(block.src) === block.src
       content = <>
-        <Field label="Adresse de l’image" error={valid ? undefined : "Une adresse https:// ou un fichier d’Eraser (/api/…)."} hint="Une image du Drive partagé, d’un index (clic droit › copier l’adresse de l’image) ou du web (https).">
+        <Field label="Adresse de l’image" error={valid ? undefined : "Une adresse https://, un fichier d’Eraser (/api/…) ou une colonne de la ligne ({Portrait})."} hint={rowOf?.index ? "Page de ligne : « {Portrait} » prend l’image de cette colonne de la ligne." : "Une image du Drive partagé, d’un index (clic droit › copier l’adresse de l’image) ou du web (https)."}>
           <input className={fieldClass} value={block.src} placeholder="https://…" onChange={(event) => set({ src: event.target.value.trim() }, "src")} />
         </Field>
         <Field label="Légende"><input className={fieldClass} value={block.caption} maxLength={300} placeholder="Facultative (sert aussi de texte de remplacement)" onChange={(event) => set({ caption: event.target.value }, "caption")} /></Field>
@@ -282,7 +310,16 @@ export function BlockSettings({ block, pages, live, onChange, onDuplicate, onRem
       </>
       break
     case "view":
-      content = <ViewSettings block={block} onChange={(patch) => set(patch)} />
+      content = <ViewSettings block={block} rowOf={rowOf} onChange={(patch) => set(patch)} />
+      break
+    case "rowfields":
+      content = <RowFieldsSettings block={block} rowOf={rowOf} onChange={(patch) => set(patch)} />
+      break
+    case "backlinks":
+      content = <>
+        <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => set({ heading: event.target.value }, "heading")} /></Field>
+        <Hint>Sur la page d’une ligne : les lignes des autres index qui la citent, par une référence « {"{"} » ou une colonne liée à son index. Une colonne que le lecteur ne voit pas ne compte pas.</Hint>
+      </>
       break
     case "stat":
       content = <StatSettings block={block} onChange={(patch) => set(patch)} />
@@ -328,6 +365,22 @@ function AccessTable({ block }: { block: Extract<PageBlock, { type: "notes" }> }
 }
 
 /* ---------- Réglages de la page ---------- */
+
+/** Le modèle des pages de ligne : l'index (et l'onglet) dont chaque ligne a sa page. */
+function RowTemplateSettings({ rowOf, place, onChange }: { rowOf?: { index: string; tab?: string }; place: PagePlace; onChange: (rowOf: { index: string; tab?: string } | undefined) => void }) {
+  const { details, loading } = useIndexDetails(rowOf?.index ?? "")
+  return <>
+    <IndexPicker value={rowOf?.index ?? ""} onChange={(index) => onChange(index ? { index } : undefined)} />
+    {rowOf?.index && <Field label="Onglet" hint="Un modèle d’onglet l’emporte sur celui de tout l’index.">
+      <select className={fieldClass} value={rowOf.tab ?? ""} disabled={loading} onChange={(event) => onChange(event.target.value ? { index: rowOf.index, tab: event.target.value } : { index: rowOf.index })}>
+        <option value="">Toutes les lignes de l’index</option>
+        {(details?.tabs ?? []).map((tab) => <option key={tab.name} value={tab.name}>{tab.name}</option>)}
+      </select>
+    </Field>}
+    <Hint>{rowOf?.index ? <>Chaque ligne a sa page à <code className="font-mono text-[11px]">/fiche/{rowOf.index}/ID</code>, ouverte depuis la fiche de la ligne et depuis les vues. Dans les blocs, « {"{Nom}"} », « {"{Image}"} »… prennent les valeurs de la ligne ; les blocs « Valeurs de la ligne » et « Cité dans » la montrent. Les carnets et les secrets sont communs à toutes les lignes.</> : "Choisis un index : cette page devient le modèle de la page de chacune de ses lignes."}</Hint>
+    {rowOf?.index && (place === "ressources" || place === "bac-a-sable" || place === "administration") && <p className="rounded-lg border border-[#9a6512]/35 bg-[#9a6512]/8 px-2.5 py-1.5 text-[11.5px] text-[#7a4f0e]">Rangée dans une section fermée aux joueurs : ils n’ouvriront pas ces pages. Range le modèle hors menu ou dans Règles pour eux.</p>}
+  </>
+}
 
 export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveError, onChange, onRevert, onTemplate, onTrash, busy }: {
   page: StudioPage
@@ -390,6 +443,23 @@ export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveErr
       {page.published && <button type="button" disabled={!page.unpublished || busy} onClick={onRevert} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:border-ring disabled:opacity-50">Revenir à la version publiée</button>}
       {page.status === "publiee" && <a href={href} target="_self" className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Ouvrir la page publiée</a>}
       <Field label="Pages qui mènent ici">{linking.length ? <div className="flex flex-wrap gap-1">{linking.map((item) => <a key={item.id} href={`/pages/atelier?id=${encodeURIComponent(item.id)}`} className="rounded-full border bg-background/60 px-2 py-0.5 text-xs hover:border-ring">{item.title}</a>)}</div> : <span className="text-xs text-muted-foreground">Aucune pour l’instant.</span>}</Field>
+    </Group>
+    <Group title="Remplacer une page d’Eraser" open={Boolean(page.replaces)} badge={page.replaces ? <span className="rounded-full border border-primary/35 bg-primary/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-primary">active</span> : undefined}>
+      {page.rowOf?.index ? <Hint>Cette page est le modèle des lignes d’un index : elle ne remplace pas une page d’Eraser. Retire d’abord le modèle (ci-dessous) pour l’utiliser ici.</Hint> : <>
+      <Field label="Page d’Eraser" hint="La page créée prend sa place à son adresse, ou s’ajoute à son contenu. Seulement une fois publiée, et pour qui peut la lire ; les autres voient la page d’origine.">
+        <select className={fieldClass} value={page.replaces ?? ""} onChange={(event) => onChange(event.target.value ? { replaces: event.target.value, replaceMode: page.replaceMode ?? "after" } : { replaces: undefined, replaceMode: undefined })}>
+          <option value="">Aucune</option>
+          {[...new Set(replaceableRoutes.map((route) => route.group))].map((group) => <optgroup key={group} label={group}>
+            {replaceableRoutes.filter((route) => route.group === group).map((route) => <option key={route.path} value={route.path}>{route.label} — {route.path}</option>)}
+          </optgroup>)}
+        </select>
+      </Field>
+      {page.replaces && <RadioCards name="replace-mode" value={page.replaceMode ?? "after"} onChange={(replaceMode) => onChange({ replaceMode })} options={replaceModes.map((mode) => ({ value: mode.value, label: mode.label, hint: mode.hint }))} />}
+      {page.replaces && <Hint>Réversible : choisis « Aucune » pour rendre la page d’origine. Admins et MJ gardent « Voir la page d’origine ». La connexion, les comptes, la corbeille, Google, Roll20 et le créateur de pages ne se remplacent jamais.</Hint>}
+      </>}
+    </Group>
+    <Group title="Page de chaque ligne d’un index" open={Boolean(page.rowOf?.index)} badge={page.rowOf?.index ? <span className="rounded-full border border-primary/35 bg-primary/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-primary">modèle</span> : undefined}>
+      {page.replaces ? <Hint>Cette page remplace ou complète une page d’Eraser : elle ne peut pas servir aussi de page pour chaque ligne d’un index.</Hint> : <RowTemplateSettings rowOf={page.rowOf} place={page.place} onChange={(rowOf) => onChange({ rowOf })} />}
     </Group>
     <Group title="Modèle et corbeille" open={false}>
       <button type="button" onClick={onTemplate} disabled={busy} className="inline-flex items-center justify-center gap-1.5 rounded-lg border bg-card px-3 py-1.5 text-xs font-medium hover:border-ring disabled:opacity-50">Enregistrer comme modèle…</button>

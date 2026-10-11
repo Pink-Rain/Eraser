@@ -37,6 +37,7 @@ import {
   type PageAuthor,
   type PageTemplate,
 } from "@/lib/custom-pages"
+import { replacementLabel } from "@/lib/page-replacements"
 import { deleteSharedRecord, listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord, type SharedRecord } from "@/lib/shared-store"
 
 export const PAGES_SCOPE = "custom-pages"
@@ -83,7 +84,7 @@ function headOf(raw: string): Head | null {
 }
 
 /** Écrit une valeur, en morceaux si elle est trop longue ; efface les morceaux d'avant. */
-async function writeChunked(scope: string, key: string, value: string, known?: SharedRecord[]) {
+export async function writeChunked(scope: string, key: string, value: string, known?: SharedRecord[]) {
   const head: Head = { v: 1, parts: 0, value }
   const single = JSON.stringify(head)
   const previous = (known ?? await listSharedRecords(scope)).filter((record) => record.key.startsWith(`${key}${PART}`)).map((record) => record.key)
@@ -122,7 +123,7 @@ export function assembleChunks(records: Array<Pick<SharedRecord, "key" | "value"
 }
 
 /** Une seule valeur, relue à l'instant (avant une écriture). */
-async function readChunked(scope: string, key: string) {
+export async function readChunked(scope: string, key: string) {
   const record = await readSharedRecord(scope, key)
   if (!record) return null
   const head = headOf(record.value)
@@ -132,7 +133,7 @@ async function readChunked(scope: string, key: string) {
   return parts.every(Boolean) ? parts.map((part) => part!.value).join("") : null
 }
 
-async function deleteChunked(scope: string, key: string) {
+export async function deleteChunked(scope: string, key: string) {
   const stale = (await listSharedRecords(scope)).filter((record) => record.key.startsWith(`${key}${PART}`))
   await deleteSharedRecord(scope, key)
   for (const record of stale) await deleteSharedRecord(scope, record.key)
@@ -211,6 +212,15 @@ async function checkSlug(page: Pick<CustomPage, "id" | "slug" | "place" | "campa
   if (problem) throw new PageStoreError("CUSTOM_PAGE_SLUG", problem, 409)
 }
 
+/** Une adresse d'Eraser ne se remplace qu'une fois, et un index (ou un onglet) n'a qu'un modèle de page de ligne. */
+async function checkUnique(page: Pick<CustomPage, "id" | "replaces" | "rowOf">) {
+  const others = (await listCustomPages({ fresh: true })).filter((other) => other.id !== page.id && !other.trashedAt)
+  const replacing = page.replaces ? others.find((other) => other.replaces === page.replaces) : undefined
+  if (replacing) throw new PageStoreError("CUSTOM_PAGE_REPLACE_TAKEN", `« ${replacementLabel(page.replaces!)} » est déjà remplacée ou complétée par la page « ${replacing.title} ». Retire-la de là d’abord.`, 409)
+  const row = page.rowOf ? others.find((other) => other.rowOf?.index === page.rowOf!.index && (other.rowOf.tab ?? "") === (page.rowOf!.tab ?? "")) : undefined
+  if (row) throw new PageStoreError("CUSTOM_PAGE_ROW_TAKEN", `La page « ${row.title} » sert déjà de modèle aux lignes de cet index${page.rowOf?.tab ? ` (onglet ${page.rowOf.tab})` : ""}.`, 409)
+}
+
 /** Une nouvelle page, en brouillon. */
 export async function createCustomPage(input: unknown, by: PageAuthor) {
   if (!sharedStoreAvailable()) throw unavailable()
@@ -223,6 +233,10 @@ export async function createCustomPage(input: unknown, by: PageAuthor) {
   for (let index = 2; slugProblem(slug, page.place, [...taken]) && index < 100; index += 1) slug = `${page.slug.slice(0, PAGE_LIMITS.slug - 4)}-${index}`
   page.slug = slug
   await checkSlug(page)
+  // Copiée d'une page qui remplace ou sert de modèle : la copie ne le fait pas (une seule à la fois).
+  delete page.replaces
+  delete page.replaceMode
+  delete page.rowOf
   return withAsyncLock(`custom-page:${page.id}`, () => persist(page))
 }
 
@@ -232,9 +246,10 @@ export function saveCustomPage(id: string, input: unknown, base: string, by: Pag
     if (base && current.updatedAt !== base) throw changed(current.updatedBy.name)
     const draft = cleanCustomPage(input)
     const next: CustomPage = { ...current, ...draft, updatedAt: nextStamp(current.updatedAt), updatedBy: by }
-    if (!draft.replaces) delete next.replaces
+    if (!draft.replaces) { delete next.replaces; delete next.replaceMode }
     if (!draft.rowOf) delete next.rowOf
     if (next.slug !== current.slug || next.place !== current.place || next.campaignId !== current.campaignId) await checkSlug(next)
+    if ((next.replaces && next.replaces !== current.replaces) || (next.rowOf && JSON.stringify(next.rowOf) !== JSON.stringify(current.rowOf))) await checkUnique(next)
     // Des blocs retirés : leur état vivant (révélation, carnet) part avec eux, sauf s'ils sont encore publiés.
     next.live = Object.fromEntries(Object.entries(current.live).filter(([blockId]) => findBlock(next, blockId) || (next.published && findBlock(next.published, blockId))))
     return next

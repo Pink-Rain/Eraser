@@ -4,9 +4,18 @@
  * elles-mêmes sont dans lib/custom-pages.ts.
  */
 import { getCampaignForMj, getCampaignForPlayer, listAllCampaignsForAdmin, listCampaignsForMj, listCampaignsForPlayer } from "@/lib/google-sheets"
-import { canEditPage, canReadPage, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageViewer } from "@/lib/custom-pages"
+import { canEditPage, canManagePages, canReadPage, pageForViewer, pageHref, placeLabel, type CustomPage, type PageAuthor, type PagePlace, type PageView, type PageViewer } from "@/lib/custom-pages"
 import { listCustomPages } from "@/lib/custom-pages-store"
+import type { BlockDataOptions, IndexSource } from "@/lib/custom-pages-data"
+import { rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
+import { resolveMenu, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/app-menu"
+import { readMenuLayout } from "@/lib/app-menu-store"
+import { listCustomIndexes } from "@/lib/custom-indexes"
+import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
+import { isForbiddenReplacement, matchesReplacement } from "@/lib/page-replacements"
 import type { AuthorizedUser } from "@/lib/server-auth"
+import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
+import { getWorldIndexQuick } from "@/lib/world-indexes"
 
 export function pageAuthor(account: Pick<AuthorizedUser, "uid" | "displayName" | "email">): PageAuthor {
   return { uid: account.uid, name: account.displayName || account.email || "Quelqu’un" }
@@ -71,4 +80,115 @@ export async function pagesOfPlace(account: Pick<AuthorizedUser, "uid" | "role" 
 /** Les pages publiées visibles du compte, pour la recherche (Ctrl + K) et le fil d'Ariane. */
 export async function pageLinkTargets(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
   return (await readablePages(account)).map(({ page }) => ({ label: page.published?.title ?? page.title, href: pageHref(page), group: "Pages", hint: placeLabel(page.place) }))
+}
+
+/* ---------- Index : leurs données, côté serveur ---------- */
+
+/** Un index du monde tel que les blocs le lisent (la copie gardée en mémoire : aucune lecture Google de plus si elle est là). */
+export async function indexSourceOf(key: WorldIndexKey): Promise<IndexSource> {
+  const data = await getWorldIndexQuick(key)
+  return {
+    key,
+    title: data.definition.title,
+    path: data.definition.path,
+    nameHref: data.definition.entity?.nameHref,
+    nameHeader: data.definition.entity?.nameHeader,
+    tables: data.tables.map((table) => ({ tabName: table.tabName, headers: table.headers, rows: table.rows })),
+    columns: data.columns,
+  }
+}
+
+/** Ce qu'un lecteur peut lire d'un index : colonnes privées des entités retirées pour un joueur. */
+export function readOptions(key: string, player: boolean, rowPageOf?: BlockDataOptions["rowPageOf"]): BlockDataOptions {
+  return { player, hiddenForPlayers: (column) => entityColumnHiddenForPlayers(key, column), rowPageOf }
+}
+
+/**
+ * Les modèles de page de ligne que le compte peut lire (publiés) : pour lier chaque ligne à
+ * sa page, partout où elle apparaît (vues des pages, fiche de l'index).
+ */
+export async function rowTemplates(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  return (await readablePages(account)).filter(({ page }) => page.rowOf?.index).map(({ page }) => page)
+}
+
+/** Le lien de la page d'une ligne, si un modèle publié et lisible existe pour son index (et son onglet). */
+export async function rowPageResolver(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  const templates = await rowTemplates(account).catch(() => [])
+  if (!templates.length) return undefined
+  return (index: string, tab: string, id: string) => templateForRow(templates, index, tab) ? rowPageHref(index, id) : undefined
+}
+
+/** Les index où chercher les lignes qui en citent une autre : ceux du monde (pas les entités, lues à part). */
+export async function backlinkSources() {
+  const keys: WorldIndexKey[] = [
+    ...(Object.values(worldIndexDefinitions).filter((definition) => !definition.entity).map((definition) => definition.key) as WorldIndexKey[]),
+    ...((await listCustomIndexes().catch(() => [])).map((entry) => entry.key) as WorldIndexKey[]),
+  ]
+  return (await Promise.all(keys.map((key) => indexSourceOf(key).catch(() => null)))).filter((source): source is IndexSource => Boolean(source))
+}
+
+/* ---------- Le menu ---------- */
+
+/**
+ * Le menu tel que le voit ce compte (sa vue) : celui réglé dans l'éditeur, sinon celui
+ * d'Eraser, avec les pages publiées et lisibles de chaque section sous la section (Règles,
+ * Index, Bac à sable, Administration) et celles d'une campagne sous son dossier. Une lecture
+ * du serveur partagé gardée en mémoire ; aucune de Google.
+ */
+export async function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">): Promise<ResolvedMenuItem[]> {
+  const [layout, readable] = await Promise.all([readMenuLayout().catch(() => null), readablePages(account).catch(() => [])])
+  const pages: Record<string, MenuPageEntry> = {}
+  const sectionPages: Record<string, MenuPageEntry[]> = {}
+  const campaignPages: Record<string, MenuPageEntry[]> = {}
+  for (const { page } of readable) {
+    const content = page.published ?? page
+    const entry: MenuPageEntry = { title: content.title, href: pageHref(page), icon: content.icon, emoji: content.emoji }
+    pages[page.id] = entry
+    // Une page de ligne d'index ou qui remplace une page d'Eraser n'est pas une entrée de section.
+    if (page.rowOf?.index || page.replaces) continue
+    if (page.place === "campagne") (campaignPages[page.campaignId] ??= []).push(entry)
+    else if (page.place !== "hors-menu") (sectionPages[page.place] ??= []).push(entry)
+  }
+  for (const list of [...Object.values(sectionPages), ...Object.values(campaignPages)]) list.sort((left, right) => left.title.localeCompare(right.title, "fr"))
+  return resolveMenu(layout?.items ?? null, { role: account.role, pages, sectionPages, campaignPages })
+}
+
+/* ---------- Pages d'Eraser remplacées ou complétées ---------- */
+
+/**
+ * La page du créateur de pages qui remplace ou complète l'adresse demandée, telle que ce
+ * compte la lit (publiée, ouverte à son rôle) ; `null` : la page d'Eraser telle quelle.
+ */
+export async function replacementFor(pathname: string, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  if (!pathname || isForbiddenReplacement(pathname)) return null
+  const candidates = (await listCustomPages().catch(() => [])).filter((page) => !page.trashedAt && page.status === "publiee" && page.published && page.replaces && matchesReplacement(page.replaces, pathname))
+  for (const page of candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
+    const view = pageForViewer(page, await viewerFor(account, page))
+    if (view) return { page, view, mode: page.replaceMode ?? "after" }
+  }
+  return null
+}
+
+/** Les pages vers lesquelles mènent les blocs Lien d'une page : seulement celles que le lecteur peut ouvrir. */
+export async function linkTargetsOf(view: PageView, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
+  const linked = new Set(view.sections.flatMap((section) => section.cols.flat()).flatMap((block) => block.type === "link" && block.pageId ? [block.pageId] : []))
+  const links: Record<string, { title: string; href: string; icon: string; emoji: string; description: string }> = {}
+  if (!linked.size) return links
+  for (const { page: target } of await readablePages(account, { includeDrafts: canManagePages(account.role) })) {
+    if (!linked.has(target.id)) continue
+    const content = target.status === "publiee" && target.published ? target.published : target
+    links[target.id] = { title: content.title, href: pageHref(target), icon: content.icon, emoji: content.emoji, description: content.description }
+  }
+  return links
+}
+
+/** L'adresse de l'index de chaque bloc Vue (MJ et admins : les joueurs n'ont pas accès aux index). */
+export function indexPathsOf(view: PageView, role: PageViewer["role"]) {
+  const paths: Record<string, string> = {}
+  if (!canManagePages(role)) return paths
+  for (const block of view.sections.flatMap((section) => section.cols.flat())) {
+    if (block.type !== "view" || !block.index) continue
+    paths[block.index] = (worldIndexDefinitions as Record<string, { path: string } | undefined>)[block.index]?.path ?? `/ressources/index/${encodeURIComponent(block.index)}`
+  }
+  return paths
 }
