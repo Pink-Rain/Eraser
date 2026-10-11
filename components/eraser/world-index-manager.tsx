@@ -9,7 +9,8 @@ import { ArrowRightLeft, CircleHelp, FileText, Filter, LoaderCircle, Pencil, Plu
 import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
-import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
+import { builtinViewsFor } from "@/lib/index-view-defaults"
+import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, RankedLinksCell, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
 import { createRowEngine } from "@/components/eraser/index-row-engine"
 import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
@@ -163,6 +164,9 @@ export type IndexEmbed = {
   addDefaults?: Record<string, string>
 }
 
+/** Les rangs d'un sort dans une classe : commun (0), puis 1 à 20. */
+const CLASS_RANKS = Array.from({ length: 21 }, (_, rank) => rank)
+
 type WorldIndexManagerProps = { indexKey: WorldIndexKey; initialData: WorldIndexData | null; initialError: string; embed?: IndexEmbed }
 
 /**
@@ -256,7 +260,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
   const [editorMode, setEditorMode] = useState<"columns" | "cards">("columns")
   const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
-  const activeView = useMemo(() => { const id = viewIdOfSelectKey(tabName); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [settings.views, tabName])
+  // Les onglets-fenêtres prévus par Eraser (Actifs, Passifs, Bonus des sorts), puis ceux de l'index.
+  // Une vue intégrée (Création de classe) est déjà limitée à ses sorts : seulement les siens.
+  const views = useMemo(() => [...(embed ? [] : builtinViewsFor(indexKey)), ...settings.views], [embed, indexKey, settings.views])
+  const activeView = useMemo(() => { const id = viewIdOfSelectKey(tabName); return id ? views.find((view) => view.id === id) ?? null : null }, [tabName, views])
   // Les onglets de rangement : une par valeur des colonnes « Rangement en onglets ».
   const sortTabs = useMemo(() => {
     const found = new Map<string, SortTab>()
@@ -556,6 +563,65 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     cell: (header) => rawOf(rowKey, header),
   }), [nameOf, rawOf])
 
+  /**
+   * Sorts des classes : « Classes et rangs », une pastille par classe avec son rang. Chaque
+   * changement part seul (`set-class-rank`), vérifié par le serveur : trois sorts par rang au
+   * plus, et le rang que la page voyait doit être encore celui de la feuille. La pastille
+   * change tout de suite ; un refus la remet comme avant.
+   */
+  const classRanks = data?.classRanks
+  const [rankDrafts, setRankDrafts] = useState<Record<string, Record<string, number | null>>>({})
+  const rankDraftsRef = useRef(rankDrafts)
+  useEffect(() => { rankDraftsRef.current = rankDrafts }, [rankDrafts])
+  const rankHeaders = useMemo(() => new Set(Object.values(classRanks?.headers ?? {}).flat().map(foldName)), [classRanks])
+  const classRankColumn = useMemo((): NonNullable<IndexEmbed["extraColumns"]>[number] | null => {
+    if (!classRanks) return null
+    const linksOf = (id: string): Record<string, number | null> => ({ ...classRanks.rows[id], ...rankDrafts[id] })
+    const countAt = (classId: string, rank: number, exceptId: string) => Object.keys({ ...classRanks.rows, ...rankDrafts }).filter((id) => id !== exceptId && linksOf(id)[classId] === rank).length
+    const save = async (row: IndexEmbedRow, next: Record<string, number | null>) => {
+      const before = linksOf(row.id)
+      const changes = [...new Set([...Object.keys(before), ...Object.keys(next)])].filter((classId) => (before[classId] ?? null) !== (next[classId] ?? null))
+      if (!changes.length) return
+      const tabName = parseRowKey(row.rowKey).tabName
+      setRankDrafts((current) => ({ ...current, [row.id]: { ...current[row.id], ...Object.fromEntries(changes.map((classId) => [classId, next[classId] ?? null])) } }))
+      setSaving((count) => count + 1); setError("")
+      try {
+        for (const classId of changes) {
+          const payload = await post({ action: "set-class-rank", tabName, rowId: row.id, classId, rank: next[classId] ?? null, originalRank: classRanks.rows[row.id]?.[classId] ?? null })
+          if (payload.data) applyData(payload.data, payload.seq)
+        }
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "Ce rang n’a pas pu être enregistré.")
+      } finally {
+        // La feuille relue fait foi : ce qui a été enregistré y est, un refus y est absent.
+        setRankDrafts((current) => { const copy = { ...current }; delete copy[row.id]; return copy })
+        setSaving((count) => Math.max(0, count - 1))
+      }
+    }
+    return {
+      key: "__class-ranks",
+      label: "Classes et rangs",
+      width: 280,
+      after: "Compétences",
+      render: (row, compact) => row.id
+        ? <RankedLinksCell
+          links={linksOf(row.id)}
+          options={classRanks.options}
+          ranks={CLASS_RANKS}
+          rankLabel={(rank) => rank === 0 ? "Commun" : `Rang ${rank}`}
+          rankShort={(rank) => rank === 0 ? "C" : `R${rank}`}
+          isFull={(classId, rank) => countAt(classId, rank, row.id) >= classRanks.perRankLimit}
+          addLabel="Classe"
+          fullLabel={`rang plein (${classRanks.perRankLimit} sorts)`}
+          compact={compact}
+          onChange={(next) => void save(row, next)}
+        />
+        : <span className="px-2 text-xs text-muted-foreground" title="Le sort reçoit son identifiant à son premier enregistrement.">—</span>,
+    }
+  }, [applyData, classRanks, post, rankDrafts])
+  // Les colonnes ajoutées au tableau et à la fiche : « Classes et rangs », puis celles de la page qui accueille la vue.
+  const pageColumns = useMemo(() => [...(classRankColumn ? [classRankColumn] : []), ...(embed?.extraColumns ?? [])], [classRankColumn, embed])
+
   /** Ouvre une ligne : sa page (personnage, campagne, classe) ou sa fiche. */
   const openRow = useCallback((rowKey: string) => {
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
@@ -652,8 +718,20 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const startAdding = useCallback(() => {
     if (embedAdd) embedAdd()
     else if (entity?.addHref) router.push(entity.addHref)
+    // Les bonus de rang : le rang suivant s'ajoute tout seul, sans formulaire.
+    else if (entity?.nextRow && table) void (async () => {
+      setPending("add"); setError("")
+      try {
+        const payload = await post({ action: "add-next", tabName: table.tabName })
+        if (payload.data) applyData(payload.data, payload.seq)
+      } catch (reason) {
+        setError(reason instanceof Error ? reason.message : "La ligne suivante n’a pas pu être ajoutée.")
+      } finally {
+        setPending("")
+      }
+    })()
     else setCreating(true)
-  }, [embedAdd, entity, router])
+  }, [applyData, embedAdd, entity, post, router, table])
   /** Une ligne ajoutée depuis la vue intégrée reçoit ce que la page impose (le Type des passifs). */
   const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? {}).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [embed])
 
@@ -954,7 +1032,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       list.splice(after >= 0 ? after + 1 : 1, 0, { key: TAB_COLUMN, label: tabColumn?.label || "Onglet", width: 180, custom: true, typeLabel: columnTypeLabel(tabSpec) })
     }
     // Les colonnes propres à la page qui accueille la vue (« Classes et rangs »).
-    for (const extra of embed?.extraColumns ?? []) {
+    for (const extra of pageColumns) {
       const at = extra.after ? list.findIndex((column) => foldName(column.key) === foldName(extra.after!)) : -1
       list.splice(at >= 0 ? at + 1 : list.length, 0, { key: extra.key, label: extra.label, width: extra.width, custom: true, sortable: false })
     }
@@ -979,7 +1057,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
       list.splice(at, 0, owner, links)
     }
     return list
-  }, [ask, busy, commitCell, computed, definition.tabColumn, drawCell, embed, engine, entity, entityImage, extras, extrasOf, notify, openRow, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
+  }, [ask, busy, commitCell, computed, definition.tabColumn, drawCell, engine, entity, entityImage, extras, extrasOf, notify, openRow, pageColumns, rawOf, rowHref, runButton, sortTabs, spanning, specOf, tabDefinition, table, valueOf, visible])
   /* eslint-enable react-hooks/refs */
 
   const corrections = useMemo(() => countCorrections(tables, specOf), [specOf, tables])
@@ -1027,7 +1105,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const moveRow = useRef(mutate)
   useLayoutEffect(() => { moveRow.current = mutate; mutateRef.current = mutate; mutateRowsRef.current = mutateRows })
   const renderTabCell = useCallback((rowKey: string, columnKey: string) => {
-    const extra = embed?.extraColumns?.find((column) => column.key === columnKey)
+    const extra = pageColumns.find((column) => column.key === columnKey)
     if (extra) return extra.render(embedRow(rowKey), true)
     const { tabName: rowTab } = parseRowKey(rowKey)
     return <Select value={rowTab} onValueChange={(target) => { if (target !== rowTab) void moveRow.current("move", [rowKey], "move", { toTab: target }) }} disabled={busy}>
@@ -1037,7 +1115,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         {moveTargetsOf(rowTab).map((target) => <SelectItem key={target} value={target}>{target}</SelectItem>)}
       </SelectContent>
     </Select>
-  }, [busy, embed, embedRow, moveTargetsOf])
+  }, [busy, embedRow, moveTargetsOf, pageColumns])
 
   const detailsFound = details !== null ? locate(details) : null
 
@@ -1063,6 +1141,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const formFields: IndexFormField[] = formTable ? (data?.columns[formTable.tabName] ?? [])
     .flatMap(({ header, spec }) => {
       if (!(isSheetSpec(spec) || layoutPlaces(tabLayoutOrBuiltin(settings.layouts, indexKey, formTable.tabName, "form"), header)) || ["id", "lookup", "rollup", "formula", "actions", "random", "auto-links", "ranked-links", "tab"].includes(spec.kind)) return []
+      // Les colonnes de rang des classes ne se remplissent que par « Classes et rangs ».
+      if (rankHeaders.has(foldName(header))) return []
       return [{ key: header, label: header, spec, long: isLongColumn(header) }]
     }) : []
 
@@ -1087,10 +1167,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const sheetLayout = detailsFound ? tabLayoutOrBuiltin(settings.layouts, indexKey, detailsFound.table.tabName, "form") : null
   /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
   const sheetFields = detailsFound ? (data?.columns[detailsFound.table.tabName] ?? [])
-    .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind))
+    .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind) && !rankHeaders.has(foldName(column.header)))
     .map((column) => ({ key: column.header, label: column.header, spec: column.spec, value: details === null ? savedCell(detailsFound, column.header) : rawOf(details, column.header), long: isLongColumn(column.header) }))
     // Les colonnes propres à la page qui accueille la vue, dessinées par elle.
-    .concat((embed?.extraColumns ?? []).map((extra) => ({ key: `__embed:${extra.key}`, label: extra.label, spec: { kind: "ranked-links" } as IndexColumnSpec, value: "", long: true }))) : []
+    .concat(pageColumns.map((extra) => ({ key: `__embed:${extra.key}`, label: extra.label, spec: { kind: "ranked-links" } as IndexColumnSpec, value: "", long: true }))) : []
   /* eslint-enable react-hooks/refs */
   const sheetRow = (header: string): IndexFieldProps["row"] => details === null ? undefined : {
     ...(entityImage && foldName(header) === entityImage.header ? { upload: (file: File) => entityImage.upload(file, details, header) } : {}),
@@ -1189,10 +1269,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
               <NativeSelectOption value="">{embed.label}</NativeSelectOption>
               {settings.views.map((view) => <NativeSelectOption key={view.id} value={viewSelectKey(view.id)}>⧉ {view.name}</NativeSelectOption>)}
             </NativeSelect>
-            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}
-        {!embed && (tables.length > 1 || settings.views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+        {!embed && (tables.length > 1 || views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Onglet
           <span className="flex items-center gap-1">
             <IndexTabPicker
@@ -1202,7 +1282,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
                 // Un vrai onglet qui porte le nom d'une valeur de rangement est réuni à son onglet de rangement.
                 ...tables.filter((candidate) => !absorbed.has(foldName(candidate.tabName))).map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
                 ...sortTabs.map((entry) => ({ value: `${SORT_PREFIX}${entry.value}`, label: entry.value, detail: String(entry.count) })),
-                ...settings.views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+                ...views.map((view) => ({ value: viewSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
               ]}
               onChange={(value) => { setTabName(value); setCreating(false); setDetails(null) }}
               hrefOf={tabHref}
@@ -1210,7 +1290,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
               disabled={busy}
               className="text-foreground"
             />
-            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}
         {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
@@ -1342,7 +1422,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         layout={sheetLayout}
         rowFor={sheetRow}
         renderField={(field) => {
-          const extra = field.key.startsWith("__embed:") ? embed?.extraColumns?.find((column) => `__embed:${column.key}` === field.key) : undefined
+          const extra = field.key.startsWith("__embed:") ? pageColumns.find((column) => `__embed:${column.key}` === field.key) : undefined
           return extra ? <div className="grid content-start gap-1 text-xs font-semibold md:col-span-2">{extra.label}{extra.render(embedRow(details), false)}</div> : undefined
         }}
         error={sheetError}

@@ -1,9 +1,11 @@
 import { NextResponse } from "next/server"
 
 import { withEntityExtras } from "@/lib/entity-index-extras"
-import { getCampaignForMj, getCharacterForUser } from "@/lib/google-sheets"
+import { addRankBonusRow, invalidateClassContentCaches, linkClassSpell } from "@/lib/class-content"
+import { getCampaignForMj, getCharacterForUser, listClassOptions } from "@/lib/google-sheets"
 import { googleFailureMessage } from "@/lib/google-failures"
 import { authorizedAccount, currentAuthToken } from "@/lib/server-auth"
+import { isClassRankHeader } from "@/lib/world-index-definitions"
 import {
   addWorldIndexRow,
   deleteWorldIndexRows,
@@ -49,6 +51,14 @@ function errorMessage(code: string) {
   if (code === "WORLD_INDEX_ROW_ADDED_UNSEEN") return "La ligne a été ajoutée dans Google Sheets, mais n’a pas pu être retrouvée juste après : actualise le tableau avant de recommencer."
   if (code === "WORLD_INDEX_TAB_NOT_FOUND") return "Cet onglet n’existe plus dans Google Sheets. Actualise le tableau."
   if (code === "WORLD_INDEX_TRASH_DENIED") return "Seul son propriétaire (ou un administrateur) peut mettre cet élément à la corbeille."
+  if (code === "RANK_BONUS_INVALID_RANK") return "Le dernier rang possible est déjà atteint."
+  if (code === "CLASS_SPELLS_SHEET_NOT_FOUND") return "Le classeur « Sorts de classe » est introuvable dans le Drive."
+  if (code === "CLASS_RANK_COLUMN_LOCKED") return "Les rangs se règlent dans la colonne « Classes et rangs » : elle vérifie qu’un rang n’a pas plus de trois sorts."
+  if (code.startsWith("CLASS_RANK_FULL")) return "Ce rang contient déjà trois sorts. Déplace ou retire d’abord l’un d’eux."
+  if (code === "CLASS_SPELL_CHANGED" || code === "CLASS_SPELL_MOVED") return "La feuille a changé entre-temps : actualise puis recommence."
+  if (code === "CLASS_SPELL_ID_REQUIRED") return "Ce sort n’a pas encore d’identifiant : actualise le tableau puis recommence."
+  if (code === "CLASS_RANK_INVALID") return "Le rang doit être compris entre 0 et 20."
+  if (code.startsWith("CLASS_COLUMN_NOT_FOUND")) return "Cette classe n’a pas de colonne dans la feuille « Sorts de classe » et elle n’a pas pu être ajoutée."
   if (code === "WORLD_INDEX_ROWS_LOCKED") return "Les lignes de cet index se créent depuis leur page et partent à la corbeille : le tableau n’en ajoute, n’en copie ni n’en supprime."
   // Le refus de Google (ou une coupure), tel quel : sans lui, impossible de savoir ce qui bloque.
   const google = googleFailureMessage(code)
@@ -94,7 +104,7 @@ export async function POST(request: Request) {
   // Personnages et campagnes : propriétaires et liens, ajoutés à chaque réponse.
   const withExtras = async (data: Awaited<ReturnType<typeof getWorldIndex>>) => withEntityExtras(data, account, await currentAuthToken())
   try {
-    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; rowId?: unknown; rowName?: unknown; rows?: unknown; column?: number; header?: unknown; html?: string; previous?: unknown; values?: unknown[]; headers?: unknown; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number }
+    const body = (await request.json()) as { key?: unknown; action?: string; tabName?: string; rowNumber?: number; rowNumbers?: unknown; rowId?: unknown; rowName?: unknown; rows?: unknown; column?: number; header?: unknown; html?: string; previous?: unknown; values?: unknown[]; headers?: unknown; name?: unknown; fields?: Record<string, unknown>; toTab?: string; count?: number; classId?: unknown; rank?: unknown; originalRank?: unknown }
     const key = await knownWorldIndexKey(body.key)
     if (!key || !body.tabName) throw new Error("INVALID_WORLD_INDEX")
     const rowNumbers = Array.isArray(body.rowNumbers) ? body.rowNumbers.filter((value): value is number => Number.isInteger(value)) : []
@@ -104,6 +114,29 @@ export async function POST(request: Request) {
     // Personnages et campagnes, pour un MJ : seulement ses lignes, jamais la case du propriétaire.
     const guard = worldIndexRowGuard(key, account)
     let changed: string[] = []
+    // Sorts des classes : les colonnes de rang ne s'écrivent que par « Classes et rangs » (trois sorts par rang au plus).
+    if (key === "class-spells" && (body.action === "update-cell" || body.action === "update-fields")) {
+      const classNames = (await listClassOptions()).map((item) => item.name)
+      const headers = body.action === "update-cell" ? [String(body.header ?? "")] : Object.keys(body.fields ?? {})
+      if (headers.some((header) => isClassRankHeader(header, classNames))) throw new Error("CLASS_RANK_COLUMN_LOCKED")
+    }
+    if (key === "class-spells" && body.action === "set-class-rank") {
+      const spellId = text(body.rowId).trim()
+      const classId = text(body.classId).trim()
+      const rank = body.rank === null ? null : typeof body.rank === "number" ? body.rank : Number.NaN
+      const originalRank = body.originalRank === null ? null : typeof body.originalRank === "number" ? body.originalRank : undefined
+      if (!spellId || !classId || (rank !== null && !Number.isInteger(rank))) throw new Error("INVALID_WORLD_INDEX_ACTION")
+      await linkClassSpell(spellId, classId, rank, originalRank)
+      // Les pages de classe et la fiche de personnage relisent la feuille ; le moteur aussi
+      // (l'écriture, faite hors de lui, lui fait oublier sa copie).
+      invalidateClassContentCaches({ keepSpellTabs: true })
+      return NextResponse.json({ ok: true, changed, data: await withExtras(await getWorldIndex(key)) })
+    }
+    // Bonus de rang : « Ajouter » écrit le rang suivant (« Rang 21 »), une seule fois même si deux pages le demandent ensemble.
+    if (key === "rank-bonuses" && body.action === "add-next") {
+      await addRankBonusRow()
+      return NextResponse.json({ ok: true, changed, data: await withExtras(await getWorldIndex(key)) })
+    }
     if (body.action === "update-cell" && row && typeof body.header === "string" && body.header.trim() && typeof body.html === "string") {
       let warning = ""
       changed = await updateWorldIndexCell(key, body.tabName, row, body.header, body.html, { previous: typeof body.previous === "string" ? body.previous : undefined, guard, onWarning: (message) => { warning = message } })

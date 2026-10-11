@@ -31,6 +31,7 @@ import { runtimeEnv } from "@/lib/google-service-account"
 import { characterClassChoicesIndex, characterSheetHeaders, characterValueHeaders } from "@/lib/character-sheet-schema"
 import { characterSheetAliases } from "@/lib/character-sheet-map"
 import { normalizeClassLabel } from "@/lib/class-utils"
+import { classRankColumnsOf, classRankOf } from "@/lib/class-rank-columns"
 import { staleWhileRevalidate } from "@/lib/stale-cache"
 import { runInBackground } from "@/lib/background-work"
 import { shareClassCatalog, sharedClassCatalog, shareRankBonuses } from "@/lib/class-catalog-share"
@@ -429,11 +430,7 @@ function spellColumnsOf(headers: string[], classes: ClassRecord[]) {
     charges: findColumn(headers, ["Charge", "Charges", "Nombre de charges"], ["charge"]),
   }
   if (columns.id < 0 || columns.name < 0 || columns.type < 0) throw new Error("CLASS_SPELLS_HEADERS_INVALID")
-  const classColumns = classes.flatMap((characterClass) => {
-    const column = headers.findIndex((header) => header === characterClass.id || normalizeClassLabel(header) === normalizeClassLabel(characterClass.name))
-    return column >= 0 ? [{ classId: characterClass.id, column }] : []
-  })
-  return { columns, classColumns }
+  return { columns, classColumns: classRankColumnsOf(headers, classes) }
 }
 
 async function spellWorkbook(refresh = false, kind: SpellIndexKind = "classes"): Promise<SpellWorkbook> {
@@ -495,10 +492,7 @@ function realSpellId(value: string) {
 }
 
 /** Un rang de classe (0 à 20), ou null. */
-function rankOf(value: unknown) {
-  const rank = typeof value === "number" ? value : Number.parseInt(String(value ?? ""), 10)
-  return Number.isInteger(rank) && rank >= 0 && rank <= 20 ? rank : null
-}
+const rankOf = classRankOf
 
 function parseSpell(workbook: SpellWorkbook, row: string[], cells: FormattedSheetCell[], rowNumber: number): ClassSpell | null {
   const id = realSpellId(cell(row, workbook.columns.id))

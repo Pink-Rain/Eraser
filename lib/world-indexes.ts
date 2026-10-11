@@ -102,6 +102,22 @@ export type WorldIndexData = {
   links: WorldIndexLink[]
   /** Personnages et campagnes : propriétaire et liens de chaque ligne (par identifiant), lus à chaque requête. */
   extras?: EntityIndexExtras
+  /** Sorts des classes : la colonne « Classes et rangs », tirée des colonnes de rang (une par classe). */
+  classRanks?: ClassRanksExtra
+}
+
+/**
+ * « Classes et rangs » : le rang de chaque sort dans chaque classe, lu dans les colonnes de
+ * rang de la feuille (cachées du tableau). Elle ne s'écrit que par `linkClassSpell` : un rang
+ * n'admet que trois sorts.
+ */
+export type ClassRanksExtra = {
+  options: Array<{ id: string; name: string; color: string }>
+  /** Les en-têtes des colonnes de rang, par onglet. */
+  headers: Record<string, string[]>
+  /** Par identifiant de sort : son rang (0 à 20) dans chaque classe. */
+  rows: Record<string, Record<string, number>>
+  perRankLimit: number
 }
 
 export type EntityIndexLink = { label: string; href: string; title?: string; color?: string }
@@ -872,7 +888,8 @@ onSpreadsheetWrite((spreadsheetId) => {
   for (const [key, effective] of effectiveIndexes) {
     if (effective.spreadsheetId !== spreadsheetId) continue
     if (!own) { worldIndexCache.delete(key); continue }
-    if (key === "classes" || key === "class-spells" || key === "creature-spells") invalidateClassContentCaches()
+    // Les bonus de rang sont dans le classeur des sorts : la fiche de personnage les relit aussi.
+    if (key === "classes" || key === "class-spells" || key === "creature-spells" || key === "rank-bonuses") invalidateClassContentCaches()
     if (key === "classes") void forgetClassIndexSync().catch(() => undefined)
   }
 })

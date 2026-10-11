@@ -104,3 +104,26 @@ test("cadrage du token : le visage choisi recadre les avatars rognés, et resser
   assert.equal(framing.cleanPortraitFraming({ x: "a" }), null);
   assert.deepEqual(framing.cleanPortraitFraming({ x: 2, y: -1, span: 9 }), { x: 1, y: 0, span: 4 });
 });
+
+test("onglets-fenêtres prévus par Eraser : Actifs, Passifs et Bonus rangent les sorts comme les pages de classe", async () => {
+  const defaults = await vite.ssrLoadModule("/lib/index-view-defaults.ts");
+  const views = await vite.ssrLoadModule("/lib/index-views.ts");
+  const spells = await vite.ssrLoadModule("/lib/class-spell-utils.ts");
+  const types = [...spells.classSpellTypeSuggestions, "", "Actif - bonus de dégâts", "Passif bonus", "Réaction", "BONUS", "passif", "<b>Passif</b>"];
+  const inView = (index, id, type) => views.matchesView(defaults.builtinViewsFor(index).find((view) => view.id === `eraser-${id}`), (column) => column === "Type" ? type : "");
+  for (const type of types) {
+    const category = spells.classSpellCategory(type.replace(/<[^>]+>/g, ""));
+    // Sorts des classes : exactement l'ancien filtre de la page.
+    assert.equal(inView("class-spells", "actifs", type), category === "actif", type);
+    assert.equal(inView("class-spells", "passifs", type), category === "passif", type);
+    assert.equal(inView("class-spells", "bonus", type), category === "bonus", type);
+    // Créatures : pas de bonus, un sort ainsi typé reste avec les actifs.
+    assert.equal(inView("creature-spells", "actifs", type), category !== "passif", type);
+    assert.equal(inView("creature-spells", "passifs", type), category === "passif", type);
+  }
+  assert.deepEqual(defaults.builtinViewsFor("places"), []);
+  assert.ok(defaults.builtinViewsFor("class-spells").every((view) => view.builtin));
+  // Jamais proposée dans la fenêtre « Modifier un onglet-fenêtre », ni relue dans les réglages.
+  assert.ok(!views.viewOperators.some((operator) => operator.value === "categorie-sort"));
+  assert.deepEqual(views.parseViewConditions(JSON.stringify([{ column: "Type", operator: "categorie-sort", value: "actif" }])), []);
+});

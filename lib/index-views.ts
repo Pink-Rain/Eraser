@@ -4,10 +4,12 @@
  * « épée »…). Les lignes restent celles de leur onglet d'origine : rien n'est copié,
  * une modification faite dans la fenêtre est écrite à la source.
  *
- * Ce fichier ne dépend de rien : la page, le serveur et les tests s'en servent.
+ * Ce fichier ne dépend que de règles pures (la catégorie d'un sort) : la page, le serveur
+ * et les tests s'en servent.
  */
+import { classSpellCategory } from "@/lib/class-spell-utils"
 
-export type ViewOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas" | "commence" | "vide" | "non-vide" | "superieur" | "inferieur"
+export type ViewOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas" | "commence" | "vide" | "non-vide" | "superieur" | "inferieur" | "categorie-sort"
 
 export type ViewCondition = { column: string; operator: ViewOperator; value: string }
 
@@ -22,6 +24,8 @@ export type IndexView = {
   match: "toutes" | "une"
   conditions: ViewCondition[]
   position: number
+  /** Prévu par Eraser (défini dans le code, jamais écrit) : il ne se modifie ni ne se supprime. */
+  builtin?: boolean
 }
 
 export const ALL_SOURCES = "*"
@@ -69,6 +73,8 @@ export function matchesCondition(condition: ViewCondition, cell: string) {
     case "non-vide": return Boolean(value)
     case "superieur": { const left = numberOf(cell); const right = numberOf(condition.value); return left !== null && right !== null && left > right }
     case "inferieur": { const left = numberOf(cell); const right = numberOf(condition.value); return left !== null && right !== null && left < right }
+    // La catégorie d'un sort (actif, passif, bonus) telle que la lisent les pages de classe ; « !passif » : tout sauf passif.
+    case "categorie-sort": { const category = classSpellCategory(cell.replace(/<[^>]+>/g, " ")); return wanted.startsWith("!") ? category !== wanted.slice(1) : category === wanted }
   }
 }
 
@@ -85,6 +91,7 @@ export function matchesView(view: Pick<IndexView, "match" | "conditions">, cell:
 
 export function describeCondition(condition: ViewCondition) {
   const operator = viewOperators.find((candidate) => candidate.value === condition.operator)
+  if (condition.operator === "categorie-sort") return `${condition.column} : ${condition.value.startsWith("!") ? `tout sauf ${condition.value.slice(1)}` : condition.value}`
   return `${condition.column} ${operator?.label ?? condition.operator}${operator?.needsValue ? ` « ${condition.value} »` : ""}`
 }
 

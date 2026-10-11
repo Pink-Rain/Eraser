@@ -1,11 +1,13 @@
-import { describeOwners, listAllCampaignsForAdmin, listAllCharactersForAdmin, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { describeOwners, listAllCampaignsForAdmin, listAllCharactersForAdmin, listClasses, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
+import { classRankColumnsOf, classRankOf } from "@/lib/class-rank-columns"
+import { MAX_CLASS_SPELLS_PER_RANK } from "@/lib/class-spell-utils"
 import { ownersOf } from "@/lib/ownership"
 import { classImageUrl } from "@/lib/class-images"
 import { isImageSource } from "@/lib/index-columns"
 import { isLegacyListCell, parseListCell, serializeListCell } from "@/lib/multiple-values"
 import { listAccounts } from "@/lib/site-auth"
-import { foldName } from "@/lib/world-index-definitions"
-import type { EntityIndexExtras, WorldIndexData } from "@/lib/world-indexes"
+import { foldName, isClassRankHeader } from "@/lib/world-index-definitions"
+import type { ClassRanksExtra, EntityIndexExtras, WorldIndexData } from "@/lib/world-indexes"
 
 /**
  * Ce que l'Index des personnages et celui des campagnes montrent en plus des colonnes de
@@ -101,8 +103,46 @@ function escapeHtml(value: string) {
   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;")
 }
 
+/**
+ * Les sorts des classes : la colonne « Classes et rangs » (une pastille par classe, avec son
+ * rang), tirée des colonnes de rang de la feuille, qui restent dans Sheets mais sortent du
+ * tableau (masquées, en lecture seule) : un rang n'admet que trois sorts, seule cette colonne
+ * le vérifie. Les classes viennent de la mémoire locale : aucune lecture Google en plus.
+ */
+async function withClassRanks(data: WorldIndexData): Promise<WorldIndexData> {
+  try {
+    const indexed = await listIndexedClasses()
+    const classes = indexed.length ? indexed : await listClasses()
+    const ranks: ClassRanksExtra = { options: classes.map((item) => ({ id: item.id, name: item.name, color: item.accentDark })), headers: {}, rows: {}, perRankLimit: MAX_CLASS_SPELLS_PER_RANK }
+    const columns = { ...data.columns }
+    for (const table of data.tables) {
+      const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
+      const rankColumns = classRankColumnsOf(table.headers, classes)
+      const rankHeaders = new Set([...rankColumns.map(({ column }) => table.headers[column]), ...table.headers.filter((header) => isClassRankHeader(header, classes.map((item) => item.name)))])
+      ranks.headers[table.tabName] = [...rankHeaders]
+      columns[table.tabName] = (columns[table.tabName] ?? []).map((column) => rankHeaders.has(column.header) ? { ...column, spec: { ...column.spec, hidden: true, readOnly: true } } : column)
+      if (idColumn < 0) continue
+      for (const row of table.rows) {
+        const id = (row.values[idColumn] ?? "").trim()
+        if (!id) continue
+        const linked: Record<string, number> = {}
+        for (const { classId, column } of rankColumns) {
+          const rank = classRankOf(row.values[column])
+          if (rank !== null) linked[classId] = rank
+        }
+        ranks.rows[id] = linked
+      }
+    }
+    return { ...data, columns, classRanks: ranks }
+  } catch (error) {
+    console.error("CLASS_RANKS_EXTRA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return data
+  }
+}
+
 export async function withEntityExtras(data: WorldIndexData, account: { role: string }, token?: string): Promise<WorldIndexData> {
   if (data.key === "classes") return withClassImages(data)
+  if (data.key === "class-spells") return withClassRanks(data)
   if (data.key !== "characters" && data.key !== "campaigns") return data
   data = withoutSheetColors(data.key === "characters" ? withReadableLists(data) : data)
   const kind = data.key === "characters" ? "character" : "campaign"

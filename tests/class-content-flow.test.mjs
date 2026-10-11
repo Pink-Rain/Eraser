@@ -443,12 +443,14 @@ test("Bonus de rang dans le moteur des index : lu dans son onglet, une case écr
   assert.equal(data.columns["Bonus de rang"].find((column) => column.header === "Cible 1").spec.kind, "linked-choice");
   assert.equal(data.columns["Bonus de rang"].find((column) => column.header === "Sort sur mesure").spec.kind, "checkbox");
   const row = table.rows[1];
+  // La fiche a déjà lu les bonus : ce qu'écrit le moteur doit la faire relire, sans « Actualiser ».
+  await content.listRankBonuses({ refresh: true });
   await engine.updateWorldIndexCell("rank-bonuses", "Bonus de rang", { rowNumber: row.rowNumber, id: "", name: "Rang 2" }, "Valeur 1", "+4");
   await engine.updateWorldIndexCell("rank-bonuses", "Bonus de rang", { rowNumber: row.rowNumber, id: "", name: "Rang 2" }, "Cible 1", "Force");
   assert.equal(google.grid(SPELLS, "Bonus de rang")[2][1], "Force");
   assert.equal(google.grid(SPELLS, "Bonus de rang")[2][2], "+4");
-  // La fiche de personnage lit le même onglet.
-  const bonuses = await content.listRankBonuses({ refresh: true });
+  // La fiche de personnage lit le même onglet, sans attendre la fin de sa mémoire de trois minutes.
+  const bonuses = await content.listRankBonuses();
   assert.deepEqual(bonuses.bonuses.find((bonus) => bonus.rank === 2).bonuses, [{ target: "Force", value: "+4", amount: 4, slot: 1 }]);
 });
 
@@ -459,4 +461,74 @@ test("Remplacer des ID dans le JSON d'une fiche ne touche à rien d'autre", () =
   assert.equal(remapSpellChoiceIds("pas du JSON", mapping), "pas du JSON");
   const both = JSON.parse(remapSpellChoiceIds(JSON.stringify({ charges: { "SOR-B": 1, "SOR-A": 3 }, edits: { "SOR-B": { name: "B" } }, order: ["SOR-A", "SOR-B"], removed: ["SOR-B"], extras: [], states: [{ id: "ETA-1", level: 2 }] }), mapping));
   assert.deepEqual(both, { charges: { "SOR-A": 3 }, edits: { "SOR-A": { name: "B" } }, order: ["SOR-A"], removed: ["SOR-A"], extras: [], states: [{ id: "ETA-1", level: 2 }] });
+});
+
+test("Classes et rangs dans le moteur : lus dans les colonnes de rang, écrits un par un, trois sorts par rang", async () => {
+  const worldRoute = await vite.ssrLoadModule("/app/api/resources/world-indexes/route.ts");
+  const engine = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const extras = await vite.ssrLoadModule("/lib/entity-index-extras.ts");
+  const grid = spellSheet([fireball, lightning, frost, { "ID": "SOR-4", "Nom": "Quatre", "Type": "Actif", "Mage": "3" }, { "ID": "SOR-5", "Nom": "Cinq", "Type": "Actif", "Mage": "3" }]);
+  engine.forgetEffectiveIndex("class-spells");
+  const data = await extras.withEntityExtras(await engine.getWorldIndex("class-spells", { refresh: true }), { role: "admin" });
+  const tab = data.tables[0].tabName;
+  assert.deepEqual(data.classRanks.rows["SOR-FEU"], { "CLA-0002": 3 });
+  assert.deepEqual(data.classRanks.rows["SOR-GEL"], { "CLA-0001": 2 });
+  assert.deepEqual([...data.classRanks.headers[tab]].sort(), ["Guerrier·e", "Mage"]);
+  // Les colonnes de rang restent dans la feuille, hors du tableau, sans se saisir à la main.
+  const mage = data.columns[tab].find((column) => column.header === "Mage");
+  assert.equal(mage.spec.hidden, true);
+  assert.equal(mage.spec.readOnly, true);
+  assert.ok(!data.tables[0].headers.includes("Classes et rangs"));
+
+  const world = (body) => post(worldRoute, "/api/resources/world-indexes", { key: "class-spells", tabName: tab, ...body });
+  const linked = await world({ action: "set-class-rank", rowId: "SOR-ECLAIR", classId: "CLA-0001", rank: 5, originalRank: null });
+  assert.equal(linked.status, 200, JSON.stringify(linked.body));
+  assert.equal(record(grid(), 2)["Guerrier·e"], "5");
+  assert.equal(record(grid(), 2)["Mage"], "4");
+  assert.deepEqual(linked.body.data.classRanks.rows["SOR-ECLAIR"], { "CLA-0001": 5, "CLA-0002": 4 });
+  // Le rang 3 du Mage a déjà trois sorts : refusé, rien n'est écrit.
+  const full = await world({ action: "set-class-rank", rowId: "SOR-ECLAIR", classId: "CLA-0002", rank: 3, originalRank: 4 });
+  assert.equal(full.status, 400);
+  assert.match(full.body.error, /trois sorts/);
+  assert.equal(record(grid(), 2)["Mage"], "4");
+  // La page voyait un autre rang que la feuille : refusé.
+  const stale = await world({ action: "set-class-rank", rowId: "SOR-GEL", classId: "CLA-0001", rank: 1, originalRank: 7 });
+  assert.match(stale.body.error, /changé entre-temps/);
+  assert.equal(record(grid(), 3)["Guerrier·e"], "2");
+  // Une case de rang ne s'écrit pas à la main (ni depuis la fiche) : le plafond serait contourné.
+  const direct = await world({ action: "update-cell", rowNumber: 2, rowId: "SOR-FEU", rowName: "Boule de feu", header: "Mage", html: "9" });
+  assert.equal(direct.status, 400);
+  assert.match(direct.body.error, /Classes et rangs/);
+  const fields = await world({ action: "update-fields", rowNumber: 2, rowId: "SOR-FEU", rowName: "Boule de feu", fields: { "Guerrier·e": "1" } });
+  assert.equal(fields.status, 400);
+  assert.equal(record(grid(), 1)["Mage"], "3");
+  // Délier : la case se vide, le reste de la ligne ne bouge pas.
+  await world({ action: "set-class-rank", rowId: "SOR-ECLAIR", classId: "CLA-0001", rank: null, originalRank: 5 });
+  assert.equal(record(grid(), 2)["Guerrier·e"], undefined);
+  assert.equal(record(grid(), 2)["Nom"], "Éclair");
+  // La page « Création de classe » lit les mêmes rangs.
+  const spells = await pageSpells();
+  assert.deepEqual(spells["Éclair"].classRanks, { "CLA-0002": 4 });
+});
+
+test("Bonus de rang : « Ajouter » écrit le rang suivant, une fois par demande, même deux à la fois", async () => {
+  const worldRoute = await vite.ssrLoadModule("/app/api/resources/world-indexes/route.ts");
+  const engine = await vite.ssrLoadModule("/lib/world-indexes.ts");
+  const headers = ["Rang", "Cible 1", "Valeur 1", "Cible 2", "Valeur 2", "Cible 3", "Valeur 3", "Cible 4", "Valeur 4", "Choix", "Sort sur mesure", "Autre"];
+  spellSheet([fireball], { tabs: [{ title: "Bonus de rang", grid: [headers, ...Array.from({ length: 20 }, (_, index) => [`Rang ${index + 1}`])] }] });
+  engine.forgetEffectiveIndex("rank-bonuses");
+  await engine.getWorldIndex("rank-bonuses", { refresh: true });
+  const add = () => post(worldRoute, "/api/resources/world-indexes", { key: "rank-bonuses", tabName: "Bonus de rang", action: "add-next" });
+  const [first, second] = await Promise.all([add(), add()]);
+  assert.equal(first.status, 200, JSON.stringify(first.body));
+  assert.equal(second.status, 200);
+  const ranks = google.grid(SPELLS, "Bonus de rang").slice(1).map((row) => row[0]);
+  assert.deepEqual(ranks.slice(-3), ["Rang 20", "Rang 21", "Rang 22"]);
+  assert.equal(ranks.length, 22);
+  // La page reçoit l'onglet relu, avec les nouveaux rangs.
+  assert.ok(second.body.data.tables[0].rows.some((row) => row.values[0] === "Rang 22"));
+  // Insérer, dupliquer et supprimer restent fermés.
+  const removed = await post(worldRoute, "/api/resources/world-indexes", { key: "rank-bonuses", tabName: "Bonus de rang", action: "delete", rows: [{ rowNumber: 2, id: "", name: "Rang 1" }] });
+  assert.equal(removed.status, 400);
+  assert.equal(google.grid(SPELLS, "Bonus de rang").length, 23);
 });

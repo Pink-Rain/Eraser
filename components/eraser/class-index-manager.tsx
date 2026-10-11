@@ -605,8 +605,8 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
   const spellById = useMemo(() => new Map(data.spells.map((spell) => [spell.id, spell])), [data.spells])
   /**
    * Actifs, Passifs et Bonus : l'index des sorts dans le moteur des index (cartes, onglets-
-   * fenêtres, « Modifier », formules, tri, fiche…), limité à leurs sorts. La page y ajoute
-   * « Classes et rangs », « Doublons » et « Créer un sort ».
+   * fenêtres, « Modifier », formules, tri, fiche…), limité à leurs sorts. Le moteur y montre
+   * « Classes et rangs » ; la page ajoute « Doublons » et « Créer un sort ».
    */
   const spellViews = useMemo(() => Object.fromEntries((["actifs", "passifs", "bonus"] as const).map((view): [string, IndexEmbed] => [view, {
     id: `${kind}:${view}`,
@@ -619,18 +619,6 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     query,
     // Distance et charges ne concernent que les actifs.
     hiddenColumns: view === "actifs" ? [] : ["Distance", "Charges"],
-    extraColumns: forClasses ? [{
-      key: "__classes",
-      label: "Classes et rangs",
-      width: 280,
-      after: "Compétences",
-      render: (row: IndexEmbedRow, compact: boolean) => {
-        const spell = spellById.get(row.id)
-        if (!spell) return <span className="px-2 text-xs text-muted-foreground" title="Le sort reçoit son identifiant à son premier enregistrement.">—</span>
-        const draft = toDraft(spell)
-        return <ClassLinksEditor compact={compact} draft={draft} classes={data.classes} spells={data.spells} spellId={spell.id} onChange={(classRanks) => void pageActions.current.save(spell, { ...draft, classRanks }, true)} />
-      },
-    }] : [],
     rowMenuExtras: (row: IndexEmbedRow) => {
       const spell = spellById.get(row.id)
       return spell ? <ContextMenuItem onSelect={() => pageActions.current.showDuplicates(spell)}><CopyCheck />Doublons et ressemblances</ContextMenuItem> : null
@@ -638,7 +626,7 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     onAdd: () => pageActions.current.startCreate(),
     addLabel: "Créer un sort",
     ...(view === "actifs" ? {} : { addDefaults: { Type: view === "passifs" ? "Passif" : "Bonus" } }),
-  }])), [data.classes, data.spells, forClasses, kind, query, spellById])
+  }])), [forClasses, kind, query, spellById])
 
   /**
    * Bonus de rang : l'onglet « Bonus de rang » du classeur des sorts, dans le moteur des index
@@ -649,15 +637,9 @@ export function ClassIndexManager({ initialData, initialError, kind = "classes",
     label: "Tous les rangs",
     rowFilter: () => true,
     query,
+    // « Ajouter un rang » : le moteur écrit le rang suivant (bonus de rang : « ligne suivante »).
     addLabel: "Ajouter un rang",
-    onAdd: () => void (async () => {
-      setError("")
-      const response = await fetch("/api/classes/rank-bonuses", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ action: "add-rank" }) }).catch(() => null)
-      const payload = (await response?.json().catch(() => ({})) ?? {}) as { error?: string }
-      if (!response?.ok) { setError(payload.error || "Le rang n’a pas pu être ajouté."); return }
-      announceWorldIndexChange(["rank-bonuses"], spellOrigin)
-    })(),
-  }), [query, spellOrigin])
+  }), [query])
 
   const engineTab = ["actifs", "passifs", "bonus", "rank-bonus"].includes(tab)
   const page = <section className="flex flex-col gap-3" {...(forClasses ? { [IN_PLACE_ATTRIBUTE]: CLASS_CREATION_PATH } : {})}>

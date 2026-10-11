@@ -147,6 +147,8 @@ export type EntityIndexOptions = {
   rowCommands?: boolean
   /** Seulement « Ajouter », par le formulaire du moteur (les classes : jamais supprimées d'ici). */
   addRows?: boolean
+  /** « Ajouter » écrit la ligne suivante sans formulaire (« Rang 21 » après « Rang 20 ») ; rien d'autre ne s'ajoute ni ne se supprime. */
+  nextRow?: boolean
   /**
    * Personnages et campagnes : le tableau les duplique, et « Supprimer » les met à la
    * corbeille (restaurables depuis Administration) au lieu d'effacer leur ligne.
@@ -467,7 +469,7 @@ const entityIndexDefinitions: Record<EntityWorldIndexKey, WorldIndexDefinition> 
     path: "/creation-de-classe",
     itemLabel: "un rang",
     tabs: [{ name: RANK_BONUS_TAB, itemLabel: "un rang", headers: RANK_BONUS_HEADERS, widths: [110, 200, 90, 200, 90, 200, 90, 200, 90, 100, 120, 280], idPrefix: "RNG" }],
-    entity: { nameHeader: RANK_BONUS_RANK_HEADER, rowCommands: false },
+    entity: { nameHeader: RANK_BONUS_RANK_HEADER, rowCommands: false, nextRow: true },
   },
   "creature-spells": {
     key: "creature-spells",
