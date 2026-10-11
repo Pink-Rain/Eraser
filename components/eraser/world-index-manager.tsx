@@ -4,8 +4,9 @@ import dynamic from "next/dynamic"
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
-import { ArrowRightLeft, CircleHelp, ExternalLink, FileText, Filter, Link2, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
+import { ArrowRightLeft, CircleHelp, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
 
+import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { forgetWorldIndexData, indexGridColumn, IndexEntryForm, loadWorldIndexData, type IndexFieldProps, type IndexFormField, type LoadedWorldIndex } from "@/components/eraser/index-cells"
@@ -46,7 +47,6 @@ import {
   worldIndexDefinitions,
   type WorldIndexDefinition,
   type WorldIndexKey,
-  type WorldIndexLink,
 } from "@/lib/world-index-definitions"
 import type { WorldIndexData, WorldIndexRow, WorldIndexRowRef, WorldIndexTable } from "@/lib/world-indexes"
 import { ReferenceScopeProvider } from "@/components/eraser/reference-menu"
@@ -126,22 +126,6 @@ function parseRowKey(key: string) {
 
 function columnIndexOf(table: WorldIndexTable, header: string) {
   return table.headers.findIndex((candidate) => foldName(candidate) === foldName(header))
-}
-
-function titleOf(index: WorldIndexKey) {
-  return isBuiltinWorldIndexKey(index) ? worldIndexDefinitions[index].title : "index lié"
-}
-
-/** Les phrases qui expliquent, sous le tableau, quelles colonnes se remplissent seules. */
-function linkHints(links: WorldIndexLink[], index: WorldIndexKey, tab: string) {
-  return links.flatMap(([left, right]) => {
-    for (const [end, other] of [[left, right], [right, left]] as const) {
-      if (!linkEndCovers(end, index, tab)) continue
-      const where = linkEndCovers(other, index, tab) ? "" : other.index === index ? ` (onglet ${other.tab})` : ` (${titleOf(other.index)})`
-      return [`« ${end.column} » ↔ « ${other.column} »${where}`]
-    }
-    return []
-  })
 }
 
 /** La définition de repli d'un index qui n'a pas pu être chargé. */
@@ -548,6 +532,7 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   }, [definition])
 
   const busy = Boolean(pending)
+  const fullscreen = useFullscreenPanel()
 
   /** Le nom d'une ligne, quelle que soit sa colonne (« Nom », « Nom du PNJ »…). */
   const nameOf = useCallback((rowKey: string) => {
@@ -1041,7 +1026,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
   const referenceScope = { index: indexKey, tab: referenceTab }
-  const hints = table ? linkHints(links, indexKey, table.tabName) : []
   const formTable = spanning ? tableByName.get(creatingTab) ?? table : table
   const formDefinition = definition.tabs.find((tab) => tab.name === formTable?.tabName) ?? tabDefinition
   // Le formulaire d'ajout montre les colonnes du formulaire (« Tableau et formulaire »,
@@ -1166,8 +1150,8 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
   return (
     <ReferenceScopeProvider scope={referenceScope}>
-    <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
-      <div className="flex flex-col gap-3 lg:flex-row lg:items-end">
+    <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3 ${fullscreen.className}`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
+      <div className="flex flex-wrap items-end gap-2">
         {/* Intégrée : la vue de la page, puis les onglets-fenêtres de l'index (combinés à elle). */}
         {embed && settings.views.length > 0 && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Vue
@@ -1200,12 +1184,13 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
           </span>
         </label>}
-        {table && embed?.query === undefined && <div className="relative min-w-0 lg:max-w-sm lg:flex-1"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
-        {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} onEdit={() => void openEditor("cards")} disabled={busy} />}
-        <div className="flex flex-wrap gap-2 lg:ml-auto">
-          {data?.webViewLink && <Button asChild variant="ghost"><a href={data.webViewLink} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
+        {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
+        {table && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {data?.webViewLink && <SheetsLinkButton href={data.webViewLink} />}
+          <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
-          <Button type="button" variant="outline" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
+          <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {table && <DrawRowButton
             rows={displayedRows}
             weightColumns={weightColumns}
@@ -1213,8 +1198,9 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
             nameOf={nameOf}
             onOpen={openRow}
             disabled={busy}
+            compact
           />}
-          <Button type="button" variant="outline" onClick={() => setViewDialog("new")} disabled={busy || !tables.length} title="Un onglet qui réaffiche les lignes répondant à des conditions, sans les copier"><Filter />Onglet-fenêtre</Button>
+          <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les lignes répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
@@ -1241,10 +1227,6 @@ function WorldIndexView({ indexKey, initialData, initialError, nameOpensDetails 
 
       {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
 
-      {hints.length > 0 && <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-muted-foreground">
-        <Link2 className="size-3.5 text-primary" />
-        Colonnes liées, qui se complètent d’elles-mêmes (noms séparés par des virgules) : {hints.join(" · ")}
-      </p>}
 
       {creating && formTable && <IndexEntryForm
         key={formTable.tabName}

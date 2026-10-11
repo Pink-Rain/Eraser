@@ -4,6 +4,7 @@ import { useCallback, useRef, useState } from "react"
 import { CircleAlert, Dices, Info, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
+import { ToolbarIconButton } from "@/components/eraser/index-toolbar"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 
 type Notice = { id: number; message: string; tone: "info" | "error" }
@@ -131,13 +132,15 @@ export function rowCard(title: string, fields: Array<{ label: string; text: stri
  * compris), pondérée par une colonne si on veut. Un bestiaire devient une table de
  * rencontres : filtre sur la région, pondère par la rareté, tire.
  */
-export function DrawRowButton({ rows, weightColumns, weightOf, nameOf, onOpen, disabled = false }: {
+export function DrawRowButton({ rows, weightColumns, weightOf, nameOf, onOpen, disabled = false, compact = false }: {
   rows: Array<{ key: string }>
   weightColumns: string[]
   weightOf: (rowKey: string, header: string) => number | null
   nameOf: (rowKey: string) => string
   onOpen: (rowKey: string) => void
   disabled?: boolean
+  /** Réduit à son icône (barre des index), son nom au survol. */
+  compact?: boolean
 }) {
   const [open, setOpen] = useState(false)
   const [weight, setWeight] = useState("")
@@ -154,7 +157,9 @@ export function DrawRowButton({ rows, weightColumns, weightOf, nameOf, onOpen, d
     setPicked(chosen)
   }
   return <>
-    <Button type="button" variant="outline" onClick={() => { setOpen(true); setPicked(null) }} disabled={disabled || !rows.length} title="Tirer une ligne au hasard parmi celles affichées"><Dices />Tirer</Button>
+    {compact
+      ? <ToolbarIconButton label="Tirer une ligne au hasard parmi celles affichées" onClick={() => { setOpen(true); setPicked(null) }} disabled={disabled || !rows.length}><Dices /></ToolbarIconButton>
+      : <Button type="button" variant="outline" onClick={() => { setOpen(true); setPicked(null) }} disabled={disabled || !rows.length} title="Tirer une ligne au hasard parmi celles affichées"><Dices />Tirer</Button>}
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogContent className="sm:max-w-md">
         <DialogHeader>

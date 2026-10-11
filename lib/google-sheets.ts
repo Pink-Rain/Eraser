@@ -70,7 +70,9 @@ import {
   baseInventoryTypeIds,
   canItemBeAutoPlacedInInventoryCategory,
   canItemGoInInventoryCategory,
+  GROUND_CATEGORY,
   inventoryCategories,
+  isUnlimitedInventoryCategory,
   inventoryWorkbookTabs,
   objectCombatColumns,
   type ObjectCombatFields,
@@ -396,14 +398,17 @@ function classImageColumn(columns: SheetColumns) {
  * Le classeur et l'onglet d'un index d'entités, pour le moteur des index : la feuille
  * que lit le reste d'Eraser (reliée, jamais recréée si elle existe dans Drive).
  */
-export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes") {
+export async function entitySheetLocation(key: "npcs" | "campaigns" | "characters" | "classes", options: { forWrite?: boolean } = {}) {
   const runtime = runtimeEnv()
   const configured = key === "characters" ? runtime.GOOGLE_CHARACTERS_SHEET_ID : key === "classes" ? runtime.GOOGLE_CLASSES_SHEET_ID : ""
   if (configured) {
     const tabName = (key === "characters" ? runtime.GOOGLE_CHARACTERS_TAB || "Personnages" : runtime.GOOGLE_CLASSES_TAB || "Classes")
     return { spreadsheetId: configured, tabName, webViewLink: `https://docs.google.com/spreadsheets/d/${configured}/edit` }
   }
-  const sheet = await ensureJdrSheet(key)
+  // Pour afficher, la feuille reliée telle quelle, comme la lisent les autres pages (Création
+  // de classe…) : ouvrir un index ne vérifie ni ne répare rien dans Google, et une vérification
+  // ratée (en-tête refusé, quota) ne l'empêche plus de s'afficher. Les écritures, elles, vérifient.
+  const sheet = options.forWrite ? await ensureJdrSheet(key) : (await resolveJdrSheet(key)) ?? await ensureJdrSheet(key)
   if (!sheet) throw new Error("WORLD_INDEX_SHEET_UNAVAILABLE")
   return { spreadsheetId: sheet.spreadsheetId, tabName: sheet.tabName, webViewLink: sheet.webViewLink }
 }
@@ -2176,6 +2181,39 @@ export async function duplicateObjectIndexRows(fileId: string, tabName: string, 
   ])
   await googleSheetsJson(`spreadsheets/${fileId}:batchUpdate`, { method: "POST", body: JSON.stringify({ requests }) })
   clearObjectIndexTableCache()
+}
+
+/**
+ * Déplace une ligne d'objet vers un autre onglet (du même classeur ou d'un autre) : elle est
+ * d'abord écrite à l'arrivée, avec sa mise en forme et son ID (les inventaires et les « { »
+ * qui la citent la retrouvent), puis seulement retirée au départ. Une colonne remplie que
+ * l'onglet d'arrivée n'a pas y est ajoutée à droite : aucune valeur ne se perd.
+ */
+export async function moveObjectIndexRow(fileId: string, tabName: string, ref: ObjectIndexRowRef, targetFileId: string, targetTabName: string) {
+  if (fileId === targetFileId && tabName === targetTabName) return
+  // Relu dans Google : la ligne déplacée est celle de la feuille, pas une copie d'il y a cinq minutes.
+  clearObjectIndexTableCache()
+  const source = await validatedObjectIndexTable(fileId, tabName)
+  const target = await validatedObjectIndexTable(targetFileId, targetTabName)
+  const layout = await freshObjectIndexLayout(source)
+  const rowNumber = layout.locate(ref)
+  const row = source.rows.find((candidate) => candidate.rowNumber === rowNumber)
+  if (rowNumber < 2 || !row) throw new Error("OBJECT_INDEX_CHANGED")
+  const pairs: Array<[string, string]> = source.headers.flatMap((header, column): Array<[string, string]> => {
+    const text = row.values[column] ?? ""
+    // La mise en forme seulement quand il y en a : un texte simple est recopié tel quel (jamais ses entités HTML).
+    const html = row.html[column] ?? ""
+    return header.trim() && text.trim() ? [[header.trim(), /<[a-z]/i.test(html) ? html : text]] : []
+  })
+  const targetHeaders = await freshObjectIndexHeaderRow(target)
+  const known = new Set(targetHeaders.map((header) => normalizedHeader(header)).filter(Boolean))
+  const missing = [...new Set(pairs.map(([header]) => header).filter((header) => !known.has(normalizedHeader(header))))]
+  if (missing.length) {
+    const columns = sheetColumns(targetHeaders, [...targetHeaders.filter((header) => header.trim()), ...missing])
+    await ensureNamedColumns(targetFileId, targetTabName, columns)
+  }
+  await addObjectIndexRowWithValues(targetFileId, targetTabName, pairs)
+  await deleteObjectIndexRows(fileId, tabName, [ref])
 }
 
 /**
@@ -6964,6 +7002,8 @@ function missingInventorySlots(workbook: InventoryWorkbook, container: StoredInv
   const existingIndexes = new Set(existing.map((content) => content.index))
   const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((item) => [item.id, item])))
   const rows: StoredInventoryContent[] = []
+  // « Au sol » n'a pas de cases d'avance : elles s'ajoutent quand un objet y atterrit.
+  if (category === GROUND_CATEGORY) return rows
   if (category === "Bourse") {
     const currencies = [...requiredInventoryCurrencies, ...(type?.columns ?? [])]
       .filter((currency, index, values) => values.findIndex((candidate) => inventoryCurrencyKey(candidate) === inventoryCurrencyKey(currency)) === index)
@@ -7267,15 +7307,18 @@ function inventoryItemForContent(content: StoredInventoryContent, indexedItem: I
 function buildCharacterInventory(characterId: string, workbook: InventoryWorkbook): CharacterInventoryRecord {
   const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
   const itemById = new Map(workbook.items.map((item) => [item.id, item]))
+  const isGround = (container: StoredInventoryContainer) => inventoryContainerCategory(container, typeById) === GROUND_CATEGORY
   const containers = workbook.containers
     .filter((container) => container.characterId === characterId && !container.deletedAt)
-    .sort((left, right) => left.order - right.order)
+    // « Au sol » reste sous les autres contenants, même ajouté après eux.
+    .sort((left, right) => Number(isGround(left)) - Number(isGround(right)) || left.order - right.order)
     .map((container) => {
       const type = typeById.get(container.typeId)
       const category = inventoryContainerCategory(container, typeById)
       const slots = workbook.contents
         .filter((content) => content.characterId === characterId && content.containerId === container.id)
-        .filter((content) => category === "Bourse" || category === "Esthétique" || content.index <= container.capacity || Boolean(content.itemId || content.customName))
+        // Au sol, seules les cases occupées comptent : les cases vidées restent dans la feuille pour resservir.
+        .filter((content) => category === GROUND_CATEGORY ? Boolean(content.itemId || content.customName) : category === "Bourse" || category === "Esthétique" || content.index <= container.capacity || Boolean(content.itemId || content.customName))
         .sort((left, right) => {
           if (category !== "Bourse") return left.index - right.index
           const order = new Map(requiredInventoryCurrencies.map((currency, index) => [inventoryCurrencyKey(currency), index]))
@@ -7396,7 +7439,8 @@ export async function addCharacterInventoryContainer(characterId: string, typeId
   return withInventoryLock(async () => {
     const workbook = await ensureCharacterInventoryStorage(characterId, true, { fresh: true })
     const type = workbook.containerTypes.find((candidate) => candidate.id === typeId && candidate.active)
-    if (!type) throw new Error("INVENTORY_CONTAINER_TYPE_NOT_FOUND")
+    // Un seul « Au sol » par personnage, créé avec ses contenants de base.
+    if (!type || type.category === GROUND_CATEGORY) throw new Error("INVENTORY_CONTAINER_TYPE_NOT_FOUND")
     return buildCharacterInventory(characterId, await appendInventoryContainer(workbook, {
       id: crypto.randomUUID(),
       characterId,
@@ -7416,7 +7460,7 @@ export async function createCharacterInventoryContainer(characterId: string, inp
   const name = input.name.trim()
   const category = parseInventoryCategory(input.category)
   const capacity = Math.trunc(input.capacity)
-  if (!name || name.length > 120 || !category || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
+  if (!name || name.length > 120 || !category || category === GROUND_CATEGORY || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
     throw new Error("INVALID_INVENTORY_CONTAINER")
   }
   return withInventoryLock(async () => {
@@ -7442,7 +7486,7 @@ export async function updateCharacterInventoryContainer(characterId: string, con
     const container = workbook.containers.find((candidate) => candidate.id === containerId && candidate.characterId === characterId && !candidate.deletedAt)
     const name = input.name.trim()
     const capacity = Math.trunc(input.capacity)
-    if (!container || !name || name.length > 120 || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
+    if (!container || container.id === groundContainerOf(characterId, workbook)?.id || !name || name.length > 120 || !Number.isFinite(capacity) || capacity < 1 || capacity > 10000) {
       throw new Error("INVALID_INVENTORY_CONTAINER")
     }
     workbook = await writeInventoryChanges(workbook, { containers: [[container, { ...container, customName: name, capacity }]] })
@@ -7458,6 +7502,7 @@ export async function deleteCharacterInventoryContainer(characterId: string, con
     const container = workbook.containers.find((candidate) => candidate.id === containerId && candidate.characterId === characterId && !candidate.deletedAt)
     if (!container) throw new Error("INVENTORY_CONTAINER_NOT_FOUND")
     const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((type) => [type.id, type])))
+    if (category === GROUND_CATEGORY) throw new Error("INVENTORY_GROUND_PERMANENT")
     // Vu sur la feuille relue à l'instant : un objet arrivé entre-temps n'est jamais caché avec son contenant.
     const hasContent = workbook.contents
       .filter((content) => content.containerId === container.id)
@@ -7467,7 +7512,44 @@ export async function deleteCharacterInventoryContainer(characterId: string, con
   })
 }
 
-export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string, mode: InventoryOwnerMode = "character") {
+/** Le contenant « Au sol » d'un personnage (aucun pour une campagne, un PNJ ou une créature). */
+function groundContainerOf(ownerId: string, workbook: InventoryWorkbook) {
+  const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+  return activeInventoryContainers(ownerId, workbook).find((container) => inventoryContainerCategory(container, typeById) === GROUND_CATEGORY)
+}
+
+/**
+ * Une case libre dans un contenant sans limite (« Au sol », esthétique) : la pile du même
+ * objet qui a encore de la place, sinon une case vidée, sinon une case ajoutée à la feuille
+ * (relue ensuite : la lecture renvoyée est celle où écrire).
+ */
+async function unlimitedSlot(workbook: InventoryWorkbook, ownerId: string, container: StoredInventoryContainer, stackWith: { itemId: string; quantity: number; maxQuantity: number } | null, read: () => Promise<InventoryWorkbook>) {
+  const contents = workbook.contents.filter((content) => content.containerId === container.id).sort((left, right) => left.index - right.index)
+  const stack = stackWith?.itemId ? contents.find((content) => content.itemId === stackWith.itemId && content.quantity + stackWith.quantity <= stackWith.maxQuantity) : undefined
+  if (stack) return { workbook, target: stack, stacked: true }
+  const free = contents.find((content) => !content.itemId && !content.customName)
+  if (free) return { workbook, target: free, stacked: false }
+  const nextIndex = contents.reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
+  const addedSlot = makeEmptyInventorySlot(ownerId, container.id, nextIndex)
+  await appendInventoryRows(workbook, inventoryContentsTab, [inventoryContentRow(addedSlot)])
+  clearInventoryWorkbookCache()
+  const reread = await read()
+  const target = reread.contents.find((content) => content.id === addedSlot.id)
+  if (!target) throw new Error("INVENTORY_FULL")
+  return { workbook: reread, target, stacked: false }
+}
+
+/** La case de départ relue avec le reste : elle doit tenir toujours le même objet. */
+function unchangedSource(workbook: InventoryWorkbook, source: StoredInventoryContent) {
+  const reread = workbook.contents.find((content) => content.id === source.id)
+  if (!reread || reread.itemId !== source.itemId || reread.customName !== source.customName || reread.quantity !== source.quantity) throw new Error("INVENTORY_CHANGED")
+  return reread
+}
+
+/** Ce qu'une modification de l'inventaire renvoie, avec « posé au sol » quand la place manquait. */
+export type InventoryChangeResult = CharacterInventoryRecord & { landedOnGround?: boolean }
+
+export async function addCharacterInventoryItem(characterId: string, itemId: string, requestedContainerId?: string, mode: InventoryOwnerMode = "character"): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
     // Le texte de l'objet est recopié dans la case : le catalogue à jour, pas la copie d'affichage.
     const read = () => readInventoryWorkbook(true, { fresh: true, currentCatalog: true })
@@ -7487,32 +7569,34 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
       .sort((left, right) => left.order - right.order)
     if (mode === "npc") containers = containers.filter((container) => container.typeId === npcBackpackTypeId)
     else if (requestedContainerId) containers = containers.filter((container) => container.id === requestedContainerId)
-    if (!containers.length) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
+    const ground = mode === "character" ? groundContainerOf(characterId, workbook) : undefined
+    if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
 
     const containerIds = new Set(containers.map((container) => container.id))
     const compatibleContents = workbook.contents
       .filter((content) => content.characterId === characterId && containerIds.has(content.containerId))
       .filter((content) => {
         const container = containers.find((candidate) => candidate.id === content.containerId)
-        return Boolean(container && (inventoryContainerCategory(container, typeById) === "Esthétique" || content.index <= container.capacity))
+        return Boolean(container && (isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)) || content.index <= container.capacity))
       })
       .sort((left, right) => {
         const leftOrder = containers.find((container) => container.id === left.containerId)?.order ?? 0
         const rightOrder = containers.find((container) => container.id === right.containerId)?.order ?? 0
         return leftOrder - rightOrder || left.index - right.index
       })
-    const stacked = compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity)
-    let target = stacked ?? compatibleContents.find((content) => !content.itemId && !content.customName)
+    let stacked = Boolean(compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity))
+    let target = compatibleContents.find((content) => content.itemId === item.id && content.quantity < item.maxQuantity) ?? compatibleContents.find((content) => !content.itemId && !content.customName)
+    let landedOnGround = false
     if (!target) {
-      const unlimitedContainer = containers.find((container) => inventoryContainerCategory(container, typeById) === "Esthétique")
-      if (!unlimitedContainer) throw new Error("INVENTORY_FULL")
-      const nextIndex = workbook.contents.filter((content) => content.containerId === unlimitedContainer.id).reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
-      const addedSlot = makeEmptyInventorySlot(characterId, unlimitedContainer.id, nextIndex)
-      await appendInventoryRows(workbook, inventoryContentsTab, [inventoryContentRow(addedSlot)])
-      clearInventoryWorkbookCache()
-      workbook = await read()
-      target = workbook.contents.find((content) => content.id === addedSlot.id)
-      if (!target) throw new Error("INVENTORY_FULL")
+      // Plus de place : un contenant sans limite visé (ou l'esthétique) grandit, sinon l'objet tombe au sol.
+      const unlimitedContainer = containers.find((container) => isUnlimitedInventoryCategory(inventoryContainerCategory(container, typeById)))
+      const destination = unlimitedContainer ?? ground
+      if (!destination) throw new Error("INVENTORY_FULL")
+      const placed = await unlimitedSlot(workbook, characterId, destination, { itemId: item.id, quantity: 1, maxQuantity: item.maxQuantity }, read)
+      workbook = placed.workbook
+      target = placed.target
+      stacked = placed.stacked
+      landedOnGround = destination.id === ground?.id && !unlimitedContainer
     }
     const now = new Date().toISOString()
     // Un exemplaire de plus sur une pile : seul le nombre change, la case garde son texte.
@@ -7532,7 +7616,8 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
           effectHtml: item.effectHtml,
           updatedAt: now,
         }
-    return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, updated]] }))
+    const inventory = buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, updated]] }))
+    return landedOnGround ? { ...inventory, landedOnGround } : inventory
   })
 }
 
@@ -7541,21 +7626,31 @@ export async function createCharacterInventoryItem(
   requestedContainerId: string,
   input: { name: string; description: string; type: string; subtype: string; effect: string },
   mode: InventoryOwnerMode = "character",
-) {
+): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
-    const workbook = await inventoryStorageFor(characterId, true, mode, { fresh: true })
+    let workbook = await inventoryStorageFor(characterId, true, mode, { fresh: true })
     const container = workbook.containers.find((candidate) => candidate.characterId === characterId && !candidate.deletedAt && (mode === "npc" ? candidate.typeId === npcBackpackTypeId : candidate.id === requestedContainerId))
     const name = input.name.trim()
     const type = input.type.trim() || "Objet"
     if (!container || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) throw new Error("INVALID_INVENTORY_ITEM")
     const category = inventoryContainerCategory(container, new Map(workbook.containerTypes.map((candidate) => [candidate.id, candidate])))
     if (!isCampaignInventoryOwner(characterId) && !canItemGoInInventoryCategory(`${type} ${input.subtype}`, category)) throw new Error("INVENTORY_ITEM_WRONG_CATEGORY")
-    const target = workbook.contents
+    let target = isUnlimitedInventoryCategory(category) ? undefined : workbook.contents
       .filter((content) => content.containerId === container.id && content.index <= container.capacity)
       .sort((left, right) => left.index - right.index)
       .find((content) => !content.itemId && !content.customName)
-    if (!target) throw new Error("INVENTORY_FULL")
-    return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, {
+    let landedOnGround = false
+    if (!target) {
+      // Contenant sans limite visé : il grandit. Contenant plein : l'objet créé tombe au sol.
+      const ground = mode === "character" ? groundContainerOf(characterId, workbook) : undefined
+      const destination = isUnlimitedInventoryCategory(category) ? container : ground
+      if (!destination) throw new Error("INVENTORY_FULL")
+      const placed = await unlimitedSlot(workbook, characterId, destination, null, () => readInventoryWorkbook(true, { fresh: true }))
+      workbook = placed.workbook
+      target = placed.target
+      landedOnGround = destination.id !== container.id
+    }
+    const inventory = buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [[target, {
       ...target,
       itemId: "",
       quantity: 1,
@@ -7569,6 +7664,7 @@ export async function createCharacterInventoryItem(
       effectHtml: "",
       updatedAt: new Date().toISOString(),
     }]] }))
+    return landedOnGround ? { ...inventory, landedOnGround } : inventory
   })
 }
 
@@ -7692,35 +7788,32 @@ export async function moveCharacterInventoryItem(characterId: string, slotId: st
       throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
     }
     const targetCategory = inventoryContainerCategory(targetContainer, typeById)
-    const targets = workbook.contents.filter((content) => content.containerId === targetContainer.id && (targetCategory === "Esthétique" || content.index <= targetContainer.capacity)).sort((left, right) => left.index - right.index)
-    const stack = source.itemId
+    const targets = workbook.contents.filter((content) => content.containerId === targetContainer.id && (isUnlimitedInventoryCategory(targetCategory) || content.index <= targetContainer.capacity)).sort((left, right) => left.index - right.index)
+    let stack = Boolean(source.itemId && targets.find((content) => content.itemId === source.itemId && content.quantity + source.quantity <= sourceItem.maxQuantity))
+    let target = source.itemId && stack
       ? targets.find((content) => content.itemId === source.itemId && content.quantity + source.quantity <= sourceItem.maxQuantity)
-      : undefined
-    let target = stack ?? targets.find((content) => !content.itemId && !content.customName)
+      : targets.find((content) => !content.itemId && !content.customName)
     let current = source
-    if (!target && targetCategory === "Esthétique") {
-      const nextIndex = targets.reduce((maximum, content) => Math.max(maximum, content.index), 0) + 1
-      const addedSlot = makeEmptyInventorySlot(characterId, targetContainer.id, nextIndex)
-      await appendInventoryRows(workbook, inventoryContentsTab, [inventoryContentRow(addedSlot)])
-      clearInventoryWorkbookCache()
-      workbook = await readInventoryWorkbook(true, { fresh: true })
-      target = workbook.contents.find((content) => content.id === addedSlot.id)
-      // La case de départ, relue avec le reste : elle doit tenir toujours le même objet.
-      const reread = workbook.contents.find((content) => content.id === source.id)
-      if (!reread || reread.itemId !== source.itemId || reread.customName !== source.customName || reread.quantity !== source.quantity) throw new Error("INVENTORY_CHANGED")
-      current = reread
+    if (!target && isUnlimitedInventoryCategory(targetCategory)) {
+      const placed = await unlimitedSlot(workbook, characterId, targetContainer, null, () => readInventoryWorkbook(true, { fresh: true }))
+      workbook = placed.workbook
+      target = placed.target
+      stack = placed.stacked
+      current = unchangedSource(workbook, source)
     }
     if (!target) throw new Error("INVENTORY_FULL")
     const now = new Date().toISOString()
+    // Posé au sol, un objet n'est plus équipé.
+    const keepsEquipped = targetCategory !== "Bourse" && targetCategory !== GROUND_CATEGORY && current.equipped
     return buildCharacterInventory(characterId, await writeInventoryChanges(workbook, { contents: [
-      [target, movedInventoryItem(target, current, Boolean(stack), targetCategory !== "Bourse" && current.equipped, now)],
+      [target, movedInventoryItem(target, current, stack, keepsEquipped, now)],
       [current, emptiedInventorySlot(current, now)],
     ] }))
   })
 }
 
 /** Ce qui vient de changer de sac : sert à prévenir le destinataire. */
-export type InventoryTransferMoved = { name: string; quantity: number; targetId: string; targetMode: InventoryOwnerMode; /** La case où l'objet est arrivé (pastille « nouveau »). */ slotId?: string }
+export type InventoryTransferMoved = { name: string; quantity: number; targetId: string; targetMode: InventoryOwnerMode; /** La case où l'objet est arrivé (pastille « nouveau »). */ slotId?: string; /** Plus de place chez le destinataire : l'objet l'attend au sol. */ onGround?: boolean }
 
 export async function transferCharacterInventoryItem(sourceId: string, slotId: string, targetId: string, sourceMode: InventoryOwnerMode = "character", onMoved?: (moved: InventoryTransferMoved) => void, expected?: InventorySlotExpectation) {
   // Une feuille des PNJ illisible à l'instant arrête le transfert : un PNJ n'est jamais pris
@@ -7730,17 +7823,19 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
   return withInventoryLock(async () => {
     await inventoryStorageFor(sourceId, true, sourceMode)
     // Relu sous le verrou, sans cache : la case visée est vide maintenant, pas il y a une minute.
-    const workbook = await inventoryStorageFor(targetId, true, targetMode, { fresh: true })
-    const source = workbook.contents.find((content) => content.id === slotId && content.characterId === sourceId)
-    assertExpectedSlot(source, expected)
-    if (!source || (!source.itemId && !source.customName) || sourceId === targetId) throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    let workbook = await inventoryStorageFor(targetId, true, targetMode, { fresh: true })
+    const found = workbook.contents.find((content) => content.id === slotId && content.characterId === sourceId)
+    assertExpectedSlot(found, expected)
+    if (!found || (!found.itemId && !found.customName) || sourceId === targetId) throw new Error("INVENTORY_SLOT_NOT_FOUND")
+    let source = found
     const sourceItem = workbook.items.find((item) => item.id === source.itemId) ?? customInventoryItem(source)
     if (!sourceItem) throw new Error("INVENTORY_ITEM_NOT_FOUND")
     const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
     const containers = activeInventoryContainers(targetId, workbook)
       .filter((container) => isCampaignInventoryOwner(targetId) || canItemBeAutoPlacedInInventoryCategory(`${sourceItem.type} ${sourceItem.subtype}`, inventoryContainerCategory(container, typeById)))
       .sort((left, right) => left.order - right.order)
-    if (!containers.length) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
+    const ground = targetMode === "character" ? groundContainerOf(targetId, workbook) : undefined
+    if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
     const containerIds = new Set(containers.map((container) => container.id))
     const targets = workbook.contents
       .filter((content) => containerIds.has(content.containerId))
@@ -7753,17 +7848,30 @@ export async function transferCharacterInventoryItem(sourceId: string, slotId: s
         const rightOrder = containers.find((container) => container.id === right.containerId)?.order ?? 0
         return leftOrder - rightOrder || left.index - right.index
       })
-    const stack = source.itemId ? targets.find((content) => content.itemId === source.itemId && content.quantity + source.quantity <= sourceItem.maxQuantity) : undefined
-    const target = stack ?? targets.find((content) => !content.itemId && !content.customName)
+    let stack = Boolean(source.itemId && targets.find((content) => content.itemId === source.itemId && content.quantity + source.quantity <= sourceItem.maxQuantity))
+    let target = source.itemId && stack
+      ? targets.find((content) => content.itemId === source.itemId && content.quantity + source.quantity <= sourceItem.maxQuantity)
+      : targets.find((content) => !content.itemId && !content.customName)
+    let onGround = false
+    if (!target && ground) {
+      // Plus de place chez le destinataire : l'objet l'attend au sol.
+      const placed = await unlimitedSlot(workbook, targetId, ground, source.itemId ? { itemId: source.itemId, quantity: source.quantity, maxQuantity: sourceItem.maxQuantity } : null, () => readInventoryWorkbook(true, { fresh: true }))
+      workbook = placed.workbook
+      target = placed.target
+      stack = placed.stacked
+      source = unchangedSource(workbook, source)
+      onGround = true
+    }
     if (!target) throw new Error("INVENTORY_FULL")
-    const targetContainer = containers.find((container) => container.id === target.containerId)
+    const targetContainer = onGround ? ground : containers.find((container) => container.id === target.containerId)
     const now = new Date().toISOString()
-    const equipped = targetContainer ? inventoryContainerCategory(targetContainer, typeById) !== "Bourse" && source.equipped : false
+    const targetCategory = targetContainer ? inventoryContainerCategory(targetContainer, typeById) : null
+    const equipped = targetCategory !== null && targetCategory !== "Bourse" && targetCategory !== GROUND_CATEGORY && source.equipped
     const updated = await writeInventoryChanges(workbook, { contents: [
-      [target, movedInventoryItem(target, source, Boolean(stack), equipped, now)],
+      [target, movedInventoryItem(target, source, stack, equipped, now)],
       [source, emptiedInventorySlot(source, now)],
     ] })
-    onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode, slotId: target.id })
+    onMoved?.({ name: source.customName || sourceItem.name, quantity: source.quantity, targetId, targetMode, slotId: target.id, ...(onGround ? { onGround } : {}) })
     return buildCharacterInventory(sourceId, updated)
   })
 }

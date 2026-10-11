@@ -382,7 +382,8 @@ export function indexInventoryModifiers(containers: InventoryContainerRecord[]):
   const totals = new Map<string, number>()
   const items = new Map<string, LinkedModifierItem[]>()
   for (const container of containers) {
-    if (container.category === "Bourse") continue
+    // La bourse n'a pas d'objets ; ce qui est au sol n'est pas sur le personnage.
+    if (container.category === "Bourse" || container.category === "Au sol") continue
     for (const slot of container.slots) {
       if (!slot.item || slot.quantity <= 0) continue
       for (const modifier of parseItemModifiers(slot.modifiers)) {
@@ -414,7 +415,8 @@ export type UsageItem = { slotId: string; name: string; equipped: boolean; icon:
 export function indexItemUsage(containers: InventoryContainerRecord[]) {
   const usage = new Map<string, UsageItem[]>()
   for (const container of containers) {
-    if (container.category === "Bourse") continue
+    // La bourse n'a pas d'objets ; ce qui est au sol n'est pas sur le personnage.
+    if (container.category === "Bourse" || container.category === "Au sol") continue
     for (const slot of container.slots) {
       if (!slot.item || slot.quantity <= 0) continue
       const { skill } = effectiveItemFields(slot.item, slot.modifiers)

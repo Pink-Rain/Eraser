@@ -663,6 +663,8 @@ export function objectColumnSpec(header: string, headers: string[]): IndexColumn
     ? { kind: "rich", description: OBJECT_VALUE_HELP }
     : { kind: "number", number: { unit: "money", defaultUnit: "PO" } }
   if (["actif", "active", "disponible"].includes(folded)) return { kind: "checkbox", emptyChecked: true }
+  // Type et sous-type : une liste, nourrie des valeurs déjà écrites ; une valeur nouvelle se tape dans la case.
+  if (["type", "types", "sous-type", "sous-types", "sous type", "sous types", "soustype"].includes(folded)) return { kind: "choice", allowCustom: true, options: [], description: "Choisis une valeur déjà utilisée, ou tape-en une nouvelle : elle rejoint la liste." }
   // Les colonnes de combat : la liste des caractéristiques et compétences de la fiche
   // (index « Caractéristiques et compétences », ses deux onglets), une distance en mètres,
   // les types d'action des sorts, les attributs d'« Armes - Modificateurs ».

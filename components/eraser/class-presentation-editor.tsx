@@ -1,10 +1,10 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ExternalLink, LoaderCircle, RefreshCw } from "lucide-react"
+import { LoaderCircle, RefreshCw } from "lucide-react"
 
 import { RichTextInlineEditor } from "@/components/eraser/rich-text"
-import { Button } from "@/components/ui/button"
+import { SheetsLinkButton, ToolbarIconButton } from "@/components/eraser/index-toolbar"
 import type { ClassPresentation, EditableClassList } from "@/lib/class-content"
 
 type Loaded = { presentation: ClassPresentation | null; sheetUrl: string }
@@ -80,8 +80,8 @@ export function ClassPresentationEditor({ classId, accent }: { classId: string; 
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-xs text-muted-foreground">Double-clique sur un texte pour le modifier. C’est ce que montre la page de la classe dans Règles.</p>
       <div className="flex gap-1">
-        <Button type="button" size="sm" variant="ghost" disabled={loading} onClick={() => { setLoading(true); setRefreshTick((tick) => tick + 1) }}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}Actualiser</Button>
-        {loaded?.sheetUrl && <Button asChild size="sm" variant="ghost"><a href={loaded.sheetUrl} target="_blank" rel="noreferrer">Ouvrir dans Sheets<ExternalLink /></a></Button>}
+        <ToolbarIconButton variant="ghost" label="Actualiser : relire Google Sheets" disabled={loading} onClick={() => { setLoading(true); setRefreshTick((tick) => tick + 1) }}>{loading ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
+        {loaded?.sheetUrl && <SheetsLinkButton href={loaded.sheetUrl} />}
       </div>
     </div>
     {error && <p className="mt-3 rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}

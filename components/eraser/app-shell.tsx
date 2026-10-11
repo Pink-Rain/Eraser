@@ -13,7 +13,6 @@ import {
   Crown,
   DownloadCloud,
   FlaskConical,
-  Hammer,
   Home,
   LibraryBig,
   Map,
@@ -35,7 +34,6 @@ import { Button } from "@/components/ui/button"
 import {
   Collapsible,
   CollapsibleContent,
-  CollapsibleTrigger,
 } from "@/components/ui/collapsible"
 import {
   DropdownMenu,
@@ -60,6 +58,7 @@ import {
   SidebarMenuSubItem,
   SidebarProvider,
   SidebarTrigger,
+  useSidebar,
 } from "@/components/ui/sidebar"
 import { internalAppPath } from "@/lib/app-links"
 import { allowedRoleViews, type SiteRole } from "@/lib/auth-types"
@@ -67,8 +66,9 @@ import { AppTabsProvider } from "@/components/eraser/app-tabs"
 import { AccountAvatar, AccountDialog } from "@/components/eraser/account-dialog"
 import { DesktopTitlebar } from "@/components/eraser/desktop-titlebar"
 import { PendingPage, usePendingPage } from "@/components/eraser/page-transition"
-import { useIndexFavorites } from "@/components/eraser/index-favorites"
-import { indexHomeHref, indexPages } from "@/lib/index-pages"
+import { useIndexDirectoryLayout, useIndexEntries, useIndexStars } from "@/components/eraser/index-entries"
+import { indexDirectoryOrder } from "@/lib/index-directory"
+import { indexHomeHref } from "@/lib/index-pages"
 import "@/lib/desktop-bridge"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
 import { campaignCreatedEvent, characterCreatedEvent } from "@/lib/selection-events"
@@ -88,7 +88,7 @@ function sameList(left: unknown[], right: unknown[]) {
   return left === right || (left.length === right.length && JSON.stringify(left) === JSON.stringify(right))
 }
 
-const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void } | null>(null)
+const ShellDataContext = createContext<{ characters: CharacterRecord[]; campaigns: CampaignRecord[]; viewRole: SiteRole; user: ShellUser; avatarVersion: number; openAccount: () => void; /** La campagne choisie dans le menu (vue MJ). */ selectedCampaignId: string | null } | null>(null)
 
 /**
  * Nomme la page (en-tête et onglet). Un PageLabel imbriqué l'emporte sur celui qui
@@ -143,6 +143,11 @@ const roleIcons = {
   admin: ShieldCheck,
 }
 
+/**
+ * Une section du menu. Avec `href`, c'est aussi une page : un clic sur son nom l'ouvre, un
+ * clic ailleurs sur la ligne (ou sur la flèche) déplie la section. Menu replié, l'icône
+ * ouvre la page.
+ */
 function NavSection({
   label,
   icon: Icon,
@@ -154,37 +159,39 @@ function NavSection({
   label: string
   icon: typeof BookOpen
   active: boolean
-  /** Une section peut aussi être une page : le titre y mène, la flèche ouvre la liste. */
   href?: string
   pageActive?: boolean
   children: ReactNode
 }) {
+  const router = useRouter()
+  const { state, isMobile } = useSidebar()
+  const [open, setOpen] = useState(active)
+  // Arriver sur une page de la section la déplie (sans la refermer en la quittant).
+  const [wasActive, setWasActive] = useState(active)
+  if (active !== wasActive) {
+    setWasActive(active)
+    if (active) setOpen(true)
+  }
+  const collapsed = state === "collapsed" && !isMobile
   return (
-    <Collapsible defaultOpen={active} className="group/collapsible">
+    <Collapsible open={open} onOpenChange={setOpen} className="group/collapsible">
       <SidebarMenuItem>
-        {href ? (
-          <>
-            <SidebarMenuButton asChild tooltip={label} isActive={pageActive} className="h-10 pr-9">
-              <IntentLink href={href}>
-                <Icon />
-                <span>{label}</span>
-              </IntentLink>
-            </SidebarMenuButton>
-            <CollapsibleTrigger asChild>
-              <SidebarMenuAction className="top-2.5" aria-label={`Afficher ou masquer ${label}`}>
-                <ChevronDown className="transition-transform group-data-[state=open]/collapsible:rotate-180" />
-              </SidebarMenuAction>
-            </CollapsibleTrigger>
-          </>
-        ) : (
-          <CollapsibleTrigger asChild>
-            <SidebarMenuButton tooltip={label} className="h-10">
-              <Icon />
-              <span>{label}</span>
-              <ChevronDown className="ml-auto transition-transform group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
-            </SidebarMenuButton>
-          </CollapsibleTrigger>
-        )}
+        <SidebarMenuButton asChild tooltip={label} isActive={pageActive} className="h-10 cursor-pointer select-none">
+          <div
+            role="button"
+            tabIndex={0}
+            aria-expanded={open}
+            aria-label={href ? `${label} : déplier la section` : label}
+            onClick={() => { if (collapsed && href) router.push(href); else setOpen((current) => !current) }}
+            onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); setOpen((current) => !current) } }}
+          >
+            <Icon />
+            {href
+              ? <IntentLink href={href} onClick={(event) => event.stopPropagation()} className="min-w-0 truncate rounded-sm underline-offset-4 hover:underline focus-visible:underline focus-visible:outline-none" title={`Ouvrir ${label}`}>{label}</IntentLink>
+              : <span className="min-w-0 truncate">{label}</span>}
+            <ChevronDown className="ml-auto shrink-0 transition-transform group-data-[state=open]/collapsible:rotate-180 group-data-[collapsible=icon]:hidden" />
+          </div>
+        </SidebarMenuButton>
         <CollapsibleContent>
           <SidebarMenuSub>{children}</SidebarMenuSub>
         </CollapsibleContent>
@@ -224,7 +231,15 @@ export function AppShell({
 }) {
   const pathname = usePathname()
   const router = useRouter()
-  const { isFavorite: isFavoriteIndex } = useIndexFavorites()
+  // Les index du menu : étoilés dans la section Index, en rouge directement dans le menu (dans l'ordre de la page Index).
+  const managesIndexes = (user.role === "admin" || user.role === "mj") && (initialViewRole === "admin" || initialViewRole === "mj")
+  const indexEntries = useIndexEntries(managesIndexes)
+  const { starOf } = useIndexStars()
+  const { layout: indexLayout } = useIndexDirectoryLayout(indexEntries, managesIndexes)
+  const orderedIndexes = useMemo(() => {
+    const byKey = new globalThis.Map(indexEntries.map((entry) => [entry.key, entry]))
+    return indexDirectoryOrder(indexLayout).flatMap((key) => byKey.get(key) ?? [])
+  }, [indexEntries, indexLayout])
   const [accountOpen, setAccountOpen] = useState(false)
   const openAccount = useCallback(() => setAccountOpen(true), [])
   const [avatarVersion, setAvatarVersion] = useState(0)
@@ -240,7 +255,7 @@ export function AppShell({
   const { uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole } = user
   const shellUser = useMemo<ShellUser>(() => ({ uid: userUid, email: userEmail, displayName: userDisplayName, role: userRole }), [userDisplayName, userEmail, userRole, userUid])
   // Les pages qui lisent ces données ne se redessinent que si elles changent vraiment.
-  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user: shellUser, avatarVersion, openAccount }), [avatarVersion, openAccount, shellUser, viewRole, visibleCampaigns, visibleCharacters])
+  const shellData = useMemo(() => ({ characters: visibleCharacters, campaigns: visibleCampaigns, viewRole, user: shellUser, avatarVersion, openAccount, selectedCampaignId }), [avatarVersion, openAccount, selectedCampaignId, shellUser, viewRole, visibleCampaigns, visibleCharacters])
   // Au clic, la page de destination s'affiche aussitôt, sans ses données ; le titre d'un
   // personnage ou d'une campagne est déjà connu ici.
   const pendingPage = usePendingPage((to) => {
@@ -599,12 +614,11 @@ export function AppShell({
                 </SidebarMenuItem>
 
                 {viewRole === "mj" && selectedCampaign && (
-                  <NavSection label={`Dossier - ${selectedCampaign.name}`} icon={Map} active={pathname.startsWith("/campagne/")}>
+                  <NavSection label={`Dossier - ${selectedCampaign.name}`} icon={Map} active={pathname.startsWith("/campagne/")} href={`/campagne/${encodeURIComponent(selectedCampaign.id)}/dossier`} pageActive={pathname === `/campagne/${encodeURIComponent(selectedCampaign.id)}/dossier`}>
                     {(() => {
                       const campaignHref = `/campagne/${encodeURIComponent(selectedCampaign.id)}`
                       return <>
                         <NavSubLink href={campaignHref} label={`Campagne - ${selectedCampaign.name}`} active={pathname === campaignHref} />
-                        <NavSubLink href={`${campaignHref}/roll20`} label="Roll20" active={pathname === `${campaignHref}/roll20`} />
                         <NavSubLink href={`${campaignHref}/lieux-et-rencontres`} label="Créateur de session" active={pathname === `${campaignHref}/lieux-et-rencontres`} />
                         <NavSubLink nested href={`${campaignHref}/evenements`} label="Événements" active={pathname === `${campaignHref}/evenements`} />
                         <NavSubLink nested href={`${campaignHref}/magasin-et-fouille`} label="Magasins" active={pathname.startsWith(`${campaignHref}/magasin-et-fouille`)} />
@@ -633,11 +647,21 @@ export function AppShell({
                           })}
                         </SidebarMenuSub>
                       )}
+                      {/* Menu replié, la liste des campagnes disparaît : chacune garde une icône cliquable. */}
+                      {selectedCharacter.campaigns.map((campaign) => {
+                        const href = `/campagne/${encodeURIComponent(campaign.id)}`
+                        return <SidebarMenuButton key={campaign.id} asChild tooltip={`Campagne - ${campaign.name}`} isActive={pathname === href} className="mt-1 hidden group-data-[collapsible=icon]:flex">
+                          <IntentLink href={href} aria-label={`Campagne - ${campaign.name}`}>
+                            <Map style={{ color: campaign.accentColor }} />
+                            <span>{campaign.name}</span>
+                          </IntentLink>
+                        </SidebarMenuButton>
+                      })}
                     </SidebarMenuItem>
                   )
                 })()}
 
-                <NavSection label="Règles" icon={ScrollText} active={pathname.startsWith("/regles")}>
+                <NavSection label="Règles" icon={ScrollText} active={pathname.startsWith("/regles")} href="/regles" pageActive={pathname === "/regles"}>
                   <NavSubLink
                     href="/regles/classes"
                     label="Classe"
@@ -650,21 +674,25 @@ export function AppShell({
 
                 {(user.role === "admin" || user.role === "mj") && (viewRole === "admin" || viewRole === "mj") && (
                   <>
-                    <SidebarMenuItem>
-                      <SidebarMenuButton asChild tooltip="Création de classe" isActive={pathname.startsWith("/creation-de-classe")} className="h-10">
-                        <IntentLink href="/creation-de-classe">
-                          <Hammer />
-                          <span>Création de classe</span>
-                        </IntentLink>
-                      </SidebarMenuButton>
-                    </SidebarMenuItem>
+                    {/* Les index à l'étoile rouge (le créateur de classe et l'index des objets d'abord), directement dans le menu. */}
+                    {orderedIndexes.filter((entry) => starOf(entry.key) === "red").map((entry) => {
+                      const EntryIcon = entry.icon
+                      return <SidebarMenuItem key={entry.key}>
+                        <SidebarMenuButton asChild tooltip={entry.label} isActive={pathname === entry.href || pathname.startsWith(`${entry.href}/`)} className="h-10">
+                          <IntentLink href={entry.href}>
+                            <EntryIcon />
+                            <span>{entry.label}</span>
+                          </IntentLink>
+                        </SidebarMenuButton>
+                      </SidebarMenuItem>
+                    })}
                     <NavSection label="Index" icon={LibraryBig} href={indexHomeHref} pageActive={pathname === indexHomeHref} active={pathname.startsWith(indexHomeHref)}>
-                      {/* Les index étoilés, par ordre alphabétique ; les autres restent sur la page Index. */}
-                      {indexPages.filter((page) => isFavoriteIndex(page.key) || pathname === page.href).map((page) => (
-                        <NavSubLink key={page.key} href={page.href} label={page.label} active={pathname === page.href} />
+                      {/* Les index étoilés, dans l'ordre de la page Index ; les autres restent sur la page. */}
+                      {orderedIndexes.filter((entry) => starOf(entry.key) === "star" || (starOf(entry.key) === "none" && pathname === entry.href)).map((entry) => (
+                        <NavSubLink key={entry.key} href={entry.href} label={entry.label} active={pathname === entry.href} />
                       ))}
                     </NavSection>
-                    <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable/")}>
+                    <NavSection label="Bac à sable" icon={FlaskConical} active={pathname.startsWith("/bac-a-sable")} href="/bac-a-sable" pageActive={pathname === "/bac-a-sable"}>
                       <NavSubLink href="/bac-a-sable/tabletop" label="Tabletop" active={pathname === "/bac-a-sable/tabletop"} />
                       <NavSubLink href="/bac-a-sable/magasin" label="Magasin" active={pathname === "/bac-a-sable/magasin"} />
                       <NavSubLink href="/bac-a-sable/pnjs" label="PNJs" active={pathname === "/bac-a-sable/pnjs"} />
@@ -677,6 +705,8 @@ export function AppShell({
                     label="Administration"
                     icon={ShieldCheck}
                     active={pathname.startsWith("/administration")}
+                    href="/administration"
+                    pageActive={pathname === "/administration"}
                   >
                     <NavSubLink
                       href="/administration/comptes-et-roles"

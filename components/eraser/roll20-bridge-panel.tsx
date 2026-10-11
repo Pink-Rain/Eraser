@@ -25,7 +25,8 @@ function dateLabel(value: string | null) {
   return new Intl.DateTimeFormat("fr-FR", { dateStyle: "short", timeStyle: "short" }).format(new Date(value))
 }
 
-export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: string; initialLink: LinkRecord | null }) {
+/** `embedded` : dans la partie dépliable du dossier de la campagne (sans titre de page). */
+export function Roll20BridgePanel({ campaignId, initialLink, embedded = false }: { campaignId: string; initialLink: LinkRecord | null; embedded?: boolean }) {
   const [link, setLink] = useState(initialLink)
   const [token, setToken] = useState("")
   const [busy, setBusy] = useState(false)
@@ -73,10 +74,10 @@ export function Roll20BridgePanel({ campaignId, initialLink }: { campaignId: str
   }
 
   return (
-    <div className="mx-auto w-full max-w-5xl space-y-6 px-5 py-8 sm:px-8">
+    <div className={embedded ? "w-full space-y-6" : "mx-auto w-full max-w-5xl space-y-6 px-5 py-8 sm:px-8"}>
       <header>
-        <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Pont de campagne</p>
-        <h1 className="mt-2 font-display text-4xl font-semibold">Roll20</h1>
+        {!embedded && <p className="text-sm font-semibold uppercase tracking-[0.18em] text-primary">Pont de campagne</p>}
+        {!embedded && <h1 className="mt-2 font-display text-4xl font-semibold">Roll20</h1>}
         <p className="mt-3 max-w-3xl text-base leading-7 text-muted-foreground">Synchronise en une fois les personnages joueurs, PNJ et magasins de cette campagne, ou seulement ceux d’une session (rangés dans un dossier du Journal à son nom). Chaque fiche reçoit son portrait et son token (celui préparé dans Eraser, sinon un token par défaut avec l’avatar centré dans son cadre). À la fin d’une session, les PV peuvent revenir de Roll20 vers Eraser.</p>
       </header>
 

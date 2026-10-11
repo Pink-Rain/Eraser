@@ -13,8 +13,7 @@ import {
 import { HomeAccounts } from "@/components/eraser/account-directory"
 import { HomeAchievements } from "@/components/eraser/achievements"
 import { PageLabel, useShellData } from "@/components/eraser/app-shell"
-import { useIndexFavorites } from "@/components/eraser/index-favorites"
-import { indexPageIcons } from "@/components/eraser/index-directory"
+import { useIndexEntries, useIndexStars } from "@/components/eraser/index-entries"
 import { RichTextField, RichTextView } from "@/components/eraser/rich-text"
 import {
   AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent,
@@ -26,7 +25,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { listText } from "@/lib/character-card"
 import type { AdminTodoRecord, CampaignRecord, CharacterRecord } from "@/lib/google-sheets"
-import { indexHomeHref, indexPages } from "@/lib/index-pages"
+import { indexHomeHref } from "@/lib/index-pages"
 import { cn } from "@/lib/utils"
 
 const viewLabels = { admin: "Vue administrateur", mj: "Vue maître du jeu", joueur: "Vue joueur" } as const
@@ -127,15 +126,16 @@ function LinkList({ links }: { links: QuickLink[] }) {
 }
 
 function SideColumn({ withIndex, withTools }: { withIndex: boolean; withTools: boolean }) {
-  const { isFavorite } = useIndexFavorites()
-  const starred = indexPages.filter((page) => isFavorite(page.key))
+  const entries = useIndexEntries(withIndex)
+  const { starOf } = useIndexStars()
+  const starred = entries.filter((entry) => starOf(entry.key) !== "none")
   return (
     <aside className="space-y-5">
       <Panel title="Règles" icon={BookOpen}><LinkList links={ruleLinks} /></Panel>
       <HomeAccounts />
       {withIndex && (
         <Panel title="Index" icon={LibraryBig} action={<Link href={indexHomeHref} prefetch={false} className="text-xs font-medium text-primary hover:underline">Tout voir</Link>}>
-          <LinkList links={(starred.length ? starred : indexPages).map((page) => ({ href: page.href, label: page.label, icon: indexPageIcons[page.key] }))} />
+          <LinkList links={(starred.length ? starred : entries).map((entry) => ({ href: entry.href, label: entry.label, icon: entry.icon }))} />
         </Panel>
       )}
       {withTools && <Panel title="Outils MJ et administration" icon={ShieldCheck}><LinkList links={toolLinks} /></Panel>}

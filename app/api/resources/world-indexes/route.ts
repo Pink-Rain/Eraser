@@ -79,8 +79,12 @@ export async function GET(request: Request) {
     if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
     // « Actualiser » relit Google Sheets ; sinon l'index gardé en mémoire suffit.
     return NextResponse.json({ data: await withEntityExtras(await getWorldIndex(key, { refresh: parameters.get("refresh") === "1" }), account, await currentAuthToken()) })
-  } catch {
-    return NextResponse.json({ error: "Cet index n’a pas pu être chargé depuis Google Sheets." }, { status: 502 })
+  } catch (error) {
+    // La cause est gardée dans le journal et montrée : sans elle, impossible de savoir ce qui bloque.
+    const code = error instanceof Error ? error.message : ""
+    console.error("WORLD_INDEX_READ_FAILED", parameters.get("key"), code || "UNKNOWN_ERROR")
+    const detail = googleFailureMessage(code) || (code ? `(${code.slice(0, 160)})` : "")
+    return NextResponse.json({ error: `Cet index n’a pas pu être chargé depuis Google Sheets.${detail ? ` ${detail}` : ""}` }, { status: 502 })
   }
 }
 

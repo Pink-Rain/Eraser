@@ -1,6 +1,17 @@
 import type { ColumnStyle } from "@/lib/index-columns"
 
-export const inventoryCategories = ["Armes", "Équipement", "Esthétique", "Inventaire", "Bourse"] as const
+export const inventoryCategories = ["Armes", "Équipement", "Esthétique", "Inventaire", "Bourse", "Au sol"] as const
+
+/**
+ * « Au sol » : un seul par personnage, sans limite. Ce qui ne trouve plus de place (objet
+ * reçu, ajouté, créé) y atterrit ; on ne peut pas en créer un deuxième ni le supprimer.
+ */
+export const GROUND_CATEGORY = "Au sol" satisfies InventoryCategory
+
+/** Les contenants dont les cases s'ajoutent à la demande (pas de capacité). */
+export function isUnlimitedInventoryCategory(category: InventoryCategory) {
+  return category === "Esthétique" || category === GROUND_CATEGORY
+}
 
 export type InventoryCategory = (typeof inventoryCategories)[number]
 
@@ -114,6 +125,17 @@ export type InventoryTransferTarget = {
   campaignName: string
 }
 
+/** Une destination où donner un objet de l'index : l'inventaire d'une campagne, d'un personnage, d'un PNJ ou d'une créature nommée. */
+export type GiveDestination = {
+  id: string
+  name: string
+  kind: "campaign" | "character" | "npc" | "creature"
+  campaignId: string
+  campaignName: string
+  /** Le personnage d'une créature compagnon. */
+  ownerName?: string
+}
+
 /**
  * Ce que la page montrait dans la case qu'elle modifie (objet, nombre). Le serveur relit la
  * feuille et refuse si elle a changé depuis, ici ou sur une autre installation.
@@ -136,6 +158,7 @@ export const baseInventoryContainerTypes: InventoryContainerTypeRecord[] = [
   { id: "TYPE-ESTHETIQUE-BASE", name: "Purement esthétique", category: "Esthétique", capacity: 1, columns: [], active: true },
   { id: "TYPE-SAC-BASE", name: "Sac de base", category: "Inventaire", capacity: 15, columns: [], active: true },
   { id: "TYPE-BOURSE-BASE", name: "Bourse de base", category: "Bourse", capacity: 300, columns: ["Or", "Cuivre", "Or noir"], active: true },
+  { id: "TYPE-SOL-BASE", name: "Au sol", category: "Au sol", capacity: 1, columns: [], active: true },
 ]
 
 export const baseInventoryTypeIds = new Set(baseInventoryContainerTypes.map((type) => type.id))
@@ -177,6 +200,7 @@ export function parseInventoryCategory(value: string): InventoryCategory | null 
   if (normalized === "esthetique" || normalized === "esthétique" || normalized === "purement esthetique" || normalized === "purement esthétique") return "Esthétique"
   if (normalized === "inventaire" || normalized === "objet" || normalized === "objets" || normalized === "ressource" || normalized === "ressources") return "Inventaire"
   if (normalized === "bourse" || normalized === "monnaie" || normalized === "monnaies") return "Bourse"
+  if (normalized === "au sol" || normalized === "sol") return "Au sol"
   return null
 }
 
@@ -189,6 +213,8 @@ export function compatibleInventoryCategory(itemType: string): InventoryCategory
 }
 
 export function canItemGoInInventoryCategory(itemType: string, category: InventoryCategory) {
+  // Tout peut être posé au sol.
+  if (category === GROUND_CATEGORY) return true
   const specializedCategory = compatibleInventoryCategory(itemType)
   // L’esthétique accepte tout le catalogue, comme le sac à dos : seule la bourse reste réservée aux monnaies.
   if (category === "Esthétique" || category === "Inventaire") return specializedCategory !== "Bourse"
@@ -201,7 +227,7 @@ export function canItemGoInInventoryCategory(itemType: string, category: Invento
  * le catalogue à la recherche.
  */
 export function canItemBeAutoPlacedInInventoryCategory(itemType: string, category: InventoryCategory) {
-  return category !== "Esthétique" && canItemGoInInventoryCategory(itemType, category)
+  return category !== "Esthétique" && category !== GROUND_CATEGORY && canItemGoInInventoryCategory(itemType, category)
 }
 
 export function emptyCharacterInventory(): CharacterInventoryRecord {

@@ -15,19 +15,20 @@ export type Crumb = { label: string; href?: string; path: string }
 export type NavTarget = { label: string; href: string }
 
 const fixed: Record<string, Omit<Crumb, "path">> = {
-  "/regles": { label: "Règles" },
+  "/regles": { label: "Règles", href: "/regles" },
   "/regles/classes": { label: "Classes", href: "/regles/classes" },
   "/ressources": { label: "Index", href: "/ressources" },
   // « /campagne » renvoie à l’accueil : c’est un dossier, qui liste les campagnes.
   "/campagne": { label: "Campagnes" },
   "/personnage": { label: "Personnages" },
   "/administration": { label: "Administration", href: "/administration" },
-  "/bac-a-sable": { label: "Bac à sable" },
+  "/bac-a-sable": { label: "Bac à sable", href: "/bac-a-sable" },
   "/profil": { label: "Profil", href: "/profil" },
   "/reference": { label: "Référence" },
 }
 
 const campaignPages: Record<string, string> = {
+  "dossier": "Dossier",
   "roll20": "Roll20",
   "lieux-et-rencontres": "Créateur de session",
   "evenements": "Événements",

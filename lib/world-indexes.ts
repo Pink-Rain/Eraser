@@ -180,11 +180,11 @@ function effectiveTabs(base: WorldIndexTabDefinition[], schema: SchemaEntry[]) {
 }
 
 /** Le classeur d'un index d'entités : la feuille que lit le reste d'Eraser. */
-function entityLocation(key: EntityWorldIndexKey) {
+function entityLocation(key: EntityWorldIndexKey, forWrite: boolean) {
   if (key === "class-spells") return spellSheetLocation("classes")
   if (key === "creature-spells") return spellSheetLocation("creatures")
   if (key === "rank-bonuses") return rankBonusSheetLocation()
-  return entitySheetLocation(key)
+  return entitySheetLocation(key, { forWrite })
 }
 
 /**
@@ -207,7 +207,7 @@ async function loadEffectiveIndex(key: WorldIndexKey, options: { strict?: boolea
   if (isBuiltinWorldIndexKey(key)) {
     const base = worldIndexDefinitions[key]
     if (isEntityWorldIndexKey(key)) {
-      const sheet = await entityLocation(key)
+      const sheet = await entityLocation(key, strict)
       const { all, degraded } = await schemaFor(key, sheet.spreadsheetId, strict)
       // L'onglet porte le nom qu'il a dans Sheets ; seuls ses réglages concernent cet index.
       const tabs = base.tabs.map((tab, index) => index === 0 ? { ...tab, name: sheet.tabName } : tab)

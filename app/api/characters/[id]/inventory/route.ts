@@ -135,6 +135,7 @@ export async function POST(request: Request, { params }: { params: Promise<{ id:
             : code === "INVALID_INVENTORY_CONTAINER" ? "Donne un nom au contenant et une capacité comprise entre 1 et 10 000."
               : code === "INVENTORY_CONTAINER_NOT_EMPTY" ? "Vide d’abord ce contenant avant de le supprimer."
                 : code === "INVENTORY_CONTAINER_NOT_FOUND" ? "Ce contenant n’existe plus."
+                : code === "INVENTORY_GROUND_PERMANENT" ? "« Au sol » reste toujours là : il ne se supprime pas."
                   : code === "INVENTORY_ITEM_WRONG_CATEGORY" ? "Ce type d’objet n’est pas compatible avec ce contenant."
                     : code === "INVALID_INVENTORY_ITEM" ? "Vérifie le nom et les informations de l’objet."
             : "La modification de l’inventaire n’a pas pu être enregistrée."

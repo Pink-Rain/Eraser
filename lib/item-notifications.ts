@@ -50,7 +50,7 @@ async function recipientOf(moved: InventoryTransferMoved) {
     return campaign?.mjUid ? { uid: campaign.mjUid, label: `Reçu par ${npc.name}` } : null
   }
   const character = await getCharacterById(moved.targetId).catch(() => null)
-  return character?.ownerUid ? { uid: character.ownerUid, label: `Reçu par ${character.name}` } : null
+  return character?.ownerUid ? { uid: character.ownerUid, label: moved.onGround ? `Posé au sol près de ${character.name} (plus de place)` : `Reçu par ${character.name}` } : null
 }
 
 /** Ne fait jamais échouer le transfert : au pire, l'alerte ne part pas. */

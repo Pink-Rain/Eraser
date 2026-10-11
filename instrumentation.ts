@@ -8,6 +8,8 @@
  * Eraser pour une tâche de fond est pire que l'erreur elle-même : elle est écrite dans le
  * journal (« eraser-startup.log », lignes [service:error]) et le service continue.
  */
+import { installErrorJournal } from "@/lib/error-journal"
+
 const SAFETY_NET = Symbol.for("eraser.processSafetyNet")
 
 function describe(reason: unknown) {
@@ -36,7 +38,10 @@ function installSafetyNet() {
 }
 
 installSafetyNet()
+// Les erreurs du serveur, gardées pour le journal de la page Administration.
+installErrorJournal()
 
 export function register() {
   installSafetyNet()
+  installErrorJournal()
 }

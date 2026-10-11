@@ -1,54 +1,59 @@
-# Eraser 0.1.1-alpha.182 — Cinq joueurs sur la même page en même temps
+# Eraser 0.1.1-alpha.183 — Au sol, un menu qui s'ouvre partout, des index plus légers
 
 Cette version arrive par la mise à jour sans réinstallation.
 
-## Le problème
+## Inventaire : « Au sol »
 
-Toutes les installations lisent Google Sheets avec le même compte : un seul quota de
-requêtes par minute pour toute la table. Quand les cinq joueurs ouvraient la campagne au même
-moment, chaque installation relisait les mêmes feuilles (index, personnages, PNJ, objets…).
-Le quota s'épuisait dès la première page : un joueur voyait la campagne, les quatre autres
-n'arrivaient pas à lire le sheet et devaient attendre leur tour, une minute chacun.
+- Sous l'inventaire classique de la fiche, un nouvel emplacement **Au sol**, sans limite. Il
+  existe toujours une seule fois : il ne se crée pas en double et ne se supprime pas.
+- Ce qui ne trouve plus de place y atterrit : un objet **reçu** d'un autre joueur, un objet
+  **ajouté** ou **créé** dans un contenant plein. Un message le dit (« Plus de place : l'objet a
+  été posé au sol. ») et le destinataire d'un envoi est prévenu.
+- Depuis le sol, on renvoie un objet dans un contenant, vers un autre inventaire, ou on le
+  supprime. Un objet posé au sol n'est plus équipé et ne compte plus dans les totaux.
+- Partout (fiche, campagne, PNJ, créature), la **description** d'un objet est grisée et
+  repliée sur une ligne : le chevron la déplie. L'effet reste toujours affiché.
 
-## Les installations se partagent leurs lectures
+## Index des objets
 
-Quand plusieurs joueurs ouvrent la même page, une seule installation lit Google ; les autres
-reprennent sa copie par le serveur partagé d'Eraser au lieu de relire la même chose.
+- Le bandeau « Index regroupés… » et le bouton « Mettre à jour les icônes » sont retirés.
+- La barre ne se chevauche plus : ses éléments passent à la ligne quand la place manque.
+- Une colonne **Actions** (juste après le nom) avec deux boutons, aussi au clic droit d'une ligne :
+  - **Envoyer** dans un inventaire : campagnes, joueurs, PNJs, créatures nommées (les
+    compagnons). En vue MJ, la campagne en cours est proposée en premier (inventaire de
+    campagne, joueurs, PNJs, créatures de la campagne). Inventaire plein : l'objet va au sol.
+  - **Déplacer** vers un autre onglet (Objets → Équipement…). L'objet garde son ID : les
+    inventaires qui le contiennent le retrouvent. Rien ne se perd : une colonne remplie absente
+    de l'onglet d'arrivée y est ajoutée.
+- **Type** et **Sous-type** sont des listes : on choisit une valeur déjà utilisée ou on en tape
+  une nouvelle, qui rejoint aussitôt la liste.
 
-- Une copie sert au plus 45 secondes.
-- Une modification faite dans Eraser, depuis n'importe quel PC, rend aussitôt les copies de
-  ce classeur inutilisables pour tout le monde.
-- Les lectures qui précèdent une écriture (trouver la bonne ligne, la bonne colonne) sont
-  toujours faites directement dans Google.
-- Si le serveur partagé ne répond pas, chaque installation lit Google comme avant.
+## Tous les tableaux
 
-Google Sheets reste la source : le serveur partagé ne garde qu'une copie de passage.
+- Un bouton **plein écran** (Échap pour en sortir).
+- « Ouvrir dans Sheets », « Actualiser », « Onglet-fenêtre » et « Tirer » ne gardent que leur
+  icône ; leur nom s'affiche au survol.
+- « Régler les cartes » est retiré (c'est dans « Modifier › Cartes »), comme la phrase sur les
+  colonnes liées.
+- L'index **Classes** se charge de nouveau : l'afficher ne vérifie plus (ni ne répare) les
+  en-têtes de la feuille, comme le fait déjà la Création de classe. Si un index ne se charge
+  pas, la cause exacte est maintenant affichée.
 
-## « Actualiser » (F5) ne relit que la page affichée
+## Page Index
 
-Actualiser relit dans Google ce que la page affiche, et rien d'autre : les autres pages
-restent en mémoire. Les joueurs gardent aussi les règles (classes, sorts, index) ;
-l'administrateur et le MJ, eux, relisent toujours tout, puisque ce sont eux qui les modifient.
+- Plus de « créés par toi / par moi » ni d'index secondaire : tous les index au même endroit,
+  **Création de classe** comprise.
+- **Étoile** (clic) : l'index est dans la section Index du menu. **Étoile rouge** (clic droit) :
+  directement dans le menu. Par défaut, l'index des objets et la Création de classe sont en rouge.
+- MJ et administrateurs créent des **dossiers** et rangent les index par **glisser-déposer**
+  (dans un dossier, ou pour changer l'ordre). Le rangement est le même pour toute la table.
 
-Après Actualiser, la page montre Google tel qu'il était au moment du clic : une copie d'avant
-le clic n'est jamais reprise. Une case modifiée directement dans Google Sheets apparaît donc
-aussitôt.
+## Menu
 
-## Mesures
-
-Testé avec cinq installations séparées, une par joueur, qui partagent un seul quota Google :
-
-| Situation | alpha.181 | alpha.182 |
-|---|---|---|
-| Début de séance : les cinq ouvrent la campagne en même temps | 60 requêtes, 4 refus de Google, un joueur sans campagne, les autres après 75 à 85 s | **10 requêtes, aucun refus, les cinq pages ensemble** |
-| Puis les cinq ouvrent leur fiche | 55 requêtes de plus, 16 refus | **34 requêtes, aucun refus** |
-| Les cinq actualisent la campagne au même instant | 50 requêtes | **8 requêtes**, environ 2 s |
-| Les cinq actualisent la campagne à quelques instants d'écart (sur 2 s) | — | **25 requêtes**, aucun refus |
-| Les cinq actualisent leur fiche | 49 requêtes | **17 requêtes**, environ 2 s |
-| Les cinq passent de leur fiche à la campagne | 20 requêtes | **5 requêtes**, moins d'une seconde |
-
-## Aussi
-
-- Les en-têtes des index ne sont plus revérifiés toutes les 12 heures mais une fois par
-  semaine : chaque séance ne commence plus par cette vérification sur les cinq PC à la fois.
-- Un refus de Google pendant une lecture partagée n'envoie plus une seconde requête.
+- Chaque section est aussi une page : un clic sur son **nom** l'ouvre, un clic ailleurs sur la
+  ligne la déplie. Menu replié, l'icône ouvre la page.
+- Nouvelles pages : **Règles**, **Administration** (avec le **journal des erreurs** du serveur
+  local), **Bac à sable**, et le **dossier de la campagne** (vue MJ) avec ses pages et le
+  **compagnon Roll20** dans une partie dépliable. La page Roll20 seule n'existe plus (ses
+  anciens liens mènent au dossier).
+- Vue joueur, menu replié : chaque campagne garde une icône cliquable.

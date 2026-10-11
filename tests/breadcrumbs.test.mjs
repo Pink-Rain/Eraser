@@ -17,7 +17,7 @@ test("Fil d'Ariane : chaque étape au-dessus de la page, avec son adresse (page 
   assert.deepEqual(labels(breadcrumbsFor("/personnage/PER-1", names)), [["Personnages", null, "/personnage"]]);
   assert.deepEqual(labels(breadcrumbsFor("/campagne/CAMP-1/pnjs", names)), [["Campagnes", null, "/campagne"], ["Campagne - Les Cendres", "/campagne/CAMP-1", "/campagne/CAMP-1"]]);
   assert.deepEqual(breadcrumbsFor("/campagne/CAMP-1/magasin-et-fouille/sauvegardes", names).map((crumb) => crumb.label), ["Campagnes", "Campagne - Les Cendres", "Magasins"]);
-  assert.deepEqual(labels(breadcrumbsFor("/regles/classes/CLA-1", names)), [["Règles", null, "/regles"], ["Classes", "/regles/classes", "/regles/classes"]]);
+  assert.deepEqual(labels(breadcrumbsFor("/regles/classes/CLA-1", names)), [["Règles", "/regles", "/regles"], ["Classes", "/regles/classes", "/regles/classes"]]);
   assert.deepEqual(labels(breadcrumbsFor("/ressources/index-des-etats?x=1", names)), [["Index", "/ressources", "/ressources"]]);
   // Un identifiant brut n'est jamais affiché comme étape.
   assert.deepEqual(breadcrumbsFor("/reference/states/ETA-1", names).map((crumb) => crumb.label), ["Référence"]);
@@ -41,5 +41,5 @@ test("Contenu d'une étape, comme dans l'explorateur : les pages autorisées jus
   assert.deepEqual(childrenOf("/campagne", targets).map((item) => item.label), ["Les Cendres"]);
   assert.deepEqual(childrenOf("/personnage/PER-1", targets), []);
   const sections = sectionsOf(targets);
-  assert.deepEqual(sections.map((section) => [section.label, section.href ?? null, section.children.length]), [["Règles", null, 2], ["Campagnes", null, 1], ["Personnages", null, 2]]);
+  assert.deepEqual(sections.map((section) => [section.label, section.href ?? null, section.children.length]), [["Règles", "/regles", 2], ["Campagnes", null, 1], ["Personnages", null, 2]]);
 });

@@ -6,6 +6,7 @@ import {
   addObjectIndexRowWithValues,
   insertObjectIndexRow,
   deleteObjectIndexRows,
+  moveObjectIndexRow,
   duplicateObjectIndexRows,
   enrichObjectIndexTables,
   ensureObjectIndexStackLimits,
@@ -69,7 +70,7 @@ async function regroupAction(action: string) {
 export async function POST(request: Request) {
   if (!await authorized()) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   try {
-    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; row?: unknown; rows?: unknown; before?: unknown; count?: number; header?: unknown; occurrence?: unknown; html?: string; values?: unknown }
+    const body = (await request.json()) as { action?: string; fileId?: string; tabName?: string; row?: unknown; rows?: unknown; before?: unknown; count?: number; header?: unknown; occurrence?: unknown; html?: string; values?: unknown; targetFileId?: unknown; targetTabName?: unknown }
     if (body.action === "regroup-status" || body.action === "regroup" || body.action === "regroup-revert") return regroupAction(body.action)
     if (body.action === "enrich") {
       const result = await enrichObjectIndexTables()
@@ -101,6 +102,8 @@ export async function POST(request: Request) {
       await insertObjectIndexRow(body.fileId, body.tabName, row, typeof body.count === "number" ? body.count : 1, body.before === true)
     } else if (body.action === "delete" && rows.length && rows.every(Boolean)) {
       await deleteObjectIndexRows(body.fileId, body.tabName, rows as ObjectIndexRowRef[])
+    } else if (body.action === "move" && row && typeof body.targetFileId === "string" && typeof body.targetTabName === "string" && body.targetTabName.trim()) {
+      await moveObjectIndexRow(body.fileId, body.tabName, row, body.targetFileId, body.targetTabName)
     } else if (body.action === "duplicate" && rows.length && rows.every(Boolean)) {
       await duplicateObjectIndexRows(body.fileId, body.tabName, rows as ObjectIndexRowRef[])
     } else throw new Error("INVALID_OBJECT_INDEX_ACTION")

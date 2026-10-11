@@ -134,8 +134,9 @@ test("Le résumé et la fiche complète chargés ensemble : aucun contenant ni e
   const { inventory } = await linkInventory();
   await Promise.all([sheets.getCharacterInventorySummary("PERSO-N"), sheets.getCharacterInventory("PERSO-N"), sheets.getCharacterInventorySummary("PERSO-N")]);
   const containers = rowsOf(inventory, "Contenants personnages").filter((row) => row["ID personnage"] === "PERSO-N");
-  assert.equal(containers.length, 5);
-  assert.equal(new Set(containers.map((row) => row["ID type"])).size, 5);
+  // Armes, équipement, esthétique, sac, bourse et « Au sol ».
+  assert.equal(containers.length, 6);
+  assert.equal(new Set(containers.map((row) => row["ID type"])).size, 6);
   const slots = rowsOf(inventory, "Contenu inventaire").filter((row) => row["ID personnage"] === "PERSO-N");
   const pairs = slots.map((row) => `${row["ID contenant"]}#${row["Emplacement"]}`);
   assert.equal(new Set(pairs).size, pairs.length);
@@ -170,6 +171,49 @@ test("Un déplacement dans l'inventaire : arrivée et départ écrits en une seu
   const mine = occupied(inventory, "PERSO-A");
   assert.equal(mine.length, 1);
   assert.equal(mine[0]["ID contenant"], aesthetic.id);
+});
+
+test("Plus de place : l'objet ajouté, créé ou reçu atterrit « Au sol », sans limite et sans être équipé", async () => {
+  const { inventory } = await linkInventory();
+  const current = await sheets.getCharacterInventory("PERSO-S");
+  const ground = current.containers.find((container) => container.category === "Au sol");
+  assert.ok(ground);
+  assert.equal(current.containers.at(-1).id, ground.id);
+  assert.equal(ground.slots.length, 0);
+  // Un seul « Au sol » : ni un deuxième, ni sa suppression.
+  await assert.rejects(sheets.createCharacterInventoryContainer("PERSO-S", { name: "Sol bis", category: "Au sol", capacity: 3 }), /INVALID_INVENTORY_CONTAINER/);
+  await assert.rejects(sheets.deleteCharacterInventoryContainer("PERSO-S", ground.id), /INVENTORY_GROUND_PERMANENT/);
+  // Le sac plein (15 cases), le seizième objet créé tombe au sol.
+  const sack = current.containers.find((container) => container.category === "Inventaire");
+  for (let index = 0; index < 15; index += 1) await sheets.createCharacterInventoryItem("PERSO-S", sack.id, { name: `Caillou ${index}`, description: "", type: "Objet", subtype: "", effect: "" });
+  const overflow = await sheets.createCharacterInventoryItem("PERSO-S", sack.id, { name: "Caillou de trop", description: "", type: "Objet", subtype: "", effect: "" });
+  assert.equal(overflow.landedOnGround, true);
+  const onGround = () => occupied(inventory, "PERSO-S").filter((row) => row["ID contenant"] === ground.id).map((row) => row["Nom personnalisé"]);
+  assert.deepEqual(onGround(), ["Caillou de trop"]);
+  // Ajouté depuis le catalogue, sac plein : au sol aussi.
+  const added = await sheets.addCharacterInventoryItem("PERSO-S", "OBJ-CORDE", sack.id);
+  assert.equal(added.landedOnGround, true);
+  assert.deepEqual(onGround().sort(), ["Caillou de trop", "Corde"]);
+  // Reçu d'un autre personnage, plus de place compatible : au sol, jamais équipé.
+  const lanterne = await characterWith("PERSO-D", "Lanterne");
+  await sheets.setCharacterInventoryItemEquipped("PERSO-D", lanterne.id, true);
+  let moved;
+  await sheets.transferCharacterInventoryItem("PERSO-D", lanterne.id, "PERSO-S", "character", (value) => { moved = value; });
+  assert.equal(moved.onGround, true);
+  const arrived = occupied(inventory, "PERSO-S").find((row) => row["Nom personnalisé"] === "Lanterne");
+  assert.equal(arrived["ID contenant"], ground.id);
+  assert.equal(arrived["Équipé"], "Non");
+  // Ramassé : de nouveau dans un contenant, la case au sol se vide et resservira.
+  const stones = occupied(inventory, "PERSO-S").filter((row) => row["ID contenant"] === sack.id);
+  await sheets.setCharacterInventoryItemQuantity("PERSO-S", stones[0]["ID"], 0);
+  const rope = occupied(inventory, "PERSO-S").find((row) => row["ID objet"] === "OBJ-CORDE");
+  const picked = await sheets.moveCharacterInventoryItem("PERSO-S", rope["ID"], sack.id);
+  assert.deepEqual(picked.containers.find((container) => container.id === ground.id).slots.map((slot) => slot.item.name).sort(), ["Caillou de trop", "Lanterne"]);
+  // La case vidée au sol resservira : rien de neuf n'est ajouté à la feuille pour le prochain objet.
+  const groundRows = () => rowsOf(inventory, "Contenu inventaire").filter((row) => row["ID contenant"] === ground.id).length;
+  const before = groundRows();
+  await sheets.moveCharacterInventoryItem("PERSO-S", occupied(inventory, "PERSO-S").find((row) => row["ID objet"] === "OBJ-CORDE")["ID"], ground.id);
+  assert.equal(groundRows(), before);
 });
 
 test("Une feuille des PNJ illisible arrête le transfert : le destinataire n'est pas pris pour un personnage", async () => {

@@ -6,7 +6,7 @@
  * cartes de l'index et à l'aperçu de l'éditeur, qui y choisit un bloc d'un clic.
  */
 import { memo, useEffect, useMemo, useRef, useState, type CSSProperties, type KeyboardEvent, type MouseEvent, type ReactNode } from "react"
-import { Check, ChevronDown, ChevronRight, ImageIcon, LayoutGrid, Pencil, Plus, Table2, X } from "lucide-react"
+import { Check, ChevronDown, ChevronRight, ImageIcon, LayoutGrid, Plus, Table2, X } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
@@ -536,17 +536,14 @@ export const isCardChoice = (value: unknown): value is string => typeof value ==
 
 /**
  * Au-dessus de l'index : tableau ou cartes et, en cartes, la carte montrée (s'il y en a
- * plusieurs) et l'accès à leur réglage.
+ * plusieurs). Leur réglage est dans « Modifier › Cartes ».
  */
-export function IndexDisplayControls({ display, onDisplay, cards, card, onPick, onEdit, disabled = false }: {
+export function IndexDisplayControls({ display, onDisplay, cards, card, onPick }: {
   display: IndexDisplay
   onDisplay: (display: IndexDisplay) => void
   cards: CardTemplate[]
   card: CardTemplate | null
   onPick: (id: string) => void
-  /** Ouvre « Modifier » › Cartes. Absent : pas de bouton. */
-  onEdit?: () => void
-  disabled?: boolean
 }) {
   return <span className="flex flex-wrap items-center gap-1.5">
     <span className="inline-flex rounded-lg border bg-muted/30 p-0.5" role="radiogroup" aria-label="Affichage de l’index">
@@ -562,7 +559,7 @@ export function IndexDisplayControls({ display, onDisplay, cards, card, onPick, 
     {display === "cards" && cards.length > 1 && <NativeSelect value={card?.id ?? ""} onChange={(event) => onPick(event.target.value)} className="h-9 w-auto min-w-40 text-sm" aria-label="Carte montrée">
       {cards.map((entry) => <NativeSelectOption key={entry.id} value={entry.id}>{entry.name}</NativeSelectOption>)}
     </NativeSelect>}
-    {display === "cards" && onEdit && <Button type="button" variant="ghost" size="sm" onClick={onEdit} disabled={disabled} title="Créer et régler les cartes de cet onglet (Modifier › Cartes)">{cards.length ? <Pencil /> : <Plus />}{cards.length ? "Régler les cartes" : "Créer une carte"}</Button>}
+    {/* Les cartes se créent et se règlent dans « Modifier › Cartes » (ou depuis l'invitation d'un onglet sans carte). */}
   </span>
 }
 

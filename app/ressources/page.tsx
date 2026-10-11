@@ -28,7 +28,7 @@ export default async function IndexHomePage() {
             <div>
               <h1 className="font-display text-4xl font-semibold tracking-[-0.025em] sm:text-5xl">Index</h1>
               <p className="mt-4 max-w-2xl text-base leading-7 text-muted-foreground">
-                Toutes les bibliothèques du monde d’Eraser. L’étoile d’une carte la garde dans l’Index et dans le menu ; sans étoile, elle passe dans l’Index secondaire.
+                Toutes les bibliothèques d’Eraser, au même endroit. L’étoile d’une carte la met dans la section Index du menu ; l’étoile rouge (clic droit) la met directement dans le menu.
               </p>
             </div>
           </div>
