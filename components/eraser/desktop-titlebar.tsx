@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useRef, useState, type CSSProperties } from "react"
+import { useEffect, useRef, useState, useSyncExternalStore, type CSSProperties } from "react"
 import { Minus, Pin, Square, X } from "lucide-react"
 
 import { AppNavButtons, AppTabStrip } from "@/components/eraser/app-tabs"
@@ -18,26 +18,29 @@ type AppRegionStyle = CSSProperties & { WebkitAppRegion?: "drag" | "no-drag" }
 const dragStyle: AppRegionStyle = { WebkitAppRegion: "drag" }
 const noDragStyle: AppRegionStyle = { WebkitAppRegion: "no-drag" }
 
+const subscribeToNothing = () => () => undefined
+const hasDesktopBridge = () => Boolean(window.eraserDesktop)
+const noDesktopBridge = () => false
+
 // Only rendered inside the desktop app (window.eraserDesktop exists only
 // there, injected by desktop/preload.cjs); on the website this returns null
 // and nothing about the page layout changes.
 export function DesktopTitlebar() {
-  const [ready, setReady] = useState(false)
+  // Le pont n'existe que dans l'application Windows, et ne change jamais pendant la vie de
+  // la page : lu dès le premier rendu client (le serveur, lui, ne le voit pas), au lieu d'un
+  // minuteur qui redessinait la barre après peinture.
+  const ready = useSyncExternalStore(subscribeToNothing, hasDesktopBridge, noDesktopBridge)
   const [state, setState] = useState<DesktopWindowState>({ isMaximized: false, isPinned: false, isCollapsed: false })
   const lastMouseDownAt = useRef(0)
 
   useEffect(() => {
     const bridge = window.eraserDesktop
     if (!bridge) return
-    // Deferred like elsewhere in this app (see usePersistentState): avoids
-    // chaining a synchronous setState directly into the effect's own body.
-    const timer = window.setTimeout(() => {
-      setReady(true)
-      bridge.windowGetState().then(setState).catch(() => undefined)
-    }, 0)
+    let active = true
+    bridge.windowGetState().then((next) => { if (active) setState(next) }).catch(() => undefined)
     const unsubscribe = bridge.onWindowStateChange(setState)
     return () => {
-      window.clearTimeout(timer)
+      active = false
       unsubscribe()
     }
   }, [])

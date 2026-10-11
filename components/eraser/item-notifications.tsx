@@ -55,6 +55,9 @@ export function useInventoryReceived(ids: string[], onReceived: () => void) {
 }
 
 const POLL_MS = 15_000
+/** Sans clic ni touche depuis ce temps, la relève passe à IDLE_POLL_MS. */
+const IDLE_AFTER_MS = 3 * 60_000
+const IDLE_POLL_MS = 60_000
 const VISIBLE_MS = 12_000
 
 /**
@@ -107,20 +110,37 @@ export function ItemNotifications() {
         running = false
       }
     }
+    // Personne devant l'écran depuis quelques minutes : relevé plus espacé (chaque relève
+    // interroge le serveur partagé). Le premier geste relève aussitôt et reprend le rythme.
+    let lastActivity = Date.now()
+    const idle = () => Date.now() - lastActivity > IDLE_AFTER_MS
     function schedule() {
       window.clearTimeout(timer)
-      timer = window.setTimeout(async () => { await check(); if (alive) schedule() }, POLL_MS)
+      timer = window.setTimeout(async () => {
+        await check()
+        // Fenêtre cachée (réduite, autre bureau) : plus de relève ; `wake` la reprend.
+        if (alive && document.visibilityState === "visible") schedule()
+      }, idle() ? IDLE_POLL_MS : POLL_MS)
     }
     const wake = () => { if (document.visibilityState === "visible") { void check(); schedule() } }
+    const activity = () => {
+      const wasIdle = idle()
+      lastActivity = Date.now()
+      if (wasIdle) wake()
+    }
     void check()
     schedule()
     window.addEventListener("focus", wake)
     document.addEventListener("visibilitychange", wake)
+    window.addEventListener("pointerdown", activity, { passive: true })
+    window.addEventListener("keydown", activity, { passive: true })
     return () => {
       alive = false
       window.clearTimeout(timer)
       window.removeEventListener("focus", wake)
       document.removeEventListener("visibilitychange", wake)
+      window.removeEventListener("pointerdown", activity)
+      window.removeEventListener("keydown", activity)
     }
   }, [])
 
