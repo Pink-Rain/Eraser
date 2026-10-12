@@ -126,3 +126,11 @@ export function sameTabLocks(left: TabLocks | null, right: TabLocks | null) {
   const normalize = (locks: TabLocks | null) => JSON.stringify(Object.fromEntries(Object.entries(locks ?? {}).sort(([a], [b]) => a.localeCompare(b)).map(([key, value]) => [key, { locked: value.locked, uses: value.uses ?? [], hidden: value.hidden ?? [] }])))
   return normalize(left) === normalize(right)
 }
+
+/** Les cadenas d'un onglet parmi ceux d'un index (nom d'onglet sans accents ni casse). */
+export function tabLocksOf(locks: Record<string, TabLocks> | null | undefined, tab: string): TabLocks | null {
+  if (!locks) return null
+  const wanted = tab.replace(/\s+/g, " ").trim().normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
+  const found = Object.entries(locks).find(([name]) => name.replace(/\s+/g, " ").trim().normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr") === wanted)
+  return found?.[1] ?? null
+}

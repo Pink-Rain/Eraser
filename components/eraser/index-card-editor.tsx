@@ -1,15 +1,19 @@
 "use client"
 
 /**
- * L'éditeur de cartes d'un onglet (« Modifier » › Cartes). À gauche, les cartes de
- * l'onglet ; au milieu, la carte choisie : sa forme, son image, ses couleurs, puis ses
- * blocs ; à droite, l'aperçu en direct avec les vraies lignes de l'onglet. Un clic sur
- * un bloc de l'aperçu l'ouvre dans les réglages. Rien n'est écrit avant « Enregistrer ».
+ * L'éditeur de cartes d'un onglet (« Modifier » › Cartes). Sous les onglets, le panneau des
+ * cartes (`CardsPanel`) : la carte choisie dans une liste déroulante, l'étoile, et ce qu'on en
+ * fait (nouvelle, dupliquer, preset, copier, retirer). Au centre, la carte choisie en quatre
+ * pages : la carte (taille, forme, grille, couleurs), l'image, les blocs, la composition
+ * (lignes et cases) ; à droite, l'aperçu en direct avec les vraies lignes de l'onglet. Un
+ * clic sur un bloc de l'aperçu l'ouvre dans les réglages. Rien n'est écrit avant
+ * « Enregistrer ».
  */
 import { useEffect, useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
 import {
   AlignCenter,
   AlignLeft,
+  AlignRight,
   ArrowDown,
   ArrowUp,
   Bookmark,
@@ -22,22 +26,27 @@ import {
   Heading,
   Image as ImageIcon,
   LayoutGrid,
+  LayoutTemplate,
   ListTree,
   Minus,
+  Monitor,
+  PanelBottom,
   PanelLeft,
   PanelRight,
   PanelTop,
   Plus,
   RotateCcw,
+  Smartphone,
   Sparkles,
   Square,
   Star,
+  Tablet,
   Trash2,
   Type,
   X,
 } from "lucide-react"
 
-import { IndexCard, cardGridStyle, type CardRowSource } from "@/components/eraser/index-card"
+import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
 import { useIndexSettings } from "@/components/eraser/index-views"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -46,22 +55,22 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import {
-  cardAspects,
   cardBlockTypes,
   cardId,
   cardPalette,
   cardRoles,
   cardStarters,
-  eraserCardPresets,
   cardWidths,
   DEFAULT_CARD_ACCENT,
   missingCardColumns,
   type CardAspect,
   type CardBlock,
   type CardBlockType,
+  type CardCell,
   type CardColumn,
   type CardMediaPosition,
   type CardPart,
+  type CardRow,
   type CardTemplate,
   type CardTone,
   type TabCards,
@@ -76,6 +85,7 @@ import { cn } from "@/lib/utils"
 const label = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
 const group = "grid gap-3 rounded-xl border bg-card/60 p-3"
 const groupTitle = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
+const hintClass = "text-[11px] leading-4 text-muted-foreground"
 
 /** Des boutons côte à côte, un seul choisi : plus rapide qu'une liste quand il y a peu de choix. */
 function Segmented<T extends string>({ value, options, onChange, disabled, ariaLabel }: {
@@ -102,6 +112,16 @@ function Segmented<T extends string>({ value, options, onChange, disabled, ariaL
 function Toggle({ checked, onChange, children, disabled, title }: { checked: boolean; onChange: (checked: boolean) => void; children: ReactNode; disabled?: boolean; title?: string }) {
   return <label className="flex cursor-pointer items-center gap-1.5 text-xs" title={title}><Checkbox checked={checked} disabled={disabled} onCheckedChange={(next) => onChange(next === true)} />{children}</label>
 }
+
+/** Un curseur avec son libellé et sa valeur écrite. */
+function Range({ text, value, min, max, step = 1, format, onChange, disabled, title }: { text: string; value: number; min: number; max: number; step?: number; format?: (value: number) => string; onChange: (value: number) => void; disabled?: boolean; title?: string }) {
+  return <label className={label} title={title}>
+    <span className="flex items-center justify-between gap-2"><span>{text}</span><span className="font-normal tabular-nums">{format ? format(value) : String(value)}</span></span>
+    <input type="range" min={min} max={max} step={step} value={value} disabled={disabled} onChange={(event) => onChange(Number(event.target.value))} className="accent-primary" />
+  </label>
+}
+
+const fr = (value: number, digits = 2) => value.toLocaleString("fr-FR", { maximumFractionDigits: digits })
 
 /** Une colonne de l'onglet (avec son type), ou rien. */
 function ColumnSelect({ value, columns, onChange, empty = "— Aucune —", disabled, ariaLabel, className }: {
@@ -165,6 +185,39 @@ function FreeColor({ value, onChange, disabled }: { value: string | undefined; o
 
 const sizeOptions = [{ value: "xs", label: "XS" }, { value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }, { value: "xl", label: "XL" }] as const
 const alignOptions = [{ value: "left", label: "", icon: <AlignLeft className="size-3.5" />, title: "À gauche" }, { value: "center", label: "", icon: <AlignCenter className="size-3.5" />, title: "Centré" }] as const
+const alignOptionsRight = [...alignOptions, { value: "right", label: "", icon: <AlignRight className="size-3.5" />, title: "À droite" }] as const
+
+/** Les proportions (largeur ÷ hauteur) d'un format nommé. */
+function aspectRatioOf(aspect: CardAspect | undefined, fallback = 4 / 3) {
+  if (!aspect) return Math.round(fallback * 100) / 100
+  const [w, h] = aspect.split("/").map(Number)
+  return Math.round((w / h) * 100) / 100
+}
+
+const shapeStarters: Array<{ key: string; label: string; ratio: number; w: number; h: number }> = [
+  { key: "square", label: "Carré", ratio: 1, w: 16, h: 16 },
+  { key: "vertical", label: "Rectangle vertical", ratio: 0.75, w: 12, h: 16 },
+  { key: "horizontal", label: "Rectangle horizontal", ratio: 1.5, w: 18, h: 12 },
+]
+
+/**
+ * La forme d'une image (ou d'une zone) : trois formes de départ, puis les curseurs des
+ * proportions et de l'arrondi des coins. Un format nommé (« 4:3 ») se lit en proportions.
+ */
+function ShapeControls({ ratio, aspect, radiusPx, defaultRadius = 0, onChange, disabled, withRatio = true }: { ratio: number | undefined; aspect?: CardAspect; radiusPx: number | undefined; defaultRadius?: number; onChange: (changes: { ratio?: number; radiusPx?: number }) => void; disabled?: boolean; withRatio?: boolean }) {
+  const current = ratio ?? aspectRatioOf(aspect, 1)
+  return <div className="grid gap-2">
+    {withRatio && <span className={label}>Forme de départ
+      <span className="flex flex-wrap gap-1">
+        {shapeStarters.map((shape) => <button key={shape.key} type="button" disabled={disabled} title={shape.label} aria-label={shape.label} aria-pressed={Math.abs(current - shape.ratio) < 0.02} onClick={() => onChange({ ratio: shape.ratio })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", Math.abs(current - shape.ratio) < 0.02 ? "border-primary bg-primary/10" : "hover:bg-muted")}>
+          <span className="block rounded-[2px] border border-current opacity-70" style={{ width: shape.w, height: shape.h }} />
+        </button>)}
+      </span>
+    </span>}
+    {withRatio && <Range text="Proportions (largeur ÷ hauteur)" value={current} min={0.3} max={4} step={0.05} format={(value) => value < 0.98 ? `${fr(value)} · plus haute que large` : value > 1.02 ? `${fr(value)} · plus large que haute` : "carrée"} onChange={(value) => onChange({ ratio: value })} disabled={disabled} />}
+    <Range text="Arrondi des coins" value={radiusPx ?? defaultRadius} min={0} max={200} step={1} format={(value) => `${value} px`} onChange={(value) => onChange({ radiusPx: value })} disabled={disabled} />
+  </div>
+}
 
 // ---------------------------------------------------------------------------
 // Les blocs
@@ -182,16 +235,21 @@ const blockIcons: Record<CardBlockType, ReactNode> = {
   value: <Square className="size-3.5" />,
   details: <ListTree className="size-3.5" />,
   divider: <span className="text-[10px] font-bold">—</span>,
+  zone: <span className="block size-3 rounded-sm bg-current opacity-70" />,
+  space: <span className="text-[10px] font-bold">␣</span>,
 }
 
 const blockLabel = (type: CardBlockType) => cardBlockTypes.find((entry) => entry.value === type)?.label ?? type
+const zoneLabels = { block: "Aplat", line: "Trait", pill: "Pastille", dot: "Point" } as const
 
 /** Ce que le bloc montre, en quelques mots, dans la liste des blocs. */
-function blockSummary(block: CardBlock) {
+function blockSummary(block: CardBlock): string {
   switch (block.type) {
     case "line": return (block.parts ?? []).map((part) => `${part.prefix ?? ""}${part.column}${part.suffix ?? ""}`).join(block.separator ?? " · ") || "Aucune colonne"
     case "pills": case "stats": case "details": return (block.columns ?? []).join(", ") || "Aucune colonne"
     case "divider": return ""
+    case "zone": return zoneLabels[block.zone ?? "block"]
+    case "space": return `${block.height ?? 12} px`
     default: return block.column ?? "Aucune colonne"
   }
 }
@@ -212,6 +270,8 @@ function newBlock(type: CardBlockType, columns: CardColumn[]): CardBlock {
     case "value": return { id, type, column: columns[0]?.header, showLabel: true }
     case "details": return { id, type, label: "Notes", columns: roles.texts.slice(0, 2) }
     case "divider": return { id, type }
+    case "zone": return { id, type, zone: "block", height: 6, width: 40 }
+    case "space": return { id, type, height: 12 }
   }
 }
 
@@ -242,7 +302,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
     <div className="flex flex-wrap items-end gap-3">
       <span className={label}>Taille<Segmented ariaLabel="Taille du texte" value={block.size ?? (block.type === "title" ? "md" : "sm")} options={[...sizeOptions]} onChange={(size) => set({ size })} disabled={disabled} /></span>
       {withFont && <span className={label}>Police<Segmented ariaLabel="Police" value={block.font ?? (block.type === "title" ? "display" : "sans")} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(font) => set({ font })} disabled={disabled} /></span>}
-      <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptions, { value: "right", label: "Droite" }]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
+      <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
     </div>
     <span className={label}>Couleur<ToneSwatches value={block.tone} onChange={(tone) => set({ tone })} disabled={disabled} allowColumn={block.type !== "line"} /></span>
     <div className="flex flex-wrap gap-3">
@@ -304,7 +364,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         <span className={label}>Couleur<ToneSwatches value={block.tone ?? "column"} onChange={(tone) => set({ tone: tone === "column" ? undefined : tone })} disabled={disabled} /></span>
         <div className="flex flex-wrap items-center gap-3">
           <Toggle checked={Boolean(block.stacked)} onChange={(stacked) => set({ stacked: stacked || undefined })} disabled={disabled}>Une par ligne</Toggle>
-          <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptions, { value: "right", label: "Droite" }]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
+          <span className={label}>Alignement<Segmented ariaLabel="Alignement" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
         </div>
         <div className="flex flex-wrap items-center gap-3">
           <Toggle checked={Boolean(block.showLabel)} onChange={(showLabel) => set({ showLabel: showLabel || undefined, label: showLabel ? block.label || (block.columns ?? [])[0] : block.label })} disabled={disabled}>Un titre au-dessus</Toggle>
@@ -334,23 +394,23 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
     case "stats":
       return <div className="grid gap-3">
         <span className={label}>Colonnes (une tuile chacune)<ColumnsPicker value={block.columns ?? []} columns={columns} onChange={(next) => set({ columns: next })} disabled={disabled} ariaLabel="Colonnes en tuiles" /></span>
-        <p className="text-[11px] text-muted-foreground">Les caractéristiques s’abrègent d’elles-mêmes (FOR, DEX…), les autres colonnes par leurs trois premières lettres.</p>
+        <p className={hintClass}>Les caractéristiques s’abrègent d’elles-mêmes (FOR, DEX…), les autres colonnes par leurs trois premières lettres.</p>
       </div>
     case "image":
       return <div className="grid gap-3">
         <label className={label}>Colonne (image ou icône)<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne de l’image" /></label>
-        <span className={label}>Format<AspectPicker value={block.aspect ?? "1/1"} onChange={(aspect) => set({ aspect })} disabled={disabled} /></span>
+        <ShapeControls ratio={block.ratio} aspect={block.aspect ?? "1/1"} radiusPx={block.radiusPx} defaultRadius={block.shape === "rounded" ? 12 : 0} onChange={(changes) => set(changes)} disabled={disabled} />
         <div className="flex flex-wrap gap-3">
           <span className={label}>Image<Segmented ariaLabel="Recadrage" value={block.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => set({ fit })} disabled={disabled} /></span>
-          <span className={label}>Forme<Segmented ariaLabel="Forme" value={block.shape ?? "rect"} options={[{ value: "rect", label: "Carrée" }, { value: "rounded", label: "Arrondie" }, { value: "circle", label: "Ronde" }]} onChange={(shape) => set({ shape: shape === "rect" ? undefined : shape })} disabled={disabled} /></span>
+          <Toggle checked={block.shape === "circle"} onChange={(circle) => set({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle>
         </div>
-        <label className={label}>Largeur : {block.width ?? 100} %<input type="range" min={15} max={100} step={5} value={block.width ?? 100} disabled={disabled} onChange={(event) => set({ width: Number(event.target.value) })} className="accent-primary" /></label>
-        {(block.width ?? 100) < 100 && <span className={label}>Place<Segmented ariaLabel="Place de l’image" value={block.align ?? "left"} options={[...alignOptions, { value: "right", label: "Droite" }]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>}
+        <Range text="Largeur dans la carte" value={block.width ?? 100} min={15} max={100} step={5} format={(value) => `${value} %`} onChange={(width) => set({ width })} disabled={disabled} />
+        {(block.width ?? 100) < 100 && <span className={label}>Place<Segmented ariaLabel="Place de l’image" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>}
       </div>
     case "value":
       return <div className="grid gap-3">
         <label className={label}>Colonne<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne" /></label>
-        <p className="text-[11px] text-muted-foreground">La valeur s’affiche selon le type de la colonne : jauge en icônes, icône, case cochée, couleur, galerie d’images, pastilles…</p>
+        <p className={hintClass}>La valeur s’affiche selon le type de la colonne : jauge en icônes, icône, case cochée, couleur, galerie d’images, pastilles…</p>
         <div className="flex flex-wrap items-center gap-3">
           <Toggle checked={Boolean(block.showLabel)} onChange={(showLabel) => set({ showLabel: showLabel || undefined })} disabled={disabled}>Écrire le nom de la colonne</Toggle>
           {block.showLabel && <Input value={block.label ?? ""} disabled={disabled} onChange={(event) => set({ label: event.target.value || undefined })} placeholder={block.column ?? "Libellé"} className="h-7 w-40 text-xs" aria-label="Libellé" />}
@@ -363,54 +423,42 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         <Toggle checked={Boolean(block.open)} onChange={(open) => set({ open: open || undefined })} disabled={disabled}>Déplié d’emblée</Toggle>
       </div>
     case "divider":
-      return <p className="text-[11px] text-muted-foreground">Un trait fin, à la couleur de l’accent.</p>
+      return <p className={hintClass}>Un trait fin, à la couleur de l’accent.</p>
+    case "zone": {
+      const zone = block.zone ?? "block"
+      return <div className="grid gap-3">
+        <span className={label}>Dessin<Segmented ariaLabel="Dessin de la zone" value={zone} options={[{ value: "block", label: "Aplat" }, { value: "line", label: "Trait" }, { value: "pill", label: "Pastille" }, { value: "dot", label: "Point" }]} onChange={(next) => set({ zone: next, radiusPx: undefined })} disabled={disabled} /></span>
+        <span className={label}>Couleur<ToneSwatches value={block.tone ?? "accent"} allowColumn={false} onChange={(tone) => set({ tone: tone === "accent" ? undefined : tone })} disabled={disabled} /></span>
+        <Range text={zone === "dot" ? "Taille" : "Hauteur"} value={block.height ?? (zone === "line" ? 2 : zone === "dot" ? 10 : 24)} min={1} max={zone === "line" ? 12 : 400} step={1} format={(value) => `${value} px`} onChange={(height) => set({ height })} disabled={disabled} />
+        {zone !== "dot" && <Range text="Largeur" value={block.width ?? 100} min={10} max={100} step={5} format={(value) => `${value} %`} onChange={(width) => set({ width })} disabled={disabled} />}
+        {zone !== "dot" && <ShapeControls withRatio={false} ratio={undefined} radiusPx={block.radiusPx} defaultRadius={zone === "pill" ? 999 : zone === "line" ? 1 : 6} onChange={(changes) => set(changes)} disabled={disabled} />}
+        {(block.width ?? 100) < 100 && <span className={label}>Place<Segmented ariaLabel="Place de la zone" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>}
+        <p className={hintClass}>Pour composer : un trait sous un titre, une pastille de couleur à côté d’un nom, un aplat qui sépare deux zones de la carte…</p>
+      </div>
+    }
+    case "space":
+      return <div className="grid gap-3">
+        <Range text="Hauteur" value={block.height ?? 12} min={1} max={400} step={1} format={(value) => `${value} px`} onChange={(height) => set({ height })} disabled={disabled} />
+        <p className={hintClass}>De l’air entre deux blocs, ou pour pousser le reste vers le bas de la carte.</p>
+      </div>
   }
 }
 
-function AspectPicker({ value, onChange, disabled }: { value: string; onChange: (value: CardAspect) => void; disabled?: boolean }) {
-  return <span className="flex flex-wrap gap-1">
-    {cardAspects.map((aspect) => {
-      const [w, h] = aspect.value.split("/").map(Number)
-      const scale = 18 / Math.max(w, h)
-      return <button key={aspect.value} type="button" disabled={disabled} title={aspect.label} aria-label={aspect.label} aria-pressed={value === aspect.value} onClick={() => onChange(aspect.value)} className={cn("grid h-8 min-w-8 place-items-center rounded-md border px-1", value === aspect.value ? "border-primary bg-primary/10" : "hover:bg-muted")}>
-        <span className="block rounded-[2px] border border-current opacity-70" style={{ width: Math.max(6, w * scale), height: Math.max(4, h * scale) }} />
-      </button>
-    })}
-  </span>
-}
-
 // ---------------------------------------------------------------------------
-// L'éditeur d'une carte
+// Les blocs : la liste et leurs réglages
 // ---------------------------------------------------------------------------
 
-const mediaLayouts: Array<{ value: CardMediaPosition | "none"; label: string; icon: ReactNode }> = [
-  { value: "top", label: "En haut", icon: <PanelTop className="size-3.5" /> },
-  { value: "left", label: "À gauche", icon: <PanelLeft className="size-3.5" /> },
-  { value: "right", label: "À droite", icon: <PanelRight className="size-3.5" /> },
-  { value: "background", label: "En fond", icon: <ImageIcon className="size-3.5" /> },
-  { value: "none", label: "Sans", icon: <X className="size-3.5" /> },
-]
-
-function CardSettings({ card, columns, selectedBlock, onSelectBlock, onChange, disabled }: {
-  card: CardTemplate
-  columns: CardColumn[]
-  selectedBlock: string | null
-  onSelectBlock: (id: string | null) => void
-  onChange: (card: CardTemplate) => void
-  disabled?: boolean
-}) {
+function BlocksPage({ card, columns, selectedBlock, onSelectBlock, onChange, disabled }: { card: CardTemplate; columns: CardColumn[]; selectedBlock: string | null; onSelectBlock: (id: string | null) => void; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
   const set = (changes: Partial<CardTemplate>) => onChange({ ...card, ...changes })
-  const roles = useMemo(() => cardRoles(columns), [columns])
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   const [adding, setAdding] = useState(false)
-  const accentColumns = columns.filter((column) => { const spec = normalizeSpec(column.spec); return spec.kind === "color" || ((spec.kind === "choice" || spec.kind === "linked-choice") && (spec.options ?? []).some((option) => option.color)) || /couleur|color/i.test(column.header) })
   const missing = new Set(missingCardColumns(card, columns.map((column) => column.header)).map(foldName))
-  // Un bloc choisi (dans l'aperçu, par exemple) : ses réglages viennent sous les yeux.
   const container = useRef<HTMLDivElement | null>(null)
+  // Un bloc choisi (dans l'aperçu, par exemple) : ses réglages viennent sous les yeux.
   useEffect(() => {
     if (!selectedBlock) return
-    const frame = window.requestAnimationFrame(() => container.current?.querySelector(`[data-block-row="${CSS.escape(selectedBlock)}"]`)?.scrollIntoView({ block: "start", behavior: "smooth" }))
+    const frame = window.requestAnimationFrame(() => container.current?.querySelector(`[data-block-row="${CSS.escape(selectedBlock)}"]`)?.scrollIntoView({ block: "nearest", behavior: "smooth" }))
     return () => window.cancelAnimationFrame(frame)
   }, [selectedBlock])
 
@@ -441,40 +489,193 @@ function CardSettings({ card, columns, selectedBlock, onSelectBlock, onChange, d
     onSelectBlock(block.id)
     setAdding(false)
   }
-  const mediaPosition = card.media?.position ?? "none"
-  const setMedia = (changes: Partial<NonNullable<CardTemplate["media"]>>) => {
-    const column = changes.column ?? card.media?.column ?? roles.image ?? roles.glyph ?? columns[0]?.header
-    if (!column) return
-    set({ media: { position: "top", aspect: "4/3", fit: "cover", ...card.media, ...changes, column } })
+  const removeBlock = (id: string) => {
+    // Retiré de la carte, et de la case où il était posé.
+    set({ blocks: card.blocks.filter((entry) => entry.id !== id), ...(card.rows ? { rows: card.rows.map((row) => ({ ...row, cells: row.cells.map((cell) => ({ ...cell, blocks: cell.blocks.filter((item) => item !== id) })) })) } : {}) })
+    if (selectedBlock === id) onSelectBlock(null)
   }
+  const placed = new Set((card.rows ?? []).flatMap((row) => row.cells.flatMap((cell) => cell.blocks)))
 
-  return <div ref={container} className="grid content-start gap-3">
-    <div className={group}>
-      <label className={label}>Nom de la carte<Input value={card.name} disabled={disabled} onChange={(event) => set({ name: event.target.value })} className="h-9 text-sm font-semibold" maxLength={60} /></label>
+  return <div ref={container} className={group}>
+    <div className="flex items-center justify-between gap-2">
+      <p className={groupTitle}><ListTree className="size-3.5" />Les blocs de la carte</p>
+      <Popover open={adding} onOpenChange={setAdding}>
+        <PopoverTrigger asChild><Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled || card.blocks.length >= 24}><Plus />Ajouter un bloc</Button></PopoverTrigger>
+        <PopoverContent align="end" className="max-h-[70svh] w-80 overflow-y-auto p-1.5">
+          {cardBlockTypes.map((entry) => <button key={entry.value} type="button" onClick={() => addBlock(entry.value)} className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted">
+            <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground">{blockIcons[entry.value]}</span>
+            <span className="min-w-0"><span className="block text-sm font-medium">{entry.label}</span><span className="block text-[11px] leading-4 text-muted-foreground">{entry.hint}</span></span>
+          </button>)}
+        </PopoverContent>
+      </Popover>
     </div>
-
-    <div className={group}>
-      <p className={groupTitle}><ImageIcon className="size-3.5" />Image principale</p>
-      <Segmented ariaLabel="Place de l’image" value={mediaPosition} options={mediaLayouts} disabled={disabled} onChange={(value) => value === "none" ? set({ media: undefined }) : setMedia({ position: value, ...(value === "left" || value === "right" ? { size: card.media?.size ?? "md", aspect: card.media?.position === "top" || card.media?.position === "background" ? "1/1" : card.media?.aspect } : {}), ...(value === "background" ? { aspect: card.media?.aspect ?? "4/3" } : {}) })} />
-      {card.media && <>
-        <label className={label}>Colonne (image, portrait, icône)<ColumnSelect value={card.media.column} columns={columns} empty={null} onChange={(column) => column && setMedia({ column })} disabled={disabled} ariaLabel="Colonne de l’image principale" /></label>
-        <span className={label}>Format<AspectPicker value={card.media.aspect ?? "4/3"} onChange={(aspect) => setMedia({ aspect })} disabled={disabled} /></span>
-        <div className="flex flex-wrap gap-3">
-          <span className={label}>Image<Segmented ariaLabel="Recadrage" value={card.media.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => setMedia({ fit })} disabled={disabled} /></span>
-          <span className={label}>Forme<Segmented ariaLabel="Forme de l’image" value={card.media.shape ?? "rect"} options={[{ value: "rect", label: "Carrée" }, { value: "rounded", label: "Arrondie" }, { value: "circle", label: "Ronde" }]} onChange={(shape) => setMedia({ shape: shape === "rect" ? undefined : shape })} disabled={disabled} /></span>
-          {(card.media.position === "left" || card.media.position === "right") && <span className={label}>Largeur<Segmented ariaLabel="Largeur de l’image" value={card.media.size ?? "md"} options={[{ value: "xs", label: "XS" }, { value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} onChange={(size) => setMedia({ size })} disabled={disabled} /></span>}
+    <p className={hintClass}>De haut en bas, sauf les blocs posés dans une case de la composition (marqués <LayoutTemplate className="inline size-3" />). Clique sur un bloc pour le régler, glisse-le par sa poignée pour le déplacer.</p>
+    {!card.blocks.length && <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun bloc : ajoute un titre, une ligne, un texte…</p>}
+    <div className="grid gap-1.5">
+      {card.blocks.map((block, index) => {
+        const selected = block.id === selectedBlock
+        const absent = [block.column, ...(block.columns ?? []), ...(block.parts ?? []).map((part) => part.column), ...(block.badges ?? []), block.maxColumn].filter((column): column is string => Boolean(column)).filter((column) => missing.has(foldName(column)))
+        return <div
+          key={block.id}
+          data-block-row={block.id}
+          onDragOver={(event: DragEvent) => { if (dragging && !disabled) { event.preventDefault(); setOver(block.id) } }}
+          onDragLeave={() => setOver((current) => current === block.id ? null : current)}
+          onDrop={(event) => { event.preventDefault(); dropOn(block.id); setDragging(null); setOver(null) }}
+          className={cn("rounded-lg border bg-background/70 transition", selected ? "border-primary shadow-sm" : "hover:border-primary/40", over === block.id && "ring-2 ring-primary/50")}
+        >
+          <div className="flex items-center gap-1 px-1.5 py-1">
+            <span draggable={!disabled} onDragStart={(event) => { setDragging(block.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", block.id) }} onDragEnd={() => { setDragging(null); setOver(null) }} className="cursor-grab p-0.5 text-muted-foreground/60" aria-label="Glisser pour déplacer"><GripVertical className="size-3.5" /></span>
+            <button type="button" onClick={() => onSelectBlock(selected ? null : block.id)} className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left" aria-expanded={selected}>
+              <span className="grid size-6 shrink-0 place-items-center rounded-md border bg-card text-muted-foreground">{blockIcons[block.type]}</span>
+              <span className="min-w-0">
+                <span className="flex items-center gap-1 text-xs font-semibold">{blockLabel(block.type)}{placed.has(block.id) && <LayoutTemplate className="size-3 text-muted-foreground" aria-label="Posé dans une case" />}</span>
+                {blockSummary(block) && <span className={cn("block truncate text-[11px]", absent.length ? "text-destructive" : "text-muted-foreground")} title={absent.length ? `Colonne absente de l’onglet : ${absent.join(", ")} (sautée)` : undefined}>{blockSummary(block)}</span>}
+              </span>
+            </button>
+            <span className="flex shrink-0">
+              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => moveBlock(block.id, -1)} aria-label="Monter le bloc"><ArrowUp /></Button>
+              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === card.blocks.length - 1} onClick={() => moveBlock(block.id, 1)} aria-label="Descendre le bloc"><ArrowDown /></Button>
+              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || card.blocks.length >= 24} onClick={() => { const copy = { ...block, id: cardId("b") }; const blocks = [...card.blocks]; blocks.splice(index + 1, 0, copy); set({ blocks }); onSelectBlock(copy.id) }} aria-label="Dupliquer le bloc" title="Dupliquer"><Copy /></Button>
+              <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => removeBlock(block.id)} aria-label="Retirer le bloc" title="Retirer"><Trash2 /></Button>
+            </span>
+          </div>
+          {selected && <div className="border-t px-3 py-3"><BlockSettings block={block} columns={columns} onChange={updateBlock} disabled={disabled} /></div>}
         </div>
-        <Toggle checked={Boolean(card.media.tint)} onChange={(tint) => setMedia({ tint: tint || undefined })} disabled={disabled} title="Une icône (succès, état) sur un médaillon coloré ; une image absente, sur la couleur de la ligne">Fond à la couleur de l’accent (médaillon)</Toggle>
+      })}
+    </div>
+  </div>
+}
+
+// ---------------------------------------------------------------------------
+// La composition : des lignes de cases où poser les blocs
+// ---------------------------------------------------------------------------
+
+const rowStarters: Array<{ key: string; label: string; cells: Array<Pick<CardCell, "width" | "align" | "valign">> }> = [
+  { key: "full", label: "Pleine largeur", cells: [{ width: "fill" }] },
+  { key: "two", label: "Gauche + droite", cells: [{ width: "fill" }, { width: "fill", align: "right" }] },
+  { key: "three", label: "Gauche · centre · droite", cells: [{ width: "fill" }, { width: "fill", align: "center" }, { width: "fill", align: "right" }] },
+  { key: "lead", label: "Petit à gauche + le reste", cells: [{ width: "auto", valign: "center" }, { width: "fill" }] },
+  { key: "trail", label: "Le reste + petit à droite", cells: [{ width: "fill" }, { width: "auto", align: "right", valign: "center" }] },
+]
+
+function CompositionPage({ card, selectedBlock, onSelectBlock, onChange, disabled }: { card: CardTemplate; selectedBlock: string | null; onSelectBlock: (id: string | null) => void; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+  const rows = card.rows ?? []
+  const setRows = (next: CardRow[]) => onChange({ ...card, rows: next.length ? next : undefined })
+  const byId = new Map(card.blocks.map((block) => [block.id, block]))
+  const placed = new Set(rows.flatMap((row) => row.cells.flatMap((cell) => cell.blocks)))
+  const free = card.blocks.filter((block) => !placed.has(block.id))
+  const updateRow = (id: string, changes: Partial<CardRow>) => setRows(rows.map((row) => row.id === id ? { ...row, ...changes } : row))
+  const updateCell = (rowId: string, cellId: string, changes: Partial<CardCell>) => setRows(rows.map((row) => row.id === rowId ? { ...row, cells: row.cells.map((cell) => cell.id === cellId ? { ...cell, ...changes } : cell) } : row))
+  const moveRow = (id: string, delta: number) => {
+    const at = rows.findIndex((row) => row.id === id)
+    const target = at + delta
+    if (at < 0 || target < 0 || target >= rows.length) return
+    const next = [...rows]
+    const [moved] = next.splice(at, 1)
+    next.splice(target, 0, moved)
+    setRows(next)
+  }
+  const addRow = (starter: typeof rowStarters[number]) => setRows([...rows, { id: cardId("r"), cells: starter.cells.map((cell) => ({ id: cardId("k"), blocks: [], ...cell })) }])
+  const widthMode = (cell: CardCell) => cell.width === "auto" ? "auto" : typeof cell.width === "number" ? "percent" : "fill"
+
+  return <div className="grid gap-3">
+    <div className={group}>
+      <p className={groupTitle}><LayoutTemplate className="size-3.5" />Composition</p>
+      <p className={hintClass}>Sans composition, les blocs s’empilent de haut en bas. Ajoute des lignes, puis pose les blocs dans leurs cases : un nom à gauche et un rang à droite, une ligne pleine largeur, trois colonnes… Les blocs qui ne sont posés nulle part suivent, empilés sous les lignes.</p>
+      <div className="flex flex-wrap items-center gap-1">
+        <span className="text-[11px] font-semibold text-muted-foreground">Ajouter une ligne :</span>
+        {rowStarters.map((starter) => <Button key={starter.key} type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || rows.length >= 24} onClick={() => addRow(starter)}><Plus />{starter.label}</Button>)}
+      </div>
+    </div>
+    {rows.map((row, index) => <div key={row.id} className={cn(group, "gap-2")}>
+      <div className="flex flex-wrap items-center gap-2">
+        <p className={groupTitle}>Ligne {index + 1}</p>
+        <span className={cn(label, "ml-auto flex-row items-center gap-1.5")}>Espace entre les cases<Segmented ariaLabel="Espace entre les cases" value={row.gap ?? "md"} options={[{ value: "none", label: "Aucun" }, { value: "sm", label: "Petit" }, { value: "md", label: "Moyen" }, { value: "lg", label: "Grand" }]} onChange={(gap) => updateRow(row.id, { gap: gap === "md" ? undefined : gap })} disabled={disabled} /></span>
+        <span className="flex">
+          <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => moveRow(row.id, -1)} aria-label="Monter la ligne"><ArrowUp /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === rows.length - 1} onClick={() => moveRow(row.id, 1)} aria-label="Descendre la ligne"><ArrowDown /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || row.cells.length >= 6} onClick={() => updateRow(row.id, { cells: [...row.cells, { id: cardId("k"), blocks: [], width: "fill" }] })} aria-label="Ajouter une case" title="Une case de plus"><Plus /></Button>
+          <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => setRows(rows.filter((entry) => entry.id !== row.id))} aria-label="Retirer la ligne" title="Retirer la ligne (ses blocs restent dans la carte)"><Trash2 /></Button>
+        </span>
+      </div>
+      <div className="grid gap-2 md:grid-flow-col md:auto-cols-fr">
+        {row.cells.map((cell, cellIndex) => <div key={cell.id} className="grid content-start gap-1.5 rounded-lg border border-dashed bg-background/50 p-2">
+          <div className="flex items-center gap-1">
+            <span className="text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Case {cellIndex + 1}</span>
+            <Button type="button" variant="ghost" size="icon-xs" className="ml-auto text-destructive" disabled={disabled || row.cells.length <= 1} onClick={() => updateRow(row.id, { cells: row.cells.filter((entry) => entry.id !== cell.id) })} aria-label="Retirer la case"><X /></Button>
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <Segmented ariaLabel="Largeur de la case" value={widthMode(cell)} options={[{ value: "fill", label: "Le reste", title: "Se partage la place avec les autres cases « le reste »" }, { value: "auto", label: "Ajustée", title: "La taille de ce qu’elle contient" }, { value: "percent", label: "%" }]} onChange={(mode) => updateCell(row.id, cell.id, { width: mode === "fill" ? undefined : mode === "auto" ? "auto" : 50 })} disabled={disabled} />
+            {typeof cell.width === "number" && <Input type="number" min={5} max={100} value={cell.width} disabled={disabled} onChange={(event) => updateCell(row.id, cell.id, { width: Math.max(5, Math.min(100, Number(event.target.value) || 5)) })} className="h-7 w-16 text-xs" aria-label="Largeur en pourcentage" />}
+          </div>
+          <div className="flex flex-wrap items-center gap-1">
+            <Segmented ariaLabel="Alignement horizontal" value={cell.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => updateCell(row.id, cell.id, { align: align === "left" ? undefined : align })} disabled={disabled} />
+            <Segmented ariaLabel="Alignement vertical" value={cell.valign ?? "top"} options={[{ value: "top", label: "Haut" }, { value: "center", label: "Milieu" }, { value: "bottom", label: "Bas" }]} onChange={(valign) => updateCell(row.id, cell.id, { valign: valign === "top" ? undefined : valign })} disabled={disabled} />
+          </div>
+          <div className="grid gap-1">
+            {cell.blocks.map((id) => {
+              const block = byId.get(id)
+              if (!block) return null
+              return <div key={id} className={cn("flex items-center gap-1 rounded-md border bg-card px-1.5 py-1", selectedBlock === id && "border-primary")}>
+                <button type="button" onClick={() => onSelectBlock(id)} className="flex min-w-0 flex-1 items-center gap-1.5 text-left" title="Régler ce bloc">
+                  <span className="grid size-5 shrink-0 place-items-center rounded border text-muted-foreground">{blockIcons[block.type]}</span>
+                  <span className="min-w-0 truncate text-xs"><b>{blockLabel(block.type)}</b>{blockSummary(block) && <span className="text-muted-foreground"> · {blockSummary(block)}</span>}</span>
+                </button>
+                <Button type="button" variant="ghost" size="icon-xs" disabled={disabled} onClick={() => updateCell(row.id, cell.id, { blocks: cell.blocks.filter((item) => item !== id) })} aria-label="Sortir le bloc de la case" title="Sortir de la case (le bloc reste dans la carte)"><X /></Button>
+              </div>
+            })}
+            {free.length > 0 && <NativeSelect value="" disabled={disabled} onChange={(event) => { if (event.target.value) updateCell(row.id, cell.id, { blocks: [...cell.blocks, event.target.value] }) }} className="h-7 border-dashed py-0 text-[11px]" aria-label="Poser un bloc dans la case">
+              <NativeSelectOption value="">+ Poser un bloc…</NativeSelectOption>
+              {free.map((block) => <NativeSelectOption key={block.id} value={block.id}>{blockLabel(block.type)}{blockSummary(block) ? ` · ${blockSummary(block)}` : ""}</NativeSelectOption>)}
+            </NativeSelect>}
+            {!cell.blocks.length && !free.length && <p className="text-[10px] text-muted-foreground">Tous les blocs sont déjà posés : ajoute-en dans « Blocs ».</p>}
+          </div>
+        </div>)}
+      </div>
+    </div>)}
+    {rows.length > 0 && free.length > 0 && <p className={hintClass}>Non posés, empilés sous les lignes : {free.map((block) => blockLabel(block.type)).join(", ")}.</p>}
+  </div>
+}
+
+// ---------------------------------------------------------------------------
+// La carte : sa taille, sa forme, sa grille, ses couleurs
+// ---------------------------------------------------------------------------
+
+const radiusOf = { sm: 8, md: 16, lg: 22 } as const
+
+function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; columns: CardColumn[]; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+  const set = (changes: Partial<CardTemplate>) => onChange({ ...card, ...changes })
+  const accentColumns = columns.filter((column) => { const spec = normalizeSpec(column.spec); return spec.kind === "color" || ((spec.kind === "choice" || spec.kind === "linked-choice") && (spec.options ?? []).some((option) => option.color)) || /couleur|color/i.test(column.header) })
+  const list = card.width === "full" && !card.widthRem
+  const widthRem = cardWidthRem(card)
+  const shape = card.ratio === undefined ? "free" : shapeStarters.find((starter) => Math.abs(starter.ratio - card.ratio!) < 0.02)?.key ?? "custom"
+  return <div className="grid gap-3">
+    <div className={group}>
+      <p className={groupTitle}><LayoutGrid className="size-3.5" />Taille et place dans la grille</p>
+      <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Cartes en grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne (liste)", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
+      {!list && <>
+        <Range text="Largeur d’une carte" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem · ${cardWidths.filter((entry) => entry.rem).reduce((best, entry) => Math.abs(entry.rem - value) < Math.abs(best.rem - value) ? entry : best).label.toLowerCase()}`} onChange={(value) => set({ widthRem: value, width: undefined })} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." />
+        <Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value} carte${value > 1 ? "s" : ""}` : "autant que possible"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." />
+        <span className={label}>Sur téléphone<Segmented ariaLabel="Cartes par ligne sur téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "Une par ligne" }, { value: "2", label: "Deux par ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} /></span>
       </>}
     </div>
 
     <div className={group}>
-      <p className={groupTitle}><LayoutGrid className="size-3.5" />Forme et place dans la grille</p>
-      <span className={label}>Largeur d’une carte<Segmented ariaLabel="Largeur de la carte" value={card.width ?? "md"} options={cardWidths.map((width) => ({ value: width.value, label: ({ xs: "XS", sm: "S", md: "M", lg: "L", xl: "XL", full: "Liste" } as const)[width.value], title: width.label }))} onChange={(width) => set({ width })} disabled={disabled} /></span>
+      <p className={groupTitle}><Square className="size-3.5" />Forme de la carte</p>
+      <span className={label}>Hauteur
+        <span className="flex flex-wrap gap-1">
+          <button type="button" disabled={disabled} aria-pressed={shape === "free"} onClick={() => set({ ratio: undefined })} className={cn("h-9 rounded-md border px-2 text-xs", shape === "free" ? "border-primary bg-primary/10" : "hover:bg-muted")} title="La carte prend la hauteur de son contenu">Libre</button>
+          {shapeStarters.map((starter) => <button key={starter.key} type="button" disabled={disabled} title={starter.label} aria-label={starter.label} aria-pressed={shape === starter.key} onClick={() => set({ ratio: starter.ratio })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", shape === starter.key ? "border-primary bg-primary/10" : "hover:bg-muted")}>
+            <span className="block rounded-[2px] border border-current opacity-70" style={{ width: starter.w, height: starter.h }} />
+          </button>)}
+        </span>
+      </span>
+      {card.ratio !== undefined && <Range text="Proportions (largeur ÷ hauteur)" value={card.ratio} min={0.3} max={4} step={0.05} format={(value) => value < 0.98 ? `${fr(value)} · plus haute que large` : value > 1.02 ? `${fr(value)} · plus large que haute` : "carrée"} onChange={(ratio) => set({ ratio })} disabled={disabled} />}
+      {card.ratio === undefined && <Range text="Hauteur minimale" value={card.minHeightPx ?? 0} min={0} max={600} step={10} format={(value) => value ? `${value} px` : "selon le contenu"} onChange={(value) => set({ minHeightPx: value || undefined })} disabled={disabled} />}
+      <Range text="Arrondi des coins" value={card.radiusPx ?? radiusOf[card.radius ?? "md"]} min={0} max={64} step={1} format={(value) => `${value} px`} onChange={(radiusPx) => set({ radiusPx })} disabled={disabled} />
       <div className="flex flex-wrap gap-3">
         <span className={label}>Contenu<Segmented ariaLabel="Alignement du contenu" value={card.align ?? "left"} options={[...alignOptions]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
         <span className={label}>Espacement<Segmented ariaLabel="Espacement" value={card.density ?? "normal"} options={[{ value: "compact", label: "Serré" }, { value: "normal", label: "Normal" }, { value: "airy", label: "Aéré" }]} onChange={(density) => set({ density: density === "normal" ? undefined : density })} disabled={disabled} /></span>
-        <span className={label}>Coins<Segmented ariaLabel="Arrondi des coins" value={card.radius ?? "md"} options={[{ value: "sm", label: "Fins" }, { value: "md", label: "Ronds" }, { value: "lg", label: "Très ronds" }]} onChange={(radius) => set({ radius: radius === "md" ? undefined : radius })} disabled={disabled} /></span>
       </div>
     </div>
 
@@ -493,58 +694,61 @@ function CardSettings({ card, columns, selectedBlock, onSelectBlock, onChange, d
         <Toggle checked={Boolean(card.band)} onChange={(band) => set({ band: band || undefined })} disabled={disabled}>Liseré d’accent {card.media?.position === "top" ? "sous l’image" : "en haut"}</Toggle>
         <Toggle checked={Boolean(card.shadow)} onChange={(shadow) => set({ shadow: shadow || undefined })} disabled={disabled}>Ombre colorée</Toggle>
         <Toggle checked={Boolean(card.lift)} onChange={(lift) => set({ lift: lift || undefined })} disabled={disabled}>Se soulève au survol</Toggle>
-        <Toggle checked={Boolean(card.chevron)} onChange={(chevron) => set({ chevron: chevron || undefined })} disabled={disabled}>Flèche à droite</Toggle>
+        <Toggle checked={Boolean(card.chevron)} onChange={(chevron) => set({ chevron: chevron || undefined })} disabled={disabled} title="Une petite flèche « › » à droite de la carte, purement décorative : elle signale que la carte s’ouvre (comme une ligne de liste). Elle n’a pas de comportement propre.">Flèche « › » à droite</Toggle>
       </div>
       <label className={label}>Pastille dans le coin (« Nouveau », un rang…)<ColumnSelect value={card.corner} columns={columns} onChange={(corner) => set({ corner })} disabled={disabled} ariaLabel="Colonne de la pastille du coin" /></label>
     </div>
+  </div>
+}
 
-    <div className={group}>
-      <div className="flex items-center justify-between gap-2">
-        <p className={groupTitle}><ListTree className="size-3.5" />Contenu, de haut en bas</p>
-        <Popover open={adding} onOpenChange={setAdding}>
-          <PopoverTrigger asChild><Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled}><Plus />Ajouter un bloc</Button></PopoverTrigger>
-          <PopoverContent align="end" className="w-80 p-1.5">
-            {cardBlockTypes.map((entry) => <button key={entry.value} type="button" onClick={() => addBlock(entry.value)} className="flex w-full items-start gap-2 rounded-md px-2 py-1.5 text-left hover:bg-muted">
-              <span className="mt-0.5 grid size-6 shrink-0 place-items-center rounded-md border bg-background text-muted-foreground">{blockIcons[entry.value]}</span>
-              <span className="min-w-0"><span className="block text-sm font-medium">{entry.label}</span><span className="block text-[11px] leading-4 text-muted-foreground">{entry.hint}</span></span>
-            </button>)}
-          </PopoverContent>
-        </Popover>
+// ---------------------------------------------------------------------------
+// L'image principale
+// ---------------------------------------------------------------------------
+
+const mediaLayouts: Array<{ value: CardMediaPosition | "none"; label: string; icon: ReactNode }> = [
+  { value: "top", label: "En haut", icon: <PanelTop className="size-3.5" /> },
+  { value: "bottom", label: "En bas", icon: <PanelBottom className="size-3.5" /> },
+  { value: "left", label: "À gauche", icon: <PanelLeft className="size-3.5" /> },
+  { value: "right", label: "À droite", icon: <PanelRight className="size-3.5" /> },
+  { value: "background", label: "En fond", icon: <ImageIcon className="size-3.5" /> },
+  { value: "none", label: "Sans", icon: <X className="size-3.5" /> },
+]
+
+function ImagePage({ card, columns, onChange, disabled }: { card: CardTemplate; columns: CardColumn[]; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+  const set = (changes: Partial<CardTemplate>) => onChange({ ...card, ...changes })
+  const roles = useMemo(() => cardRoles(columns), [columns])
+  const media = card.media
+  const position = media?.position ?? "none"
+  const setMedia = (changes: Partial<NonNullable<CardTemplate["media"]>>) => {
+    const column = changes.column ?? media?.column ?? roles.image ?? roles.glyph ?? columns[0]?.header
+    if (!column) return
+    set({ media: { position: "top", aspect: "4/3", fit: "cover", ...media, ...changes, column } })
+  }
+  const side = position === "left" || position === "right"
+  const vertical = position === "top" || position === "bottom"
+  return <div className={group}>
+    <p className={groupTitle}><ImageIcon className="size-3.5" />Image principale</p>
+    <Segmented ariaLabel="Place de l’image" value={position} options={mediaLayouts} disabled={disabled} onChange={(value) => value === "none" ? set({ media: undefined }) : setMedia({ position: value, ...(value === "left" || value === "right" ? { size: media?.size ?? "md" } : {}) })} />
+    {!media && <p className={hintClass}>Sans image principale. Un bloc « Image dans la carte » peut aussi poser une image au milieu du contenu.</p>}
+    {media && <>
+      <label className={label}>Colonne (image, portrait, icône)<ColumnSelect value={media.column} columns={columns} empty={null} onChange={(column) => column && setMedia({ column })} disabled={disabled} ariaLabel="Colonne de l’image principale" /></label>
+      {side && <span className={label}>Hauteur dans la carte
+        <Segmented ariaLabel="Accroche de l’image" value={media.anchor ?? "top"} options={[{ value: "stretch", label: "Touche le haut et le bas", title: "L’image prend toute la hauteur de la carte" }, { value: "top", label: "Collée en haut", title: "L’image garde ses proportions, alignée en haut" }, { value: "bottom", label: "Collée en bas", title: "L’image garde ses proportions, alignée en bas" }]} onChange={(anchor) => setMedia({ anchor: anchor === "top" ? undefined : anchor })} disabled={disabled} />
+      </span>}
+      {side && <span className={label}>Largeur<Segmented ariaLabel="Largeur de l’image" value={media.size ?? "md"} options={[{ value: "xs", label: "XS" }, { value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} onChange={(size) => setMedia({ size })} disabled={disabled} /></span>}
+      {vertical && <span className={label}>Hauteur
+        <Segmented ariaLabel="Hauteur de l’image" value={media.sizing ?? "aspect"} options={[{ value: "aspect", label: "Selon ses proportions", title: "La largeur de la carte décide la hauteur" }, { value: "height", label: "Fixe", title: "Une hauteur en pixels, quelle que soit la largeur" }]} onChange={(sizing) => setMedia({ sizing: sizing === "aspect" ? undefined : sizing })} disabled={disabled} />
+      </span>}
+      {vertical && media.sizing === "height" && <Range text="Hauteur de l’image" value={media.heightPx ?? 160} min={16} max={800} step={4} format={(value) => `${value} px`} onChange={(heightPx) => setMedia({ heightPx })} disabled={disabled} />}
+      {(!side || media.anchor !== "stretch") && (!vertical || media.sizing !== "height") && <ShapeControls ratio={media.ratio} aspect={media.aspect ?? (side ? "1/1" : "4/3")} radiusPx={media.radiusPx} defaultRadius={media.shape === "rounded" ? 12 : 0} onChange={(changes) => setMedia(changes)} disabled={disabled} />}
+      {((side && media.anchor === "stretch") || (vertical && media.sizing === "height")) && <ShapeControls withRatio={false} ratio={undefined} radiusPx={media.radiusPx} defaultRadius={media.shape === "rounded" ? 12 : 0} onChange={(changes) => setMedia(changes)} disabled={disabled} />}
+      <div className="flex flex-wrap gap-3">
+        <span className={label}>Image<Segmented ariaLabel="Recadrage" value={media.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => setMedia({ fit })} disabled={disabled} /></span>
+        <Toggle checked={media.shape === "circle"} onChange={(circle) => setMedia({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde (médaillon)</Toggle>
+        {position !== "background" && <Toggle checked={Boolean(media.inset)} onChange={(inset) => setMedia({ inset: inset || undefined })} disabled={disabled} title="Une marge entre l’image et les bords de la carte">Avec une marge</Toggle>}
+        <Toggle checked={Boolean(media.tint)} onChange={(tint) => setMedia({ tint: tint || undefined })} disabled={disabled} title="Une icône (succès, état) sur un médaillon coloré ; une image absente, sur la couleur de la ligne">Fond à la couleur de l’accent</Toggle>
       </div>
-      {!card.blocks.length && <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun bloc : ajoute un titre, une ligne, un texte…</p>}
-      <div className="grid gap-1.5">
-        {card.blocks.map((block, index) => {
-          const selected = block.id === selectedBlock
-          const absent = [block.column, ...(block.columns ?? []), ...(block.parts ?? []).map((part) => part.column), ...(block.badges ?? []), block.maxColumn].filter((column): column is string => Boolean(column)).filter((column) => missing.has(foldName(column)))
-          return <div
-            key={block.id}
-            data-block-row={block.id}
-            onDragOver={(event: DragEvent) => { if (dragging && !disabled) { event.preventDefault(); setOver(block.id) } }}
-            onDragLeave={() => setOver((current) => current === block.id ? null : current)}
-            onDrop={(event) => { event.preventDefault(); dropOn(block.id); setDragging(null); setOver(null) }}
-            className={cn("rounded-lg border bg-background/70 transition", selected ? "border-primary shadow-sm" : "hover:border-primary/40", over === block.id && "ring-2 ring-primary/50")}
-          >
-            <div className="flex items-center gap-1 px-1.5 py-1">
-              <span draggable={!disabled} onDragStart={(event) => { setDragging(block.id); event.dataTransfer.effectAllowed = "move"; event.dataTransfer.setData("text/plain", block.id) }} onDragEnd={() => { setDragging(null); setOver(null) }} className="cursor-grab p-0.5 text-muted-foreground/60" aria-label="Glisser pour déplacer"><GripVertical className="size-3.5" /></span>
-              <button type="button" onClick={() => onSelectBlock(selected ? null : block.id)} className="flex min-w-0 flex-1 items-center gap-2 py-0.5 text-left" aria-expanded={selected}>
-                <span className="grid size-6 shrink-0 place-items-center rounded-md border bg-card text-muted-foreground">{blockIcons[block.type]}</span>
-                <span className="min-w-0">
-                  <span className="block text-xs font-semibold">{blockLabel(block.type)}</span>
-                  {blockSummary(block) && <span className={cn("block truncate text-[11px]", absent.length ? "text-destructive" : "text-muted-foreground")} title={absent.length ? `Colonne absente de l’onglet : ${absent.join(", ")} (sautée)` : undefined}>{blockSummary(block)}</span>}
-                </span>
-              </button>
-              <span className="flex shrink-0">
-                <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => moveBlock(block.id, -1)} aria-label="Monter le bloc"><ArrowUp /></Button>
-                <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === card.blocks.length - 1} onClick={() => moveBlock(block.id, 1)} aria-label="Descendre le bloc"><ArrowDown /></Button>
-                <Button type="button" variant="ghost" size="icon-xs" disabled={disabled} onClick={() => { const copy = { ...block, id: cardId("b") }; const blocks = [...card.blocks]; blocks.splice(index + 1, 0, copy); set({ blocks }); onSelectBlock(copy.id) }} aria-label="Dupliquer le bloc" title="Dupliquer"><Copy /></Button>
-                <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => { set({ blocks: card.blocks.filter((entry) => entry.id !== block.id) }); if (selected) onSelectBlock(null) }} aria-label="Retirer le bloc" title="Retirer"><Trash2 /></Button>
-              </span>
-            </div>
-            {selected && <div className="border-t px-3 py-3"><BlockSettings block={block} columns={columns} onChange={updateBlock} disabled={disabled} /></div>}
-          </div>
-        })}
-      </div>
-    </div>
+    </>}
   </div>
 }
 
@@ -571,12 +775,15 @@ function previewSamples(samples: Array<Record<string, string>>, columns: CardCol
   return [Object.fromEntries(columns.map((column) => [column.header, normalizeSpec(column.spec).kind === "number" ? "12" : column.header]))]
 }
 
+const screens = { phone: "22rem", tablet: "40rem", desktop: "100%" } as const
+
 function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: { card: CardTemplate; columns: CardColumn[]; samples: Array<Record<string, string>>; selectedBlock: string | null; onSelectBlock: (id: string) => void }) {
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
   const [at, setAt] = useState(0)
   const [grid, setGrid] = useState(false)
+  const [screen, setScreen] = useState<keyof typeof screens>("desktop")
   const index = Math.min(at, rows.length - 1)
-  const width = cardWidths.find((entry) => entry.value === (card.width ?? "md"))
+  const rem = cardWidthRem(card)
   return <aside className="grid content-start gap-2 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu en direct</p>
@@ -586,14 +793,15 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
           <span className="text-[11px] tabular-nums text-muted-foreground">{index + 1} / {rows.length}</span>
           <Button type="button" variant="ghost" size="icon-xs" disabled={index === rows.length - 1} onClick={() => setAt(index + 1)} aria-label="Ligne suivante"><ChevronRight /></Button>
         </>}
-        {rows.length > 1 && <Button type="button" variant={grid ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setGrid(!grid)}><LayoutGrid />{grid ? "Une" : "Toutes"}</Button>}
+        <Button type="button" variant={grid ? "secondary" : "ghost"} size="sm" className="h-7 text-xs" onClick={() => setGrid(!grid)} title="Toutes les lignes, dans la grille : pour voir combien de cartes tiennent par ligne"><LayoutGrid />{grid ? "Une" : "Grille"}</Button>
       </span>
     </div>
+    {grid && <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />}
     {grid
-      ? <div className="grid items-start gap-2" style={cardGridStyle({ ...card, width: card.width === "full" ? "full" : "xs" })}>
-        {rows.map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
+      ? <div className={cn("grid items-start gap-2", screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
+        {(rows.length > 1 ? rows : [rows[0], rows[0], rows[0]]).map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
       </div>
-      : <div className="mx-auto w-full" style={width && width.rem ? { maxWidth: `${width.rem + 2}rem` } : undefined}>
+      : <div className="mx-auto w-full" style={card.width === "full" && !card.widthRem ? undefined : { maxWidth: `${rem + 2}rem` }}>
         <IndexCard card={card} row={sampleSource(rows[index], columns)} selectedBlock={selectedBlock} onSelectBlock={onSelectBlock} />
       </div>}
     <p className="text-[10px] leading-4 text-muted-foreground">Clique sur un bloc de l’aperçu pour le régler. Un bloc vide pour cette ligne reste en pointillés ici, et disparaît sur la vraie carte.</p>
@@ -601,7 +809,7 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
 }
 
 // ---------------------------------------------------------------------------
-// Nouvelle carte : formes de départ, cartes d'Eraser, presets
+// Nouvelle carte : les cartes d'Eraser pour cet index, les formes de départ, les presets
 // ---------------------------------------------------------------------------
 
 function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { columns: CardColumn[]; samples: Array<Record<string, string>>; builtins: CardTemplate[]; onPick: (card: CardTemplate) => void; onClose: () => void }) {
@@ -609,11 +817,10 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
   const source = sampleSource(rows[0], columns)
   const starters = useMemo(() => cardStarters.map((starter) => ({ key: starter.key, label: starter.label, hint: starter.hint, card: starter.build(columns) })), [columns])
-  const others = useMemo(() => { const own = new Set(builtins.map((card) => card.id)); return eraserCardPresets().filter((entry) => !own.has(entry.card.id)) }, [builtins])
   const tile = (key: string, title: string, hint: string, card: CardTemplate, extra?: ReactNode) => <div key={key} className="group relative grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 transition hover:border-primary hover:shadow-md">
     <button type="button" onClick={() => onPick({ ...card, id: cardId() })} className="grid content-start gap-2 text-left">
       <span className="pointer-events-none grid max-h-56 min-h-28 place-items-center overflow-hidden rounded-lg bg-muted/30 p-2">
-        <span className="w-full origin-top scale-[0.8]" style={{ maxWidth: card.width === "full" ? undefined : `${(cardWidths.find((entry) => entry.value === card.width)?.rem ?? 15)}rem` }}><IndexCard card={card} row={source} /></span>
+        <span className="w-full origin-top scale-[0.8]" style={{ maxWidth: card.width === "full" && !card.widthRem ? undefined : `${cardWidthRem(card)}rem` }}><IndexCard card={card} row={source} /></span>
       </span>
       <span><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span></span>
     </button>
@@ -623,27 +830,22 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
     <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[min(94vw,1100px)]">
       <DialogHeader>
         <DialogTitle className="font-display text-2xl">Nouvelle carte</DialogTitle>
-        <DialogDescription>Choisis un point de départ : il est rempli avec les colonnes de cet onglet et ses vraies lignes. Tout se change ensuite.</DialogDescription>
+        <DialogDescription>Un point de départ, rempli avec les colonnes de cet onglet et ses vraies lignes. Tout se change ensuite : la taille, l’image, les blocs, la composition.</DialogDescription>
       </DialogHeader>
       {builtins.length > 0 && <section className="grid gap-2">
         <p className={groupTitle}><Star className="size-3.5" />Les cartes d’Eraser pour cet index</p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((card) => tile(card.id, card.name, "Celle qu’Eraser affichait déjà, refaite avec le moteur de cartes.", card))}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((card) => tile(card.id, card.name, "Celle qu’Eraser affiche déjà pour ces lignes, refaite avec le moteur de cartes.", card))}</div>
       </section>}
-      {/* Les cartes des autres pages d'Eraser (classe, campagne, personnage…) : des presets comme les autres. */}
-      {others.length > 0 && <details className="group/eraser grid gap-2">
-        <summary className={`${groupTitle} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}><LayoutGrid className="size-3.5" />Les cartes des pages d’Eraser ({others.length}) <span className="font-normal normal-case tracking-normal text-muted-foreground/80">· carte de classe, de campagne, de personnage…</span></summary>
-        <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{others.map((entry) => tile(`eraser:${entry.card.id}`, `${entry.card.name} · ${entry.label}`, "Les colonnes qui manquent ici restent vides : choisis les tiennes ensuite.", entry.card))}</div>
-      </details>}
       <section className="grid gap-2">
         <p className={groupTitle}><Sparkles className="size-3.5" />Formes de départ</p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.card))}</div>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.card))}</div>
       </section>
       <section className="grid gap-2">
         <p className={groupTitle}><Bookmark className="size-3.5" />Presets enregistrés</p>
         {cardPresets.length
-          ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{cardPresets.map((preset) => tile(preset.id, preset.name, `Enregistré le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}.`, { ...preset.card, name: preset.name },
+          ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{cardPresets.map((preset) => tile(preset.id, preset.name, `Enregistré le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}. Les colonnes absentes ici restent vides.`, { ...preset.card, name: preset.name },
             <Button type="button" variant="ghost" size="icon-xs" className="absolute right-1.5 top-1.5 text-destructive opacity-0 group-hover:opacity-100" onClick={() => void deleteCardPreset(preset.id)} aria-label={`Supprimer le preset ${preset.name}`} title="Supprimer le preset"><Trash2 /></Button>))}</div>
-          : <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun preset pour l’instant : « Enregistrer en preset » garde une carte pour la reprendre dans n’importe quel index.</p>}
+          : <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun preset pour l’instant : « Preset » dans le panneau des cartes garde une carte pour la reprendre dans n’importe quel index.</p>}
       </section>
     </DialogContent>
   </Dialog>
@@ -664,7 +866,7 @@ function SavePresetDialog({ card, onClose }: { card: CardTemplate; onClose: () =
     <DialogContent className="sm:max-w-md">
       <DialogHeader>
         <DialogTitle>Enregistrer la carte en preset</DialogTitle>
-        <DialogDescription>Le preset garde la forme et les blocs, avec les noms de colonnes. Appliqué ailleurs, une colonne absente est simplement sautée (et signalée ici).</DialogDescription>
+        <DialogDescription>Le preset garde la forme, la composition et les blocs, avec les noms de colonnes. Appliqué ailleurs, une colonne absente est simplement sautée (et signalée).</DialogDescription>
       </DialogHeader>
       <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); void save() }}>
         <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Nom du preset" />
@@ -699,37 +901,52 @@ function CopyDialog({ card, tabs, onCopy, onClose }: { card: CardTemplate; tabs:
 }
 
 // ---------------------------------------------------------------------------
-// L'éditeur des cartes d'un onglet
+// Le panneau des cartes (sous les onglets) et l'éditeur de la carte choisie
 // ---------------------------------------------------------------------------
 
-export function IndexCardEditor({ tabName, columns, value, builtin, builtins, samples, otherTabs, onChange, onCopyTo, onReset, disabled = false }: {
+/** Une copie d'une carte, avec de nouveaux identifiants (blocs, lignes et cases compris). */
+export function duplicateCard(card: CardTemplate, name = card.name): CardTemplate {
+  const ids = new Map(card.blocks.map((block) => [block.id, cardId("b")]))
+  return {
+    ...card,
+    id: cardId(),
+    name,
+    blocks: card.blocks.map((block) => ({ ...block, id: ids.get(block.id)! })),
+    ...(card.rows ? { rows: card.rows.map((row) => ({ ...row, id: cardId("r"), cells: row.cells.map((cell) => ({ ...cell, id: cardId("k"), blocks: cell.blocks.flatMap((id) => ids.has(id) ? [ids.get(id)!] : []) })) })) } : {}),
+  }
+}
+
+export function pickedCard(value: TabCards, selected: string | null) {
+  return value.cards.find((entry) => entry.id === selected) ?? value.cards.find((entry) => entry.id === value.defaultId) ?? value.cards[0] ?? null
+}
+
+/**
+ * Le panneau des cartes d'un onglet, sous la liste des onglets : la carte choisie (liste
+ * déroulante, l'étoile pour celle montrée d'abord), son nom, et ce qu'on en fait.
+ */
+export function CardsPanel({ tabName, columns, value, builtin, builtins, samples, otherTabs, selected, onSelect, onChange, onCopyTo, onReset, disabled = false }: {
   tabName: string
   columns: CardColumn[]
-  /** Les cartes de l'onglet (brouillon). */
   value: TabCards
-  /** Ce sont les cartes d'Eraser, pas encore enregistrées pour cet onglet. */
   builtin: boolean
-  /** Les cartes qu'Eraser avait déjà pour cet index (proposées dans « Nouvelle carte »). */
   builtins: CardTemplate[]
   samples: Array<Record<string, string>>
   otherTabs: Array<{ id: string; name: string }>
+  selected: string | null
+  onSelect: (id: string | null) => void
   onChange: (value: TabCards) => void
   onCopyTo: (tabIds: string[], card: CardTemplate) => void
-  /** Revenir aux cartes d'Eraser (efface les cartes enregistrées de l'onglet). */
   onReset?: () => void
   disabled?: boolean
 }) {
-  const [selected, setSelected] = useState<string | null>(value.cards[0]?.id ?? null)
-  const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
   const [dialog, setDialog] = useState<"new" | "preset" | "copy" | null>(null)
-  const card = value.cards.find((entry) => entry.id === selected) ?? value.cards[0] ?? null
+  const card = pickedCard(value, selected)
   const defaultId = value.defaultId && value.cards.some((entry) => entry.id === value.defaultId) ? value.defaultId : value.cards[0]?.id
-
   const setCards = (cards: CardTemplate[], extra: Partial<TabCards> = {}) => onChange({ ...value, ...extra, cards, ...(extra.defaultId === undefined && value.defaultId && !cards.some((entry) => entry.id === value.defaultId) ? { defaultId: undefined } : {}) })
-  const updateCard = (next: CardTemplate) => setCards(value.cards.map((entry) => entry.id === next.id ? next : entry))
-  const addCard = (next: CardTemplate) => { setCards([...value.cards, next]); setSelected(next.id); setSelectedBlock(null); setDialog(null) }
-  const moveCard = (id: string, delta: number) => {
-    const at = value.cards.findIndex((entry) => entry.id === id)
+  const addCard = (next: CardTemplate) => { setCards([...value.cards, next]); onSelect(next.id); setDialog(null) }
+  const moveCard = (delta: number) => {
+    if (!card) return
+    const at = value.cards.findIndex((entry) => entry.id === card.id)
     const target = at + delta
     if (at < 0 || target < 0 || target >= value.cards.length) return
     const cards = [...value.cards]
@@ -737,49 +954,91 @@ export function IndexCardEditor({ tabName, columns, value, builtin, builtins, sa
     cards.splice(target, 0, moved)
     setCards(cards)
   }
-
-  return <div className="grid items-start gap-3 xl:grid-cols-[13rem_minmax(0,1fr)_minmax(18rem,24rem)]">
-    <aside className="grid min-w-0 content-start gap-2 xl:sticky xl:top-0 xl:self-start">
-      <div className="grid gap-1 rounded-xl border bg-muted/20 p-2">
-        <p className={cn(groupTitle, "px-1")}>Cartes de « {tabName} »</p>
-        {value.cards.map((entry, index) => <div key={entry.id} className={cn("group flex items-center gap-1 rounded-lg px-1", entry.id === card?.id ? "bg-primary/10" : "hover:bg-muted/60")}>
-          <button type="button" onClick={() => { setSelected(entry.id); setSelectedBlock(null) }} className="min-w-0 flex-1 truncate py-1.5 pl-1 text-left text-sm" title={entry.name}>{entry.name}</button>
-          <Button type="button" variant="ghost" size="icon-xs" className={cn(entry.id === defaultId ? "text-[#c9a227]" : "opacity-0 group-hover:opacity-100")} disabled={disabled} onClick={() => onChange({ ...value, defaultId: entry.id })} title={entry.id === defaultId ? "Carte montrée d’abord" : "Montrer cette carte d’abord"} aria-label="Carte par défaut"><Star fill={entry.id === defaultId ? "currentColor" : "none"} /></Button>
-          <span className="flex opacity-0 group-hover:opacity-100">
-            <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === 0} onClick={() => moveCard(entry.id, -1)} aria-label="Monter la carte"><ArrowUp /></Button>
-            <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || index === value.cards.length - 1} onClick={() => moveCard(entry.id, 1)} aria-label="Descendre la carte"><ArrowDown /></Button>
-          </span>
-        </div>)}
-        {!value.cards.length && <p className="rounded-lg border border-dashed p-3 text-center text-xs text-muted-foreground">Aucune carte : cet onglet s’affiche en tableau seulement.</p>}
-        <Button type="button" size="sm" className="mt-1" disabled={disabled || value.cards.length >= 12} onClick={() => setDialog("new")}><Plus />Nouvelle carte</Button>
-      </div>
-      {card && <div className="grid gap-1 rounded-xl border bg-muted/20 p-2">
-        <p className={cn(groupTitle, "px-1")}>Cette carte</p>
-        <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={disabled || value.cards.length >= 12} onClick={() => addCard({ ...card, id: cardId(), name: `${card.name} (copie)`, blocks: card.blocks.map((block) => ({ ...block, id: cardId("b") })) })}><Copy />Dupliquer</Button>
-        <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={disabled} onClick={() => setDialog("preset")}><BookmarkPlus />Enregistrer en preset</Button>
-        <Button type="button" variant="ghost" size="sm" className="justify-start" disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={otherTabs.length ? undefined : "Cet index n’a pas d’autre onglet"}><Copy />Copier vers un onglet…</Button>
-        <Button type="button" variant="ghost" size="sm" className="justify-start text-destructive hover:text-destructive" disabled={disabled} onClick={() => { const cards = value.cards.filter((entry) => entry.id !== card.id); setCards(cards); setSelected(cards[0]?.id ?? null); setSelectedBlock(null) }}><Trash2 />Retirer la carte</Button>
-      </div>}
-      {builtin && value.cards.length > 0 && <p className="rounded-lg bg-primary/5 px-2.5 py-2 text-[11px] leading-4 text-muted-foreground"><Star className="mr-1 inline size-3 text-[#c9a227]" />Les cartes qu’Eraser avait déjà pour cet index. Modifie-les librement : elles sont enregistrées pour tout le monde à « Enregistrer ».</p>}
-      {!builtin && onReset && builtins.length > 0 && <Button type="button" variant="ghost" size="sm" className="justify-start text-xs text-muted-foreground" disabled={disabled} onClick={onReset}><RotateCcw />Revenir aux cartes d’Eraser</Button>}
-    </aside>
-
-    {card
-      ? <>
-        <section className="min-w-0"><CardSettings key={card.id} card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={updateCard} disabled={disabled} /></section>
-        <CardPreview card={card} columns={columns} samples={samples} selectedBlock={selectedBlock} onSelectBlock={(id) => setSelectedBlock(id)} />
-      </>
-      : <div className="grid place-items-center rounded-xl border border-dashed p-10 text-center xl:col-span-2">
-        <div className="grid max-w-sm gap-3">
-          <LayoutGrid className="mx-auto size-8 text-primary/50" />
-          <p className="font-display text-xl font-semibold">Montrer « {tabName} » en cartes</p>
-          <p className="text-sm text-muted-foreground">Une carte, c’est une image, une couleur, un cadre et des blocs (titre, lignes, texte, pastilles, jauge…). Pars d’une forme toute prête, remplie avec les colonnes de l’onglet.</p>
-          <div><Button type="button" disabled={disabled} onClick={() => setDialog("new")}><Plus />Créer une carte</Button></div>
-        </div>
-      </div>}
+  const at = card ? value.cards.findIndex((entry) => entry.id === card.id) : -1
+  const full = value.cards.length >= 12
+  return <div className="mt-2 grid gap-1.5 rounded-lg border border-dashed bg-background/40 p-2">
+    <p className={`${groupTitle} px-1`}>Cartes de « {tabName} »</p>
+    {value.cards.length > 0 && <div className="flex items-center gap-1">
+      <NativeSelect value={card?.id ?? ""} disabled={disabled} onChange={(event) => onSelect(event.target.value || null)} className="h-7 min-w-0 flex-1 py-0 text-[11px]" aria-label="Carte modifiée">
+        {value.cards.map((entry) => <NativeSelectOption key={entry.id} value={entry.id}>{entry.id === defaultId ? "★ " : ""}{entry.name}</NativeSelectOption>)}
+      </NativeSelect>
+      {card && <Button type="button" variant="ghost" size="icon-xs" className={card.id === defaultId ? "text-[#c9a227]" : ""} disabled={disabled || card.id === defaultId} onClick={() => onChange({ ...value, defaultId: card.id })} title={card.id === defaultId ? "Carte montrée d’abord" : "Montrer cette carte d’abord (l’étoile)"} aria-label="Carte par défaut"><Star fill={card.id === defaultId ? "currentColor" : "none"} /></Button>}
+    </div>}
+    {card && <div className="flex items-center gap-1">
+      <Input value={card.name} disabled={disabled} maxLength={60} onChange={(event) => setCards(value.cards.map((entry) => entry.id === card.id ? { ...entry, name: event.target.value } : entry))} className="h-7 min-w-0 flex-1 text-[11px]" aria-label="Nom de la carte" />
+      <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || at <= 0} onClick={() => moveCard(-1)} aria-label="Avancer la carte" title="Avancer dans la liste des cartes"><ArrowUp /></Button>
+      <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || at < 0 || at >= value.cards.length - 1} onClick={() => moveCard(1)} aria-label="Reculer la carte" title="Reculer dans la liste des cartes"><ArrowDown /></Button>
+    </div>}
+    {!value.cards.length && <p className="rounded-lg border border-dashed p-2 text-center text-[11px] text-muted-foreground">Aucune carte : cet onglet s’affiche en tableau seulement.</p>}
+    <div className="flex flex-wrap gap-1">
+      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || full} onClick={() => setDialog("new")} title="Une carte de plus, à partir d’une carte d’Eraser, d’une forme de départ ou d’un preset"><Plus />Nouvelle</Button>
+      {card && <>
+        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || full} onClick={() => addCard(duplicateCard(card, `${card.name} (copie)`))} title="Une copie de la carte affichée"><Copy />Dupliquer</Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setDialog("preset")} title="Garder cette carte pour la reprendre dans n’importe quel index"><BookmarkPlus />Preset</Button>
+        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={otherTabs.length ? "Copier cette carte vers d’autres onglets" : "Cet index n’a pas d’autre onglet"}><Copy />Copier vers…</Button>
+        <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px] text-destructive hover:text-destructive" disabled={disabled} onClick={() => { const cards = value.cards.filter((entry) => entry.id !== card.id); setCards(cards); onSelect(cards[0]?.id ?? null) }}><Trash2 />Retirer</Button>
+      </>}
+    </div>
+    {builtin && value.cards.length > 0 && <p className="rounded-lg bg-primary/5 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground"><Star className="mr-1 inline size-3 text-[#c9a227]" />Les cartes qu’Eraser affiche déjà pour cet index. Modifie-les librement : elles sont enregistrées pour tout le monde à « Enregistrer ».</p>}
+    {!builtin && onReset && builtins.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={onReset}><RotateCcw />Revenir aux cartes d’Eraser</Button>}
 
     {dialog === "new" && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={addCard} onClose={() => setDialog(null)} />}
     {dialog === "preset" && card && <SavePresetDialog card={card} onClose={() => setDialog(null)} />}
     {dialog === "copy" && card && <CopyDialog card={card} tabs={otherTabs} onClose={() => setDialog(null)} onCopy={(ids) => { onCopyTo(ids, card); setDialog(null) }} />}
+  </div>
+}
+
+type CardPageKey = "card" | "image" | "blocks" | "composition"
+
+const cardPages: Array<{ value: CardPageKey; label: string; icon: ReactNode }> = [
+  { value: "card", label: "Carte", icon: <Square className="size-3.5" /> },
+  { value: "image", label: "Image", icon: <ImageIcon className="size-3.5" /> },
+  { value: "blocks", label: "Blocs", icon: <ListTree className="size-3.5" /> },
+  { value: "composition", label: "Composition", icon: <LayoutTemplate className="size-3.5" /> },
+]
+
+/** L'éditeur de la carte choisie : ses réglages en pages, et l'aperçu en direct. */
+export function IndexCardEditor({ tabName, columns, value, builtins, samples, selected, onSelect, onChange, disabled = false }: {
+  tabName: string
+  columns: CardColumn[]
+  /** Les cartes de l'onglet (brouillon). */
+  value: TabCards
+  /** Les cartes qu'Eraser avait déjà pour cet index (proposées dans « Nouvelle carte »). */
+  builtins: CardTemplate[]
+  samples: Array<Record<string, string>>
+  selected: string | null
+  onSelect: (id: string | null) => void
+  onChange: (value: TabCards) => void
+  disabled?: boolean
+}) {
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
+  const [page, setPage] = useState<CardPageKey>("card")
+  const [creating, setCreating] = useState(false)
+  const card = pickedCard(value, selected)
+  const updateCard = (next: CardTemplate) => onChange({ ...value, cards: value.cards.map((entry) => entry.id === next.id ? next : entry) })
+  const selectBlock = (id: string | null) => { setSelectedBlock(id); if (id) setPage("blocks") }
+
+  if (!card) return <div className="grid place-items-center rounded-xl border border-dashed p-10 text-center">
+    <div className="grid max-w-sm gap-3">
+      <LayoutGrid className="mx-auto size-8 text-primary/50" />
+      <p className="font-display text-xl font-semibold">Montrer « {tabName} » en cartes</p>
+      <p className="text-sm text-muted-foreground">Une carte, c’est une taille, une image, une couleur, des blocs (titre, lignes, texte, pastilles, jauge…) et une composition libre. Pars d’une carte d’Eraser ou d’une forme toute prête, remplie avec les colonnes de l’onglet.</p>
+      <div><Button type="button" disabled={disabled} onClick={() => setCreating(true)}><Plus />Créer une carte</Button></div>
+    </div>
+    {creating && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={(next) => { onChange({ ...value, cards: [...value.cards, next] }); onSelect(next.id); setCreating(false) }} onClose={() => setCreating(false)} />}
+  </div>
+
+  return <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
+    <section className="grid min-w-0 content-start gap-3">
+      <div className="flex flex-wrap items-center gap-2">
+        <Segmented ariaLabel="Page des réglages" value={page} options={cardPages} onChange={setPage} />
+        <span className="truncate text-xs text-muted-foreground">« {card.name} »</span>
+      </div>
+      {page === "card" && <CardPage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
+      {page === "image" && <ImagePage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
+      {page === "blocks" && <BlocksPage key={card.id} card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={updateCard} disabled={disabled} />}
+      {page === "composition" && <CompositionPage key={card.id} card={card} selectedBlock={selectedBlock} onSelectBlock={selectBlock} onChange={updateCard} disabled={disabled} />}
+    </section>
+    <CardPreview card={card} columns={columns} samples={samples} selectedBlock={selectedBlock} onSelectBlock={selectBlock} />
   </div>
 }

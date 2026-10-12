@@ -15,7 +15,26 @@ export { cellNumber }
 export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
 
 export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown"
-export type DashboardTile = { kind: DashboardTileKind; column?: string; label?: string; /** Couleur de la tuile (#hex). */ color?: string; /** Tuile large (deux places). */ wide?: boolean }
+export type DashboardTile = {
+  kind: DashboardTileKind
+  column?: string
+  label?: string
+  /** Couleur de la tuile (#hex). */
+  color?: string
+  /** Tuile large (deux places). */
+  wide?: boolean
+  /** Une icône (nom d'icône ou émoji) dans la tuile. */
+  icon?: string
+  /** Une unité écrite après le nombre (« PO », « % »). */
+  unit?: string
+  /** La taille du nombre. */
+  size?: "sm" | "md" | "lg"
+  /** Une ligne sous le nombre (« sur l'ensemble des lieux »). */
+  note?: string
+}
+
+/** Une colonne du kanban réglée à la main : son libellé, sa couleur, son icône, cachée, une limite. */
+export type KanbanLane = { value: string; label?: string; color?: string; icon?: string; hidden?: boolean; limit?: number }
 
 /**
  * L'apparence des éléments d'une vue (Modifier › Liste, Kanban…) : comme l'atelier des
@@ -26,7 +45,7 @@ export type ViewLook = {
   /** Espacement des éléments. */
   density?: "compact" | "normal" | "airy"
   /** Éléments encadrés un par un, ou lignes séparées d'un trait. */
-  surface?: "boxed" | "plain"
+  surface?: "boxed" | "plain" | "zebra"
   /** Comment la couleur (« Couleur des lignes selon ») marque un élément. */
   accent?: "border" | "tint" | "dot" | "title" | "none"
   /** Le nom : police et taille. */
@@ -53,6 +72,17 @@ export type ViewLook = {
   masterWidth?: "narrow" | "normal" | "wide"
   /** Sections : un trait discret (d'office) ou un grand titre centré, comme les familles de classes. */
   sectionStyle?: "bar" | "heading"
+  /** Une couleur d'accent propre à la vue (#hex) : titres de sections, pastilles, ligne du temps, tuiles sans couleur… */
+  color?: string
+  /** Une icône (nom d'icône ou émoji) devant les titres de sections (et les colonnes du kanban sans icône propre). */
+  sectionIcon?: string
+  /** Les coins des éléments encadrés, et une ombre. */
+  radius?: "sm" | "md" | "lg"
+  shadow?: boolean
+  /** Le nom en capitales espacées. */
+  titleCaps?: boolean
+  /** Les libellés des colonnes montrées : discrets, ou à la couleur d'accent. */
+  fieldColor?: "muted" | "accent"
 }
 
 export type ViewLayout = {
@@ -95,7 +125,7 @@ export type ViewLayout = {
   /** Calendrier : la liste des lignes sans date sous le calendrier. */
   showUndated?: boolean
   /** Tableau de bord : nombre de tuiles par rangée. */
-  tileColumns?: 1 | 2 | 3 | 4
+  tileColumns?: 1 | 2 | 3 | 4 | 5 | 6
   /**
    * Liste, kanban, maître-détail, chronologie : chaque élément dessiné avec une carte de
    * « Modifier › Cartes » (son identifiant, ou « * » pour la carte par défaut de l'onglet) ;
@@ -112,9 +142,55 @@ export type ViewLayout = {
   timelineSide?: "alternate" | "right"
   /** Codex : le sommaire à côté des fiches. */
   showToc?: boolean
+  /** Une colonne icône (ou émoji) montrée devant le nom ; `itemIcon` : une icône fixe quand aucune colonne ne la donne. */
+  iconColumn?: string
+  itemIcon?: string
+  /** Une colonne montrée en pastille à droite du nom (liste, kanban, arborescence) ou en ruban sur l'image (galerie). */
+  badgeColumn?: string
+  /** Liste : les lignes numérotées ; rangées par première lettre (sans autre section). */
+  numbered?: boolean
+  alphabet?: boolean
+  /** Kanban : ses colonnes réglées une à une ; repliables d'un clic sur leur en-tête. */
+  lanes?: KanbanLane[]
+  laneCollapse?: boolean
+  /** Maître-détail : la liste à gauche ou à droite ; le détail sur une, deux ou trois colonnes ; son image. */
+  masterSide?: "left" | "right"
+  detailColumns?: 1 | 2 | 3
+  detailImage?: "side" | "banner" | "none"
+  /** Calendrier : sans la saison ; l'en-tête du mois à la couleur de la saison ; tant d'entrées au plus par jour (0 : toutes). */
+  hideSeasons?: boolean
+  monthStyle?: "plain" | "season"
+  maxPerDay?: number
+  /** Galerie : la largeur des vignettes (rem), leurs proportions (largeur ÷ hauteur), l'arrondi (px), le recadrage, sans zoom au survol. */
+  galleryWidthRem?: number
+  galleryRatio?: number
+  galleryRadiusPx?: number
+  galleryFit?: "cover" | "contain"
+  galleryStill?: boolean
+  /** Chronologie : des points, des icônes en médaillon ou des chapitres ; un jalon par an, décennie, siècle ou millénaire ; la date écrite. */
+  timelineStyle?: "dots" | "icons" | "chapters"
+  milestoneEvery?: 1 | 10 | 100 | 1000
+  milestoneIcon?: string
+  dateStyle?: "label" | "badge" | "hidden"
+  /** Arborescence : son dessin ; les icônes des branches et des feuilles ; une couleur par profondeur ; les racines en grandes sections. */
+  treeStyle?: "lines" | "indent" | "boxed"
+  branchIcon?: string
+  leafIcon?: string
+  depthColors?: boolean
+  rootsAsSections?: boolean
+  /** Codex : son style ; le texte sur deux colonnes ; les fiches numérotées ; le sommaire à côté ou au-dessus. */
+  codexStyle?: "book" | "scroll" | "plain"
+  proseColumns?: 1 | 2
+  chapterNumbers?: boolean
+  tocPosition?: "side" | "top"
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
   look?: ViewLook
 }
+
+/** Les icônes et couleurs proposées dans les éditeurs de vues (les mêmes que les cartes). */
+export const viewPalette = ["#927640", "#682522", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#397f88", "#285f8f", "#1e3a8a", "#6b4c9a", "#9d174d", "#78716c"]
+/** Les couleurs d'une arborescence « une couleur par profondeur ». */
+export const depthPalette = ["#927640", "#397f88", "#6b4c9a", "#4d7c0f", "#c2410c", "#285f8f"]
 
 /** La valeur d'`itemCard` qui veut dire « la carte par défaut de l'onglet ». */
 export const DEFAULT_ITEM_CARD = "*"
@@ -155,9 +231,13 @@ const kinds = new Set<string>([...viewLayoutKinds.map((kind) => kind.value), "st
 const tileKinds = new Set<string>(dashboardTileKinds.map((kind) => kind.value))
 const text = (value: unknown, max = 120) => typeof value === "string" ? value.replace(/\s+/g, " ").trim().slice(0, max) : ""
 
+const isHexColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+const oneOf = <T extends string>(value: unknown, allowed: readonly T[]): T | undefined => allowed.includes(value as T) ? value as T : undefined
+const bounded = (value: unknown, min: number, max: number, step = 1) => typeof value === "number" && Number.isFinite(value) ? Math.max(min, Math.min(max, Math.round(value / step) * step)) : undefined
+
 const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   density: ["compact", "normal", "airy"],
-  surface: ["boxed", "plain"],
+  surface: ["boxed", "plain", "zebra"],
   accent: ["border", "tint", "dot", "title", "none"],
   titleFont: ["display", "sans"],
   titleSize: ["sm", "md", "lg"],
@@ -173,6 +253,12 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   dropCap: [true],
   masterWidth: ["narrow", "normal", "wide"],
   sectionStyle: ["bar", "heading"],
+  color: [],
+  sectionIcon: [],
+  radius: ["sm", "md", "lg"],
+  shadow: [true],
+  titleCaps: [true],
+  fieldColor: ["muted", "accent"],
 }
 
 /** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */
@@ -181,10 +267,27 @@ export function cleanViewLook(value: unknown): ViewLook | undefined {
   const raw = value as Record<string, unknown>
   const look: Record<string, unknown> = {}
   for (const [key, allowed] of Object.entries(lookChoices)) if (allowed.includes(raw[key])) look[key] = raw[key]
+  if (isHexColor(raw.color)) look.color = raw.color
+  if (text(raw.sectionIcon, 40)) look.sectionIcon = text(raw.sectionIcon, 40)
   return Object.keys(look).length ? look as ViewLook : undefined
 }
 
-const isHexColor = (value: unknown): value is string => typeof value === "string" && /^#[0-9a-f]{6}$/i.test(value)
+
+/** Une colonne du kanban réglée à la main, nettoyée ; sans valeur : rien. */
+function cleanLane(input: unknown): KanbanLane | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  const value = text(raw.value, 80)
+  if (!value) return null
+  const lane: KanbanLane = { value }
+  if (text(raw.label, 60)) lane.label = text(raw.label, 60)
+  if (isHexColor(raw.color)) lane.color = raw.color
+  if (text(raw.icon, 40)) lane.icon = text(raw.icon, 40)
+  if (raw.hidden === true) lane.hidden = true
+  const limit = bounded(raw.limit, 1, 999)
+  if (limit) lane.limit = limit
+  return Object.keys(lane).length > 1 ? lane : null
+}
 
 /** Une présentation propre (champs connus, longueurs bornées) ; `undefined` pour le tableau simple. */
 export function cleanViewLayout(value: unknown): ViewLayout | undefined {
@@ -200,17 +303,27 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.collapsible === true) layout.collapsible = true
   if (raw.collapsed === true) layout.collapsed = true
   if (raw.compact === true) layout.compact = true
-  const fields = Array.isArray(raw.fields) ? raw.fields.map((field) => text(field)).filter(Boolean).slice(0, 4) : []
+  const fields = Array.isArray(raw.fields) ? raw.fields.map((field) => text(field)).filter(Boolean).slice(0, 8) : []
   if (fields.length) layout.fields = fields
   if (text(raw.kanbanColumn)) layout.kanbanColumn = text(raw.kanbanColumn)
   if (text(raw.dateColumn)) layout.dateColumn = text(raw.dateColumn)
   if (text(raw.calendar)) layout.calendar = text(raw.calendar)
-  const tiles = Array.isArray(raw.tiles) ? raw.tiles.flatMap((tile): DashboardTile[] => {
-    if (!tile || typeof tile !== "object") return []
-    const entry = tile as Record<string, unknown>
+  const tiles = Array.isArray(raw.tiles) ? raw.tiles.flatMap((input): DashboardTile[] => {
+    if (!input || typeof input !== "object") return []
+    const entry = input as Record<string, unknown>
     if (!tileKinds.has(String(entry.kind))) return []
-    return [{ kind: entry.kind as DashboardTileKind, ...(text(entry.column) ? { column: text(entry.column) } : {}), ...(text(entry.label, 60) ? { label: text(entry.label, 60) } : {}), ...(isHexColor(entry.color) ? { color: entry.color } : {}), ...(entry.wide === true ? { wide: true } : {}) }]
-  }).slice(0, 12) : []
+    const tile: DashboardTile = { kind: entry.kind as DashboardTileKind }
+    if (text(entry.column)) tile.column = text(entry.column)
+    if (text(entry.label, 60)) tile.label = text(entry.label, 60)
+    if (isHexColor(entry.color)) tile.color = entry.color
+    if (entry.wide === true) tile.wide = true
+    if (text(entry.icon, 40)) tile.icon = text(entry.icon, 40)
+    if (text(entry.unit, 12)) tile.unit = text(entry.unit, 12)
+    const size = oneOf(entry.size, ["sm", "md", "lg"] as const)
+    if (size) tile.size = size
+    if (text(entry.note, 80)) tile.note = text(entry.note, 80)
+    return [tile]
+  }).slice(0, 16) : []
   if (tiles.length) layout.tiles = tiles
   if (text(raw.sortBy)) layout.sortBy = text(raw.sortBy)
   if (raw.sortDesc === true) layout.sortDesc = true
@@ -223,7 +336,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   const detailFields = Array.isArray(raw.detailFields) ? raw.detailFields.map((field) => text(field)).filter(Boolean).slice(0, 12) : []
   if (detailFields.length) layout.detailFields = detailFields
   if (raw.showUndated === true) layout.showUndated = true
-  if (raw.tileColumns === 1 || raw.tileColumns === 2 || raw.tileColumns === 4) layout.tileColumns = raw.tileColumns
+  if (raw.tileColumns === 1 || raw.tileColumns === 2 || raw.tileColumns === 4 || raw.tileColumns === 5 || raw.tileColumns === 6) layout.tileColumns = raw.tileColumns
   if (text(raw.itemCard, 80)) layout.itemCard = text(raw.itemCard, 80)
   if (text(raw.parentColumn)) layout.parentColumn = text(raw.parentColumn)
   if (raw.galleryShape === "square" || raw.galleryShape === "portrait" || raw.galleryShape === "landscape") layout.galleryShape = raw.galleryShape
@@ -231,6 +344,48 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.captionOnHover === true) layout.captionOnHover = true
   if (raw.timelineSide === "alternate" || raw.timelineSide === "right") layout.timelineSide = raw.timelineSide
   if (raw.showToc === true) layout.showToc = true
+  // Les réglages propres à chaque vue (icônes, couleurs, formes libres).
+  if (text(raw.iconColumn)) layout.iconColumn = text(raw.iconColumn)
+  if (text(raw.itemIcon, 40)) layout.itemIcon = text(raw.itemIcon, 40)
+  if (text(raw.badgeColumn)) layout.badgeColumn = text(raw.badgeColumn)
+  if (raw.numbered === true) layout.numbered = true
+  if (raw.alphabet === true) layout.alphabet = true
+  const lanes = Array.isArray(raw.lanes) ? raw.lanes.map(cleanLane).filter((lane): lane is KanbanLane => Boolean(lane)).slice(0, 24) : []
+  if (lanes.length) layout.lanes = lanes
+  if (raw.laneCollapse === true) layout.laneCollapse = true
+  if (raw.masterSide === "right") layout.masterSide = "right"
+  if (raw.detailColumns === 1 || raw.detailColumns === 3) layout.detailColumns = raw.detailColumns
+  const detailImage = oneOf(raw.detailImage, ["side", "banner", "none"] as const)
+  if (detailImage) layout.detailImage = detailImage
+  if (raw.hideSeasons === true) layout.hideSeasons = true
+  if (raw.monthStyle === "season") layout.monthStyle = "season"
+  const maxPerDay = bounded(raw.maxPerDay, 1, 12)
+  if (maxPerDay) layout.maxPerDay = maxPerDay
+  const galleryWidthRem = bounded(raw.galleryWidthRem, 5, 30, 0.5)
+  if (galleryWidthRem) layout.galleryWidthRem = galleryWidthRem
+  const galleryRatio = bounded(raw.galleryRatio, 0.3, 4, 0.01)
+  if (galleryRatio) layout.galleryRatio = galleryRatio
+  const galleryRadiusPx = bounded(raw.galleryRadiusPx, 0, 200)
+  if (galleryRadiusPx !== undefined) layout.galleryRadiusPx = galleryRadiusPx
+  if (raw.galleryFit === "contain") layout.galleryFit = "contain"
+  if (raw.galleryStill === true) layout.galleryStill = true
+  const timelineStyle = oneOf(raw.timelineStyle, ["dots", "icons", "chapters"] as const)
+  if (timelineStyle) layout.timelineStyle = timelineStyle
+  if (raw.milestoneEvery === 1 || raw.milestoneEvery === 10 || raw.milestoneEvery === 100 || raw.milestoneEvery === 1000) layout.milestoneEvery = raw.milestoneEvery
+  if (text(raw.milestoneIcon, 40)) layout.milestoneIcon = text(raw.milestoneIcon, 40)
+  const dateStyle = oneOf(raw.dateStyle, ["label", "badge", "hidden"] as const)
+  if (dateStyle) layout.dateStyle = dateStyle
+  const treeStyle = oneOf(raw.treeStyle, ["lines", "indent", "boxed"] as const)
+  if (treeStyle) layout.treeStyle = treeStyle
+  if (text(raw.branchIcon, 40)) layout.branchIcon = text(raw.branchIcon, 40)
+  if (text(raw.leafIcon, 40)) layout.leafIcon = text(raw.leafIcon, 40)
+  if (raw.depthColors === true) layout.depthColors = true
+  if (raw.rootsAsSections === true) layout.rootsAsSections = true
+  const codexStyle = oneOf(raw.codexStyle, ["book", "scroll", "plain"] as const)
+  if (codexStyle) layout.codexStyle = codexStyle
+  if (raw.proseColumns === 2) layout.proseColumns = 2
+  if (raw.chapterNumbers === true) layout.chapterNumbers = true
+  if (raw.tocPosition === "top") layout.tocPosition = "top"
   const look = cleanViewLook(raw.look)
   if (look) layout.look = look
   return layout.kind === "table" && !layout.groupBy ? undefined : layout
@@ -331,7 +486,7 @@ export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewL
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
   return cleanViewLayout(next) ?? { kind: layout.kind }
 }
 
@@ -348,7 +503,7 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:kanban-wide", name: "Kanban large", builtin: true, layout: { kind: "kanban", laneWidth: "wide" } },
   { id: "eraser:master-sections", name: "Maître-détail en sections", builtin: true, layout: { kind: "master-detail", collapsible: true } },
   { id: "eraser:calendar-real", name: "Calendrier réel", builtin: true, layout: { kind: "calendar", calendar: "Calendrier réel", showUndated: true } },
-  { id: "eraser:dashboard-count", name: "Tableau de bord simple", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }], tileColumns: 3 } },
+  { id: "eraser:dashboard-count", name: "Tableau de bord simple", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }] } },
   { id: "eraser:list-cards", name: "Liste de cartes", builtin: true, layout: { kind: "list", itemCard: DEFAULT_ITEM_CARD, listColumns: 2 } },
   // La page Règles › Classes : une section par famille (Type), cinq cartes de classe par rangée.
   { id: "eraser:classes-par-famille", name: "Classes par famille", builtin: true, layout: { kind: "list", groupBy: "Type", hideEmpty: true, hideCounts: true, itemCard: "eraser-classe-carte", listColumns: 5, look: { sectionStyle: "heading" } } },
@@ -371,6 +526,22 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:gallery-captions", name: "Galerie légendée", builtin: true, layout: { kind: "gallery", galleryShape: "square", look: { caption: "below", fieldStyle: "pills" } } },
   { id: "eraser:codex-book", name: "Livre illustré", builtin: true, layout: { kind: "codex", showToc: true, look: { codexImage: "banner", dropCap: true } } },
   { id: "eraser:master-wide", name: "Maître-détail, liste large", builtin: true, layout: { kind: "master-detail", look: { masterWidth: "wide", imageShape: "circle", fieldStyle: "stacked" } } },
+  // Les formes qui tirent parti des réglages propres à chaque vue (icônes, couleurs, dessins).
+  { id: "eraser:list-numbered", name: "Liste numérotée", builtin: true, layout: { kind: "list", numbered: true, look: { surface: "zebra", density: "compact", titleFont: "sans" } } },
+  { id: "eraser:list-alphabet", name: "Annuaire par lettre", builtin: true, layout: { kind: "list", alphabet: true, collapsible: true, hideCounts: true, listColumns: 2, look: { surface: "plain", density: "compact", sectionStyle: "heading" } } },
+  { id: "eraser:list-boxed-icons", name: "Liste encadrée à icônes", builtin: true, layout: { kind: "list", itemIcon: "sparkle", look: { surface: "boxed", radius: "lg", shadow: true, accent: "title", fieldStyle: "pills", fieldColor: "accent" } } },
+  { id: "eraser:kanban-folding", name: "Kanban repliable, à icônes", builtin: true, layout: { kind: "kanban", laneCollapse: true, hideEmpty: true, look: { laneStyle: "header", sectionIcon: "flag", surface: "boxed", radius: "lg" } } },
+  { id: "eraser:master-right", name: "Maître-détail, liste à droite", builtin: true, layout: { kind: "master-detail", masterSide: "right", detailColumns: 1, detailImage: "banner", look: { masterWidth: "narrow" } } },
+  { id: "eraser:calendar-seasons", name: "Calendrier des saisons", builtin: true, layout: { kind: "calendar", monthStyle: "season", maxPerDay: 3, look: { entryStyle: "bar", density: "airy" } } },
+  { id: "eraser:dashboard-icons", name: "Tableau de bord à icônes", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count", icon: "users", size: "lg" }], tileColumns: 4, look: { tileStyle: "accent", radius: "lg", shadow: true } } },
+  { id: "eraser:gallery-polaroid", name: "Polaroïds", builtin: true, layout: { kind: "gallery", galleryWidthRem: 11, galleryRatio: 1, galleryRadiusPx: 4, look: { caption: "below", surface: "boxed", titleFont: "sans", density: "airy" } } },
+  { id: "eraser:gallery-ribbon", name: "Galerie à rubans", builtin: true, layout: { kind: "gallery", galleryShape: "portrait", galleryRadiusPx: 16, look: { caption: "overlay", accent: "border" } } },
+  { id: "eraser:timeline-chapters", name: "Chronique en chapitres", builtin: true, layout: { kind: "timeline", timelineStyle: "chapters", timelineSide: "right", dateStyle: "badge", milestoneEvery: 10, look: { surface: "plain", titleFont: "display", titleSize: "md" } } },
+  { id: "eraser:timeline-icons", name: "Frise à médaillons", builtin: true, layout: { kind: "timeline", timelineStyle: "icons", itemIcon: "flag", milestoneIcon: "hourglass", look: { density: "airy", radius: "lg" } } },
+  { id: "eraser:tree-boxed", name: "Arbre en cartes", builtin: true, layout: { kind: "tree", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, look: { density: "airy" } } },
+  { id: "eraser:tree-sections", name: "Racines en sections", builtin: true, layout: { kind: "tree", rootsAsSections: true, treeStyle: "indent", look: { sectionStyle: "heading", titleFont: "display" } } },
+  { id: "eraser:codex-scroll", name: "Parchemin", builtin: true, layout: { kind: "codex", codexStyle: "scroll", showToc: true, chapterNumbers: true, look: { dropCap: true, titleFont: "display", titleSize: "lg" } } },
+  { id: "eraser:codex-columns", name: "Codex sur deux colonnes", builtin: true, layout: { kind: "codex", proseColumns: 2, tocPosition: "top", showToc: true, look: { codexImage: "banner", density: "compact" } } },
 ]
 
 export function cleanViewPreset(value: unknown): ViewPreset | null {

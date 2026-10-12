@@ -76,3 +76,30 @@ test("la chronologie lit les dates du calendrier, puis les années seules", () =
   assert.equal(dated[0].date.yearOnly, true);
   assert.deepEqual(undated.map((row) => row.name), ["Légende", "Rumeur"]);
 });
+
+test("les réglages propres à chaque vue se relisent (icônes, couleurs, colonnes du kanban, galerie libre, chronologie, arbre, codex)", () => {
+  const list = views.cleanViewLayout({ kind: "list", numbered: true, alphabet: true, iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], look: { surface: "zebra", color: "#397f88", sectionIcon: "flag", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent" } });
+  assert.deepEqual(list, { kind: "list", fields: ["A", "B", "C", "D", "E", "F", "G", "H"], iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", numbered: true, alphabet: true, look: { surface: "zebra", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent", color: "#397f88", sectionIcon: "flag" } });
+  const kanban = views.cleanViewLayout({ kind: "kanban", kanbanColumn: "État", laneCollapse: true, lanes: [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }, { value: "" }, { value: "Rien" }] });
+  assert.deepEqual(kanban.lanes, [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }]);
+  assert.equal(kanban.laneCollapse, true);
+  const master = views.cleanViewLayout({ kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
+  assert.deepEqual(master, { kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
+  const calendar = views.cleanViewLayout({ kind: "calendar", dateColumn: "Date", hideSeasons: true, monthStyle: "season", maxPerDay: 40 });
+  assert.deepEqual(calendar, { kind: "calendar", dateColumn: "Date", hideSeasons: true, monthStyle: "season", maxPerDay: 12 });
+  const dashboard = views.cleanViewLayout({ kind: "dashboard", tileColumns: 6, tiles: [{ kind: "count", icon: "users", unit: "PNJ", size: "lg", note: "dans le monde", color: "#285f8f" }, { kind: "sum", column: "Prix", unit: "PO" }] });
+  assert.deepEqual(dashboard, { kind: "dashboard", tiles: [{ kind: "count", color: "#285f8f", icon: "users", unit: "PNJ", size: "lg", note: "dans le monde" }, { kind: "sum", column: "Prix", unit: "PO" }], tileColumns: 6 });
+  const gallery = views.cleanViewLayout({ kind: "gallery", imageColumn: "Portrait", galleryWidthRem: 11.25, galleryRatio: 1.333, galleryRadiusPx: 500, galleryFit: "contain", galleryStill: true, badgeColumn: "Rang" });
+  assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", badgeColumn: "Rang", galleryWidthRem: 11.5, galleryRatio: 1.33, galleryRadiusPx: 200, galleryFit: "contain", galleryStill: true });
+  const timeline = views.cleanViewLayout({ kind: "timeline", dateColumn: "Année", timelineStyle: "chapters", milestoneEvery: 100, milestoneIcon: "hourglass", dateStyle: "badge" });
+  assert.deepEqual(timeline, { kind: "timeline", dateColumn: "Année", timelineStyle: "chapters", milestoneEvery: 100, milestoneIcon: "hourglass", dateStyle: "badge" });
+  const tree = views.cleanViewLayout({ kind: "tree", parentColumn: "Pays", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, rootsAsSections: true });
+  assert.deepEqual(tree, { kind: "tree", parentColumn: "Pays", treeStyle: "boxed", branchIcon: "trees", leafIcon: "leaf", depthColors: true, rootsAsSections: true });
+  const codex = views.cleanViewLayout({ kind: "codex", codexStyle: "scroll", proseColumns: 2, chapterNumbers: true, tocPosition: "top", showToc: true });
+  assert.deepEqual(codex, { kind: "codex", showToc: true, codexStyle: "scroll", proseColumns: 2, chapterNumbers: true, tocPosition: "top" });
+  // Valeurs inconnues écartées, et un preset appliqué ailleurs garde icônes et pastilles seulement si leurs colonnes existent.
+  assert.deepEqual(views.cleanViewLayout({ kind: "tree", treeStyle: "ronde", milestoneEvery: 7, look: { color: "rouge", radius: "xl" } }), { kind: "tree" });
+  const fitted = views.fitLayoutToColumns({ kind: "list", iconColumn: "icône", badgeColumn: "Rang", itemIcon: "star" }, ["Nom", "Icône"]);
+  assert.deepEqual(fitted, { kind: "list", iconColumn: "Icône", itemIcon: "star" });
+  for (const preset of views.builtinViewPresets) assert.deepEqual(views.cleanViewLayout(preset.layout), preset.layout, preset.id);
+});

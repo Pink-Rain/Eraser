@@ -6,7 +6,7 @@ import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, 
 import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
-import { LayoutSettings } from "@/components/eraser/index-views"
+import { ViewKindSettings } from "@/components/eraser/index-views-editor"
 import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
@@ -239,7 +239,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         <option value="own">Propre à cette page…</option>
       </select>
     </Field>}
-    {block.tab && presentation && block.layout && <LayoutSettings fixedKind layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && presentation && block.layout && isPresentationKind(block.kind) && <ViewKindSettings kind={block.kind} layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
     {block.tab && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}

@@ -4,7 +4,10 @@
  * par onglet : portée « index-locks », clé « index::onglet », valeur `{ colonne: réglage }` en
  * JSON. Plus aucun réglage dans l'onglet : l'entrée est effacée.
  */
-import { cleanTabLocks, type TabLocks } from "@/lib/index-locks"
+import { cleanTabLocks, tabLocksOf, type TabLocks } from "@/lib/index-locks"
+
+// Règle pure, gardée ici pour les lecteurs du serveur ; la page l'importe de lib/index-locks.
+export { tabLocksOf }
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 const SCOPE = "index-locks"
@@ -62,10 +65,3 @@ export async function saveIndexLocks(index: string, changes: Array<{ tab: string
   return (await all(true)).get(index.trim()) ?? {}
 }
 
-/** Les cadenas d'un onglet parmi ceux d'un index (nom d'onglet sans accents ni casse). */
-export function tabLocksOf(locks: Record<string, TabLocks> | null | undefined, tab: string): TabLocks | null {
-  if (!locks) return null
-  const wanted = tab.replace(/\s+/g, " ").trim().normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr")
-  const found = Object.entries(locks).find(([name]) => name.replace(/\s+/g, " ").trim().normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr") === wanted)
-  return found?.[1] ?? null
-}

@@ -103,8 +103,11 @@ function clampStyle(lines: number | undefined): CSSProperties {
   return { display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: lines, overflow: "hidden" }
 }
 
-const aspectClass = (aspect: CardAspect | undefined) => ({ aspectRatio: (aspect ?? "4/3").replace("/", " / ") }) as CSSProperties
+/** Les proportions d'une image : un réglage libre (largeur ÷ hauteur), sinon un format nommé. */
+const aspectClass = (aspect: CardAspect | undefined, ratio?: number) => ({ aspectRatio: ratio ? String(ratio) : (aspect ?? "4/3").replace("/", " / ") }) as CSSProperties
 const shapeClass = (shape: CardShape | undefined) => shape === "circle" ? "rounded-full" : shape === "rounded" ? "rounded-xl" : ""
+/** L'arrondi des coins réglé en pixels (il l'emporte sur la forme). */
+const radiusStyle = (radiusPx: number | undefined): CSSProperties => radiusPx === undefined ? {} : { borderRadius: radiusPx }
 
 function initialsOf(name: string) {
   return name.split(/\s+/).filter(Boolean).slice(0, 2).map((word) => word[0]?.toLocaleUpperCase("fr") ?? "").join("")
@@ -281,7 +284,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       if (!block.column) return null
       if (!(row.value(block.column) ?? "").trim()) return null
       return <div className={cn("flex", align === "center" || ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : "")}>
-        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} alt={block.column} initials="" className="w-full" style={{ ...aspectClass(block.aspect ?? "1/1"), width: `${block.width ?? 100}%` }} />
+        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} alt={block.column} initials="" className="w-full" style={{ ...aspectClass(block.aspect ?? "1/1", block.ratio), ...radiusStyle(block.radiusPx), width: `${block.width ?? 100}%` }} />
       </div>
     }
     case "value": {
@@ -318,6 +321,19 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
     }
     case "divider":
       return <hr className="border-t" style={{ borderColor: `color-mix(in srgb, ${accent} 25%, var(--border))` }} />
+    case "zone": {
+      // Une zone de couleur : un aplat, un trait, une pastille, un point — à la couleur choisie (ou l'accent).
+      const color = block.tone && block.tone !== "accent" && block.tone !== "default" && block.tone !== "column" ? (block.tone === "muted" ? "var(--muted-foreground)" : block.tone) : accent
+      const zone = block.zone ?? "block"
+      const height = block.height ?? (zone === "line" ? 2 : zone === "dot" ? 10 : 24)
+      const width = zone === "dot" ? height : `${block.width ?? 100}%`
+      const radius = block.radiusPx ?? (zone === "pill" || zone === "dot" ? 999 : zone === "line" ? 1 : 6)
+      return <div className={cn("flex", align === "center" || ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : "")}>
+        <span aria-hidden="true" className="block shrink-0" style={{ height, width, backgroundColor: color, borderRadius: radius, opacity: zone === "line" ? 0.75 : 1 }} />
+      </div>
+    }
+    case "space":
+      return <div aria-hidden="true" style={{ height: block.height ?? 12 }} />
     case "details": {
       const columns = (block.columns ?? []).filter((column) => plainCardText(row.value(column) ?? ""))
       if (!columns.length) return null
@@ -376,7 +392,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   const density = card.density ?? "normal"
   const editing = Boolean(onSelectBlock)
 
-  const blocks = card.blocks.map((block) => {
+  const renderBlock = (block: CardBlock) => {
     const body = <BlockBody block={block} ctx={ctx} />
     if (!editing) return <div key={block.id} className="min-w-0">{body}</div>
     // Dans l'éditeur, un bloc vide pour cette ligne reste visible (et cliquable) en pointillés.
@@ -388,7 +404,22 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
     >
       {body ?? <span className="block rounded-md border border-dashed px-1.5 py-0.5 text-[10px] text-muted-foreground">{blockPlaceholder(block)}</span>}
     </div>
-  })
+  }
+  // La composition libre : des lignes de cases ; les blocs qui ne sont dans aucune case suivent.
+  const byId = new Map(card.blocks.map((block) => [block.id, block]))
+  const placedIds = new Set((card.rows ?? []).flatMap((row) => row.cells.flatMap((cell) => cell.blocks)))
+  const rowGaps = { none: "gap-0", sm: "gap-1.5", md: "gap-3", lg: "gap-5" } as const
+  const rows = (card.rows ?? []).map((row) => <div key={row.id} className={cn("flex min-w-0 items-start", rowGaps[row.gap ?? "md"])}>
+    {row.cells.map((cell) => {
+      const items = cell.blocks.flatMap((id) => { const block = byId.get(id); return block ? [renderBlock(block)] : [] })
+      if (!items.length && !editing) return null
+      const width = cell.width === "fill" || cell.width === undefined ? { flex: "1 1 0%", minWidth: 0 } : cell.width === "auto" ? { flex: "0 0 auto", minWidth: 0 } : { flex: `0 0 ${cell.width}%`, maxWidth: `${cell.width}%`, minWidth: 0 }
+      return <div key={cell.id} className={cn("flex min-w-0 flex-col gap-1.5", cell.align === "center" && "items-center text-center", cell.align === "right" && "items-end text-right", cell.valign === "center" && "justify-center self-stretch", cell.valign === "bottom" && "justify-end self-stretch")} style={width}>
+        {items.length ? items : <span className="block rounded-md border border-dashed px-1.5 py-0.5 text-[10px] text-muted-foreground">Case vide</span>}
+      </div>
+    })}
+  </div>)
+  const blocks = [...rows, ...card.blocks.filter((block) => !placedIds.has(block.id)).map(renderBlock)]
 
   const border = card.border ?? "subtle"
   const surface = card.surface ?? "card"
@@ -425,13 +456,19 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   const chevron = card.chevron ? <ChevronRight className="mr-2 size-4 shrink-0 self-center text-muted-foreground/60" aria-hidden="true" /> : null
 
   let content: ReactNode
-  if (media?.position === "top") {
-    content = <>{pictureFor(cn("w-full", media.shape === "circle" && "mx-auto mt-3 w-1/2"), aspectClass(media.aspect))}{band}{body}</>
+  // En haut ou en bas : la hauteur suit les proportions, ou une hauteur fixe ; une marge si demandé.
+  const topStyle = media ? { ...(media.sizing === "height" ? { height: media.heightPx ?? 160 } : aspectClass(media.aspect, media.ratio)), ...radiusStyle(media.radiusPx) } : undefined
+  if (media?.position === "top" || media?.position === "bottom") {
+    const picture = pictureFor(cn("w-full", media.shape === "circle" && "mx-auto mt-3 w-1/2", media.inset && (density === "compact" ? "w-[calc(100%-1rem)] mx-2 mt-2" : "w-[calc(100%-1.5rem)] mx-3 mt-3")), topStyle)
+    content = media.position === "top" ? <>{picture}{band}{body}</> : <>{band}{body}{picture}</>
   } else if (media?.position === "left" || media?.position === "right") {
-    const side = pictureFor(cn(sideWidths[media.size ?? "md"], "self-start", media.shape && media.shape !== "rect" && (density === "compact" ? "m-2" : "m-3")), aspectClass(media.aspect ?? "1/1"))
+    // Collée en haut et en bas (toute la hauteur), ou seulement en haut, ou en bas.
+    const anchor = media.anchor ?? "top"
+    const inset = media.shape && media.shape !== "rect" ? true : Boolean(media.inset)
+    const side = pictureFor(cn(sideWidths[media.size ?? "md"], anchor === "stretch" ? "self-stretch" : anchor === "bottom" ? "self-end" : "self-start", inset && (density === "compact" ? "m-2" : "m-3")), { ...(anchor === "stretch" ? {} : aspectClass(media.aspect ?? "1/1", media.ratio)), ...radiusStyle(media.radiusPx) })
     content = <>{band}<div className={cn("flex min-w-0 flex-1", media.position === "right" && "flex-row-reverse")}>{side}{body}{chevron}</div></>
   } else if (onImage && media) {
-    content = <div className="relative grid min-w-0 flex-1" style={aspectClass(media.aspect ?? "4/3")}>
+    content = <div className="relative grid min-w-0 flex-1" style={aspectClass(media.aspect ?? "4/3", media.ratio)}>
       {pictureFor("absolute inset-0 size-full")}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
       {body}
@@ -439,6 +476,8 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   } else {
     content = <>{band}<div className="flex min-w-0 flex-1">{body}{chevron}</div></>
   }
+  // La taille libre de la carte : coins, hauteur minimale, proportions fixes.
+  const sizeStyle: CSSProperties = { ...radiusStyle(card.radiusPx), ...(card.minHeightPx ? { minHeight: card.minHeightPx } : {}), ...(card.ratio ? { aspectRatio: String(card.ratio) } : {}) }
 
   const shellClass = cn(
     "group/card relative flex min-w-0 flex-col overflow-hidden text-left text-card-foreground",
@@ -454,7 +493,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   )
   return <article
     className={shellClass}
-    style={shell}
+    style={{ ...shell, ...sizeStyle }}
     role={interactive ? "button" : undefined}
     tabIndex={interactive ? 0 : undefined}
     aria-label={interactive ? `Ouvrir ${name || "la ligne"}` : undefined}
@@ -471,7 +510,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
 
 function blockPlaceholder(block: CardBlock) {
   const columns = [block.column, ...(block.columns ?? []), ...(block.parts ?? []).map((part) => part.column)].filter(Boolean)
-  const label = { title: "Titre", line: "Ligne", text: "Texte", pills: "Pastilles", field: "Libellé : valeur", bar: "Barre", stats: "Tuiles", image: "Image", value: "Valeur", divider: "Séparateur", details: "Détails" }[block.type]
+  const label = { title: "Titre", line: "Ligne", text: "Texte", pills: "Pastilles", field: "Libellé : valeur", bar: "Barre", stats: "Tuiles", image: "Image", value: "Valeur", divider: "Séparateur", details: "Détails", zone: "Zone de couleur", space: "Espace" }[block.type]
   return columns.length ? `${label} : ${columns.join(", ")} (vide ici)` : `${label} : choisis une colonne`
 }
 
@@ -482,9 +521,16 @@ function blockPlaceholder(block: CardBlock) {
 /** Les colonnes de la grille pour une largeur de carte. */
 export function cardGridStyle(card: CardTemplate): CSSProperties {
   const width = card.width ?? "md"
-  if (width === "full") return { gridTemplateColumns: "minmax(0, 1fr)" }
-  const rem = cardWidths.find((entry) => entry.value === width)?.rem ?? 15
-  return { gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${rem}rem), 1fr))` }
+  if (width === "full" && !card.widthRem) return { gridTemplateColumns: "minmax(0, 1fr)" }
+  const rem = card.widthRem ?? cardWidths.find((entry) => entry.value === width)?.rem ?? 15
+  // Au plus N cartes par ligne : chaque colonne fait au moins 1/N de la place.
+  const minimum = card.grid?.max ? `max(min(100%, ${rem}rem), calc(${(100 / card.grid.max).toFixed(3)}% - 0.75rem))` : `min(100%, ${rem}rem)`
+  return { gridTemplateColumns: `repeat(auto-fill, minmax(${minimum}, 1fr))`, ...(card.grid?.phone === 2 ? { "--eraser-card-phone": "2" } as CSSProperties : {}) }
+}
+
+/** La largeur d'une carte (en rem) d'après ses réglages, pour les aperçus. */
+export function cardWidthRem(card: CardTemplate) {
+  return card.widthRem ?? cardWidths.find((entry) => entry.value === (card.width ?? "md"))?.rem ?? 15
 }
 
 const PAGE = 60

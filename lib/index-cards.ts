@@ -29,7 +29,7 @@ export type CardShape = "rect" | "rounded" | "circle"
 /** Un morceau d'une ligne : une colonne, avec ce qu'on écrit avant et après sa valeur. */
 export type CardPart = { column: string; prefix?: string; suffix?: string; tone?: CardTone; bold?: boolean; italic?: boolean }
 
-export type CardBlockType = "title" | "line" | "text" | "pills" | "field" | "bar" | "stats" | "image" | "value" | "divider" | "details"
+export type CardBlockType = "title" | "line" | "text" | "pills" | "field" | "bar" | "stats" | "image" | "value" | "divider" | "details" | "zone" | "space"
 
 /**
  * Un bloc de la carte. Un seul type d'objet, dont chaque type de bloc lit les réglages qui
@@ -75,11 +75,32 @@ export type CardBlock = {
   fit?: CardFit
   shape?: CardShape
   width?: number
+  /** Image, zone : les proportions libres (largeur ÷ hauteur, 0,3 à 4) et l'arrondi des coins (en pixels). */
+  ratio?: number
+  radiusPx?: number
+  /** Zone de couleur, espace : la hauteur (en pixels). */
+  height?: number
+  /** Zone de couleur : son dessin. */
+  zone?: "block" | "line" | "pill" | "dot"
   /** Détails : ouverts d'emblée. */
   open?: boolean
 }
 
-export type CardMediaPosition = "top" | "left" | "right" | "background"
+/** Une case d'une ligne de la carte : des blocs côte à côte, chacune sa largeur et son alignement. */
+export type CardCell = {
+  id: string
+  /** Les blocs posés dans la case, de haut en bas (leurs identifiants dans `blocks`). */
+  blocks: string[]
+  /** La largeur : « auto » (sa taille), « fill » (le reste), ou une part en % de la carte. */
+  width?: "auto" | "fill" | number
+  align?: "left" | "center" | "right"
+  valign?: "top" | "center" | "bottom"
+}
+
+/** Une ligne de la carte : ses cases, de gauche à droite. */
+export type CardRow = { id: string; cells: CardCell[]; gap?: "none" | "sm" | "md" | "lg" }
+
+export type CardMediaPosition = "top" | "bottom" | "left" | "right" | "background"
 
 /** L'image principale de la carte (portrait, bannière, icône…). */
 export type CardMedia = {
@@ -92,6 +113,16 @@ export type CardMedia = {
   size?: "xs" | "sm" | "md" | "lg"
   /** Une icône ou une image absente : un fond à la couleur de l'accent. */
   tint?: boolean
+  /** Les proportions libres (largeur ÷ hauteur) et l'arrondi des coins (en pixels). */
+  ratio?: number
+  radiusPx?: number
+  /** À gauche ou à droite : collée en haut et en bas (toute la hauteur), ou seulement en haut, ou en bas. */
+  anchor?: "stretch" | "top" | "bottom"
+  /** En haut ou en bas : sa hauteur suit ses proportions, ou une hauteur fixe (en pixels). */
+  sizing?: "aspect" | "height"
+  heightPx?: number
+  /** Une marge autour de l'image (sinon collée aux bords). */
+  inset?: boolean
 }
 
 export type CardWidth = "xs" | "sm" | "md" | "lg" | "xl" | "full"
@@ -119,6 +150,20 @@ export type CardTemplate = {
   /** La carte se soulève au survol. */
   lift?: boolean
   blocks: CardBlock[]
+  /**
+   * La composition libre : des lignes de cases où les blocs sont posés (gauche, centre,
+   * droite, pleine largeur…). Sans lignes, les blocs s'empilent de haut en bas. Un bloc
+   * qui n'est dans aucune case s'affiche à la suite.
+   */
+  rows?: CardRow[]
+  /** La taille libre : la largeur dans la grille (en rem, 6 à 48), l'arrondi des coins (en pixels). */
+  widthRem?: number
+  radiusPx?: number
+  /** Une hauteur minimale (en pixels), ou des proportions fixes pour toute la carte (largeur ÷ hauteur). */
+  minHeightPx?: number
+  ratio?: number
+  /** La grille : au plus tant de cartes par ligne ; sur téléphone, une ou deux par ligne. */
+  grid?: { max?: number; phone?: 1 | 2 }
 }
 
 /** Les cartes d'un onglet, et celle qu'on montre d'abord. */
@@ -143,6 +188,8 @@ export const cardBlockTypes: Array<{ value: CardBlockType; label: string; hint: 
   { value: "value", label: "Valeur telle quelle", hint: "Une colonne affichée selon son type : jauge, icône, case, galerie…" },
   { value: "details", label: "Détails repliables", hint: "Des textes cachés sous un titre, qu'on déplie (notes, lore)." },
   { value: "divider", label: "Séparateur", hint: "Un trait fin." },
+  { value: "zone", label: "Zone de couleur", hint: "Un aplat, un trait, une pastille ou un point à la couleur de l'accent (ou une autre) : pour composer." },
+  { value: "space", label: "Espace", hint: "Un peu d'air, de la hauteur voulue." },
 ]
 
 export const cardAspects: Array<{ value: CardAspect; label: string }> = [
@@ -295,16 +342,47 @@ function cleanBlock(input: unknown): CardBlock | null {
   if (fit) block.fit = fit
   const shape = oneOf<CardShape>(raw.shape, ["rect", "rounded", "circle"])
   if (shape) block.shape = shape
-  if (typeof raw.width === "number" && Number.isFinite(raw.width)) block.width = Math.max(15, Math.min(100, Math.round(raw.width)))
+  if (typeof raw.width === "number" && Number.isFinite(raw.width)) block.width = Math.max(10, Math.min(100, Math.round(raw.width)))
+  if (typeof raw.ratio === "number" && Number.isFinite(raw.ratio)) block.ratio = Math.max(0.3, Math.min(4, Math.round(raw.ratio * 100) / 100))
+  if (typeof raw.radiusPx === "number" && Number.isFinite(raw.radiusPx)) block.radiusPx = Math.max(0, Math.min(200, Math.round(raw.radiusPx)))
+  if (typeof raw.height === "number" && Number.isFinite(raw.height)) block.height = Math.max(1, Math.min(400, Math.round(raw.height)))
+  const zone = oneOf<"block" | "line" | "pill" | "dot">(raw.zone, ["block", "line", "pill", "dot"])
+  if (zone) block.zone = zone
   if (raw.open === true) block.open = true
   return block
+}
+
+function cleanCell(input: unknown): CardCell | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  const blocks = (Array.isArray(raw.blocks) ? raw.blocks : []).map((item) => text(item, 20)).filter(Boolean).slice(0, MAX_BLOCKS)
+  const cell: CardCell = { id: text(raw.id, 20) || cardId("k"), blocks }
+  if (raw.width === "auto" || raw.width === "fill") cell.width = raw.width
+  else if (typeof raw.width === "number" && Number.isFinite(raw.width)) cell.width = Math.max(5, Math.min(100, Math.round(raw.width)))
+  const align = oneOf<"left" | "center" | "right">(raw.align, ["left", "center", "right"])
+  if (align) cell.align = align
+  const valign = oneOf<"top" | "center" | "bottom">(raw.valign, ["top", "center", "bottom"])
+  if (valign) cell.valign = valign
+  return cell
+}
+
+/** Les lignes de la carte lues ; un bloc n'est dans une case qu'une fois. */
+function cleanRows(input: unknown, blockIds: Set<string>): CardRow[] {
+  const used = new Set<string>()
+  return (Array.isArray(input) ? input : []).slice(0, 24).flatMap((entry): CardRow[] => {
+    if (!entry || typeof entry !== "object") return []
+    const raw = entry as Record<string, unknown>
+    const cells = (Array.isArray(raw.cells) ? raw.cells : []).map(cleanCell).filter((cell): cell is CardCell => Boolean(cell)).slice(0, 6).map((cell) => ({ ...cell, blocks: cell.blocks.filter((id) => blockIds.has(id) && !used.has(id) && Boolean(used.add(id))) }))
+    const gap = oneOf<"none" | "sm" | "md" | "lg">(raw.gap, ["none", "sm", "md", "lg"])
+    return [{ id: text(raw.id, 20) || cardId("r"), cells, ...(gap ? { gap } : {}) }]
+  })
 }
 
 function cleanMedia(input: unknown): CardMedia | undefined {
   if (!input || typeof input !== "object") return undefined
   const raw = input as Record<string, unknown>
   const column = text(raw.column, 120)
-  const position = oneOf<CardMediaPosition>(raw.position, ["top", "left", "right", "background"])
+  const position = oneOf<CardMediaPosition>(raw.position, ["top", "bottom", "left", "right", "background"])
   if (!column || !position) return undefined
   const media: CardMedia = { column, position }
   const aspect = oneOf<CardAspect>(raw.aspect, aspectSet)
@@ -316,6 +394,14 @@ function cleanMedia(input: unknown): CardMedia | undefined {
   const size = oneOf<"xs" | "sm" | "md" | "lg">(raw.size, ["xs", "sm", "md", "lg"])
   if (size) media.size = size
   if (raw.tint === true) media.tint = true
+  if (typeof raw.ratio === "number" && Number.isFinite(raw.ratio)) media.ratio = Math.max(0.3, Math.min(4, Math.round(raw.ratio * 100) / 100))
+  if (typeof raw.radiusPx === "number" && Number.isFinite(raw.radiusPx)) media.radiusPx = Math.max(0, Math.min(200, Math.round(raw.radiusPx)))
+  const anchor = oneOf<"stretch" | "top" | "bottom">(raw.anchor, ["stretch", "top", "bottom"])
+  if (anchor) media.anchor = anchor
+  const sizing = oneOf<"aspect" | "height">(raw.sizing, ["aspect", "height"])
+  if (sizing) media.sizing = sizing
+  if (typeof raw.heightPx === "number" && Number.isFinite(raw.heightPx)) media.heightPx = Math.max(16, Math.min(800, Math.round(raw.heightPx)))
+  if (raw.inset === true) media.inset = true
   return media
 }
 
@@ -358,6 +444,19 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   if (corner) card.corner = corner
   if (raw.chevron === true) card.chevron = true
   if (raw.lift === true) card.lift = true
+  const rows = cleanRows(raw.rows, new Set(blocks.map((block) => block.id)))
+  if (rows.length) card.rows = rows
+  if (typeof raw.widthRem === "number" && Number.isFinite(raw.widthRem)) card.widthRem = Math.max(6, Math.min(48, Math.round(raw.widthRem * 2) / 2))
+  if (typeof raw.radiusPx === "number" && Number.isFinite(raw.radiusPx)) card.radiusPx = Math.max(0, Math.min(64, Math.round(raw.radiusPx)))
+  if (typeof raw.minHeightPx === "number" && Number.isFinite(raw.minHeightPx)) card.minHeightPx = Math.max(0, Math.min(1200, Math.round(raw.minHeightPx)))
+  if (typeof raw.ratio === "number" && Number.isFinite(raw.ratio)) card.ratio = Math.max(0.3, Math.min(4, Math.round(raw.ratio * 100) / 100))
+  if (raw.grid && typeof raw.grid === "object") {
+    const grid = raw.grid as Record<string, unknown>
+    const clean: NonNullable<CardTemplate["grid"]> = {}
+    if (typeof grid.max === "number" && Number.isFinite(grid.max) && grid.max >= 1) clean.max = Math.min(12, Math.round(grid.max))
+    if (grid.phone === 1 || grid.phone === 2) clean.phone = grid.phone
+    if (Object.keys(clean).length) card.grid = clean
+  }
   return card
 }
 
@@ -544,24 +643,6 @@ export const cardStarters: CardStarter[] = [
     },
   },
   {
-    key: "portrait",
-    label: "Portrait",
-    hint: "Une grande image verticale, le nom et deux lignes courtes : un personnage, un PNJ.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      return {
-        id: cardId(), name: "Portrait", width: "sm", lift: true, band: true, border: "subtle",
-        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
-        ...(roles.image ? { media: { column: roles.image, position: "top" as const, aspect: "4/5" as const, fit: "cover" as const } } : {}),
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "md", font: "display" }),
-          roles.choices[0] && block("line", { parts: [{ column: roles.choices[0] }], tone: "accent", bold: true, size: "xs" }),
-          (roles.choices[1] ?? roles.texts[0]) && block("line", { parts: [{ column: (roles.choices[1] ?? roles.texts[0])! }], italic: true, tone: "muted", size: "xs" }),
-        ].filter(present),
-      }
-    },
-  },
-  {
     key: "side",
     label: "Fiche horizontale",
     hint: "L’image à gauche, le contenu à droite : une jauge, des valeurs, la description.",
@@ -618,40 +699,6 @@ export const cardStarters: CardStarter[] = [
     },
   },
   {
-    key: "badge",
-    label: "Insigne centré",
-    hint: "Le titre en haut, l’image au centre, les pastilles empilées : une classe, un blason.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      return {
-        id: cardId(), name: "Insigne", width: "md", align: "center", border: "accent", shadow: true, lift: true,
-        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "xl", font: "display", tone: "accent", align: "center" }),
-          (roles.image ?? roles.glyph) && block("image", { column: (roles.image ?? roles.glyph)!, aspect: "1/1", fit: "contain", width: 80 }),
-          roles.choices.length > 0 && block("pills", { columns: roles.choices.slice(0, 3), stacked: true }),
-          roles.numbers[0] && block("divider"),
-          roles.numbers[0] && block("field", { column: roles.numbers[0] }),
-        ].filter(present),
-      }
-    },
-  },
-  {
-    key: "text",
-    label: "Texte seul",
-    hint: "Sans image : le nom en titre et tout le texte, comme une entrée de glossaire.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      return {
-        id: cardId(), name: "Texte", width: "xl", border: "none", surface: "plain",
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "xl", font: "display" }),
-          roles.description && block("text", { column: roles.description, clamp: 0, size: "md" }),
-        ].filter(present),
-      }
-    },
-  },
-  {
     key: "playing",
     label: "Carte à jouer",
     hint: "Grande illustration, titre centré, pastilles et petites tuiles en bas : un sort, un objet, une créature.",
@@ -667,82 +714,6 @@ export const cardStarters: CardStarter[] = [
           roles.description && block("text", { column: roles.description, clamp: 3, size: "xs", align: "center", italic: true, tone: "muted" }),
           roles.numbers.length > 0 && block("divider"),
           roles.numbers.length > 0 && block("stats", { columns: roles.numbers.slice(0, 4) }),
-        ].filter(present),
-      }
-    },
-  },
-  {
-    key: "combat",
-    label: "Fiche de combat",
-    hint: "Le nom et son rang, une barre de vie, les caractéristiques en tuiles, le reste replié : un PNJ, un monstre.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      const life = roles.numbers.find((column) => /pv|vie|sant[ée]|hp|points/i.test(column)) ?? roles.numbers[0]
-      const lifeMax = roles.numbers.find((column) => column !== life && /max/i.test(column))
-      const tiles = roles.numbers.filter((column) => column !== life && column !== lifeMax).slice(0, 7)
-      return {
-        id: cardId(), name: "Fiche de combat", width: "lg", border: "left", density: "compact",
-        accent: roles.color ? { column: roles.color } : { color: "#a83a33" },
-        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "1/1" as const, fit: "cover" as const, size: "sm" as const, shape: "rounded" as const } } : {}),
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "md", font: "display", ...(roles.choices[0] ? { badges: [roles.choices[0]] } : {}) }),
-          life && block("bar", { column: life, ...(lifeMax ? { maxColumn: lifeMax } : { max: 100 }), label: life, showValue: true }),
-          tiles.length > 0 && block("stats", { columns: tiles }),
-          (roles.description || roles.texts.length > 0) && block("details", { label: "Détails", columns: [roles.description, ...roles.texts].filter((column): column is string => Boolean(column)).slice(0, 4) }),
-        ].filter(present),
-      }
-    },
-  },
-  {
-    key: "dossier",
-    label: "Dossier",
-    hint: "Une fiche d’enquête : portrait à gauche, champs libellés, la description en citation.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      const fields = [...roles.choices, ...roles.numbers].slice(0, 3)
-      return {
-        id: cardId(), name: "Dossier", width: "xl", border: "top", surface: "tint",
-        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
-        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "4/5" as const, fit: "cover" as const, size: "md" as const } } : {}),
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "xl", font: "display" }),
-          ...fields.map((column) => block("field", { column })),
-          roles.description && block("text", { column: roles.description, clamp: 4, size: "sm", quote: true, italic: true }),
-        ].filter(present),
-      }
-    },
-  },
-  {
-    key: "banner",
-    label: "Bannière",
-    hint: "Une image large en bandeau, le nom en grand, une ligne et deux lignes de texte : une campagne, un lieu, une faction.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      return {
-        id: cardId(), name: "Bannière", width: "xl", lift: true, band: true, border: "subtle",
-        ...(roles.color ? { accent: { column: roles.color } } : {}),
-        ...(roles.image ? { media: { column: roles.image, position: "top" as const, aspect: "16/6" as const, fit: "cover" as const } } : {}),
-        blocks: [
-          roles.name && block("title", { column: roles.name, size: "xl", font: "display", tone: "accent" }),
-          roles.choices.length > 0 && block("line", { parts: roles.choices.slice(0, 3).map((column) => ({ column })), separator: " • ", size: "xs", caps: true, tone: "muted" }),
-          roles.description && block("text", { column: roles.description, clamp: 2, size: "sm" }),
-        ].filter(present),
-      }
-    },
-  },
-  {
-    key: "token",
-    label: "Vignette ronde",
-    hint: "Petite et centrée : un portrait rond et le nom, pour un trombinoscope serré.",
-    build: (columns) => {
-      const roles = cardRoles(columns)
-      return {
-        id: cardId(), name: "Vignette ronde", width: "xs", align: "center", border: "none", surface: "plain", density: "compact", lift: true,
-        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
-        blocks: [
-          (roles.image ?? roles.glyph) && block("image", { column: (roles.image ?? roles.glyph)!, aspect: "1/1", fit: "cover", shape: "circle", width: 75, align: "center" }),
-          roles.name && block("title", { column: roles.name, size: "sm", font: "display", align: "center", clamp: 2 }),
-          roles.choices[0] && block("line", { parts: [{ column: roles.choices[0], tone: "column" }], size: "xs", align: "center" }),
         ].filter(present),
       }
     },
@@ -799,6 +770,16 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
           blocks: [
             { id: "b1", type: "title", column: "Nom personnage", size: "md", font: "display" },
             { id: "b2", type: "line", parts: [{ column: "Classe" }, { column: "Level", prefix: "rang " }, { column: "Titre honorifique" }, { column: "Joueur" }], separator: " · ", size: "xs", tone: "muted", clamp: 1 },
+          ],
+        },
+        {
+          id: "eraser-personnage-session", name: "Carte de session", width: "md", border: "subtle", density: "compact",
+          accent: { color: DEFAULT_CARD_ACCENT },
+          media: { column: "Portrait", position: "left", aspect: "4/5", fit: "cover", size: "sm", anchor: "stretch" },
+          blocks: [
+            { id: "b1", type: "title", column: "Nom personnage", size: "md", font: "display" },
+            { id: "b2", type: "line", parts: [{ column: "Classe" }, { column: "Level", prefix: "rang " }], separator: " · ", size: "xs", tone: "accent", bold: true, clamp: 1 },
+            { id: "b3", type: "line", parts: [{ column: "Joueur" }], size: "xs", tone: "muted", clamp: 1 },
           ],
         },
         {
@@ -880,6 +861,15 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
             { id: "b2", type: "text", column: "Effet", size: "sm", bold: true, quote: true, clamp: 0 },
             { id: "b3", type: "text", column: "Description", size: "sm", tone: "muted", quote: true, clamp: 4 },
             { id: "b4", type: "line", parts: [{ column: "Compétences", tone: "#b3261e", bold: true }, { column: "Distance", prefix: "Distance : " }, { column: "Charges", prefix: "Charges : " }], separator: "   ", size: "xs", tone: "muted" },
+          ],
+        },
+        {
+          id: "eraser-sort-selecteur", name: "Carte du sélecteur de sorts", width: "lg", border: "left", density: "compact", accent: { column: "Type", color: DEFAULT_CARD_ACCENT },
+          blocks: [
+            { id: "b1", type: "title", column: "Nom", size: "sm", font: "display", badges: ["Type"] },
+            { id: "b2", type: "text", column: "Effet", size: "sm", bold: true, clamp: 0 },
+            { id: "b3", type: "text", column: "Description", size: "sm", tone: "muted", clamp: 0 },
+            { id: "b4", type: "line", parts: [{ column: "Compétences", tone: "#b3261e", bold: true }, { column: "Distance", prefix: "⌖ Distance : " }], separator: "   ", size: "xs", tone: "muted" },
           ],
         },
         {

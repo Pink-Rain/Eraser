@@ -7,9 +7,9 @@ import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { LayoutPresetBar, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
-import { IndexCardEditor } from "@/components/eraser/index-card-editor"
+import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/index-card-editor"
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
-import { IndexViewsEditor } from "@/components/eraser/index-views-editor"
+import { IndexViewsEditor, ViewsPanel } from "@/components/eraser/index-views-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -48,11 +48,11 @@ import {
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
 import { DEFAULT_FORM_ID, layoutId, renameLayoutColumns, serializeIndexLayout, serializeNamedLayouts, tabLayout, type IndexLayout, type LayoutKind, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
 import { automaticLayoutFor, builtinLayoutFor, tabLayoutsOf } from "@/lib/index-layout-defaults"
-import { cardId, renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
+import { renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
-import { tabLocksOf } from "@/lib/index-locks-store"
+import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
-import { presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 import { layoutIcons } from "@/components/eraser/index-views"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
@@ -800,6 +800,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [guide, setGuide] = useState<GuideSection | null>(null)
   // Le panneau des onglets, à gauche : on le replie pour donner la place aux réglages.
   const [asideOpen, setAsideOpen] = useState(true)
+  // La carte modifiée, par onglet (le panneau des cartes et l'éditeur la partagent).
+  const [selectedCard, setSelectedCard] = useState<Record<string, string | null>>({})
   const readOnly = Boolean(model.readOnly)
   const tab = tabs.find((candidate) => candidate.id === selectedTab) ?? tabs[0]
   const column = tab?.columns.find((candidate) => candidate.id === selectedColumn) ?? tab?.columns[0]
@@ -1176,6 +1178,53 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               />
             </div>
           })()}
+          {mode === "cards" && cardsEnabled && tab && !tab.removed && (() => {
+            const entry = cardsOf(tab)
+            return <CardsPanel
+              key={tab.id}
+              tabName={tab.name}
+              columns={cardColumnsOf(tab)}
+              value={entry}
+              builtin={entry.builtin}
+              builtins={tabCardsOf({}, cardsIndex ?? model.key, tab.original ?? tab.name.trim()).cards}
+              samples={sampleRows[tab.original ?? tab.name] ?? []}
+              otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+              selected={selectedCard[tab.id] ?? null}
+              onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
+              disabled={pending || layoutSaving}
+              onChange={(next) => setCardDrafts((current) => ({ ...current, [tab.id]: { cards: next.cards, ...(next.defaultId ? { defaultId: next.defaultId } : {}) } }))}
+              onCopyTo={(ids, card) => setCardDrafts((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => {
+                const target = tabs.find((candidate) => candidate.id === id)
+                const base = target ? cardsOf(target) : { cards: [] as CardTemplate[] }
+                return [id, { ...base, cards: [...base.cards, duplicateCard(card)].slice(0, 12) }]
+              })) }))}
+              onReset={() => setCardDrafts((current) => ({ ...current, [tab.id]: null }))}
+            />
+          })()}
+          {viewKind && presentationsEnabled && tab && !tab.removed && (() => {
+            const current = presentationsOf(tab)
+            const columnsOfTab = tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())
+            return <ViewsPanel
+              key={`${tab.id}:${viewKind}`}
+              kind={viewKind}
+              columns={columnsOfTab}
+              layout={current[viewKind] ?? { kind: viewKind }}
+              configured={Boolean(current[viewKind])}
+              presets={viewPresets}
+              onApply={(layout) => setPresentationDrafts((state) => ({ ...state, [tab.id]: { ...current, [viewKind]: layout } }))}
+              onReset={() => setPresentationDrafts((state) => { const next = { ...current }; delete next[viewKind]; return { ...state, [tab.id]: next } })}
+              onSavePreset={onSaveViewPreset}
+              onDeletePreset={onDeleteViewPreset}
+              otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+              onCopyTo={(ids) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => {
+                const target = tabs.find((candidate) => candidate.id === id)
+                const base = target ? presentationsOf(target) : {}
+                const headers = target ? target.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim()) : []
+                return [id, { ...base, [viewKind]: fitLayoutToColumns(current[viewKind] ?? { kind: viewKind }, headers) }]
+              })) }))}
+              disabled={pending || layoutSaving}
+            />
+          })()}
           {!readOnly && tab && !tab.removed && tab.itemLabel !== undefined && <label className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2 text-[11px] text-muted-foreground" title="Le mot des boutons et messages de l’onglet : « + Ajouter un lieu », « Ce lieu a été supprimé »…">
             Une ligne de « {tab.name} » s’appelle
             <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
@@ -1208,9 +1257,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
             value={presentationsOf(tab)}
             onChange={(next) => setPresentationDrafts((current) => ({ ...current, [tab.id]: next }))}
-            presets={viewPresets}
-            onSavePreset={onSaveViewPreset}
-            onDeletePreset={onDeleteViewPreset}
             optionsOf={optionsOf ? (header) => optionsOf(tab.original ?? tab.name.trim(), header) : undefined}
             cards={cardsEnabled ? cardsOf(tab).cards : []}
             cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
@@ -1228,18 +1274,12 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               tabName={tab.name}
               columns={cardColumnsOf(tab)}
               value={entry}
-              builtin={entry.builtin}
               builtins={tabCardsOf({}, cardsIndex ?? model.key, tab.original ?? tab.name.trim()).cards}
               samples={sampleRows[tab.original ?? tab.name] ?? []}
-              otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+              selected={selectedCard[tab.id] ?? null}
+              onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
               disabled={pending || layoutSaving || tab.removed}
               onChange={(next) => setCardDrafts((current) => ({ ...current, [tab.id]: { cards: next.cards, ...(next.defaultId ? { defaultId: next.defaultId } : {}) } }))}
-              onCopyTo={(ids, card) => setCardDrafts((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => {
-                const target = tabs.find((candidate) => candidate.id === id)
-                const base = target ? cardsOf(target) : { cards: [] as CardTemplate[] }
-                return [id, { ...base, cards: [...base.cards, { ...card, id: cardId(), blocks: card.blocks.map((block) => ({ ...block, id: cardId("b") })) }].slice(0, 12) }]
-              })) }))}
-              onReset={() => setCardDrafts((current) => ({ ...current, [tab.id]: null }))}
             />
           })()}
         </section>}

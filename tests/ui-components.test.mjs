@@ -266,7 +266,8 @@ test("Calendriers et présentations de vue : dates du monde, sections, tableau d
   assert.equal(calendars.parseCalendarDate("29 février 2023", calendars.realCalendar), null);
 
   assert.equal(layouts.cleanViewLayout({ kind: "table" }), undefined);
-  assert.deepEqual(layouts.cleanViewLayout({ kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E"], evil: "x" }), { kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D"] });
+  // Huit colonnes au plus sous le nom (chaque vue règle les siennes) ; un champ inconnu est écarté.
+  assert.deepEqual(layouts.cleanViewLayout({ kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], evil: "x" }), { kind: "kanban", kanbanColumn: "Statut", fields: ["A", "B", "C", "D", "E", "F", "G", "H"] });
   assert.equal(layouts.cleanViewLayout({ kind: "inconnu" }), undefined);
   assert.equal(layouts.parseViewLayout("pas du json"), undefined);
   const rows = [{ t: "Arme", p: "10 PO" }, { t: "Arme, Rune", p: "1 250,5 PO" }, { t: "", p: "abc" }];
