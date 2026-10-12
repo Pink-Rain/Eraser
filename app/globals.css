@@ -740,3 +740,9 @@ a[href^="/reference/"] {
 .stat-link[aria-pressed="true"] .stat-mark {
   fill-opacity: 0.75;
 }
+
+/* Le contenu d'une page d'Eraser posé dans une page du créateur (module « Contenu de la page
+   d'origine ») : la page qui l'accueille a déjà ses marges. */
+.eraser-origin > .w-full.flex-1 {
+  padding: 0;
+}

@@ -524,23 +524,51 @@ function TodoColumn() {
 
 // ---------- Page ----------
 
-export function HomeShell() {
-  const { characters, campaigns, listsLoaded, viewRole, user } = useShellData()
+/*
+ * Les morceaux de l'accueil, aussi posés comme modules d'Eraser dans une page du créateur de
+ * pages (lib/eraser-modules.ts) : chacun lit la vue en cours et les listes de la coque.
+ */
+
+/** « Bonjour, … » et la vue en cours. */
+export function HomeGreeting() {
+  const { viewRole, user } = useShellData()
   const firstName = (user.displayName || user.email.split("@")[0]).trim()
+  return <header>
+    <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">
+      <span className="h-px w-7 bg-primary/50" />{viewLabels[viewRole]}
+    </div>
+    <h1 className="font-display text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">Bonjour, <span className="text-primary">{firstName}</span></h1>
+  </header>
+}
+
+/** La colonne principale : mes campagnes (MJ), les choses à faire (admin), mes personnages (joueur). */
+export function HomeMain() {
+  const { characters, campaigns, listsLoaded, viewRole } = useShellData()
+  return viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} loading={!listsLoaded} />
+}
+
+/** La colonne de côté : règles, joueurs et MJ, index favoris, outils. */
+export function HomeSide() {
+  const { viewRole } = useShellData()
+  return <SideColumn withIndex={viewRole !== "joueur"} withTools={viewRole === "admin"} />
+}
+
+/** Les succès du compte, selon la vue. */
+export function HomeAchievementsPanel() {
+  const { viewRole } = useShellData()
+  return <HomeAchievements viewRole={viewRole} />
+}
+
+export function HomeShell() {
   return (
     <PageLabel label="Accueil">
       <div className="flex w-full flex-1 flex-col px-5 py-9 sm:px-8 md:py-12">
-        <header className="mb-8">
-          <div className="mb-3 flex items-center gap-2 text-xs font-semibold uppercase tracking-[0.22em] text-primary/75">
-            <span className="h-px w-7 bg-primary/50" />{viewLabels[viewRole]}
-          </div>
-          <h1 className="font-display text-4xl font-semibold leading-[1.05] tracking-[-0.03em] sm:text-5xl">Bonjour, <span className="text-primary">{firstName}</span></h1>
-        </header>
+        <div className="mb-8"><HomeGreeting /></div>
         <div className="grid items-start gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(0,19rem)] xl:grid-cols-[minmax(0,1fr)_minmax(0,21rem)]">
-          {viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} loading={!listsLoaded} />}
-          <SideColumn withIndex={viewRole !== "joueur"} withTools={viewRole === "admin"} />
+          <HomeMain />
+          <HomeSide />
         </div>
-        <HomeAchievements viewRole={viewRole} />
+        <HomeAchievementsPanel />
       </div>
     </PageLabel>
   )

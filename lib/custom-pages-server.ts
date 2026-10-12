@@ -16,6 +16,7 @@ import { isForbiddenReplacement, matchesReplacement } from "@/lib/page-replaceme
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
+import { forPageReading } from "@/lib/entity-index-extras"
 
 export function pageAuthor(account: Pick<AuthorizedUser, "uid" | "displayName" | "email">): PageAuthor {
   return { uid: account.uid, name: account.displayName || account.email || "Quelqu’un" }
@@ -103,13 +104,15 @@ export async function pageLinkTargets(account: Pick<AuthorizedUser, "uid" | "rol
 
 /** Un index du monde tel que les blocs le lisent (la copie gardée en mémoire : aucune lecture Google de plus si elle est là). */
 export async function indexSourceOf(key: WorldIndexKey): Promise<IndexSource> {
-  const data = await getWorldIndexQuick(key)
+  const data = await forPageReading(await getWorldIndexQuick(key))
   return {
     key,
     title: data.definition.title,
     path: data.definition.path,
     nameHref: data.definition.entity?.nameHref,
     nameHeader: data.definition.entity?.nameHeader,
+    // La page d'une classe (Règles › Classes › …) est ouverte à tous : un joueur y va aussi.
+    ...(key === "classes" ? { openToPlayers: true } : {}),
     tables: data.tables.map((table) => ({ tabName: table.tabName, headers: table.headers, rows: table.rows })),
     columns: data.columns,
   }

@@ -12,7 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { BlockView, CalloutFrame, ImageView, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
+import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
 import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
 import { describeCondition } from "@/lib/index-views"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
@@ -65,7 +65,7 @@ type Dragged = { kind: "new"; type: BlockType; view?: ViewBlockKind } | { kind: 
 type Toast = { text: string; action?: { label: string; run: () => void } }
 
 const DRAG_TYPE = "application/x-eraser-page-block"
-const draftKeys = ["title", "icon", "emoji", "description", "sections", "slug", "place", "campaignId", "vis", "replaces", "replaceMode", "rowOf"] as const
+const draftKeys = ["title", "icon", "emoji", "description", "hideHeader", "sections", "slug", "place", "campaignId", "vis", "replaces", "replaceMode", "rowOf"] as const
 
 function draftOf(page: StudioPage): PageDraft {
   const out: Record<string, unknown> = {}
@@ -237,6 +237,8 @@ function BlockEditor({ block, rev, live, links, viewAs, onChange }: EditorProps)
       return <PageStatBlock block={block} source={{ direct: true, asPlayer: viewAs === "joueur" }} />
     case "search":
       return <PageSearchBlock block={block} />
+    case "module":
+      return <ModulePlaceholder block={block} />
     case "rowfields":
     case "backlinks":
       return <BlockView block={block} context={{ source: { direct: true }, canReveal: false, links }} />
@@ -578,7 +580,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
   const publishLabel = !doc.published || doc.status !== "publiee" ? "Publier" : doc.unpublished || save.kind === "dirty" || save.kind === "saving" ? "Publier les modifications" : "Publiée"
   const preview = useMemo(() => {
     if (mode !== "preview") return null
-    const fake: CustomPage = { ...doc, ...draftOf(doc), status: "publiee", published: { title: doc.title, icon: doc.icon, emoji: doc.emoji, description: doc.description, sections: doc.sections }, createdAt: "", createdBy: { uid: "", name: "" }, updatedBy: { uid: "", name: "" }, publishedBy: null, trashedAt: "", trashedBy: null }
+    const fake: CustomPage = { ...doc, ...draftOf(doc), status: "publiee", published: { title: doc.title, icon: doc.icon, emoji: doc.emoji, description: doc.description, sections: doc.sections, ...(doc.hideHeader ? { hideHeader: true } : {}) }, createdAt: "", createdBy: { uid: "", name: "" }, updatedBy: { uid: "", name: "" }, publishedBy: null, trashedAt: "", trashedBy: null }
     return pageForViewer(fake, { role: viewAs, uid: "", member: true, manager: true })
   }, [doc, mode, viewAs])
   const previewContext: BlockContext = { source: { direct: true, asPlayer: viewAs === "joueur" }, canReveal: viewAs !== "joueur", links }
@@ -647,7 +649,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
             <Button type="button" size="xs" variant="outline" onClick={() => setMode("build")}><Hammer />Revenir à l’atelier</Button>
           </div>
           {preview ? <>
-            <PageHeader eyebrow={doc.place === "hors-menu" ? "Page" : crumb} title={preview.title} description={preview.description} icon={preview.icon} emoji={preview.emoji} />
+            {!preview.hideHeader && <PageHeader eyebrow={doc.place === "hors-menu" ? "Page" : crumb} title={preview.title} description={preview.description} icon={preview.icon} emoji={preview.emoji} />}
             <div className="mt-10">{preview.sections.some((section) => section.cols.some((column) => column.length)) ? <PageSections sections={preview.sections} render={(block) => <BlockView block={block} context={previewContext} />} /> : <p className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Rien à montrer à ce rôle.</p>}</div>
           </> : <p className="flex items-start gap-2 rounded-xl border border-dashed px-4 py-4 text-sm text-muted-foreground"><LockKeyhole className="mt-0.5 size-4 shrink-0" />Le rôle {roleLabels[viewAs]} ne voit pas cette page : elle n’apparaît pas dans sa recherche et son adresse lui répond « page introuvable ».</p>}
         </> : <div className="grid gap-4">

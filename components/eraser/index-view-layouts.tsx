@@ -136,8 +136,15 @@ function Item({ row, props, fields, framed, extra, className = "" }: { row: stri
   </article>
 }
 
-function Section({ title, count, collapsible, startCollapsed, color, hideCount, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; children: ReactNode }) {
+function Section({ title, count, collapsible, startCollapsed, color, hideCount, heading, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; heading?: boolean; children: ReactNode }) {
   const [open, setOpen] = useState(!startCollapsed)
+  // Un grand titre centré, au-dessus d'un trait (les familles de la page des classes).
+  if (heading) return <section className="space-y-5">
+    {collapsible
+      ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold hover:text-primary sm:text-4xl"><ChevronDown className={`size-5 transition-transform ${open ? "" : "-rotate-90"}`} />{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</button>
+      : <h2 className="flex items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold sm:text-4xl">{color && <span className="size-3 rounded-full" style={{ backgroundColor: color }} />}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</h2>}
+    {open && children}
+  </section>
   const label = <><span className="flex items-center gap-2">{color && <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />}{title || "Sans valeur"}</span>{!hideCount && <span className="text-muted-foreground">{count}</span>}</>
   return <section className="space-y-2">
     {collapsible
@@ -152,7 +159,8 @@ function Sections({ layout, rows, valueOf, optionsOf, render }: { layout: ViewLa
   if (!layout.groupBy) return <>{render(rows)}</>
   const options = optionsOf?.(layout.groupBy) ?? []
   const groups = groupRowsBy(rows, (row) => valueOf(row, layout.groupBy!), options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty)
-  return <div className="space-y-5">{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} color={options.find((option) => fold(option.value) === fold(group.name))?.color}>{render(group.rows)}</Section>)}</div>
+  const heading = layout.look?.sectionStyle === "heading"
+  return <div className={heading ? "space-y-14" : "space-y-5"}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} color={options.find((option) => fold(option.value) === fold(group.name))?.color}>{render(group.rows)}</Section>)}</div>
 }
 
 const PAGE = 60
@@ -168,6 +176,9 @@ function Paged({ rows, render }: { rows: string[]; render: (rows: string[]) => R
 
 /* ---------- Liste ---------- */
 
+// Plusieurs colonnes seulement sur un écran assez large : une à deux sur téléphone.
+const listColumnClasses: Record<number, string> = { 1: "", 2: "md:grid-cols-2", 3: "sm:grid-cols-2 xl:grid-cols-3", 4: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4", 5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5" }
+
 function ListLayout(props: ViewLayoutProps) {
   const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
@@ -176,7 +187,7 @@ function ListLayout(props: ViewLayoutProps) {
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set())
   const toggle = (row: string) => setOpenRows((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })
   const others = headers.filter((header) => !fields.includes(header))
-  const columnsClass = layout.listColumns === 3 ? "sm:grid-cols-2 xl:grid-cols-3" : layout.listColumns === 2 ? "md:grid-cols-2" : ""
+  const columnsClass = listColumnClasses[layout.listColumns ?? 1]
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
     return <Sections layout={layout} rows={rows} valueOf={valueOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${columnsClass}`}>{shown.map((row) => <div key={row} className="min-w-0">{card(row) ?? <Item row={row} props={props} framed />}</div>)}</div>} />} />

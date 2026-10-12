@@ -844,7 +844,7 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
             { id: "b3", type: "pills", columns: ["Mots-clés 1", "Mots-clés 2", "Mots-clés 3"], stacked: true, tone: "accent" },
             { id: "b4", type: "divider" },
             { id: "b5", type: "field", column: "Difficulté" },
-            { id: "b6", type: "bar", column: "Finition", label: "Finition", max: 100, showValue: true, unit: "%" },
+            { id: "b6", type: "bar", column: "Finition", label: "Finition", showValue: true, unit: "%" },
           ],
         },
         {
@@ -978,6 +978,29 @@ export function tabCardsOf(stored: Record<string, TabCards> | null | undefined, 
   const found = stored ? Object.entries(stored).find(([name]) => foldName(name) === foldName(tab)) : undefined
   if (found) return { ...found[1], builtin: false }
   return { cards: builtinCardsFor(index, tab), builtin: true }
+}
+
+/**
+ * Les cartes des pages d'Eraser (la carte de classe de Règles › Classes, celle des campagnes de
+ * l'accueil…), proposées comme presets dans tous les index : on les reprend, puis on les
+ * adapte aux colonnes de l'onglet.
+ */
+export const eraserCardSources: Array<{ index: string; tab: string; label: string }> = [
+  { index: "classes", tab: "Classes", label: "Classes" },
+  { index: "campaigns", tab: "Campagnes", label: "Campagnes" },
+  { index: "characters", tab: "Personnages", label: "Personnages" },
+  { index: "npcs", tab: "PNJs", label: "PNJs" },
+  { index: "creatures", tab: "Créatures", label: "Créatures" },
+  { index: "class-spells", tab: "Sorts", label: "Sorts" },
+  { index: "achievements", tab: "Succès", label: "Succès" },
+  { index: "states", tab: "États", label: "États" },
+  { index: "weapon-modifiers", tab: "Tout", label: "Modificateurs d’armes" },
+  { index: "vocabulary", tab: "Vocabulaire", label: "Vocabulaire" },
+  { index: "objects", tab: "Objets", label: "Items" },
+]
+
+export function eraserCardPresets(exceptIndex = ""): Array<{ index: string; label: string; card: CardTemplate }> {
+  return eraserCardSources.filter((source) => source.index !== exceptIndex).flatMap((source) => builtinCardsFor(source.index, source.tab).map((card) => ({ index: source.index, label: source.label, card })))
 }
 
 /** La carte à montrer : celle choisie, sinon celle par défaut, sinon la première. */

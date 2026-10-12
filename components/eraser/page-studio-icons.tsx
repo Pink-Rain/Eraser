@@ -1,4 +1,4 @@
-import { CalendarDays, Search, CornerDownLeft, TableProperties, ChartColumn, GalleryHorizontalEnd, Heading, Image, LayoutDashboard, LayoutGrid, LayoutList, Link2, ListTree, LockKeyhole, MessageSquareQuote, Minus, NotebookPen, PanelLeft, ScrollText, SquareKanban, Table2, Text, TextQuote, Waypoints, type LucideIcon } from "lucide-react"
+import { CalendarDays, Puzzle, Search, CornerDownLeft, TableProperties, ChartColumn, GalleryHorizontalEnd, Heading, Image, LayoutDashboard, LayoutGrid, LayoutList, Link2, ListTree, LockKeyhole, MessageSquareQuote, Minus, NotebookPen, PanelLeft, ScrollText, SquareKanban, Table2, Text, TextQuote, Waypoints, type LucideIcon } from "lucide-react"
 
 import type { BlockType, ViewBlockKind } from "@/lib/custom-pages"
 
@@ -19,6 +19,7 @@ export const blockIcons: { blocks: Record<BlockType, LucideIcon>; views: Record<
     rowfields: TableProperties,
     backlinks: CornerDownLeft,
     search: Search,
+    module: Puzzle,
   },
   views: {
     "table": Table2,

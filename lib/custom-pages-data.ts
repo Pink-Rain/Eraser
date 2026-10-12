@@ -22,6 +22,8 @@ export type IndexSource = {
   nameHref?: string
   /** Index d'entités : la colonne du nom (« Nom personnage »). */
   nameHeader?: string
+  /** La page d'une ligne (`nameHref`) est ouverte aux joueurs (une classe) : ils y vont aussi. */
+  openToPlayers?: boolean
   tables: Array<{ tabName: string; headers: string[]; rows: Array<{ values: string[]; html: string[] }> }>
   columns: Record<string, Array<{ header: string; spec: IndexColumnSpec }>>
 }
@@ -103,7 +105,7 @@ function rowsOf(source: IndexSource, table: IndexSource["tables"][number], heade
     // La page de la ligne (un modèle existe) pour tous ; sinon sa fiche dans l'index, pour les MJ
     // et admins seulement : un joueur lit la ligne sans l'ouvrir.
     const rowPage = rowId ? options.rowPageOf?.(source.key, table.tabName, rowId) : undefined
-    const href = rowPage ?? (options.player || !rowId ? undefined : source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
+    const href = rowPage ?? (!rowId ? undefined : source.nameHref && (!options.player || source.openToPlayers) ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : options.player ? undefined : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
     return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
   })
 }

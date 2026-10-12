@@ -5,6 +5,7 @@ import { ExternalLink, PenLine, Replace } from "lucide-react"
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { PageLabel } from "@/components/eraser/app-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
+import { moduleSlots } from "@/components/eraser/eraser-modules"
 import { Button } from "@/components/ui/button"
 import { canManagePages, pageForViewer, studioHref, type CustomPage, type PagePlace, type PageView } from "@/lib/custom-pages"
 import { findCustomPage } from "@/lib/custom-pages-store"
@@ -28,7 +29,7 @@ export async function CustomPageRoute({ place, slug, campaignId = "" }: { place:
   const campaignName = page.place === "campagne" ? (await campaignsOf(viewAccount).catch(() => [])).find((campaign) => campaign.id === page.campaignId)?.name : undefined
   return (
     <AuthenticatedShell pageLabel={view.title}>
-      <CustomPageView key={view.id} initial={view} links={await linkTargetsOf(view, viewAccount)} campaignName={campaignName} indexPaths={indexPathsOf(view, viewAccount.role)} />
+      <CustomPageView key={view.id} initial={view} links={await linkTargetsOf(view, viewAccount)} campaignName={campaignName} indexPaths={indexPathsOf(view, viewAccount.role)} modules={moduleSlots(view, { account: viewAccount })} />
     </AuthenticatedShell>
   )
 }
@@ -54,9 +55,11 @@ export function ReplacementView({ page, view, mode, pathname, account, children 
     {mode === "replace" && <Link href={`${pathname}?origine=1`} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Voir la page d’origine</Link>}
     {view.editable && <Link href={studioHref(page.id)} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><PenLine className="size-3.5" />Modifier</Link>}
   </p> : null
+  // « À la place » : le contenu d'origine va où la page pose son module « Contenu de la page
+  // d'origine » (nulle part sans ce module) ; au-dessus ou en dessous, il est déjà autour.
   if (mode === "replace") return <PageLabel label={view.title}>
-    <CustomPageView key={`${view.id}:${pathname}`} initial={view} links={links} indexPaths={indexPaths} eyebrow={label} notice={notice} actions={manager ? <Button asChild size="sm" variant="ghost"><Link href={`${pathname}?origine=1`} prefetch={false}><ExternalLink />Voir la page d’origine</Link></Button> : undefined} />
+    <CustomPageView key={`${view.id}:${pathname}`} initial={view} links={links} indexPaths={indexPaths} eyebrow={label} notice={notice} modules={moduleSlots(view, { account, origin: children })} actions={manager ? <Button asChild size="sm" variant="ghost"><Link href={`${pathname}?origine=1`} prefetch={false}><ExternalLink />Voir la page d’origine</Link></Button> : undefined} />
   </PageLabel>
-  const blocks = <CustomPageView key={`${view.id}:${pathname}:${mode}`} initial={view} links={links} indexPaths={indexPaths} blocksOnly notice={notice ? <div className="mb-4 max-w-3xl">{notice}</div> : undefined} />
+  const blocks = <CustomPageView key={`${view.id}:${pathname}:${mode}`} initial={view} links={links} indexPaths={indexPaths} modules={moduleSlots(view, { account, origin: null })} blocksOnly notice={notice ? <div className="mb-4 max-w-3xl">{notice}</div> : undefined} />
   return <>{mode === "before" && blocks}{children}{mode === "after" && blocks}</>
 }

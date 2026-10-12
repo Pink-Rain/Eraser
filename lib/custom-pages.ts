@@ -20,6 +20,7 @@ import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
 import { cleanViewLayout, isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { parseViewConditions, viewOperators, type ViewCondition } from "@/lib/index-views"
+import { eraserModuleKeys, moduleSections, type EraserModuleKey } from "@/lib/eraser-modules"
 
 /* ---------- Les types ---------- */
 
@@ -35,7 +36,7 @@ export type PagePlace = PageSection | "campagne" | "hors-menu"
 export type PageStatus = "brouillon" | "publiee"
 export type SectionLayout = "1" | "2" | "3" | "side-r" | "side-l"
 
-export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks" | "search"
+export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks" | "search" | "module"
 export type CalloutTone = "info" | "mj" | "secret" | "alerte"
 export type ImageRatio = "auto" | "21/9" | "16/9" | "4/3" | "1/1" | "3/4"
 export type SeparatorGlyph = "ornement" | "etoile" | "points" | "trait"
@@ -85,12 +86,15 @@ export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; he
 export type BacklinksBlock = Common & { type: "backlinks"; heading: string }
 /** Un champ de recherche : il filtre les lignes des blocs Vue de la page (ceux qui le suivent). */
 export type SearchBlock = Common & { type: "search"; placeholder: string; heading: string }
-export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock | SearchBlock
+/** Un module d'Eraser (lib/eraser-modules.ts) ; `place` : la section d'un module « Pages d'une section ». */
+export type ModuleBlock = Common & { type: "module"; module: EraserModuleKey; place: PageSection; heading: string }
+export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock | SearchBlock | ModuleBlock
 
 export type PageSectionBlock = { id: string; layout: SectionLayout; framed: boolean; cols: PageBlock[][] }
 
 /** Ce qui se publie (et se restaure avec « Revenir à la version publiée »). */
-export type PageContent = { title: string; icon: string; emoji: string; description: string; sections: PageSectionBlock[] }
+/** `hideHeader` : sans l'en-tête de la page (titre, icône, description), quand un bloc en tient lieu. */
+export type PageContent = { title: string; icon: string; emoji: string; description: string; sections: PageSectionBlock[]; hideHeader?: boolean }
 
 /** Ce qui change sur la page publiée sans passer par l'atelier : révélations et carnets. */
 export type LiveBlockState = { revealedAt?: string; revealedBy?: string; html?: string; editedAt?: string; editedBy?: string }
@@ -265,7 +269,7 @@ export function samePlace(left: Pick<CustomPage, "place" | "campaignId">, right:
 
 /* ---------- Les blocs ---------- */
 
-export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" | "Page de ligne" }> = [
+export const blockCatalog: Array<{ type: BlockType; label: string; hint: string; group: "Texte" | "Révélations et carnets" | "Navigation" | "Données d’index" | "Page de ligne" | "Modules d’Eraser" }> = [
   { type: "title", label: "Titre", hint: "Un titre de partie, avec une petite ligne au-dessus", group: "Texte" },
   { type: "text", label: "Texte riche", hint: "Gras, listes, liens, couleurs et citations « { »", group: "Texte" },
   { type: "callout", label: "Encadré", hint: "Info, conseil du MJ, secret ou alerte", group: "Texte" },
@@ -279,6 +283,7 @@ export const blockCatalog: Array<{ type: BlockType; label: string; hint: string;
   { type: "search", label: "Recherche", hint: "Un champ qui filtre les vues d’index de la page", group: "Données d’index" },
   { type: "stat", label: "Statistiques", hint: "Une statistique d’un index, ou toutes ses épinglées", group: "Données d’index" },
   { type: "rowfields", label: "Valeurs de la ligne", hint: "Page de ligne : les colonnes de la ligne affichée", group: "Page de ligne" },
+  { type: "module", label: "Module d’Eraser", hint: "Un morceau des pages d’Eraser : glossaire, répertoire des index, accueil, page d’origine…", group: "Modules d’Eraser" },
   { type: "backlinks", label: "Cité dans", hint: "Page de ligne : les lignes d’autres index qui la citent", group: "Page de ligne" },
 ]
 export const blockTypes = blockCatalog.map((item) => item.type)
@@ -302,6 +307,7 @@ export function newBlock(type: BlockType, id = newId("b")): PageBlock {
     case "rowfields": return { ...common, type, columns: [], heading: "", style: "grid" }
     case "backlinks": return { ...common, type, heading: "Cité dans" }
     case "search": return { ...common, type, placeholder: "", heading: "" }
+    case "module": return { ...common, type, module: "origine", place: "regles", heading: "" }
   }
 }
 
@@ -384,6 +390,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
     case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid") }
     case "backlinks": return { ...common, type, heading: text(raw.heading, 160) }
     case "search": return { ...common, type, placeholder: text(raw.placeholder, 120), heading: text(raw.heading, 160) }
+    case "module": return { ...common, type, module: oneOf(raw.module, eraserModuleKeys, "origine"), place: oneOf(raw.place, moduleSections.map((item) => item.value), "regles"), heading: text(raw.heading, 160) }
   }
 }
 
@@ -423,6 +430,7 @@ export function cleanContent(input: unknown): PageContent {
     emoji: typeof raw.emoji === "string" ? [...raw.emoji.trim()].slice(0, 4).join("") : "",
     description: text(raw.description, PAGE_LIMITS.description),
     sections: cleanSections(raw.sections),
+    ...(raw.hideHeader === true ? { hideHeader: true } : {}),
   }
 }
 
@@ -491,7 +499,7 @@ export function parseCustomPage(input: unknown): CustomPage | null {
 }
 
 export function contentOf(page: PageContent): PageContent {
-  return { title: page.title, icon: page.icon, emoji: page.emoji, description: page.description, sections: page.sections }
+  return { title: page.title, icon: page.icon, emoji: page.emoji, description: page.description, sections: page.sections, ...(page.hideHeader ? { hideHeader: true } : {}) }
 }
 
 /** Le brouillon diffère-t-il de la version publiée ? */
@@ -580,6 +588,7 @@ export type PageView = {
   icon: string
   emoji: string
   description: string
+  hideHeader?: boolean
   href: string
   slug: string
   place: PagePlace
@@ -631,6 +640,7 @@ export function pageForViewer(page: CustomPage, viewer: PageViewer, options: { d
     icon: content.icon,
     emoji: content.emoji,
     description: content.description,
+    ...(content.hideHeader ? { hideHeader: true } : {}),
     href: pageHref(page),
     slug: page.slug,
     place: page.place,
@@ -665,6 +675,9 @@ export type PageSummary = {
   updatedBy: string
   trashedAt: string
   editable: boolean
+  /** La page d'Eraser qu'elle remplace ou complète. */
+  replaces?: string
+  replaceMode?: ReplaceMode
 }
 
 export function pageSummary(page: CustomPage, viewer: PageViewer): PageSummary {
@@ -672,6 +685,7 @@ export function pageSummary(page: CustomPage, viewer: PageViewer): PageSummary {
     id: page.id, title: page.title, icon: page.icon, emoji: page.emoji, description: page.description, href: pageHref(page), slug: page.slug,
     place: page.place, campaignId: page.campaignId, vis: page.vis, status: page.status, unpublished: hasUnpublishedChanges(page),
     blocks: allBlocks(page).length, updatedAt: page.updatedAt, updatedBy: page.updatedBy.name, trashedAt: page.trashedAt, editable: canEditPage(page, viewer),
+    ...(page.replaces ? { replaces: page.replaces, replaceMode: page.replaceMode ?? "after" } : {}),
   }
 }
 

@@ -9,6 +9,7 @@ import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { LayoutSettings } from "@/components/eraser/index-views"
 import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
+import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { describeCondition, viewOperators, type ViewCondition } from "@/lib/index-views"
 import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
@@ -429,6 +430,22 @@ export function BlockSettings({ block, pages, live, rowOf, onChange, onDuplicate
     case "stat":
       content = <StatSettings block={block} onChange={(patch) => set(patch)} />
       break
+    case "module":
+      content = <>
+        <Field label="Module" hint={eraserModules.find((item) => item.key === block.module)?.hint}>
+          <select className={fieldClass} value={block.module} onChange={(event) => set({ module: event.target.value })}>
+            {eraserModules.map((item) => <option key={item.key} value={item.key}>{item.label}</option>)}
+          </select>
+        </Field>
+        {block.module === "pages-section" && <Field label="Section">
+          <select className={fieldClass} value={block.place} onChange={(event) => set({ place: event.target.value })}>
+            {moduleSections.map((item) => <option key={item.value} value={item.value}>{item.label}</option>)}
+          </select>
+        </Field>}
+        <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => set({ heading: event.target.value }, "heading")} /></Field>
+        <Hint>{block.module === "origine" ? "Sur une page qui en remplace une d’Eraser (Réglages de la page › « Remplacer une page d’Eraser »), tout le contenu de la page d’origine s’affiche ici : place des blocs autour, au-dessus, à côté." : "Un morceau des pages d’Eraser, avec son fonctionnement (modifier, trier, ranger…). Il s’affiche sur la page elle-même ; ici, sa place."}</Hint>
+      </>
+      break
     case "search":
       content = <>
         <Field label="Texte d’invite"><input className={fieldClass} value={block.placeholder} maxLength={120} placeholder="Chercher dans la page…" onChange={(event) => set({ placeholder: event.target.value }, "placeholder")} /></Field>
@@ -540,6 +557,7 @@ export function PageSettings({ page, pages, campaigns, isAdmin, linking, saveErr
         <textarea className={`${fieldClass} h-auto min-h-16 resize-y py-1.5 leading-snug`} value={page.description} maxLength={400} placeholder="Facultative" onChange={(event) => onChange({ description: event.target.value }, "description")} />
       </Field>
       <Field label="Icône"><IconPicker icon={page.icon || undefined} emoji={page.emoji || undefined} allowNone onChange={(value) => onChange({ icon: value.icon ?? "", emoji: value.emoji ?? "" })} /></Field>
+      <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 accent-primary" checked={!page.hideHeader} onChange={(event) => onChange({ hideHeader: event.target.checked ? undefined : true })} /><span>Montrer l’en-tête<span className="block text-[11.5px] text-muted-foreground">Le titre, l’icône et la description en haut de la page. Sans lui, la page commence par ses blocs (le titre sert encore au menu et aux liens).</span></span></label>
     </Group>
     <Group title="Place et adresse" badge={<span className="rounded-full border bg-card px-1.5 text-[10.5px] font-semibold normal-case tracking-normal">{pagePlaces.find((place) => place.value === page.place)?.label.replace(" (lien direct)", "")}</span>}>
       <Field label="Rangée dans" hint={page.place === "hors-menu" ? "Dans aucun menu : on y arrive par un lien, la recherche (Ctrl + K) ou l’Index des pages." : page.place === "campagne" ? "Dans le dossier de la campagne ; ouverte à ses joueurs et à son MJ." : "La page apparaît sur la page de la section, et sous son adresse."}>

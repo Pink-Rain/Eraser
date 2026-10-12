@@ -51,6 +51,8 @@ export type ViewLook = {
   dropCap?: boolean
   /** Maître-détail : largeur de la liste. */
   masterWidth?: "narrow" | "normal" | "wide"
+  /** Sections : un trait discret (d'office) ou un grand titre centré, comme les familles de classes. */
+  sectionStyle?: "bar" | "heading"
 }
 
 export type ViewLayout = {
@@ -84,8 +86,8 @@ export type ViewLayout = {
   hideEmpty?: boolean
   /** Sections : sans le nombre de lignes. */
   hideCounts?: boolean
-  /** Liste : sur une, deux ou trois colonnes. */
-  listColumns?: 1 | 2 | 3
+  /** Liste : sur une à cinq colonnes (sur un écran assez large). */
+  listColumns?: 1 | 2 | 3 | 4 | 5
   /** Kanban : largeur des colonnes. */
   laneWidth?: "narrow" | "normal" | "wide"
   /** Maître-détail : les colonnes du détail (toutes si vide), douze au plus. */
@@ -170,6 +172,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   codexImage: ["side", "banner"],
   dropCap: [true],
   masterWidth: ["narrow", "normal", "wide"],
+  sectionStyle: ["bar", "heading"],
 }
 
 /** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */
@@ -215,7 +218,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (text(raw.imageColumn)) layout.imageColumn = text(raw.imageColumn)
   if (raw.hideEmpty === true) layout.hideEmpty = true
   if (raw.hideCounts === true) layout.hideCounts = true
-  if (raw.listColumns === 2 || raw.listColumns === 3) layout.listColumns = raw.listColumns
+  if (raw.listColumns === 2 || raw.listColumns === 3 || raw.listColumns === 4 || raw.listColumns === 5) layout.listColumns = raw.listColumns
   if (raw.laneWidth === "narrow" || raw.laneWidth === "wide") layout.laneWidth = raw.laneWidth
   const detailFields = Array.isArray(raw.detailFields) ? raw.detailFields.map((field) => text(field)).filter(Boolean).slice(0, 12) : []
   if (detailFields.length) layout.detailFields = detailFields
@@ -347,6 +350,9 @@ export const builtinViewPresets: ViewPreset[] = [
   { id: "eraser:calendar-real", name: "Calendrier réel", builtin: true, layout: { kind: "calendar", calendar: "Calendrier réel", showUndated: true } },
   { id: "eraser:dashboard-count", name: "Tableau de bord simple", builtin: true, layout: { kind: "dashboard", tiles: [{ kind: "count" }], tileColumns: 3 } },
   { id: "eraser:list-cards", name: "Liste de cartes", builtin: true, layout: { kind: "list", itemCard: DEFAULT_ITEM_CARD, listColumns: 2 } },
+  // La page Règles › Classes : une section par famille (Type), cinq cartes de classe par rangée.
+  { id: "eraser:classes-par-famille", name: "Classes par famille", builtin: true, layout: { kind: "list", groupBy: "Type", hideEmpty: true, hideCounts: true, itemCard: "eraser-classe-carte", listColumns: 5, look: { sectionStyle: "heading" } } },
+  { id: "eraser:cards-by-section", name: "Cartes rangées en grandes sections", builtin: true, layout: { kind: "list", itemCard: DEFAULT_ITEM_CARD, listColumns: 4, hideEmpty: true, hideCounts: true, look: { sectionStyle: "heading" } } },
   { id: "eraser:kanban-cards", name: "Kanban de cartes", builtin: true, layout: { kind: "kanban", itemCard: DEFAULT_ITEM_CARD, hideEmpty: true } },
   { id: "eraser:master-card", name: "Maître-détail avec carte", builtin: true, layout: { kind: "master-detail", itemCard: DEFAULT_ITEM_CARD } },
   { id: "eraser:gallery-portraits", name: "Trombinoscope", builtin: true, layout: { kind: "gallery", galleryShape: "portrait", gallerySize: "md" } },

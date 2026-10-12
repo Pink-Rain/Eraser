@@ -52,6 +52,7 @@ import {
   cardPalette,
   cardRoles,
   cardStarters,
+  eraserCardPresets,
   cardWidths,
   DEFAULT_CARD_ACCENT,
   missingCardColumns,
@@ -608,6 +609,7 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
   const source = sampleSource(rows[0], columns)
   const starters = useMemo(() => cardStarters.map((starter) => ({ key: starter.key, label: starter.label, hint: starter.hint, card: starter.build(columns) })), [columns])
+  const others = useMemo(() => { const own = new Set(builtins.map((card) => card.id)); return eraserCardPresets().filter((entry) => !own.has(entry.card.id)) }, [builtins])
   const tile = (key: string, title: string, hint: string, card: CardTemplate, extra?: ReactNode) => <div key={key} className="group relative grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 transition hover:border-primary hover:shadow-md">
     <button type="button" onClick={() => onPick({ ...card, id: cardId() })} className="grid content-start gap-2 text-left">
       <span className="pointer-events-none grid max-h-56 min-h-28 place-items-center overflow-hidden rounded-lg bg-muted/30 p-2">
@@ -627,6 +629,11 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
         <p className={groupTitle}><Star className="size-3.5" />Les cartes d’Eraser pour cet index</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((card) => tile(card.id, card.name, "Celle qu’Eraser affichait déjà, refaite avec le moteur de cartes.", card))}</div>
       </section>}
+      {/* Les cartes des autres pages d'Eraser (classe, campagne, personnage…) : des presets comme les autres. */}
+      {others.length > 0 && <details className="group/eraser grid gap-2">
+        <summary className={`${groupTitle} cursor-pointer list-none [&::-webkit-details-marker]:hidden`}><LayoutGrid className="size-3.5" />Les cartes des pages d’Eraser ({others.length}) <span className="font-normal normal-case tracking-normal text-muted-foreground/80">· carte de classe, de campagne, de personnage…</span></summary>
+        <div className="mt-2 grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{others.map((entry) => tile(`eraser:${entry.card.id}`, `${entry.card.name} · ${entry.label}`, "Les colonnes qui manquent ici restent vides : choisis les tiennes ensuite.", entry.card))}</div>
+      </details>}
       <section className="grid gap-2">
         <p className={groupTitle}><Sparkles className="size-3.5" />Formes de départ</p>
         <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.card))}</div>

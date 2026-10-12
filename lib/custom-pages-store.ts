@@ -35,7 +35,9 @@ import {
   type CustomPage,
   type LiveBlockState,
   type PageAuthor,
+  type PageContent,
   type PageTemplate,
+  type PageVisibility,
 } from "@/lib/custom-pages"
 import { replacementLabel } from "@/lib/page-replacements"
 import { deleteSharedRecord, listSharedRecords, readSharedRecord, sharedStoreAvailable, writeSharedRecord, type SharedRecord } from "@/lib/shared-store"
@@ -270,6 +272,25 @@ export async function createCustomPage(input: unknown, by: PageAuthor) {
   delete page.replaceMode
   delete page.rowOf
   return withAsyncLock(`custom-page:${page.id}`, () => persist(page))
+}
+
+/**
+ * Rendre une page d'Eraser modifiable : la page qui la remplace déjà (même en brouillon), ou
+ * une nouvelle, en brouillon, qui la remplacera une fois publiée, avec `content` (ses blocs de
+ * départ). Rien ne change pour les lecteurs avant la publication.
+ */
+export async function adoptEraserPage(path: string, content: PageContent, slug: string, vis: PageVisibility, by: PageAuthor): Promise<{ page: CustomPage; created: boolean }> {
+  if (!sharedStoreAvailable()) throw unavailable()
+  const existing = (await listCustomPages({ fresh: true })).find((page) => !page.trashedAt && page.replaces === path)
+  if (existing) return { page: existing, created: false }
+  return withAsyncLock(`custom-page-adopt:${path}`, async () => {
+    const again = (await listCustomPages({ fresh: true })).find((page) => !page.trashedAt && page.replaces === path)
+    if (again) return { page: again, created: false }
+    const created = await createCustomPage({ ...content, slug, place: "hors-menu", vis }, by)
+    const page: CustomPage = { ...created, replaces: path, replaceMode: "replace" }
+    await checkUnique(page)
+    return { page: await withAsyncLock(`custom-page:${page.id}`, () => persist(page)), created: true }
+  })
 }
 
 /** Enregistre le brouillon et les réglages ; refusé si la page a changé depuis `base`. */

@@ -2,7 +2,7 @@
 
 import Link from "next/link"
 import { useMemo, useState, type ReactNode } from "react"
-import { ChevronRight, EyeOff, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
+import { ChevronRight, EyeOff, Puzzle, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
@@ -11,6 +11,7 @@ import { IndexRichText } from "@/components/eraser/index-references"
 import { PageBacklinksBlock, PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
 import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
 import { arrangeLayout, type LayoutField } from "@/lib/index-layouts"
+import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
@@ -200,6 +201,17 @@ export type BlockContext = {
   onNotes?: (blockId: string, html: string, base: string) => Promise<string | null>
   /** Page de ligne : la ligne affichée (ses valeurs lisibles par le lecteur). */
   row?: RowContext
+  /** Le contenu des blocs « Module d'Eraser », rendu sur le serveur (identifiant du bloc → contenu). */
+  modules?: Record<string, ReactNode>
+}
+
+/** Un module d'Eraser là où il n'est pas rendu (atelier, adresse propre d'une page de remplacement). */
+export function ModulePlaceholder({ block }: { block: Extract<PageBlock, { type: "module" }> }) {
+  const entry = eraserModules.find((item) => item.key === block.module)
+  return <div className="grid gap-1 rounded-2xl border border-dashed bg-card/40 px-4 py-5 text-center">
+    <p className="flex items-center justify-center gap-2 text-sm font-semibold"><Puzzle className="size-4 text-primary" />{entry?.label ?? "Module d’Eraser"}{block.module === "pages-section" ? ` · ${moduleSections.find((item) => item.value === block.place)?.label ?? ""}` : ""}</p>
+    <p className="text-xs text-muted-foreground">{block.module === "origine" ? "Le contenu de la page d’Eraser que celle-ci remplace s’affiche ici, à son adresse d’origine." : `${entry?.hint ?? ""}. Il s’affiche sur la page elle-même.`}</p>
+  </div>
 }
 
 /** Page de ligne : les valeurs de la ligne, toutes ou les colonnes choisies. */
@@ -259,6 +271,13 @@ export function BlockView({ block, context }: { block: ViewedBlock; context: Blo
     case "rowfields": return <RowFieldsView block={block} row={context.row} />
     case "backlinks": return <PageBacklinksBlock block={block} source={context.source} />
     case "search": return <PageSearchBlock block={block} />
+    case "module": {
+      if (context.modules && block.id in context.modules) {
+        const content = context.modules[block.id]
+        return content ? <div className="grid min-w-0 gap-2">{block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}{content}</div> : null
+      }
+      return <ModulePlaceholder block={block} />
+    }
   }
 }
 
@@ -305,7 +324,7 @@ export function PageHeader({ eyebrow, title, description, icon, emoji, children 
  * Révéler un secret et écrire dans un carnet passent par /api/pages : la page revient
  * telle que le serveur la voit après le changement.
  */
-export function CustomPageView({ initial, links, campaignName, indexPaths, row: packedRow, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false }: {
+export function CustomPageView({ initial, links, campaignName, indexPaths, row: packedRow, eyebrow: eyebrowOverride, notice, actions, blocksOnly = false, modules }: {
   initial: PageView
   links: Record<string, PageLinkTarget>
   campaignName?: string
@@ -319,6 +338,8 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
   actions?: ReactNode
   /** Seulement les blocs, sans en-tête (page qui complète une page d'Eraser). */
   blocksOnly?: boolean
+  /** Le contenu des blocs « Module d'Eraser », rendu sur le serveur. */
+  modules?: Record<string, ReactNode>
 }) {
   const [raw, setView] = useState(initial)
   // La ligne arrive allégée (html identique au texte vidé) : rétablie avant tout usage.
@@ -343,6 +364,7 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
     indexPaths,
     onReveal: view.canReveal ? async (blockId, reveal) => { const problem = await post({ action: reveal ? "reveal" : "hide", blockId }); setError(problem ?? "") } : undefined,
     onNotes: (blockId, html, base) => post({ action: "edit-notes", blockId, html, base }),
+    modules,
   }
 
   const sections = view.sections.some((section) => section.cols.some((column) => column.length))
@@ -354,19 +376,24 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
     {sections}
   </div>
 
+  const tools = <>
+    {view.editable && <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${view.draft ? "border-[#9a6512]/40 bg-[#9a6512]/10 text-[#9a6512]" : "border-[#0f7a65]/40 bg-[#0f7a65]/10 text-[#0f7a65]"}`}>{view.draft ? "Brouillon" : "Publiée"}</span>}
+    {view.unpublished && !view.draft && <span className="text-xs text-muted-foreground">Des modifications attendent d’être publiées.</span>}
+    {view.editable && <Button asChild size="sm" variant="outline" className="ml-1"><Link href={studioHref(view.id)} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>}
+    {actions}
+  </>
+  const above = !view.hideHeader || view.editable || Boolean(actions) || Boolean(notice) || Boolean(error)
   return <div className="w-full flex-1 px-5 py-9 sm:px-8 md:py-14">
-    <PageHeader eyebrow={eyebrow} title={view.title} description={view.description} icon={view.icon} emoji={view.emoji}>
-      {(view.editable || actions) && <div className="mt-5 flex flex-wrap items-center gap-2">
-        {view.editable && <span className={`rounded-full border px-2.5 py-0.5 text-xs font-semibold ${view.draft ? "border-[#9a6512]/40 bg-[#9a6512]/10 text-[#9a6512]" : "border-[#0f7a65]/40 bg-[#0f7a65]/10 text-[#0f7a65]"}`}>{view.draft ? "Brouillon" : "Publiée"}</span>}
-        {view.unpublished && !view.draft && <span className="text-xs text-muted-foreground">Des modifications attendent d’être publiées.</span>}
-        {view.editable && <Button asChild size="sm" variant="outline" className="ml-1"><Link href={studioHref(view.id)} prefetch={false}><PenLine />Modifier dans l’atelier</Link></Button>}
-        {actions}
-      </div>}
-    </PageHeader>
+    {/* Sans en-tête (un bloc en tient lieu) : seulement le statut et « Modifier », pour qui peut modifier. */}
+    {view.hideHeader
+      ? (view.editable || actions) && <div className="flex max-w-3xl flex-wrap items-center gap-2">{tools}</div>
+      : <PageHeader eyebrow={eyebrow} title={view.title} description={view.description} icon={view.icon} emoji={view.emoji}>
+        {(view.editable || actions) && <div className="mt-5 flex flex-wrap items-center gap-2">{tools}</div>}
+      </PageHeader>}
     {notice && <div className="mt-6 max-w-3xl">{notice}</div>}
     {view.draft && view.editable && <p className="mt-6 flex max-w-3xl items-start gap-2 rounded-xl border border-dashed px-4 py-3 text-sm text-muted-foreground"><EyeOff className="mt-0.5 size-4 shrink-0" />Ce brouillon n’est visible que de ceux qui peuvent modifier la page. Publie-le depuis l’atelier pour l’ouvrir aux autres.</p>}
     {error && <p role="alert" className="mt-6 max-w-3xl rounded-xl border border-destructive/30 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
-    <div className="mt-10">
+    <div className={view.hideHeader ? above ? "mt-6" : "" : "mt-10"}>
       {sections ?? <p className="rounded-2xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Cette page est encore vide.</p>}
     </div>
   </div>

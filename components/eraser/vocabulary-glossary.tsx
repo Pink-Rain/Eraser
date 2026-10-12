@@ -68,7 +68,8 @@ function EntryForm({ initial, submitLabel, pending, error, onSubmit, onCancel, e
   </form>
 }
 
-export function VocabularyGlossary({ initialEntries, canEdit, loadError }: { initialEntries: VocabularyEntry[]; canEdit: boolean; loadError: string }) {
+/** `inPage` : posé dans une page du créateur de pages (le bouton « Ajouter » ne remonte pas dans l'en-tête). */
+export function VocabularyGlossary({ initialEntries, canEdit, loadError, inPage = false }: { initialEntries: VocabularyEntry[]; canEdit: boolean; loadError: string; inPage?: boolean }) {
   const [entries, setEntries] = useState(initialEntries)
   const [adding, setAdding] = useState(false)
   const [editing, setEditing] = useState<VocabularyEntry | null>(null)
@@ -97,7 +98,7 @@ export function VocabularyGlossary({ initialEntries, canEdit, loadError }: { ini
   }
 
   return <>
-    {canEdit && <div className="-mt-2 flex justify-end md:-mt-16">
+    {canEdit && <div className={`flex justify-end ${inPage ? "" : "-mt-2 md:-mt-16"}`}>
       <Button type="button" variant={adding ? "outline" : "default"} onClick={() => { setAdding((open) => !open); setEditing(null); setError("") }}>
         {adding ? <X /> : <Plus />}
         {adding ? "Fermer" : "Ajouter du vocabulaire"}

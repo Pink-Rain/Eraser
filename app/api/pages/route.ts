@@ -17,6 +17,7 @@ import {
   type PageViewer,
 } from "@/lib/custom-pages"
 import {
+  adoptEraserPage,
   createCustomPage,
   deleteCustomPage,
   deletePageTemplate,
@@ -37,6 +38,8 @@ import {
   updateLiveBlock,
 } from "@/lib/custom-pages-store"
 import { campaignsOf, pageAuthor, viewerFor } from "@/lib/custom-pages-server"
+import { blueprintSlug, blueprintVisibility, eraserPageBlueprint, eraserPageEntries } from "@/lib/eraser-page-blueprints"
+import { isReplaceablePath } from "@/lib/page-replacements"
 import { authorizedAccount, type AuthorizedUser } from "@/lib/server-auth"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 
@@ -66,6 +69,8 @@ async function directory(account: AuthorizedUser) {
   }).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
   return {
     pages: summaries,
+    // Les pages d'Eraser, et celle du créateur qui remplace ou complète chacune (même en brouillon).
+    eraser: eraserPageEntries(pages, account.role),
     templates: templates.map((template) => ({ id: template.id, name: template.name, createdAt: template.createdAt, createdBy: template.createdBy.name, title: template.content.title, icon: template.content.icon, emoji: template.content.emoji, blocks: template.content.sections.reduce((total, section) => total + section.cols.flat().length, 0) })),
     campaigns: campaigns.filter((campaign) => account.role === "admin" || campaign.mine).map((campaign) => ({ id: campaign.id, name: campaign.name })),
     allCampaigns: campaigns.map((campaign) => ({ id: campaign.id, name: campaign.name })),
@@ -147,6 +152,17 @@ export async function POST(request: Request) {
       if (!canEditPage({ vis: draft.vis === "admin" ? "admin" : "tous", place: (draft.place ?? "hors-menu") as PagePlace }, viewer)) return NextResponse.json({ error: "Ton rôle ne peut pas créer une page à cet endroit." }, { status: 403 })
       const created = await createCustomPage(input, by)
       return NextResponse.json({ page: studioPage(created) })
+    }
+
+    // « Modifier » une page d'Eraser : la page qui la remplace, ou une nouvelle en brouillon,
+    // redessinée en blocs (lib/eraser-page-blueprints.ts). Rien ne change avant la publication.
+    if (action === "adopt") {
+      const path = typeof (body as { path?: unknown }).path === "string" ? (body as { path: string }).path.trim() : ""
+      if (!isReplaceablePath(path)) return NextResponse.json({ error: "Cette page d’Eraser ne peut pas être modifiée ici." }, { status: 400 })
+      const vis = blueprintVisibility(path)
+      if (vis === "admin" && account.role !== "admin") return denied()
+      const { page, created } = await adoptEraserPage(path, eraserPageBlueprint(path), blueprintSlug(path), vis, by)
+      return NextResponse.json({ page: studioPage(page), created })
     }
 
     if (action === "save-template" || action === "delete-template") {

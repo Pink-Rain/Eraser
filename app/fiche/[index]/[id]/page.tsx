@@ -4,6 +4,7 @@ import { ExternalLink } from "lucide-react"
 
 import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
+import { moduleSlots } from "@/components/eraser/eraser-modules"
 import { Button } from "@/components/ui/button"
 import { canManagePages, pageForViewer } from "@/lib/custom-pages"
 import { blocksForRow, packRowContext, rowContextOf, rowValuesOf, templateForRow } from "@/lib/custom-pages-rows"
@@ -53,6 +54,7 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
         key={`${view.id}:${key}:${row.id}`}
         initial={view}
         row={packRowContext(form ? { ...row, form } : row)}
+        modules={moduleSlots(view, { account: viewAccount })}
         eyebrow={`${source.title} · ${row.tab}`}
         links={await linkTargetsOf(view, viewAccount)}
         indexPaths={indexPathsOf(view, viewAccount.role)}

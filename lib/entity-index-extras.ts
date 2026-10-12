@@ -149,6 +149,40 @@ async function withClassRanks(data: WorldIndexData): Promise<WorldIndexData> {
   }
 }
 
+/**
+ * Un index lu par une page du créateur de pages : les classes y montrent leur image actuelle
+ * et leur finition réelle (calculée sur leurs sorts, comme la page Règles › Classes : la case
+ * « Finition » de la feuille n'est qu'un repli). Affichage seulement, rien n'est écrit.
+ */
+export async function forPageReading(data: WorldIndexData): Promise<WorldIndexData> {
+  if (data.key !== "classes") return data
+  const shown = await withClassImages(data)
+  try {
+    const { classSpellsForDisplay } = await import("@/lib/class-content")
+    const { classSpellState } = await import("@/lib/class-spell-utils")
+    const { spells } = await classSpellsForDisplay()
+    return {
+      ...shown,
+      tables: shown.tables.map((table) => {
+        const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
+        const finish = table.headers.findIndex((header) => foldName(header) === "finition")
+        if (idColumn < 0 || finish < 0) return table
+        return { ...table, rows: table.rows.map((row) => {
+          const id = (row.values[idColumn] ?? "").trim()
+          if (!id) return row
+          const completion = String(classSpellState(spells, id).completion)
+          const values = [...row.values]; const html = [...row.html]
+          values[finish] = completion; html[finish] = completion
+          return { ...row, values, html }
+        }) }
+      }),
+    }
+  } catch (error) {
+    console.error("CLASS_PAGE_COMPLETION_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return shown
+  }
+}
+
 export async function withEntityExtras(data: WorldIndexData, account: { role: string }, token?: string): Promise<WorldIndexData> {
   if (data.key === "classes") return withClassImages(data)
   if (data.key === "class-spells") return withClassRanks(data)

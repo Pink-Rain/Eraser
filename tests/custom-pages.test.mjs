@@ -21,6 +21,8 @@ const pages = await vite.ssrLoadModule("/lib/custom-pages.ts");
 const store = await vite.ssrLoadModule("/lib/custom-pages-store.ts");
 const blockData = await vite.ssrLoadModule("/lib/custom-pages-data.ts");
 const shared = await vite.ssrLoadModule("/tests/fakes/shared-store.ts");
+const blueprints = await vite.ssrLoadModule("/lib/eraser-page-blueprints.ts");
+const layouts = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
 
 beforeEach(() => { shared.reset(); store.forgetCustomPages(); });
 
@@ -390,4 +392,94 @@ test("Données d'un bloc Vue : conditions (colonnes masquées comprises), tri av
   // La carte choisie devient celle par défaut ; une carte inconnue laisse celle à l'étoile.
   assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-b" }, settings, options).cards.defaultId, "carte-b");
   assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-z" }, settings, options).cards.defaultId, "carte-a");
+});
+
+test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, redessiné ou dans un module", () => {
+  const routes = blueprints.eraserPages;
+  assert.ok(routes.length > 30);
+  for (const route of routes) {
+    const content = blueprints.eraserPageBlueprint(route.path);
+    const clean = pages.cleanContent(content);
+    // Le contenu de départ passe tel quel le nettoyage de l'enregistrement (aucun bloc perdu).
+    assert.equal(pages.allBlocks(clean).length, pages.allBlocks(content).length, route.path);
+    assert.ok(clean.title, route.path);
+    if (!route.redrawn) {
+      assert.equal(clean.hideHeader, true, route.path);
+      assert.deepEqual(pages.allBlocks(clean).map((block) => [block.type, block.module]), [["module", "origine"]], route.path);
+    }
+  }
+  // Règles › Classes : un bloc Vue de l'index des classes, preset « Classes par famille » (carte « Carte de classe »).
+  const classes = pages.allBlocks(blueprints.eraserPageBlueprint("/regles/classes"));
+  const view = classes.find((block) => block.type === "view");
+  assert.deepEqual([view.index, view.tab, view.kind, view.presetId], ["classes", "Classes", "list", "eraser:classes-par-famille"]);
+  assert.equal(classes.find((block) => block.type === "link").vis, "mj");
+  const preset = layouts.builtinViewPresets.find((item) => item.id === "eraser:classes-par-famille");
+  assert.deepEqual(layouts.cleanViewLayout(preset.layout), preset.layout);
+  assert.equal(preset.layout.itemCard, "eraser-classe-carte");
+  // L'accueil : ses morceaux en modules, sans en-tête.
+  const home = blueprints.eraserPageBlueprint("/");
+  assert.equal(home.hideHeader, true);
+  assert.deepEqual(pages.allBlocks(home).map((block) => block.module), ["accueil-salutation", "accueil-principal", "accueil-cote", "accueil-succes"]);
+  assert.equal(blueprints.blueprintSlug("/regles/classes"), "regles-classes");
+  assert.equal(blueprints.blueprintSlug("/campagne/[id]/journal"), "campagne-une-journal");
+  assert.equal(blueprints.blueprintSlug("/"), "accueil");
+  assert.equal(blueprints.blueprintVisibility("/administration"), "admin");
+  assert.equal(blueprints.blueprintVisibility("/ressources/index-des-lieux"), "mj");
+  assert.equal(blueprints.blueprintVisibility("/regles"), "tous");
+});
+
+test("Bloc Module d'Eraser et en-tête masqué : gardés à l'enregistrement, valeurs inconnues ramenées", () => {
+  assert.deepEqual(pages.cleanBlock({ id: "b-mod", type: "module", module: "pages-section", place: "bac-a-sable", heading: "Pages" }), { id: "b-mod", vis: "tous", type: "module", module: "pages-section", place: "bac-a-sable", heading: "Pages" });
+  const odd = pages.cleanBlock({ id: "b-mod2", type: "module", module: "pirate", place: "nulle-part" });
+  assert.deepEqual([odd.module, odd.place], ["origine", "regles"]);
+  assert.equal(pages.cleanContent({ title: "x", hideHeader: true }).hideHeader, true);
+  assert.equal(pages.cleanContent({ title: "x", hideHeader: "oui" }).hideHeader, undefined);
+  const page = pages.parseCustomPage(stored({ hideHeader: true, status: "publiee", published: { title: "x", sections: [], hideHeader: true } }));
+  assert.equal(pages.pageForViewer(page, admin).hideHeader, true);
+  assert.equal(pages.hasUnpublishedChanges({ ...page, hideHeader: undefined }), true);
+});
+
+test("Pages d'Eraser : « Modifier » crée une seule page de remplacement, en brouillon, redessinée", async () => {
+  const content = blueprints.eraserPageBlueprint("/regles/classes");
+  const first = await store.adoptEraserPage("/regles/classes", content, blueprints.blueprintSlug("/regles/classes"), "tous", by);
+  assert.equal(first.created, true);
+  assert.equal(first.page.status, "brouillon");
+  assert.equal(first.page.replaces, "/regles/classes");
+  assert.equal(first.page.replaceMode, "replace");
+  assert.equal(first.page.place, "hors-menu");
+  assert.equal(first.page.slug, "regles-classes");
+  assert.ok(pages.allBlocks(first.page).some((block) => block.type === "view" && block.presetId === "eraser:classes-par-famille"));
+  // Une deuxième fois : la même page, pas une copie.
+  const again = await store.adoptEraserPage("/regles/classes", content, "regles-classes", "tous", by);
+  assert.equal(again.created, false);
+  assert.equal(again.page.id, first.page.id);
+  const entries = blueprints.eraserPageEntries(await store.listCustomPages({ fresh: true }), "mj");
+  const entry = entries.find((item) => item.path === "/regles/classes");
+  assert.deepEqual([entry.page.id, entry.page.status, entry.page.mode, entry.redrawn], [first.page.id, "brouillon", "replace", true]);
+  assert.ok(!entries.some((item) => item.path.startsWith("/administration")));
+  assert.equal(entries.find((item) => item.path === "/regles/vocabulaire").page, undefined);
+  // À la corbeille : la page d'origine revient (plus de remplacement), et « Modifier » en recrée une.
+  await store.trashCustomPage(first.page.id, by);
+  const after = blueprints.eraserPageEntries(await store.listCustomPages({ fresh: true }), "admin");
+  assert.equal(after.find((item) => item.path === "/regles/classes").page, undefined);
+});
+
+test("Bloc Vue : une ligne d'un index dont la page est ouverte à tous (les classes) mène à sa page, joueurs compris", () => {
+  const source = { key: "classes", title: "Classes", path: "/ressources/index-des-classes", nameHref: "/regles/classes/{id}", nameHeader: "Nom de la classe", openToPlayers: true,
+    tables: [{ tabName: "Classes", headers: ["ID", "Type", "Nom de la classe"], rows: [{ values: ["CL-1", "Solide", "Gardien"], html: ["CL-1", "Solide", "Gardien"] }] }], columns: {} };
+  const data = blockData.viewBlockData(source, { tab: "Classes", kind: "table", limit: 0 }, { presentations: {}, cards: {} }, { player: true });
+  assert.equal(data.rows[0].href, "/regles/classes/CL-1");
+  const closed = blockData.viewBlockData({ ...source, openToPlayers: undefined }, { tab: "Classes", kind: "table", limit: 0 }, { presentations: {}, cards: {} }, { player: true });
+  assert.equal(closed.rows[0].href, undefined);
+});
+
+test("Cartes des pages d'Eraser proposées comme presets dans tous les index (carte de classe comprise)", async () => {
+  const cards = await vite.ssrLoadModule("/lib/index-cards.ts");
+  const all = cards.eraserCardPresets();
+  const classCard = all.find((entry) => entry.card.id === "eraser-classe-carte");
+  assert.equal(classCard.label, "Classes");
+  assert.equal(classCard.card.blocks.find((block) => block.type === "bar").max, undefined);
+  assert.ok(all.some((entry) => entry.card.id === "eraser-succes-carte"));
+  assert.ok(all.some((entry) => entry.card.id === "eraser-etat-carte"));
+  assert.ok(!cards.eraserCardPresets("classes").some((entry) => entry.index === "classes"));
 });
