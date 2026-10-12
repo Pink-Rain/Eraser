@@ -96,7 +96,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 
 type IndexEntry = { key: string; title: string; path: string }
 type IndexDetails = {
-  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
   stats: Array<{ id: string; title: string; pinned: boolean }>
   presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
 }
@@ -303,7 +303,17 @@ function RowFieldsSettings({ block, rowOf, onChange }: { block: Extract<PageBloc
         })}
       </div>}
     </Field>
-    <Field label="Disposition" hint={block.style === "form" ? "Les sections, les lignes et la colonne latérale de la fiche de l’onglet (Modifier › Formulaire), en lecture." : undefined}><Segmented label="Disposition" value={block.style} onChange={(style) => onChange({ style })} options={[{ value: "grid", label: "En grille" }, { value: "list", label: "En liste" }, { value: "form", label: "Comme la fiche", title: "Disposées comme le formulaire de l’index" }]} /></Field>
+    <Field label="Disposition" hint={block.style === "form" ? "Les sections, les lignes, la colonne latérale et les blocs de la fiche de l’onglet (Modifier › Formulaire), en lecture." : undefined}><Segmented label="Disposition" value={block.style} onChange={(style) => onChange({ style })} options={[{ value: "grid", label: "En grille" }, { value: "list", label: "En liste" }, { value: "form", label: "Comme la fiche", title: "Disposées comme le formulaire de l’index" }]} /></Field>
+    {block.style === "form" && (() => {
+      const forms = [...new Map((details?.tabs ?? []).filter((tab) => !rowOf?.tab || tab.name === rowOf.tab).flatMap((tab) => tab.formList ?? []).map((form) => [form.id, form])).values()]
+      return <Field label="Formulaire" hint="Lequel des formulaires de l’onglet (Modifier › Formulaire). Vide : le formulaire étoilé.">
+        <select className={fieldClass} value={block.formId ?? ""} onChange={(event) => onChange({ formId: event.target.value || undefined })}>
+          <option value="">Le formulaire étoilé</option>
+          {forms.filter((form) => form.id !== "principal").map((form) => <option key={form.id} value={form.id}>{form.name}</option>)}
+          {block.formId && !forms.some((form) => form.id === block.formId) && <option value={block.formId}>{block.formId} (introuvable)</option>}
+        </select>
+      </Field>
+    })()}
     <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
   </>
 }

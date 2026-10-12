@@ -21,7 +21,9 @@ import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
 import { foldName, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
 import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedLayout, type ResolvedLayoutField, type ResolvedReference } from "@/lib/index-references"
 import type { LayoutSpan } from "@/lib/index-layouts"
-import { IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
+import { resolveReference } from "@/components/eraser/reference-store"
 import { objectIconImage } from "@/lib/object-icons"
 import { cn } from "@/lib/utils"
 import type { WeaponModifierRef } from "@/lib/weapon-modifiers"
@@ -106,11 +108,27 @@ export function useWeaponModifiers(enabled: boolean) {
 // Les détails au survol
 // ---------------------------------------------------------------------------
 
+/** La ligne d'un état, résolue comme une citation (avec son survol réglé) ; `null` tant qu'elle ne l'est pas. */
+function useStateReference(definition: StateDefinition) {
+  const [reference, setReference] = useState<ResolvedReference | null>(null)
+  const id = definition.id.startsWith("etat:") ? "" : definition.id
+  useEffect(() => {
+    if (!id) return
+    let active = true
+    void resolveReference({ index: "states", id, name: definition.name }).then((value) => { if (active) setReference(value) })
+    return () => { active = false }
+  }, [definition.name, id])
+  return reference
+}
+
 /**
  * Le détail d'un état : la description de ses niveaux et ses règles (pas les lignes de
  * l'onglet Effets). `level` 0 : aucun niveau en cours, les deux sont montrés pareil.
  */
 export function StateDetails({ definition, level, color }: { definition: StateDefinition; level: 1 | 2 | 0; color: string }) {
+  // Le survol réglé pour les états (« Modifier » › Survol), lu une fois ; en attendant, le dessin d'office.
+  const reference = useStateReference(definition)
+  if (reference?.layout) return <LayoutDetails reference={{ ...reference, color: reference.color || color }} layout={reference.layout} color={color} depth={0} level={level} />
   return <div className="grid gap-2.5">
     <div className="flex items-start gap-3">
       <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${color}, ${color}cc 60%, #1d140c 140%)` }}>
@@ -211,7 +229,7 @@ function nameLook(style: ColumnStyle | undefined) {
   return { className: css.className, style: css.style, color }
 }
 
-function StateChip({ definition, nameStyle, label }: { definition: StateDefinition; nameStyle?: ColumnStyle; label?: string }) {
+function StateChip({ definition, nameStyle, label, reference }: { definition: StateDefinition; nameStyle?: ColumnStyle; label?: string; /** La ligne résolue, avec le survol réglé pour les états. */ reference?: ResolvedReference }) {
   const color = definition.gauge.color || DEFAULT_STATE_COLOR
   const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
@@ -221,13 +239,13 @@ function StateChip({ definition, nameStyle, label }: { definition: StateDefiniti
         {label !== undefined ? <span style={look ? undefined : { color: firstHtmlColor(definition.nameHtml) ?? color }}>{label}</span> : look ? <span>{definition.name}</span> : <FormattedName name={definition.name} html={definition.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
-    <HoverCardContent side="top" align="start" className="w-80 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
-      <StateDetails definition={definition} level={0} color={color} />
+    <HoverCardContent side="top" align="start" collisionPadding={12} className={`${hoverWidthClass(reference?.layout)} rounded-2xl p-3.5 text-foreground`} style={{ borderColor: `${color}55` }}>
+      {reference?.layout ? <LayoutDetails reference={{ ...reference, color: reference.color || color }} layout={reference.layout} color={color} depth={0} level={0} /> : <StateDetails definition={definition} level={0} color={color} />}
     </HoverCardContent>
   </HoverCard>
 }
 
-function ModifierChip({ modifier, nameStyle, label }: { modifier: WeaponModifierRef; nameStyle?: ColumnStyle; label?: string }) {
+function ModifierChip({ modifier, nameStyle, label, reference }: { modifier: WeaponModifierRef; nameStyle?: ColumnStyle; label?: string; reference?: ResolvedReference }) {
   const color = modifier.color || "#7f5a3a"
   const look = nameLook(nameStyle)
   return <HoverCard openDelay={180} closeDelay={80}>
@@ -236,8 +254,8 @@ function ModifierChip({ modifier, nameStyle, label }: { modifier: WeaponModifier
         {look ? <span style={look.color ? { color: look.color } : undefined}><ModifierIcon modifier={modifier} />{label ?? modifier.name}</span> : label !== undefined ? <span style={{ color }}><ModifierIcon modifier={modifier} color={firstHtmlColor(modifier.nameHtml)} /><span style={{ color: firstHtmlColor(modifier.nameHtml) ?? color }}>{label}</span></span> : <ModifierName modifier={modifier} color={color} />}
       </span>
     </HoverCardTrigger>
-    <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
-      <ModifierDetails modifier={modifier} color={color} />
+    <HoverCardContent side="top" align="start" collisionPadding={12} className={`${reference?.layout ? hoverWidthClass(reference.layout) : "w-72"} rounded-2xl p-3.5 text-foreground`} style={{ borderColor: `${color}55` }}>
+      {reference?.layout ? <LayoutDetails reference={{ ...reference, color: reference.color || color }} layout={reference.layout} color={color} depth={0} /> : <ModifierDetails modifier={modifier} color={color} />}
     </HoverCardContent>
   </HoverCard>
 }
@@ -294,7 +312,12 @@ function RowDetails({ reference, color, depth }: { reference: ResolvedReference;
 }
 
 /** Une case du survol réglé dans « Modifier » : une image, une couleur, une icône, ou sa valeur. */
-function LayoutValue({ reference, field, depth }: { reference: ResolvedReference; field: ResolvedLayoutField; depth: number }) {
+function LayoutValue({ reference, field, depth, accent, level }: { reference: ResolvedReference; field: ResolvedLayoutField; depth: number; accent: string; level?: number }) {
+  if (field.block) {
+    const cells = field.cells ?? {}
+    const cellOf = (column: string) => Object.entries(cells).find(([name]) => foldName(name) === foldName(column))?.[1]
+    return <LayoutBlockView block={field.block} ctx={{ valueOf: (column) => cellOf(column)?.value ?? "", htmlOf: (column) => cellOf(column)?.valueHtml ?? "", accent, compact: true, row: { index: reference.index, id: reference.id, tab: reference.tab, name: reference.name }, level }} />
+  }
   const kind = field.look?.kind
   if (kind === "file") {
     const files = field.value.split(/\n+/).map((item) => item.trim()).filter(Boolean)
@@ -310,31 +333,54 @@ function LayoutValue({ reference, field, depth }: { reference: ResolvedReference
  * Le survol d'une ligne selon sa mise en page (« Modifier » › Mise en page › Survol) : en
  * tête l'image et le sous-titre choisis, puis ses cases rangées en sections et en lignes.
  */
-function LayoutDetails({ reference, layout, color, depth }: { reference: ResolvedReference; layout: ResolvedLayout; color?: string; depth: number }) {
-  const look = parseGlyphValue(reference.icon ?? "")
-  const image = layout.image || reference.image
+export function LayoutDetails({ reference, layout, color, depth, level }: { reference: ResolvedReference; layout: ResolvedLayout; color?: string; depth: number; /** Bloc Paliers : le niveau en cours, quand la page le sait. */ level?: number }) {
+  // L'accent : celui de la mise en page (« {Couleur} »), sinon la couleur de la ligne, sinon l'or d'Eraser.
+  const accent = layout.accent || color || DEFAULT_LAYOUT_ACCENT
+  const look = parseGlyphValue(layout.icon || reference.icon || "")
+  const image = layout.image || (layout.icon ? "" : reference.image)
   const wrap = (fields: ResolvedLayoutField[]) => fields.map((field) => ({ ...field, span: field.span as LayoutSpan | undefined, item: field }))
   const arranged = {
     aside: wrap(layout.aside),
     asideWidth: layout.asideWidth ?? "md",
+    asideSide: layout.asideSide ?? "left" as const,
     sections: layout.sections.map((section) => ({ ...section, rows: section.rows.map((row) => ({ id: row.id, fields: wrap(row.fields) })) })),
     rest: [] as ResolvedLayoutField[],
   }
+  const nameColor = layout.nameInAccent ? accent : color
+  const hasGlyph = Boolean(look.icon || look.emoji)
+  // Le médaillon : l'image ou l'icône sur un fond à la couleur de l'accent (le survol d'un état).
+  const medallion = layout.tint
+    ? <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)` }}>
+      {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "clock"} emoji={look.emoji} className="size-5" stroke={accent} />} /> : <IndexIconGlyph icon={look.icon || "clock"} emoji={look.emoji} className="size-5" stroke={accent} />}
+    </span>
+    : (image || hasGlyph) && !layout.icon
+      ? <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={{ color: accent }}>
+        {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} /> : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} />}
+      </span>
+      : null
+  // L'icône devant le nom (colonne Icône d'un modificateur), de la couleur du nom.
+  const inlineIcon = layout.icon && hasGlyph && !layout.tint ? <span className="mr-1 inline-flex translate-y-[0.12em]" style={{ color: nameColor ?? accent }}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span> : null
+  const subtitle = layout.subtitle || reference.type || (layout.icon ? "" : reference.tab)
   return <div className="grid gap-2.5">
     <div className="flex items-start gap-3">
-      {(image || look.icon || look.emoji) && <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={color ? { color } : undefined}>
-        {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} /> : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} />}
-      </span>}
+      {medallion}
       <div className="min-w-0">
-        <p className="font-display text-lg font-semibold leading-tight" style={color ? { color } : undefined}><FormattedName name={reference.name} html={reference.nameHtml} color={color} /></p>
-        <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{layout.subtitle || reference.type || reference.tab}</p>
+        <p className="font-display text-lg font-semibold leading-tight" style={nameColor ? { color: nameColor } : undefined}>{inlineIcon}<FormattedName name={reference.name} html={reference.nameHtml} color={nameColor} /></p>
+        {subtitle && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{subtitle}</p>}
       </div>
     </div>
-    <IndexLayoutView compact arranged={arranged} render={(field) => <div className="grid gap-0.5">
-      {!field.hideLabel && <p className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground">{field.column}</p>}
-      <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} /></div>
+    <IndexLayoutView compact accent={accent} arranged={arranged} render={(field) => <div className="grid gap-0.5">
+      {!field.hideLabel && <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" style={field.color ? { color: field.color.startsWith("#") ? field.color : accent } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || field.column}</p>}
+      <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div>
     </div>} />
   </div>
+}
+
+/** La largeur de la carte de survol d'une mise en page. */
+function hoverWidthClass(layout: ResolvedLayout | undefined) {
+  if (!layout) return "w-80"
+  const width = layout.width === "sm" ? "w-80" : layout.width === "lg" ? "w-[32rem]" : "w-[26rem]"
+  return `max-h-[min(34rem,75vh)] ${width} max-w-[calc(100vw-2rem)] overflow-y-auto`
 }
 
 /**
@@ -356,7 +402,7 @@ function RowChip({ reference, depth, label }: { reference: ResolvedReference; de
         {label !== undefined ? <span style={reference.nameStyle || !wordColor ? undefined : { color: wordColor }}>{label}</span> : reference.nameStyle ? <span>{reference.name}</span> : <FormattedName name={reference.name} html={reference.nameHtml} color={color} />}
       </span>
     </HoverCardTrigger>
-    <HoverCardContent side="top" align="start" collisionPadding={12} className={`${reference.layout ? "max-h-[min(34rem,75vh)] w-[26rem] max-w-[calc(100vw-2rem)] overflow-y-auto" : "w-80"} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
+    <HoverCardContent side="top" align="start" collisionPadding={12} className={`${hoverWidthClass(reference.layout)} rounded-2xl p-3.5 text-foreground`} style={color ? { borderColor: `${color}55` } : undefined}>
       {reference.layout ? <LayoutDetails reference={reference} layout={reference.layout} color={color} depth={depth} /> : <RowDetails reference={reference} color={color} depth={depth} />}
     </HoverCardContent>
   </HoverCard>
@@ -400,11 +446,11 @@ function Cited({ citation, value, depth, states, modifiers }: { citation: Citati
   if (citation.request.column) return <CellValue reference={value} depth={depth} />
   if (value.index === "states") {
     const definition = states.find((candidate) => candidate.id === value.id) ?? states.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (definition) return <StateChip definition={definition} nameStyle={value.nameStyle} label={custom} />
+    if (definition) return <StateChip definition={definition} nameStyle={value.nameStyle} label={custom} reference={value} />
   }
   if (value.index === "weapon-modifiers") {
     const modifier = modifiers?.find((candidate) => candidate.id === value.id) ?? modifiers?.find((candidate) => foldName(candidate.name) === foldName(value.name))
-    if (modifier) return <ModifierChip modifier={modifier} nameStyle={value.nameStyle} label={custom} />
+    if (modifier) return <ModifierChip modifier={modifier} nameStyle={value.nameStyle} label={custom} reference={value} />
   }
   return <RowChip reference={value} depth={depth} label={custom} />
 }
@@ -481,8 +527,12 @@ export function IndexRichText({ html, fill, self, depth = 0, className = "", as 
 export function ModifierPills({ names, look, iconColor }: { names: string[]; look?: { className: string; style: CSSProperties }; /** Pastilles : la couleur de leur icône (celle de leur colonne dans l'objet). */ iconColor?: string }) {
   const modifiers = useWeaponModifiers(names.length > 0)
   const byName = useMemo(() => new Map((modifiers ?? []).map((modifier) => [foldName(modifier.name), modifier])), [modifiers])
+  // Le survol réglé pour les modificateurs (« Modifier » › Survol) : la ligne de chacun, résolue comme une citation.
+  const requests = useMemo(() => names.flatMap((name) => { const modifier = byName.get(foldName(name)); return modifier?.id ? [{ index: "weapon-modifiers", id: modifier.id, name: modifier.name }] : [] }), [byName, names])
+  const resolved = useResolvedReferences(requests)
   return <>{names.map((name, index) => {
     const modifier = byName.get(foldName(name))
+    const reference = modifier?.id ? resolved.get(referenceKey({ index: "weapon-modifiers", id: modifier.id })) : undefined
     // Dans le style d'une colonne : du texte, séparé par des virgules, sans étiquette.
     const shape = look ? cn("whitespace-normal break-words [overflow-wrap:anywhere]", look.className) : pillClass
     const style = look ? look.style : pillStyle(modifier?.color) ?? undefined
@@ -493,8 +543,8 @@ export function ModifierPills({ names, look, iconColor }: { names: string[]; loo
       <HoverCardTrigger asChild>
         <span tabIndex={0} className={cn(shape, !look && "font-medium", "cursor-help outline-none focus-visible:ring-2 focus-visible:ring-ring/50")} style={style}><ModifierIcon modifier={modifier} color={look ? undefined : iconColor} />{modifier.name}</span>
       </HoverCardTrigger>
-      <HoverCardContent side="top" align="start" className="w-72 rounded-2xl p-3.5 text-foreground" style={{ borderColor: `${color}55` }}>
-        <ModifierDetails modifier={modifier} color={color} />
+      <HoverCardContent side="top" align="start" collisionPadding={12} className={`${reference?.layout ? hoverWidthClass(reference.layout) : "w-72"} rounded-2xl p-3.5 text-foreground`} style={{ borderColor: `${color}55` }}>
+        {reference?.layout ? <LayoutDetails reference={{ ...reference, color: reference.color || color }} layout={reference.layout} color={color} depth={0} /> : <ModifierDetails modifier={modifier} color={color} />}
       </HoverCardContent>
     </HoverCard></span>
   })}</>

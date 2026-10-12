@@ -134,3 +134,91 @@ test("onglets-fenêtres prévus par Eraser : Actifs, Passifs et Bonus rangent le
   assert.ok(!views.viewOperators.some((operator) => operator.value === "categorie-sort"));
   assert.deepEqual(views.parseViewConditions(JSON.stringify([{ column: "Type", operator: "categorie-sort", value: "actif" }])), []);
 });
+
+test("blocs, allure des sections, formulaires nommés : lus et réécrits tels quels, bornés", () => {
+  const rich = {
+    aside: [{ column: "Portrait", hideLabel: true }],
+    asideSide: "right",
+    accent: "{Couleur}",
+    sections: [
+      { id: "s1", title: "Caractéristiques", look: "tinted", color: "#397f88", icon: "shield", collapsible: true, columns: 2, rows: [{ id: "r1", fields: [{ column: "bloc:abc", span: 12, hideLabel: true, block: { kind: "tiles", columns: ["Force", "Dextérité"], colors: { Force: "#397f88" }, perRow: 2, short: true } }] }] },
+      { id: "s2", rows: [{ id: "r2", fields: [{ column: "bloc:lvl", span: 12, block: { kind: "levels", levels: [{ label: "Niveau 1", column: "Description niveau 1" }], rules: "Règles", rulesLabel: "Règles liées" } }, { column: "Nom", span: 6, icon: "user", color: "accent", label: "Qui" }] }] },
+    ],
+    rest: "hide",
+    icon: "Icône",
+    tint: true,
+    nameInAccent: true,
+    width: "lg",
+  };
+  const parsed = layouts.parseIndexLayout(JSON.stringify(rich));
+  assert.deepEqual(parsed, rich);
+  // Un bloc illisible est écarté ; une clé « bloc: » sans bloc aussi ; une couleur farfelue est oubliée.
+  const cleaned = layouts.parseIndexLayout({ aside: [], sections: [{ rows: [{ fields: [{ column: "bloc:x" }, { column: "bloc:y", block: { kind: "inventory", accept: "Chapeaux" } }, { column: "Nom", color: "rouge" }] }] }] });
+  assert.deepEqual(cleaned.sections[0].rows[0].fields, [{ column: "bloc:y", block: { kind: "inventory", accept: "all" } }, { column: "Nom" }]);
+  // Les colonnes qu'un bloc lit comptent comme placées.
+  assert.equal(layouts.layoutPlaces(rich, "Force"), true);
+  assert.equal(layouts.layoutPlaces(rich, "Règles"), true);
+  assert.equal(layouts.layoutPlaces(rich, "Icône"), true);
+  // Renommer une colonne suit dans les blocs.
+  const renamed = layouts.renameLayoutColumns(rich, new Map([["force", "Puissance"], ["icone", "Emblème"]]));
+  assert.deepEqual(renamed.sections[0].rows[0].fields[0].block.columns, ["Puissance", "Dextérité"]);
+  assert.deepEqual(renamed.sections[0].rows[0].fields[0].block.colors, { Puissance: "#397f88" });
+  assert.equal(renamed.icon, "Emblème");
+  // Le rangement garde les blocs (par `blockItem`) et saute une colonne absente.
+  const arranged = layouts.arrangeLayout(rich, [{ header: "Nom" }, { header: "Portrait" }], (item) => item.header, (field) => ({ header: field.column, block: field.block }));
+  assert.deepEqual(arranged.sections.map((section) => section.rows.map((row) => row.fields.map((field) => field.column))), [[["bloc:abc"]], [["bloc:lvl", "Nom"]]]);
+  assert.equal(arranged.asideSide, "right");
+  assert.equal(arranged.sections[0].look, "tinted");
+  // Les formulaires nommés d'un onglet : l'étoilé en tête sous « principal », les autres par leur identifiant.
+  const entry = layouts.parseTabLayouts(JSON.stringify({ form: sample, forms: [{ id: "court", name: "Fiche courte", layout: sample }, { id: "principal", name: "doublon", layout: sample }, { id: "nul", layout: {} }] }));
+  assert.deepEqual(entry.forms.map((item) => item.id), ["court"]);
+  assert.deepEqual(layouts.tabFormsOf(entry).map((item) => [item.id, item.name]), [["principal", "Formulaire principal"], ["court", "Fiche courte"]]);
+  assert.equal(layouts.formOf(entry, "court"), entry.forms[0].layout);
+  assert.equal(layouts.formOf(entry, "inconnu"), entry.form);
+  assert.equal(layouts.formOf(entry), entry.form);
+  assert.equal(layouts.parseTabLayouts("{}"), null);
+  // Une couleur réglée se résout pour une ligne.
+  assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", (column) => column === "Couleur" ? "#b3261e" : ""), "#b3261e");
+  assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", () => "pas une couleur"), "#000000");
+  assert.equal(layouts.resolveLayoutColor(undefined, "#111111"), "#111111");
+});
+
+test("l'affichage automatique et les survols d'Eraser sont exprimés en mise en page", async () => {
+  const defaults = await vite.ssrLoadModule("/lib/index-layout-defaults.ts");
+  const definitions = await vite.ssrLoadModule("/lib/world-index-definitions.ts");
+  const sheets = await vite.ssrLoadModule("/lib/entity-sheets.ts");
+  // La fiche automatique : deux champs par ligne, les textes longs sur toute la ligne, les images à droite.
+  const columns = [{ header: "Nom", spec: { kind: "name-form" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice" } }, { header: "Rang", spec: { kind: "number" } }, { header: "Description", spec: { kind: "rich" } }, { header: "ID", spec: { kind: "id" } }];
+  const form = defaults.automaticLayoutFor("form", columns);
+  assert.equal(form.asideSide, "right");
+  assert.deepEqual(form.aside.map((field) => field.column), ["Portrait"]);
+  assert.deepEqual(form.sections[0].rows.map((row) => row.fields.map((field) => [field.column, field.span])), [[["Nom", 6], ["Type", 6]], [["Rang", 6]], [["Description", 12]]]);
+  // Le survol automatique : l'image en tête, le type en sous-titre, la description.
+  const hover = defaults.automaticLayoutFor("hover", columns);
+  assert.equal(hover.image, "Portrait");
+  assert.equal(hover.subtitle, "Type");
+  assert.deepEqual(hover.sections[0].rows[0].fields, [{ column: "Description", span: 12, hideLabel: true }]);
+  assert.equal(defaults.effectiveLayoutFor({}, "places", "Villes", "form", columns).source, "automatic");
+  assert.equal(defaults.effectiveLayoutFor({ Villes: { form: form } }, "places", "Villes", "form", columns).source, "saved");
+  // La fiche d'un PNJ : ses colonnes existent dans la feuille des PNJ ; tuiles et sac à dos en blocs.
+  const npc = defaults.builtinLayoutFor("npcs", "PNJs", "form");
+  assert.equal(defaults.effectiveLayoutFor({}, "npcs", "PNJs", "form", []).source, "eraser");
+  const placed = [...npc.aside, ...npc.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))];
+  for (const field of placed) {
+    if (field.block) for (const column of layouts.blockColumns(field.block)) assert.ok(sheets.npcSheetHeaders.includes(column), column);
+    else assert.ok(sheets.npcSheetHeaders.includes(field.column), field.column);
+  }
+  assert.ok(placed.some((field) => field.block?.kind === "inventory"));
+  assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(npc)), npc);
+  // Le survol d'un état : ses niveaux en bloc Paliers, un médaillon à sa couleur ; celui d'un modificateur : son icône, à sa couleur.
+  const state = defaults.builtinLayoutFor("states", definitions.STATES_TAB, "hover");
+  assert.equal(state.tint, true);
+  assert.deepEqual(state.sections[0].rows[0].fields[0].block.levels.map((level) => level.column), ["Description niveau 1", "Description niveau 2"]);
+  assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(state)), state);
+  const modifier = defaults.builtinLayoutFor("weapon-modifiers", definitions.WEAPON_MODIFIERS_TAB, "hover");
+  assert.equal(modifier.icon, "Icône");
+  assert.equal(modifier.accent, "{Couleur}");
+  assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(modifier)), modifier);
+  assert.equal(defaults.tabFormOrBuiltin({ PNJs: { form: form, forms: [{ id: "court", name: "Courte", layout: hover }] } }, "npcs", "PNJs", "court"), hover);
+  assert.equal(defaults.tabFormOrBuiltin({}, "npcs", "PNJs", "court"), npc);
+});

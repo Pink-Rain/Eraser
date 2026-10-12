@@ -9,8 +9,9 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
 import { ALL_SOURCES, describeCondition, viewOperators, type IndexView, type ViewCondition } from "@/lib/index-views"
-import type { IndexLayout, LayoutKind, LayoutPreset, TabLayouts } from "@/lib/index-layouts"
+import type { IndexLayout, LayoutKind, LayoutPreset, NamedLayout, TabLayouts } from "@/lib/index-layouts"
 import type { CardPreset, CardTemplate, TabCards } from "@/lib/index-cards"
+import type { TabLocks } from "@/lib/index-locks"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
@@ -216,9 +217,9 @@ export function LayoutSettings({ layout, columns, onChange, fixedKind = false, c
   </div>
 }
 
-type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[] }
+type Settings = { views: IndexView[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: ViewPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
 
-const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [] }
+const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
@@ -241,7 +242,7 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [] }
+        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
         known.set(index, next)
         setSettings(next)
       })
@@ -261,7 +262,7 @@ export function useIndexSettings(index: string) {
     return payload.id ?? ""
   }, [update])
   /** Les mises en page (fiche, survol) d'onglets de cet index ; `null` : l'affichage automatique. */
-  const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) => {
+  const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }>) => {
     if (!changes.length) return
     const payload = await postSettings({ action: "save-layouts", index, changes })
     if (payload.layouts) update({ layouts: payload.layouts })
@@ -291,6 +292,12 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-layout-preset", id })
     if (payload.layoutPresets) update({ layoutPresets: payload.layoutPresets })
   }, [update])
+  /** Les cadenas des colonnes d'onglets de cet index ; `null` : plus aucun réglage dans l'onglet. */
+  const saveLocks = useCallback(async (changes: Array<{ tab: string; locks: TabLocks | null }>) => {
+    if (!changes.length) return
+    const payload = await postSettings({ action: "save-locks", index, changes })
+    if (payload.locks) update({ locks: payload.locks })
+  }, [index, update])
   /** Les cartes d'onglets de cet index ; `null` : l'onglet revient aux cartes d'Eraser. */
   const saveCards = useCallback(async (changes: Array<{ tab: string; cards: TabCards | null }>) => {
     if (!changes.length) return
@@ -328,7 +335,7 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats }
+  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
 }
 
 const emptyCondition = (column: string): ViewCondition => ({ column, operator: "est", value: "" })

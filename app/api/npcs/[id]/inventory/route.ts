@@ -20,7 +20,9 @@ async function authorizedNpc(id: string) {
   const npc = await getNpcById(id)
   if (!npc) return null
   if (account.role !== "joueur" && npc.pageLinked === "bac-a-sable") return { account, npc, player: false }
-  if (isNpcLibraryPage(npc.pageLinked)) return null
+  // Un PNJ de l'Index : son inventaire se prépare dans la bibliothèque (MJ et admins) ; il est
+  // copié avec lui quand on le récupère dans une campagne.
+  if (isNpcLibraryPage(npc.pageLinked)) return account.role !== "joueur" ? { account, npc, player: false } : null
   if (account.role !== "joueur") {
     const campaign = await getCampaignDashboard(account.role === "admin" ? null : account.uid, npc.pageLinked).catch(() => null)
     if (campaign) return { account, npc, player: false }

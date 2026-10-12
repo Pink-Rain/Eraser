@@ -8,6 +8,7 @@
  * réécrire aucun texte. Sans dépendance au serveur.
  */
 import { internalAppPath } from "@/lib/app-links"
+import type { LayoutBlock, LayoutSection } from "@/lib/index-layouts"
 import type { ColumnStyle } from "@/lib/index-columns"
 
 export const REFERENCE_PATH = "/reference/"
@@ -206,16 +207,24 @@ export type ResolvedReference = {
   layout?: ResolvedLayout
 }
 
-/** Une case du survol d'une ligne, dans sa mise en page. */
-export type ResolvedLayoutField = { column: string; span?: number; hideLabel?: boolean; large?: boolean; value: string; valueHtml: string; look?: ReferenceLook }
+/** Une case du survol d'une ligne, dans sa mise en page ; un bloc (paliers, tuiles…) porte les cases qu'il lit. */
+export type ResolvedLayoutField = { column: string; span?: number; hideLabel?: boolean; large?: boolean; label?: string; icon?: string; color?: string; value: string; valueHtml: string; look?: ReferenceLook; block?: LayoutBlock; cells?: Record<string, { value: string; valueHtml: string }> }
 
 /** Le survol d'une ligne selon sa mise en page : image et sous-titre en tête, puis les cases rangées. */
 export type ResolvedLayout = {
   image?: string
   subtitle?: string
+  /** L'icône (colonne Icône) devant le nom ; un médaillon à la couleur de l'accent ; le nom dans cette couleur. */
+  icon?: string
+  tint?: boolean
+  nameInAccent?: boolean
+  /** La couleur d'accent de la mise en page, résolue pour cette ligne. */
+  accent?: string
+  width?: "sm" | "md" | "lg"
   asideWidth?: "sm" | "md" | "lg"
+  asideSide?: "left" | "right"
   aside: ResolvedLayoutField[]
-  sections: Array<{ id: string; title?: string; framed?: boolean; rows: Array<{ id: string; fields: ResolvedLayoutField[] }> }>
+  sections: Array<Pick<LayoutSection, "id" | "title" | "framed" | "look" | "color" | "icon" | "collapsible" | "collapsed" | "columns"> & { rows: Array<{ id: string; fields: ResolvedLayoutField[] }> }>
 }
 
 /** Le plus de références qu'une demande peut résoudre d'un coup. */

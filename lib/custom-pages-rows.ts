@@ -26,11 +26,20 @@ export type RowContext = {
   columns: Array<{ header: string; text: string; html: string }>
   /** La fiche de l'onglet (Modifier › Formulaire), quand un bloc « Valeurs de la ligne » la reprend. */
   form?: IndexLayout
+  /** Les autres formulaires de l'onglet que des blocs demandent (par leur identifiant). */
+  forms?: Record<string, IndexLayout>
   /** Les colonnes de l'onglet que le lecteur ne voit pas (leur « {…} » s'efface). */
   hidden: string[]
 }
 
 export const rowPageHref = (index: string, id: string) => `/fiche/${encodeURIComponent(index)}/${encodeURIComponent(id)}`
+
+/** Les formulaires que les blocs « Valeurs de la ligne » disposés « comme la fiche » demandent ; `null` : aucun. */
+export function rowFormIdsOf(view: { sections: Array<{ cols: Array<Array<{ type: string; style?: string; formId?: string }>> }> }): string[] | null {
+  const blocks = view.sections.flatMap((section) => section.cols.flat()).filter((block) => block.type === "rowfields" && block.style === "form")
+  if (!blocks.length) return null
+  return [...new Set(blocks.map((block) => block.formId || ""))]
+}
 
 /**
  * Sur le fil, de la page au composant client (comme lib/index-rows-wire.ts pour les index) :

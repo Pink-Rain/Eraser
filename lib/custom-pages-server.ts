@@ -12,7 +12,7 @@ import { resolveMenu, type MenuPageEntry, type ResolvedMenuItem } from "@/lib/ap
 import { knownMenuLayout } from "@/lib/app-menu-store"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
-import { isForbiddenReplacement, matchesReplacement } from "@/lib/page-replacements"
+import { isForbiddenReplacement, isReplaceablePath, matchesReplacement } from "@/lib/page-replacements"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
@@ -192,7 +192,7 @@ export function shellMenu(account: Pick<AuthorizedUser, "uid" | "role" | "displa
  */
 export function replacementFor(pathname: string, account: Pick<AuthorizedUser, "uid" | "role" | "displayName" | "email">) {
   if (!pathname || isForbiddenReplacement(pathname)) return null
-  const candidates = (knownCustomPages() ?? []).filter((page) => !page.trashedAt && page.status === "publiee" && page.published && page.replaces && page.place !== "campagne" && matchesReplacement(page.replaces, pathname))
+  const candidates = (knownCustomPages() ?? []).filter((page) => !page.trashedAt && page.status === "publiee" && page.published && page.replaces && page.place !== "campagne" && isReplaceablePath(page.replaces) && matchesReplacement(page.replaces, pathname))
   const viewer: PageViewer = { role: account.role, uid: account.uid, name: pageAuthor(account).name, member: false, manager: false }
   for (const page of candidates.sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))) {
     const view = pageForViewer(page, viewer)

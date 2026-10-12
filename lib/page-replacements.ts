@@ -31,11 +31,10 @@ export const replaceableRoutes: Array<{ path: string; label: string; group: stri
   { path: "/regles/vocabulaire", label: "Vocabulaire", group: "Règles" },
   { path: "/regles/combat", label: "Combat", group: "Règles" },
   { path: "/regles/hors-combat", label: "Hors combat", group: "Règles" },
+  // Les pages d'index (/ressources/index-des-…, un index personnalisé, la fiche d'une
+  // référence) ne sont pas ici : elles ont leur propre « Modifier » (le moteur des index) et
+  // ne se remplacent pas dans l'atelier. Seule la page de la section reste.
   { path: "/ressources", label: "Index (page de la section)", group: "Index" },
-  ...["armes-modificateurs", "index-des-attributs", "index-des-calendriers", "index-des-campagnes", "index-des-caracteristiques", "index-des-classes", "index-des-creatures", "index-des-etats", "index-des-langues", "index-des-lieux", "index-des-materiaux", "index-des-objets", "index-des-personnages", "index-des-peuples", "index-des-pnjs", "index-des-religions", "index-des-runes", "index-des-succes", "index-du-vocabulaire", "sorts-des-classes", "sorts-des-creatures"]
-    .map((slug) => ({ path: `/ressources/${slug}`, label: slug.replace(/-/g, " ").replace(/^./, (letter) => letter.toUpperCase()), group: "Index" })),
-  { path: "/ressources/index/[cle]", label: "Un index personnalisé", group: "Index" },
-  { path: "/reference/[index]/[id]", label: "Fiche d’une référence", group: "Index" },
   { path: "/bac-a-sable", label: "Bac à sable (page de la section)", group: "Bac à sable" },
   { path: "/bac-a-sable/tabletop", label: "Tabletop", group: "Bac à sable" },
   { path: "/bac-a-sable/magasin", label: "Magasin", group: "Bac à sable" },
@@ -57,12 +56,15 @@ export const replaceableRoutes: Array<{ path: string; label: string; group: stri
   { path: "/administration/personnages", label: "Personnages (administration)", group: "Administration" },
 ]
 
+/** Les adresses des pages d'index prévues par Eraser (hors atelier : le moteur des index les gère). */
+export const indexPageSlugs = ["armes-modificateurs", "index-des-attributs", "index-des-calendriers", "index-des-campagnes", "index-des-caracteristiques", "index-des-classes", "index-des-creatures", "index-des-etats", "index-des-langues", "index-des-lieux", "index-des-materiaux", "index-des-objets", "index-des-personnages", "index-des-peuples", "index-des-pnjs", "index-des-religions", "index-des-runes", "index-des-succes", "index-du-vocabulaire", "sorts-des-classes", "sorts-des-creatures"]
+
 /**
  * Jamais remplacées, quoi qu'on enregistre : la connexion, les comptes et la corbeille, la
  * liaison Google, le compagnon Roll20, toute route /api (OAuth compris), et le créateur de
  * pages lui-même avec l'éditeur du menu (on ne doit pas pouvoir s'en fermer l'accès).
  */
-export const forbiddenReplacements = ["/api", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/campagne/[id]/roll20", "/pages", "/fiche"]
+export const forbiddenReplacements = ["/api", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/campagne/[id]/roll20", "/pages", "/fiche", "/reference", "/ressources/index", ...indexPageSlugs.map((slug) => `/ressources/${slug}`)]
 
 const segments = (path: string) => path.split(/[?#]/)[0].split("/").filter(Boolean)
 

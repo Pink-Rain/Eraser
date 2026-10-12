@@ -9,11 +9,13 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { LayoutBlockView, type LayoutBlockContext } from "@/components/eraser/index-layout-blocks"
+import { richTextPlainText } from "@/components/eraser/rich-text"
 import { foldName, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
-import { arrangeLayout, type IndexLayout } from "@/lib/index-layouts"
+import { arrangeLayout, type IndexLayout, type LayoutBlock } from "@/lib/index-layouts"
 
-export type RowSheetField = { key: string; label: string; spec: IndexColumnSpec; value: string; long?: boolean }
+export type RowSheetField = { key: string; label: string; spec: IndexColumnSpec; value: string; long?: boolean; /** Un bloc de la mise en page (tuiles, inventaire…) à la place d'une colonne. */ block?: LayoutBlock }
 
 /** Les lignes qu'on parcourt depuis la fiche : celles du tableau, dans l'ordre affiché. */
 export type RowSheetNavigation = {
@@ -44,7 +46,7 @@ function releaseFocus() {
  * ni « Fermer ». Une seule barre de mise en forme, en haut, sert à tous les champs. En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
  * à l'autre sans quitter la fiche.
  */
-export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose }: {
+export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose, rowRef, inventoryEndpoint }: {
   open: boolean
   /** La ligne affichée : chaque enregistrement la désigne, même si on est passé à une autre entre-temps. */
   rowKey: string
@@ -63,6 +65,10 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   /** Enregistre des champs de la ligne `rowKey` ; refusé : lève une erreur (la page en affiche la raison). */
   onSave: (rowKey: string, changes: Record<string, string>) => Promise<void> | void
   onClose: () => void
+  /** La ligne (index, identifiant, onglet) : les blocs Inventaire et Bouton de la mise en page en ont besoin. */
+  rowRef?: { index: string; id: string; tab?: string }
+  /** L'adresse de l'inventaire de la ligne (sinon celle d'office du moteur). */
+  inventoryEndpoint?: (row: { index: string; id: string }) => string
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
   // « Réessayer » : renvoie ce que la fiche n'a pas pu enregistrer.
@@ -111,7 +117,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
       </div>
       {/* Une ligne, un corps : passer à une autre ligne enregistre ce qui restait et repart de ses valeurs. */}
       <RichTextToolbarHost.Provider value={toolbarHost}>
-        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} />
+        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} />
       </RichTextToolbarHost.Provider>
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
@@ -203,7 +209,7 @@ function RowJump({ navigation, current, position, onGo }: { navigation: RowSheet
  * (la frappe continue), puis partent l'une après l'autre ; ce qui reste quand on change de
  * ligne ou qu'on ferme la fiche part aussitôt, toujours vers la ligne d'où il vient.
  */
-function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus }: {
+function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint }: {
   rowKey: string
   fields: RowSheetField[]
   layout?: IndexLayout | null
@@ -212,6 +218,8 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   retryRef: MutableRefObject<(() => void) | null>
   onSave: (rowKey: string, changes: Record<string, string>) => Promise<void> | void
   onStatus: (status: SaveStatus) => void
+  rowRef?: { index: string; id: string; tab?: string }
+  inventoryEndpoint?: (row: { index: string; id: string }) => string
 }) {
   // Ce qui a été saisi ici : la fiche l'affiche tant que la page n'a pas relu la ligne.
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -286,14 +294,27 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   />
   // Une mise en page réglée dans « Modifier » : ses sections, ses lignes et sa colonne latérale.
   // Rangés par le nom de leur colonne (l'index des items désigne ses champs par leur place).
-  const arranged = layout ? arrangeLayout(layout, fields.filter((item) => normalizeSpec(item.spec).kind !== "id"), (item) => item.label) : null
+  // Un bloc (tuiles, inventaire, bouton…) devient un champ à part, dessiné par le moteur des blocs.
+  const byLabel = (column: string) => fields.find((item) => foldName(item.label) === foldName(column))
+  const arranged = layout ? arrangeLayout(layout, fields.filter((item) => normalizeSpec(item.spec).kind !== "id"), (item) => item.label, (placed) => ({ key: placed.column, label: placed.label ?? "", spec: { kind: "rich" } as IndexColumnSpec, value: "", block: placed.block })) : null
+  const blockContext: LayoutBlockContext = {
+    valueOf: (column) => { const item = byLabel(column); return item ? richTextPlainText(valueOf(item)) : "" },
+    htmlOf: (column) => { const item = byLabel(column); return item ? valueOf(item) : "" },
+    accent: DEFAULT_LAYOUT_ACCENT,
+    row: rowRef,
+    onChange: (column, value) => { const item = byLabel(column); if (item) change(item, value) },
+    inventoryEndpoint,
+  }
 
   return <div className="min-h-0 flex-1 overflow-y-auto pr-1">
     {arranged
       ? <IndexLayoutView
         arranged={arranged}
+        readColumn={blockContext.valueOf}
         // Une case à cocher (sans libellé au-dessus) s'aligne sur le bas des champs de sa ligne.
-        render={(item, placed) => <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed.label)}</div>}
+        render={(item, placed) => item.block
+          ? <div key={item.key} className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" className="text-xs font-semibold text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={blockContext} /></div>
+          : <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed.label)}</div>}
         renderRest={(rest) => <div className="grid content-start gap-3 md:grid-cols-2">{rest.map((item) => field(item))}</div>}
       />
       : <div className={pictures.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]" : ""}>

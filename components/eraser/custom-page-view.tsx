@@ -4,13 +4,15 @@ import Link from "next/link"
 import { useMemo, useState, type ReactNode } from "react"
 import { ChevronRight, EyeOff, Puzzle, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
 
+import { usePageEditTarget } from "@/components/eraser/app-shell"
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { PageBacklinksBlock, PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
 import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
-import { arrangeLayout, type LayoutField } from "@/lib/index-layouts"
+import { arrangeLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
@@ -222,16 +224,23 @@ function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowf
   </div>
   const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
   const columns = (block.columns.length ? block.columns.flatMap((name) => row.columns.filter((column) => fold(column.header) === fold(name))) : row.columns).filter((column) => column.text || /<img|https?:/.test(column.html))
-  // Comme la fiche de l'index : ses sections, ses lignes de champs et sa colonne latérale.
-  if (block.style === "form" && row.form && columns.length) {
-    const field = (column: RowContext["columns"][number], layout: LayoutField) => <div className="grid min-w-0 gap-0.5">
-      {!layout.hideLabel && <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{layout.label || column.header}</span>}
-      <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${layout.large ? "font-display text-xl font-semibold" : "text-[14px]"}`} />
-    </div>
+  // Comme la fiche de l'index (le formulaire étoilé, ou celui que le bloc nomme) : ses sections, ses
+  // lignes de champs, sa colonne latérale, et ses blocs (tuiles, paliers, texte…) en lecture.
+  const layout = block.style === "form" ? (block.formId ? row.forms?.[block.formId] ?? row.form : row.form) : undefined
+  if (block.style === "form" && layout && columns.length) {
+    const columnOf = (header: string) => row.columns.find((column) => fold(column.header) === fold(header))
+    const blockContext = { valueOf: (header: string) => columnOf(header)?.text ?? "", htmlOf: (header: string) => columnOf(header)?.html ?? "", accent: DEFAULT_LAYOUT_ACCENT, row: { index: row.index, id: row.id, tab: row.tab, name: row.name } }
+    type Shown = RowContext["columns"][number] & { block?: LayoutBlock }
+    const field = (column: Shown, placed: LayoutField) => column.block
+      ? <div className="grid min-w-0 gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" />}<LayoutBlockView block={column.block} ctx={blockContext} /></div>
+      : <div className="grid min-w-0 gap-0.5">
+        {!placed.hideLabel && <FieldLabel field={placed} fallback={column.header} className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground" readColumn={blockContext.valueOf} />}
+        <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${placed.large ? "font-display text-xl font-semibold" : "text-[14px]"}`} />
+      </div>
     return <section className="grid gap-2">
       {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
       <div className="rounded-2xl border bg-card p-4">
-        <IndexLayoutView arranged={arrangeLayout(row.form, columns, (column) => column.header)} render={field}
+        <IndexLayoutView arranged={arrangeLayout<Shown>(layout, columns, (column) => column.header, (placed) => ({ header: placed.column, text: "", html: "", block: placed.block }))} render={field} readColumn={blockContext.valueOf}
           renderRest={(rest) => <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(12rem,100%),1fr))]">{rest.map((column) => <div key={column.header}>{field(column, { column: column.header })}</div>)}</div>} />
       </div>
     </section>
@@ -342,6 +351,8 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
   modules?: Record<string, ReactNode>
 }) {
   const [raw, setView] = useState(initial)
+  // « Modifier la page » de l'en-tête ouvre cette page dans l'atelier (pour qui peut la modifier).
+  usePageEditTarget(initial.editable ? initial.id : null)
   // La ligne arrive allégée (html identique au texte vidé) : rétablie avant tout usage.
   const row = useMemo(() => packedRow ? unpackRowContext(packedRow) : undefined, [packedRow])
   const view = useMemo(() => row ? fillRowPage(raw, row) : raw, [raw, row])

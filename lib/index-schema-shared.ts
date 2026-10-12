@@ -40,10 +40,20 @@ export type ColumnPolicy = {
   rename: boolean
   type: boolean
   remove: boolean
-  /** Ce qui lit la colonne, et donc ce qui casserait. */
+  /** Ce qui lit la colonne, et donc ce qui casserait (usages d'Eraser gardés et usages ajoutés). */
   reasons: string[]
   /** Ce qu'on peut changer malgré le verrou. */
   allowed: string
+  /** Nom et ID : toujours verrouillées, le cadenas ne se retire pas. */
+  permanent?: boolean
+  /** Les usages d'Eraser (tous, écartés compris) : le cadenas d'Eraser, qu'on peut remettre. */
+  builtin?: string[]
+  /** Les usages ajoutés à la main dans « Modifier ». */
+  manual?: string[]
+  /** Les usages d'Eraser écartés de la liste. */
+  hidden?: string[]
+  /** Le cadenas d'Eraser a été retiré : la colonne est libre bien qu'Eraser la lise. */
+  unlocked?: boolean
 }
 
 export type EditorColumn = { header: string; spec: IndexColumnSpec; policy: ColumnPolicy }
@@ -223,9 +233,11 @@ export const objectReadHeaders: Array<{ names: string[]; label: string }> = [
 
 /** Pourquoi une colonne d'un tableau d'objets est verrouillée, ou `null` si elle est libre. */
 export function objectColumnPolicy(header: string): ColumnPolicy {
-  if (isIdHeader(header)) return lockedPolicy(["L’identifiant relie chaque item aux inventaires des personnages et aux boutiques : le changer ferait perdre ces items."])
+  if (isIdHeader(header)) return { ...lockedPolicy(["L’identifiant relie chaque item aux inventaires des personnages et aux boutiques : le changer ferait perdre ces items."]), permanent: true }
   const read = objectReadHeaders.find((entry) => entry.names.some((name) => foldName(name) === foldName(header)))
   if (!read) return freePolicy
+  // Le nom d'un item : chaque ligne est retrouvée par lui (inventaires, boutiques, citations).
+  if (read === objectReadHeaders[0]) return { ...lockedPolicy([`L’inventaire des personnages, les boutiques et la table lisent ${read.label} dans la colonne « ${header} » par son nom : la renommer ou la supprimer la rendrait introuvable.`], "Le type d’affichage (la valeur reste le même texte dans Sheets), la description et l’option « Masquée ».", { type: true }), permanent: true }
   return lockedPolicy(
     [`L’inventaire des personnages, les boutiques et la table lisent ${read.label} dans la colonne « ${header} » par son nom : la renommer ou la supprimer la rendrait introuvable.`],
     "Le type d’affichage (la valeur reste le même texte dans Sheets), la description et l’option « Masquée ».",

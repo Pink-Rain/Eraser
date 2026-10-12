@@ -1,4 +1,7 @@
 import { NextResponse } from "next/server"
+import { tabLayoutsOf } from "@/lib/index-layout-defaults"
+import { tabFormsOf } from "@/lib/index-layouts"
+import { listIndexLayouts } from "@/lib/index-layouts-store"
 
 import { canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
 import { isMeCondition, statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
@@ -103,7 +106,7 @@ export async function GET(request: Request) {
       }
       const key = await knownWorldIndexKey(wanted)
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
-      const [data, presentations, cards, record, presets] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => [])])
+      const [data, presentations, cards, record, presets, layouts] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => []), listIndexLayouts(key).catch(() => ({}))])
       const cardsOf = (tab: string) => Object.entries(cards).find(([name]) => name.toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr"))?.[1]?.cards ?? []
       return NextResponse.json({
         tabs: data.tables.map((table) => ({
@@ -113,6 +116,8 @@ export async function GET(request: Request) {
           // Leurs formes : la forme propre à une page part de celle de l'index.
           forms: Object.fromEntries(viewKindsOf(presentations, table.tabName).map((kind) => [kind, presentationFor(presentations, table.tabName, kind as PresentationKind)])),
           cards: cardsOf(table.tabName).length > 0,
+          // Les formulaires de l'onglet (Modifier › Formulaire) : un bloc « Valeurs de la ligne » en choisit un.
+          formList: tabFormsOf(tabLayoutsOf(layouts, table.tabName)).map((form) => ({ id: form.id, name: form.name })),
           cardList: cardsOf(table.tabName).map((card) => ({ id: card.id, name: card.name })),
           columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
           // Les valeurs proposées des colonnes à liste : les conditions d'un bloc les suggèrent.

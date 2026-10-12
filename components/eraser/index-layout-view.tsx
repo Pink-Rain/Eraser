@@ -1,13 +1,21 @@
 "use client"
 
-import type { CSSProperties, ReactNode } from "react"
+import { useState, type CSSProperties, type ReactNode } from "react"
+import { ChevronDown } from "lucide-react"
 
-import type { ArrangedLayout, LayoutField } from "@/lib/index-layouts"
+import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { resolveLayoutColor, type ArrangedLayout, type ArrangedSection, type LayoutField } from "@/lib/index-layouts"
+import { cn } from "@/lib/utils"
 
 const asideColumns: Record<"sm" | "md" | "lg", string> = {
   sm: "md:grid-cols-[11rem_minmax(0,1fr)]",
   md: "md:grid-cols-[14rem_minmax(0,1fr)]",
   lg: "md:grid-cols-[18rem_minmax(0,1fr)]",
+}
+const asideColumnsRight: Record<"sm" | "md" | "lg", string> = {
+  sm: "md:grid-cols-[minmax(0,1fr)_11rem]",
+  md: "md:grid-cols-[minmax(0,1fr)_14rem]",
+  lg: "md:grid-cols-[minmax(0,1fr)_18rem]",
 }
 
 /**
@@ -31,41 +39,99 @@ const compactAsideColumns: Record<"sm" | "md" | "lg", string> = {
   md: "grid-cols-[6.5rem_minmax(0,1fr)]",
   lg: "grid-cols-[9rem_minmax(0,1fr)]",
 }
+const compactAsideColumnsRight: Record<"sm" | "md" | "lg", string> = {
+  sm: "grid-cols-[minmax(0,1fr)_4.5rem]",
+  md: "grid-cols-[minmax(0,1fr)_6.5rem]",
+  lg: "grid-cols-[minmax(0,1fr)_9rem]",
+}
+
+/** La couleur d'accent d'une mise en page rangée, résolue pour la ligne affichée. */
+export const DEFAULT_LAYOUT_ACCENT = "#927640"
 
 /**
- * Une mise en page rangée (`arrangeLayout`) : la colonne latérale, puis les sections et
- * leurs lignes de champs, et enfin ce qui n'est pas placé. `render` dessine un élément (un
- * champ de la fiche, une case du survol) ; `renderRest` les éléments non placés.
+ * Une section rangée : nue, encadrée, teintée ou avec un bandeau coloré ; son titre avec son
+ * icône ; repliable quand elle le demande. `columns` 2 ou 3 : ses lignes se répartissent en
+ * colonnes égales.
  */
-export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "Autres champs", compact = false }: {
+function SectionView<T>({ section, accent, compact, readColumn, children }: { section: ArrangedSection<T>; accent: string; compact: boolean; readColumn?: (column: string) => string; children: ReactNode }) {
+  const [open, setOpen] = useState(!section.collapsed)
+  const look = section.look ?? (section.framed ? "framed" : "plain")
+  const color = resolveLayoutColor(section.color, accent, readColumn)
+  const titleClass = cn("flex items-center gap-1.5 font-semibold uppercase tracking-[.14em]", compact ? "text-[10px]" : "text-xs")
+  const title = section.title || section.icon
+    ? <p className={cn(titleClass, look === "banner" ? "text-white" : "")} style={{ color: look === "banner" ? undefined : section.color || look === "tinted" ? color : undefined }}>
+      {section.icon && <IndexIconGlyph icon={section.icon} className={compact ? "size-3" : "size-3.5"} filled={false} />}
+      {section.title}
+      {section.collapsible && <ChevronDown className={cn("ml-auto size-3.5 transition-transform", !open && "-rotate-90")} aria-hidden="true" />}
+    </p>
+    : null
+  const header = title && section.collapsible
+    ? <button type="button" onClick={() => setOpen((value) => !value)} aria-expanded={open} className={cn("-m-1 rounded-md p-1 text-left hover:bg-foreground/5", look === "banner" && "hover:bg-white/10")}>{title}</button>
+    : title
+  const body = open || !section.collapsible ? <div className={cn("grid min-w-0 content-start", compact ? "gap-2" : "gap-3", section.columns === 2 && "md:grid-cols-2", section.columns === 3 && "md:grid-cols-3")}>{children}</div> : null
+  if (look === "banner") return <section className={cn("grid min-w-0 content-start overflow-hidden rounded-2xl border", compact ? "gap-2" : "gap-3")} style={{ borderColor: `color-mix(in srgb, ${color} 45%, transparent)` }}>
+    <div className={cn("flex items-center", compact ? "px-2.5 py-1" : "px-3 py-1.5")} style={{ backgroundColor: color }}>{header}</div>
+    {body && <div className={compact ? "px-2.5 pb-2.5" : "px-3 pb-3"}>{body}</div>}
+  </section>
+  const frame = look === "framed" ? "rounded-2xl border bg-muted/20" : look === "tinted" ? "rounded-2xl border" : ""
+  const frameStyle: CSSProperties | undefined = look === "tinted" ? { backgroundColor: `color-mix(in srgb, ${color} 9%, transparent)`, borderColor: `color-mix(in srgb, ${color} 35%, transparent)` } : undefined
+  return <section className={cn("grid min-w-0 content-start", compact ? "gap-2" : "gap-3", frame, frame && (compact ? "p-2.5" : "p-3"))} style={frameStyle}>
+    {header}
+    {body}
+  </section>
+}
+
+/**
+ * Une mise en page rangée (`arrangeLayout`) : la colonne latérale (à gauche ou à droite),
+ * puis les sections et leurs lignes de champs, et enfin ce qui n'est pas placé. `render`
+ * dessine un élément (un champ de la fiche, une case du survol, un bloc) ; `renderRest` les
+ * éléments non placés. `readColumn` résout les couleurs lues dans une colonne (« {Couleur} »).
+ */
+export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "Autres champs", compact = false, accent, readColumn }: {
   arranged: ArrangedLayout<T>
   render: (item: T, field: LayoutField) => ReactNode
   renderRest?: (items: T[]) => ReactNode
   restTitle?: string
   /** Survol : moins d'espace entre les sections, colonne latérale étroite. */
   compact?: boolean
+  /** La couleur d'accent de la ligne (sinon celle de la mise en page, sinon l'or d'Eraser). */
+  accent?: string
+  readColumn?: (column: string) => string
 }) {
   const gap = compact ? "gap-2.5" : "gap-4"
+  const color = accent ?? resolveLayoutColor(arranged.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
   const main = <div className={`grid min-w-0 content-start ${gap}`}>
-    {arranged.sections.map((section) => <section key={section.id} className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"} ${section.framed ? `rounded-2xl border bg-muted/20 ${compact ? "p-2.5" : "p-3"}` : ""}`}>
-      {section.title && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{section.title}</p>}
+    {arranged.sections.map((section) => <SectionView key={section.id} section={section} accent={color} compact={compact} readColumn={readColumn}>
       {section.rows.map((row) => <div key={row.id} className={layoutRowClass} style={layoutRowStyle(row.fields)}>
         {/* En colonne : un champ peut occuper toute la hauteur de sa ligne (une case à cocher s'aligne en bas). */}
         {row.fields.map((field) => <div key={field.column} className="flex min-w-0 flex-col self-stretch">{render(field.item, field)}</div>)}
       </div>)}
-    </section>)}
+    </SectionView>)}
     {arranged.rest.length > 0 && renderRest && <section className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>
       {arranged.sections.length > 0 && restTitle && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{restTitle}</p>}
       {renderRest(arranged.rest)}
     </section>}
   </div>
   if (!arranged.aside.length) return main
-  return <div className={`grid ${compact ? `gap-3 ${compactAsideColumns[arranged.asideWidth]}` : `gap-5 ${asideColumns[arranged.asideWidth]}`}`}>
+  const right = arranged.asideSide === "right"
+  const columns = compact ? (right ? compactAsideColumnsRight : compactAsideColumns) : (right ? asideColumnsRight : asideColumns)
+  const aside = <div className={cn("grid min-w-0 content-start", compact ? "gap-2" : "mx-auto w-full max-w-64 gap-3 md:max-w-none", right && "md:order-2")}>{arranged.aside.map((field) => <div key={field.column} className="min-w-0">{render(field.item, field)}</div>)}</div>
+  return <div className={`grid ${compact ? `gap-3 ${columns[arranged.asideWidth]}` : `gap-5 ${columns[arranged.asideWidth]}`}`}>
     {/* Sur téléphone, la colonne latérale passe au-dessus : une image n'y prend pas tout l'écran. */}
-    <div className={`grid min-w-0 content-start ${compact ? "gap-2" : "mx-auto w-full max-w-64 gap-3 md:max-w-none"}`}>{arranged.aside.map((field) => <div key={field.column} className="min-w-0">{render(field.item, field)}</div>)}</div>
+    {aside}
     {main}
   </div>
 }
 
 /** Le grand format d'un champ « en grand » de la fiche (un nom, un titre). */
 export const largeFieldClass = "[&_input]:h-11 [&_input]:font-display [&_input]:text-xl [&_input]:font-semibold [&_[contenteditable]]:font-display [&_[contenteditable]]:text-xl [&_[contenteditable]]:font-semibold"
+
+/** Le libellé d'un champ placé : son texte (ou le nom de la colonne), son icône et sa couleur. */
+export function FieldLabel({ field, fallback, accent, readColumn, className }: { field: Pick<LayoutField, "label" | "icon" | "color" | "hideLabel">; fallback: string; accent?: string; readColumn?: (column: string) => string; className?: string }) {
+  if (field.hideLabel) return null
+  const color = field.color ? resolveLayoutColor(field.color, accent ?? DEFAULT_LAYOUT_ACCENT, readColumn) : undefined
+  return <span className={cn("flex items-center gap-1", className)} style={color ? { color } : undefined}>
+    {field.icon && <IndexIconGlyph icon={field.icon} className="size-3.5" filled={false} />}
+    {field.label || fallback}
+  </span>
+}

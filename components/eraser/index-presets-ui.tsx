@@ -130,7 +130,7 @@ function ManagePresetsDialog({ tabName, columns, presets, onClose, onSave, onDel
  * appliquer un preset, enregistrer la mise en page en preset, la copier d'un coup vers
  * d'autres onglets. Rien n'est écrit avant « Enregistrer » de la fenêtre.
  */
-export function LayoutPresetBar({ kind, tabName, layout, otherTabs, disabled, onApply, onCopyTo }: {
+export function LayoutPresetBar({ kind, tabName, layout, otherTabs, disabled, onApply, onCopyTo, compact = false }: {
   kind: LayoutKind
   tabName: string
   layout: IndexLayout | null
@@ -138,20 +138,24 @@ export function LayoutPresetBar({ kind, tabName, layout, otherTabs, disabled, on
   disabled: boolean
   onApply: (layout: IndexLayout) => void
   onCopyTo: (tabIds: string[]) => void
+  /** Sous les onglets de « Modifier » : en colonne, boutons courts. */
+  compact?: boolean
 }) {
   const { layoutPresets, saveLayoutPreset, deleteLayoutPreset } = useIndexSettings("")
   const presets = layoutPresets.filter((preset) => preset.kind === kind)
   const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
   const what = kind === "form" ? "la fiche" : "le survol"
-  return <div className="flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed bg-background/40 px-2 py-1.5">
+  return <div className={compact ? "grid gap-1" : "flex flex-wrap items-center gap-1.5 rounded-xl border border-dashed bg-background/40 px-2 py-1.5"}>
     <span className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.14em] text-muted-foreground"><Bookmark className="size-3" />Presets</span>
-    <NativeSelect value="" disabled={disabled || !presets.length} onChange={(event) => { const preset = presets.find((candidate) => candidate.id === event.target.value); if (preset) onApply(preset.layout) }} className="h-7 w-auto min-w-48 py-0 text-xs" aria-label={`Appliquer un preset à ${what}`}>
-      <NativeSelectOption value="">{presets.length ? `Appliquer un preset à ${what}…` : "Aucun preset enregistré"}</NativeSelectOption>
+    <NativeSelect value="" disabled={disabled || !presets.length} onChange={(event) => { const preset = presets.find((candidate) => candidate.id === event.target.value); if (preset) onApply(preset.layout) }} className={compact ? "h-7 min-w-0 py-0 text-[11px]" : "h-7 w-auto min-w-48 py-0 text-xs"} aria-label={`Appliquer un preset à ${what}`}>
+      <NativeSelectOption value="">{presets.length ? (compact ? "Appliquer un preset…" : `Appliquer un preset à ${what}…`) : "Aucun preset enregistré"}</NativeSelectOption>
       {presets.map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>{preset.name}</NativeSelectOption>)}
     </NativeSelect>
-    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" disabled={disabled || !layout} onClick={() => setDialog("save")} title={layout ? `Garder ${what} de « ${tabName} » pour l’appliquer ailleurs` : "Personnalise d’abord la mise en page"}><BookmarkPlus />Enregistrer en preset</Button>
-    <Button type="button" variant="outline" size="sm" className="h-7 text-xs" disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={`Donner ${what} de « ${tabName} » à d’autres onglets de cet index`}><Copy />Copier vers d’autres onglets…</Button>
-    {presets.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 text-xs" onClick={() => setDialog("manage")}><Settings2 />Gérer</Button>}
+    <span className="flex flex-wrap gap-1">
+    <Button type="button" variant="outline" size="sm" className={compact ? "h-7 text-[11px]" : "h-7 text-xs"} disabled={disabled || !layout} onClick={() => setDialog("save")} title={layout ? `Garder ${what} de « ${tabName} » pour l’appliquer ailleurs` : "Personnalise d’abord la mise en page"}><BookmarkPlus />{compact ? "Preset" : "Enregistrer en preset"}</Button>
+    <Button type="button" variant="outline" size="sm" className={compact ? "h-7 text-[11px]" : "h-7 text-xs"} disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={`Donner ${what} de « ${tabName} » à d’autres onglets de cet index`}><Copy />{compact ? "Copier vers…" : "Copier vers d’autres onglets…"}</Button>
+    {presets.length > 0 && <Button type="button" variant="ghost" size="sm" className={compact ? "h-7 text-[11px]" : "h-7 text-xs"} onClick={() => setDialog("manage")}><Settings2 />Gérer</Button>}
+    </span>
     {dialog === "save" && layout && <SaveLayoutPresetDialog kind={kind} tabName={tabName} layout={layout} presets={presets} onClose={() => setDialog(null)} onSave={saveLayoutPreset} />}
     {dialog === "copy" && <CopyLayoutDialog what={what} tabName={tabName} empty={!layout} tabs={otherTabs} onClose={() => setDialog(null)} onCopy={(ids) => { onCopyTo(ids); setDialog(null) }} />}
     {dialog === "manage" && <ManageLayoutPresetsDialog presets={presets} what={what} onClose={() => setDialog(null)} onSave={saveLayoutPreset} onDelete={deleteLayoutPreset} />}

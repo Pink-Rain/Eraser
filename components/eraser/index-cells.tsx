@@ -16,7 +16,8 @@ import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
 import { GaugeCell, GlyphCell } from "@/components/eraser/index-gauge"
-import { IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import {
   checkboxValue,
@@ -45,7 +46,7 @@ import {
 import { creatureTokenId, uploadCreaturePortrait } from "@/components/eraser/creature-portrait"
 import { TokenButton } from "@/components/eraser/token-editor"
 import type { FormulaDisplay } from "@/lib/index-formula"
-import { arrangeLayout, type IndexLayout } from "@/lib/index-layouts"
+import { arrangeLayout, type IndexLayout, type LayoutBlock } from "@/lib/index-layouts"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { soundVolume } from "@/lib/sounds"
@@ -1245,7 +1246,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
   }
 }
 
-export type IndexFormField = { key: string; label: string; spec: IndexColumnSpec; long?: boolean }
+export type IndexFormField = { key: string; label: string; spec: IndexColumnSpec; long?: boolean; block?: LayoutBlock }
 
 /**
  * Le formulaire d'ajout d'une ligne, construit à partir des colonnes et de leur type :
@@ -1285,8 +1286,12 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
       ? <div className="mt-4 grid gap-4">
         {leading && <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{leading}</div>}
         <IndexLayoutView
-          arranged={arrangeLayout(layout, fields, (field) => field.label)}
-          render={(field, placed) => <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel)}</div>}
+          arranged={arrangeLayout(layout, fields, (field) => field.label, (placed) => ({ key: placed.column, label: placed.label ?? "", spec: { kind: "rich" } as IndexColumnSpec, block: placed.block }))}
+          readColumn={(column) => richTextPlainText(values[fields.find((field) => foldName(field.label) === foldName(column))?.key ?? ""] ?? "")}
+          // Un bloc (tuiles de valeurs…) écrit dans ses cases ; un inventaire attend que la ligne existe.
+          render={(field, placed) => field.block
+            ? <LayoutBlockView block={field.block} ctx={{ valueOf: (column) => richTextPlainText(values[fields.find((item) => foldName(item.label) === foldName(column))?.key ?? ""] ?? ""), accent: DEFAULT_LAYOUT_ACCENT, onChange: (column, value) => { const target = fields.find((item) => foldName(item.label) === foldName(column)); if (target) setValues((current) => ({ ...current, [target.key]: value })) } }} />
+            : <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel)}</div>}
           renderRest={(rest) => <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{rest.map((field) => entryField(field))}</div>}
         />
       </div>

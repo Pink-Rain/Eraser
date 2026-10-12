@@ -7376,7 +7376,63 @@ async function ensureCharacterInventoryStorage(characterId: string, includeCatal
   })
 }
 
-type InventoryOwnerMode = "character" | "npc"
+/**
+ * À qui appartient un inventaire : un personnage (tous ses contenants), un PNJ (son seul sac
+ * à dos), ou une ligne d'index (un bloc Inventaire de sa fiche : un seul contenant de la
+ * famille demandée, « row:Inventaire » pour tout accepter).
+ */
+export type InventoryOwnerMode = "character" | "npc" | `row:${InventoryCategory}`
+
+/** La famille d'items d'un inventaire de ligne d'index (« row:Armes » → Armes). */
+function rowInventoryCategory(mode: InventoryOwnerMode): InventoryCategory | null {
+  if (!mode.startsWith("row:")) return null
+  const category = mode.slice(4)
+  return (inventoryCategories as readonly string[]).includes(category) ? category as InventoryCategory : "Inventaire"
+}
+
+/** Le contenant d'une ligne d'index (son seul contenant de la famille demandée). */
+function rowContainerOf(ownerId: string, category: InventoryCategory, workbook: InventoryWorkbook) {
+  const typeById = new Map(workbook.containerTypes.map((type) => [type.id, type]))
+  return activeInventoryContainers(ownerId, workbook).find((container) => inventoryContainerCategory(container, typeById) === category)
+}
+
+/**
+ * L'inventaire d'une ligne d'index (bloc Inventaire de sa fiche) : un contenant de la famille
+ * demandée, créé la première fois (d'après le contenant de base de cette famille). Relancé,
+ * rien n'est ajouté deux fois.
+ */
+async function ensureRowInventoryStorage(ownerId: string, category: InventoryCategory, includeCatalog = true, options: InventoryReadOptions = {}): Promise<InventoryWorkbook> {
+  if (!options.fresh) {
+    const known = await readInventoryWorkbook(includeCatalog)
+    const found = rowContainerOf(ownerId, category, known)
+    if (found && !missingInventorySlots(known, found).length) return known
+  }
+  return withInventoryLock(async () => {
+    const read = () => readInventoryWorkbook(includeCatalog, { ...options, fresh: true })
+    let workbook = await read()
+    let found = rowContainerOf(ownerId, category, workbook)
+    if (!found) {
+      const baseType = baseInventoryContainerTypes.find((type) => type.category === category) ?? baseInventoryContainerTypes.find((type) => type.id === npcBackpackTypeId)!
+      const configuredType = workbook.containerTypes.find((type) => type.id === baseType.id) ?? baseType
+      const created: StoredInventoryContainer = {
+        id: crypto.randomUUID(), characterId: ownerId, typeId: configuredType.id, customName: category === "Inventaire" ? "Inventaire" : "",
+        category, capacity: configuredType.capacity, order: 0, createdAt: new Date().toISOString(), deletedAt: "", rowNumber: 0,
+      }
+      await appendInventoryRows(workbook, inventoryContainerTab, [inventoryContainerRow(created)])
+      clearInventoryWorkbookCache()
+      workbook = await read()
+      found = rowContainerOf(ownerId, category, workbook)
+    }
+    if (!found) throw new Error("INVENTORY_CONTAINER_NOT_FOUND")
+    if (await appendMissingInventorySlots(workbook, [found])) workbook = await read()
+    return workbook
+  })
+}
+
+/** L'inventaire d'une ligne d'index (son bloc Inventaire), pour la famille d'items demandée. */
+export async function getRowInventory(ownerId: string, category: InventoryCategory, includeCatalog = true) {
+  return buildCharacterInventory(ownerId, await ensureRowInventoryStorage(ownerId, category, includeCatalog))
+}
 
 const npcBackpackTypeId = "TYPE-SAC-BASE"
 
@@ -7465,6 +7521,8 @@ async function ensureNpcBackpackInventoryStorage(npcId: string, includeCatalog =
 }
 
 async function inventoryStorageFor(ownerId: string, includeCatalog: boolean, mode: InventoryOwnerMode, options: InventoryReadOptions = {}) {
+  const rowCategory = rowInventoryCategory(mode)
+  if (rowCategory) return ensureRowInventoryStorage(ownerId, rowCategory, includeCatalog, options)
   return mode === "npc" ? ensureNpcBackpackInventoryStorage(ownerId, includeCatalog, options) : ensureCharacterInventoryStorage(ownerId, includeCatalog, options)
 }
 
@@ -7778,7 +7836,9 @@ export async function addCharacterInventoryItem(characterId: string, itemId: str
           : canItemBeAutoPlacedInInventoryCategory(itemType, category)
       })
       .sort((left, right) => left.order - right.order)
+    const rowCategory = rowInventoryCategory(mode)
     if (mode === "npc") containers = containers.filter((container) => container.typeId === npcBackpackTypeId)
+    else if (rowCategory) containers = containers.filter((container) => inventoryContainerCategory(container, typeById) === rowCategory)
     else if (requestedContainerId) containers = containers.filter((container) => container.id === requestedContainerId)
     const ground = mode === "character" ? groundContainerOf(characterId, workbook) : undefined
     if (!containers.length && !ground) throw new Error("INVENTORY_NO_COMPATIBLE_CONTAINER")
@@ -7842,7 +7902,10 @@ export async function createCharacterInventoryItem(
 ): Promise<InventoryChangeResult> {
   return withInventoryLock(async () => {
     let workbook = await inventoryStorageFor(characterId, true, mode, { fresh: true })
-    const container = workbook.containers.find((candidate) => candidate.characterId === characterId && !candidate.deletedAt && (mode === "npc" ? candidate.typeId === npcBackpackTypeId : candidate.id === requestedContainerId))
+    const rowCategory = rowInventoryCategory(mode)
+    const container = rowCategory
+      ? rowContainerOf(characterId, rowCategory, workbook)
+      : workbook.containers.find((candidate) => candidate.characterId === characterId && !candidate.deletedAt && (mode === "npc" ? candidate.typeId === npcBackpackTypeId : candidate.id === requestedContainerId))
     const name = input.name.trim()
     const type = input.type.trim() || "Objet"
     if (!container || !name || name.length > 160 || input.description.length > 1200 || input.effect.length > 1200) throw new Error("INVALID_INVENTORY_ITEM")

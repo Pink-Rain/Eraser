@@ -7,7 +7,7 @@
  * Une entrée par onglet : portée « index-layouts », clé « index::onglet », valeur
  * `{ form, hover }` en JSON. Revenir à l'affichage automatique efface l'entrée.
  */
-import { parseIndexLayout, type IndexLayout, type LayoutPreset, type TabLayouts } from "@/lib/index-layouts"
+import { parseIndexLayout, parseTabLayouts, type IndexLayout, type LayoutPreset, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
 import { deleteSharedRecord, listSharedRecords, sharedStoreAvailable, writeSharedRecord } from "@/lib/shared-store"
 
 const SCOPE = "index-layouts"
@@ -33,13 +33,10 @@ async function readAll() {
     if (at <= 0) continue
     const index = record.key.slice(0, at)
     const tab = record.key.slice(at + SEPARATOR.length)
-    let parsed: { form?: unknown; hover?: unknown } = {}
-    try { parsed = JSON.parse(record.value) as typeof parsed } catch { continue }
-    const form = parseIndexLayout(parsed.form)
-    const hover = parseIndexLayout(parsed.hover)
-    if (!tab || (!form && !hover)) continue
+    const parsed = parseTabLayouts(record.value)
+    if (!tab || !parsed) continue
     const entry = result.get(index) ?? {}
-    entry[tab] = { ...(form ? { form } : {}), ...(hover ? { hover } : {}) }
+    entry[tab] = parsed
     result.set(index, entry)
   }
   return result
@@ -58,14 +55,18 @@ export async function listIndexLayouts(index: string): Promise<Record<string, Ta
   return (await all()).get(index.trim()) ?? {}
 }
 
+/** Ce qu'un onglet enregistre : le formulaire étoilé, le survol, les autres formulaires ; tout vide : l'affichage automatique. */
+export type TabLayoutChange = { tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }
+
 /** Enregistre les mises en page d'onglets d'un index ; `null` partout : l'affichage automatique. */
-export async function saveIndexLayouts(index: string, changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) {
+export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]) {
   if (!index.trim()) throw new Error("INDEX_LAYOUT_INVALID")
   if (!sharedStoreAvailable()) throw new Error("INDEX_LAYOUTS_UNAVAILABLE")
   for (const change of changes.filter((item) => item.tab.trim()).slice(0, 100)) {
     const key = recordKey(index, change.tab)
-    if (!change.form && !change.hover) { await deleteSharedRecord(SCOPE, key); continue }
-    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}) })
+    const forms = (change.forms ?? []).filter((item) => parseIndexLayout(item.layout))
+    if (!change.form && !change.hover && !forms.length) { await deleteSharedRecord(SCOPE, key); continue }
+    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}) })
     if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")
     await writeSharedRecord(SCOPE, key, value)
   }

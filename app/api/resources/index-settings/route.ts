@@ -2,9 +2,11 @@ import { NextResponse } from "next/server"
 
 import { deleteColumnPreset, deleteIndexView, listColumnPresets, listIndexViews, saveColumnPreset, saveIndexView } from "@/lib/index-settings"
 import { deleteLayoutPreset, listIndexLayouts, listLayoutPresets, saveIndexLayouts, saveLayoutPreset } from "@/lib/index-layouts-store"
-import { parseIndexLayout } from "@/lib/index-layouts"
+import { parseIndexLayout, parseNamedLayout } from "@/lib/index-layouts"
 import { deleteCardPreset, listCardPresets, listIndexCards, saveCardPreset, saveIndexCards } from "@/lib/index-cards-store"
 import { parseCardTemplate, parseTabCards } from "@/lib/index-cards"
+import { cleanTabLocks } from "@/lib/index-locks"
+import { listIndexLocks, saveIndexLocks } from "@/lib/index-locks-store"
 import { deleteViewPreset, listIndexPresentations, listIndexStatsRecord, listViewPresets, saveIndexPresentations, saveIndexStats, saveViewPreset } from "@/lib/index-presentations-store"
 import { cleanViewLayout, parseTabPresentations } from "@/lib/index-view-layouts"
 import type { PresetColumn } from "@/lib/index-presets"
@@ -24,6 +26,8 @@ const messages: Record<string, string> = {
   INDEX_CARDS_INVALID: "Ces cartes n’ont pas pu être lues.",
   INDEX_CARDS_UNAVAILABLE: "Les cartes se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
   INDEX_CARDS_TOO_LARGE: "Les cartes de cet onglet sont trop grandes pour être enregistrées : retire une carte ou quelques blocs.",
+  INDEX_LOCKS_UNAVAILABLE: "Les cadenas se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
+  INDEX_LOCKS_TOO_LARGE: "Trop d’usages écrits pour cet onglet : raccourcis-les.",
   INDEX_PRESENTATIONS_INVALID: "Ces vues n’ont pas pu être lues.",
   INDEX_PRESENTATIONS_UNAVAILABLE: "Les vues se gardent sur le serveur partagé d’Eraser, qui n’est pas configuré ici.",
   INDEX_STATS_TOO_LARGE: "Trop de statistiques pour cet index : supprime-en une ou retire quelques conditions.",
@@ -36,7 +40,7 @@ export async function GET(request: Request) {
   if (!account) return NextResponse.json({ error: "Accès refusé." }, { status: 403 })
   const index = new URL(request.url).searchParams.get("index")?.trim() ?? ""
   try {
-    const [views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, statsRecord] = await Promise.all([
+    const [views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, statsRecord, locks] = await Promise.all([
       index ? listIndexViews(index) : Promise.resolve([]),
       listColumnPresets(),
       index ? listIndexLayouts(index).catch(() => ({})) : Promise.resolve({}),
@@ -46,8 +50,9 @@ export async function GET(request: Request) {
       index ? listIndexPresentations(index).catch(() => ({})) : Promise.resolve({}),
       listViewPresets().catch(() => []),
       index ? listIndexStatsRecord(index).catch(() => ({ stats: [], groups: [] })) : Promise.resolve({ stats: [], groups: [] }),
+      index ? listIndexLocks(index) : Promise.resolve({}),
     ])
-    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups })
+    return NextResponse.json({ views, presets, layouts, layoutPresets, cards, cardPresets, presentations, viewPresets, stats: statsRecord.stats, statGroups: statsRecord.groups, locks })
   } catch (error) {
     console.error("INDEX_SETTINGS_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
     return NextResponse.json({ error: "Les onglets-fenêtres et les presets n’ont pas pu être chargés." }, { status: 503 })
@@ -61,7 +66,7 @@ export async function POST(request: Request) {
     const body = (await request.json()) as { action?: string; id?: string; index?: string; name?: string; source?: string; match?: string; conditions?: ViewCondition[]; layout?: unknown; description?: string; columns?: PresetColumn[]; changes?: Array<{ tab?: unknown; form?: unknown; hover?: unknown }> }
     if (body.action === "save-layouts") {
       // Mise en page de la fiche et du survol, onglet par onglet ; vide : l'affichage automatique.
-      const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover) }))
+      const changes = (Array.isArray(body.changes) ? body.changes : []).map((change) => ({ tab: String(change.tab ?? ""), form: parseIndexLayout(change.form), hover: parseIndexLayout(change.hover), forms: (Array.isArray((change as { forms?: unknown }).forms) ? (change as { forms: unknown[] }).forms : []).map(parseNamedLayout).filter((item): item is NonNullable<typeof item> => Boolean(item)) }))
       try {
         return NextResponse.json({ layouts: await saveIndexLayouts(String(body.index ?? ""), changes) })
       } catch (error) {
@@ -119,6 +124,18 @@ export async function POST(request: Request) {
         const code = error instanceof Error ? error.message : ""
         console.error("INDEX_VIEW_PRESET_SAVE_FAILED", code)
         return NextResponse.json({ error: messages[code] ?? "Le preset de vue n’a pas pu être enregistré sur le serveur partagé d’Eraser." }, { status: 400 })
+      }
+    }
+    if (body.action === "save-locks") {
+      // Les cadenas des colonnes de chaque onglet ; `null` : plus aucun réglage dans l'onglet.
+      const raw = body as { changes?: Array<{ tab?: unknown; locks?: unknown }> }
+      const changes = (Array.isArray(raw.changes) ? raw.changes : []).map((change) => ({ tab: String(change.tab ?? ""), locks: change.locks === null ? null : cleanTabLocks(change.locks) }))
+      try {
+        return NextResponse.json({ locks: await saveIndexLocks(String(body.index ?? ""), changes) })
+      } catch (error) {
+        const code = error instanceof Error ? error.message : ""
+        console.error("INDEX_LOCKS_SAVE_FAILED", code)
+        return NextResponse.json({ error: messages[code] ?? "Les cadenas n’ont pas pu être enregistrés sur le serveur partagé d’Eraser." }, { status: 400 })
       }
     }
     if (body.action === "save-cards") {

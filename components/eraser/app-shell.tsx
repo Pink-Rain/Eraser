@@ -3,6 +3,7 @@
 import { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState, type ComponentProps, type ReactNode } from "react"
 import { installNavigationCacheGuard } from "@/lib/navigation-cache"
 import { PortraitFramingEffect } from "@/components/eraser/portrait-framing"
+import { PageEditButton } from "@/components/eraser/page-edit-button"
 import { SharePageButton } from "@/components/eraser/share-page"
 import { rememberScroll } from "@/lib/scroll-memory"
 import Link from "next/link"
@@ -112,6 +113,18 @@ export function PageLabel({ label, children }: { label: string; children: ReactN
   useEffect(() => setParentLabel(effective), [effective, setParentLabel])
   useEffect(() => () => setParentLabel(null), [setParentLabel])
   return <PageLabelContext.Provider value={setChildLabel}>{children}</PageLabelContext.Provider>
+}
+
+/** La page de l'atelier qu'affiche la page ouverte (pour « Modifier la page », dans l'en-tête). */
+const PageEditContext = createContext<(pageId: string | null) => void>(() => undefined)
+
+/**
+ * Signale au bandeau quelle page de l'atelier est affichée (une page créée, ou une page
+ * d'Eraser remplacée) : « Modifier la page » l'ouvre directement. Retirée en quittant la page.
+ */
+export function usePageEditTarget(pageId: string | null) {
+  const setTarget = useContext(PageEditContext)
+  useEffect(() => { setTarget(pageId); return () => setTarget(null) }, [pageId, setTarget])
 }
 
 export function useShellData() {
@@ -314,6 +327,8 @@ export function AppShell({
     return match[1] === "personnage" ? visibleCharacters.find((character) => character.id === id)?.name : visibleCampaigns.find((campaign) => campaign.id === id)?.name
   }, children)
   const [currentPageLabel, setCurrentPageLabel] = useState(pageLabel)
+  // La page de l'atelier affichée (page créée, page d'Eraser remplacée) : « Modifier la page » l'ouvre.
+  const [editPageId, setEditPageId] = useState<string | null>(null)
   // Le titre le plus précis l'emporte ; un titre retiré (page quittée) ne vide pas l'en-tête.
   const setShellLabel = useCallback((label: string | null) => { if (label) setCurrentPageLabel(label) }, [])
   const [accountMenuOpen, setAccountMenuOpen] = useState(false)
@@ -819,6 +834,7 @@ export function AppShell({
           <ShellBreadcrumb pathname={pendingPage?.to || pathname} current={pendingPage?.title || currentPageLabel} campaignName={(id) => visibleCampaigns.find((campaign) => campaign.id === id)?.name} />
           <div className="ml-auto flex shrink-0 items-center gap-2">
             <PageSearch />
+            {user.role === "admin" && viewRole === "admin" && !pendingPage && <PageEditButton pathname={pathname} pageId={editPageId} />}
             <SharePageButton title={currentPageLabel} />
             <VolumeControl />
             <Badge variant="outline" className="hidden shrink-0 border-primary/20 bg-primary/5 sm:inline-flex">
@@ -830,11 +846,13 @@ export function AppShell({
             les calques qui couvrent l’écran pendant qu’on fait défiler (FX page entière). */}
         <div ref={pageScrollerRef} className="paper-grain flex min-h-0 flex-1 flex-col overflow-y-auto overflow-x-clip overscroll-contain [--eraser-viewport:calc(100svh-3.5rem)]">
           <ShellDataContext.Provider value={shellData}>
+            <PageEditContext.Provider value={setEditPageId}>
             {pendingPage && <PendingPage pending={pendingPage} />}
             {/* La page actuelle reste montée (cachée) pendant que la suivante arrive. */}
             <div data-view-role={viewRole} className={pendingPage ? "hidden" : "contents"}>
               {children}
             </div>
+            </PageEditContext.Provider>
           </ShellDataContext.Provider>
         </div>
       </SidebarInset>

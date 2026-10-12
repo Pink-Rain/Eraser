@@ -662,8 +662,8 @@ function entityReaders(index: EntityWorldIndexKey, header: string, context: Worl
 export function worldColumnPolicy(index: WorldIndexKey, tab: string, header: string, links: WorldIndexLink[], context: WorldPolicyContext = {}): ColumnPolicy {
   const all = "Tout : nom, type, réglages, suppression."
   const only = "L’affichage : description, « Masquée », style imposé, couleurs et ordre des options."
-  if (isIdHeader(header)) return { rename: false, type: false, remove: false, reasons: ["Généré par Eraser pour reconnaître chaque ligne (et masqué d’office)."], allowed: only }
-  if (isNameColumn(header)) return { rename: false, type: false, remove: false, reasons: ["Chaque ligne est retrouvée par son nom : colonnes liées, listes liées (le Peuple des PNJ…), Recherche, Agrégat et création de personnage (Peuples) en dépendent."], allowed: only }
+  if (isIdHeader(header)) return { rename: false, type: false, remove: false, reasons: ["Généré par Eraser pour reconnaître chaque ligne (et masqué d’office)."], allowed: only, permanent: true }
+  if (isNameColumn(header)) return { rename: false, type: false, remove: false, reasons: ["Chaque ligne est retrouvée par son nom : colonnes liées, listes liées (le Peuple des PNJ…), Recherche, Agrégat et création de personnage (Peuples) en dépendent."], allowed: only, permanent: true }
   const pair = links.find(([end]) => linkEndCovers(end, index, tab) && foldName(end.column) === foldName(header))
   if (pair) {
     const other = pair[1]

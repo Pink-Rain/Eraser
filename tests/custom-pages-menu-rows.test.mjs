@@ -135,11 +135,11 @@ test("La coque n'attend jamais le serveur partagé : copies en mémoire, relues 
 });
 
 test("Remplacements : seules les pages d'Eraser prévues, jamais les routes techniques", () => {
-  for (const path of ["/api", "/api/roll20/bridge", "/api/admin/google-drive/oauth/callback", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/pages", "/pages/atelier", "/pages/menu", "/campagne/[id]/roll20", "/fiche/creatures/CRE-1"]) {
+  for (const path of ["/api", "/api/roll20/bridge", "/api/admin/google-drive/oauth/callback", "/connexion", "/administration/comptes-et-roles", "/administration/corbeille", "/administration/google-drive", "/pages", "/pages/atelier", "/pages/menu", "/campagne/[id]/roll20", "/fiche/creatures/CRE-1", "/ressources/index-des-lieux", "/ressources/index-des-objets", "/ressources/index/perso-abc", "/reference/states/ETA-1"]) {
     assert.equal(replacements.isReplaceablePath(path), false, path);
     assert.equal(replacements.isForbiddenReplacement(path), true, path);
   }
-  for (const path of ["/", "/regles/combat", "/campagne/[id]/journal", "/personnage/[id]", "/ressources/index-des-lieux"]) assert.equal(replacements.isReplaceablePath(path), true, path);
+  for (const path of ["/", "/regles/combat", "/campagne/[id]/journal", "/personnage/[id]", "/ressources"]) assert.equal(replacements.isReplaceablePath(path), true, path);
   assert.equal(replacements.isReplaceablePath("/regles/une-page-creee"), false);
   assert.equal(replacements.matchesReplacement("/campagne/[id]/journal", "/campagne/CAMP-1/journal"), true);
   assert.equal(replacements.matchesReplacement("/campagne/[id]/journal", "/campagne/CAMP-1/pnjs"), false);

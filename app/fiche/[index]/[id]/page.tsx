@@ -7,9 +7,9 @@ import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { moduleSlots } from "@/components/eraser/eraser-modules"
 import { Button } from "@/components/ui/button"
 import { canManagePages, pageForViewer } from "@/lib/custom-pages"
-import { blocksForRow, packRowContext, rowContextOf, rowValuesOf, templateForRow } from "@/lib/custom-pages-rows"
+import { blocksForRow, packRowContext, rowContextOf, rowFormIdsOf, rowValuesOf, templateForRow } from "@/lib/custom-pages-rows"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
-import { tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
+import { tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { indexPathsOf, indexSourceOf, linkTargetsOf, readablePages, readOptions, viewerFor } from "@/lib/custom-pages-server"
 import { currentAccount, currentViewAccount } from "@/lib/server-auth"
 import { knownWorldIndexKey } from "@/lib/world-indexes"
@@ -45,15 +45,18 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   const valueOf = rowValuesOf(source, row.tab, row.id)
   const view = valueOf ? blocksForRow(viewed, valueOf) : viewed
   // Un bloc « Valeurs de la ligne » disposé comme la fiche : la fiche de l'onglet (lue seulement alors).
-  const wantsForm = view.sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "rowfields" && block.style === "form")))
-  const form = wantsForm ? tabLayoutOrBuiltin(await listIndexLayouts(key).catch(() => ({})), key, row.tab, "form") : null
+  // Un bloc « Valeurs de la ligne » disposé comme la fiche : le formulaire étoilé de l'onglet, et ceux que les blocs nomment.
+  const formIds = rowFormIdsOf(view)
+  const layouts = formIds ? await listIndexLayouts(key).catch(() => ({})) : {}
+  const form = formIds ? tabLayoutOrBuiltin(layouts, key, row.tab, "form") : null
+  const forms = formIds ? Object.fromEntries(formIds.filter(Boolean).flatMap((formId) => { const layout = tabFormOrBuiltin(layouts, key, row.tab, formId); return layout ? [[formId, layout]] : [] })) : {}
   const indexHref = manager ? (source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(row.id)) : `${source.path}?ligne=${encodeURIComponent(row.id)}`) : ""
   return (
     <AuthenticatedShell pageLabel={row.name}>
       <CustomPageView
         key={`${view.id}:${key}:${row.id}`}
         initial={view}
-        row={packRowContext(form ? { ...row, form } : row)}
+        row={packRowContext(form ? { ...row, form, ...(Object.keys(forms).length ? { forms } : {}) } : row)}
         modules={moduleSlots(view, { account: viewAccount, row: { index: key, id: row.id } })}
         eyebrow={`${source.title} · ${row.tab}`}
         links={await linkTargetsOf(view, viewAccount)}

@@ -1,13 +1,14 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, Star, FilePlus2 } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
 import { LayoutPresetBar, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { IndexCardEditor } from "@/components/eraser/index-card-editor"
+import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
 import { IndexViewsEditor } from "@/components/eraser/index-views-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
@@ -27,7 +28,6 @@ import {
   indexColumnKinds,
   isColorSourceSpec,
   isComputedSpec,
-  kindGroups,
   normalizeSpec,
   placementOf,
   randomSourceLabels,
@@ -46,9 +46,11 @@ import {
   type RollupFunction,
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
-import { renameLayoutColumns, serializeIndexLayout, tabLayout, type IndexLayout, type LayoutKind, type TabLayouts } from "@/lib/index-layouts"
-import { builtinLayoutFor, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
+import { DEFAULT_FORM_ID, layoutId, renameLayoutColumns, serializeIndexLayout, serializeNamedLayouts, tabLayout, type IndexLayout, type LayoutKind, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
+import { automaticLayoutFor, builtinLayoutFor, tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { cardId, renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
+import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
+import { tabLocksOf } from "@/lib/index-locks-store"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import { presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 import { layoutIcons } from "@/components/eraser/index-views"
@@ -58,7 +60,6 @@ export type EditorMode = "columns" | LayoutKind | "cards" | `view:${Presentation
 import {
   alignColumns,
   canonicalObjectHeader,
-  creatableKinds,
   freePolicy,
   headerProblem,
   isDisplayOnlyChange,
@@ -75,7 +76,10 @@ import {
  * `lockedPolicy` : le cadenas d'origine, gardé quand on déverrouille la colonne (le
  * changement part alors avec `force`, et l'avertissement reste affiché).
  */
-type DraftColumn = { id: string; original?: string; originalIndex?: number; header: string; spec: IndexColumnSpec; originalSpec?: IndexColumnSpec; policy: ColumnPolicy; lockedPolicy?: ColumnPolicy; removed: boolean }
+type DraftColumn = { id: string; original?: string; originalIndex?: number; header: string; spec: IndexColumnSpec; originalSpec?: IndexColumnSpec; policy: ColumnPolicy; /** Le cadenas tel qu'il était à l'ouverture (ce qui est enregistré). */ originalPolicy?: ColumnPolicy; lockedPolicy?: ColumnPolicy; removed: boolean }
+
+/** Une colonne dont le nom, le type ou la présence sont protégés. */
+const isLockedPolicy = (policy: ColumnPolicy) => policy.reasons.length > 0 || (!policy.rename && !policy.type && !policy.remove)
 type DraftTab = { id: string; original?: string; name: string; itemLabel?: string; originalItemLabel?: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
 
 let draftCounter = 0
@@ -121,7 +125,7 @@ function draftOf(model: IndexEditorModel): DraftTab[] {
     addColumns: tab.addColumns,
     addColumnsReason: tab.addColumnsReason,
     // Les réglages sont lus sous leur forme actuelle (« Affichage fixe » → style imposé…).
-    columns: tab.columns.map((column, index) => { const spec = normalizeSpec(column.spec); return { id: nextId(), original: column.header, originalIndex: index, header: column.header, spec, originalSpec: spec, policy: column.policy, removed: false } }),
+    columns: tab.columns.map((column, index) => { const spec = normalizeSpec(column.spec); return { id: nextId(), original: column.header, originalIndex: index, header: column.header, spec, originalSpec: spec, policy: column.policy, originalPolicy: column.policy, removed: false } }),
   }))
 }
 
@@ -139,7 +143,8 @@ export function operationsOf(tabs: DraftTab[], originalTabOrder: string[] = []):
         if (!column.removed) operations.push({ op: "add-column", tab: tab.original, header: column.header.trim(), spec: column.spec })
         continue
       }
-      const force = column.lockedPolicy ? { force: true } : {}
+      // Déverrouillée ici (cadenas retiré) : le changement part avec `force`, le cadenas est enregistré avant.
+      const force = column.lockedPolicy || (column.originalPolicy && isLockedPolicy(column.originalPolicy) && !isLockedPolicy(column.policy)) ? { force: true } : {}
       if (column.removed) { operations.push({ op: "remove-column", tab: tab.original, header: column.original, ...force }); continue }
       const header = column.header.trim()
       if (header !== column.original) operations.push({ op: "rename", tab: tab.original, header: column.original, to: header, ...force })
@@ -215,47 +220,6 @@ function defaultSpec(kind: IndexColumnKind, targets: RelationTarget[], relations
 const sectionTitle = "text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
 const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
 const box = "grid gap-3 rounded-xl border bg-card/60 p-3"
-
-/**
- * Le cadenas d'une colonne : ce qui la lit, et le bouton pour la modifier quand même.
- * Déverrouiller demande une confirmation qui redit ce qui risque de casser ; ensuite
- * l'avertissement reste affiché tant que les changements ne sont pas enregistrés.
- */
-function LockNote({ policy, unlocked, readOnly, onUnlock, onRelock }: { policy: ColumnPolicy; unlocked: boolean; readOnly: boolean; onUnlock: () => void; onRelock: () => void }) {
-  const [confirming, setConfirming] = useState(false)
-  if (!policy.reasons.length) return null
-  const reasons = policy.reasons.filter(Boolean)
-  if (unlocked) return <div className="rounded-lg border border-destructive/35 bg-destructive/[.06] px-3 py-2 text-xs leading-5 text-foreground">
-    <p className="flex items-center gap-1.5 font-semibold text-destructive"><TriangleAlert className="size-3.5" />Déverrouillée : attention</p>
-    <p className="mt-1">Eraser lit cette colonne ailleurs. Si tu changes son nom, son type ou la supprimes, voici ce qui risque de ne plus marcher :</p>
-    <ul className="mt-1 list-disc pl-4">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-    <Button type="button" variant="link" size="sm" className="h-auto px-0 text-xs" onClick={onRelock}>Annuler et reverrouiller</Button>
-  </div>
-  return <div className="rounded-lg border border-amber-700/30 bg-amber-100/60 px-3 py-2 text-xs leading-5 text-amber-950">
-    <p className="flex items-center gap-1.5 font-semibold"><Lock className="size-3.5" />Verrouillée</p>
-    <ul className="mt-1 list-disc pl-4">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-    <p className="mt-1"><span className="font-semibold">Modifiable sans risque :</span> {policy.allowed}</p>
-    {!readOnly && <Button type="button" variant="outline" size="sm" className="mt-2 h-7 border-amber-800/40 bg-transparent text-xs text-amber-950 hover:bg-amber-200/60" onClick={() => setConfirming(true)}><LockOpen />Modifier quand même</Button>}
-    <AlertDialog open={confirming} onOpenChange={setConfirming}>
-      <AlertDialogContent>
-        <AlertDialogHeader>
-          <AlertDialogTitle className="flex items-center gap-2"><TriangleAlert className="size-5 text-destructive" />Déverrouiller cette colonne ?</AlertDialogTitle>
-          <AlertDialogDescription asChild>
-            <div className="grid gap-2 text-sm">
-              <p>Cette colonne est verrouillée parce qu’Eraser s’en sert ailleurs :</p>
-              <ul className="list-disc pl-5">{reasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>
-              <p>Tu pourras changer son nom, son type et ses réglages, ou la supprimer. Si ça casse quelque chose, remets-la comme avant (son nom et son type d’origine) : les données de la feuille ne sont pas effacées.</p>
-            </div>
-          </AlertDialogDescription>
-        </AlertDialogHeader>
-        <AlertDialogFooter>
-          <AlertDialogCancel>Laisser verrouillée</AlertDialogCancel>
-          <AlertDialogAction onClick={() => { setConfirming(false); onUnlock() }}>Je comprends, déverrouiller</AlertDialogAction>
-        </AlertDialogFooter>
-      </AlertDialogContent>
-    </AlertDialog>
-  </div>
-}
 
 /** Des pastilles de couleur, plus une couleur libre. */
 function ColorSwatches({ value, onChange, disabled = false, allowNone = true, allowMuted = false }: { value?: string; onChange: (value: string | undefined) => void; disabled?: boolean; allowNone?: boolean; allowMuted?: boolean }) {
@@ -708,20 +672,16 @@ function StyleSettings({ spec, onChange, disabled, colorColumns = [] }: { spec: 
 }
 
 /**
- * L'affichage d'une colonne : « Masquée » (le tableau), « Lecture seule », sa description.
- * Où elle apparaît dans la fiche et au survol se règle dans leur mise en page : n'importe
- * quelle colonne, masquée ou non, peut y être placée. L'ancien réglage « Formulaire
- * seulement » compte comme « Masquée ».
+ * Les deux options d'une colonne qui ne tiennent ni au type ni au style : « Lecture seule »
+ * (visible partout, modifiable ailleurs) et « Nomme la ligne » (le nom d'une ligne dans un
+ * onglet sans colonne Nom). L'œil, la description et le cadenas sont sur la première ligne.
  */
-function DisplaySettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean }) {
-  const masked = Boolean(spec.hidden) || placementOf(spec) === "sheet"
-  return <div className={box}>
-    <p className="font-semibold">Affichage</p>
-    <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={masked} onCheckedChange={(checked) => onChange({ ...spec, hidden: checked === true || undefined, placement: placementOf(spec) === "sheet" ? undefined : spec.placement, form: undefined })} /><span><b>Masquée</b> : cachée du tableau ; le bouton « Colonnes masquées » la montre d’un clic.</span></label>
-    {!isComputedSpec(spec) && spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> : visible, triable et dans les survols, mais ne se modifie pas d’ici (ses données viennent d’ailleurs).</span></label>}
-    {spec.kind !== "id" && spec.kind !== "name-form" && spec.kind !== "name" && <label className="flex items-center gap-2 text-xs"><Checkbox disabled={disabled} checked={Boolean(spec.rowLabel)} onCheckedChange={(checked) => onChange({ ...spec, rowLabel: checked === true || undefined })} /><span><b>Nomme la ligne</b> : dans un onglet sans colonne Nom, cette colonne donne son nom à la ligne (titre de la fiche, citations « {"{"} »).</span></label>}
-    <label className={smallLabel}>Description (au survol de l’en-tête et dans la fiche)<Input disabled={disabled} value={spec.description ?? ""} onChange={(event) => onChange({ ...spec, description: event.target.value || undefined })} placeholder="À quoi sert cette colonne ?" /></label>
-    <p className="text-[11px] text-muted-foreground">Pour choisir les champs de la fiche et du survol (masqués compris) : « Formulaire » et « Survol », en haut.</p>
+function OptionsSettings({ spec, onChange, disabled }: { spec: IndexColumnSpec; onChange: (spec: IndexColumnSpec) => void; disabled: boolean }) {
+  const nameLike = spec.kind === "id" || spec.kind === "name-form" || spec.kind === "name"
+  if (nameLike) return null
+  return <div className="flex flex-wrap items-center gap-x-4 gap-y-1.5 border-t pt-2 text-xs">
+    {!isComputedSpec(spec) && <label className="flex items-center gap-2" title="Visible, triable, cherchable, dans les fiches et les survols, mais rien ne s’y saisit ni ne s’y colle depuis l’index : ses données viennent d’ailleurs."><Checkbox disabled={disabled} checked={Boolean(spec.readOnly)} onCheckedChange={(checked) => onChange({ ...spec, readOnly: checked === true || undefined })} /><span><b>Lecture seule</b> <span className="text-muted-foreground">(se modifie ailleurs)</span></span></label>}
+    <label className="flex items-center gap-2" title="Dans un onglet sans colonne Nom, cette colonne donne son nom à la ligne : titre de la fiche, citations « { », pages de ligne. Sans effet quand l’onglet a une colonne Nom."><Checkbox disabled={disabled} checked={Boolean(spec.rowLabel)} onCheckedChange={(checked) => onChange({ ...spec, rowLabel: checked === true || undefined })} /><span><b>Nomme la ligne</b> <span className="text-muted-foreground">(onglet sans colonne Nom)</span></span></label>
   </div>
 }
 
@@ -731,58 +691,6 @@ const kindIcons: Partial<Record<IndexColumnKind, LucideIcon>> = {
   "choice": List, "linked-choice": ListTree, "linked": ArrowLeftRight, "tab-sort": FolderTree,
   "lookup": SearchIcon, "rollup": Sigma, "formula": FunctionSquare, "random": Dices,
   "actions": MousePointerClick, "file": Paperclip, "spells": Sparkles,
-}
-
-/**
- * Le choix du type : une liste compacte, une ligne par type (icône, nom, ce qui le
- * distingue des autres). Le détail du type survolé s'affiche dessous, sans tout déplier.
- */
-function TypePicker({ spec, onPick, policy, disabled, family }: { spec: IndexColumnSpec; onPick: (kind: IndexColumnKind) => void; policy: ColumnPolicy; disabled: boolean; family: IndexEditorModel["family"] }) {
-  const [open, setOpen] = useState(false)
-  const [hovered, setHovered] = useState<IndexColumnKind | null>(null)
-  const objects = family === "objects"
-  const blocked = (kind: IndexColumnKind) => {
-    if (kind === spec.kind) return ""
-    if (!policy.type && !(["name", "name-form"].includes(kind) && ["name", "name-form"].includes(spec.kind))) return "Type verrouillé : voir le cadenas."
-    // Comme le serveur (lib/object-schema.ts) : une Liste liée écrit un simple nom, elle est permise.
-    if (objects && ["linked", "lookup", "rollup", "tab-sort"].includes(kind)) return "Pas encore dans l’index des items : l’inventaire et les boutiques lisent leurs cases comme du texte."
-    return ""
-  }
-  const current = indexColumnKinds[spec.kind]
-  const CurrentIcon = kindIcons[spec.kind] ?? TypeIcon
-  const detail = indexColumnKinds[hovered ?? spec.kind]
-  return <div className={box}>
-    <div className="flex items-center gap-2">
-      <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"><CurrentIcon className="size-4" /></span>
-      <div className="min-w-0 flex-1"><p className={sectionTitle}>Type</p><p className="truncate font-semibold">{current.label}</p></div>
-      <Button type="button" variant="outline" size="sm" disabled={disabled} onClick={() => setOpen(!open)}>{open ? "Fermer" : "Changer"}</Button>
-    </div>
-    {!open && <p className="text-xs text-muted-foreground">{current.short ?? current.description}</p>}
-    {open && <>
-      <div className="grid gap-x-3 gap-y-2 sm:grid-cols-2" onMouseLeave={() => setHovered(null)}>
-        {kindGroups.map((group) => {
-          const kinds = creatableKinds.filter((kind) => indexColumnKinds[kind].group === group)
-          if (!kinds.length) return null
-          return <div key={group} className="grid content-start gap-0.5">
-            <p className={`${sectionTitle} px-1`}>{group}</p>
-            {kinds.map((kind) => {
-              const reason = blocked(kind)
-              const Icon = kindIcons[kind] ?? TypeIcon
-              return <button key={kind} type="button" disabled={Boolean(reason) || disabled} title={reason || indexColumnKinds[kind].description} onMouseEnter={() => setHovered(kind)} onFocus={() => setHovered(kind)} onClick={() => { onPick(kind); setOpen(false) }} className={`flex min-w-0 items-center gap-2 rounded-md px-1.5 py-1 text-left text-xs disabled:opacity-40 ${kind === spec.kind ? "bg-primary/12 text-primary" : "hover:bg-muted"}`}>
-                <Icon className="size-3.5 shrink-0" />
-                <b className="shrink-0">{indexColumnKinds[kind].label}</b>
-                {reason ? <Lock className="ml-auto size-3 shrink-0" /> : <span className="min-w-0 truncate text-muted-foreground">{indexColumnKinds[kind].short}</span>}
-              </button>
-            })}
-          </div>
-        })}
-      </div>
-      <div className="rounded-lg bg-muted/40 px-3 py-2 text-xs leading-5">
-        <b>{detail.label}</b> — {detail.description}
-        {detail.example && <span className="block text-muted-foreground">Exemple : {detail.example}</span>}
-      </div>
-    </>}
-  </div>
 }
 
 // ---------------------------------------------------------------------------
@@ -825,7 +733,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -847,7 +755,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Les mises en page enregistrées (fiche et survol), par onglet. */
   layouts?: Record<string, TabLayouts>
   /** Enregistre les mises en page changées. Absent : pas d'onglets « Fiche » et « Survol ». */
-  onSaveLayouts?: (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null }>) => Promise<void>
+  onSaveLayouts?: (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }>) => Promise<void>
   /** La clé de l'index pour ses cartes (celles qu'Eraser avait déjà). */
   cardsIndex?: string
   /** Les cartes enregistrées, par onglet. */
@@ -871,6 +779,10 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   statsPanel?: ReactNode
   /** L'onglet ouvert d'abord (son nom). */
   initialTab?: string
+  /** Les cadenas réglés (posés, retirés, usages ajoutés), par onglet. */
+  locks?: Record<string, TabLocks>
+  /** Enregistre les cadenas changés (`null` : plus aucun réglage dans l'onglet). */
+  onSaveLocks?: (changes: Array<{ tab: string; locks: TabLocks | null }>) => Promise<void>
 }) {
   const [tabs, setTabs] = useState<DraftTab[]>(() => [...draftOf(model), ...startTabs.map((name): DraftTab => ({ id: nextId(), name, columns: [], removed: false, remove: true, rename: true, addColumns: true }))])
   const originalTabOrder = useMemo(() => model.tabs.map((tab) => tab.name), [model])
@@ -886,6 +798,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [newColumn, setNewColumn] = useState("")
   const [showChanges, setShowChanges] = useState(false)
   const [guide, setGuide] = useState<GuideSection | null>(null)
+  // Le panneau des onglets, à gauche : on le replie pour donner la place aux réglages.
+  const [asideOpen, setAsideOpen] = useState(true)
   const readOnly = Boolean(model.readOnly)
   const tab = tabs.find((candidate) => candidate.id === selectedTab) ?? tabs[0]
   const column = tab?.columns.find((candidate) => candidate.id === selectedColumn) ?? tab?.columns[0]
@@ -904,28 +818,48 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   // « Colonnes », ou la mise en page de la fiche ou du survol de l'onglet choisi.
   const [mode, setMode] = useState<EditorMode>(() => (initialMode === "cards" && !onSaveCards) || (initialMode.startsWith("view:") && !onSavePresentations) || (initialMode === "stats" && !statsPanel) ? "columns" : initialMode)
   const viewKind = mode.startsWith("view:") ? mode.slice(5) as PresentationKind : null
-  // Les mises en page touchées, par onglet (identifiant du brouillon) ; `null` : automatique.
-  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, Partial<Record<LayoutKind, IndexLayout | null>>>>({})
+  /**
+   * Les mises en page touchées, par onglet (identifiant du brouillon) : le formulaire étoilé
+   * (`null` : retour à celui d'Eraser ou à l'automatique), le survol, les autres formulaires.
+   */
+  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[] }>>({})
+  // Le formulaire ouvert dans l'éditeur, par onglet (« principal » : l'étoilé).
+  const [editedForm, setEditedForm] = useState<Record<string, string>>({})
   const [layoutSaving, setLayoutSaving] = useState(false)
   const [layoutError, setLayoutError] = useState("")
   const layoutsEnabled = Boolean(onSaveLayouts) && !readOnly
-  const layoutOf = (draft: DraftTab, kind: LayoutKind) => {
+  const savedLayoutsOf = (draft: DraftTab) => draft.original ? tabLayoutsOf(layouts, draft.original) : null
+  /**
+   * La mise en page réellement utilisée par un onglet (étoilée ou survol) : la touchée, sinon
+   * l'enregistrée, sinon celle d'Eraser, sinon l'automatique écrite d'après les colonnes.
+   */
+  const layoutOf = (draft: DraftTab, kind: LayoutKind): { layout: IndexLayout; source: "saved" | "eraser" | "automatic" } => {
     const touched = layoutDrafts[draft.id]
-    // Sans mise en page enregistrée : celle d'Eraser (la fiche des créatures), sinon l'automatique.
     const builtin = draft.original ? builtinLayoutFor(model.key, draft.original, kind) : null
-    if (touched && kind in touched) return touched[kind] ?? builtin
-    return draft.original ? tabLayoutOrBuiltin(layouts, model.key, draft.original, kind) : null
+    const fallback = () => builtin ? { layout: builtin, source: "eraser" as const } : { layout: automaticLayoutFor(kind, layoutColumnsOf(draft, kind)), source: "automatic" as const }
+    if (touched && kind in touched) return touched[kind] ? { layout: touched[kind]!, source: "saved" } : fallback()
+    const saved = draft.original ? tabLayout(layouts, draft.original, kind) : null
+    return saved ? { layout: saved, source: "saved" } : fallback()
   }
+  const sampleRowsOf = (draft: DraftTab) => sampleRows[draft.original ?? draft.name] ?? []
+  /** Les autres formulaires d'un onglet (touchés, sinon enregistrés). */
+  const namedFormsOf = (draft: DraftTab): NamedLayout[] => {
+    const touched = layoutDrafts[draft.id]
+    if (touched && "forms" in touched) return touched.forms ?? []
+    return savedLayoutsOf(draft)?.forms ?? []
+  }
+  const touchLayout = (draft: DraftTab, changes: { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[] }) => setLayoutDrafts((current) => ({ ...current, [draft.id]: { ...current[draft.id], ...changes } }))
   /**
    * Ce qu'il faut écrire : les mises en page touchées, et celles qui suivent un onglet ou
-   * des colonnes renommés (elles nomment leurs colonnes).
+   * des colonnes renommés (elles nomment leurs colonnes). La mise en page d'Eraser (ou
+   * l'automatique) n'est écrite que si on y a touché, ou si une colonne qu'elle range est renommée.
    */
   const layoutChanges = useMemo(() => tabs.flatMap((draft) => {
     if (draft.removed) return []
-    const saved = { form: draft.original ? tabLayout(layouts, draft.original, "form") : null, hover: draft.original ? tabLayout(layouts, draft.original, "hover") : null }
+    const savedEntry = draft.original ? tabLayoutsOf(layouts, draft.original) : null
+    const saved = { form: savedEntry?.form ?? null, hover: savedEntry?.hover ?? null, forms: savedEntry?.forms ?? [] }
     const touched = layoutDrafts[draft.id] ?? {}
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
-    // La mise en page d'Eraser n'est écrite que si une colonne qu'elle range est renommée (elle la suit).
     const builtinRenamed = (kind: LayoutKind) => {
       const builtin = draft.original && renames.size ? builtinLayoutFor(model.key, draft.original, kind) : null
       const renamedBuiltin = builtin ? renameLayoutColumns(builtin, renames) : null
@@ -938,14 +872,15 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     }
     const form = next("form")
     const hover = next("hover")
+    const forms = ("forms" in touched ? touched.forms ?? [] : saved.forms).map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) }))
     const name = draft.name.trim()
     const renamed = Boolean(draft.original) && name !== draft.original
-    const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover)
+    const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover) || serializeNamedLayouts(forms) !== serializeNamedLayouts(saved.forms)
     if (!changed || !name) return []
     // Un onglet renommé : sa mise en page suit son nouveau nom, l'ancienne ligne est retirée.
-    const retired = renamed && (saved.form || saved.hover) ? [{ tab: draft.original!, form: null, hover: null }] : []
-    if (renamed && !form && !hover && !retired.length) return []
-    return [...retired, { tab: name, form, hover }]
+    const retired = renamed && (saved.form || saved.hover || saved.forms.length) ? [{ tab: draft.original!, form: null, hover: null, forms: [] as NamedLayout[] }] : []
+    if (renamed && !form && !hover && !forms.length && !retired.length) return []
+    return [...retired, { tab: name, form, hover, forms }]
   }), [layoutDrafts, layouts, model.key, tabs])
 
   // Les cartes touchées, par onglet (identifiant du brouillon) ; `null` : retour aux cartes d'Eraser.
@@ -1006,7 +941,36 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   // eslint-disable-next-line react-hooks/exhaustive-deps -- `presentations` est lu par savedPresentationsOf
   }), [presentationDrafts, presentations, tabs])
 
+  /**
+   * Les cadenas à écrire : pour chaque onglet dont un cadenas a changé, tous les réglages de
+   * ses colonnes (sous leur nouveau nom) ; `null` quand plus rien n'est réglé.
+   */
+  const lockChanges = useMemo(() => tabs.flatMap((draft): Array<{ tab: string; locks: TabLocks | null }> => {
+    const name = draft.name.trim()
+    if (draft.removed || !name || !draft.original) return []
+    const saved = tabLocksOf(locks, draft.original)
+    const next: TabLocks = {}
+    for (const item of draft.columns) {
+      if (item.removed || !item.header.trim()) continue
+      const override = lockOverrideFor(item.policy)
+      if (override) next[foldName(item.header.trim())] = override
+    }
+    const renamed = name !== draft.original
+    if (!renamed && sameTabLocks(saved, Object.keys(next).length ? next : null)) return []
+    const retired = renamed && saved ? [{ tab: draft.original, locks: null }] : []
+    return [...retired, { tab: name, locks: Object.keys(next).length ? next : null }]
+  }), [locks, tabs])
+
   async function submit() {
+    if (lockChanges.length && onSaveLocks) {
+      setLayoutSaving(true); setLayoutError("")
+      try { await onSaveLocks(lockChanges) } catch (reason) {
+        setLayoutError(reason instanceof Error ? reason.message : "Les cadenas n’ont pas pu être enregistrés.")
+        setLayoutSaving(false)
+        return
+      }
+      setLayoutSaving(false)
+    }
     if (presentationChanges.length && onSavePresentations) {
       setLayoutSaving(true); setLayoutError("")
       try { await onSavePresentations(presentationChanges) } catch (reason) {
@@ -1134,15 +1098,21 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
               {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
-            <Button type="button" variant="outline" size="sm" onClick={() => setGuide("types")}><BookOpen />?</Button>
           </span>
         </div>
       </DialogHeader>
       {leading && <div className="shrink-0">{leading}</div>}
-      <div className={`grid min-h-0 flex-1 gap-3 overflow-hidden ${mode === "columns" ? "md:grid-cols-[13rem_18rem_minmax(0,1fr)]" : "md:grid-cols-[13rem_minmax(0,1fr)]"}`}>
-        {/* Onglets */}
-        <aside className="flex min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border bg-muted/20 p-2">
-          <p className={`${sectionTitle} px-1`}>Onglets</p>
+      <div className={`grid min-h-0 flex-1 gap-3 overflow-hidden ${mode === "columns" ? asideOpen ? "md:grid-cols-[13rem_18rem_minmax(0,1fr)]" : "md:grid-cols-[2.25rem_18rem_minmax(0,1fr)]" : asideOpen ? "md:grid-cols-[13rem_minmax(0,1fr)]" : "md:grid-cols-[2.25rem_minmax(0,1fr)]"}`}>
+        {/* Onglets (repliables) */}
+        {!asideOpen && <aside className="flex min-h-0 flex-col items-center gap-2 rounded-xl border bg-muted/20 py-2">
+          <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAsideOpen(true)} aria-label="Afficher les onglets" title="Afficher le panneau des onglets"><PanelLeftOpen /></Button>
+          <span className="[writing-mode:vertical-rl] rotate-180 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{tab?.name ?? "Onglets"}</span>
+        </aside>}
+        <aside className={`min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border bg-muted/20 p-2 ${asideOpen ? "flex" : "hidden"}`}>
+          <div className="flex items-center justify-between gap-1 px-1">
+            <p className={sectionTitle}>Onglets</p>
+            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setAsideOpen(false)} aria-label="Replier les onglets" title="Replier le panneau des onglets"><PanelLeftClose /></Button>
+          </div>
           {tabs.map((candidate) => <div key={candidate.id} {...(readOnly ? {} : tabDrag.props(candidate))} className={`group flex items-center gap-1 rounded-lg px-1 ${candidate.id === tab?.id ? "bg-primary/10" : "hover:bg-muted/60"} ${tabDrag.over === candidate.id ? "ring-2 ring-primary/50" : ""}`}>
             {!readOnly && <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />}
             {renaming === candidate.id
@@ -1162,6 +1132,50 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               </NativeSelect>}
             </form>
             : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
+          {(mode === "form" || mode === "hover") && layoutsEnabled && tab && !tab.removed && (() => {
+            const named = namedFormsOf(tab)
+            const formId = mode === "form" ? editedForm[tab.id] ?? DEFAULT_FORM_ID : DEFAULT_FORM_ID
+            const chosen = formId !== DEFAULT_FORM_ID ? named.find((item) => item.id === formId) : undefined
+            const current = chosen ? chosen.layout : layoutOf(tab, mode).layout
+            const busy = pending || layoutSaving
+            const rename = (id: string, name: string) => touchLayout(tab, { forms: named.map((item) => item.id === id ? { ...item, name } : item) })
+            const star = (id: string) => {
+              // L'étoile passe à ce formulaire : il devient le formulaire étoilé, l'ancien garde une place nommée.
+              const target = named.find((item) => item.id === id)
+              if (!target) return
+              const previous = layoutOf(tab, "form").layout
+              touchLayout(tab, { form: target.layout, forms: [...named.filter((item) => item.id !== id), { id: layoutId(), name: "Ancien formulaire principal", layout: previous }] })
+              setEditedForm((state) => ({ ...state, [tab.id]: DEFAULT_FORM_ID }))
+            }
+            return <div className="mt-2 grid gap-1.5 rounded-lg border border-dashed bg-background/40 p-2">
+              <p className={`${sectionTitle} px-1`}>{mode === "form" ? "Formulaires" : "Survol"}</p>
+              {mode === "form" && <>
+                <div className="flex items-center gap-1">
+                  <NativeSelect value={formId} disabled={busy} onChange={(event) => setEditedForm((state) => ({ ...state, [tab.id]: event.target.value }))} className="h-7 min-w-0 flex-1 py-0 text-[11px]" aria-label="Formulaire modifié">
+                    <NativeSelectOption value={DEFAULT_FORM_ID}>★ Formulaire principal</NativeSelectOption>
+                    {named.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
+                  </NativeSelect>
+                  {chosen && <Button type="button" variant="ghost" size="icon-xs" disabled={busy} onClick={() => star(chosen.id)} title="En faire le formulaire étoilé (celui qu’ouvre le nom d’une ligne)" aria-label="Étoiler ce formulaire"><Star /></Button>}
+                </div>
+                {chosen && <Input value={chosen.name} disabled={busy} maxLength={60} onChange={(event) => rename(chosen.id, event.target.value)} className="h-7 text-[11px]" aria-label="Nom du formulaire" />}
+                <div className="flex flex-wrap gap-1">
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={busy || named.length >= 11} onClick={() => { const id = layoutId(); touchLayout(tab, { forms: [...named, { id, name: `Formulaire ${named.length + 2}`, layout: automaticLayoutFor("form", layoutColumnsOf(tab, "form")) }] }); setEditedForm((state) => ({ ...state, [tab.id]: id })) }} title="Un formulaire de plus, à partir de l’affichage automatique"><FilePlus2 />Nouveau</Button>
+                  <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={busy || named.length >= 11} onClick={() => { const id = layoutId(); touchLayout(tab, { forms: [...named, { id, name: `${chosen ? chosen.name : "Formulaire principal"} (copie)`, layout: current }] }); setEditedForm((state) => ({ ...state, [tab.id]: id })) }} title="Une copie du formulaire affiché"><Copy />Dupliquer</Button>
+                  {chosen && <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px] text-destructive hover:text-destructive" disabled={busy} onClick={() => { touchLayout(tab, { forms: named.filter((item) => item.id !== chosen.id) }); setEditedForm((state) => ({ ...state, [tab.id]: DEFAULT_FORM_ID })) }}><Trash2 />Retirer</Button>}
+                </div>
+              </>}
+              <LayoutPresetBar
+                kind={mode}
+                tabName={tab.name}
+                layout={current}
+                compact
+                otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+                disabled={busy}
+                onApply={(layout) => chosen ? touchLayout(tab, { forms: named.map((item) => item.id === chosen.id ? { ...item, layout } : item) }) : touchLayout(tab, { [mode]: layout })}
+                onCopyTo={(ids) => setLayoutDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => [id, { ...state[id], [mode]: current }])) }))}
+              />
+            </div>
+          })()}
           {!readOnly && tab && !tab.removed && tab.itemLabel !== undefined && <label className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2 text-[11px] text-muted-foreground" title="Le mot des boutons et messages de l’onglet : « + Ajouter un lieu », « Ce lieu a été supprimé »…">
             Une ligne de « {tab.name} » s’appelle
             <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
@@ -1230,32 +1244,38 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           })()}
         </section>}
 
-        {(mode === "form" || mode === "hover") && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            {mode === "form"
-              ? <>Mise en page de la <b className="text-foreground">fiche</b> des lignes de « {tab.name} » (et du formulaire « Ajouter »). Elle vaut partout où la fiche s’ouvre. Toutes les colonnes peuvent y être placées, masquées comprises.</>
-              : <>Ce qu’affiche le <b className="text-foreground">survol</b> d’une ligne de « {tab.name} » citée en entier avec « {"{"} » (dans une description, une note, un chat…). Pour les joueurs, les colonnes privées restent cachées.</>}
-          </div>
-          <LayoutPresetBar
-            kind={mode}
-            tabName={tab.name}
-            layout={layoutOf(tab, mode)}
-            otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
-            disabled={pending || layoutSaving || tab.removed}
-            onApply={(layout) => setLayoutDrafts((current) => ({ ...current, [tab.id]: { ...current[tab.id], [mode]: layout } }))}
-            onCopyTo={(ids) => { const layout = layoutOf(tab, mode); setLayoutDrafts((current) => ({ ...current, ...Object.fromEntries(ids.map((id) => [id, { ...current[id], [mode]: layout }])) })) }}
-          />
-          <IndexLayoutEditor
-            key={`${tab.id}:${mode}`}
-            kind={mode}
-            columns={layoutColumnsOf(tab, mode)}
-            value={layoutOf(tab, mode)}
-            onChange={(layout) => setLayoutDrafts((current) => ({ ...current, [tab.id]: { ...current[tab.id], [mode]: layout } }))}
-            sample={sampleRows[tab.original ?? tab.name]?.[0]}
-            resetLabel={tab.original && builtinLayoutFor(model.key, tab.original, mode) ? "Revenir à la fiche d’Eraser" : undefined}
-            disabled={pending || layoutSaving || tab.removed}
-          />
-        </section>}
+        {(mode === "form" || mode === "hover") && tab && (() => {
+          const formId = mode === "form" ? editedForm[tab.id] ?? DEFAULT_FORM_ID : DEFAULT_FORM_ID
+          const named = mode === "form" && formId !== DEFAULT_FORM_ID ? namedFormsOf(tab).find((item) => item.id === formId) : undefined
+          const main = layoutOf(tab, mode)
+          const current = named ? { layout: named.layout, source: "saved" as const } : main
+          const columns = layoutColumnsOf(tab, mode)
+          const sampleRows = sampleRowsOf(tab)
+          const update = (layout: IndexLayout) => named
+            ? touchLayout(tab, { forms: namedFormsOf(tab).map((item) => item.id === named.id ? { ...item, layout } : item) })
+            : touchLayout(tab, { [mode]: layout })
+          return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+            <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
+              {mode === "form"
+                ? <>{named ? <>Le formulaire <b className="text-foreground">« {named.name} »</b> de « {tab.name} » : les pages du créateur de pages peuvent l’afficher (bloc « Valeurs de la ligne »).</> : <>Le <b className="text-foreground">formulaire étoilé</b> de « {tab.name} » : celui qu’ouvre le nom d’une ligne (et le formulaire « Ajouter »). Toutes les colonnes peuvent y être placées, masquées comprises ; les blocs (tuiles, inventaire, bouton…) s’ajoutent à côté.</>}</>
+                : <>Ce qu’affiche le <b className="text-foreground">survol</b> d’une ligne de « {tab.name} » citée en entier avec « {"{"} » (dans une description, une note, un chat…). Pour les joueurs, les colonnes privées restent cachées.</>}
+            </div>
+            <IndexLayoutEditor
+              key={`${tab.id}:${mode}:${formId}`}
+              kind={mode}
+              columns={columns}
+              value={current.layout}
+              source={current.source}
+              onChange={update}
+              onReset={named ? undefined : () => touchLayout(tab, { [mode]: null })}
+              resetLabel={tab.original && builtinLayoutFor(model.key, tab.original, mode) ? "Revenir à la mise en page d’Eraser" : "Revenir à l’affichage automatique"}
+              sample={sampleRows[0]}
+              sampleRow={sampleRows[0] ? { index: model.key, id: sampleRows[0].ID ?? "", tab: tab.original ?? tab.name } : undefined}
+              forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((item) => ({ id: item.id, name: item.name }))]}
+              disabled={pending || layoutSaving || tab.removed}
+            />
+          </section>
+        })()}
 
         {/* Colonnes */}
         {mode === "columns" && <>
@@ -1270,7 +1290,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 <span className={`truncate text-sm font-medium ${item.removed ? "line-through" : ""}`}>{item.header || "(sans nom)"}{!item.original && <span className="ml-1 text-[10px] text-primary">nouvelle</span>}</span>
                 <span className="flex flex-wrap items-center gap-1 text-[10px] text-muted-foreground">
                   {indexColumnKinds[spec.kind].label}
-                  {(spec.hidden || place === "sheet") && <span className="rounded bg-muted px-1">Masquée</span>}
+                  {(spec.hidden || place === "sheet") && <EyeOff className="size-3" aria-label="Masquée du tableau" />}
                   {spec.style && !spec.style.keepCellFormatting && <span className="rounded bg-muted px-1">Style</span>}
                   {item.lockedPolicy ? <LockOpen className="size-3 text-destructive" aria-label="Déverrouillée : voir l’avertissement" /> : item.policy.reasons.length > 0 && <Lock className="size-3 text-amber-700" aria-label={lockedTitle(item)} />}
                 </span>
@@ -1293,23 +1313,22 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           {column && tab ? <>
             <div className={box}>
-              <div className="flex flex-wrap items-end gap-2">
-                <label className={`${smallLabel} min-w-48 flex-1`}>Nom de la colonne<Input value={column.header} disabled={columnDisabled || !policy.rename} onChange={(event) => updateColumn({ ...column, header: event.target.value })} className="h-9 text-base font-semibold" /></label>
-                {column.removed
-                  ? <Button type="button" variant="outline" onClick={() => updateColumn({ ...column, removed: false })}><Undo2 />Annuler la suppression</Button>
-                  : <Button type="button" variant="outline" className="text-destructive" disabled={readOnly || tab.removed || !policy.remove} onClick={() => updateColumn({ ...column, removed: true })} title={policy.remove ? "Mettre la colonne à la corbeille" : lockedTitle(column)}>{policy.remove ? <Trash2 /> : <Lock />}Supprimer</Button>}
-                {column.spec.hidden || placementOf(column.spec) === "sheet" ? <EyeOff className="mb-2 size-4 text-muted-foreground" aria-label="Masquée" /> : <Eye className="mb-2 size-4 text-muted-foreground" aria-label="Visible" />}
+              {/* Première ligne : le nom, la description, l'œil, le cadenas, la poubelle, et le type. */}
+              <div className="flex flex-wrap items-center gap-1.5">
+                <Input value={column.header} disabled={columnDisabled || !policy.rename} onChange={(event) => updateColumn({ ...column, header: event.target.value })} className="h-9 min-w-40 flex-1 text-base font-semibold" aria-label="Nom de la colonne" placeholder="Nom de la colonne" title={!policy.rename && !columnDisabled ? "Nom verrouillé : voir le cadenas." : undefined} />
+                <span className="flex items-center gap-0.5">
+                  <ColumnDescriptionButton value={column.spec.description ?? ""} disabled={displayDisabled} onChange={(description) => updateColumn({ ...column, spec: { ...column.spec, description: description || undefined } })} />
+                  {(() => { const hiddenColumn = Boolean(column.spec.hidden) || placementOf(column.spec) === "sheet"; return <Button type="button" variant={hiddenColumn ? "secondary" : "ghost"} size="icon-sm" className={hiddenColumn ? "text-muted-foreground" : "text-muted-foreground/60"} disabled={displayDisabled} onClick={() => updateColumn({ ...column, spec: { ...column.spec, hidden: hiddenColumn ? undefined : true, placement: placementOf(column.spec) === "sheet" ? undefined : column.spec.placement, form: undefined } })} aria-pressed={hiddenColumn} aria-label={hiddenColumn ? "Colonne masquée : la montrer dans le tableau" : "Colonne visible : la masquer du tableau"} title={hiddenColumn ? "Masquée du tableau (« Colonnes masquées » la montre d’un clic). Cliquer pour la montrer." : "Visible dans le tableau. Cliquer pour la masquer."}>{hiddenColumn ? <EyeOff /> : <Eye />}</Button> })()}
+                  <ColumnLockButton policy={policy} disabled={columnDisabled} onChange={(next) => updateColumn({ ...column, policy: next, lockedPolicy: undefined })} />
+                  {column.removed
+                    ? <Button type="button" variant="secondary" size="icon-sm" onClick={() => updateColumn({ ...column, removed: false })} aria-label="Annuler la suppression" title="Mise à la corbeille à « Enregistrer » : cliquer pour annuler"><Undo2 /></Button>
+                    : <Button type="button" variant="ghost" size="icon-sm" className={policy.remove ? "text-destructive/80 hover:text-destructive" : "text-muted-foreground/50"} disabled={readOnly || tab.removed || !policy.remove} onClick={() => updateColumn({ ...column, removed: true })} aria-label="Mettre la colonne à la corbeille" title={policy.remove ? "Mettre la colonne à la corbeille (à « Enregistrer »)" : "Suppression verrouillée : voir le cadenas."}>{policy.remove ? <Trash2 /> : <Lock />}</Button>}
+                </span>
+                <ColumnTypeMenu spec={column.spec} policy={policy} disabled={columnDisabled} family={model.family} onPick={pickKind} icons={kindIcons} />
               </div>
-              <p className="text-[11px] text-muted-foreground">Au survol de l’en-tête : {columnTypeLabel(column.spec)}</p>
-              <LockNote
-                policy={column.lockedPolicy ?? policy}
-                unlocked={Boolean(column.lockedPolicy)}
-                readOnly={columnDisabled}
-                onUnlock={() => updateColumn({ ...column, lockedPolicy: column.policy, policy: { ...freePolicy, reasons: column.policy.reasons, allowed: "Tout (déverrouillée)." } })}
-                onRelock={() => updateColumn({ ...column, policy: column.lockedPolicy ?? column.policy, lockedPolicy: undefined, header: column.original ?? column.header, spec: column.originalSpec ?? column.spec, removed: false })}
-              />
+              {column.removed && <p className="text-[11px] text-muted-foreground">Cette colonne part à la corbeille à « {submitLabel} » (restaurable depuis Administration › Corbeille).</p>}
+              {policy.unlocked && !column.removed && <p className="flex items-center gap-1.5 text-[11px] text-destructive"><TriangleAlert className="size-3.5 shrink-0" />Cadenas d’Eraser retiré : ce qui lit cette colonne par son nom peut casser si elle change. Le cadenas se remet d’un clic.</p>}
             </div>
-            <TypePicker spec={column.spec} policy={policy} disabled={columnDisabled} family={model.family} onPick={pickKind} />
             <div className={box}>
               <p className="font-semibold">Réglages du type {indexColumnKinds[column.spec.kind].label}</p>
               <TypeSettings
@@ -1329,9 +1348,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 <span><b>Valeur d’une nouvelle ligne</b> : écrite dans la case laissée vide quand une ligne est ajoutée (ou tapée dans Sheets puis reçue par Eraser).</span>
                 <Input disabled={typeDisabled} value={column.spec.defaultValue ?? ""} maxLength={200} onChange={(event) => updateColumn({ ...column, spec: { ...column.spec, defaultValue: event.target.value || (column.originalSpec?.defaultValue ? "" : undefined) } })} placeholder={column.spec.kind === "checkbox" ? "Oui ou Non" : "Vide"} className="h-8 text-xs" />
               </label>}
-              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé : « Masquée », la description, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
+              {typeDisabled && !readOnly && <p className="flex items-center gap-1.5 text-xs text-muted-foreground"><Lock className="size-3.5" />Type verrouillé (cadenas) : la description, l’œil, le style imposé{column.spec.kind === "choice" ? ", les couleurs, les groupes et l’ordre des options" : ""} restent modifiables.</p>}
+              <OptionsSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
             </div>
-            <DisplaySettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} />
             <StyleSettings spec={column.spec} onChange={(spec) => updateColumn({ ...column, spec })} disabled={displayDisabled} colorColumns={tab.columns.filter((item) => item.id !== column.id && !item.removed && item.header.trim() && isColorSourceSpec(item.spec)).map((item) => item.header.trim())} />
           </> : <p className="rounded-xl border border-dashed p-8 text-center text-sm text-muted-foreground">Choisis une colonne à gauche, ou ajoute-en une.</p>}
         </section>
@@ -1345,22 +1364,24 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         {layoutError && <p className="mb-1 text-destructive">{layoutError}</p>}
         <div className="flex items-center gap-2">
           <Settings2 className="size-3.5 shrink-0" />
-          <span className="font-semibold">{operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length
+          <span className="font-semibold">{operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length + lockChanges.length
             ? [
               operations.length ? `${operations.length} changement${operations.length > 1 ? "s" : ""} à écrire dans Google Sheets` : "",
               // Les mises en page sont des réglages d'Eraser : gardées sur son serveur partagé, pas dans Sheets.
               layoutChanges.length ? `${layoutChanges.length} mise${layoutChanges.length > 1 ? "s" : ""} en page à enregistrer dans Eraser (pour tout le monde)` : "",
               presentationChanges.length ? `Vues de ${presentationChanges.filter((change) => change.presentations).length || presentationChanges.length} onglet(s) à enregistrer dans Eraser (pour tout le monde)` : "",
               cardChanges.length ? (() => { const count = cardChanges.filter((change) => change.cards).length || cardChanges.length; return `Cartes de ${count} onglet${count > 1 ? "s" : ""} à enregistrer dans Eraser (pour tout le monde)` })() : "",
+              lockChanges.length ? `Cadenas de ${lockChanges.length} onglet${lockChanges.length > 1 ? "s" : ""} à enregistrer dans Eraser (pour tout le monde)` : "",
             ].filter(Boolean).join(" · ")
             : "Aucun changement pour l’instant"}</span>
-          {operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
+          {operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length + lockChanges.length > 0 && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-xs" onClick={() => setShowChanges(!showChanges)}>{showChanges ? "Masquer le détail" : "Voir le détail"}</Button>}
         </div>
         {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">
           {operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}
           {presentationChanges.map((change, index) => <li key={`views-${index}`}>• Vues de « {change.tab} » (dans Eraser) : {change.presentations ? Object.keys(change.presentations).length + " réglée(s)" : "réglages d’office"}</li>)}
           {cardChanges.map((change, index) => <li key={`cards-${index}`}>• Cartes de « {change.tab} » (dans Eraser) : {change.cards ? `${change.cards.cards.length} carte${change.cards.cards.length > 1 ? "s" : ""}` : "retour aux cartes d’Eraser"}</li>)}
-          {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » (dans Eraser) : {!change.form && !change.hover ? "affichage automatique" : [change.form ? "fiche personnalisée" : "fiche automatique", change.hover ? "survol personnalisé" : "survol automatique"].join(", ")}</li>)}
+          {lockChanges.map((change, index) => <li key={`locks-${index}`}>• Cadenas de « {change.tab} » (dans Eraser) : {change.locks ? `${Object.keys(change.locks).length} colonne${Object.keys(change.locks).length > 1 ? "s" : ""} réglée${Object.keys(change.locks).length > 1 ? "s" : ""}` : "ceux d’Eraser"}</li>)}
+          {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » (dans Eraser) : {!change.form && !change.hover && !change.forms?.length ? "affichage d’Eraser" : [change.form ? "formulaire réglé" : "formulaire d’Eraser", change.hover ? "survol réglé" : "survol d’Eraser", ...(change.forms?.length ? [`${change.forms.length} autre${change.forms.length > 1 ? "s" : ""} formulaire${change.forms.length > 1 ? "s" : ""}`] : [])].join(", ")}</li>)}
         </ul>}
       </div>
       <DialogFooter className="shrink-0 sm:justify-between">
@@ -1380,8 +1401,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {model.deleteIndex && !model.deleteIndex.allowed && model.deleteIndex.reason && <span className="ml-1 hidden text-[11px] text-muted-foreground lg:inline">{model.deleteIndex.reason}</span>}
         </span>
         <span className="flex gap-2">
+        <Button type="button" variant="outline" size="icon" onClick={() => setGuide("types")} aria-label="Guide des colonnes" title="Guide : types de colonnes, formules, boutons, aléatoire"><BookOpen /></Button>
         <Button type="button" variant="outline" onClick={onClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
-        {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length || presentationChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
+        {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length || presentationChanges.length || lockChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
         </span>
       </DialogFooter>
       {guide && <IndexGuide open section={guide} onClose={() => setGuide(null)} />}

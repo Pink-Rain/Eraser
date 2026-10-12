@@ -42,6 +42,8 @@ import { mustReread } from "@/lib/request-freshness"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
 import { customIndexEntry, idPrefixOf, isCustomIndexKey, listCustomIndexes } from "@/lib/custom-indexes"
 import { choiceCorrection, newIndexId, type IndexColumnSpec, type SpellSource, type TabColumnSettings } from "@/lib/index-columns"
+import { applyLockOverride, lockOverrideOf } from "@/lib/index-locks"
+import { listIndexLocks, tabLocksOf } from "@/lib/index-locks-store"
 import { findEntry, readSchema, rewriteSchema, upsertEntry } from "@/lib/index-schema"
 import { columnMoves, headerProblem, isDisplayOnlyChange, tabProblem, type IndexEditorModel, type RelationTarget, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import {
@@ -1765,6 +1767,8 @@ async function policyContext(key: WorldIndexKey): Promise<WorldPolicyContext> {
 export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorModel> {
   const data = await getWorldIndex(key)
   const links = data.links
+  // Les cadenas réglés dans « Modifier » (posés, retirés, usages ajoutés) : lus une fois.
+  const locks = await listIndexLocks(key)
   // Pour l'affichage seulement : l'écriture relit les classes et refuse si elle ne le peut pas.
   const context = await policyContext(key).catch((error) => {
     console.error("WORLD_INDEX_POLICY_CONTEXT_FAILED", key, error instanceof Error ? error.message : "UNKNOWN_ERROR")
@@ -1778,7 +1782,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
       const reason = "Onglet lu par Eraser sous ce nom : c’est la feuille de cet index."
       return {
         name: table.tabName,
-        columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
+        columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: applyLockOverride(worldColumnPolicy(key, table.tabName, column.header, links, context), lockOverrideOf(tabLocksOf(locks, table.tabName), column.header)) })),
         itemLabel: data.definition.tabs.find((candidate) => candidate.name === table.tabName)?.itemLabel ?? data.definition.itemLabel ?? "une ligne",
         remove: false,
         removeReason: reason,
@@ -1795,7 +1799,7 @@ export async function worldEditorModel(key: WorldIndexKey): Promise<IndexEditorM
     const renameReason = planned ? "Onglet prévu par Eraser : il est retrouvé par son nom (créations, liens, statistiques)." : linkedTabs.has(table.tabName) ? "Une colonne liée vise cet onglet par son nom." : ""
     return {
       name: table.tabName,
-      columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: worldColumnPolicy(key, table.tabName, column.header, links, context) })),
+      columns: (data.columns[table.tabName] ?? []).map((column) => ({ header: column.header, spec: column.spec, policy: applyLockOverride(worldColumnPolicy(key, table.tabName, column.header, links, context), lockOverrideOf(tabLocksOf(locks, table.tabName), column.header)) })),
       itemLabel: data.definition.tabs.find((candidate) => candidate.name === table.tabName)?.itemLabel ?? "une ligne",
       remove: !locked,
       removeReason: locked || undefined,
@@ -1914,6 +1918,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
     const edit = (change: (entries: SchemaEntry[]) => void) => { change(schema); edits.push(change) }
     const links = linksOf(key)
     const context = await policyContext(key)
+    const locks = await listIndexLocks(key)
     const entity = entityOf(key)
     const now = new Date().toISOString()
     try {
@@ -2020,7 +2025,7 @@ export function applyWorldSchemaOperations(key: WorldIndexKey, operations: Schem
         }
         const column = columnOf(table.headers, operation.header)
         if (column < 0) throw new Error("WORLD_INDEX_COLUMN_NOT_FOUND")
-        const policy = worldColumnPolicy(key, tab.name, operation.header, links, context)
+        const policy = applyLockOverride(worldColumnPolicy(key, tab.name, operation.header, links, context), lockOverrideOf(tabLocksOf(locks, tab.name), operation.header))
         if (operation.op === "rename") {
           // Une colonne qu'Eraser lit dans la feuille d'un index d'entités garde son nom, même
           // déverrouillée : la renommer dans Sheets la couperait des pages qui la lisent.

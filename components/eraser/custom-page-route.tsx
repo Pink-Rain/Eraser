@@ -11,10 +11,10 @@ import { canManagePages, pageForViewer, studioHref, type CustomPage, type PagePl
 import { findCustomPage } from "@/lib/custom-pages-store"
 import { campaignsOf, indexPathsOf, linkTargetsKnown, linkTargetsOf, viewerFor } from "@/lib/custom-pages-server"
 import { replacementLabel, rowOfRoute, type ReplaceMode } from "@/lib/page-replacements"
-import { blocksForRow, fillRowText, packRowContext, rowContextOf, rowValuesOf } from "@/lib/custom-pages-rows"
+import { blocksForRow, fillRowText, packRowContext, rowContextOf, rowValuesOf, rowFormIdsOf } from "@/lib/custom-pages-rows"
 import { indexSourceOf, readOptions } from "@/lib/custom-pages-server"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
-import { tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
+import { tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { knownWorldIndexKey } from "@/lib/world-indexes"
 import { currentAccount, currentViewAccount, type AuthorizedUser } from "@/lib/server-auth"
 
@@ -60,9 +60,11 @@ export async function ReplacementView({ page, view: viewed, mode, pathname, acco
   if (target && !row) return <>{children}</>
   const valueOf = row && source ? rowValuesOf(source, row.tab, row.id) : null
   const view = valueOf ? blocksForRow(viewed, valueOf) : viewed
-  const wantsForm = row && view.sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "rowfields" && block.style === "form")))
-  const form = wantsForm && rowKey ? tabLayoutOrBuiltin(await listIndexLayouts(rowKey).catch(() => ({})), rowKey, row.tab, "form") : null
-  const packedRow = row ? packRowContext(form ? { ...row, form } : row) : undefined
+  const formIds = row ? rowFormIdsOf(view) : null
+  const layouts = formIds && rowKey ? await listIndexLayouts(rowKey).catch(() => ({})) : {}
+  const form = formIds && rowKey && row ? tabLayoutOrBuiltin(layouts, rowKey, row.tab, "form") : null
+  const forms = formIds && rowKey && row ? Object.fromEntries(formIds.filter(Boolean).flatMap((formId) => { const layout = tabFormOrBuiltin(layouts, rowKey, row.tab, formId); return layout ? [[formId, layout]] : [] })) : {}
+  const packedRow = row ? packRowContext(form ? { ...row, form, ...(Object.keys(forms).length ? { forms } : {}) } : row) : undefined
   const moduleRow = row ? { index: row.index, id: row.id } : undefined
   const links = linkTargetsKnown(view, account)
   const indexPaths = indexPathsOf(view, account.role)

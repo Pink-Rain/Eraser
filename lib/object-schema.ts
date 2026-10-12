@@ -17,6 +17,8 @@ import {
   type ObjectIndexTable,
 } from "@/lib/google-sheets"
 import { foldName, isIdHeader, objectColumnSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { applyLockOverride, lockOverrideOf } from "@/lib/index-locks"
+import { listIndexLocks, tabLocksOf } from "@/lib/index-locks-store"
 import { findEntry, readSchema, upsertEntry, writeSchema } from "@/lib/index-schema"
 import { columnMoves, headerProblem, isDisplayOnlyChange, isObjectSpellingFix, objectColumnPolicy, tabProblem, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import type { IndexTrashItem } from "@/lib/world-indexes"
@@ -44,6 +46,7 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
   const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId)
   if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
   const schema = await readSchema(fileId)
+  const locks = await listIndexLocks(fileId)
   return {
     family: "objects",
     key: fileId,
@@ -56,7 +59,7 @@ export async function objectEditorModel(fileId: string): Promise<IndexEditorMode
       columns: table.headers.filter((header) => header.trim() && !trashed(findEntry(schema, table.tabName, header))).map((header) => ({
         header,
         spec: effectiveObjectSpec(header, table.headers, schema, table.tabName),
-        policy: objectColumnPolicy(header),
+        policy: applyLockOverride(objectColumnPolicy(header), lockOverrideOf(tabLocksOf(locks, table.tabName), header)),
       })),
       remove: tables.length > 1,
       removeReason: tables.length > 1 ? undefined : "C’est le seul tableau de ce classeur : il doit en garder au moins un.",
@@ -103,6 +106,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
   const tables = (await listObjectIndexTables()).filter((table) => table.fileId === fileId).map((table) => ({ ...table, headers: [...table.headers] }))
   if (!tables.length) throw new Error("OBJECT_INDEX_NOT_FOUND")
   const schema = [...await readSchema(fileId, { refresh: true })]
+  const locks = await listIndexLocks(fileId)
   const now = new Date().toISOString()
   for (const operation of operations) {
     if (operation.op === "add-tab") {
@@ -167,7 +171,7 @@ export async function applyObjectSchemaOperations(fileId: string, operations: Sc
     }
     const column = table.headers.findIndex((header) => foldName(header) === foldName(operation.header))
     if (column < 0) throw new Error("OBJECT_INDEX_COLUMN_NOT_FOUND")
-    const policy = objectColumnPolicy(operation.header)
+    const policy = applyLockOverride(objectColumnPolicy(operation.header), lockOverrideOf(tabLocksOf(locks, table.tabName), operation.header))
     if (operation.op === "rename") {
       // Corriger l'orthographe d'une colonne lue sous ses deux noms (« Cout » → « Prix ») ne perd rien.
       locked(policy.rename || Boolean(operation.force) || isObjectSpellingFix(operation.header, operation.to), policy.reasons)

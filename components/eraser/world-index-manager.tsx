@@ -1397,6 +1397,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         cardsIndex={indexKey}
         cards={settings.cards}
         onSaveCards={settings.saveCards}
+        locks={settings.locks}
+        onSaveLocks={settings.saveLocks}
         presentations={settings.presentations}
         onSavePresentations={settings.savePresentations}
         viewPresets={settings.viewPresets}
@@ -1536,6 +1538,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         }}
         error={sheetError}
         footer={<RowPageLink index={indexKey} tab={detailsFound.table.tabName} id={savedCell(detailsFound, "ID").replace(/<[^>]+>/g, "").trim()} />}
+        // Les blocs Inventaire et Bouton de la mise en page : la ligne, et l'adresse de son inventaire (celle des PNJ pour l'Index des PNJs).
+        rowRef={{ index: indexKey, id: savedCell(detailsFound, "ID").replace(/<[^>]+>/g, "").trim(), tab: detailsFound.table.tabName }}
+        inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined}
         navigation={sheetNavigation}
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null) }}

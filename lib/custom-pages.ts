@@ -89,7 +89,8 @@ export type ViewWhere = { match: "toutes" | "une"; conditions: ViewCondition[] }
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
 /** « form » : disposées comme la fiche de l'index (Modifier › Formulaire). */
-export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" | "form" }
+/** `formId` : lequel des formulaires de l'onglet (Modifier › Formulaire) ; vide : le formulaire étoilé. */
+export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" | "form"; formId?: string }
 /** Page de ligne : les lignes des autres index qui citent celle-ci (« Cité dans »). */
 export type BacklinksBlock = Common & { type: "backlinks"; heading: string }
 /** Un champ de recherche : il filtre les lignes des blocs Vue de la page (ceux qui le suivent). */
@@ -403,7 +404,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
       return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
-    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid") }
+    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid"), ...(text(raw.formId, 40) ? { formId: text(raw.formId, 40) } : {}) }
     case "backlinks": return { ...common, type, heading: text(raw.heading, 160) }
     case "search": return { ...common, type, placeholder: text(raw.placeholder, 120), heading: text(raw.heading, 160) }
     case "module": return { ...common, type, module: oneOf(raw.module, eraserModuleKeys, "origine"), place: oneOf(raw.place, moduleSections.map((item) => item.value), "regles"), heading: text(raw.heading, 160) }
