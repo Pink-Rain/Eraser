@@ -11,6 +11,7 @@ import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec 
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, isPresentationKind, presentationFor, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
 import type { ViewBlockKind } from "@/lib/custom-pages"
+import { matchesView, type IndexView } from "@/lib/index-views"
 
 /** Un index tel que le serveur le lit (un sous-ensemble de WorldIndexData). */
 export type IndexSource = {
@@ -121,9 +122,12 @@ export function findTable(source: IndexSource, tab: string) {
 }
 
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
-export function viewBlockData(source: IndexSource, input: { tab: string; kind: ViewBlockKind; limit: number; match?: { column: string; index: string; id: string; name: string } }, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
-  const table = findTable(source, input.tab)
-  if (!table) return null
+export function viewBlockData(source: IndexSource, input: { tab: string; kind: ViewBlockKind; limit: number; match?: { column: string; index: string; id: string; name: string }; layout?: ViewLayout; view?: Pick<IndexView, "match" | "conditions" | "layout"> | null }, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
+  const found = findTable(source, input.tab)
+  if (!found) return null
+  // Une vue enregistrée de l'index : seulement ses lignes (conditions lues sur toutes les colonnes,
+  // masquées comprises : un joueur reçoit les mêmes lignes qu'un MJ, sans les colonnes cachées).
+  const table = input.view ? { ...found, rows: found.rows.filter((row) => matchesView(input.view!, (header) => { const at = found.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return at >= 0 ? row.values[at] ?? "" : "" })) } : found
   const headers = shownColumns(source, table, options)
   let all = rowsOf(source, table, headers, options)
   // Page de ligne : seulement les lignes dont la colonne choisie cite la ligne de la page.
@@ -136,10 +140,14 @@ export function viewBlockData(source: IndexSource, input: { tab: string; kind: V
   const specs = Object.fromEntries(headers.map((header) => [header, columnSpecIn(source, table.tabName, header)]))
   const base: ViewBlockData = { kind: "view", index: source.key, title: source.title, tab: table.tabName, view: input.kind, headers, specs, rows: all.slice(0, limit), total: all.length }
   if (input.kind === "cards") return { ...base, cards: tabCardsOf(settings.cards, source.key, table.tabName) }
-  if (isPresentationKind(input.kind)) {
-    // La forme de la vue reste celle de l'index ; les colonnes que le lecteur ne voit pas en sont retirées.
-    const layout = fitLayoutToColumns(presentationFor(settings.presentations, table.tabName, input.kind), headers)
-    return { ...base, layout, ...(layout.itemCard ? { cards: tabCardsOf(settings.cards, source.key, table.tabName) } : {}) }
+  // La forme : celle réglée pour la page, sinon celle de la vue enregistrée, sinon celle de l'index
+  // (ou la présentation par défaut). Les colonnes que le lecteur ne voit pas en sont retirées.
+  const chosen = input.layout && isPresentationKind(input.layout.kind) ? input.layout
+    : input.view?.layout && isPresentationKind(input.view.layout.kind) && input.view.layout.kind === input.kind ? input.view.layout
+    : isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null
+  if (chosen) {
+    const layout = fitLayoutToColumns(chosen, headers)
+    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard ? { cards: tabCardsOf(settings.cards, source.key, table.tabName) } : {}) }
   }
   return base
 }
@@ -177,7 +185,8 @@ export function statBlockData(source: IndexSource, record: { stats: StatDefiniti
 }
 
 /** Les vues qu'un onglet propose à un bloc Vue : tableau, cartes, et celles réglées dans « Modifier › Vues ». */
+/** Les présentations déjà réglées pour un onglet dans l'index (les autres prennent leur forme par défaut). */
 export function viewKindsOf(presentations: Record<string, TabPresentations>, tab: string): ViewBlockKind[] {
   const entry = Object.entries(presentations).find(([name]) => foldName(name) === foldName(tab))?.[1] ?? {}
-  return ["table", "cards", ...Object.keys(entry).filter(isPresentationKind)] as ViewBlockKind[]
+  return Object.keys(entry).filter(isPresentationKind) as ViewBlockKind[]
 }

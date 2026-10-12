@@ -226,7 +226,7 @@ function KanbanLayout(props: ViewLayoutProps) {
     .filter((lane) => !layout.hideEmpty || lane.rows.length)
   const width = layout.laneWidth === "narrow" ? "w-52" : layout.laneWidth === "wide" ? "w-80" : "w-64"
   const laneStyle = look.laneStyle ?? "plain"
-  if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans « Modifier › Kanban ».</p>
+  if (!column) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du kanban dans les réglages de cette vue.</p>
   return <div className="flex gap-3 overflow-x-auto pb-2">
     {lanes.filter((lane) => lane.name || lane.rows.length).map((lane) => {
       const tint = lane.color ?? "var(--primary)"
@@ -329,7 +329,7 @@ function CalendarLayout(props: ViewLayoutProps) {
   const start = dated[0]?.date ?? (calendar === realCalendar ? { year: today.getFullYear(), month: today.getMonth(), day: 1 } : { year: 1, month: 0, day: 1 })
   const [shown, setShown] = useState<{ year: number; month: number } | null>(null)
   const current = shown ?? { year: start.year, month: start.month }
-  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans « Modifier › Calendrier ».</p>
+  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans les réglages de cette vue.</p>
   if (!calendar) return <p className="py-10 text-center text-sm text-muted-foreground">Chargement du calendrier…</p>
   if (!calendar.months.length) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Le calendrier « {calendar.name} » n’a pas encore de mois : ajoute-les dans l’Index des calendriers, onglet Mois.</p>
   const week = calendar.weekdays.length || 7
@@ -401,7 +401,7 @@ function GalleryLayout(props: ViewLayoutProps) {
   const radius = galleryRadius[look.imageShape ?? "rounded"]
   const hover = Boolean(layout.captionOnHover)
   const below = look.caption === "below" || circle
-  if (!layout.imageColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des images dans « Modifier › Galerie ».</p>
+  if (!layout.imageColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des images dans les réglages de cette vue.</p>
   return <Sections layout={layout} rows={rows} valueOf={valueOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid ${look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"}`} style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}), 1fr))` }}>
     {shown.map((row) => {
       const src = rowImage(layout, row, valueOf)
@@ -435,7 +435,7 @@ function TimelineLayout(props: ViewLayoutProps) {
   const named = layout.calendar && layout.calendar !== REAL_CALENDAR ? calendars?.find((candidate) => fold(candidate.name) === fold(layout.calendar!)) : undefined
   const calendar = named ?? realCalendar
   const { dated, undated } = useMemo(() => !layout.dateColumn ? { dated: [], undated: rows } : timelineEntries(rows, (row) => valueOf(row, layout.dateColumn!), (text) => parseCalendarDate(text, calendar)), [calendar, layout.dateColumn, rows, valueOf])
-  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans « Modifier › Chronologie ».</p>
+  if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans les réglages de cette vue.</p>
   const alternate = (layout.timelineSide ?? "alternate") === "alternate"
   // Les années servent de jalons : un repère chaque fois que l'année change ; les éléments alternent de côté.
   const placed = dated.map((entry, index) => ({ ...entry, milestone: index === 0 || dated[index - 1].date.year !== entry.date.year, right: !alternate || index % 2 === 0 }))
@@ -471,7 +471,7 @@ function TreeLayout(props: ViewLayoutProps) {
   const tree = useMemo(() => parentColumn ? rowTree(rows, nameOf, (row) => valueOf(row, parentColumn)) : [], [nameOf, parentColumn, rows, valueOf])
   // Les nœuds ouverts ou fermés à la main ; les autres suivent « replié à l'ouverture ».
   const [toggled, setToggled] = useState<Set<string>>(() => new Set())
-  if (!parentColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du parent dans « Modifier › Arborescence » (par exemple « Pays » pour des villes).</p>
+  if (!parentColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du parent dans les réglages de cette vue (par exemple « Pays » pour des villes).</p>
   const isOpen = (row: string) => toggled.has(row) ? Boolean(layout.collapsed) : !layout.collapsed
   const toggle = (row: string) => setToggled((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })
   const all = (open: boolean) => setToggled(open === !layout.collapsed ? new Set() : new Set(rows))

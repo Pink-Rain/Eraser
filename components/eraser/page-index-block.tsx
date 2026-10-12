@@ -40,7 +40,9 @@ function dataUrl(block: ViewBlock | StatBlock | BacklinksBlock, source: BlockSou
   if (!block.index) return ""
   const as = source.asPlayer ? "&as=joueur" : ""
   if (block.type === "stat") return block.statId ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&stat=${encodeURIComponent(block.statId)}${as}` : ""
-  return block.tab ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&tab=${encodeURIComponent(block.tab)}&kind=${block.kind}&limit=${block.limit}${as}` : ""
+  const own = block.layout ? `&layout=${encodeURIComponent(JSON.stringify(block.layout))}` : ""
+  const saved = block.viewId ? `&view=${encodeURIComponent(block.viewId)}` : ""
+  return block.tab ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&tab=${encodeURIComponent(block.tab)}&kind=${block.kind}&limit=${block.limit}${own}${saved}${as}` : ""
 }
 
 function useBlockData(url: string, version: number) {

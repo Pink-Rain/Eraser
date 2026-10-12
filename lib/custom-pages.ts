@@ -18,6 +18,7 @@ import type { SiteRole } from "@/lib/auth-types"
 import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
+import { cleanViewLayout, isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 
 /* ---------- Les types ---------- */
 
@@ -55,7 +56,13 @@ export type SecretBlock = Common & { type: "secret"; title: string; html: string
 /** Un carnet qu'on continue d'écrire sur la page publiée ; `html` : son texte de départ. */
 export type NotesBlock = Common & { type: "notes"; title: string; html: string; editors: PageRole[] }
 /** `rowMatch` (page de ligne) : seulement les lignes dont cette colonne cite la ligne de la page. */
-export type ViewBlock = Common & { type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string; rowMatch: string }
+export type ViewBlock = Common & {
+  type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string; rowMatch: string
+  /** Une vue enregistrée de l'index (onglet-fenêtre) : ses conditions et sa présentation. */
+  viewId?: string
+  /** La forme réglée pour cette page seulement (sinon : celle de l'index ou de la vue enregistrée). */
+  layout?: ViewLayout
+}
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
 export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" }
@@ -324,7 +331,11 @@ export function cleanBlock(input: unknown): PageBlock | null {
     }
     case "view": {
       const limit = Number(raw.limit)
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120) }
+      // Une forme propre à la page : seulement une présentation (le tableau et les cartes n'en ont pas).
+      const layout = cleanViewLayout(raw.layout)
+      const ownLayout = layout && isPresentationKind(layout.kind) ? layout : undefined
+      const viewId = text(raw.viewId, 60)
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
     case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid"] as const, "grid") }

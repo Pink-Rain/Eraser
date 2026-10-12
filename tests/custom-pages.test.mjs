@@ -269,6 +269,17 @@ test("Modèles enregistrés sur le serveur partagé", async () => {
   assert.deepEqual(await store.listPageTemplates(), []);
 });
 
+test("Bloc Vue : forme propre à la page gardée pour une présentation, refusée pour le tableau et les cartes", () => {
+  const kept = pages.cleanBlock({ id: "b-vue1", type: "view", index: "npcs", tab: "Bibliothèque", kind: "table", viewId: "v-12", layout: { kind: "kanban", kanbanColumn: "Rang", evil: true } });
+  assert.equal(kept.kind, "kanban");
+  assert.deepEqual(kept.layout, { kind: "kanban", kanbanColumn: "Rang" });
+  assert.equal(kept.viewId, "v-12");
+  const table = pages.cleanBlock({ id: "b-vue2", type: "view", index: "npcs", tab: "Bibliothèque", kind: "table", layout: { kind: "stats" } });
+  assert.equal(table.kind, "table");
+  assert.equal(table.layout, undefined);
+  assert.equal(table.viewId, undefined);
+});
+
 test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées, lignes sans lien pour un joueur", () => {
   const source = {
     key: "npcs",
@@ -299,7 +310,21 @@ test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées,
   assert.equal(forMj.rows[0].href, "/ressources/index-des-pnjs?ligne=PNJ-1");
   assert.equal(forMj.rows[0].name, "Aldric");
   assert.equal(blockData.viewBlockData(source, { tab: "Inconnu", kind: "table", limit: 0 }, settings, { player: false }), null);
-  assert.deepEqual(blockData.viewKindsOf(settings.presentations, "Bibliothèque"), ["table", "cards", "kanban"]);
+  assert.deepEqual(blockData.viewKindsOf(settings.presentations, "Bibliothèque"), ["kanban"]);
+  // Une présentation non réglée dans l'index : sa forme par défaut, jamais le tableau.
+  const gallery = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "gallery", limit: 0 }, settings, { player: false });
+  assert.equal(gallery.view, "gallery");
+  assert.equal(gallery.layout.kind, "gallery");
+  // La forme propre à la page l'emporte sur celle de l'index, colonnes cachées retirées pour un joueur.
+  const own = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "kanban", limit: 0, layout: { kind: "kanban", kanbanColumn: "Rang", fields: ["Titre", "Notes MJ"] } }, settings, { player: true, hiddenForPlayers: hidden });
+  assert.equal(own.layout.kanbanColumn, "Rang");
+  assert.deepEqual(own.layout.fields, ["Titre"]);
+  // Une vue enregistrée de l'index : seulement ses lignes (condition lue même sur une colonne masquée), avec sa présentation.
+  const view = { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }], layout: { kind: "list", fields: ["Titre"] } };
+  const saved = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "list", limit: 0, view }, settings, { player: true, hiddenForPlayers: hidden });
+  assert.deepEqual(saved.rows.map((row) => row.name), ["Aldric"]);
+  assert.equal(saved.layout.kind, "list");
+  assert.ok(!saved.headers.includes("Secret"));
   const stat = blockData.statBlockData(source, { stats: [{ id: "st-1", title: "Par rang", measure: "count", by: ["Rang"], form: "bars" }], groups: [] }, "st-1", { player: true, hiddenForPlayers: hidden });
   assert.deepEqual(stat.columns, ["Nom du PNJ", "Titre", "Rang", "Onglet"]);
   assert.equal(stat.rows.length, 3);

@@ -8,6 +8,9 @@ import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } 
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
 import { listIndexPresentations, listIndexStatsRecord } from "@/lib/index-presentations-store"
+import { listIndexViews } from "@/lib/index-settings"
+import { cleanViewLayout, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
+import { ALL_SOURCES } from "@/lib/index-views"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
@@ -23,9 +26,15 @@ async function calendarTables() {
 
 type RowPageOf = BlockDataOptions["rowPageOf"]
 
-async function viewData(key: WorldIndexKey, input: Parameters<typeof viewBlockData>[1], player: boolean, rowPageOf: RowPageOf) {
-  const [source, presentations, cards] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({}))])
-  const data = viewBlockData(source, input, { presentations, cards }, readOptions(key, player, rowPageOf))
+/** Une vue enregistrée de l'index (onglet-fenêtre), lue seulement quand le bloc en désigne une. */
+async function savedView(key: WorldIndexKey, viewId: string | undefined) {
+  if (!viewId) return null
+  return (await listIndexViews(key).catch(() => [])).find((view) => view.id === viewId) ?? null
+}
+
+async function viewData(key: WorldIndexKey, input: Omit<Parameters<typeof viewBlockData>[1], "view"> & { viewId?: string }, player: boolean, rowPageOf: RowPageOf) {
+  const [source, presentations, cards, view] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), savedView(key, input.viewId)])
+  const data = viewBlockData(source, { ...input, view }, { presentations, cards }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(input.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
 }
@@ -66,9 +75,21 @@ export async function GET(request: Request) {
       }
       const key = await knownWorldIndexKey(wanted)
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
-      const [data, presentations, cards, record] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] }))])
+      const [data, presentations, cards, record, views] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listIndexViews(key).catch(() => [])])
+      const cardsOf = (tab: string) => Object.entries(cards).find(([name]) => name.toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr"))?.[1]?.cards ?? []
       return NextResponse.json({
-        tabs: data.tables.map((table) => ({ name: table.tabName, kinds: viewKindsOf(presentations, table.tabName), cards: Object.entries(cards).some(([name, entry]) => name.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr") && entry.cards.length > 0), columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)) })),
+        tabs: data.tables.map((table) => ({
+          name: table.tabName,
+          // Les présentations déjà réglées dans l'index ; toutes restent proposées.
+          configured: viewKindsOf(presentations, table.tabName),
+          // Leurs formes : la forme propre à une page part de celle de l'index.
+          forms: Object.fromEntries(viewKindsOf(presentations, table.tabName).map((kind) => [kind, presentationFor(presentations, table.tabName, kind as PresentationKind)])),
+          cards: cardsOf(table.tabName).length > 0,
+          cardList: cardsOf(table.tabName).map((card) => ({ id: card.id, name: card.name })),
+          columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
+          // Les vues enregistrées de l'index qui portent sur cet onglet (ou sur tous).
+          views: views.filter((view) => view.source === ALL_SOURCES || view.source.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr")).map((view) => ({ id: view.id, name: view.name, kind: view.layout?.kind ?? "table" })),
+        })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
       })
     }
@@ -90,7 +111,7 @@ export async function GET(request: Request) {
       const key = await knownWorldIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
       const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
-      const data = block.type === "view" ? await viewData(key, { tab: block.tab, kind: block.kind, limit: block.limit, match }, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
+      const data = block.type === "view" ? await viewData(key, { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, viewId: block.viewId }, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 
@@ -106,7 +127,10 @@ export async function GET(request: Request) {
     }
     const kind = kinds.includes(parameters.get("kind") as ViewBlockKind) ? parameters.get("kind") as ViewBlockKind : "table"
     const limit = Math.max(0, Math.min(500, Number.parseInt(parameters.get("limit") ?? "0", 10) || 0))
-    const data = await viewData(key, { tab: parameters.get("tab") ?? "", kind, limit }, asPlayer, rowPageOf)
+    // L'atelier envoie la forme propre au bloc (encore non enregistrée) et sa vue enregistrée.
+    let layout: ReturnType<typeof cleanViewLayout>
+    try { layout = cleanViewLayout(JSON.parse(parameters.get("layout") ?? "null")) } catch { layout = undefined }
+    const data = await viewData(key, { tab: parameters.get("tab") ?? "", kind, limit, layout, viewId: parameters.get("view") ?? undefined }, asPlayer, rowPageOf)
     return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cet onglet n’existe pas dans l’index." }, { status: 404 })
   } catch (error) {
     console.error("PAGE_BLOCK_DATA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")

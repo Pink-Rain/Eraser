@@ -6,6 +6,8 @@ import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, TriangleAlert } f
 import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
+import { LayoutSettings } from "@/components/eraser/index-views"
+import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
 import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
   blockCatalog,
@@ -89,7 +91,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 /* ---------- Les index (blocs Vue et Stat) ---------- */
 
 type IndexEntry = { key: string; title: string; path: string }
-type IndexDetails = { tabs: Array<{ name: string; kinds: ViewBlockKind[]; cards: boolean; columns?: string[] }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
+type IndexDetails = { tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; views?: Array<{ id: string; name: string; kind: string }> }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
 
 let catalogPromise: Promise<IndexEntry[]> | null = null
 const detailsCache = new Map<string, Promise<IndexDetails | null>>()
@@ -142,25 +144,47 @@ function IndexPicker({ value, onChange }: { value: string; onChange: (key: strin
 function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { type: "view" }>; rowOf?: { index: string; tab?: string }; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
   const { details, loading } = useIndexDetails(block.index)
   const tab = details?.tabs.find((item) => item.name === block.tab)
-  const kinds = tab?.kinds ?? ["table", "cards"]
+  const configured = tab?.configured ?? []
+  const views = tab?.views ?? []
+  const own = Boolean(block.layout)
+  const presentation = isPresentationKind(block.kind)
+  // Changer de présentation : la forme propre à la page repart de celle-ci (ses réglages ne vont pas d'une présentation à l'autre).
+  // La forme propre part de celle de l'index (sinon de la forme par défaut) : rien n'est perdu à basculer.
+  const startFrom = (kind: ViewBlockKind): ViewLayout => ({ ...(tab?.forms?.[kind] ?? {}), kind })
+  const pickKind = (kind: ViewBlockKind) => onChange({ kind, layout: own && isPresentationKind(kind) ? startFrom(kind) : undefined })
   return <>
-    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", kind: "table" })} />
+    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", kind: "table", viewId: undefined, layout: undefined })} />
     {block.index && <Field label="Onglet">
-      <select className={fieldClass} value={block.tab} disabled={loading} onChange={(event) => onChange({ tab: event.target.value, kind: "table" })}>
+      <select className={fieldClass} value={block.tab} disabled={loading} onChange={(event) => onChange({ tab: event.target.value, kind: "table", viewId: undefined, layout: undefined })}>
         <option value="">{loading ? "Lecture de l’index…" : "Choisir un onglet…"}</option>
         {(details?.tabs ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
       </select>
     </Field>}
-    {block.tab && <Field label="Vue" hint="La forme de chaque vue se règle dans l’index (Modifier › Vues, Modifier › Cartes) : la page ne fait que la montrer.">
+    {block.tab && views.length > 0 && <Field label="Vue enregistrée de l’index" hint="Une vue de l’index (ses conditions et sa présentation) : seules ses lignes s’affichent.">
+      <select className={fieldClass} value={block.viewId ?? ""} onChange={(event) => {
+        const view = views.find((item) => item.id === event.target.value)
+        const kind = view && viewBlockKinds.some((item) => item.value === view.kind) ? view.kind as ViewBlockKind : block.kind
+        onChange({ viewId: view?.id, kind, layout: undefined })
+      }}>
+        <option value="">Aucune : toutes les lignes de l’onglet</option>
+        {views.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
+      </select>
+    </Field>}
+    {block.tab && <Field label="Présentation" hint={configured.length ? "Les présentations marquées d’un point sont déjà réglées dans l’index ; les autres prennent leur forme par défaut, ou celle que tu règles ci-dessous." : "Chaque présentation prend sa forme réglée dans l’index (Modifier › Vues), ou celle que tu règles ci-dessous pour cette page."}>
       <div className="flex flex-wrap gap-1">
-        {viewBlockKinds.filter((kind) => kinds.includes(kind.value)).map((kind) => {
+        {viewBlockKinds.map((kind) => {
           const Icon = blockIcons.views[kind.value]
-          return <button key={kind.value} type="button" aria-pressed={block.kind === kind.value} onClick={() => onChange({ kind: kind.value })} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">
-            <Icon className="size-3.5" />{kind.label}{kind.value === "cards" && tab && !tab.cards ? " (d’office)" : ""}
+          return <button key={kind.value} type="button" aria-pressed={block.kind === kind.value} onClick={() => pickKind(kind.value)} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">
+            <Icon className="size-3.5" />{kind.label}{configured.includes(kind.value) && <span className="size-1.5 rounded-full bg-current opacity-70" aria-label="réglée dans l’index" />}{kind.value === "cards" && tab && !tab.cards ? " (d’office)" : ""}
           </button>
         })}
       </div>
     </Field>}
+    {block.tab && presentation && <Field label="Forme">
+      <Segmented label="Forme" size="sm" value={own ? "page" : "index"} onChange={(value) => onChange({ layout: value === "page" ? startFrom(block.kind) : undefined })}
+        options={[{ value: "index", label: block.viewId ? "Celle de la vue enregistrée" : "Celle de l’index", title: "Modifier la forme dans l’index la change partout où elle sert" }, { value: "page", label: "Propre à cette page", title: "Réglée ici, pour ce bloc seulement : l’index n’est pas touché" }]} />
+    </Field>}
+    {block.tab && presentation && block.layout && <LayoutSettings fixedKind layout={block.layout} columns={tab?.columns ?? []} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
     <div className="grid grid-cols-2 gap-2">
       <Field label="Au plus (lignes)" hint="0 : toutes">
         <input type="number" min={0} max={500} className={fieldClass} value={block.limit} onChange={(event) => onChange({ limit: Math.max(0, Math.min(500, Number.parseInt(event.target.value, 10) || 0)) })} />
