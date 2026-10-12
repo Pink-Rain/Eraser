@@ -9,8 +9,8 @@
 import { tabCardsOf, type TabCards } from "@/lib/index-cards"
 import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, isPresentationKind, presentationFor, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
-import type { ViewBlockKind } from "@/lib/custom-pages"
+import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
+import { activeWhere, type ViewBlockKind, type ViewWhere } from "@/lib/custom-pages"
 import { matchesView, type IndexView } from "@/lib/index-views"
 
 /** Un index tel que le serveur le lit (un sous-ensemble de WorldIndexData). */
@@ -46,7 +46,8 @@ export type StatBlockData = {
   kind: "stat"
   index: string
   title: string
-  stat: StatDefinition
+  /** Une statistique, ou (« toutes les épinglées ») celles de l'onglet stat de l'index. */
+  stats: StatDefinition[]
   groups: StatColumnGroup[]
   columns: string[]
   tabs: string[]
@@ -121,13 +122,36 @@ export function findTable(source: IndexSource, tab: string) {
   return source.tables.find((table) => foldName(table.tabName) === foldName(tab)) ?? null
 }
 
+/** Ce qu'un bloc Vue demande : l'onglet, sa présentation et ce qui choisit ses lignes. */
+export type ViewBlockInput = {
+  tab: string
+  kind: ViewBlockKind
+  limit: number
+  /** Page de ligne : seulement les lignes dont cette colonne cite la ligne de la page. */
+  match?: { column: string; index: string; id: string; name: string }
+  /** La forme propre au bloc. */
+  layout?: ViewLayout
+  /** La forme d'un preset de vue choisi pour le bloc (déjà retrouvé). */
+  preset?: ViewLayout | null
+  /** Ancien réglage : une vue enregistrée de l'index (onglet-fenêtre). */
+  view?: Pick<IndexView, "match" | "conditions" | "layout"> | null
+  /** Les cartes : laquelle montrer. */
+  cardId?: string
+  where?: ViewWhere
+  sort?: { column: string; desc: boolean }
+}
+
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
-export function viewBlockData(source: IndexSource, input: { tab: string; kind: ViewBlockKind; limit: number; match?: { column: string; index: string; id: string; name: string }; layout?: ViewLayout; view?: Pick<IndexView, "match" | "conditions" | "layout"> | null }, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
+export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
   const found = findTable(source, input.tab)
   if (!found) return null
-  // Une vue enregistrée de l'index : seulement ses lignes (conditions lues sur toutes les colonnes,
-  // masquées comprises : un joueur reçoit les mêmes lignes qu'un MJ, sans les colonnes cachées).
-  const table = input.view ? { ...found, rows: found.rows.filter((row) => matchesView(input.view!, (header) => { const at = found.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return at >= 0 ? row.values[at] ?? "" : "" })) } : found
+  // Les conditions (celles du bloc, et celles d'une ancienne vue enregistrée) se lisent sur toutes
+  // les colonnes, masquées comprises : un joueur reçoit les mêmes lignes qu'un MJ, sans les colonnes cachées.
+  const cellOf = (row: IndexSource["tables"][number]["rows"][number], header: string) => { const at = found.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return at >= 0 ? row.values[at] ?? "" : "" }
+  const filters = [input.view, activeWhere(input.where)].filter((item): item is Pick<IndexView, "match" | "conditions"> => Boolean(item?.conditions.length))
+  let rows = filters.length ? found.rows.filter((row) => filters.every((filter) => matchesView(filter, (header) => cellOf(row, header)))) : found.rows
+  if (input.sort?.column) rows = sortLayoutRows(rows, { sortBy: input.sort.column, sortDesc: input.sort.desc }, cellOf)
+  const table = { ...found, rows }
   const headers = shownColumns(source, table, options)
   let all = rowsOf(source, table, headers, options)
   // Page de ligne : seulement les lignes dont la colonne choisie cite la ligne de la page.
@@ -139,15 +163,21 @@ export function viewBlockData(source: IndexSource, input: { tab: string; kind: V
   const limit = input.limit > 0 ? Math.min(input.limit, MAX_ROWS) : MAX_ROWS
   const specs = Object.fromEntries(headers.map((header) => [header, columnSpecIn(source, table.tabName, header)]))
   const base: ViewBlockData = { kind: "view", index: source.key, title: source.title, tab: table.tabName, view: input.kind, headers, specs, rows: all.slice(0, limit), total: all.length }
-  if (input.kind === "cards") return { ...base, cards: tabCardsOf(settings.cards, source.key, table.tabName) }
-  // La forme : celle réglée pour la page, sinon celle de la vue enregistrée, sinon celle de l'index
-  // (ou la présentation par défaut). Les colonnes que le lecteur ne voit pas en sont retirées.
+  const cards = () => {
+    const entry = tabCardsOf(settings.cards, source.key, table.tabName)
+    return input.cardId && entry.cards.some((card) => card.id === input.cardId) ? { ...entry, defaultId: input.cardId } : entry
+  }
+  if (input.kind === "cards") return { ...base, cards: cards() }
+  // La forme : celle réglée pour la page, sinon le preset choisi, sinon celle de l'ancienne vue
+  // enregistrée, sinon celle de l'onglet (ou la présentation par défaut). Les colonnes que le
+  // lecteur ne voit pas en sont retirées.
+  const same = (layout?: ViewLayout | null) => layout && isPresentationKind(layout.kind) && layout.kind === input.kind ? layout : null
   const chosen = input.layout && isPresentationKind(input.layout.kind) ? input.layout
-    : input.view?.layout && isPresentationKind(input.view.layout.kind) && input.view.layout.kind === input.kind ? input.view.layout
-    : isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null
+    : same(input.preset) ?? same(input.view?.layout)
+    ?? (isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null)
   if (chosen) {
     const layout = fitLayoutToColumns(chosen, headers)
-    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard ? { cards: tabCardsOf(settings.cards, source.key, table.tabName) } : {}) }
+    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard ? { cards: cards() } : {}) }
   }
   return base
 }
@@ -155,10 +185,13 @@ export function viewBlockData(source: IndexSource, input: { tab: string; kind: V
 /** La colonne virtuelle des statistiques : l'onglet d'où vient une ligne. */
 export const STAT_TAB_COLUMN = "Onglet"
 
-/** Les données d'un bloc Stat : la statistique enregistrée et les lignes de tous les onglets. */
+/** Le choix « toutes les statistiques épinglées » d'un bloc Stat. */
+export const ALL_PINNED_STATS = "*"
+
+/** Les données d'un bloc Stat : la statistique enregistrée (ou toutes les épinglées) et les lignes de tous les onglets. */
 export function statBlockData(source: IndexSource, record: { stats: StatDefinition[]; groups: StatColumnGroup[] }, statId: string, options: BlockDataOptions): StatBlockData | null {
-  const stat = record.stats.find((item) => item.id === statId)
-  if (!stat) return null
+  const stats: StatDefinition[] = statId === ALL_PINNED_STATS ? record.stats.filter((item) => item.pinned) : record.stats.filter((item) => item.id === statId).map((item) => ({ ...item, pinned: true as const }))
+  if (!stats.length && statId !== ALL_PINNED_STATS) return null
   const columns: string[] = []
   const seen = new Set<string>()
   const owner = new Map<string, string>()
@@ -181,7 +214,7 @@ export function statBlockData(source: IndexSource, record: { stats: StatDefiniti
     if (spec.options?.length) options_[column] = spec.options.map((option) => ({ value: option.value, ...(option.color ? { color: option.color } : {}) }))
     if (spec.multiple && spec.listSeparator) separators[column] = spec.listSeparator
   }
-  return { kind: "stat", index: source.key, title: source.title, stat: { ...stat, pinned: true }, groups: record.groups, columns, tabs: source.tables.map((table) => table.tabName), rows, options: options_, separators }
+  return { kind: "stat", index: source.key, title: source.title, stats, groups: record.groups, columns, tabs: source.tables.map((table) => table.tabName), rows, options: options_, separators }
 }
 
 /** Les vues qu'un onglet propose à un bloc Vue : tableau, cartes, et celles réglées dans « Modifier › Vues ». */

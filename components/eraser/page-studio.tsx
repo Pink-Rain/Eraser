@@ -13,7 +13,8 @@ import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, D
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuSeparator, DropdownMenuTrigger } from "@/components/ui/dropdown-menu"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { BlockView, CalloutFrame, ImageView, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
-import { PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
+import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
+import { describeCondition } from "@/lib/index-views"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { BlockSettings, PageSettings, Segmented, VisibilityPill, roleDot } from "@/components/eraser/page-studio-settings"
 import { IndexRichText } from "@/components/eraser/index-references"
@@ -32,6 +33,7 @@ import {
   placeOpenTo,
   roleLabels,
   sectionLayouts,
+  viewBlockKinds,
   type BlockType,
   type CustomPage,
   type PageBlock,
@@ -41,6 +43,7 @@ import {
   type PageSummary,
   type SectionLayout,
   type StudioPage,
+  type ViewBlockKind,
   studioHref,
 } from "@/lib/custom-pages"
 
@@ -57,7 +60,8 @@ import {
 
 type SaveState = { kind: "saved" | "dirty" | "saving" | "error" | "conflict"; message?: string }
 type DropTarget = { section: string; column: number; index: number }
-type Dragged = { kind: "new"; type: BlockType } | { kind: "move"; id: string }
+/** `kind` : la présentation d'un bloc Vue ajouté depuis ses raccourcis (Kanban, Liste…). */
+type Dragged = { kind: "new"; type: BlockType; view?: ViewBlockKind } | { kind: "move"; id: string }
 type Toast = { text: string; action?: { label: string; run: () => void } }
 
 const DRAG_TYPE = "application/x-eraser-page-block"
@@ -101,7 +105,7 @@ function ToolButton({ label, onClick, disabled, children, danger }: { label: str
 }
 
 /** La palette : les blocs à ajouter, groupés, filtrables. */
-function Palette({ onAdd, onDragStart, onClose }: { onAdd: (type: BlockType) => void; onDragStart: (event: DragEvent, type: BlockType) => void; onClose: () => void }) {
+function Palette({ onAdd, onDragStart, onClose }: { onAdd: (type: BlockType, view?: ViewBlockKind) => void; onDragStart: (event: DragEvent, type: BlockType, view?: ViewBlockKind) => void; onClose: () => void }) {
   const [query, setQuery] = useState("")
   const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLowerCase()
   const shown = blockCatalog.filter((item) => !query.trim() || fold(`${item.label} ${item.hint}`).includes(fold(query.trim())))
@@ -119,13 +123,22 @@ function Palette({ onAdd, onDragStart, onClose }: { onAdd: (type: BlockType) => 
       <h3 className="px-2 pb-1 pt-2 text-[10.5px] font-bold uppercase tracking-[0.16em] text-muted-foreground">{group}</h3>
       {shown.filter((item) => item.group === group).map((item) => {
         const Icon = blockIcons.blocks[item.type]
-        return <button key={item.type} type="button" draggable onDragStart={(event) => onDragStart(event, item.type)} onClick={() => onAdd(item.type)} title={item.hint}
+        return <Fragment key={item.type}><button type="button" draggable onDragStart={(event) => onDragStart(event, item.type)} onClick={() => onAdd(item.type)} title={item.hint}
           className="grid cursor-grab grid-cols-[2rem_minmax(0,1fr)] items-center gap-x-2.5 rounded-xl border border-transparent p-1.5 text-left transition hover:border-border/70 hover:bg-background/70 active:cursor-grabbing">
           <span className="row-span-2 flex size-8 items-center justify-center rounded-[9px] bg-secondary text-primary"><Icon className="size-4" /></span>
           <b className="text-[13px] font-semibold leading-tight">{item.label}</b>
           <small className="text-[11.5px] leading-snug text-muted-foreground">{item.hint}</small>
         </button>
+        {/* Chaque présentation du moteur des index, à poser directement (le bloc Vue, déjà réglé sur elle). */}
+        {item.type === "view" && <div className="flex flex-wrap gap-1 pb-1.5 pl-[2.9rem] pr-1" aria-label="Vues à poser directement">
+          {viewBlockKinds.map((kind) => {
+            const KindIcon = blockIcons.views[kind.value]
+            return <button key={kind.value} type="button" draggable onDragStart={(event) => onDragStart(event, "view", kind.value)} onClick={() => onAdd("view", kind.value)} title={`Vue d’index en ${kind.label.toLocaleLowerCase("fr")}`}
+              className="inline-flex cursor-grab items-center gap-1 rounded-full border border-border/70 bg-background/60 px-2 py-0.5 text-[11.5px] text-muted-foreground transition hover:border-border hover:text-foreground active:cursor-grabbing"><KindIcon className="size-3" />{kind.label}</button>
+          })}
+        </div>}</Fragment>
       })}
+
     </div>)}
     {!shown.length && <p className="px-4 py-3 text-xs text-muted-foreground">Aucun bloc ne correspond.</p>}
     <p className="mx-4 mb-4 mt-1 border-t border-dashed pt-3 text-[11.5px] leading-snug text-muted-foreground">Glisse un bloc dans une colonne de la page, ou clique dessus : il s’ajoute après le bloc choisi.</p>
@@ -222,6 +235,8 @@ function BlockEditor({ block, rev, live, links, viewAs, onChange }: EditorProps)
       return <PageViewBlock block={block} source={{ direct: true, asPlayer: viewAs === "joueur" }} />
     case "stat":
       return <PageStatBlock block={block} source={{ direct: true, asPlayer: viewAs === "joueur" }} />
+    case "search":
+      return <PageSearchBlock block={block} />
     case "rowfields":
     case "backlinks":
       return <BlockView block={block} context={{ source: { direct: true }, canReveal: false, links }} />
@@ -373,8 +388,9 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     window.setTimeout(() => setFlash((current) => current === id ? null : current), 1100)
   }, [])
 
-  const insert = useCallback((type: BlockType, at?: DropTarget) => {
-    const block = newBlock(type)
+  const insert = useCallback((type: BlockType, at?: DropTarget, view?: ViewBlockKind) => {
+    const fresh = newBlock(type)
+    const block = view && fresh.type === "view" ? { ...fresh, kind: view } : fresh
     change((draft) => {
       let target = at
       if (!target) {
@@ -388,7 +404,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     setSelected(block.id)
     setDrawer(null)
     reveal(block.id)
-    notify(`Bloc « ${blockLabel(type)} » ajouté`)
+    notify(`Bloc « ${view ? viewBlockKinds.find((item) => item.value === view)?.label ?? blockLabel(type) : blockLabel(type)} » ajouté`)
   }, [change, notify, reveal, selected])
 
   const move = useCallback((id: string, direction: "up" | "down" | "left" | "right") => change((draft) => {
@@ -488,7 +504,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
     const target = drop
     endDrag()
     if (!item || !target) return
-    if (item.kind === "new") insert(item.type, target)
+    if (item.kind === "new") insert(item.type, target, item.view)
     else moveTo(item.id, target)
   }, [drop, endDrag, insert, moveTo])
 
@@ -620,7 +636,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
 
     <div className={`grid items-start gap-3.5 ${mode === "build" ? "min-[960px]:grid-cols-[232px_minmax(0,1fr)_316px] min-[1400px]:grid-cols-[248px_minmax(0,1fr)_336px]" : ""}`}>
       {mode === "build" && <aside aria-label="Blocs" className={paneClass(drawer === "palette")}>
-        <Palette onAdd={(type) => insert(type)} onDragStart={(event, type) => startDrag(event, { kind: "new", type })} onClose={() => setDrawer(null)} />
+        <Palette onAdd={(type, view) => insert(type, undefined, view)} onDragStart={(event, type, view) => startDrag(event, { kind: "new", type, view })} onClose={() => setDrawer(null)} />
       </aside>}
 
       {/* La page */}
@@ -651,6 +667,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
           </header>
           {pageClosed && <p className="flex items-start gap-2 rounded-xl border border-dashed px-3.5 py-2.5 text-[13px] text-muted-foreground"><LockKeyhole className="mt-0.5 size-4 shrink-0" />Le rôle {roleLabels[viewAs]} ne voit pas cette page ({doc.place === "ressources" || doc.place === "bac-a-sable" ? "section réservée aux MJ et aux admins" : doc.place === "administration" ? "section réservée aux admins" : "réglage « Qui voit la page »"}).</p>}
 
+          <PageSearchProvider present={doc.sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "search")))}>
           {doc.sections.map((section, si) => <section key={section.id} aria-label={`Section ${si + 1}`} className="grid gap-1.5">
             <div className="flex flex-wrap items-center gap-x-2.5 gap-y-1 px-0.5 text-xs text-muted-foreground">
               <span className="text-[10.5px] font-bold uppercase tracking-[0.14em]">Section {si + 1}</span>
@@ -678,8 +695,9 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
                       className={`group/block relative min-w-0 rounded-[14px] border px-2 pb-2 transition ${isSelected ? "border-primary/80 shadow-[0_0_0_3px_rgb(104_37_34/0.14)]" : "border-border/60 hover:border-border"} ${draggingId === block.id ? "opacity-40" : ""} ${flash === block.id ? "animate-[pulse_0.9s_ease-out_1]" : ""} ${reason ? "bg-[repeating-linear-gradient(135deg,rgb(104_37_34/0.05)_0_8px,transparent_8px_16px)]" : "bg-card/50"}`}>
                       <div className="flex min-h-7 flex-wrap items-center gap-1.5 text-[11.5px] text-muted-foreground">
                         <span draggable onDragStart={(event) => startDrag(event, { kind: "move", id: block.id }, event.currentTarget.closest<HTMLElement>("[data-block-id]"))} onDragEnd={endDrag} title="Glisser pour déplacer (ou Alt + flèches)" className="flex cursor-grab items-center rounded px-0.5 py-1 hover:bg-muted active:cursor-grabbing"><svg viewBox="0 0 24 24" className="size-3.5" fill="currentColor" aria-hidden><circle cx="9" cy="6" r="1.6" /><circle cx="15" cy="6" r="1.6" /><circle cx="9" cy="12" r="1.6" /><circle cx="15" cy="12" r="1.6" /><circle cx="9" cy="18" r="1.6" /><circle cx="15" cy="18" r="1.6" /></svg></span>
-                        <span className="inline-flex items-center gap-1 font-semibold text-foreground/70"><Icon className="size-3.5" />{blockLabel(block.type)}</span>
+                        <span className="inline-flex items-center gap-1 font-semibold text-foreground/70"><Icon className="size-3.5" />{blockLabel(block.type)}{block.type === "view" ? ` · ${viewBlockKinds.find((item) => item.value === block.kind)?.label ?? ""}` : ""}</span>
                         <VisibilityPill vis={block.vis} />
+                        {block.showIf && <span title={block.showIf.conditions.map(describeCondition).join(block.showIf.match === "une" ? " ou " : " et ")} className="inline-flex items-center rounded-full border border-[#9a6512]/35 bg-[#9a6512]/8 px-1.5 text-[10.5px] font-semibold normal-case tracking-normal text-[#9a6512]">Si…</span>}
                         {block.type === "notes" && <span className="rounded-full border px-1.5 text-[10.5px]">écrit par : {block.editors.map((item) => roleLabels[item]).join(", ") || "personne"}</span>}
                         <span className={`absolute -top-3 right-2 z-[3] inline-flex rounded-lg border bg-card px-0.5 shadow-[0_4px_14px_rgb(67_50_31/0.12)] transition ${isSelected ? "opacity-100" : "pointer-events-none opacity-0 group-hover/block:pointer-events-auto group-hover/block:opacity-100 group-focus-within/block:pointer-events-auto group-focus-within/block:opacity-100"}`}>
                           <ToolButton label="Monter (Alt+↑)" disabled={first} onClick={() => move(block.id, "up")}><ArrowUp className="size-3.5" /></ToolButton>
@@ -703,6 +721,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
               </div>)}
             </div>
           </section>)}
+          </PageSearchProvider>
           <button type="button" onClick={() => change((draft) => { draft.sections.push({ id: newId("s"), layout: "1", framed: false, cols: [[]] }) })} className="justify-self-center rounded-xl border border-dashed px-4 py-2 text-[12.5px] text-muted-foreground transition hover:border-[#3b5c8a] hover:text-foreground"><Plus className="mr-1 inline size-3.5" />Ajouter une section</button>
         </div>}
       </main>

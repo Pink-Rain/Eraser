@@ -329,7 +329,65 @@ test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées,
   assert.deepEqual(stat.columns, ["Nom du PNJ", "Titre", "Rang", "Onglet"]);
   assert.equal(stat.rows.length, 3);
   assert.equal(stat.rows[2].cells[3], "Campagne");
-  assert.equal(stat.stat.pinned, true);
+  assert.equal(stat.stats.length, 1);
+  assert.equal(stat.stats[0].pinned, true);
   assert.deepEqual(stat.options.Rang, [{ value: "1", color: "#111111" }, { value: "2" }]);
   assert.equal(blockData.statBlockData(source, { stats: [], groups: [] }, "st-1", { player: false }), null);
+  // « Toutes les épinglées » : celles de l'onglet stat, dans leur ordre ; aucune : un bloc vide, pas une erreur.
+  const record = { stats: [{ id: "st-1", title: "A", measure: "count", by: ["Rang"], form: "bars", pinned: true }, { id: "st-2", title: "B", measure: "count", by: ["Rang"], form: "bars" }, { id: "st-3", title: "C", measure: "count", by: ["Titre"], form: "bars", pinned: true, width: "half" }], groups: [] };
+  assert.deepEqual(blockData.statBlockData(source, record, blockData.ALL_PINNED_STATS, { player: false }).stats.map((item) => item.id), ["st-1", "st-3"]);
+  assert.deepEqual(blockData.statBlockData(source, { stats: [], groups: [] }, blockData.ALL_PINNED_STATS, { player: false }).stats, []);
+});
+
+test("Bloc Vue : preset, carte choisie, conditions et tri gardés à l'enregistrement", () => {
+  const block = pages.cleanBlock({ id: "b-vue3", type: "view", index: "npcs", tab: "Bibliothèque", kind: "kanban", presetId: "eraser:kanban-narrow", cardId: "carte-2", where: { match: "une", conditions: [{ column: "Rang", operator: "est", value: "2" }, { column: "", operator: "est", value: "x" }, { column: "Titre", operator: "pirate", value: "x" }] }, sort: { column: "Rang", desc: true } });
+  assert.equal(block.presetId, "eraser:kanban-narrow");
+  assert.equal(block.cardId, "carte-2");
+  assert.deepEqual(block.where, { match: "une", conditions: [{ column: "Rang", operator: "est", value: "2" }] });
+  assert.deepEqual(block.sort, { column: "Rang", desc: true });
+  // Une forme propre l'emporte : le preset n'est pas gardé ; sans condition lisible, pas de `where`.
+  const own = pages.cleanBlock({ id: "b-vue4", type: "view", index: "npcs", tab: "Bibliothèque", kind: "list", presetId: "eraser:list-compact", layout: { kind: "list" }, where: { conditions: [] }, sort: { column: "" } });
+  assert.equal(own.presetId, undefined);
+  assert.equal(own.where, undefined);
+  assert.equal(own.sort, undefined);
+});
+
+test("Données d'un bloc Vue : conditions (colonnes masquées comprises), tri avant la limite, preset et carte choisis", () => {
+  const source = {
+    key: "creatures",
+    title: "Créatures",
+    path: "/ressources/index-des-creatures",
+    tables: [{ tabName: "Bestiaire", headers: ["ID", "Nom", "Type", "Niveau", "Secret"], rows: [
+      { values: ["C-1", "Gobelin", "Commun", "2", ""], html: ["C-1", "Gobelin", "Commun", "2", ""] },
+      { values: ["C-2", "Dragon", "Boss", "12", "oui"], html: ["C-2", "Dragon", "Boss", "12", "oui"] },
+      { values: ["C-3", "Liche", "Boss", "9", ""], html: ["C-3", "Liche", "Boss", "9", ""] },
+      { values: ["C-4", "Rat", "Commun", "1", ""], html: ["C-4", "Rat", "Commun", "1", ""] },
+    ] }],
+    columns: { Bestiaire: [{ header: "Secret", spec: { kind: "text", hidden: true } }] },
+  };
+  const cards = { Bestiaire: { cards: [{ id: "carte-a", name: "A", blocks: [] }, { id: "carte-b", name: "B", blocks: [] }], defaultId: "carte-a" } };
+  const settings = { presentations: { Bestiaire: { kanban: { kind: "kanban", kanbanColumn: "Type" } } }, cards };
+  const options = { player: true };
+  const bosses = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "table", limit: 0, where: { match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Boss" }] } }, settings, options);
+  assert.deepEqual(bosses.rows.map((row) => row.name), ["Dragon", "Liche"]);
+  const notBoss = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "table", limit: 0, where: { match: "toutes", conditions: [{ column: "Type", operator: "n-est-pas", value: "boss" }] } }, settings, options);
+  assert.deepEqual(notBoss.rows.map((row) => row.name), ["Gobelin", "Rat"]);
+  const secret = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "table", limit: 0, where: { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }] } }, settings, options);
+  assert.deepEqual(secret.rows.map((row) => row.name), ["Dragon"]);
+  assert.ok(!secret.headers.includes("Secret"));
+  const either = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "table", limit: 0, where: { match: "une", conditions: [{ column: "Nom", operator: "est", value: "Rat" }, { column: "Niveau", operator: "superieur", value: "10" }] } }, settings, options);
+  assert.deepEqual(either.rows.map((row) => row.name), ["Dragon", "Rat"]);
+  // Le tri s'applique avant « Au plus » : les deux plus hauts niveaux.
+  const top = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "table", limit: 2, sort: { column: "Niveau", desc: true } }, settings, options);
+  assert.deepEqual(top.rows.map((row) => row.name), ["Dragon", "Liche"]);
+  assert.equal(top.total, 4);
+  // Un preset : sa forme, d'abord ; celui d'une autre présentation est ignoré.
+  const preset = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "kanban", limit: 0, preset: { kind: "kanban", laneWidth: "narrow", kanbanColumn: "Niveau" } }, settings, options);
+  assert.equal(preset.layout.laneWidth, "narrow");
+  assert.equal(preset.layout.kanbanColumn, "Niveau");
+  const wrong = blockData.viewBlockData(source, { tab: "Bestiaire", kind: "kanban", limit: 0, preset: { kind: "list", compact: true } }, settings, options);
+  assert.equal(wrong.layout.kanbanColumn, "Type");
+  // La carte choisie devient celle par défaut ; une carte inconnue laisse celle à l'étoile.
+  assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-b" }, settings, options).cards.defaultId, "carte-b");
+  assert.equal(blockData.viewBlockData(source, { tab: "Bestiaire", kind: "cards", limit: 0, cardId: "carte-z" }, settings, options).cards.defaultId, "carte-a");
 });

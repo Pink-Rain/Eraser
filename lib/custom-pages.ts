@@ -19,6 +19,7 @@ import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
 import { cleanViewLayout, isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
+import { parseViewConditions, viewOperators, type ViewCondition } from "@/lib/index-views"
 
 /* ---------- Les types ---------- */
 
@@ -34,7 +35,7 @@ export type PagePlace = PageSection | "campagne" | "hors-menu"
 export type PageStatus = "brouillon" | "publiee"
 export type SectionLayout = "1" | "2" | "3" | "side-r" | "side-l"
 
-export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks"
+export type BlockType = "title" | "text" | "callout" | "quote" | "image" | "separator" | "link" | "secret" | "notes" | "view" | "stat" | "rowfields" | "backlinks" | "search"
 export type CalloutTone = "info" | "mj" | "secret" | "alerte"
 export type ImageRatio = "auto" | "21/9" | "16/9" | "4/3" | "1/1" | "3/4"
 export type SeparatorGlyph = "ornement" | "etoile" | "points" | "trait"
@@ -42,7 +43,8 @@ export type SeparatorGlyph = "ornement" | "etoile" | "points" | "trait"
 export type ViewBlockKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex"
 export type ViewHeight = "auto" | "sm" | "md" | "lg"
 
-type Common = { id: string; vis: BlockVisibility }
+/** `showIf` (page de ligne) : le bloc ne s'affiche que si la ligne de la page remplit ces conditions. */
+type Common = { id: string; vis: BlockVisibility; showIf?: ViewWhere }
 export type TitleBlock = Common & { type: "title"; eyebrow: string; text: string; level: "h2" | "h3"; align: "left" | "center" }
 export type TextBlock = Common & { type: "text"; html: string }
 export type CalloutBlock = Common & { type: "callout"; tone: CalloutTone; title: string; html: string }
@@ -58,17 +60,32 @@ export type NotesBlock = Common & { type: "notes"; title: string; html: string; 
 /** `rowMatch` (page de ligne) : seulement les lignes dont cette colonne cite la ligne de la page. */
 export type ViewBlock = Common & {
   type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string; rowMatch: string
-  /** Une vue enregistrée de l'index (onglet-fenêtre) : ses conditions et sa présentation. */
+  /** Ancien réglage : une vue enregistrée de l'index (onglet-fenêtre). Toujours lu, plus proposé. */
   viewId?: string
-  /** La forme réglée pour cette page seulement (sinon : celle de l'index ou de la vue enregistrée). */
+  /** La forme réglée pour cette page seulement (sinon : le preset choisi, ou celle de l'onglet). */
   layout?: ViewLayout
+  /** Un preset de vue (« Kanban serré », un des tiens…) : sa forme, appliquée aux colonnes de l'onglet. */
+  presetId?: string
+  /** Les cartes : laquelle des cartes de l'onglet (sinon celle à l'étoile). */
+  cardId?: string
+  /** Seulement les lignes qui remplissent ces conditions (« Type est Boss »). */
+  where?: ViewWhere
+  /** L'ordre des lignes (avant « Au plus ») ; une présentation peut avoir son propre tri. */
+  sort?: { column: string; desc: boolean }
+  /** Ne suit pas le bloc Recherche de la page. */
+  ignoreSearch?: boolean
 }
+/** Les conditions d'un bloc : « toutes » doivent être vraies, ou « une » suffit. */
+export type ViewWhere = { match: "toutes" | "une"; conditions: ViewCondition[] }
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
-export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" }
+/** « form » : disposées comme la fiche de l'index (Modifier › Formulaire). */
+export type RowFieldsBlock = Common & { type: "rowfields"; columns: string[]; heading: string; style: "list" | "grid" | "form" }
 /** Page de ligne : les lignes des autres index qui citent celle-ci (« Cité dans »). */
 export type BacklinksBlock = Common & { type: "backlinks"; heading: string }
-export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock
+/** Un champ de recherche : il filtre les lignes des blocs Vue de la page (ceux qui le suivent). */
+export type SearchBlock = Common & { type: "search"; placeholder: string; heading: string }
+export type PageBlock = TitleBlock | TextBlock | CalloutBlock | QuoteBlock | ImageBlock | SeparatorBlock | LinkBlock | SecretBlock | NotesBlock | ViewBlock | StatBlock | RowFieldsBlock | BacklinksBlock | SearchBlock
 
 export type PageSectionBlock = { id: string; layout: SectionLayout; framed: boolean; cols: PageBlock[][] }
 
@@ -258,8 +275,9 @@ export const blockCatalog: Array<{ type: BlockType; label: string; hint: string;
   { type: "secret", label: "Secret à révéler", hint: "Caché aux joueurs jusqu’à ce que le MJ le révèle", group: "Révélations et carnets" },
   { type: "notes", label: "Bloc-notes", hint: "Un carnet qu’on continue d’écrire sur la page publiée", group: "Révélations et carnets" },
   { type: "link", label: "Lien vers une page", hint: "Une carte-lien vers une page d’Eraser", group: "Navigation" },
-  { type: "view", label: "Vue d’index", hint: "Une vue réglée dans un index : liste, kanban, cartes…", group: "Données d’index" },
-  { type: "stat", label: "Stat épinglée", hint: "Une statistique enregistrée dans un index", group: "Données d’index" },
+  { type: "view", label: "Vue d’index", hint: "Tableau, cartes, liste, kanban, maître-détail… filtrée comme tu veux", group: "Données d’index" },
+  { type: "search", label: "Recherche", hint: "Un champ qui filtre les vues d’index de la page", group: "Données d’index" },
+  { type: "stat", label: "Statistiques", hint: "Une statistique d’un index, ou toutes ses épinglées", group: "Données d’index" },
   { type: "rowfields", label: "Valeurs de la ligne", hint: "Page de ligne : les colonnes de la ligne affichée", group: "Page de ligne" },
   { type: "backlinks", label: "Cité dans", hint: "Page de ligne : les lignes d’autres index qui la citent", group: "Page de ligne" },
 ]
@@ -283,6 +301,7 @@ export function newBlock(type: BlockType, id = newId("b")): PageBlock {
     case "stat": return { ...common, type, index: "", statId: "", heading: "" }
     case "rowfields": return { ...common, type, columns: [], heading: "", style: "grid" }
     case "backlinks": return { ...common, type, heading: "Cité dans" }
+    case "search": return { ...common, type, placeholder: "", heading: "" }
   }
 }
 
@@ -307,6 +326,24 @@ export function cleanLinkHref(value: unknown) {
   return /^https:\/\/[^\s"'<>]+$/i.test(raw) ? raw : ""
 }
 
+/** Les conditions d'un bloc Vue ; aucune condition lisible : rien (toutes les lignes). */
+export function cleanViewWhere(value: unknown): ViewWhere | undefined {
+  if (!value || typeof value !== "object") return undefined
+  const raw = value as Record<string, unknown>
+  const conditions = Array.isArray(raw.conditions) ? parseViewConditions(JSON.stringify(raw.conditions)) : []
+  return conditions.length ? { match: raw.match === "une" ? "une" : "toutes", conditions } : undefined
+}
+
+/**
+ * Les conditions qui comptent : une condition encore incomplète (« Type est … » sans valeur,
+ * le temps de l'écrire) n'écarte aucune ligne. « est vide » se choisit explicitement.
+ */
+export function activeWhere(where: ViewWhere | undefined): ViewWhere | undefined {
+  if (!where) return undefined
+  const conditions = where.conditions.filter((condition) => condition.column.trim() && (!viewOperators.find((operator) => operator.value === condition.operator)?.needsValue || condition.value.trim()))
+  return conditions.length ? { ...where, conditions } : undefined
+}
+
 /** Un bloc reçu (atelier, modèle, serveur), remis en forme ; `null` s'il n'est pas lisible. */
 export function cleanBlock(input: unknown): PageBlock | null {
   if (!input || typeof input !== "object") return null
@@ -315,7 +352,8 @@ export function cleanBlock(input: unknown): PageBlock | null {
   if (!blockTypes.includes(type) || !isId(raw.id)) return null
   const base = newBlock(type, raw.id)
   const vis = oneOf(raw.vis, blockVisValues, base.vis)
-  const common = { id: raw.id, vis }
+  const showIf = cleanViewWhere(raw.showIf)
+  const common = { id: raw.id, vis, ...(showIf ? { showIf } : {}) }
   switch (type) {
     case "title": return { ...common, type, eyebrow: text(raw.eyebrow, 120), text: text(raw.text, 200), level: oneOf(raw.level, ["h2", "h3"] as const, "h2"), align: oneOf(raw.align, ["left", "center"] as const, "left") }
     case "text": return { ...common, type, html: html(raw.html) }
@@ -335,11 +373,17 @@ export function cleanBlock(input: unknown): PageBlock | null {
       const layout = cleanViewLayout(raw.layout)
       const ownLayout = layout && isPresentationKind(layout.kind) ? layout : undefined
       const viewId = text(raw.viewId, 60)
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}) }
+      const presetId = ownLayout ? "" : text(raw.presetId, 80)
+      const cardId = text(raw.cardId, 60)
+      const where = cleanViewWhere(raw.where)
+      const sortRaw = raw.sort && typeof raw.sort === "object" ? raw.sort as Record<string, unknown> : null
+      const sortColumn = sortRaw ? text(sortRaw.column, 120) : ""
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
-    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid"] as const, "grid") }
+    case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid") }
     case "backlinks": return { ...common, type, heading: text(raw.heading, 160) }
+    case "search": return { ...common, type, placeholder: text(raw.placeholder, 120), heading: text(raw.heading, 160) }
   }
 }
 

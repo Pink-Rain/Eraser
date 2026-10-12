@@ -7,10 +7,12 @@
  * Règles pures : la route, le serveur des blocs et les tests s'en servent. Un joueur ne lit
  * jamais une colonne masquée ni une colonne privée d'une entité (comme les vues d'index).
  */
-import type { CustomPage, PageView, ViewedBlock } from "@/lib/custom-pages"
+import { activeWhere, type CustomPage, type PageView, type ViewedBlock } from "@/lib/custom-pages"
 import { foldName, isIdHeader } from "@/lib/index-columns"
+import type { IndexLayout } from "@/lib/index-layouts"
 import { parseReferenceHref } from "@/lib/index-references"
 import { cellCitesRow, columnSpecIn, shownColumns, type BlockDataOptions, type IndexSource } from "@/lib/custom-pages-data"
+import { matchesView } from "@/lib/index-views"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 
 /** La ligne d'une page de ligne : ses valeurs lisibles par le lecteur. */
@@ -22,6 +24,8 @@ export type RowContext = {
   name: string
   /** Les colonnes montrées, dans l'ordre de l'onglet. */
   columns: Array<{ header: string; text: string; html: string }>
+  /** La fiche de l'onglet (Modifier › Formulaire), quand un bloc « Valeurs de la ligne » la reprend. */
+  form?: IndexLayout
   /** Les colonnes de l'onglet que le lecteur ne voit pas (leur « {…} » s'efface). */
   hidden: string[]
 }
@@ -115,8 +119,27 @@ function fillBlock(block: ViewedBlock, row: RowContext): ViewedBlock {
     case "stat": return { ...block, heading: text(block.heading) }
     case "rowfields": return { ...block, heading: text(block.heading) }
     case "backlinks": return { ...block, heading: text(block.heading) }
+    case "search": return { ...block, heading: text(block.heading), placeholder: text(block.placeholder) }
     default: return block
   }
+}
+
+/** Les valeurs d'une ligne, toutes colonnes comprises (masquées aussi) : pour les conditions, jamais montrées. */
+export function rowValuesOf(source: IndexSource, tab: string, id: string): ((column: string) => string) | null {
+  const table = source.tables.find((candidate) => foldName(candidate.tabName) === foldName(tab))
+  const idColumn = table ? table.headers.findIndex(isIdHeader) : -1
+  const row = table && idColumn >= 0 ? table.rows.find((candidate) => plain(candidate.values[idColumn] ?? "") === id) : undefined
+  if (!table || !row) return null
+  return (column) => { const at = table.headers.findIndex((header) => foldName(header) === foldName(column)); return at >= 0 ? row.values[at] ?? "" : "" }
+}
+
+/**
+ * Page de ligne : retire les blocs dont la condition d'affichage n'est pas remplie par la
+ * ligne (sur le serveur : un bloc écarté n'est pas envoyé). Une section vidée disparaît à l'affichage.
+ */
+export function blocksForRow<T extends Pick<PageView, "sections">>(view: T, valueOf: (column: string) => string): T {
+  if (!view.sections.some((section) => section.cols.some((column) => column.some((block) => block.showIf)))) return view
+  return { ...view, sections: view.sections.map((section) => ({ ...section, cols: section.cols.map((column) => column.filter((block) => { const where = activeWhere(block.showIf); return !where || matchesView(where, valueOf) })) })) }
 }
 
 /** La page de la ligne : le modèle (déjà filtré pour son lecteur) rempli avec les valeurs de la ligne. */

@@ -1,13 +1,15 @@
 "use client"
 
 import { useEffect, useState, type ReactNode } from "react"
-import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, TriangleAlert } from "lucide-react"
+import { Check, ChevronDown, Copy, ExternalLink, LoaderCircle, Plus, RefreshCw, TriangleAlert, X } from "lucide-react"
 
 import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { LayoutSettings } from "@/components/eraser/index-views"
 import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
+import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
+import { describeCondition, viewOperators, type ViewCondition } from "@/lib/index-views"
 import { replaceModes, replaceableRoutes } from "@/lib/page-replacements"
 import {
   blockCatalog,
@@ -31,6 +33,7 @@ import {
   type PageSummary,
   type StudioPage,
   type ViewBlockKind,
+  type ViewWhere,
   studioHref,
 } from "@/lib/custom-pages"
 
@@ -91,7 +94,11 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 /* ---------- Les index (blocs Vue et Stat) ---------- */
 
 type IndexEntry = { key: string; title: string; path: string }
-type IndexDetails = { tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; views?: Array<{ id: string; name: string; kind: string }> }>; stats: Array<{ id: string; title: string; pinned: boolean }> }
+type IndexDetails = {
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]>; views?: Array<{ id: string; name: string; kind: string; match?: ViewWhere["match"]; conditions?: ViewCondition[] }> }>
+  stats: Array<{ id: string; title: string; pinned: boolean }>
+  presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
+}
 
 let catalogPromise: Promise<IndexEntry[]> | null = null
 const detailsCache = new Map<string, Promise<IndexDetails | null>>()
@@ -119,15 +126,18 @@ function useIndexCatalog() {
 
 function useIndexDetails(key: string) {
   const [state, setState] = useState<{ key: string; details: IndexDetails | null; loading: boolean }>({ key, details: null, loading: Boolean(key) })
+  const [version, setVersion] = useState(0)
   useEffect(() => {
     if (!key) return
     let alive = true
     // eslint-disable-next-line react-hooks/set-state-in-effect -- un autre index repart d'un état « chargement »
-    setState({ key, details: null, loading: true })
+    setState((current) => ({ key, details: current.key === key ? current.details : null, loading: true }))
     void loadDetails(key).then((details) => { if (alive) setState({ key, details, loading: false }) })
     return () => { alive = false }
-  }, [key])
-  return state.key === key ? state : { key, details: null, loading: Boolean(key) }
+  }, [key, version])
+  // Relire l'index : une carte, une forme ou un preset créé entre-temps dans « Modifier ».
+  const reload = () => { detailsCache.delete(key); setVersion((value) => value + 1) }
+  return { ...(state.key === key ? state : { key, details: null, loading: Boolean(key) }), reload }
 }
 
 function IndexPicker({ value, onChange }: { value: string; onChange: (key: string) => void }) {
@@ -141,50 +151,114 @@ function IndexPicker({ value, onChange }: { value: string; onChange: (key: strin
   </Field>
 }
 
+/** Les conditions d'un bloc Vue, dans le volet étroit de l'atelier : une condition par carte. */
+function WhereEditor({ where, columns, choices, rowPage, onChange }: { where?: ViewWhere; columns: string[]; choices: Record<string, string[]>; rowPage: boolean; onChange: (where: ViewWhere | undefined) => void }) {
+  const conditions = where?.conditions ?? []
+  const match = where?.match ?? "toutes"
+  const set = (next: ViewCondition[], nextMatch = match) => onChange(next.length ? { match: nextMatch, conditions: next } : undefined)
+  const change = (position: number, patch: Partial<ViewCondition>) => set(conditions.map((condition, index) => index === position ? { ...condition, ...patch } : condition))
+  return <div className="grid gap-2">
+    {conditions.length > 1 && <Segmented label="Combinaison" size="sm" value={match} onChange={(value) => set(conditions, value)} options={[{ value: "toutes", label: "Toutes vraies" }, { value: "une", label: "Une suffit" }]} />}
+    {conditions.map((condition, position) => {
+      const operator = viewOperators.find((candidate) => candidate.value === condition.operator)
+      const listId = `conditions-${position}-${condition.column}`
+      return <div key={position} className="grid gap-1 rounded-lg border bg-background/50 p-1.5">
+        <div className="flex items-center gap-1">
+          {position > 0 && <span className="shrink-0 px-1 text-[11px] font-semibold text-muted-foreground">{match === "une" ? "ou" : "et"}</span>}
+          <select aria-label="Colonne" className={`${fieldClass} h-7 text-xs`} value={condition.column} onChange={(event) => change(position, { column: event.target.value })}>
+            {condition.column && !columns.includes(condition.column) && <option value={condition.column}>{condition.column} (absente)</option>}
+            {columns.map((column) => <option key={column} value={column}>{column}</option>)}
+          </select>
+          <button type="button" onClick={() => set(conditions.filter((_, index) => index !== position))} aria-label="Retirer la condition" className="flex size-7 shrink-0 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive"><X className="size-3.5" /></button>
+        </div>
+        <div className="grid grid-cols-[minmax(0,9rem)_minmax(0,1fr)] gap-1">
+          <select aria-label="Comparaison" className={`${fieldClass} h-7 text-xs`} value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as ViewCondition["operator"] })}>
+            {viewOperators.map((candidate) => <option key={candidate.value} value={candidate.value}>{candidate.label}</option>)}
+          </select>
+          {operator?.needsValue ? <>
+            <input aria-label="Valeur" list={choices[condition.column]?.length ? listId : undefined} className={`${fieldClass} h-7 text-xs`} value={condition.value} placeholder={rowPage ? "Valeur ou {Colonne}" : "Valeur"} onChange={(event) => change(position, { value: event.target.value })} />
+            {choices[condition.column]?.length ? <datalist id={listId}>{choices[condition.column].map((value) => <option key={value} value={value} />)}</datalist> : null}
+          </> : <span />}
+        </div>
+      </div>
+    })}
+    <button type="button" disabled={!columns.length} onClick={() => set([...conditions, { column: columns[0] ?? "", operator: "est", value: "" }])} className="inline-flex items-center gap-1 justify-self-start rounded-lg px-1.5 py-1 text-xs font-medium text-primary hover:bg-primary/10 disabled:opacity-40"><Plus className="size-3.5" />Ajouter une condition</button>
+    {conditions.length > 0 && <span className="text-[11.5px] leading-snug text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</span>}
+  </div>
+}
+
 function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { type: "view" }>; rowOf?: { index: string; tab?: string }; onChange: (patch: Partial<Extract<PageBlock, { type: "view" }>>) => void }) {
-  const { details, loading } = useIndexDetails(block.index)
+  const { details, loading, reload } = useIndexDetails(block.index)
   const tab = details?.tabs.find((item) => item.name === block.tab)
   const configured = tab?.configured ?? []
-  const views = tab?.views ?? []
-  const own = Boolean(block.layout)
+  const legacyView = block.viewId ? tab?.views?.find((view) => view.id === block.viewId) : undefined
   const presentation = isPresentationKind(block.kind)
-  // Changer de présentation : la forme propre à la page repart de celle-ci (ses réglages ne vont pas d'une présentation à l'autre).
-  // La forme propre part de celle de l'index (sinon de la forme par défaut) : rien n'est perdu à basculer.
+  const kindLabel = viewBlockKinds.find((item) => item.value === block.kind)?.label ?? ""
+  const presets = (details?.presets ?? []).filter((preset) => preset.kind === block.kind)
+  const columns = tab?.columns ?? []
+  // La forme propre part de celle de l'onglet (sinon de la forme par défaut) : rien n'est perdu à basculer.
   const startFrom = (kind: ViewBlockKind): ViewLayout => ({ ...(tab?.forms?.[kind] ?? {}), kind })
-  const pickKind = (kind: ViewBlockKind) => onChange({ kind, layout: own && isPresentationKind(kind) ? startFrom(kind) : undefined })
+  // Changer de présentation : un preset ou une forme propre ne passe pas d'une présentation à l'autre.
+  const pickKind = (kind: ViewBlockKind) => onChange({ kind, layout: block.layout && isPresentationKind(kind) ? startFrom(kind) : undefined, presetId: undefined })
+  const form = block.layout ? "own" : block.presetId ? `preset:${block.presetId}` : ""
+  const pickForm = (value: string) => value === "own" ? onChange({ layout: startFrom(block.kind), presetId: undefined })
+    : value.startsWith("preset:") ? onChange({ presetId: value.slice("preset:".length), layout: undefined })
+    : onChange({ presetId: undefined, layout: undefined })
+  const where = block.where
   return <>
-    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", kind: "table", viewId: undefined, layout: undefined })} />
+    <IndexPicker value={block.index} onChange={(index) => onChange({ index, tab: "", viewId: undefined, layout: undefined, presetId: undefined, cardId: undefined, where: undefined, sort: undefined })} />
     {block.index && <Field label="Onglet">
-      <select className={fieldClass} value={block.tab} disabled={loading} onChange={(event) => onChange({ tab: event.target.value, kind: "table", viewId: undefined, layout: undefined })}>
-        <option value="">{loading ? "Lecture de l’index…" : "Choisir un onglet…"}</option>
+      <select className={fieldClass} value={block.tab} disabled={loading && !details} onChange={(event) => onChange({ tab: event.target.value, viewId: undefined, layout: undefined, cardId: undefined, where: undefined, sort: undefined })}>
+        <option value="">{loading && !details ? "Lecture de l’index…" : "Choisir un onglet…"}</option>
         {(details?.tabs ?? []).map((item) => <option key={item.name} value={item.name}>{item.name}</option>)}
       </select>
     </Field>}
-    {block.tab && views.length > 0 && <Field label="Vue enregistrée de l’index" hint="Une vue de l’index (ses conditions et sa présentation) : seules ses lignes s’affichent.">
-      <select className={fieldClass} value={block.viewId ?? ""} onChange={(event) => {
-        const view = views.find((item) => item.id === event.target.value)
-        const kind = view && viewBlockKinds.some((item) => item.value === view.kind) ? view.kind as ViewBlockKind : block.kind
-        onChange({ viewId: view?.id, kind, layout: undefined })
-      }}>
-        <option value="">Aucune : toutes les lignes de l’onglet</option>
-        {views.map((view) => <option key={view.id} value={view.id}>{view.name}</option>)}
-      </select>
-    </Field>}
-    {block.tab && <Field label="Présentation" hint={configured.length ? "Les présentations marquées d’un point sont déjà réglées dans l’index ; les autres prennent leur forme par défaut, ou celle que tu règles ci-dessous." : "Chaque présentation prend sa forme réglée dans l’index (Modifier › Vues), ou celle que tu règles ci-dessous pour cette page."}>
+    {block.tab && <Field label="Présentation" hint="Tout ce que propose « Modifier » dans l’index. Un point : déjà réglée pour cet onglet.">
       <div className="flex flex-wrap gap-1">
         {viewBlockKinds.map((kind) => {
           const Icon = blockIcons.views[kind.value]
           return <button key={kind.value} type="button" aria-pressed={block.kind === kind.value} onClick={() => pickKind(kind.value)} className="inline-flex items-center gap-1.5 rounded-full border border-border/80 bg-background/60 px-2.5 py-1 text-xs text-muted-foreground transition hover:border-border hover:text-foreground aria-pressed:border-foreground aria-pressed:bg-foreground aria-pressed:text-background">
-            <Icon className="size-3.5" />{kind.label}{configured.includes(kind.value) && <span className="size-1.5 rounded-full bg-current opacity-70" aria-label="réglée dans l’index" />}{kind.value === "cards" && tab && !tab.cards ? " (d’office)" : ""}
+            <Icon className="size-3.5" />{kind.label}{(configured.includes(kind.value) || (kind.value === "cards" && tab?.cards)) && <span className="size-1.5 rounded-full bg-current opacity-70" aria-label="réglée dans l’index" />}
           </button>
         })}
       </div>
     </Field>}
-    {block.tab && presentation && <Field label="Forme">
-      <Segmented label="Forme" size="sm" value={own ? "page" : "index"} onChange={(value) => onChange({ layout: value === "page" ? startFrom(block.kind) : undefined })}
-        options={[{ value: "index", label: block.viewId ? "Celle de la vue enregistrée" : "Celle de l’index", title: "Modifier la forme dans l’index la change partout où elle sert" }, { value: "page", label: "Propre à cette page", title: "Réglée ici, pour ce bloc seulement : l’index n’est pas touché" }]} />
+    {block.tab && block.kind === "cards" && <Field label="Carte" hint={tab?.cardList?.length ? <>Les cartes de l’onglet (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></> : <>Cet onglet n’a pas encore de carte : Eraser en dessine une d’office. Crée les tiennes dans l’index (Modifier › Cartes). <RefreshLink onClick={reload} loading={loading} /></>}>
+      <select className={fieldClass} value={block.cardId ?? ""} onChange={(event) => onChange({ cardId: event.target.value || undefined })}>
+        <option value="">Celle à l’étoile (par défaut)</option>
+        {(tab?.cardList ?? []).map((card) => <option key={card.id} value={card.id}>{card.name}</option>)}
+        {block.cardId && !(tab?.cardList ?? []).some((card) => card.id === block.cardId) && <option value={block.cardId}>Carte supprimée (celle par défaut la remplace)</option>}
+      </select>
     </Field>}
-    {block.tab && presentation && block.layout && <LayoutSettings fixedKind layout={block.layout} columns={tab?.columns ?? []} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && presentation && <Field label="Forme" hint={<>Pour avoir plusieurs {kindLabel.toLocaleLowerCase("fr")}s, règle chacun dans l’index (Modifier › {kindLabel}) et enregistre-le en preset : il apparaît ici. <RefreshLink onClick={reload} loading={loading} /></>}>
+      <select className={fieldClass} value={form} onChange={(event) => pickForm(event.target.value)}>
+        <option value="">{configured.includes(block.kind) ? `Celle de l’onglet (Modifier › ${kindLabel})` : `Celle de l’onglet (${kindLabel} par défaut)`}</option>
+        {presets.some((preset) => !preset.builtin) && <optgroup label="Tes presets">{presets.filter((preset) => !preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
+        {presets.some((preset) => preset.builtin) && <optgroup label="Presets d’Eraser">{presets.filter((preset) => preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
+        {block.presetId && !presets.some((preset) => preset.id === block.presetId) && details && <option value={`preset:${block.presetId}`}>Preset supprimé (la forme de l’onglet le remplace)</option>}
+        <option value="own">Propre à cette page…</option>
+      </select>
+    </Field>}
+    {block.tab && presentation && block.layout && <LayoutSettings fixedKind layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
+    {block.tab && <Field label="Seulement les lignes où…" hint={rowOf?.index ? "Sans condition : toutes les lignes. « {Colonne} » dans une valeur prend celle de la ligne de la page." : "Sans condition : toutes les lignes. Les colonnes masquées comptent aussi, sans jamais être montrées."}>
+      <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
+    </Field>}
+    {block.viewId && <Hint>
+      Ce bloc reprend aussi les lignes de l’onglet-fenêtre « {legacyView?.name ?? "supprimé"} » (ancien réglage).{" "}
+      {/* Ses conditions deviennent celles du bloc : il ne dépend plus de l'onglet-fenêtre. */}
+      {!legacyView?.conditions?.length || !where?.conditions.length
+        ? <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined, ...(legacyView?.conditions?.length ? { where: { match: legacyView.match ?? "toutes", conditions: legacyView.conditions } } : {}) })}>{legacyView?.conditions?.length ? "Copier ses conditions ici" : "Ne plus en dépendre"}</button>
+        : <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined })}>Ne garder que les conditions du bloc</button>}
+    </Hint>}
+    {block.tab && <Field label="Trier par" hint={presentation ? "Avant « Au plus » ; une forme qui a son propre tri le garde pour l’affichage." : undefined}>
+      <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">
+        <select className={fieldClass} value={block.sort?.column ?? ""} onChange={(event) => onChange({ sort: event.target.value ? { column: event.target.value, desc: block.sort?.desc ?? false } : undefined })}>
+          <option value="">L’ordre de l’onglet</option>
+          {columns.map((column) => <option key={column} value={column}>{column}</option>)}
+        </select>
+        {block.sort && <Segmented label="Ordre" size="sm" value={block.sort.desc ? "desc" : "asc"} onChange={(value) => onChange({ sort: { column: block.sort!.column, desc: value === "desc" } })} options={[{ value: "asc", label: "A→Z", title: "Croissant" }, { value: "desc", label: "Z→A", title: "Décroissant" }]} />}
+      </div>
+    </Field>}
     <div className="grid grid-cols-2 gap-2">
       <Field label="Au plus (lignes)" hint="0 : toutes">
         <input type="number" min={0} max={500} className={fieldClass} value={block.limit} onChange={(event) => onChange({ limit: Math.max(0, Math.min(500, Number.parseInt(event.target.value, 10) || 0)) })} />
@@ -198,11 +272,16 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
     {rowOf?.index && block.tab && <Field label="Page de ligne : seulement les lignes liées" hint="Ne garde que les lignes dont cette colonne cite la ligne de la page (son nom dans une liste, ou une référence « { » vers elle).">
       <select className={fieldClass} value={block.rowMatch} onChange={(event) => onChange({ rowMatch: event.target.value })}>
         <option value="">Toutes les lignes (pas de filtre)</option>
-        {(tab?.columns ?? []).map((column) => <option key={column} value={column}>{column}</option>)}
+        {columns.map((column) => <option key={column} value={column}>{column}</option>)}
       </select>
     </Field>}
+    <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 accent-primary" checked={!block.ignoreSearch} onChange={(event) => onChange({ ignoreSearch: event.target.checked ? undefined : true })} /><span>Suivre la recherche de la page<span className="block text-[11.5px] text-muted-foreground">Si la page a un bloc Recherche, il filtre aussi ces lignes.</span></span></label>
     <Field label="Titre au-dessus" hint={rowOf?.index ? "« {Nom} » y met le nom de la ligne." : undefined}><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
   </>
+}
+
+function RefreshLink({ onClick, loading }: { onClick: () => void; loading: boolean }) {
+  return <button type="button" onClick={onClick} disabled={loading} className="inline-flex items-center gap-0.5 font-medium text-primary hover:underline disabled:opacity-50">{loading ? <LoaderCircle className="size-3 animate-spin" /> : <RefreshCw className="size-3" />}Relire l’index</button>
 }
 
 /** Page de ligne : les colonnes montrées par « Valeurs de la ligne ». */
@@ -219,7 +298,7 @@ function RowFieldsSettings({ block, rowOf, onChange }: { block: Extract<PageBloc
         })}
       </div>}
     </Field>
-    <Field label="Disposition"><Segmented label="Disposition" value={block.style} onChange={(style) => onChange({ style })} options={[{ value: "grid", label: "En grille" }, { value: "list", label: "En liste" }]} /></Field>
+    <Field label="Disposition" hint={block.style === "form" ? "Les sections, les lignes et la colonne latérale de la fiche de l’onglet (Modifier › Formulaire), en lecture." : undefined}><Segmented label="Disposition" value={block.style} onChange={(style) => onChange({ style })} options={[{ value: "grid", label: "En grille" }, { value: "list", label: "En liste" }, { value: "form", label: "Comme la fiche", title: "Disposées comme le formulaire de l’index" }]} /></Field>
     <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>
   </>
 }
@@ -231,6 +310,7 @@ function StatSettings({ block, onChange }: { block: Extract<PageBlock, { type: "
     {block.index && <Field label="Statistique" hint={details && !details.stats.length ? "Cet index n’a pas encore de statistique : crée-la dans l’index (Modifier › Stats)." : "Les statistiques se créent dans l’index (Modifier › Stats)."}>
       <select className={fieldClass} value={block.statId} disabled={loading} onChange={(event) => onChange({ statId: event.target.value })}>
         <option value="">{loading ? "Lecture de l’index…" : "Choisir une statistique…"}</option>
+        {details && <option value={ALL_PINNED_STATS}>Toutes les épinglées (comme l’onglet stat)</option>}
         {(details?.stats ?? []).map((stat) => <option key={stat.id} value={stat.id}>{stat.pinned ? "📌 " : ""}{stat.title}</option>)}
       </select>
     </Field>}
@@ -349,6 +429,13 @@ export function BlockSettings({ block, pages, live, rowOf, onChange, onDuplicate
     case "stat":
       content = <StatSettings block={block} onChange={(patch) => set(patch)} />
       break
+    case "search":
+      content = <>
+        <Field label="Texte d’invite"><input className={fieldClass} value={block.placeholder} maxLength={120} placeholder="Chercher dans la page…" onChange={(event) => set({ placeholder: event.target.value }, "placeholder")} /></Field>
+        <Field label="Titre au-dessus"><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => set({ heading: event.target.value }, "heading")} /></Field>
+        <Hint>Ce qu’on tape ici filtre les lignes de toutes les vues d’index de la page (sauf celles réglées pour ne pas suivre la recherche). Rien n’est relu dans Google : la recherche se fait sur ce qui est déjà affiché.</Hint>
+      </>
+      break
   }
   return <div>
     <div className="flex items-center gap-2.5 px-4 pb-3">
@@ -360,12 +447,28 @@ export function BlockSettings({ block, pages, live, rowOf, onChange, onDuplicate
       <RadioCards name={`vis-${block.id}`} value={block.vis} onChange={(vis) => set({ vis })} options={blockVisibilities.map((item) => ({ value: item.value, label: item.label, hint: item.hint, dot: visDot[item.value] || undefined }))} />
       <Hint>Vérifié sur le serveur : un bloc masqué n’est jamais envoyé au navigateur de qui ne le voit pas.</Hint>
     </Group>
+    {rowOf?.index && <Group title="Quand l’afficher" open={Boolean(block.showIf)} badge={block.showIf ? <span className="rounded-full border px-1.5 text-[10.5px] font-semibold normal-case tracking-normal">{block.showIf.conditions.length} condition{block.showIf.conditions.length > 1 ? "s" : ""}</span> : undefined}>
+      <RowCondition rowOf={rowOf} value={block.showIf} onChange={(showIf) => set({ showIf })} />
+    </Group>}
     <div className="flex flex-wrap gap-1.5 border-t border-border/70 px-4 pt-3">
       <button type="button" onClick={onDuplicate} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs hover:border-ring">Dupliquer</button>
       <button type="button" onClick={onRemove} className="inline-flex items-center gap-1.5 rounded-lg border bg-card px-2.5 py-1 text-xs text-destructive hover:border-destructive/50">Supprimer</button>
       <button type="button" onClick={onPage} className="ml-auto inline-flex items-center gap-1.5 rounded-lg px-2.5 py-1 text-xs text-muted-foreground hover:bg-muted hover:text-foreground">Régler la page</button>
     </div>
   </div>
+}
+
+/** Page de ligne : le bloc ne s'affiche que pour les lignes qui remplissent ces conditions. */
+function RowCondition({ rowOf, value, onChange }: { rowOf: { index: string; tab?: string }; value?: ViewWhere; onChange: (value: ViewWhere | undefined) => void }) {
+  const { details, loading } = useIndexDetails(rowOf.index)
+  const tabs = (details?.tabs ?? []).filter((tab) => !rowOf.tab || tab.name === rowOf.tab)
+  const columns = [...new Set(tabs.flatMap((tab) => tab.columns ?? []))]
+  const choices = Object.assign({}, ...tabs.map((tab) => tab.choices ?? {})) as Record<string, string[]>
+  if (loading && !details) return <span className="text-xs text-muted-foreground">Lecture de l’index…</span>
+  return <>
+    <WhereEditor where={value} columns={columns} choices={choices} rowPage={false} onChange={onChange} />
+    <Hint>Sans condition : sur la page de chaque ligne. Sinon, seulement sur celles qui les remplissent (« Type est Boss ») ; ailleurs, le bloc n’est pas envoyé du tout.</Hint>
+  </>
 }
 
 function Hint({ children }: { children: ReactNode }) {

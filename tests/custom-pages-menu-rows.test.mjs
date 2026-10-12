@@ -224,3 +224,22 @@ test("Page de ligne sur le fil : l'html identique au texte est vidé à l'envoi,
   assert.equal(rows.unpackRowContext(restored), restored, "déjà rétablie : le même objet");
   assert.equal(rows.packRowContext(packed), packed, "déjà allégée : le même objet");
 });
+
+test("Page de ligne : un bloc conditionnel n'est gardé que pour les lignes qui remplissent sa condition (colonnes masquées comprises)", () => {
+  const sections = [{ id: "s", layout: "1", cols: [[
+    { id: "b-tous", type: "text", html: "<p>Toujours</p>" },
+    { id: "b-esprit", type: "text", html: "<p>Esprits</p>", showIf: { match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Esprit" }] } },
+    { id: "b-boss", type: "text", html: "<p>Boss</p>", showIf: { match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Boss" }] } },
+    { id: "b-secret", type: "text", html: "<p>Secret</p>", showIf: { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }] } },
+  ]] }];
+  const template = pages.parseCustomPage({ id: "p-cond", title: "{Nom}", slug: "fiche-cond", place: "hors-menu", status: "publiee", rowOf: { index: "creatures" }, sections, published: { title: "{Nom}", sections } });
+  assert.deepEqual(template.sections[0].cols[0][1].showIf, { match: "toutes", conditions: [{ column: "Type", operator: "est", value: "Esprit" }] });
+  const view = pages.pageForViewer(template, { role: "joueur", uid: "j" });
+  const valueOf = rows.rowValuesOf(source, "Bestiaire", "CRE-1");
+  const kept = rows.blocksForRow(view, valueOf).sections[0].cols[0].map((block) => block.id);
+  assert.deepEqual(kept, ["b-tous", "b-esprit", "b-secret"]);
+  assert.equal(rows.rowValuesOf(source, "Bestiaire", "CRE-404"), null);
+  // Sans bloc conditionnel, la page revient telle quelle.
+  const plain = pages.pageForViewer(pages.parseCustomPage({ id: "p-plain", title: "x", slug: "x", place: "hors-menu", status: "publiee", sections: [sections[0]].map((section) => ({ ...section, cols: [[section.cols[0][0]]] })) }), { role: "admin", uid: "a" });
+  assert.equal(rows.blocksForRow(plain, valueOf), plain);
+});

@@ -6,9 +6,11 @@ import { ChevronRight, EyeOff, FileText, ImageOff, Info, LoaderCircle, LockKeyho
 
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { IndexLayoutView } from "@/components/eraser/index-layout-view"
 import { IndexRichText } from "@/components/eraser/index-references"
-import { PageBacklinksBlock, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
+import { PageBacklinksBlock, PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock, type BlockSource } from "@/components/eraser/page-index-block"
 import { fillRowPage, unpackRowContext, type RowContext } from "@/lib/custom-pages-rows"
+import { arrangeLayout, type LayoutField } from "@/lib/index-layouts"
 import { RichTextField } from "@/components/eraser/rich-text"
 import { placeLabel, sectionLayouts, studioHref, type CalloutTone, type ImageRatio, type PageBlock, type PageView, type SectionLayout, type ViewedBlock, type ViewedSection } from "@/lib/custom-pages"
 
@@ -208,6 +210,20 @@ function RowFieldsView({ block, row }: { block: Extract<PageBlock, { type: "rowf
   </div>
   const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().trim()
   const columns = (block.columns.length ? block.columns.flatMap((name) => row.columns.filter((column) => fold(column.header) === fold(name))) : row.columns).filter((column) => column.text || /<img|https?:/.test(column.html))
+  // Comme la fiche de l'index : ses sections, ses lignes de champs et sa colonne latérale.
+  if (block.style === "form" && row.form && columns.length) {
+    const field = (column: RowContext["columns"][number], layout: LayoutField) => <div className="grid min-w-0 gap-0.5">
+      {!layout.hideLabel && <span className="text-[10.5px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{layout.label || column.header}</span>}
+      <IndexRichText html={column.html} as="span" className={`min-w-0 [overflow-wrap:anywhere] ${layout.large ? "font-display text-xl font-semibold" : "text-[14px]"}`} />
+    </div>
+    return <section className="grid gap-2">
+      {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
+      <div className="rounded-2xl border bg-card p-4">
+        <IndexLayoutView arranged={arrangeLayout(row.form, columns, (column) => column.header)} render={field}
+          renderRest={(rest) => <div className="grid gap-3 [grid-template-columns:repeat(auto-fill,minmax(min(12rem,100%),1fr))]">{rest.map((column) => <div key={column.header}>{field(column, { column: column.header })}</div>)}</div>} />
+      </div>
+    </section>
+  }
   return <section className="grid gap-2">
     {block.heading && <h3 className="font-display text-lg font-semibold">{block.heading}</h3>}
     {columns.length
@@ -242,12 +258,14 @@ export function BlockView({ block, context }: { block: ViewedBlock; context: Blo
     case "stat": return <PageStatBlock block={block} source={context.source} />
     case "rowfields": return <RowFieldsView block={block} row={context.row} />
     case "backlinks": return <PageBacklinksBlock block={block} source={context.source} />
+    case "search": return <PageSearchBlock block={block} />
   }
 }
 
 /** Les sections d'une page et leurs colonnes ; une section vide disparaît. */
 export function PageSections({ sections, render }: { sections: ViewedSection[]; render: (block: ViewedBlock) => ReactNode }) {
-  return <div className="@container grid gap-8">
+  const searchable = sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "search")))
+  return <PageSearchProvider present={searchable}><div className="@container grid gap-8">
     {sections.map((section) => {
       // Une colonne vide pour ce lecteur (blocs qu'il ne voit pas) laisse la place aux autres.
       const columns = section.cols.filter((column) => column.length)
@@ -259,7 +277,7 @@ export function PageSections({ sections, render }: { sections: ViewedSection[]; 
         </div>)}
       </section>
     })}
-  </div>
+  </div></PageSearchProvider>
 }
 
 export const layoutColumns = (layout: SectionLayout) => sectionLayouts.find((item) => item.value === layout)?.columns.length ?? 1

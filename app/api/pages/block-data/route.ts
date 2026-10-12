@@ -1,22 +1,21 @@
 import { NextResponse } from "next/server"
 
-import { canManagePages, pageForViewer, viewBlockKinds, type ViewBlockKind } from "@/lib/custom-pages"
+import { canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
 import { statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
-import { backlinksOf, rowContextOf, rowPageHref, templateForRow } from "@/lib/custom-pages-rows"
+import { backlinksOf, fillRowText, rowContextOf, rowPageHref, templateForRow, type RowContext } from "@/lib/custom-pages-rows"
 import { readCustomPage } from "@/lib/custom-pages-store"
 import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
-import { listIndexPresentations, listIndexStatsRecord } from "@/lib/index-presentations-store"
+import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
 import { listIndexViews } from "@/lib/index-settings"
-import { cleanViewLayout, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
+import { builtinViewPresets, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
 import { ALL_SOURCES } from "@/lib/index-views"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
 
 const denied = () => NextResponse.json({ error: "Accès refusé." }, { status: 403 })
-const kinds = viewBlockKinds.map((kind) => kind.value)
 
 /** Les calendriers de l'Index des calendriers, pour une vue Calendrier (un joueur ne peut pas les lire ailleurs). */
 async function calendarTables() {
@@ -32,11 +31,28 @@ async function savedView(key: WorldIndexKey, viewId: string | undefined) {
   return (await listIndexViews(key).catch(() => [])).find((view) => view.id === viewId) ?? null
 }
 
-async function viewData(key: WorldIndexKey, input: Omit<Parameters<typeof viewBlockData>[1], "view"> & { viewId?: string }, player: boolean, rowPageOf: RowPageOf) {
-  const [source, presentations, cards, view] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), savedView(key, input.viewId)])
-  const data = viewBlockData(source, { ...input, view }, { presentations, cards }, readOptions(key, player, rowPageOf))
+/** La forme d'un preset de vue (ceux d'Eraser, puis ceux enregistrés), lue seulement quand le bloc en désigne un. */
+async function presetLayout(presetId: string | undefined) {
+  if (!presetId) return null
+  const builtin = builtinViewPresets.find((preset) => preset.id === presetId)
+  if (builtin) return builtin.layout
+  return (await listViewPresets().catch(() => [])).find((preset) => preset.id === presetId)?.layout ?? null
+}
+
+/** Page de ligne : « {Région} » dans une condition prend la valeur de la ligne affichée. */
+function whereForRow(where: ViewBlock["where"], row: RowContext | null) {
+  if (!where) return where
+  // Sans ligne (atelier) : une condition qui dépend de la ligne ne s'applique pas.
+  if (!row) return { ...where, conditions: where.conditions.filter((condition) => !/\{[^{}]+\}/.test(condition.value)) }
+  return { ...where, conditions: where.conditions.map((condition) => ({ ...condition, value: fillRowText(condition.value, row) })) }
+}
+
+async function viewData(key: WorldIndexKey, block: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf) {
+  const [source, presentations, cards, view, preset] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), savedView(key, block.viewId), presetLayout(block.presetId)])
+  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, view, cardId: block.cardId, where: whereForRow(block.where, row), sort: block.sort }
+  const data = viewBlockData(source, input, { presentations, cards }, readOptions(key, player, rowPageOf))
   if (!data) return null
-  return { ...data, ...(input.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
+  return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
 }
 
 async function statData(key: WorldIndexKey, statId: string, player: boolean, rowPageOf: RowPageOf) {
@@ -49,7 +65,7 @@ async function statData(key: WorldIndexKey, statId: string, player: boolean, row
  * - ?page=&block= (&rowIndex=&rowId= pour une page de ligne) : pour tout lecteur de la page qui
  *   voit ce bloc (les joueurs n'ont pas accès aux routes des index : seul ce que le bloc montre
  *   leur est envoyé, sans colonne masquée ni privée).
- * - ?index=&tab=&kind=&limit= ou ?index=&stat= : pour l'atelier (MJ et admins ; &as=joueur :
+ * - ?index=&def= (réglages du bloc, JSON) ou ?index=&stat= : pour l'atelier (MJ et admins ; &as=joueur :
  *   ce que recevrait un joueur).
  * - ?catalog=1 (&index=) : les index, leurs onglets, leurs vues et leurs stats (atelier).
  * - ?row-templates=1 : les index dont les lignes ont une page (fiche de l'index).
@@ -75,7 +91,7 @@ export async function GET(request: Request) {
       }
       const key = await knownWorldIndexKey(wanted)
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
-      const [data, presentations, cards, record, views] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listIndexViews(key).catch(() => [])])
+      const [data, presentations, cards, record, views, presets] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listIndexViews(key).catch(() => []), listViewPresets().catch(() => [])])
       const cardsOf = (tab: string) => Object.entries(cards).find(([name]) => name.toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr"))?.[1]?.cards ?? []
       return NextResponse.json({
         tabs: data.tables.map((table) => ({
@@ -87,10 +103,14 @@ export async function GET(request: Request) {
           cards: cardsOf(table.tabName).length > 0,
           cardList: cardsOf(table.tabName).map((card) => ({ id: card.id, name: card.name })),
           columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
-          // Les vues enregistrées de l'index qui portent sur cet onglet (ou sur tous).
-          views: views.filter((view) => view.source === ALL_SOURCES || view.source.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr")).map((view) => ({ id: view.id, name: view.name, kind: view.layout?.kind ?? "table" })),
+          // Les valeurs proposées des colonnes à liste : les conditions d'un bloc les suggèrent.
+          choices: Object.fromEntries((data.columns[table.tabName] ?? []).flatMap((column) => column.spec.options?.length ? [[column.header, column.spec.options.map((option) => option.value).slice(0, 80)]] : [])),
+          // Les vues enregistrées de l'index (ancien réglage d'un bloc : seulement pour en montrer le nom).
+          views: views.filter((view) => view.source === ALL_SOURCES || view.source.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr")).map((view) => ({ id: view.id, name: view.name, kind: view.layout?.kind ?? "table", match: view.match, conditions: view.conditions })),
         })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
+        // Les presets de vues (« Kanban serré », les tiens…) : autant de formes à choisir pour un bloc.
+        presets: [...presets, ...builtinViewPresets].map((preset) => ({ id: preset.id, name: preset.name, kind: preset.layout.kind, builtin: Boolean(preset.builtin) })),
       })
     }
 
@@ -111,7 +131,7 @@ export async function GET(request: Request) {
       const key = await knownWorldIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
       const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
-      const data = block.type === "view" ? await viewData(key, { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, viewId: block.viewId }, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
+      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 
@@ -125,12 +145,12 @@ export async function GET(request: Request) {
       const data = await statData(key, statId, asPlayer, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
-    const kind = kinds.includes(parameters.get("kind") as ViewBlockKind) ? parameters.get("kind") as ViewBlockKind : "table"
-    const limit = Math.max(0, Math.min(500, Number.parseInt(parameters.get("limit") ?? "0", 10) || 0))
-    // L'atelier envoie la forme propre au bloc (encore non enregistrée) et sa vue enregistrée.
-    let layout: ReturnType<typeof cleanViewLayout>
-    try { layout = cleanViewLayout(JSON.parse(parameters.get("layout") ?? "null")) } catch { layout = undefined }
-    const data = await viewData(key, { tab: parameters.get("tab") ?? "", kind, limit, layout, viewId: parameters.get("view") ?? undefined }, asPlayer, rowPageOf)
+    // L'atelier envoie les réglages du bloc (encore non enregistrés), remis en forme comme à l'enregistrement.
+    let raw: unknown = null
+    try { raw = JSON.parse(parameters.get("def") ?? "null") } catch { raw = null }
+    const block = cleanBlock({ ...(raw && typeof raw === "object" ? raw : {}), type: "view", id: "atelier", index: key })
+    if (!block || block.type !== "view") return NextResponse.json({ error: "Réglages du bloc illisibles." }, { status: 400 })
+    const data = await viewData(key, block, undefined, null, asPlayer, rowPageOf)
     return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cet onglet n’existe pas dans l’index." }, { status: 404 })
   } catch (error) {
     console.error("PAGE_BLOCK_DATA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")

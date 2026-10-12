@@ -6,7 +6,9 @@ import { AuthenticatedShell } from "@/components/eraser/authenticated-shell"
 import { CustomPageView } from "@/components/eraser/custom-page-view"
 import { Button } from "@/components/ui/button"
 import { canManagePages, pageForViewer } from "@/lib/custom-pages"
-import { packRowContext, rowContextOf, templateForRow } from "@/lib/custom-pages-rows"
+import { blocksForRow, packRowContext, rowContextOf, rowValuesOf, templateForRow } from "@/lib/custom-pages-rows"
+import { listIndexLayouts } from "@/lib/index-layouts-store"
+import { tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { indexPathsOf, indexSourceOf, linkTargetsOf, readablePages, readOptions, viewerFor } from "@/lib/custom-pages-server"
 import { currentAccount, currentViewAccount } from "@/lib/server-auth"
 import { knownWorldIndexKey } from "@/lib/world-indexes"
@@ -36,15 +38,21 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
   if (!row) notFound()
   const template = templateForRow(templates, key, row.tab)
   if (!template) notFound()
-  const view = pageForViewer(template, await viewerFor(viewAccount, template))
-  if (!view) notFound()
+  const viewed = pageForViewer(template, await viewerFor(viewAccount, template))
+  if (!viewed) notFound()
+  // Les blocs dont la condition d'affichage ne vaut pas pour cette ligne ne partent pas.
+  const valueOf = rowValuesOf(source, row.tab, row.id)
+  const view = valueOf ? blocksForRow(viewed, valueOf) : viewed
+  // Un bloc « Valeurs de la ligne » disposé comme la fiche : la fiche de l'onglet (lue seulement alors).
+  const wantsForm = view.sections.some((section) => section.cols.some((column) => column.some((block) => block.type === "rowfields" && block.style === "form")))
+  const form = wantsForm ? tabLayoutOrBuiltin(await listIndexLayouts(key).catch(() => ({})), key, row.tab, "form") : null
   const indexHref = manager ? (source.nameHref ? source.nameHref.replace("{id}", encodeURIComponent(row.id)) : `${source.path}?ligne=${encodeURIComponent(row.id)}`) : ""
   return (
     <AuthenticatedShell pageLabel={row.name}>
       <CustomPageView
         key={`${view.id}:${key}:${row.id}`}
         initial={view}
-        row={packRowContext(row)}
+        row={packRowContext(form ? { ...row, form } : row)}
         eyebrow={`${source.title} · ${row.tab}`}
         links={await linkTargetsOf(view, viewAccount)}
         indexPaths={indexPathsOf(view, viewAccount.role)}

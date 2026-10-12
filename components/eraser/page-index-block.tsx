@@ -2,17 +2,17 @@
 
 import Link from "next/link"
 import { useRouter } from "next/navigation"
-import { useCallback, useEffect, useMemo, useState, type CSSProperties } from "react"
-import { ChevronRight, LoaderCircle, RotateCcw, TriangleAlert } from "lucide-react"
+import { createContext, useCallback, useContext, useDeferredValue, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { ChevronRight, LoaderCircle, RotateCcw, Search, TriangleAlert, X } from "lucide-react"
 
 import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/eraser/index-card"
 import { primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import type { BacklinksBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
+import type { BacklinksBlock, SearchBlock, StatBlock, ViewBlock } from "@/lib/custom-pages"
 import type { Backlink } from "@/lib/custom-pages-rows"
 import { viewHeights } from "@/lib/custom-pages"
-import type { StatBlockData, ViewBlockData } from "@/lib/custom-pages-data"
+import { ALL_PINNED_STATS, type StatBlockData, type ViewBlockData } from "@/lib/custom-pages-data"
 import { pickCard } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import { DEFAULT_ITEM_CARD, isPresentationKind } from "@/lib/index-view-layouts"
@@ -40,9 +40,37 @@ function dataUrl(block: ViewBlock | StatBlock | BacklinksBlock, source: BlockSou
   if (!block.index) return ""
   const as = source.asPlayer ? "&as=joueur" : ""
   if (block.type === "stat") return block.statId ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&stat=${encodeURIComponent(block.statId)}${as}` : ""
-  const own = block.layout ? `&layout=${encodeURIComponent(JSON.stringify(block.layout))}` : ""
-  const saved = block.viewId ? `&view=${encodeURIComponent(block.viewId)}` : ""
-  return block.tab ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&tab=${encodeURIComponent(block.tab)}&kind=${block.kind}&limit=${block.limit}${own}${saved}${as}` : ""
+  // L'atelier lit l'index avec les réglages du bloc, encore non enregistrés.
+  const { index, tab, kind, limit, layout, viewId, presetId, cardId, where, sort } = block
+  return tab ? `/api/pages/block-data?index=${encodeURIComponent(index)}&def=${encodeURIComponent(JSON.stringify({ tab, kind, limit, layout, viewId, presetId, cardId, where, sort }))}${as}` : ""
+}
+
+/* ---------- La recherche de la page ---------- */
+
+type PageSearch = { query: string; setQuery: (query: string) => void; present: boolean }
+const PageSearchContext = createContext<PageSearch | null>(null)
+
+/** La recherche partagée par les blocs d'une page : le bloc Recherche l'écrit, les blocs Vue la suivent. */
+export function PageSearchProvider({ children, present }: { children: ReactNode; present: boolean }) {
+  const [query, setQuery] = useState("")
+  const value = useMemo(() => ({ query: present ? query : "", setQuery, present }), [present, query])
+  return <PageSearchContext.Provider value={value}>{children}</PageSearchContext.Provider>
+}
+
+const foldSearch = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+
+/** Un bloc « Recherche » : un champ qui filtre les lignes des vues de la page. */
+export function PageSearchBlock({ block }: { block: SearchBlock }) {
+  const search = useContext(PageSearchContext)
+  const query = search?.query ?? ""
+  return <section className="grid gap-2">
+    {block.heading && <h3 className="font-display text-lg font-semibold tracking-[-0.01em]">{block.heading}</h3>}
+    <label className="flex items-center gap-2.5 rounded-2xl border bg-card px-3.5 shadow-[0_8px_24px_rgb(67_50_31/0.05)] focus-within:border-ring focus-within:ring-2 focus-within:ring-ring/20">
+      <Search className="size-4 shrink-0 text-muted-foreground" />
+      <input type="search" value={query} onChange={(event) => search?.setQuery(event.target.value)} placeholder={block.placeholder || "Chercher dans la page…"} aria-label={block.placeholder || "Chercher dans la page"} className="h-11 min-w-0 flex-1 bg-transparent text-[15px] outline-none [&::-webkit-search-cancel-button]:hidden" />
+      {query && <button type="button" onClick={() => search?.setQuery("")} aria-label="Effacer la recherche" className="flex size-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"><X className="size-3.5" /></button>}
+    </label>
+  </section>
 }
 
 function useBlockData(url: string, version: number) {
@@ -100,7 +128,7 @@ function ReadTable({ data, open }: { data: ViewData; open: (href?: string) => vo
   </div>
 }
 
-function ViewContent({ data, block }: { data: ViewData; block: ViewBlock }) {
+function ViewContent({ data, block, searching = false }: { data: ViewData; block: ViewBlock; searching?: boolean }) {
   const router = useRouter()
   const byKey = useMemo(() => new Map(data.rows.map((row) => [row.key, row])), [data.rows])
   const column = useMemo(() => new Map(data.headers.map((header, index) => [foldName(header), index])), [data.headers])
@@ -117,7 +145,7 @@ function ViewContent({ data, block }: { data: ViewData; block: ViewBlock }) {
     const chosen = data.cards ? pickCard(data.cards, cardId === DEFAULT_ITEM_CARD ? null : cardId) : null
     return chosen ? <IndexCard card={chosen} row={rowSource(rowKey)} onOpen={hrefOf(rowKey) ? () => openRow(rowKey) : undefined} href={hrefOf(rowKey)} /> : null
   }, [data.cards, hrefOf, openRow, rowSource])
-  const empty = "Aucune ligne dans cette vue pour le moment."
+  const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
   if (data.view === "cards") return card
     ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} empty={empty} />
     : <Placeholder>Cet onglet n’a pas encore de cartes : elles se règlent dans l’index (Modifier › Cartes).</Placeholder>
@@ -152,14 +180,22 @@ export function PageViewBlock({ block, source, path }: { block: ViewBlock; sourc
   const url = dataUrl(block, source)
   const state = useBlockData(url, version)
   const height = viewHeights.find((item) => item.value === block.height)?.rem ?? null
+  // La recherche de la page (bloc Recherche) : seulement les lignes qui la contiennent.
+  const search = useContext(PageSearchContext)
+  const query = useDeferredValue(block.ignoreSearch ? "" : foldSearch(search?.query ?? ""))
+  const loaded = state.data?.kind === "view" ? state.data as ViewData : null
+  const data = useMemo(() => {
+    if (!loaded || !query) return loaded
+    const words = query.split(" ")
+    return { ...loaded, rows: loaded.rows.filter((row) => { const text = foldSearch(`${row.name} ${row.cells.join(" ")}`); return words.every((word) => text.includes(word)) }) }
+  }, [loaded, query])
   if (!url) return <Frame heading={block.heading}><Placeholder>Choisis un index et un onglet dans les réglages du bloc.</Placeholder></Frame>
-  const data = state.data?.kind === "view" ? state.data as ViewData : null
-  const footer = data && (data.total > data.rows.length || path) ? <p className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
-    <span>{data.total > data.rows.length ? `${data.rows.length} lignes sur ${data.total}` : `${data.total} ligne${data.total > 1 ? "s" : ""}`} · {data.title} › {data.tab}</span>
+  const footer = data && (data.total > data.rows.length || path || query) ? <p className="flex flex-wrap items-center justify-between gap-2 px-1 text-xs text-muted-foreground">
+    <span>{query && loaded ? `${data.rows.length} trouvée${data.rows.length > 1 ? "s" : ""} sur ${loaded.rows.length}` : data.total > data.rows.length ? `${data.rows.length} lignes sur ${data.total}` : `${data.total} ligne${data.total > 1 ? "s" : ""}`} · {data.title} › {data.tab}</span>
     {path && <Link href={path} prefetch={false} className="inline-flex items-center gap-0.5 font-medium text-primary hover:underline">Ouvrir l’index<ChevronRight className="size-3.5" /></Link>}
   </p> : null
   return <Frame heading={block.heading} height={height} footer={footer}>
-    {state.loading && !data ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : data ? <ViewContent data={data} block={block} /> : null}
+    {state.loading && !data ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : data ? <ViewContent data={data} block={block} searching={Boolean(query)} /> : null}
   </Frame>
 }
 
@@ -179,10 +215,10 @@ export function PageStatBlock({ block, source }: { block: StatBlock; source: Blo
   if (!url) return <Frame heading={block.heading}><Placeholder>Choisis un index et une de ses statistiques dans les réglages du bloc.</Placeholder></Frame>
   return <Frame heading={block.heading}>
     {state.loading && !data ? <Skeleton /> : state.error ? <Placeholder tone="error" onRetry={() => setVersion((value) => value + 1)}>{state.error}</Placeholder> : data ? <IndexStats
-      stats={[data.stat]}
+      stats={data.stats}
       groups={data.groups}
       pinnedOnly
-      single
+      single={block.statId !== ALL_PINNED_STATS}
       rows={rows}
       columns={data.columns}
       tabs={data.tabs}
