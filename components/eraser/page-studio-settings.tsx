@@ -74,11 +74,11 @@ export function Group({ title, badge, children, open = true }: { title: string; 
 }
 
 export const roleDot: Record<PageRole, string> = { joueur: "bg-[#0f7a65]", mj: "bg-[#3b5c8a]", admin: "bg-primary" }
-const visDot: Record<BlockVisibility, string> = { tous: "", joueurs: roleDot.joueur, mj: roleDot.mj, admin: roleDot.admin }
+const visDot: Record<BlockVisibility, string> = { tous: "", joueurs: roleDot.joueur, mj: roleDot.mj, "mj-seul": roleDot.mj, admin: roleDot.admin }
 
 export function VisibilityPill({ vis }: { vis: BlockVisibility }) {
   if (vis === "tous") return null
-  const tone = { joueurs: "text-[#0f7a65] border-[#0f7a65]/35 bg-[#0f7a65]/8", mj: "text-[#3b5c8a] border-[#3b5c8a]/35 bg-[#3b5c8a]/8", admin: "text-primary border-primary/35 bg-primary/8" }[vis]
+  const tone = { joueurs: "text-[#0f7a65] border-[#0f7a65]/35 bg-[#0f7a65]/8", mj: "text-[#3b5c8a] border-[#3b5c8a]/35 bg-[#3b5c8a]/8", "mj-seul": "text-[#3b5c8a] border-[#3b5c8a]/35 bg-[#3b5c8a]/8", admin: "text-primary border-primary/35 bg-primary/8" }[vis]
   return <span className={`inline-flex items-center gap-1 rounded-full border px-1.5 text-[10.5px] font-semibold normal-case tracking-normal ${tone}`}>{blockVisibilities.find((item) => item.value === vis)?.short}</span>
 }
 
@@ -241,7 +241,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
       </select>
     </Field>}
     {block.tab && presentation && block.layout && <LayoutSettings fixedKind layout={block.layout} columns={columns} cards={tab?.cardList ?? []} onChange={(layout) => onChange({ layout: { ...layout, kind: block.kind } })} />}
-    {block.tab && <Field label="Seulement les lignes où…" hint={rowOf?.index ? "Sans condition : toutes les lignes. « {Colonne} » dans une valeur prend celle de la ligne de la page." : "Sans condition : toutes les lignes. Les colonnes masquées comptent aussi, sans jamais être montrées."}>
+    {block.tab && <Field label="Seulement les lignes où…" hint={`Sans condition : toutes les lignes. « {Moi} » : le lecteur (« Joueur est {Moi} » : ses personnages ; « MJ est {Moi} » : ses campagnes).${rowOf?.index ? " « {Colonne} » prend la valeur de la ligne de la page, aussi dans un nom de colonne." : " Les colonnes masquées comptent aussi, sans jamais être montrées."}`}>
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}
     {block.viewId && <Hint>
@@ -275,6 +275,14 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         <option value="">Toutes les lignes (pas de filtre)</option>
         {columns.map((column) => <option key={column} value={column}>{column}</option>)}
       </select>
+    </Field>}
+    {block.tab && <Field label="Au clic sur une ligne" hint={block.click && block.click !== "-" ? "« {ID} » et « {Colonne} » prennent les valeurs de la ligne. La page ouverte vérifie toujours qui peut la voir." : !block.click ? "Sa fiche : sa page de ligne s’il y en a une, sinon sa page d’Eraser (une classe…) ou l’index (MJ et admins)." : undefined}>
+      <select className={fieldClass} value={!block.click ? "" : block.click === "-" ? "-" : "href"} onChange={(event) => onChange({ click: event.target.value === "href" ? block.index === "campaigns" ? "/campagne/{ID}" : "/" : event.target.value || undefined })}>
+        <option value="">Ouvrir sa fiche</option>
+        <option value="href">Ouvrir une adresse…</option>
+        <option value="-">Rien</option>
+      </select>
+      {block.click && block.click !== "-" && <input className={`${fieldClass} mt-1 font-mono text-xs`} value={block.click} maxLength={300} placeholder="/campagne/{ID}" onChange={(event) => onChange({ click: event.target.value || undefined })} />}
     </Field>}
     <label className="flex items-start gap-2 text-[13px]"><input type="checkbox" className="mt-0.5 accent-primary" checked={!block.ignoreSearch} onChange={(event) => onChange({ ignoreSearch: event.target.checked ? undefined : true })} /><span>Suivre la recherche de la page<span className="block text-[11.5px] text-muted-foreground">Si la page a un bloc Recherche, il filtre aussi ces lignes.</span></span></label>
     <Field label="Titre au-dessus" hint={rowOf?.index ? "« {Nom} » y met le nom de la ligne." : undefined}><input className={fieldClass} value={block.heading} maxLength={160} placeholder="Facultatif" onChange={(event) => onChange({ heading: event.target.value })} /></Field>

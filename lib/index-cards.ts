@@ -857,6 +857,19 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
           ],
         },
       ]
+    // Les bonus gagnés à chaque rang (la page d'une classe les montre rang par rang).
+    case "rank-bonuses":
+      return [{
+        id: "eraser-bonus-rang", name: "Bonus d’un rang", width: "md", border: "subtle", density: "compact", accent: { color: DEFAULT_CARD_ACCENT },
+        blocks: [
+          { id: "b1", type: "line", parts: [{ column: "Rang", prefix: "Rang " }], size: "lg", font: "display", bold: true, tone: "accent" },
+          { id: "b2", type: "line", parts: [{ column: "Cible 1", suffix: " " }, { column: "Valeur 1", bold: true }], separator: "", size: "sm" },
+          { id: "b3", type: "line", parts: [{ column: "Cible 2", suffix: " " }, { column: "Valeur 2", bold: true }], separator: "", size: "sm" },
+          { id: "b4", type: "line", parts: [{ column: "Cible 3", suffix: " " }, { column: "Valeur 3", bold: true }], separator: "", size: "sm" },
+          { id: "b5", type: "line", parts: [{ column: "Cible 4", suffix: " " }, { column: "Valeur 4", bold: true }], separator: "", size: "sm" },
+          { id: "b6", type: "pills", columns: ["Choix", "Sort sur mesure", "Autre"], tone: "accent" },
+        ],
+      }]
     case "class-spells":
     case "creature-spells":
       return [
@@ -992,6 +1005,7 @@ export const eraserCardSources: Array<{ index: string; tab: string; label: strin
   { index: "npcs", tab: "PNJs", label: "PNJs" },
   { index: "creatures", tab: "Créatures", label: "Créatures" },
   { index: "class-spells", tab: "Sorts", label: "Sorts" },
+  { index: "rank-bonuses", tab: "Bonus de rang", label: "Bonus de rang" },
   { index: "achievements", tab: "Succès", label: "Succès" },
   { index: "states", tab: "États", label: "États" },
   { index: "weapon-modifiers", tab: "Tout", label: "Modificateurs d’armes" },

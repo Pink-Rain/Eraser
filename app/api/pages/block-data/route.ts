@@ -1,7 +1,8 @@
 import { NextResponse } from "next/server"
 
 import { canManagePages, cleanBlock, pageForViewer, type ViewBlock } from "@/lib/custom-pages"
-import { statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
+import { isMeCondition, statBlockData, viewBlockData, viewKindsOf, type BlockDataOptions } from "@/lib/custom-pages-data"
+import { identityUidsForUser } from "@/lib/identity-links"
 import { backlinksOf, fillRowText, rowContextOf, rowPageHref, templateForRow, type RowContext } from "@/lib/custom-pages-rows"
 import { readCustomPage } from "@/lib/custom-pages-store"
 import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } from "@/lib/custom-pages-server"
@@ -11,6 +12,7 @@ import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@
 import { listIndexViews } from "@/lib/index-settings"
 import { builtinViewPresets, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
 import { ALL_SOURCES } from "@/lib/index-views"
+import { rowOfRoute } from "@/lib/page-replacements"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
@@ -39,17 +41,33 @@ async function presetLayout(presetId: string | undefined) {
   return (await listViewPresets().catch(() => [])).find((preset) => preset.id === presetId)?.layout ?? null
 }
 
-/** Page de ligne : « {Région} » dans une condition prend la valeur de la ligne affichée. */
-function whereForRow(where: ViewBlock["where"], row: RowContext | null) {
-  if (!where) return where
-  // Sans ligne (atelier) : une condition qui dépend de la ligne ne s'applique pas.
-  if (!row) return { ...where, conditions: where.conditions.filter((condition) => !/\{[^{}]+\}/.test(condition.value)) }
-  return { ...where, conditions: where.conditions.map((condition) => ({ ...condition, value: fillRowText(condition.value, row) })) }
+const hasToken = (value: string | undefined) => Boolean(value && /\{[^{}]+\}/.test(value))
+
+/**
+ * Page de ligne : « {Région} » dans une condition prend la valeur de la ligne affichée, et
+ * « {ID} » dans un nom de colonne (regrouper, trier, condition) prend celle de sa colonne —
+ * la page d'une classe range les sorts par la colonne de la classe. Sans ligne (atelier),
+ * ce qui dépend de la ligne ne s'applique pas.
+ */
+function blockForRow(block: ViewBlock, row: RowContext | null): ViewBlock {
+  const fill = (value: string) => row ? fillRowText(value, row) : value
+  // « {Moi} » n'est pas une colonne de la ligne : il désigne le lecteur (lib/custom-pages-data.ts).
+  const where = block.where ? { ...block.where, conditions: block.where.conditions.flatMap((condition) => {
+    const me = isMeCondition(condition)
+    if (!row && ((!me && hasToken(condition.value)) || hasToken(condition.column))) return []
+    return [{ ...condition, column: fill(condition.column), value: me ? condition.value : fill(condition.value) }]
+  }) } : undefined
+  const sort = block.sort && !(hasToken(block.sort.column) && !row) ? { ...block.sort, column: fill(block.sort.column) } : undefined
+  const layout = block.layout ? { ...block.layout, ...Object.fromEntries((["groupBy", "sortBy", "kanbanColumn", "dateColumn", "parentColumn", "colorBy", "imageColumn"] as const).flatMap((key) => block.layout?.[key] ? [[key, fill(block.layout[key]!)]] : [])) } : undefined
+  return { ...block, where, sort, layout }
 }
 
-async function viewData(key: WorldIndexKey, block: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf) {
+async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<typeof viewBlockData>[1]["match"], row: RowContext | null, player: boolean, rowPageOf: RowPageOf, uid: string) {
+  const block = blockForRow(raw, row)
+  // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande).
+  const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
   const [source, presentations, cards, view, preset] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), savedView(key, block.viewId), presetLayout(block.presetId)])
-  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, view, cardId: block.cardId, where: whereForRow(block.where, row), sort: block.sort }
+  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, view, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
@@ -121,8 +139,10 @@ export async function GET(request: Request) {
       const block = view?.sections.flatMap((section) => section.cols.flat()).find((item) => item.id === parameters.get("block"))
       if (!block || (block.type !== "view" && block.type !== "stat" && block.type !== "backlinks")) return NextResponse.json({ error: "Ce bloc n’existe pas, ou il ne t’est pas ouvert." }, { status: 404 })
       // Page de ligne : la ligne affichée, lue comme le lecteur peut la lire.
-      const rowKey = page?.rowOf?.index ? await knownWorldIndexKey(parameters.get("rowIndex")) : null
-      const row = rowKey && rowKey === page?.rowOf?.index ? rowContextOf(await indexSourceOf(rowKey), parameters.get("rowId") ?? "", readOptions(rowKey, player)) : null
+      // La ligne d'une page de ligne, ou d'une page qui remplace celle d'une ligne (une classe).
+      const rowIndex = page?.rowOf?.index ?? rowOfRoute(page?.replaces)?.index
+      const rowKey = rowIndex ? await knownWorldIndexKey(parameters.get("rowIndex")) : null
+      const row = rowKey && rowKey === rowIndex ? rowContextOf(await indexSourceOf(rowKey), parameters.get("rowId") ?? "", readOptions(rowKey, player)) : null
       if (block.type === "backlinks") {
         if (!row) return NextResponse.json({ data: { kind: "backlinks", items: [] } })
         const items = backlinksOf(await backlinkSources(), row, { ...readOptions(row.index, player), hrefOf: (index, tab, id) => rowPageOf?.(index, tab, id) ?? (player ? undefined : `${(worldIndexDefinitions as Record<string, { path: string } | undefined>)[index]?.path ?? `/ressources/index/${encodeURIComponent(index)}`}?ligne=${encodeURIComponent(id)}`) })
@@ -131,7 +151,7 @@ export async function GET(request: Request) {
       const key = await knownWorldIndexKey(block.index)
       if (!key) return NextResponse.json({ error: "L’index de ce bloc n’existe plus." }, { status: 404 })
       const match = block.type === "view" && block.rowMatch && row ? { column: block.rowMatch, index: row.index, id: row.id, name: row.name } : undefined
-      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf) : await statData(key, block.statId, player, rowPageOf)
+      const data = block.type === "view" ? await viewData(key, block, match, row, player, rowPageOf, account.uid) : await statData(key, block.statId, player, rowPageOf)
       return data ? NextResponse.json({ data }) : NextResponse.json({ error: block.type === "view" ? "L’onglet de ce bloc n’existe plus dans l’index." : "Cette statistique n’existe plus dans l’index." }, { status: 404 })
     }
 
@@ -150,7 +170,7 @@ export async function GET(request: Request) {
     try { raw = JSON.parse(parameters.get("def") ?? "null") } catch { raw = null }
     const block = cleanBlock({ ...(raw && typeof raw === "object" ? raw : {}), type: "view", id: "atelier", index: key })
     if (!block || block.type !== "view") return NextResponse.json({ error: "Réglages du bloc illisibles." }, { status: 400 })
-    const data = await viewData(key, block, undefined, null, asPlayer, rowPageOf)
+    const data = await viewData(key, block, undefined, null, asPlayer, rowPageOf, account.uid)
     return data ? NextResponse.json({ data }) : NextResponse.json({ error: "Cet onglet n’existe pas dans l’index." }, { status: 404 })
   } catch (error) {
     console.error("PAGE_BLOCK_DATA_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")

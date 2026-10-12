@@ -1,5 +1,5 @@
 import { describeOwners, listAllCampaignsForAdmin, listAllCharactersForAdmin, listClasses, listIndexedClasses, trashedItemIds } from "@/lib/google-sheets"
-import { classRankColumnsOf, classRankOf } from "@/lib/class-rank-columns"
+import { classRankColumnsOf, classRankLabels, classRankOf, rankColumnsForPages } from "@/lib/class-rank-columns"
 import { MAX_CLASS_SPELLS_PER_RANK } from "@/lib/class-spell-utils"
 import { ownersOf } from "@/lib/ownership"
 import { classImageUrl } from "@/lib/class-images"
@@ -149,12 +149,45 @@ async function withClassRanks(data: WorldIndexData): Promise<WorldIndexData> {
   }
 }
 
+/** Les sorts des classes lus par une page : une colonne de rang par classe, nommée par son identifiant. */
+async function withPageClassRanks(data: WorldIndexData): Promise<WorldIndexData> {
+  try {
+    let classes = await listIndexedClasses()
+    if (!classes.length) classes = await listClasses()
+    const { tables, rankHeaders } = rankColumnsForPages(data.tables, classes)
+    const columns = { ...data.columns }
+    for (const [tab, headers] of Object.entries(rankHeaders)) {
+      const kept = (columns[tab] ?? []).filter((column) => !isClassRankHeader(column.header, classes.map((item) => item.name)))
+      columns[tab] = [...kept, ...headers.map((header) => ({ header, spec: { kind: "choice" as const, options: classRankLabels.map((value) => ({ value })) } }))]
+    }
+    return { ...data, tables, columns }
+  } catch (error) {
+    console.error("PAGE_CLASS_RANKS_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return data
+  }
+}
+
 /**
  * Un index lu par une page du créateur de pages : les classes y montrent leur image actuelle
  * et leur finition réelle (calculée sur leurs sorts, comme la page Règles › Classes : la case
  * « Finition » de la feuille n'est qu'un repli). Affichage seulement, rien n'est écrit.
  */
 export async function forPageReading(data: WorldIndexData): Promise<WorldIndexData> {
+  if (data.key === "class-spells") return withPageClassRanks(data)
+  // Les personnages et les campagnes à la corbeille ne s'affichent pas (comme dans leur index).
+  if (data.key === "characters" || data.key === "campaigns") {
+    try {
+      const trashed = await trashedItemIds(data.key === "characters" ? "character" : "campaign")
+      if (!trashed.size) return data
+      return { ...data, tables: data.tables.map((table) => {
+        const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
+        return idColumn < 0 ? table : { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
+      }) }
+    } catch (error) {
+      console.error("PAGE_TRASHED_ENTITIES_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+      return data
+    }
+  }
   if (data.key !== "classes") return data
   const shown = await withClassImages(data)
   try {

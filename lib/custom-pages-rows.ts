@@ -112,7 +112,8 @@ function fillBlock(block: ViewedBlock, row: RowContext): ViewedBlock {
     case "callout": return { ...block, title: text(block.title), html: html(block.html) }
     case "quote": return { ...block, text: text(block.text), cite: text(block.cite) }
     case "image": return { ...block, src: rowImage(block.src, row), caption: text(block.caption) }
-    case "link": return { ...block, title: text(block.title), description: text(block.description) }
+    // Une adresse peut citer la ligne (« /creation-de-classe?classe={ID} ») : la valeur y est encodée.
+    case "link": return { ...block, title: text(block.title), description: text(block.description), href: block.href.replace(/\{([^{}]{1,80})\}/g, (_, name: string) => encodeURIComponent(fillRowText(`{${name}}`, row))) }
     case "secret": return { ...block, title: text(block.title), html: html(block.html) }
     case "notes": return { ...block, title: text(block.title) }
     case "view": return { ...block, heading: text(block.heading) }

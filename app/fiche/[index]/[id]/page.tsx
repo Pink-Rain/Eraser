@@ -54,7 +54,7 @@ export default async function RowPage({ params }: { params: Promise<{ index: str
         key={`${view.id}:${key}:${row.id}`}
         initial={view}
         row={packRowContext(form ? { ...row, form } : row)}
-        modules={moduleSlots(view, { account: viewAccount })}
+        modules={moduleSlots(view, { account: viewAccount, row: { index: key, id: row.id } })}
         eyebrow={`${source.title} · ${row.tab}`}
         links={await linkTargetsOf(view, viewAccount)}
         indexPaths={indexPathsOf(view, viewAccount.role)}

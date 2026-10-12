@@ -21,6 +21,9 @@ export type EraserModuleKey =
   | "accueil-principal"
   | "accueil-cote"
   | "accueil-succes"
+  | "accueil-a-faire"
+  | "classe-presentation"
+  | "classe-specificites"
 
 export type EraserModule = { key: EraserModuleKey; label: string; hint: string }
 
@@ -33,6 +36,9 @@ export const eraserModules: EraserModule[] = [
   { key: "accueil-principal", label: "Accueil : colonne principale", hint: "Mes personnages (joueur), mes campagnes (MJ) ou les choses à faire (admin)" },
   { key: "accueil-cote", label: "Accueil : colonne de côté", hint: "Règles, joueurs et MJ, index favoris, outils" },
   { key: "accueil-succes", label: "Accueil : succès", hint: "Les succès du compte" },
+  { key: "accueil-a-faire", label: "Accueil : choses à faire", hint: "La liste des choses à faire des admins (admins seulement)" },
+  { key: "classe-presentation", label: "Classe : présentation", hint: "Page d’une classe : caractéristiques principales et secondaires, spécialités" },
+  { key: "classe-specificites", label: "Classe : spécificités", hint: "Page d’une classe : ses tableaux propres (les cartes du Cartomancien…)" },
 ]
 
 export const eraserModuleKeys = eraserModules.map((item) => item.key)

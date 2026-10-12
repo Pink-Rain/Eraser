@@ -26,7 +26,7 @@ import { eraserModuleKeys, moduleSections, type EraserModuleKey } from "@/lib/er
 
 export type PageRole = SiteRole
 /** Qui voit un bloc. « joueurs » : seulement les joueurs (un mot d'accueil, une consigne). */
-export type BlockVisibility = "tous" | "joueurs" | "mj" | "admin"
+export type BlockVisibility = "tous" | "joueurs" | "mj" | "mj-seul" | "admin"
 /** Qui voit une page. */
 export type PageVisibility = "tous" | "mj" | "admin"
 /** Les sections du menu qui accueillent des pages, et leur adresse. */
@@ -75,6 +75,11 @@ export type ViewBlock = Common & {
   sort?: { column: string; desc: boolean }
   /** Ne suit pas le bloc Recherche de la page. */
   ignoreSearch?: boolean
+  /**
+   * Au clic sur une ligne : sa fiche (d'office), une adresse d'Eraser où « {ID} » et
+   * « {Colonne} » prennent les valeurs de la ligne (« /campagne/{ID} »), ou rien (« - »).
+   */
+  click?: string
 }
 /** Les conditions d'un bloc : « toutes » doivent être vraies, ou « une » suffit. */
 export type ViewWhere = { match: "toutes" | "une"; conditions: ViewCondition[] }
@@ -152,6 +157,7 @@ export const blockVisibilities: Array<{ value: BlockVisibility; label: string; s
   { value: "tous", label: "Tout le monde", short: "Tout le monde", hint: "Joueurs, MJ et admin" },
   { value: "joueurs", label: "Joueurs seulement", short: "Joueurs", hint: "Masqué au MJ et à l’admin : un mot d’accueil, une consigne" },
   { value: "mj", label: "MJ et admin", short: "MJ et admin", hint: "Les joueurs ne le reçoivent jamais" },
+  { value: "mj-seul", label: "MJ seulement", short: "MJ", hint: "Ni les joueurs ni l’admin (sauf en « Vue MJ ») : ses campagnes, ses outils" },
   { value: "admin", label: "Admin seulement", short: "Admin", hint: "Notes de construction, réglages" },
 ]
 
@@ -332,6 +338,13 @@ export function cleanLinkHref(value: unknown) {
   return /^https:\/\/[^\s"'<>]+$/i.test(raw) ? raw : ""
 }
 
+/** « Au clic » d'un bloc Vue : « - » (rien), ou une adresse d'Eraser (« /campagne/{ID} »), jamais externe. */
+export function cleanClick(value: unknown) {
+  const raw = typeof value === "string" ? value.trim().slice(0, 300) : ""
+  if (raw === "-") return "-"
+  return /^\/(?!\/)[^\s"'<>\\]*$/.test(raw) && !/^\/api(\/|$)/.test(raw) ? raw : ""
+}
+
 /** Les conditions d'un bloc Vue ; aucune condition lisible : rien (toutes les lignes). */
 export function cleanViewWhere(value: unknown): ViewWhere | undefined {
   if (!value || typeof value !== "object") return undefined
@@ -384,7 +397,7 @@ export function cleanBlock(input: unknown): PageBlock | null {
       const where = cleanViewWhere(raw.where)
       const sortRaw = raw.sort && typeof raw.sort === "object" ? raw.sort as Record<string, unknown> : null
       const sortColumn = sortRaw ? text(sortRaw.column, 120) : ""
-      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}) }
+      return { ...common, type, index: text(raw.index, 90), tab: text(raw.tab, 120), kind: ownLayout ? ownLayout.kind as ViewBlockKind : oneOf(raw.kind, viewKindValues, "table"), limit: Number.isFinite(limit) ? Math.max(0, Math.min(500, Math.round(limit))) : 0, height: oneOf(raw.height, ["auto", "sm", "md", "lg"] as const, "auto"), heading: text(raw.heading, 160), rowMatch: text(raw.rowMatch, 120), ...(viewId ? { viewId } : {}), ...(ownLayout ? { layout: ownLayout } : {}), ...(presetId ? { presetId } : {}), ...(cardId ? { cardId } : {}), ...(where ? { where } : {}), ...(sortColumn ? { sort: { column: sortColumn, desc: sortRaw?.desc === true } } : {}), ...(raw.ignoreSearch === true ? { ignoreSearch: true } : {}), ...(cleanClick(raw.click) ? { click: cleanClick(raw.click) } : {}) }
     }
     case "stat": return { ...common, type, index: text(raw.index, 90), statId: text(raw.statId, 60), heading: text(raw.heading, 160) }
     case "rowfields": return { ...common, type, columns: Array.isArray(raw.columns) ? raw.columns.flatMap((column) => { const clean = text(column, 120); return clean ? [clean] : [] }).slice(0, 40) : [], heading: text(raw.heading, 160), style: oneOf(raw.style, ["list", "grid", "form"] as const, "grid") }
@@ -537,6 +550,7 @@ export function blockVisibleTo(vis: BlockVisibility, role: PageRole) {
   if (vis === "tous") return true
   if (vis === "joueurs") return role === "joueur"
   if (vis === "mj") return role === "mj" || role === "admin"
+  if (vis === "mj-seul") return role === "mj"
   return role === "admin"
 }
 

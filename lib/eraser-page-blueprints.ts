@@ -35,9 +35,22 @@ function menuPage(title: string, icon: string, description: string, links: Array
 const lorem = "<p>Lorem ipsum dolor sit amet, consectetur adipiscing elit. Sed do eiusmod tempor incididunt ut labore et dolore magna aliqua : tout ce qu’il faut savoir pour jouer à Eraser.</p><p>Ut enim ad minim veniam, quis nostrud exercitation ullamco laboris nisi ut aliquip ex ea commodo consequat.</p>"
 
 const blueprints: Record<string, () => Blueprint> = {
+  // L'accueil : « Mes campagnes » (MJ) et « Mes personnages » (joueurs) sont des vues de leur
+  // index, filtrées sur le lecteur (« {Moi} ») ; les choses à faire (admin), la colonne de côté
+  // et les succès restent des modules.
   "/": () => ({
     title: "Accueil", icon: "house", emoji: "", description: "", hideHeader: true,
-    sections: [section("1", [eraserModule("accueil-salutation")]), section("side-r", [eraserModule("accueil-principal")], [eraserModule("accueil-cote")]), section("1", [eraserModule("accueil-succes")])],
+    sections: [
+      section("1", [eraserModule("accueil-salutation")]),
+      section("side-r", [
+        { id: newId("b"), vis: "mj-seul", type: "view", index: "campaigns", tab: "Campagnes", kind: "list", limit: 0, height: "auto", heading: "Mes campagnes", rowMatch: "",
+          layout: { kind: "list", itemCard: "eraser-campagne-grille", listColumns: 2 }, where: { match: "toutes", conditions: [{ column: "MJ", operator: "est", value: "{Moi}" }] }, sort: { column: "Nom de la campagne", desc: false }, click: "/campagne/{ID}" },
+        { id: newId("b"), vis: "joueurs", type: "view", index: "characters", tab: "Personnages", kind: "list", limit: 0, height: "auto", heading: "Mes personnages", rowMatch: "",
+          layout: { kind: "list", itemCard: "eraser-personnage-grille", listColumns: 3 }, where: { match: "toutes", conditions: [{ column: "Joueur", operator: "est", value: "{Moi}" }] }, sort: { column: "Nom personnage", desc: false }, click: "/personnage/{ID}" },
+        { ...eraserModule("accueil-a-faire"), vis: "admin" },
+      ], [eraserModule("accueil-cote")]),
+      section("1", [eraserModule("accueil-succes")]),
+    ],
   }),
   "/regles": () => menuPage("Règles", "scroll-text", "", [
     ["/regles/classes", "Classes", "Les classes jouables, leurs rangs et leurs sorts."],
@@ -51,6 +64,28 @@ const blueprints: Record<string, () => Blueprint> = {
       link("/creation-de-classe", "Créateur de classe", "Créer une classe, ses rangs et ses sorts.", { compact: true, vis: "mj" }),
       { id: newId("b"), vis: "tous", type: "view", index: "classes", tab: "Classes", kind: "list", limit: 0, height: "auto", heading: "", rowMatch: "", presetId: "eraser:classes-par-famille" },
     ])],
+  }),
+  // La page d'une classe : la page de chaque ligne de l'index des classes. Ses sorts sont une
+  // vue de l'index des sorts, rangée par la colonne de la classe (« {ID} » : celle de la page).
+  "/regles/classes/[id]": () => ({
+    title: "{Nom de la classe}", icon: "library-big", emoji: "", description: "", hideHeader: true,
+    sections: [
+      section("2", [link("/regles/classes", "Retour aux classes", "Toutes les classes, par famille.", { compact: true })], [link("/creation-de-classe?classe={ID}", "Modifier dans le créateur de classe", "Ses rangs, ses sorts, sa présentation.", { compact: true, vis: "mj" })]),
+      section("side-l",
+        [{ id: newId("b"), vis: "tous", type: "image", src: "{Image}", caption: "", ratio: "1/1", fit: "contain" }],
+        [{ id: newId("b"), vis: "tous", type: "title", eyebrow: "{Type}", text: "{Nom de la classe}", level: "h2", align: "left" }, eraserModule("classe-presentation")]),
+      section("1", [
+        { id: newId("b"), vis: "tous", type: "title", eyebrow: "Progression", text: "Sorts de classe", level: "h2", align: "left" },
+        { id: newId("b"), vis: "tous", type: "view", index: "class-spells", tab: "Sorts", kind: "list", limit: 0, height: "auto", heading: "", rowMatch: "",
+          layout: { kind: "list", groupBy: "{ID}", itemCard: "eraser-sort-carte", listColumns: 3, hideEmpty: true, hideCounts: true, look: { sectionStyle: "heading" } },
+          where: { match: "toutes", conditions: [{ column: "{ID}", operator: "non-vide", value: "" }] } },
+      ]),
+      section("1", [
+        { id: newId("b"), vis: "tous", type: "title", eyebrow: "Progression", text: "Bonus de rang", level: "h3", align: "left" },
+        { id: newId("b"), vis: "tous", type: "view", index: "rank-bonuses", tab: "Bonus de rang", kind: "cards", limit: 0, height: "auto", heading: "", rowMatch: "", cardId: "eraser-bonus-rang" },
+      ]),
+      section("1", [eraserModule("classe-specificites")]),
+    ],
   }),
   "/regles/vocabulaire": () => ({
     title: "Vocabulaire", icon: "book-text", emoji: "", description: "Le dictionnaire des mots qu’on utilise sans arrêt autour de la table, rangés par ordre alphabétique.",

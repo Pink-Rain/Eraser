@@ -3,7 +3,9 @@ import { Files } from "lucide-react"
 
 import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
-import { HomeAchievementsPanel, HomeGreeting, HomeMain, HomeSide } from "@/components/eraser/home-shell"
+import { ClassPresentationPanel, ClassSupplementsPanel } from "@/components/eraser/class-detail"
+import { HomeAchievementsPanel, HomeGreeting, HomeMain, HomeSide, HomeTodos } from "@/components/eraser/home-shell"
+import { getClassContent } from "@/lib/class-content"
 import { IndexDirectory } from "@/components/eraser/index-directory"
 import { MenuLinkPanel } from "@/components/eraser/menu-page"
 import { NewIndexButton } from "@/components/eraser/new-index-dialog"
@@ -37,6 +39,16 @@ async function Vocabulary({ canEdit }: { canEdit: boolean }) {
   return <VocabularyGlossary initialEntries={entries} canEdit={canEdit} loadError={loadError} inPage />
 }
 
+/** Un morceau de la page d'une classe : la classe de la page (page qui remplace celle d'une classe). */
+async function ClassPart({ classId, part }: { classId: string; part: "presentation" | "supplements" }) {
+  const content = await getClassContent(classId).catch((error) => {
+    console.error("CLASS_CONTENT_LOAD_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
+    return null
+  })
+  if (!content) return null
+  return part === "presentation" ? <ClassPresentationPanel content={content} /> : <ClassSupplementsPanel content={content} />
+}
+
 function render(block: ModuleBlock, context: ModuleContext): ReactNode {
   const manager = canManagePages(context.account.role)
   switch (block.module) {
@@ -50,6 +62,12 @@ function render(block: ModuleBlock, context: ModuleContext): ReactNode {
     case "accueil-principal": return <HomeMain />
     case "accueil-cote": return <HomeSide />
     case "accueil-succes": return <HomeAchievementsPanel />
+    case "accueil-a-faire": return context.account.role === "admin" ? <HomeTodos /> : null
+    case "classe-presentation":
+    case "classe-specificites":
+      // Sans classe (atelier, adresse propre de la page) : l'emplacement seulement.
+      if (context.row?.index !== "classes") return undefined
+      return <Suspense fallback={<DeferredContentLoading label="Chargement de la classe…" />}><ClassPart classId={context.row.id} part={block.module === "classe-presentation" ? "presentation" : "supplements"} /></Suspense>
   }
 }
 
@@ -60,6 +78,8 @@ export type ModuleContext = {
    * montré), `null` quand il est déjà affiché autour de la page (au-dessus ou en dessous).
    */
   origin?: ReactNode | null
+  /** Page d'une ligne (une classe…) : la ligne affichée, pour les modules qui la montrent. */
+  row?: { index: string; id: string }
 }
 
 /** Le contenu de chaque bloc Module de la page (identifiant du bloc → contenu). */

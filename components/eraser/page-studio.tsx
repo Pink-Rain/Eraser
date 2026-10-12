@@ -15,6 +15,7 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import { BlockView, CalloutFrame, ImageView, ModulePlaceholder, PageHeader, PageIcon, PageSections, SeparatorView, calloutTones, layoutGrid, type BlockContext, type PageLinkTarget } from "@/components/eraser/custom-page-view"
 import { PageSearchBlock, PageSearchProvider, PageStatBlock, PageViewBlock } from "@/components/eraser/page-index-block"
 import { describeCondition } from "@/lib/index-views"
+import { rowOfRoute } from "@/lib/page-replacements"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { BlockSettings, PageSettings, Segmented, VisibilityPill, roleDot } from "@/components/eraser/page-studio-settings"
 import { IndexRichText } from "@/components/eraser/index-references"
@@ -741,7 +742,7 @@ export function PageStudio({ initial, pages: initialPages, campaigns, linking, r
         </div>
         <div className="pb-4">
           {selectedBlock
-            ? <BlockSettings key={selectedBlock.id} block={selectedBlock} pages={pages} live={doc.live[selectedBlock.id]} rowOf={doc.rowOf} onChange={(patch, coalesce) => updateBlock(selectedBlock.id, patch, coalesce ? `${selectedBlock.id}:${coalesce}` : undefined)} onDuplicate={() => duplicate(selectedBlock.id)} onRemove={() => remove(selectedBlock.id)} onPage={() => select(null)} />
+            ? <BlockSettings key={selectedBlock.id} block={selectedBlock} pages={pages} live={doc.live[selectedBlock.id]} rowOf={doc.rowOf ?? (rowOfRoute(doc.replaces) ? { index: rowOfRoute(doc.replaces)!.index } : undefined)} onChange={(patch, coalesce) => updateBlock(selectedBlock.id, patch, coalesce ? `${selectedBlock.id}:${coalesce}` : undefined)} onDuplicate={() => duplicate(selectedBlock.id)} onRemove={() => remove(selectedBlock.id)} onPage={() => select(null)} />
             : <PageSettings page={doc} pages={initialPages} campaigns={campaigns} isAdmin={isAdmin} linking={linking} busy={busy} saveError={save.kind === "error" && save.message && /adresse/i.test(save.message) ? save.message : ""}
               onChange={(patch, coalesce) => change((draft) => ({ ...draft, ...patch }), coalesce ? `page:${coalesce}` : undefined)}
               onRevert={() => void action("revert", "Brouillon remis comme la version publiée")}

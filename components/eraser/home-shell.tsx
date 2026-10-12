@@ -547,6 +547,11 @@ export function HomeMain() {
   return viewRole === "mj" ? <CampaignColumn campaigns={campaigns} loading={!listsLoaded} /> : viewRole === "admin" ? <TodoColumn /> : <CharacterColumn characters={characters} loading={!listsLoaded} />
 }
 
+/** Les choses à faire des admins. */
+export function HomeTodos() {
+  return <TodoColumn />
+}
+
 /** La colonne de côté : règles, joueurs et MJ, index favoris, outils. */
 export function HomeSide() {
   const { viewRole } = useShellData()

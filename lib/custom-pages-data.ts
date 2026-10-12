@@ -11,7 +11,8 @@ import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec 
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
 import { activeWhere, type ViewBlockKind, type ViewWhere } from "@/lib/custom-pages"
-import { matchesView, type IndexView } from "@/lib/index-views"
+import { matchesCondition, type IndexView, type ViewCondition } from "@/lib/index-views"
+import { ownedBy } from "@/lib/ownership"
 
 /** Un index tel que le serveur le lit (un sous-ensemble de WorldIndexData). */
 export type IndexSource = {
@@ -91,7 +92,12 @@ function plain(value: string) {
   return value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/&amp;/g, "&").replace(/\s+/g, " ").trim()
 }
 
-function rowsOf(source: IndexSource, table: IndexSource["tables"][number], headers: string[], options: BlockDataOptions) {
+/** L'adresse « Au clic » d'une ligne : « {ID} » et « {Colonne} » prennent ses valeurs, encodées. */
+export function clickHrefFor(template: string, valueOf: (column: string) => string, id: string) {
+  return template.replace(/\{([^{}]{1,80})\}/g, (_, name: string) => encodeURIComponent(foldName(name) === "id" ? id : plain(valueOf(name))))
+}
+
+function rowsOf(source: IndexSource, table: IndexSource["tables"][number], headers: string[], options: BlockDataOptions, click?: string) {
   const at = headers.map((header) => table.headers.findIndex((candidate) => foldName(candidate) === foldName(header)))
   const rich = headers.map((header) => isRichSpec(columnSpecIn(source, table.tabName, header)))
   const id = table.headers.findIndex(isIdHeader)
@@ -105,6 +111,12 @@ function rowsOf(source: IndexSource, table: IndexSource["tables"][number], heade
     // La page de la ligne (un modèle existe) pour tous ; sinon sa fiche dans l'index, pour les MJ
     // et admins seulement : un joueur lit la ligne sans l'ouvrir.
     const rowPage = rowId ? options.rowPageOf?.(source.key, table.tabName, rowId) : undefined
+    if (click) {
+      // Réglé dans le bloc : rien, ou l'adresse choisie (pour tous les lecteurs : la page ouverte vérifie l'accès).
+      // Seulement les colonnes que le lecteur voit : une colonne masquée ne fuit pas dans une adresse.
+      const href = click === "-" ? undefined : clickHrefFor(click, (column) => { const at = headers.some((header) => foldName(header) === foldName(column)) ? table.headers.findIndex((candidate) => foldName(candidate) === foldName(column)) : -1; return at >= 0 ? row.values[at] ?? "" : "" }, rowId)
+      return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
+    }
     const href = rowPage ?? (!rowId ? undefined : source.nameHref && (!options.player || source.openToPlayers) ? source.nameHref.replace("{id}", encodeURIComponent(rowId)) : options.player ? undefined : `${source.path}?ligne=${encodeURIComponent(rowId)}`)
     return [{ key: `${table.tabName}|${rowId || position}`, name: label, ...(href ? { href } : {}), cells }]
   })
@@ -141,6 +153,30 @@ export type ViewBlockInput = {
   cardId?: string
   where?: ViewWhere
   sort?: { column: string; desc: boolean }
+  /** Les identifiants du lecteur (son compte, et l'ancien s'il en a un) : « {Moi} » dans une condition. */
+  me?: string[]
+  /** Au clic : « - » (rien), ou l'adresse de chaque ligne (« /campagne/{ID} »). */
+  click?: string
+}
+
+/** La valeur d'une condition qui désigne le lecteur : « Joueur est {Moi} », « MJ est {Moi} ». */
+export const ME_TOKEN = "{Moi}"
+export const isMeCondition = (condition: ViewCondition) => condition.value.trim().toLowerCase() === ME_TOKEN.toLowerCase()
+
+/**
+ * Une ligne remplit-elle les conditions du bloc ? « {Moi} » compare la case aux comptes du
+ * lecteur (une case de propriétaires : « est » = la ligne est à lui) ; sans lecteur connu,
+ * personne ne correspond.
+ */
+export function matchesWhere(where: Pick<ViewWhere, "match" | "conditions">, cell: (column: string) => string, me: readonly string[] = []) {
+  const conditions = where.conditions.filter((condition) => condition.column.trim())
+  if (!conditions.length) return true
+  const results = conditions.map((condition) => {
+    if (!isMeCondition(condition)) return matchesCondition(condition, cell(condition.column))
+    const mine = ownedBy(cell(condition.column), me)
+    return condition.operator === "n-est-pas" || condition.operator === "ne-contient-pas" ? !mine : mine
+  })
+  return where.match === "une" ? results.some(Boolean) : results.every(Boolean)
 }
 
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
@@ -151,11 +187,11 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
   // les colonnes, masquées comprises : un joueur reçoit les mêmes lignes qu'un MJ, sans les colonnes cachées.
   const cellOf = (row: IndexSource["tables"][number]["rows"][number], header: string) => { const at = found.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return at >= 0 ? row.values[at] ?? "" : "" }
   const filters = [input.view, activeWhere(input.where)].filter((item): item is Pick<IndexView, "match" | "conditions"> => Boolean(item?.conditions.length))
-  let rows = filters.length ? found.rows.filter((row) => filters.every((filter) => matchesView(filter, (header) => cellOf(row, header)))) : found.rows
+  let rows = filters.length ? found.rows.filter((row) => filters.every((filter) => matchesWhere(filter, (header) => cellOf(row, header), input.me))) : found.rows
   if (input.sort?.column) rows = sortLayoutRows(rows, { sortBy: input.sort.column, sortDesc: input.sort.desc }, cellOf)
   const table = { ...found, rows }
   const headers = shownColumns(source, table, options)
-  let all = rowsOf(source, table, headers, options)
+  let all = rowsOf(source, table, headers, options, input.click)
   // Page de ligne : seulement les lignes dont la colonne choisie cite la ligne de la page.
   if (input.match) {
     const at = headers.findIndex((header) => foldName(header) === foldName(input.match!.column))

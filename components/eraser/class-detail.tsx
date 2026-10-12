@@ -67,3 +67,26 @@ export function ClassDetail({ content, imageUrl }: { content: ClassContent; imag
 
   </div>
 }
+
+/*
+ * Les morceaux de la page d'une classe que l'index des classes ne porte pas (la présentation
+ * vient du classeur « Présentation des classes », les spécificités de leurs onglets) : posés
+ * comme modules d'Eraser dans une page du créateur qui remplace la page d'une classe.
+ */
+
+/** Caractéristiques principales et secondaires, spécialités. */
+export function ClassPresentationPanel({ content }: { content: ClassContent }) {
+  const { presentation } = content
+  if (!presentation) return null
+  return <div className="grid gap-7">
+    <div className="grid gap-5 sm:grid-cols-2"><OverviewList label="Caractéristiques principales" field={presentation.primaryCharacteristics} /><OverviewList label="Caractéristiques secondaires" field={presentation.secondaryCharacteristics} /></div>
+    {presentation.specialties.length ? <div className="border-t pt-5"><p className="text-[11px] font-semibold uppercase tracking-[.18em] text-muted-foreground">Spécialités</p><div className="mt-3 divide-y">{presentation.specialties.map((specialty) => <div key={specialty.index} className="grid gap-1 py-3 sm:grid-cols-[10rem_1fr]"><RichTextView html={specialty.titleHtml} fallback={specialty.title} className="font-display font-semibold" /><RichTextView html={specialty.textHtml} fallback={specialty.text} className="text-sm leading-6 text-muted-foreground" /></div>)}</div></div> : null}
+  </div>
+}
+
+/** Les spécificités d'une classe (les cartes du Cartomancien…). */
+export function ClassSupplementsPanel({ content }: { content: ClassContent }) {
+  const { characterClass } = content
+  if (!content.supplements.length) return null
+  return <div className="grid gap-12">{content.supplements.map((table) => <section key={table.title}><div className="border-b pb-4"><p className="text-[11px] font-semibold uppercase tracking-[.2em]" style={{ color: characterClass.accentDark }}>Spécificité de classe</p><h2 className="font-display mt-1 text-3xl font-semibold">{table.title}</h2></div><div className="mt-5 grid gap-3 [grid-template-columns:repeat(auto-fit,minmax(min(100%,16rem),1fr))]">{table.rows.map((row) => <article key={row.rowNumber} className="rounded-2xl border bg-card/75 p-4" style={{ borderColor: `${characterClass.accentDark}45` }}>{table.headers.map((header, index) => row.values[index] ? <div key={`${header}:${index}`} className={index ? "mt-3" : ""}><p className="text-[10px] font-semibold uppercase tracking-wider text-muted-foreground">{header}</p><p className={index === 0 ? "font-display text-lg font-semibold" : "mt-1 whitespace-pre-line text-sm leading-6"}>{row.values[index]}</p></div> : null)}</article>)}</div></section>)}</div>
+}

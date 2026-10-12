@@ -92,4 +92,27 @@ export function cleanReplaceMode(value: unknown): ReplaceMode {
   return value === "replace" || value === "before" ? value : "after"
 }
 
+/**
+ * Les pages d'Eraser qui montrent une ligne d'un index (« /regles/classes/[id] » : une classe).
+ * La page qui en remplace une devient la page de chaque ligne : « {Nom de la classe} »,
+ * « Valeurs de la ligne », les vues filtrées sur la ligne… comme une page de ligne.
+ */
+export const rowRoutes: Record<string, string> = {
+  "/regles/classes/[id]": "classes",
+}
+
+/** L'index dont la page `pattern` montre une ligne, et l'identifiant de cette ligne dans `pathname`. */
+export function rowOfRoute(pattern: string | undefined, pathname?: string): { index: string; id: string } | null {
+  const index = pattern ? rowRoutes[pattern] : undefined
+  if (!index) return null
+  if (!pathname) return { index, id: "" }
+  const wanted = segments(pattern!)
+  const parts = segments(pathname)
+  const at = wanted.findIndex((part) => part === "[id]")
+  if (at < 0 || wanted.length !== parts.length) return null
+  let id = parts[at]
+  try { id = decodeURIComponent(id) } catch { /* l'adresse brute */ }
+  return id ? { index, id } : null
+}
+
 export const replacementLabel = (path: string) => replaceableRoutes.find((route) => route.path === path)?.label ?? path

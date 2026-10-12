@@ -416,10 +416,16 @@ test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, re
   const preset = layouts.builtinViewPresets.find((item) => item.id === "eraser:classes-par-famille");
   assert.deepEqual(layouts.cleanViewLayout(preset.layout), preset.layout);
   assert.equal(preset.layout.itemCard, "eraser-classe-carte");
-  // L'accueil : ses morceaux en modules, sans en-tête.
+  // L'accueil : « Mes campagnes » et « Mes personnages » en vues filtrées sur le lecteur, le reste en modules.
   const home = blueprints.eraserPageBlueprint("/");
   assert.equal(home.hideHeader, true);
-  assert.deepEqual(pages.allBlocks(home).map((block) => block.module), ["accueil-salutation", "accueil-principal", "accueil-cote", "accueil-succes"]);
+  assert.deepEqual(pages.allBlocks(home).map((block) => block.type === "view" ? `${block.index}:${block.vis}:${block.where.conditions[0].value}` : block.module), ["accueil-salutation", "campaigns:mj-seul:{Moi}", "characters:joueurs:{Moi}", "accueil-a-faire", "accueil-cote", "accueil-succes"]);
+  // La page d'une classe : sorts rangés par la colonne de la classe, lien vers son créateur qui cite la ligne.
+  const classPage = pages.cleanContent(blueprints.eraserPageBlueprint("/regles/classes/[id]"));
+  const spells = pages.allBlocks(classPage).find((block) => block.type === "view" && block.index === "class-spells");
+  assert.equal(spells.layout.groupBy, "{ID}");
+  assert.deepEqual(spells.where.conditions, [{ column: "{ID}", operator: "non-vide", value: "" }]);
+  assert.ok(pages.allBlocks(classPage).some((block) => block.type === "link" && block.href === "/creation-de-classe?classe={ID}"));
   assert.equal(blueprints.blueprintSlug("/regles/classes"), "regles-classes");
   assert.equal(blueprints.blueprintSlug("/campagne/[id]/journal"), "campagne-une-journal");
   assert.equal(blueprints.blueprintSlug("/"), "accueil");
@@ -482,4 +488,52 @@ test("Cartes des pages d'Eraser proposées comme presets dans tous les index (ca
   assert.ok(all.some((entry) => entry.card.id === "eraser-succes-carte"));
   assert.ok(all.some((entry) => entry.card.id === "eraser-etat-carte"));
   assert.ok(!cards.eraserCardPresets("classes").some((entry) => entry.index === "classes"));
+});
+
+test("Pages de ligne d'Eraser, « {Moi} », « Au clic » et visibilité « MJ seulement »", async () => {
+  const replacements = await vite.ssrLoadModule("/lib/page-replacements.ts");
+  const ownership = await vite.ssrLoadModule("/lib/ownership.ts");
+  const owners = ownership.ownersCell(["uid-b", "uid-ancien"]);
+  assert.deepEqual(replacements.rowOfRoute("/regles/classes/[id]", "/regles/classes/CLA%2007"), { index: "classes", id: "CLA 07" });
+  assert.equal(replacements.rowOfRoute("/regles/classes", "/regles/classes"), null);
+  assert.deepEqual(replacements.rowOfRoute("/regles/classes/[id]"), { index: "classes", id: "" });
+  // « MJ seulement » : ni joueur ni admin (sauf en vue MJ).
+  assert.deepEqual(["joueur", "mj", "admin"].map((role) => pages.blockVisibleTo("mj-seul", role)), [false, true, false]);
+  assert.equal(pages.cleanBlock({ id: "b-v", type: "view", vis: "mj-seul", index: "campaigns", tab: "Campagnes" }).vis, "mj-seul");
+  // « Au clic » : une adresse d'Eraser ou « - », jamais une adresse externe ni l'API.
+  assert.equal(pages.cleanClick("/campagne/{ID}"), "/campagne/{ID}");
+  assert.equal(pages.cleanClick("-"), "-");
+  assert.equal(pages.cleanClick("https://ailleurs.example"), "");
+  assert.equal(pages.cleanClick("//ailleurs.example"), "");
+  assert.equal(pages.cleanClick("/api/pages"), "");
+  const source = { key: "campaigns", title: "Campagnes", path: "/ressources/index-des-campagnes", nameHref: "/campagne/{id}/dossier", nameHeader: "Nom de la campagne",
+    tables: [{ tabName: "Campagnes", headers: ["ID", "MJ", "Nom de la campagne", "Secret"], rows: [
+      { values: ["CAM-1", "uid-a", "Ombres", "x"], html: ["CAM-1", "uid-a", "Ombres", "x"] },
+      { values: ["CAM 2", owners, "Marées", ""], html: ["CAM 2", owners, "Marées", ""] },
+      { values: ["CAM-3", "uid-c", "Cendres", ""], html: ["CAM-3", "uid-c", "Cendres", ""] },
+    ] }], columns: { Campagnes: [{ header: "Secret", spec: { kind: "text", hidden: true } }] } };
+  const mine = { tab: "Campagnes", kind: "table", limit: 0, where: { match: "toutes", conditions: [{ column: "MJ", operator: "est", value: "{Moi}" }] } };
+  const settings = { presentations: {}, cards: {} };
+  assert.deepEqual(blockData.viewBlockData(source, { ...mine, me: ["uid-ancien", "uid-z"] }, settings, { player: false }).rows.map((row) => row.name), ["Marées"]);
+  assert.deepEqual(blockData.viewBlockData(source, { ...mine, me: [] }, settings, { player: false }).rows, []);
+  const others = { ...mine, where: { match: "toutes", conditions: [{ column: "MJ", operator: "n-est-pas", value: "{moi}" }] }, me: ["uid-a"] };
+  assert.deepEqual(blockData.viewBlockData(source, others, settings, { player: false }).rows.map((row) => row.name), ["Marées", "Cendres"]);
+  // Au clic : l'adresse choisie, pour tous ; une colonne masquée ne fuit pas dans l'adresse.
+  const clicked = blockData.viewBlockData(source, { tab: "Campagnes", kind: "table", limit: 0, click: "/campagne/{ID}?s={Secret}&n={Nom de la campagne}" }, settings, { player: true });
+  assert.deepEqual(clicked.rows.map((row) => row.href), ["/campagne/CAM-1?s=&n=Ombres", "/campagne/CAM%202?s=&n=Mar%C3%A9es", "/campagne/CAM-3?s=&n=Cendres"]);
+  assert.ok(blockData.viewBlockData(source, { tab: "Campagnes", kind: "table", limit: 0, click: "-" }, settings, { player: false }).rows.every((row) => row.href === undefined));
+});
+
+test("Sorts lus par une page : la colonne de rang de chaque classe prend l'identifiant de la classe, ses cases « Rang … »", async () => {
+  const ranks = await vite.ssrLoadModule("/lib/class-rank-columns.ts");
+  const tables = [{ tabName: "Sorts", headers: ["ID", "Nom", "CLA-1", "Guerrier·e"], rows: [
+    { values: ["S-1", "Coup", "0", "3"], html: ["S-1", "Coup", "0", "3"] },
+    { values: ["S-2", "Parade", "", "x"], html: ["S-2", "Parade", "", "x"] },
+  ] }];
+  const { tables: out, rankHeaders } = ranks.rankColumnsForPages(tables, [{ id: "CLA-1", name: "Mage" }, { id: "CLA-2", name: "Guerrier" }, { id: "CLA-3", name: "Absent" }]);
+  assert.deepEqual(out[0].headers, ["ID", "Nom", "CLA-1", "CLA-2"]);
+  assert.deepEqual(out[0].rows.map((row) => row.values.slice(2)), [["Rang commun", "Rang 3"], ["", ""]]);
+  assert.deepEqual(rankHeaders, { Sorts: ["CLA-1", "CLA-2"] });
+  assert.equal(ranks.classRankLabels.length, 21);
+  assert.equal(tables[0].headers[3], "Guerrier·e");
 });

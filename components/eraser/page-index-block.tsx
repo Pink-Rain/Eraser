@@ -41,8 +41,8 @@ function dataUrl(block: ViewBlock | StatBlock | BacklinksBlock, source: BlockSou
   const as = source.asPlayer ? "&as=joueur" : ""
   if (block.type === "stat") return block.statId ? `/api/pages/block-data?index=${encodeURIComponent(block.index)}&stat=${encodeURIComponent(block.statId)}${as}` : ""
   // L'atelier lit l'index avec les réglages du bloc, encore non enregistrés.
-  const { index, tab, kind, limit, layout, viewId, presetId, cardId, where, sort } = block
-  return tab ? `/api/pages/block-data?index=${encodeURIComponent(index)}&def=${encodeURIComponent(JSON.stringify({ tab, kind, limit, layout, viewId, presetId, cardId, where, sort }))}${as}` : ""
+  const { index, tab, kind, limit, layout, viewId, presetId, cardId, where, sort, click } = block
+  return tab ? `/api/pages/block-data?index=${encodeURIComponent(index)}&def=${encodeURIComponent(JSON.stringify({ tab, kind, limit, layout, viewId, presetId, cardId, where, sort, click }))}${as}` : ""
 }
 
 /* ---------- La recherche de la page ---------- */
