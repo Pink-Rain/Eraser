@@ -20,7 +20,7 @@ import { IndexViewDialog, useIndexSettings } from "@/components/eraser/index-vie
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { DEFAULT_ITEM_CARD, groupRowsBy, isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
+import { DEFAULT_ITEM_CARD, groupRowsBy, type ViewLayout } from "@/lib/index-view-layouts"
 import { IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
@@ -1151,16 +1151,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const card = pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? null : cardId)
     return card ? <IndexCard card={card} row={cardRow(rowKey)} onOpen={() => openRow(rowKey)} href={rowHref(rowKey)} /> : null
   }, [cardRow, indexKey, openRow, rowHref, settings.cards])
-  // La présentation de l'onglet-fenêtre ouvert (liste, kanban, calendrier…), réglée dans « Modifier la vue ».
-  // Une vue choisie par l'onglet-fenêtre (liste, kanban…) part des réglages de « Modifier › Vues »
-  // pour cet onglet ; ce que l'onglet-fenêtre règle lui-même passe par-dessus.
-  const viewLayout = useMemo(() => {
-    const own = activeView?.layout ?? null
-    if (!own || !table || !isPresentationKind(own.kind)) return own
-    const base = presentationFor(settings.presentations, table.tabName, own.kind)
-    const set = Object.fromEntries(Object.entries(own).filter(([, value]) => value !== undefined && !(Array.isArray(value) && !value.length)))
-    return { ...base, ...set, kind: own.kind } as ViewLayout
-  }, [activeView, settings.presentations, table])
+  // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre.
+  // Une présentation enregistrée par une version précédente (kanban, liste…) est ignorée — elle
+  // reste dans la feuille, et part quand on enregistre l'onglet ; ces vues se posent dans une page.
+  const viewLayout = useMemo((): ViewLayout | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
   const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
   const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
   // Cartes rangées en sections : les lignes de chaque valeur de la colonne choisie.

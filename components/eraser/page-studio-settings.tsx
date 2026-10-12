@@ -96,7 +96,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 
 type IndexEntry = { key: string; title: string; path: string }
 type IndexDetails = {
-  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]>; views?: Array<{ id: string; name: string; kind: string; match?: ViewWhere["match"]; conditions?: ViewCondition[] }> }>
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
   stats: Array<{ id: string; title: string; pinned: boolean }>
   presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
 }
@@ -192,7 +192,6 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
   const { details, loading, reload } = useIndexDetails(block.index)
   const tab = details?.tabs.find((item) => item.name === block.tab)
   const configured = tab?.configured ?? []
-  const legacyView = block.viewId ? tab?.views?.find((view) => view.id === block.viewId) : undefined
   const presentation = isPresentationKind(block.kind)
   const kindLabel = viewBlockKinds.find((item) => item.value === block.kind)?.label ?? ""
   const presets = (details?.presets ?? []).filter((preset) => preset.kind === block.kind)
@@ -245,11 +244,8 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
       <WhereEditor where={where} columns={columns} choices={tab?.choices ?? {}} rowPage={Boolean(rowOf?.index)} onChange={(next) => onChange({ where: next })} />
     </Field>}
     {block.viewId && <Hint>
-      Ce bloc reprend aussi les lignes de l’onglet-fenêtre « {legacyView?.name ?? "supprimé"} » (ancien réglage).{" "}
-      {/* Ses conditions deviennent celles du bloc : il ne dépend plus de l'onglet-fenêtre. */}
-      {!legacyView?.conditions?.length || !where?.conditions.length
-        ? <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined, ...(legacyView?.conditions?.length ? { where: { match: legacyView.match ?? "toutes", conditions: legacyView.conditions } } : {}) })}>{legacyView?.conditions?.length ? "Copier ses conditions ici" : "Ne plus en dépendre"}</button>
-        : <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined })}>Ne garder que les conditions du bloc</button>}
+      Ce bloc portait sur un onglet-fenêtre de l’index (ancien réglage, plus utilisé : un onglet-fenêtre n’est que le tableau filtré de l’index). Mets ses conditions ci-dessus si tu en as besoin.{" "}
+      <button type="button" className="font-medium text-primary hover:underline" onClick={() => onChange({ viewId: undefined })}>Retirer l’ancien réglage</button>
     </Hint>}
     {block.tab && <Field label="Trier par" hint={presentation ? "Avant « Au plus » ; une forme qui a son propre tri le garde pour l’affichage." : undefined}>
       <div className="grid grid-cols-[minmax(0,1fr)_auto] gap-1.5">

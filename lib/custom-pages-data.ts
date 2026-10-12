@@ -11,7 +11,7 @@ import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec 
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
 import { activeWhere, type ViewBlockKind, type ViewWhere } from "@/lib/custom-pages"
-import { matchesCondition, type IndexView, type ViewCondition } from "@/lib/index-views"
+import { matchesCondition, type ViewCondition } from "@/lib/index-views"
 import { ownedBy } from "@/lib/ownership"
 
 /** Un index tel que le serveur le lit (un sous-ensemble de WorldIndexData). */
@@ -147,8 +147,6 @@ export type ViewBlockInput = {
   layout?: ViewLayout
   /** La forme d'un preset de vue choisi pour le bloc (déjà retrouvé). */
   preset?: ViewLayout | null
-  /** Ancien réglage : une vue enregistrée de l'index (onglet-fenêtre). */
-  view?: Pick<IndexView, "match" | "conditions" | "layout"> | null
   /** Les cartes : laquelle montrer. */
   cardId?: string
   where?: ViewWhere
@@ -183,11 +181,11 @@ export function matchesWhere(where: Pick<ViewWhere, "match" | "conditions">, cel
 export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
   const found = findTable(source, input.tab)
   if (!found) return null
-  // Les conditions (celles du bloc, et celles d'une ancienne vue enregistrée) se lisent sur toutes
-  // les colonnes, masquées comprises : un joueur reçoit les mêmes lignes qu'un MJ, sans les colonnes cachées.
+  // Les conditions du bloc se lisent sur toutes les colonnes, masquées comprises : un joueur reçoit
+  // les mêmes lignes qu'un MJ, sans les colonnes cachées.
   const cellOf = (row: IndexSource["tables"][number]["rows"][number], header: string) => { const at = found.headers.findIndex((candidate) => foldName(candidate) === foldName(header)); return at >= 0 ? row.values[at] ?? "" : "" }
-  const filters = [input.view, activeWhere(input.where)].filter((item): item is Pick<IndexView, "match" | "conditions"> => Boolean(item?.conditions.length))
-  let rows = filters.length ? found.rows.filter((row) => filters.every((filter) => matchesWhere(filter, (header) => cellOf(row, header), input.me))) : found.rows
+  const where = activeWhere(input.where)
+  let rows = where ? found.rows.filter((row) => matchesWhere(where, (header) => cellOf(row, header), input.me)) : found.rows
   if (input.sort?.column) rows = sortLayoutRows(rows, { sortBy: input.sort.column, sortDesc: input.sort.desc }, cellOf)
   const table = { ...found, rows }
   const headers = shownColumns(source, table, options)
@@ -206,12 +204,11 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
     return input.cardId && entry.cards.some((card) => card.id === input.cardId) ? { ...entry, defaultId: input.cardId } : entry
   }
   if (input.kind === "cards") return { ...base, cards: cards() }
-  // La forme : celle réglée pour la page, sinon le preset choisi, sinon celle de l'ancienne vue
-  // enregistrée, sinon celle de l'onglet (ou la présentation par défaut). Les colonnes que le
-  // lecteur ne voit pas en sont retirées.
+  // La forme : celle réglée pour la page, sinon le preset choisi, sinon celle de l'onglet (ou la
+  // présentation par défaut). Les colonnes que le lecteur ne voit pas en sont retirées.
   const same = (layout?: ViewLayout | null) => layout && isPresentationKind(layout.kind) && layout.kind === input.kind ? layout : null
   const chosen = input.layout && isPresentationKind(input.layout.kind) ? input.layout
-    : same(input.preset) ?? same(input.view?.layout)
+    : same(input.preset)
     ?? (isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null)
   if (chosen) {
     const layout = fitLayoutToColumns(chosen, headers)

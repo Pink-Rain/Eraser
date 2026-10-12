@@ -61,7 +61,10 @@ export type NotesBlock = Common & { type: "notes"; title: string; html: string; 
 /** `rowMatch` (page de ligne) : seulement les lignes dont cette colonne cite la ligne de la page. */
 export type ViewBlock = Common & {
   type: "view"; index: string; tab: string; kind: ViewBlockKind; limit: number; height: ViewHeight; heading: string; rowMatch: string
-  /** Ancien réglage : une vue enregistrée de l'index (onglet-fenêtre). Toujours lu, plus proposé. */
+  /**
+   * Ancien réglage (alpha 206) : un onglet-fenêtre de l'index. Gardé tel quel, mais plus lu :
+   * un onglet-fenêtre n'est que le tableau filtré de l'index. Les conditions du bloc le remplacent.
+   */
   viewId?: string
   /** La forme réglée pour cette page seulement (sinon : le preset choisi, ou celle de l'onglet). */
   layout?: ViewLayout

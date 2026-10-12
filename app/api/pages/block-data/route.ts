@@ -9,9 +9,7 @@ import { backlinkSources, indexSourceOf, readOptions, rowTemplates, viewerFor } 
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { listIndexCards } from "@/lib/index-cards-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
-import { listIndexViews } from "@/lib/index-settings"
 import { builtinViewPresets, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
-import { ALL_SOURCES } from "@/lib/index-views"
 import { rowOfRoute } from "@/lib/page-replacements"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
@@ -26,12 +24,6 @@ async function calendarTables() {
 }
 
 type RowPageOf = BlockDataOptions["rowPageOf"]
-
-/** Une vue enregistrée de l'index (onglet-fenêtre), lue seulement quand le bloc en désigne une. */
-async function savedView(key: WorldIndexKey, viewId: string | undefined) {
-  if (!viewId) return null
-  return (await listIndexViews(key).catch(() => [])).find((view) => view.id === viewId) ?? null
-}
 
 /** La forme d'un preset de vue (ceux d'Eraser, puis ceux enregistrés), lue seulement quand le bloc en désigne un. */
 async function presetLayout(presetId: string | undefined) {
@@ -66,8 +58,10 @@ async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<ty
   const block = blockForRow(raw, row)
   // « {Moi} » : les comptes du lecteur (lus seulement si une condition le demande).
   const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
-  const [source, presentations, cards, view, preset] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), savedView(key, block.viewId), presetLayout(block.presetId)])
-  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, view, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
+  // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies
+  // du serveur partagé, relues toutes les 30 s) et, s'il est choisi, un preset. Jamais Google.
+  const [source, presentations, cards, preset] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId)])
+  const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
   const data = viewBlockData(source, input, { presentations, cards }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
@@ -109,7 +103,7 @@ export async function GET(request: Request) {
       }
       const key = await knownWorldIndexKey(wanted)
       if (!key) return NextResponse.json({ error: "Index inconnu." }, { status: 400 })
-      const [data, presentations, cards, record, views, presets] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listIndexViews(key).catch(() => []), listViewPresets().catch(() => [])])
+      const [data, presentations, cards, record, presets] = await Promise.all([getWorldIndexQuick(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })), listViewPresets().catch(() => [])])
       const cardsOf = (tab: string) => Object.entries(cards).find(([name]) => name.toLocaleLowerCase("fr") === tab.toLocaleLowerCase("fr"))?.[1]?.cards ?? []
       return NextResponse.json({
         tabs: data.tables.map((table) => ({
@@ -123,8 +117,6 @@ export async function GET(request: Request) {
           columns: (data.columns[table.tabName] ?? []).map((column) => column.header).filter((header) => !/^id$/i.test(header)),
           // Les valeurs proposées des colonnes à liste : les conditions d'un bloc les suggèrent.
           choices: Object.fromEntries((data.columns[table.tabName] ?? []).flatMap((column) => column.spec.options?.length ? [[column.header, column.spec.options.map((option) => option.value).slice(0, 80)]] : [])),
-          // Les vues enregistrées de l'index (ancien réglage d'un bloc : seulement pour en montrer le nom).
-          views: views.filter((view) => view.source === ALL_SOURCES || view.source.toLocaleLowerCase("fr") === table.tabName.toLocaleLowerCase("fr")).map((view) => ({ id: view.id, name: view.name, kind: view.layout?.kind ?? "table", match: view.match, conditions: view.conditions })),
         })),
         stats: record.stats.map((stat) => ({ id: stat.id, title: stat.title, pinned: Boolean(stat.pinned) })),
         // Les presets de vues (« Kanban serré », les tiens…) : autant de formes à choisir pour un bloc.

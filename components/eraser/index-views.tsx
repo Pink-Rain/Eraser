@@ -16,7 +16,7 @@ import { Checkbox } from "@/components/ui/checkbox"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { cleanViewLayout, dashboardTileKinds, DEFAULT_ITEM_CARD, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import { dashboardTileKinds, DEFAULT_ITEM_CARD, viewLayoutKinds, type DashboardTile, type TabPresentations, type ViewLayout, type ViewLayoutKind, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
 
 export const layoutIcons: Record<ViewLayoutKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
 
@@ -361,7 +361,7 @@ export function IndexViewDialog({ open, onOpenChange, index, view, sources, colu
       </DialogHeader>
       <div className="grid gap-3 sm:grid-cols-2">
         {([
-          { value: "window", Icon: AppWindow, label: "Onglet fenêtre", hint: "Des lignes choisies, en tableau, cartes, kanban…" },
+          { value: "window", Icon: AppWindow, label: "Onglet fenêtre", hint: "Le tableau, seulement avec les lignes qui remplissent tes conditions." },
           { value: "stats", Icon: ChartColumnBig, label: "Onglet stat", hint: "Des chiffres, barres et tableaux croisés sur l’index." },
         ] as const).map((choice) => <button key={choice.value} type="button" autoFocus={choice.value === "window"} onClick={() => setKind(choice.value)} className="group grid justify-items-start gap-2 rounded-xl border bg-card/70 p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring">
           <span className="grid size-11 place-items-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground"><choice.Icon className="size-6" /></span>
@@ -441,7 +441,6 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
   const [match, setMatch] = useState<IndexView["match"]>(view?.match ?? "toutes")
   const columns = columnsOf(source)
   const [conditions, setConditions] = useState<ViewCondition[]>(() => view?.conditions.length ? view.conditions : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
-  const [layout, setLayout] = useState<ViewLayout>(() => view?.layout ?? { kind: "table" })
   const [pending, setPending] = useState("")
   const [error, setError] = useState("")
 
@@ -452,7 +451,9 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
   async function save() {
     setPending("save"); setError("")
     try {
-      await onSave({ id: view?.id, index, name, source, match, conditions: conditions.filter((condition) => condition.column), layout: cleanViewLayout(layout) })
+      // Un onglet-fenêtre est le tableau filtré : il n'a pas de présentation à lui (kanban, liste… se
+      // posent dans une page). Une présentation d'avant se retire en l'enregistrant.
+      await onSave({ id: view?.id, index, name, source, match, conditions: conditions.filter((condition) => condition.column) })
       onOpenChange(false)
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "L’onglet-fenêtre n’a pas pu être enregistré.")
@@ -471,7 +472,7 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
     <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl">
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2"><Filter className="size-4 text-primary" />{view ? "Modifier la vue" : "Nouvelle vue"}</DialogTitle>
-        <DialogDescription>Un onglet-fenêtre : les lignes qui remplissent les conditions, présentées comme tu veux. Rien n’est copié : une case modifiée ici l’est dans son onglet d’origine.</DialogDescription>
+        <DialogDescription>Un onglet-fenêtre : le tableau, avec seulement les lignes qui remplissent les conditions. Rien n’est copié : une case modifiée ici l’est dans son onglet d’origine.</DialogDescription>
       </DialogHeader>
       <div className="grid gap-3 sm:grid-cols-2">
         <label className="grid gap-1.5 text-sm font-medium">Nom de l’onglet<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Runes, Armes légendaires…" autoFocus /></label>
@@ -507,8 +508,7 @@ function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf,
         {!conditions.length && <p className="text-xs text-muted-foreground">Sans condition, la fenêtre montre toutes les lignes de la source.</p>}
         {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
       </div>
-      <LayoutSettings layout={layout} columns={columns} onChange={setLayout} />
-      {["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"].includes(layout.kind) && <p className="text-xs text-muted-foreground">Ces réglages s’ajoutent à ceux de « Modifier » (un onglet par vue : Liste, Kanban, Galerie, Chronologie…) ; ce que tu laisses vide ici reprend ceux de « Modifier », cartes comprises.</p>}
+      <p className="text-xs text-muted-foreground">L’onglet-fenêtre montre le tableau (ou les cartes, comme les autres onglets), seulement avec ces lignes. Un kanban, une liste ou une galerie se posent dans une page (bloc Vue d’index).</p>
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
         {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}

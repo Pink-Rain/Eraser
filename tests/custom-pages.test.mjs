@@ -321,12 +321,13 @@ test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées,
   const own = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "kanban", limit: 0, layout: { kind: "kanban", kanbanColumn: "Rang", fields: ["Titre", "Notes MJ"] } }, settings, { player: true, hiddenForPlayers: hidden });
   assert.equal(own.layout.kanbanColumn, "Rang");
   assert.deepEqual(own.layout.fields, ["Titre"]);
-  // Une vue enregistrée de l'index : seulement ses lignes (condition lue même sur une colonne masquée), avec sa présentation.
-  const view = { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }], layout: { kind: "list", fields: ["Titre"] } };
-  const saved = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "list", limit: 0, view }, settings, { player: true, hiddenForPlayers: hidden });
-  assert.deepEqual(saved.rows.map((row) => row.name), ["Aldric"]);
-  assert.equal(saved.layout.kind, "list");
-  assert.ok(!saved.headers.includes("Secret"));
+  // Un ancien réglage d'onglet-fenêtre n'est plus lu : seules les conditions du bloc filtrent (même sur une colonne masquée).
+  const legacy = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "list", limit: 0, view: { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }], layout: { kind: "kanban" } } }, settings, { player: true, hiddenForPlayers: hidden });
+  assert.equal(legacy.rows.length, 2);
+  assert.equal(legacy.layout.kind, "list");
+  const filtered = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "list", limit: 0, where: { match: "toutes", conditions: [{ column: "Secret", operator: "non-vide", value: "" }] } }, settings, { player: true, hiddenForPlayers: hidden });
+  assert.deepEqual(filtered.rows.map((row) => row.name), ["Aldric"]);
+  assert.ok(!filtered.headers.includes("Secret"));
   const stat = blockData.statBlockData(source, { stats: [{ id: "st-1", title: "Par rang", measure: "count", by: ["Rang"], form: "bars" }], groups: [] }, "st-1", { player: true, hiddenForPlayers: hidden });
   assert.deepEqual(stat.columns, ["Nom du PNJ", "Titre", "Rang", "Onglet"]);
   assert.equal(stat.rows.length, 3);

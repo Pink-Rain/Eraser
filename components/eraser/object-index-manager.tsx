@@ -43,7 +43,7 @@ import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
-import { isPresentationKind, presentationFor, type ViewLayout } from "@/lib/index-view-layouts"
+import type { ViewLayout } from "@/lib/index-view-layouts"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
@@ -125,16 +125,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
   const editedInView = useRef(false)
   const activeView = useMemo(() => { const id = viewIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
-  // La vue de l'onglet-fenêtre (liste, kanban…) part des réglages de « Modifier › Vues » de son
-  // tableau (le premier si la fenêtre les couvre tous) ; ce qu'elle règle elle-même passe par-dessus.
-  const activeLayout = useMemo((): ViewLayout | null => {
-    const own = activeView?.layout ?? null
-    if (!own || !isPresentationKind(own.kind)) return own
-    const table = activeView!.source === ALL_SOURCES ? tables[0] : tables.find((candidate) => tableKey(candidate) === activeView!.source)
-    const base = table ? presentationFor(settings.presentations, table.tabName, own.kind) : { kind: own.kind }
-    const set = Object.fromEntries(Object.entries(own).filter(([, value]) => value !== undefined && !(Array.isArray(value) && !value.length)))
-    return { ...base, ...set, kind: own.kind } as ViewLayout
-  }, [activeView, settings.presentations, tables])
+  // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre
+  // (une présentation d'une version précédente est ignorée ; kanban, liste… se posent dans une page).
+  const activeLayout = useMemo((): ViewLayout | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
 
   // Les statistiques des items (Modifier › Stats), sur tous les tableaux ; un onglet stat montre les épinglées.
   const statKey = (table: ObjectIndexTable, rowNumber: number) => `${tableKey(table)}|${rowNumber}`
