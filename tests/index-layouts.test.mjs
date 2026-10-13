@@ -195,7 +195,9 @@ test("l'affichage automatique et les survols d'Eraser sont exprimés en mise en 
   assert.deepEqual(form.sections[0].rows.map((row) => row.fields.map((field) => [field.column, field.span])), [[["Nom", 6], ["Type", 6]], [["Rang", 6]], [["Description", 12]]]);
   // Le survol automatique : l'image en tête, le type en sous-titre, la description.
   const hover = defaults.automaticLayoutFor("hover", columns);
-  assert.equal(hover.image, "Portrait");
+  // L'image en tête est un médaillon explicite (« Ajouter un médaillon »), que l'éditeur montre et qu'on peut retirer.
+  assert.deepEqual(hover.medallion, { column: "Portrait", size: 48 });
+  assert.equal(hover.image, undefined);
   assert.equal(hover.subtitle, "Type");
   assert.deepEqual(hover.sections[0].rows[0].fields, [{ column: "Description", span: 12, hideLabel: true }]);
   assert.equal(defaults.effectiveLayoutFor({}, "places", "Villes", "form", columns).source, "automatic");
@@ -212,7 +214,7 @@ test("l'affichage automatique et les survols d'Eraser sont exprimés en mise en 
   assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(npc)), npc);
   // Le survol d'un état : ses niveaux en bloc Paliers, un médaillon à sa couleur ; celui d'un modificateur : son icône, à sa couleur.
   const state = defaults.builtinLayoutFor("states", definitions.STATES_TAB, "hover");
-  assert.equal(state.tint, true);
+  assert.deepEqual(state.medallion, { size: 40, tint: true });
   assert.deepEqual(state.sections[0].rows[0].fields[0].block.levels.map((level) => level.column), ["Description niveau 1", "Description niveau 2"]);
   assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(state)), state);
   const modifier = defaults.builtinLayoutFor("weapon-modifiers", definitions.WEAPON_MODIFIERS_TAB, "hover");
@@ -221,4 +223,18 @@ test("l'affichage automatique et les survols d'Eraser sont exprimés en mise en 
   assert.deepEqual(layouts.parseIndexLayout(JSON.stringify(modifier)), modifier);
   assert.equal(defaults.tabFormOrBuiltin({ PNJs: { form: form, forms: [{ id: "court", name: "Courte", layout: hover }] } }, "npcs", "PNJs", "court"), hover);
   assert.equal(defaults.tabFormOrBuiltin({}, "npcs", "PNJs", "court"), npc);
+});
+
+test("le médaillon d'un survol et la taille libre des images se relisent", async () => {
+  const cards = await vite.ssrLoadModule("/lib/index-cards.ts");
+  const parsed = layouts.parseIndexLayout({ aside: [], sections: [], rest: "hide", medallion: { column: "Icône", size: 999, round: true, tint: true } });
+  assert.deepEqual(parsed.medallion, { column: "Icône", size: 160, round: true, tint: true });
+  assert.equal(layouts.parseIndexLayout({ aside: [], sections: [], rest: "hide", medallion: { size: 44 } })?.medallion.size, 44);
+  // Les cartes : largeur et hauteur en %, liées, collées aux bords ; les anciens réglages se lisent en boîte.
+  const card = cards.parseCardTemplate({ id: "c", name: "C", media: { column: "Portrait", position: "left", widthPct: 35, heightPct: 500, linked: true, edges: ["top", "bottom", "x"] }, blocks: [{ id: "b", type: "image", column: "Icône", widthPct: 50, autoHeight: true, edges: [] }] });
+  assert.deepEqual(cards.mediaBox(card.media), { widthPct: 35, heightPct: 300, edges: ["top", "bottom"] });
+  assert.deepEqual(cards.blockBox(card.blocks[0]), { widthPct: 50, edges: [], autoHeight: true });
+  assert.deepEqual(cards.mediaBox({ column: "P", position: "left", size: "sm", anchor: "stretch" }), { widthPct: 30, edges: ["top", "bottom", "left"], heightPct: 30 });
+  assert.deepEqual(cards.mediaBox({ column: "P", position: "top", aspect: "4/3", inset: true }), { widthPct: 100, edges: [], heightPct: 75 });
+  assert.equal(cards.cardStarters.length, 13);
 });

@@ -47,6 +47,7 @@ import {
 } from "lucide-react"
 
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
+import { Choice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/view-editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-views"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -62,6 +63,8 @@ import {
   cardStarters,
   cardWidths,
   DEFAULT_CARD_ACCENT,
+  blockBox,
+  mediaBox,
   missingCardColumns,
   type CardAspect,
   type CardBlock,
@@ -83,7 +86,7 @@ import { cn } from "@/lib/utils"
 // ---------------------------------------------------------------------------
 
 const label = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
-const group = "grid gap-3 rounded-xl border bg-card/60 p-3"
+const group = "grid gap-2 rounded-xl border bg-card/60 p-2.5"
 const groupTitle = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
 const hintClass = "text-[11px] leading-4 text-muted-foreground"
 
@@ -396,17 +399,17 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
         <span className={label}>Colonnes (une tuile chacune)<ColumnsPicker value={block.columns ?? []} columns={columns} onChange={(next) => set({ columns: next })} disabled={disabled} ariaLabel="Colonnes en tuiles" /></span>
         <p className={hintClass}>Les caractéristiques s’abrègent d’elles-mêmes (FOR, DEX…), les autres colonnes par leurs trois premières lettres.</p>
       </div>
-    case "image":
-      return <div className="grid gap-3">
-        <label className={label}>Colonne (image ou icône)<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne de l’image" /></label>
-        <ShapeControls ratio={block.ratio} aspect={block.aspect ?? "1/1"} radiusPx={block.radiusPx} defaultRadius={block.shape === "rounded" ? 12 : 0} onChange={(changes) => set(changes)} disabled={disabled} />
-        <div className="flex flex-wrap gap-3">
-          <span className={label}>Image<Segmented ariaLabel="Recadrage" value={block.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => set({ fit })} disabled={disabled} /></span>
-          <Toggle checked={block.shape === "circle"} onChange={(circle) => set({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle>
-        </div>
-        <Range text="Largeur dans la carte" value={block.width ?? 100} min={15} max={100} step={5} format={(value) => `${value} %`} onChange={(width) => set({ width })} disabled={disabled} />
-        {(block.width ?? 100) < 100 && <span className={label}>Place<Segmented ariaLabel="Place de l’image" value={block.align ?? "left"} options={[...alignOptionsRight]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>}
+    case "image": {
+      const box = blockBox(block)
+      return <div className="grid gap-2">
+        <SettingsRow>
+          <label className={cn(label, "min-w-40 flex-1")}>Colonne (image ou icône)<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne de l’image" /></label>
+          <Choice label="Image" value={block.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => set({ fit })} disabled={disabled} />
+          <span className="self-end pb-1.5"><Toggle checked={block.shape === "circle"} onChange={(circle) => set({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle></span>
+        </SettingsRow>
+        <ImageBoxControls value={{ widthPct: block.widthPct, heightPct: block.heightPct, autoHeight: block.autoHeight, linked: block.linked, edges: block.edges }} defaults={box} onChange={(changes) => set(changes)} disabled={disabled} radius={block.radiusPx ?? (block.shape === "rounded" ? 12 : 0)} onRadius={(radiusPx) => set({ radiusPx })} edgeLabels={{ top: "haut", bottom: "bas" }} />
       </div>
+    }
     case "value":
       return <div className="grid gap-3">
         <label className={label}>Colonne<ColumnSelect value={block.column} columns={columns} onChange={(column) => set({ column })} disabled={disabled} ariaLabel="Colonne" /></label>
@@ -652,27 +655,32 @@ function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; c
   return <div className="grid gap-3">
     <div className={group}>
       <p className={groupTitle}><LayoutGrid className="size-3.5" />Taille et place dans la grille</p>
-      <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Cartes en grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne (liste)", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
-      {!list && <>
-        <Range text="Largeur d’une carte" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem · ${cardWidths.filter((entry) => entry.rem).reduce((best, entry) => Math.abs(entry.rem - value) < Math.abs(best.rem - value) ? entry : best).label.toLowerCase()}`} onChange={(value) => set({ widthRem: value, width: undefined })} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." />
-        <Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value} carte${value > 1 ? "s" : ""}` : "autant que possible"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." />
-        <span className={label}>Sur téléphone<Segmented ariaLabel="Cartes par ligne sur téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "Une par ligne" }, { value: "2", label: "Deux par ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} /></span>
-      </>}
+      <SettingsRow>
+        <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
+        {!list && <>
+          <span className="min-w-36 flex-1"><Range text="Largeur" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem · ${cardWidths.filter((entry) => entry.rem).reduce((best, entry) => Math.abs(entry.rem - value) < Math.abs(best.rem - value) ? entry : best).label.toLowerCase()}`} onChange={(value) => set({ widthRem: value, width: undefined })} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." /></span>
+          <span className="min-w-32 flex-1"><Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value}` : "libre"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." /></span>
+          <Choice label="Téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "1 / ligne" }, { value: "2", label: "2 / ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} />
+        </>}
+      </SettingsRow>
     </div>
 
     <div className={group}>
       <p className={groupTitle}><Square className="size-3.5" />Forme de la carte</p>
-      <span className={label}>Hauteur
-        <span className="flex flex-wrap gap-1">
-          <button type="button" disabled={disabled} aria-pressed={shape === "free"} onClick={() => set({ ratio: undefined })} className={cn("h-9 rounded-md border px-2 text-xs", shape === "free" ? "border-primary bg-primary/10" : "hover:bg-muted")} title="La carte prend la hauteur de son contenu">Libre</button>
-          {shapeStarters.map((starter) => <button key={starter.key} type="button" disabled={disabled} title={starter.label} aria-label={starter.label} aria-pressed={shape === starter.key} onClick={() => set({ ratio: starter.ratio })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", shape === starter.key ? "border-primary bg-primary/10" : "hover:bg-muted")}>
-            <span className="block rounded-[2px] border border-current opacity-70" style={{ width: starter.w, height: starter.h }} />
-          </button>)}
+      <SettingsRow>
+        <span className={label}>Hauteur
+          <span className="flex flex-wrap gap-1">
+            <button type="button" disabled={disabled} aria-pressed={shape === "free"} onClick={() => set({ ratio: undefined })} className={cn("h-8 rounded-md border px-2 text-xs", shape === "free" ? "border-primary bg-primary/10" : "hover:bg-muted")} title="La carte prend la hauteur de son contenu">Libre</button>
+            {shapeStarters.map((starter) => <button key={starter.key} type="button" disabled={disabled} title={starter.label} aria-label={starter.label} aria-pressed={shape === starter.key} onClick={() => set({ ratio: starter.ratio })} className={cn("grid h-8 min-w-9 place-items-center rounded-md border px-1.5", shape === starter.key ? "border-primary bg-primary/10" : "hover:bg-muted")}>
+              <span className="block rounded-[2px] border border-current opacity-70" style={{ width: starter.w * 0.8, height: starter.h * 0.8 }} />
+            </button>)}
+          </span>
         </span>
-      </span>
-      {card.ratio !== undefined && <Range text="Proportions (largeur ÷ hauteur)" value={card.ratio} min={0.3} max={4} step={0.05} format={(value) => value < 0.98 ? `${fr(value)} · plus haute que large` : value > 1.02 ? `${fr(value)} · plus large que haute` : "carrée"} onChange={(ratio) => set({ ratio })} disabled={disabled} />}
-      {card.ratio === undefined && <Range text="Hauteur minimale" value={card.minHeightPx ?? 0} min={0} max={600} step={10} format={(value) => value ? `${value} px` : "selon le contenu"} onChange={(value) => set({ minHeightPx: value || undefined })} disabled={disabled} />}
-      <Range text="Arrondi des coins" value={card.radiusPx ?? radiusOf[card.radius ?? "md"]} min={0} max={64} step={1} format={(value) => `${value} px`} onChange={(radiusPx) => set({ radiusPx })} disabled={disabled} />
+        {card.ratio !== undefined
+          ? <span className="min-w-36 flex-1"><Range text="Proportions (l ÷ h)" value={card.ratio} min={0.3} max={4} step={0.05} format={(value) => fr(value)} onChange={(ratio) => set({ ratio })} disabled={disabled} /></span>
+          : <span className="min-w-36 flex-1"><Range text="Hauteur minimale" value={card.minHeightPx ?? 0} min={0} max={600} step={10} format={(value) => value ? `${value} px` : "contenu"} onChange={(value) => set({ minHeightPx: value || undefined })} disabled={disabled} /></span>}
+        <span className="min-w-28 flex-1"><Range text="Arrondi" value={card.radiusPx ?? radiusOf[card.radius ?? "md"]} min={0} max={64} step={1} format={(value) => `${value} px`} onChange={(radiusPx) => set({ radiusPx })} disabled={disabled} /></span>
+      </SettingsRow>
       <div className="flex flex-wrap gap-3">
         <span className={label}>Contenu<Segmented ariaLabel="Alignement du contenu" value={card.align ?? "left"} options={[...alignOptions]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
         <span className={label}>Espacement<Segmented ariaLabel="Espacement" value={card.density ?? "normal"} options={[{ value: "compact", label: "Serré" }, { value: "normal", label: "Normal" }, { value: "airy", label: "Aéré" }]} onChange={(density) => set({ density: density === "normal" ? undefined : density })} disabled={disabled} /></span>
@@ -688,8 +696,10 @@ function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; c
             <FreeColor value={card.accent?.color && !cardPalette.some((color) => color.value === card.accent?.color) ? card.accent.color : undefined} onChange={(color) => set({ accent: { ...card.accent, color } })} disabled={disabled} /></span>
         </span>
       </div>
-      <span className={label}>Bordure<Segmented ariaLabel="Bordure" value={card.border ?? "subtle"} options={[{ value: "none", label: "Aucune" }, { value: "subtle", label: "Fine" }, { value: "accent", label: "Accent" }, { value: "left", label: "Liseré à gauche" }, { value: "top", label: "Liseré en haut" }]} onChange={(border) => set({ border: border === "subtle" ? undefined : border })} disabled={disabled} /></span>
-      <span className={label}>Fond<Segmented ariaLabel="Fond" value={card.surface ?? "card"} options={[{ value: "card", label: "Carte" }, { value: "tint", label: "Teinté" }, { value: "glow", label: "Lueur" }, { value: "plain", label: "Transparent" }]} onChange={(surface) => set({ surface: surface === "card" ? undefined : surface })} disabled={disabled} /></span>
+      <SettingsRow>
+        <Choice label="Bordure" value={card.border ?? "subtle"} options={[{ value: "none", label: "Aucune" }, { value: "subtle", label: "Fine" }, { value: "accent", label: "Accent" }, { value: "left", label: "Liseré gauche" }, { value: "top", label: "Liseré haut" }]} onChange={(border) => set({ border: border === "subtle" ? undefined : border })} disabled={disabled} />
+        <Choice label="Fond" value={card.surface ?? "card"} options={[{ value: "card", label: "Carte" }, { value: "tint", label: "Teinté" }, { value: "glow", label: "Lueur" }, { value: "plain", label: "Transparent" }]} onChange={(surface) => set({ surface: surface === "card" ? undefined : surface })} disabled={disabled} />
+      </SettingsRow>
       <div className="flex flex-wrap gap-x-4 gap-y-2">
         <Toggle checked={Boolean(card.band)} onChange={(band) => set({ band: band || undefined })} disabled={disabled}>Liseré d’accent {card.media?.position === "top" ? "sous l’image" : "en haut"}</Toggle>
         <Toggle checked={Boolean(card.shadow)} onChange={(shadow) => set({ shadow: shadow || undefined })} disabled={disabled}>Ombre colorée</Toggle>
@@ -722,33 +732,32 @@ function ImagePage({ card, columns, onChange, disabled }: { card: CardTemplate; 
   const setMedia = (changes: Partial<NonNullable<CardTemplate["media"]>>) => {
     const column = changes.column ?? media?.column ?? roles.image ?? roles.glyph ?? columns[0]?.header
     if (!column) return
-    set({ media: { position: "top", aspect: "4/3", fit: "cover", ...media, ...changes, column } })
+    set({ media: { position: "top", ...media, ...changes, column } })
   }
-  const side = position === "left" || position === "right"
-  const vertical = position === "top" || position === "bottom"
+  const box = media ? mediaBox(media) : null
   return <div className={group}>
-    <p className={groupTitle}><ImageIcon className="size-3.5" />Image principale</p>
-    <Segmented ariaLabel="Place de l’image" value={position} options={mediaLayouts} disabled={disabled} onChange={(value) => value === "none" ? set({ media: undefined }) : setMedia({ position: value, ...(value === "left" || value === "right" ? { size: media?.size ?? "md" } : {}) })} />
-    {!media && <p className={hintClass}>Sans image principale. Un bloc « Image dans la carte » peut aussi poser une image au milieu du contenu.</p>}
-    {media && <>
-      <label className={label}>Colonne (image, portrait, icône)<ColumnSelect value={media.column} columns={columns} empty={null} onChange={(column) => column && setMedia({ column })} disabled={disabled} ariaLabel="Colonne de l’image principale" /></label>
-      {side && <span className={label}>Hauteur dans la carte
-        <Segmented ariaLabel="Accroche de l’image" value={media.anchor ?? "top"} options={[{ value: "stretch", label: "Touche le haut et le bas", title: "L’image prend toute la hauteur de la carte" }, { value: "top", label: "Collée en haut", title: "L’image garde ses proportions, alignée en haut" }, { value: "bottom", label: "Collée en bas", title: "L’image garde ses proportions, alignée en bas" }]} onChange={(anchor) => setMedia({ anchor: anchor === "top" ? undefined : anchor })} disabled={disabled} />
+    <SettingsRow>
+      <label className={label}>Emplacement
+        <NativeSelect value={position} disabled={disabled} onChange={(event) => { const value = event.target.value as CardMediaPosition | "none"; if (value === "none") set({ media: undefined }); else setMedia({ position: value, edges: undefined, widthPct: undefined, heightPct: undefined }) }} className="h-8 py-0 text-xs">
+          {mediaLayouts.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>
+      {media && <label className={cn(label, "min-w-40 flex-1")}>Colonne (image ou icône)<ColumnSelect value={media.column} columns={columns} empty={null} onChange={(column) => column && setMedia({ column })} disabled={disabled} ariaLabel="Colonne de l’image principale" /></label>}
+      {media && position !== "background" && <Choice label="Image" value={media.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => setMedia({ fit })} disabled={disabled} />}
+      {media && <span className="flex items-center gap-3 self-end pb-1.5">
+        <Toggle checked={media.shape === "circle"} onChange={(circle) => setMedia({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle>
+        <Toggle checked={Boolean(media.tint)} onChange={(tint) => setMedia({ tint: tint || undefined })} disabled={disabled} title="Une icône (succès, état) sur un médaillon coloré ; une image absente, sur la couleur de la ligne">Fond accent</Toggle>
       </span>}
-      {side && <span className={label}>Largeur<Segmented ariaLabel="Largeur de l’image" value={media.size ?? "md"} options={[{ value: "xs", label: "XS" }, { value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} onChange={(size) => setMedia({ size })} disabled={disabled} /></span>}
-      {vertical && <span className={label}>Hauteur
-        <Segmented ariaLabel="Hauteur de l’image" value={media.sizing ?? "aspect"} options={[{ value: "aspect", label: "Selon ses proportions", title: "La largeur de la carte décide la hauteur" }, { value: "height", label: "Fixe", title: "Une hauteur en pixels, quelle que soit la largeur" }]} onChange={(sizing) => setMedia({ sizing: sizing === "aspect" ? undefined : sizing })} disabled={disabled} />
-      </span>}
-      {vertical && media.sizing === "height" && <Range text="Hauteur de l’image" value={media.heightPx ?? 160} min={16} max={800} step={4} format={(value) => `${value} px`} onChange={(heightPx) => setMedia({ heightPx })} disabled={disabled} />}
-      {(!side || media.anchor !== "stretch") && (!vertical || media.sizing !== "height") && <ShapeControls ratio={media.ratio} aspect={media.aspect ?? (side ? "1/1" : "4/3")} radiusPx={media.radiusPx} defaultRadius={media.shape === "rounded" ? 12 : 0} onChange={(changes) => setMedia(changes)} disabled={disabled} />}
-      {((side && media.anchor === "stretch") || (vertical && media.sizing === "height")) && <ShapeControls withRatio={false} ratio={undefined} radiusPx={media.radiusPx} defaultRadius={media.shape === "rounded" ? 12 : 0} onChange={(changes) => setMedia(changes)} disabled={disabled} />}
-      <div className="flex flex-wrap gap-3">
-        <span className={label}>Image<Segmented ariaLabel="Recadrage" value={media.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => setMedia({ fit })} disabled={disabled} /></span>
-        <Toggle checked={media.shape === "circle"} onChange={(circle) => setMedia({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde (médaillon)</Toggle>
-        {position !== "background" && <Toggle checked={Boolean(media.inset)} onChange={(inset) => setMedia({ inset: inset || undefined })} disabled={disabled} title="Une marge entre l’image et les bords de la carte">Avec une marge</Toggle>}
-        <Toggle checked={Boolean(media.tint)} onChange={(tint) => setMedia({ tint: tint || undefined })} disabled={disabled} title="Une icône (succès, état) sur un médaillon coloré ; une image absente, sur la couleur de la ligne">Fond à la couleur de l’accent</Toggle>
-      </div>
-    </>}
+    </SettingsRow>
+    {media && box && position !== "background" && <ImageBoxControls
+      value={{ widthPct: media.widthPct, heightPct: media.heightPct, autoHeight: media.autoHeight, linked: media.linked, edges: media.edges }}
+      defaults={box}
+      onChange={(changes) => setMedia(changes)}
+      disabled={disabled}
+      radius={media.radiusPx ?? (media.shape === "rounded" ? 12 : 0)}
+      onRadius={(radiusPx) => setMedia({ radiusPx })}
+    />}
+    {media && position === "background" && <ImageBoxControls value={{ widthPct: media.widthPct, heightPct: media.heightPct, linked: media.linked }} defaults={{ widthPct: 100, heightPct: box?.heightPct ?? 75, edges: ["top", "bottom", "left", "right"] }} onChange={(changes) => setMedia(changes)} disabled={disabled} withEdges={false} />}
   </div>
 }
 
@@ -1030,10 +1039,7 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
 
   return <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
     <section className="grid min-w-0 content-start gap-3">
-      <div className="flex flex-wrap items-center gap-2">
-        <Segmented ariaLabel="Page des réglages" value={page} options={cardPages} onChange={setPage} />
-        <span className="truncate text-xs text-muted-foreground">« {card.name} »</span>
-      </div>
+      <Tabs ariaLabel="Réglages de la carte" value={page} options={cardPages} onChange={setPage} />
       {page === "card" && <CardPage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
       {page === "image" && <ImagePage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
       {page === "blocks" && <BlocksPage key={card.id} card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={updateCard} disabled={disabled} />}

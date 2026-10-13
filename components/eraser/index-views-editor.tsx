@@ -14,7 +14,7 @@ import { ArrowDown, ArrowUp, BookOpen, BookmarkPlus, Check, Columns3, Copy, Imag
 
 import { IndexCard } from "@/components/eraser/index-card"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, fr, hintText, IconPick, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, sizeOptions, Toggle } from "@/components/eraser/view-editor-controls"
+import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/view-editor-controls"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -139,13 +139,13 @@ function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, with
       <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe devant chaque nom"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
     </div>}
     {withBadge && <ColumnField label="Pastille à droite du nom, prise dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucune —" disabled={disabled} hint="Un rang, un type, un état : en pastille, à la couleur du choix" />}
-    {withImage && <div className="grid gap-2 sm:grid-cols-2">
-      <ColumnField label="Image à côté du nom" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />
-      {layout.imageColumn && <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Forme" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />
-        <Choice label="Taille" value={look.imageSize ?? "md"} options={sizeOptions} onChange={(imageSize) => setLook({ imageSize: imageSize === "md" ? undefined : imageSize })} disabled={disabled} />
-      </div>}
-    </div>}
+    {withImage && <>
+      <SettingsRow>
+        <ColumnField label="Image ou icône à côté du nom" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} hint="Une adresse donne une image, un nom d’icône ou un émoji donne une icône" />
+        {layout.imageColumn && <Choice label="Forme" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />}
+      </SettingsRow>
+      {layout.imageColumn && <ImageBoxControls value={{ widthPct: look.imageWidth, heightPct: look.imageHeight, linked: look.imageLinked }} defaults={{ widthPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], heightPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], edges: [] }} onChange={(changes) => setLook({ ...(changes.widthPct !== undefined ? { imageWidth: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { imageHeight: changes.heightPct } : {}), ...(changes.linked !== undefined ? { imageLinked: changes.linked || undefined } : {}) })} disabled={disabled} unit="px" widthRange={[12, 240]} heightRange={[12, 240]} withEdges={false} />}
+    </>}
   </div>
 }
 
@@ -435,7 +435,7 @@ function DashboardPages(ctx: Ctx): Page[] {
 // ---------------------------------------------------------------------------
 
 const galleryShapes = [{ key: "square", label: "Carré", ratio: 1, w: 16, h: 16 }, { key: "portrait", label: "Rectangle vertical", ratio: 0.8, w: 13, h: 16 }, { key: "landscape", label: "Rectangle horizontal", ratio: 1.6, w: 18, h: 11 }] as const
-const galleryRatioOf = (layout: ViewLayout) => layout.galleryRatio ?? { square: 1, portrait: 0.8, landscape: 1.6 }[layout.galleryShape ?? "portrait"]
+const galleryRatioOf = (layout: ViewLayout) => layout.galleryHeightRem ? galleryWidthOf(layout) / layout.galleryHeightRem : layout.galleryRatio ?? { square: 1, portrait: 0.8, landscape: 1.6 }[layout.galleryShape ?? "portrait"]
 const galleryWidthOf = (layout: ViewLayout) => layout.galleryWidthRem ?? { sm: 8.5, md: 12, lg: 17 }[layout.gallerySize ?? "md"]
 
 function GalleryPages(ctx: Ctx): Page[] {
@@ -445,12 +445,21 @@ function GalleryPages(ctx: Ctx): Page[] {
     { key: "images", label: "Images", icon: <ImageIcon className="size-3.5" />, render: () => <div className={settingsGroup}>
       <p className={settingsTitle}><ImageIcon className="size-3.5" />Les vignettes</p>
       <ColumnField label="Colonne des images" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Choisir… —" disabled={disabled} />
-      <span className={fieldLabel}>Forme de départ
-        <span className="flex flex-wrap gap-1">{galleryShapes.map((shape) => <button key={shape.key} type="button" disabled={disabled} title={shape.label} aria-label={shape.label} aria-pressed={Math.abs(ratio - shape.ratio) < 0.02} onClick={() => set({ galleryRatio: shape.ratio })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", Math.abs(ratio - shape.ratio) < 0.02 ? "border-primary bg-primary/10" : "hover:bg-muted")}><span className="block rounded-[2px] border border-current opacity-70" style={{ width: shape.w, height: shape.h }} /></button>)}</span>
+      <span className={fieldLabel}>Forme de départ <span className="font-normal">— règle les deux curseurs</span>
+        <span className="flex flex-wrap gap-1">{galleryShapes.map((shape) => <button key={shape.key} type="button" disabled={disabled} title={shape.label} aria-label={shape.label} aria-pressed={Math.abs(ratio - shape.ratio) < 0.02} onClick={() => set({ galleryHeightRem: Math.round(galleryWidthOf(layout) / shape.ratio * 2) / 2, galleryWidthRem: galleryWidthOf(layout), galleryRatio: undefined })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", Math.abs(ratio - shape.ratio) < 0.02 ? "border-primary bg-primary/10" : "hover:bg-muted")}><span className="block rounded-[2px] border border-current opacity-70" style={{ width: shape.w, height: shape.h }} /></button>)}</span>
       </span>
-      <Range text="Proportions (largeur ÷ hauteur)" value={ratio} min={0.3} max={4} step={0.05} format={(value) => value < 0.98 ? `${fr(value)} · plus haute que large` : value > 1.02 ? `${fr(value)} · plus large que haute` : "carrée"} onChange={(galleryRatio) => set({ galleryRatio })} disabled={disabled || look.imageShape === "circle"} />
-      <Range text="Largeur des vignettes" value={galleryWidthOf(layout)} min={5} max={30} step={0.5} format={(value) => `${fr(value, 1)} rem`} onChange={(galleryWidthRem) => set({ galleryWidthRem })} disabled={disabled} title="La grille met autant de vignettes de cette largeur que la place le permet" />
-      <Range text="Arrondi des coins" value={layout.galleryRadiusPx ?? { square: 6, rounded: 12, circle: 999 }[look.imageShape ?? "rounded"]} min={0} max={200} format={(value) => `${value} px`} onChange={(galleryRadiusPx) => set({ galleryRadiusPx })} disabled={disabled || look.imageShape === "circle"} />
+      <ImageBoxControls
+        value={{ widthPct: layout.galleryWidthRem, heightPct: layout.galleryHeightRem, linked: layout.galleryLinked }}
+        defaults={{ widthPct: galleryWidthOf(layout), heightPct: Math.round(galleryWidthOf(layout) / ratio), edges: [] }}
+        onChange={(changes) => set({ ...(changes.widthPct !== undefined ? { galleryWidthRem: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { galleryHeightRem: changes.heightPct, galleryRatio: undefined } : {}), ...(changes.linked !== undefined ? { galleryLinked: changes.linked || undefined } : {}) })}
+        disabled={disabled || look.imageShape === "circle"}
+        unit="rem"
+        widthRange={[5, 30]}
+        heightRange={[3, 40]}
+        withEdges={false}
+        radius={layout.galleryRadiusPx ?? { square: 6, rounded: 12, circle: 999 }[look.imageShape ?? "rounded"]}
+        onRadius={(galleryRadiusPx) => set({ galleryRadiusPx })}
+      />
       <div className="flex flex-wrap items-end gap-3">
         <Choice label="Image" value={layout.galleryFit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(galleryFit) => set({ galleryFit: galleryFit === "cover" ? undefined : galleryFit })} disabled={disabled} />
         <Toggle checked={look.imageShape === "circle"} onChange={(circle) => setLook({ imageShape: circle ? "circle" : undefined })} disabled={disabled}>Rondes (médaillons)</Toggle>
@@ -657,7 +666,7 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
     : CodexPages(ctx)
   const current = pages.find((entry) => entry.key === page) ?? pages[0]
   return <div className="grid content-start gap-3">
-    <Segmented ariaLabel="Page des réglages" value={current.key} options={pages.map((entry) => ({ value: entry.key, label: entry.label, icon: entry.icon }))} onChange={setPage} />
+    <Tabs ariaLabel="Réglages de la vue" value={current.key} options={pages.map((entry) => ({ value: entry.key, label: entry.label, icon: entry.icon }))} onChange={setPage} />
     {current.render()}
   </div>
 }

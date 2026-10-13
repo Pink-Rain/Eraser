@@ -18,7 +18,7 @@ import { richTextRendering, sanitizeRichText } from "@/components/eraser/rich-te
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
 import { HoverCard, HoverCardContent, HoverCardTrigger } from "@/components/ui/hover-card"
 import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
-import { foldName, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
+import { foldName, isImageSource, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
 import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedLayout, type ResolvedLayoutField, type ResolvedReference } from "@/lib/index-references"
 import type { LayoutSpan } from "@/lib/index-layouts"
 import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/index-layout-view"
@@ -348,22 +348,28 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
   }
   const nameColor = layout.nameInAccent ? accent : color
   const hasGlyph = Boolean(look.icon || look.emoji)
-  // Le médaillon : l'image ou l'icône sur un fond à la couleur de l'accent (le survol d'un état).
-  const medallion = layout.tint
-    ? <span className="flex size-10 shrink-0 items-center justify-center overflow-hidden rounded-xl text-white shadow-sm" style={{ background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)` }}>
-      {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "clock"} emoji={look.emoji} className="size-5" stroke={accent} />} /> : <IndexIconGlyph icon={look.icon || "clock"} emoji={look.emoji} className="size-5" stroke={accent} />}
+  // Le médaillon en tête (« Ajouter un médaillon ») : la colonne choisie, sinon l'image ou l'icône de la
+  // ligne ; une adresse donne une image, un nom d'icône ou un émoji donne une icône. Les anciens
+  // survols (« médaillon teinté », « image en tête ») se lisent de la même façon.
+  const medallion = layout.medallion ?? (layout.tint ? { value: "", tint: true, size: 40 } : layout.image && !layout.icon ? { value: layout.image, size: 48 } : (image || hasGlyph) && !layout.icon && !layout.medallion && layout.sections.length === 0 && !layout.subtitle ? { value: image || "", size: 48 } : undefined)
+  const medallionValue = medallion?.value || image || (hasGlyph ? (look.emoji || look.icon || "") : "")
+  const medallionGlyph = medallionValue && !isImageSource(medallionValue) ? parseGlyphValue(medallionValue) : null
+  const medallionSize = medallion?.size ?? 44
+  const medallionNode = medallion
+    ? <span className={cn("flex shrink-0 items-center justify-center overflow-hidden shadow-sm", medallion.round ? "rounded-full" : "rounded-xl", !medallion.tint && "border bg-muted/40")} style={{ width: medallionSize, height: medallionSize, ...(medallion.tint ? { background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)`, color: "#fff" } : { color: accent }) }}>
+      {medallionValue && isImageSource(medallionValue)
+        ? <IndexImage value={medallionValue} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon="file-text" className="size-[45%]" filled={false} />} />
+        : medallionGlyph && (medallionGlyph.icon || medallionGlyph.emoji)
+          ? <IndexIconGlyph icon={medallionGlyph.icon} emoji={medallionGlyph.emoji} className="size-[50%]" filled={Boolean(medallionGlyph.emoji) || Boolean(medallion.tint)} stroke={medallion.tint ? accent : undefined} />
+          : <IndexIconGlyph icon={medallion.tint ? "clock" : "file-text"} className="size-[45%]" filled={Boolean(medallion.tint)} stroke={medallion.tint ? accent : undefined} />}
     </span>
-    : (image || hasGlyph) && !layout.icon
-      ? <span className="flex size-12 shrink-0 items-center justify-center overflow-hidden rounded-xl border bg-muted/40" style={{ color: accent }}>
-        {image ? <IndexImage value={image} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon={look.icon || "file-text"} emoji={look.emoji} className="size-5" filled={false} />} /> : <IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-5" filled={Boolean(look.emoji)} />}
-      </span>
-      : null
+    : null
   // L'icône devant le nom (colonne Icône d'un modificateur), de la couleur du nom.
-  const inlineIcon = layout.icon && hasGlyph && !layout.tint ? <span className="mr-1 inline-flex translate-y-[0.12em]" style={{ color: nameColor ?? accent }}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span> : null
+  const inlineIcon = layout.icon && hasGlyph ? <span className="mr-1 inline-flex translate-y-[0.12em]" style={{ color: nameColor ?? accent }}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span> : null
   const subtitle = layout.subtitle || reference.type || (layout.icon ? "" : reference.tab)
   return <div className="grid gap-2.5">
     <div className="flex items-start gap-3">
-      {medallion}
+      {medallionNode}
       <div className="min-w-0">
         <p className="font-display text-lg font-semibold leading-tight" style={nameColor ? { color: nameColor } : undefined}>{inlineIcon}<FormattedName name={reference.name} html={reference.nameHtml} color={nameColor} /></p>
         {subtitle && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{subtitle}</p>}

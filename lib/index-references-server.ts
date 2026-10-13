@@ -282,6 +282,8 @@ function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden
   const image = pick(layout.image)
   const subtitle = pick(layout.subtitle)
   const icon = pick(layout.icon)
+  // Le médaillon : la colonne choisie, sinon l'image ou l'icône de la ligne (résolues par la référence).
+  const medallion = layout.medallion ? { value: layout.medallion.column ? pick(layout.medallion.column) : "", ...(layout.medallion.size ? { size: layout.medallion.size } : {}), ...(layout.medallion.round ? { round: true } : {}), ...(layout.medallion.tint ? { tint: true } : {}) } : undefined
   // La couleur d'accent réglée (« {Couleur} », « #… ») : résolue ici, la carte n'a pas la ligne.
   const accent = layout.accent ? resolveLayoutColor(layout.accent, "", (column) => pick(column)) : ""
   return {
@@ -290,6 +292,7 @@ function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden
     ...(icon ? { icon } : {}),
     ...(accent ? { accent } : {}),
     ...(layout.tint ? { tint: true } : {}),
+    ...(medallion ? { medallion } : {}),
     ...(layout.nameInAccent ? { nameInAccent: true } : {}),
     ...(layout.width ? { width: layout.width } : {}),
     ...(layout.asideWidth ? { asideWidth: layout.asideWidth } : {}),

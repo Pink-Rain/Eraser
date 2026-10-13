@@ -114,7 +114,7 @@ const stateHover: IndexLayout = {
   }],
   rest: "hide",
   subtitle: "Type",
-  tint: true,
+  medallion: { size: 40, tint: true },
   nameInAccent: true,
 }
 

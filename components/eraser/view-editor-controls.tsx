@@ -16,7 +16,7 @@ import { viewPalette } from "@/lib/index-view-layouts"
 import { cn } from "@/lib/utils"
 
 export const fieldLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
-export const settingsGroup = "grid gap-3 rounded-xl border bg-card/60 p-3"
+export const settingsGroup = "grid gap-2 rounded-xl border bg-card/60 p-2.5"
 export const settingsTitle = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
 export const hintText = "text-[11px] leading-4 text-muted-foreground"
 
@@ -43,7 +43,7 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
 
 /** Un choix avec son libellé au-dessus. */
 export function Choice<T extends string>({ label, value, options, onChange, disabled, hint }: { label: string; value: T; options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode; title?: string }>; onChange: (value: T) => void; disabled?: boolean; hint?: string }) {
-  return <span className={fieldLabel} title={hint}>{label}<Segmented ariaLabel={label} value={value} options={options} onChange={onChange} disabled={disabled} /></span>
+  return <span className="flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground" title={hint}><span className="shrink-0">{label}</span><Segmented ariaLabel={label} value={value} options={options} onChange={onChange} disabled={disabled} /></span>
 }
 
 export function Toggle({ checked, onChange, children, disabled, title }: { checked: boolean; onChange: (checked: boolean) => void; children: ReactNode; disabled?: boolean; title?: string }) {
@@ -94,7 +94,7 @@ export function ColumnSelect({ value, columns, onChange, empty = "— Aucune —
 }
 
 export function ColumnField({ label, value, columns, onChange, empty, disabled, hint }: { label: string; value: string | undefined; columns: string[]; onChange: (value: string | undefined) => void; empty?: string | null; disabled?: boolean; hint?: string }) {
-  return <label className={fieldLabel} title={hint}>{label}<ColumnSelect value={value} columns={columns} onChange={onChange} empty={empty} disabled={disabled} ariaLabel={label} /></label>
+  return <label className="flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground" title={hint}><span className="shrink-0">{label}</span><ColumnSelect value={value} columns={columns} onChange={onChange} empty={empty} disabled={disabled} ariaLabel={label} className="min-w-0 flex-1" /></label>
 }
 
 /** Plusieurs colonnes, dans l'ordre : des étiquettes qu'on retire ou avance, et une liste pour en ajouter. */
@@ -125,3 +125,70 @@ export const radiusOptions = [{ value: "sm", label: "Fins" }, { value: "md", lab
 export const imageShapeOptions = [{ value: "square", label: "Carrée" }, { value: "rounded", label: "Arrondie" }, { value: "circle", label: "Ronde" }] as const
 export const fieldStyleOptions = [{ value: "inline", label: "En ligne" }, { value: "labels", label: "Libellés" }, { value: "pills", label: "Pastilles" }, { value: "stacked", label: "Empilées" }] as const
 export const accentOptions = [{ value: "border", label: "Liseré" }, { value: "tint", label: "Teinte" }, { value: "dot", label: "Point" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }] as const
+
+/** De vrais onglets en haut d'une zone de réglages (Carte, Image, Blocs… ; Lignes, Sections…). */
+export function Tabs<T extends string>({ value, options, onChange, ariaLabel }: { value: T; options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode }>; onChange: (value: T) => void; ariaLabel: string }) {
+  return <div role="tablist" aria-label={ariaLabel} className="flex flex-wrap gap-0 border-b">
+    {options.map((option) => <button key={option.value} type="button" role="tab" aria-selected={value === option.value} onClick={() => onChange(option.value)} className={cn("-mb-px inline-flex h-8 items-center gap-1.5 border-b-2 px-3 text-xs font-semibold transition", value === option.value ? "border-primary text-foreground" : "border-transparent text-muted-foreground hover:text-foreground")}>{option.icon}{option.label}</button>)}
+  </div>
+}
+
+/** Une ligne de réglages : les contrôles côte à côte, qui passent à la ligne quand la place manque. */
+export function SettingsRow({ children, className }: { children: ReactNode; className?: string }) {
+  return <div className={cn("flex flex-wrap items-end gap-x-3 gap-y-2", className)}>{children}</div>
+}
+
+/** Un réglage en ligne : son libellé à gauche, le contrôle à droite. */
+export function Inline({ label, children, className, hint }: { label: string; children: ReactNode; className?: string; hint?: string }) {
+  return <label className={cn("flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground", className)} title={hint}><span className="shrink-0">{label}</span>{children}</label>
+}
+
+export type ImageBoxValue = { widthPct?: number; heightPct?: number; autoHeight?: boolean; linked?: boolean; edges?: Array<"top" | "bottom" | "left" | "right"> }
+
+/**
+ * La taille d'une image, la même partout : largeur et hauteur en % (de la largeur de
+ * l'élément), « auto » au bout du curseur de hauteur, le bouton lier / délier, les bords
+ * auxquels l'image est collée. Une seule ligne de réglages.
+ */
+export function ImageBoxControls({ value, defaults, onChange, disabled, radius, onRadius, unit = "%", widthRange = [5, 100], heightRange = [5, 300], withEdges = true, edgeLabels }: {
+  value: ImageBoxValue
+  /** Ce qui s'affiche quand rien n'est réglé (déduit des anciens réglages). */
+  defaults: { widthPct: number; heightPct?: number; autoHeight?: boolean; edges: Array<"top" | "bottom" | "left" | "right"> }
+  onChange: (changes: Partial<ImageBoxValue>) => void
+  disabled?: boolean
+  /** L'arrondi des coins (px), sur la même ligne. */
+  radius?: number
+  onRadius?: (radiusPx: number) => void
+  unit?: string
+  widthRange?: [number, number]
+  heightRange?: [number, number]
+  withEdges?: boolean
+  edgeLabels?: Partial<Record<"top" | "bottom" | "left" | "right", string>>
+}) {
+  const width = value.widthPct ?? defaults.widthPct
+  const auto = value.autoHeight ?? Boolean(defaults.autoHeight)
+  const height = value.heightPct ?? defaults.heightPct ?? width
+  const linked = value.linked ?? true
+  const edges = value.edges ?? defaults.edges
+  const [heightMin, heightMax] = heightRange
+  const setWidth = (next: number) => onChange(linked && !auto ? { widthPct: next, heightPct: Math.max(heightMin, Math.min(heightMax, Math.round(height * next / Math.max(1, width)))) } : { widthPct: next })
+  const setHeight = (next: number) => {
+    if (next > heightMax) { onChange({ autoHeight: true }); return }
+    onChange(linked ? { heightPct: next, autoHeight: false, widthPct: Math.max(widthRange[0], Math.min(widthRange[1], Math.round(width * next / Math.max(1, height)))) } : { heightPct: next, autoHeight: false })
+  }
+  const toggleEdge = (edge: "top" | "bottom" | "left" | "right") => onChange({ edges: edges.includes(edge) ? edges.filter((item) => item !== edge) : [...edges, edge] })
+  const labels = { top: "haut", bottom: "bas", left: "gauche", right: "droite", ...edgeLabels }
+  return <div className="grid gap-2">
+    <SettingsRow>
+      <button type="button" disabled={disabled} aria-pressed={linked} onClick={() => onChange({ linked: !linked })} title={linked ? "Liées : bouger un curseur bouge l’autre dans les mêmes proportions" : "Déliées : largeur et hauteur indépendantes"} className={cn("grid size-8 shrink-0 place-items-center rounded-md border text-base", linked ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted")}>{linked ? "🔗" : "⛓️‍💥"}</button>
+      <label className="grid min-w-32 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Largeur</span><span className="font-normal tabular-nums">{width} {unit}</span></span><input type="range" min={widthRange[0]} max={widthRange[1]} step={1} value={width} disabled={disabled} onChange={(event) => setWidth(Number(event.target.value))} className="accent-primary" /></label>
+      <label className="grid min-w-32 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Hauteur</span><span className="font-normal tabular-nums">{auto ? "auto (celle de l’image)" : `${height} ${unit}`}</span></span><input type="range" min={heightMin} max={heightMax + 1} step={1} value={auto ? heightMax + 1 : height} disabled={disabled} onChange={(event) => setHeight(Number(event.target.value))} className="accent-primary" /></label>
+      {onRadius && <label className="grid min-w-28 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Arrondi</span><span className="font-normal tabular-nums">{radius ?? 0} px</span></span><input type="range" min={0} max={200} step={1} value={radius ?? 0} disabled={disabled} onChange={(event) => onRadius(Number(event.target.value))} className="accent-primary" /></label>}
+    </SettingsRow>
+    {withEdges && <SettingsRow>
+      <span className="text-[11px] font-semibold text-muted-foreground" title="Un bord coché : l’image le touche et suit la taille de l’élément ; aucun : elle flotte avec une marge">Collée à</span>
+      {(["top", "bottom", "left", "right"] as const).map((edge) => <Toggle key={edge} checked={edges.includes(edge)} onChange={() => toggleEdge(edge)} disabled={disabled}>{labels[edge]}</Toggle>)}
+      <button type="button" disabled={disabled} onClick={() => onChange({ edges: [] })} className={cn("text-[11px]", edges.length ? "text-muted-foreground hover:text-foreground" : "font-semibold text-foreground")}>aucun</button>
+    </SettingsRow>}
+  </div>
+}

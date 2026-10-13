@@ -53,17 +53,27 @@ const fold = (value: string) => value.toLocaleLowerCase("fr")
 /** La couleur d'accent de la vue (Modifier › la vue › Couleurs), sinon l'or d'Eraser. */
 const accentOf = (look: ViewLook) => look.color ?? "var(--primary)"
 
-/** La couleur d'une ligne : celle du choix de la colonne « Couleur des lignes selon ». */
+/**
+ * La couleur d'une ligne : celle du choix de la colonne « Couleur des lignes selon » ; sinon
+ * la couleur d'accent réglée pour la vue, qui marque alors chaque élément de la même façon
+ * (liseré, teinte, point, nom coloré). Sans l'une ni l'autre : rien.
+ */
 function rowColor(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"], optionsOf?: ViewLayoutProps["optionsOf"]) {
-  if (!layout.colorBy) return undefined
+  const fallback = layout.look?.color
+  if (!layout.colorBy) return fallback
   const value = fold(plain(valueOf(row, layout.colorBy)).split(/\s*[,;]\s*/)[0] ?? "")
-  return value ? optionsOf?.(layout.colorBy)?.find((option) => fold(option.value) === value)?.color : undefined
+  return (value ? optionsOf?.(layout.colorBy)?.find((option) => fold(option.value) === value)?.color : undefined) ?? fallback
 }
 
 /** L'image d'une ligne (première adresse trouvée dans la case choisie). */
 function rowImage(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"]) {
   if (!layout.imageColumn) return ""
-  return valueOf(row, layout.imageColumn).match(/(https:\/\/[^\s"'<>]+|\/api\/[^\s"'<>]+)/)?.[0] ?? ""
+  const raw = valueOf(row, layout.imageColumn)
+  const address = raw.match(/(https:\/\/[^\s"'<>]+|\/api\/[^\s"'<>]+)/)?.[0]
+  if (address) return address
+  // Pas une adresse : un nom d'icône ou un émoji, que RowImage dessine en icône.
+  const value = plain(raw).split(/[,;\n]/)[0]?.trim() ?? ""
+  return value && (parseGlyphValue(value).emoji || /^[a-z0-9]+(-[a-z0-9]+)*$/.test(value)) ? value : ""
 }
 
 /** L'icône d'une ligne : celle écrite dans la colonne icône, sinon l'icône fixe de la vue. */
@@ -115,11 +125,19 @@ const radii = { sm: "rounded-lg", md: "rounded-xl", lg: "rounded-2xl" } as const
 /** Le cadre d'un élément encadré : ses coins, son ombre. */
 const boxClass = (look: ViewLook) => `${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}`
 
+/** L'image à côté du nom : une adresse donne une image, un nom d'icône ou un émoji donne une icône ; taille en pixels si réglée. */
 function RowImage({ src, look, size }: { src: string; look: ViewLook; size?: keyof typeof imageSizes }) {
   const [failed, setFailed] = useState("")
-  const sized = imageSizes[size ?? look.imageSize ?? "md"]
+  const sized = look.imageWidth || look.imageHeight ? "" : imageSizes[size ?? look.imageSize ?? "md"]
+  const style: CSSProperties | undefined = look.imageWidth || look.imageHeight ? { width: look.imageWidth ?? look.imageHeight, height: look.imageHeight ?? look.imageWidth } : undefined
+  if (!src) return null
+  if (!/^(https?:\/\/|\/)/.test(src)) {
+    const glyph = parseGlyphValue(src)
+    if (!glyph.icon && !glyph.emoji) return null
+    return <span className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} grid shrink-0 place-items-center border bg-muted/40`} style={style}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-[60%]" /></span>
+  }
   // eslint-disable-next-line @next/next/no-img-element -- images des index (Drive ou app)
-  return src && failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} shrink-0 border object-cover`} /> : null
+  return failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} shrink-0 border object-cover`} style={style} /> : null
 }
 
 /** Le cadre d'un élément selon « la couleur marque l'élément par… » (liseré par défaut). */
@@ -501,7 +519,7 @@ function GalleryLayout(props: ViewLayoutProps) {
   const look = layout.look ?? {}
   const width = layout.galleryWidthRem ?? galleryWidths[layout.gallerySize ?? "md"]
   const circle = look.imageShape === "circle"
-  const ratio = circle ? 1 : layout.galleryRatio ?? galleryRatios[layout.galleryShape ?? "portrait"]
+  const ratio = circle ? 1 : layout.galleryHeightRem ? width / layout.galleryHeightRem : layout.galleryRatio ?? galleryRatios[layout.galleryShape ?? "portrait"]
   const radius = circle ? 999 : layout.galleryRadiusPx ?? galleryRadius[look.imageShape ?? "rounded"]
   const hover = Boolean(layout.captionOnHover)
   const below = look.caption === "below" || circle

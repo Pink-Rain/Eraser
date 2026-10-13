@@ -217,6 +217,8 @@ export type ResolvedLayout = {
   /** L'icône (colonne Icône) devant le nom ; un médaillon à la couleur de l'accent ; le nom dans cette couleur. */
   icon?: string
   tint?: boolean
+  /** Le médaillon en tête : la valeur (adresse d'image ou icône), sa taille, rond, teinté. */
+  medallion?: { value: string; size?: number; round?: boolean; tint?: boolean }
   nameInAccent?: boolean
   /** La couleur d'accent de la mise en page, résolue pour cette ligne. */
   accent?: string

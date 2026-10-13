@@ -120,9 +120,15 @@ export type IndexLayout = {
   /** Survol seulement : la colonne de l'image (ou de l'icône) en tête, et celle du sous-titre. */
   image?: string
   subtitle?: string
-  /** Survol : la colonne de l'icône devant le nom ; l'image ou l'icône sur un médaillon à la couleur de l'accent. */
+  /** Survol : la colonne de l'icône devant le nom ; l'image ou l'icône sur un médaillon à la couleur de l'accent (ancien réglage, voir `medallion`). */
   icon?: string
   tint?: boolean
+  /**
+   * Survol : le médaillon en tête (« Ajouter un médaillon ») : sa colonne (une image ou une
+   * icône, au choix de la case ; absente : l'image ou l'icône de la ligne), sa taille en
+   * pixels, rond ou carré, sur un fond à la couleur de l'accent.
+   */
+  medallion?: { column?: string; size?: number; round?: boolean; tint?: boolean }
   /** Survol : le nom prend la couleur de l'accent. */
   nameInAccent?: boolean
   /** La largeur de la carte de survol. */
@@ -325,9 +331,15 @@ export function parseIndexLayout(input: unknown): IndexLayout | null {
   if (subtitle) layout.subtitle = subtitle
   if (icon) layout.icon = icon
   if (raw.tint === true) layout.tint = true
+  if (raw.medallion && typeof raw.medallion === "object") {
+    const medallion = raw.medallion as Record<string, unknown>
+    const column = cleanText(medallion.column, 120)
+    const size = typeof medallion.size === "number" && Number.isFinite(medallion.size) ? Math.max(20, Math.min(160, Math.round(medallion.size))) : undefined
+    layout.medallion = { ...(column ? { column } : {}), ...(size ? { size } : {}), ...(medallion.round === true ? { round: true } : {}), ...(medallion.tint === true ? { tint: true } : {}) }
+  }
   if (raw.nameInAccent === true) layout.nameInAccent = true
   if (raw.width === "sm" || raw.width === "lg") layout.width = raw.width
-  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle) return null
+  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !layout.medallion) return null
   return layout
 }
 
@@ -388,6 +400,7 @@ export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, st
     ...(layout.image ? { image: rename(layout.image) } : {}),
     ...(layout.subtitle ? { subtitle: rename(layout.subtitle) } : {}),
     ...(layout.icon ? { icon: rename(layout.icon) } : {}),
+    ...(layout.medallion?.column ? { medallion: { ...layout.medallion, column: rename(layout.medallion.column) } } : {}),
   }
 }
 
@@ -530,9 +543,8 @@ export function automaticHoverLayout(columns: Array<{ header: string; picture?: 
     aside: [],
     sections: [{ id: layoutId(), rows: description ? [{ id: layoutId(), fields: [{ column: description.header, span: 12, hideLabel: true }] }] : [] }],
     rest: "hide",
-    ...(image ? { image: image.header } : {}),
+    ...(image || glyph ? { medallion: { column: (image ?? glyph)!.header, size: 48 } } : {}),
     ...(type ? { subtitle: type.header } : {}),
-    ...(glyph ? { icon: glyph.header } : {}),
     ...(color ? { accent: `{${color.header}}` } : {}),
   }
 }
@@ -542,7 +554,7 @@ export function layoutPlaces(layout: IndexLayout | null | undefined, column: str
   if (!layout) return false
   const key = foldName(column)
   const fields = [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))]
-  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, layout.subtitle, layout.icon].some((value) => value !== undefined && foldName(value) === key)
+  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, layout.subtitle, layout.icon, layout.medallion?.column].some((value) => value !== undefined && foldName(value) === key)
 }
 
 /** Tous les formulaires d'un onglet (étoilé compris) placent-ils cette colonne ? L'un d'eux suffit. */

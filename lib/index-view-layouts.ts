@@ -53,9 +53,12 @@ export type ViewLook = {
   titleSize?: "sm" | "md" | "lg"
   /** Les colonnes montrées sous le nom. */
   fieldStyle?: "inline" | "labels" | "pills" | "stacked"
-  /** L'image à côté du nom. */
+  /** L'image à côté du nom : sa forme ; sa largeur et sa hauteur en pixels (liées ou non ; `imageSize` : ancien réglage). */
   imageShape?: "square" | "rounded" | "circle"
   imageSize?: "sm" | "md" | "lg"
+  imageWidth?: number
+  imageHeight?: number
+  imageLinked?: boolean
   /** Kanban : colonnes sobres, teintées, ou à en-tête coloré. */
   laneStyle?: "plain" | "tinted" | "header"
   /** Calendrier : grille du mois ou agenda (liste par date) ; style des entrées. */
@@ -161,8 +164,10 @@ export type ViewLayout = {
   hideSeasons?: boolean
   monthStyle?: "plain" | "season"
   maxPerDay?: number
-  /** Galerie : la largeur des vignettes (rem), leurs proportions (largeur ÷ hauteur), l'arrondi (px), le recadrage, sans zoom au survol. */
+  /** Galerie : la largeur et la hauteur des vignettes (rem, liées ou non ; `galleryRatio` : ancien réglage), l'arrondi (px), le recadrage, sans zoom au survol. */
   galleryWidthRem?: number
+  galleryHeightRem?: number
+  galleryLinked?: boolean
   galleryRatio?: number
   galleryRadiusPx?: number
   galleryFit?: "cover" | "contain"
@@ -255,6 +260,9 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   sectionStyle: ["bar", "heading"],
   color: [],
   sectionIcon: [],
+  imageWidth: [],
+  imageHeight: [],
+  imageLinked: [true],
   radius: ["sm", "md", "lg"],
   shadow: [true],
   titleCaps: [true],
@@ -269,6 +277,10 @@ export function cleanViewLook(value: unknown): ViewLook | undefined {
   for (const [key, allowed] of Object.entries(lookChoices)) if (allowed.includes(raw[key])) look[key] = raw[key]
   if (isHexColor(raw.color)) look.color = raw.color
   if (text(raw.sectionIcon, 40)) look.sectionIcon = text(raw.sectionIcon, 40)
+  const imageWidth = bounded(raw.imageWidth, 12, 240)
+  if (imageWidth) look.imageWidth = imageWidth
+  const imageHeight = bounded(raw.imageHeight, 12, 240)
+  if (imageHeight) look.imageHeight = imageHeight
   return Object.keys(look).length ? look as ViewLook : undefined
 }
 
@@ -363,6 +375,9 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (maxPerDay) layout.maxPerDay = maxPerDay
   const galleryWidthRem = bounded(raw.galleryWidthRem, 5, 30, 0.5)
   if (galleryWidthRem) layout.galleryWidthRem = galleryWidthRem
+  const galleryHeightRem = bounded(raw.galleryHeightRem, 3, 40, 0.5)
+  if (galleryHeightRem) layout.galleryHeightRem = galleryHeightRem
+  if (raw.galleryLinked === true) layout.galleryLinked = true
   const galleryRatio = bounded(raw.galleryRatio, 0.3, 4, 0.01)
   if (galleryRatio) layout.galleryRatio = galleryRatio
   const galleryRadiusPx = bounded(raw.galleryRadiusPx, 0, 200)

@@ -84,7 +84,7 @@ export type CardBlock = {
   zone?: "block" | "line" | "pill" | "dot"
   /** Détails : ouverts d'emblée. */
   open?: boolean
-}
+} & ImageBox
 
 /** Une case d'une ligne de la carte : des blocs côte à côte, chacune sa largeur et son alignement. */
 export type CardCell = {
@@ -101,6 +101,24 @@ export type CardCell = {
 export type CardRow = { id: string; cells: CardCell[]; gap?: "none" | "sm" | "md" | "lg" }
 
 export type CardMediaPosition = "top" | "bottom" | "left" | "right" | "background"
+
+/** Un bord de l'élément auquel une image est collée (elle le touche et suit la taille de l'élément). */
+export type ImageEdge = "top" | "bottom" | "left" | "right"
+export const imageEdges: ImageEdge[] = ["top", "bottom", "left", "right"]
+
+/**
+ * La taille libre d'une image, la même partout (cartes, vues, survols) : la largeur et la
+ * hauteur en % de la largeur de l'élément (100 / 100 : un carré aussi large que la carte),
+ * « hauteur automatique » : celle de l'image ; liées, bouger l'une bouge l'autre ; collée à
+ * un ou plusieurs bords.
+ */
+export type ImageBox = {
+  widthPct?: number
+  heightPct?: number
+  autoHeight?: boolean
+  linked?: boolean
+  edges?: ImageEdge[]
+}
 
 /** L'image principale de la carte (portrait, bannière, icône…). */
 export type CardMedia = {
@@ -123,7 +141,7 @@ export type CardMedia = {
   heightPx?: number
   /** Une marge autour de l'image (sinon collée aux bords). */
   inset?: boolean
-}
+} & ImageBox
 
 export type CardWidth = "xs" | "sm" | "md" | "lg" | "xl" | "full"
 
@@ -164,6 +182,40 @@ export type CardTemplate = {
   ratio?: number
   /** La grille : au plus tant de cartes par ligne ; sur téléphone, une ou deux par ligne. */
   grid?: { max?: number; phone?: 1 | 2 }
+}
+
+/**
+ * La boîte d'une image principale, nouvelle forme ou déduite des anciens réglages (taille,
+ * format, accroche, marge) : le rendu n'a qu'un chemin.
+ */
+export function mediaBox(media: CardMedia): Required<Pick<ImageBox, "widthPct" | "edges">> & Pick<ImageBox, "heightPct" | "autoHeight"> {
+  const side = media.position === "left" || media.position === "right"
+  const ratioOf = () => media.ratio ?? (media.aspect ? Number(media.aspect.split("/")[0]) / Number(media.aspect.split("/")[1]) : side ? 1 : 4 / 3)
+  if (media.widthPct !== undefined || media.heightPct !== undefined || media.autoHeight || media.edges) {
+    const widthPct = media.widthPct ?? (side ? 40 : 100)
+    const edges: ImageEdge[] = media.edges ?? (side ? [media.position as ImageEdge, "top"] : [media.position === "bottom" ? "bottom" : "top", "left", "right"])
+    return { widthPct, edges, ...(media.autoHeight ? { autoHeight: true } : { heightPct: media.heightPct ?? Math.round(widthPct / ratioOf()) }) }
+  }
+  if (side) {
+    const widthPct = { xs: 20, sm: 30, md: 40, lg: 55 }[media.size ?? "md"]
+    const inset = (media.shape && media.shape !== "rect") || media.inset
+    const anchor = media.anchor ?? "top"
+    const sideEdge = media.position as ImageEdge
+    const edges: ImageEdge[] = inset ? [] : anchor === "stretch" ? ["top", "bottom", sideEdge] : anchor === "bottom" ? ["bottom", sideEdge] : ["top", sideEdge]
+    return { widthPct, edges, heightPct: anchor === "stretch" ? widthPct : Math.round(widthPct / ratioOf()) }
+  }
+  const edges: ImageEdge[] = media.inset ? [] : media.position === "background" ? ["top", "bottom", "left", "right"] : [media.position === "bottom" ? "bottom" : "top", "left", "right"]
+  const widthPct = media.shape === "circle" ? 50 : 100
+  if (media.sizing === "height") return { widthPct, edges, heightPct: Math.round((media.heightPx ?? 160) / 2.4) }
+  return { widthPct, edges, heightPct: Math.round(widthPct / ratioOf()) }
+}
+
+/** La boîte d'un bloc image, nouvelle forme ou déduite des anciens réglages (largeur en %, format, place). */
+export function blockBox(block: CardBlock): Required<Pick<ImageBox, "widthPct" | "edges">> & Pick<ImageBox, "heightPct" | "autoHeight"> {
+  const widthPct = block.widthPct ?? block.width ?? 100
+  const ratio = block.ratio ?? (block.aspect ? Number(block.aspect.split("/")[0]) / Number(block.aspect.split("/")[1]) : 1)
+  const edges = block.edges ?? (block.align === "center" ? [] : block.align === "right" ? ["right"] : ["left"])
+  return { widthPct, edges, ...(block.autoHeight ? { autoHeight: true } : { heightPct: block.heightPct ?? Math.round(widthPct / ratio) }) }
 }
 
 /** Les cartes d'un onglet, et celle qu'on montre d'abord. */
@@ -279,6 +331,18 @@ function columnList(value: unknown) {
   }).slice(0, MAX_COLUMNS)
 }
 
+/** La taille libre d'une image, lue et bornée ; les champs absents restent absents. */
+export function cleanImageBox(raw: Record<string, unknown>): ImageBox {
+  const box: ImageBox = {}
+  if (typeof raw.widthPct === "number" && Number.isFinite(raw.widthPct)) box.widthPct = Math.max(5, Math.min(100, Math.round(raw.widthPct)))
+  if (typeof raw.heightPct === "number" && Number.isFinite(raw.heightPct)) box.heightPct = Math.max(5, Math.min(300, Math.round(raw.heightPct)))
+  if (raw.autoHeight === true) box.autoHeight = true
+  if (raw.linked === true) box.linked = true
+  const edges = Array.isArray(raw.edges) ? raw.edges.filter((edge): edge is ImageEdge => imageEdges.includes(edge as ImageEdge)) : []
+  if (Array.isArray(raw.edges)) box.edges = [...new Set(edges)]
+  return box
+}
+
 function cleanPart(input: unknown): CardPart | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
@@ -349,6 +413,7 @@ function cleanBlock(input: unknown): CardBlock | null {
   const zone = oneOf<"block" | "line" | "pill" | "dot">(raw.zone, ["block", "line", "pill", "dot"])
   if (zone) block.zone = zone
   if (raw.open === true) block.open = true
+  Object.assign(block, cleanImageBox(raw))
   return block
 }
 
@@ -402,6 +467,7 @@ function cleanMedia(input: unknown): CardMedia | undefined {
   if (sizing) media.sizing = sizing
   if (typeof raw.heightPx === "number" && Number.isFinite(raw.heightPx)) media.heightPx = Math.max(16, Math.min(800, Math.round(raw.heightPx)))
   if (raw.inset === true) media.inset = true
+  Object.assign(media, cleanImageBox(raw))
   return media
 }
 
@@ -643,6 +709,24 @@ export const cardStarters: CardStarter[] = [
     },
   },
   {
+    key: "portrait",
+    label: "Portrait",
+    hint: "Une grande image verticale, le nom et deux lignes courtes : un personnage, un PNJ.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Portrait", width: "sm", lift: true, band: true, border: "subtle",
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        ...(roles.image ? { media: { column: roles.image, position: "top" as const, aspect: "4/5" as const, fit: "cover" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "md", font: "display" }),
+          roles.choices[0] && block("line", { parts: [{ column: roles.choices[0] }], tone: "accent", bold: true, size: "xs" }),
+          (roles.choices[1] ?? roles.texts[0]) && block("line", { parts: [{ column: (roles.choices[1] ?? roles.texts[0])! }], italic: true, tone: "muted", size: "xs" }),
+        ].filter(present),
+      }
+    },
+  },
+  {
     key: "side",
     label: "Fiche horizontale",
     hint: "L’image à gauche, le contenu à droite : une jauge, des valeurs, la description.",
@@ -699,6 +783,40 @@ export const cardStarters: CardStarter[] = [
     },
   },
   {
+    key: "badge",
+    label: "Insigne centré",
+    hint: "Le titre en haut, l’image au centre, les pastilles empilées : une classe, un blason.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Insigne", width: "md", align: "center", border: "accent", shadow: true, lift: true,
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display", tone: "accent", align: "center" }),
+          (roles.image ?? roles.glyph) && block("image", { column: (roles.image ?? roles.glyph)!, aspect: "1/1", fit: "contain", width: 80 }),
+          roles.choices.length > 0 && block("pills", { columns: roles.choices.slice(0, 3), stacked: true }),
+          roles.numbers[0] && block("divider"),
+          roles.numbers[0] && block("field", { column: roles.numbers[0] }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "text",
+    label: "Texte seul",
+    hint: "Sans image : le nom en titre et tout le texte, comme une entrée de glossaire.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Texte", width: "xl", border: "none", surface: "plain",
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display" }),
+          roles.description && block("text", { column: roles.description, clamp: 0, size: "md" }),
+        ].filter(present),
+      }
+    },
+  },
+  {
     key: "playing",
     label: "Carte à jouer",
     hint: "Grande illustration, titre centré, pastilles et petites tuiles en bas : un sort, un objet, une créature.",
@@ -714,6 +832,82 @@ export const cardStarters: CardStarter[] = [
           roles.description && block("text", { column: roles.description, clamp: 3, size: "xs", align: "center", italic: true, tone: "muted" }),
           roles.numbers.length > 0 && block("divider"),
           roles.numbers.length > 0 && block("stats", { columns: roles.numbers.slice(0, 4) }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "combat",
+    label: "Fiche de combat",
+    hint: "Le nom et son rang, une barre de vie, les caractéristiques en tuiles, le reste replié : un PNJ, un monstre.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      const life = roles.numbers.find((column) => /pv|vie|sant[ée]|hp|points/i.test(column)) ?? roles.numbers[0]
+      const lifeMax = roles.numbers.find((column) => column !== life && /max/i.test(column))
+      const tiles = roles.numbers.filter((column) => column !== life && column !== lifeMax).slice(0, 7)
+      return {
+        id: cardId(), name: "Fiche de combat", width: "lg", border: "left", density: "compact",
+        accent: roles.color ? { column: roles.color } : { color: "#a83a33" },
+        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "1/1" as const, fit: "cover" as const, size: "sm" as const, shape: "rounded" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "md", font: "display", ...(roles.choices[0] ? { badges: [roles.choices[0]] } : {}) }),
+          life && block("bar", { column: life, ...(lifeMax ? { maxColumn: lifeMax } : { max: 100 }), label: life, showValue: true }),
+          tiles.length > 0 && block("stats", { columns: tiles }),
+          (roles.description || roles.texts.length > 0) && block("details", { label: "Détails", columns: [roles.description, ...roles.texts].filter((column): column is string => Boolean(column)).slice(0, 4) }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "dossier",
+    label: "Dossier",
+    hint: "Une fiche d’enquête : portrait à gauche, champs libellés, la description en citation.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      const fields = [...roles.choices, ...roles.numbers].slice(0, 3)
+      return {
+        id: cardId(), name: "Dossier", width: "xl", border: "top", surface: "tint",
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        ...(roles.image ? { media: { column: roles.image, position: "left" as const, aspect: "4/5" as const, fit: "cover" as const, size: "md" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display" }),
+          ...fields.map((column) => block("field", { column })),
+          roles.description && block("text", { column: roles.description, clamp: 4, size: "sm", quote: true, italic: true }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "banner",
+    label: "Bannière",
+    hint: "Une image large en bandeau, le nom en grand, une ligne et deux lignes de texte : une campagne, un lieu, une faction.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Bannière", width: "xl", lift: true, band: true, border: "subtle",
+        ...(roles.color ? { accent: { column: roles.color } } : {}),
+        ...(roles.image ? { media: { column: roles.image, position: "top" as const, aspect: "16/6" as const, fit: "cover" as const } } : {}),
+        blocks: [
+          roles.name && block("title", { column: roles.name, size: "xl", font: "display", tone: "accent" }),
+          roles.choices.length > 0 && block("line", { parts: roles.choices.slice(0, 3).map((column) => ({ column })), separator: " • ", size: "xs", caps: true, tone: "muted" }),
+          roles.description && block("text", { column: roles.description, clamp: 2, size: "sm" }),
+        ].filter(present),
+      }
+    },
+  },
+  {
+    key: "token",
+    label: "Vignette ronde",
+    hint: "Petite et centrée : un portrait rond et le nom, pour un trombinoscope serré.",
+    build: (columns) => {
+      const roles = cardRoles(columns)
+      return {
+        id: cardId(), name: "Vignette ronde", width: "xs", align: "center", border: "none", surface: "plain", density: "compact", lift: true,
+        accent: roles.color ? { column: roles.color } : { color: DEFAULT_CARD_ACCENT },
+        blocks: [
+          (roles.image ?? roles.glyph) && block("image", { column: (roles.image ?? roles.glyph)!, aspect: "1/1", fit: "cover", shape: "circle", width: 75, align: "center" }),
+          roles.name && block("title", { column: roles.name, size: "sm", font: "display", align: "center", clamp: 2 }),
+          roles.choices[0] && block("line", { parts: [{ column: roles.choices[0], tone: "column" }], size: "xs", align: "center" }),
         ].filter(present),
       }
     },

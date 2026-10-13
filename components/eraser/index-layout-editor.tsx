@@ -4,6 +4,7 @@ import { useMemo, useState, type DragEvent, type ReactNode } from "react"
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Blocks, GripVertical, Heading, Paintbrush, Plus, RotateCcw, Settings2, Tag, Trash2, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { IndexImage } from "@/components/eraser/index-image"
 import { LayoutBlockView, layoutBlockSummary } from "@/components/eraser/index-layout-blocks"
 import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/index-layout-view"
 import { RichTextField } from "@/components/eraser/rich-text"
@@ -13,7 +14,7 @@ import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cardPalette } from "@/lib/index-cards"
-import { foldName, indexColumnKinds, isNameColumnSpec, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, indexColumnKinds, isImageSource, isNameColumnSpec, normalizeSpec, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import {
   arrangeLayout,
   blockKey,
@@ -93,7 +94,7 @@ function placeField(layout: IndexLayout, column: string, place: Place, position?
 }
 
 const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
-const group = "grid gap-2 rounded-xl border bg-muted/15 p-3"
+const group = "grid gap-2 rounded-xl border bg-muted/15 p-2.5"
 
 /** Une couleur : une pastille de la palette, une colonne Couleur (« {Couleur} »), ou aucune. */
 function ColorPick({ value, onChange, columns, disabled, label, allowAccent = true }: { value?: string; onChange: (value: string | undefined) => void; columns?: string[]; disabled?: boolean; label: string; allowAccent?: boolean }) {
@@ -389,31 +390,43 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
 
       <div className={cn(group, "sm:grid-cols-2")}>
         <span className={smallLabel}>Couleur d’accent <span className="font-normal">— titres de sections, séparateurs, boutons</span><ColorPick label="Couleur d’accent" value={layout.accent} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(accent) => set({ ...layout, accent })} /></span>
-        {hover && <>
-          <label className={smallLabel}>Image en tête
-            <NativeSelect disabled={disabled} value={layout.image ?? ""} onChange={(event) => set({ ...layout, image: event.target.value || undefined })} className="h-8 py-0 text-xs">
-              <NativeSelectOption value="">Automatique (Image, Portrait…)</NativeSelectOption>
-              {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
-            </NativeSelect>
-          </label>
-          <label className={smallLabel}>Sous-titre (sous le nom)
-            <NativeSelect disabled={disabled} value={layout.subtitle ?? ""} onChange={(event) => set({ ...layout, subtitle: event.target.value || undefined })} className="h-8 py-0 text-xs">
-              <NativeSelectOption value="">Automatique (Type, onglet)</NativeSelectOption>
-              {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
-            </NativeSelect>
-          </label>
-          <label className={smallLabel}>Icône devant le nom
-            <NativeSelect disabled={disabled} value={layout.icon ?? ""} onChange={(event) => set({ ...layout, icon: event.target.value || undefined })} className="h-8 py-0 text-xs">
-              <NativeSelectOption value="">Aucune</NativeSelectOption>
-              {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
-            </NativeSelect>
-          </label>
-          <div className="flex flex-wrap items-center gap-3 self-end pb-1">
-            <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.tint)} onCheckedChange={(checked) => set({ ...layout, tint: checked === true || undefined })} />Médaillon à la couleur de l’accent</label>
-            <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.nameInAccent)} onCheckedChange={(checked) => set({ ...layout, nameInAccent: checked === true || undefined })} />Nom dans la couleur de l’accent</label>
+        {hover && <div className="grid gap-2 sm:col-span-2">
+          <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
+            <label className={smallLabel}>Sous-titre
+              <NativeSelect disabled={disabled} value={layout.subtitle ?? ""} onChange={(event) => set({ ...layout, subtitle: event.target.value || undefined })} className="h-8 py-0 text-xs">
+                <NativeSelectOption value="">Automatique (Type, onglet)</NativeSelectOption>
+                {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
+              </NativeSelect>
+            </label>
+            <label className={smallLabel}>Icône devant le nom
+              <NativeSelect disabled={disabled} value={layout.icon ?? ""} onChange={(event) => set({ ...layout, icon: event.target.value || undefined })} className="h-8 py-0 text-xs">
+                <NativeSelectOption value="">Aucune</NativeSelectOption>
+                {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
+              </NativeSelect>
+            </label>
             <span className={smallLabel}>Largeur<Segmented label="Largeur du survol" value={layout.width ?? "md"} disabled={disabled} onChange={(width) => set({ ...layout, width: width === "md" ? undefined : width })} options={[{ value: "sm", label: "Étroit" }, { value: "md", label: "Normal" }, { value: "lg", label: "Large" }]} /></span>
+            <label className="flex items-center gap-1.5 self-center pt-3 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.nameInAccent)} onCheckedChange={(checked) => set({ ...layout, nameInAccent: checked === true || undefined })} />Nom à la couleur de l’accent</label>
           </div>
-        </>}
+          {/* Le médaillon en tête : rien d'office ; « Ajouter un médaillon » le pose, avec sa colonne (image ou icône, au choix de la case), sa taille, rond, teinté. */}
+          {!layout.medallion && !layout.tint && !layout.image
+            ? <div><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => set({ ...layout, medallion: { size: 44 } })}><Plus />Ajouter un médaillon</Button></div>
+            : (() => {
+              const medallion = layout.medallion ?? { ...(layout.image ? { column: layout.image } : {}), ...(layout.tint ? { tint: true } : {}), size: 44 }
+              const update = (changes: Partial<NonNullable<IndexLayout["medallion"]>>) => set({ ...layout, image: undefined, tint: undefined, medallion: { ...medallion, ...changes } })
+              return <div className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-lg border border-dashed bg-background/40 p-2">
+                <label className={smallLabel}>Médaillon
+                  <NativeSelect disabled={disabled} value={medallion.column ?? ""} onChange={(event) => update({ column: event.target.value || undefined })} className="h-8 py-0 text-xs">
+                    <NativeSelectOption value="">Image ou icône de la ligne (automatique)</NativeSelectOption>
+                    {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
+                  </NativeSelect>
+                </label>
+                <label className="grid min-w-28 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Taille</span><span className="font-normal tabular-nums">{medallion.size ?? 44} px</span></span><input type="range" min={20} max={160} step={2} value={medallion.size ?? 44} disabled={disabled} onChange={(event) => update({ size: Number(event.target.value) })} className="accent-primary" /></label>
+                <label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(medallion.round)} onCheckedChange={(checked) => update({ round: checked === true || undefined })} />Rond</label>
+                <label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(medallion.tint)} onCheckedChange={(checked) => update({ tint: checked === true || undefined })} />Fond à la couleur de l’accent</label>
+                <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set({ ...layout, image: undefined, tint: undefined, medallion: undefined })} aria-label="Retirer le médaillon" title="Retirer le médaillon"><X /></Button>
+              </div>
+            })()}
+        </div>}
       </div>
 
       <div className={`grid gap-2 rounded-xl border p-3 ${over === "aside" ? "border-primary bg-primary/5" : "bg-muted/10"}`} {...dropProps({ area: "aside" }, "aside")}>
@@ -504,12 +517,18 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
 
     <aside className="grid content-start gap-2 rounded-xl border bg-card/70 p-3 xl:sticky xl:top-0 xl:self-start">
       <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu</p>
-      {hover && <div className="flex items-center gap-2">
-        {layout.tint
-          ? <span className="grid size-9 place-items-center rounded-lg text-white" style={{ background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)` }}>{layout.icon && readColumn(layout.icon) ? <IndexIconGlyph icon={readColumn(layout.icon)} className="size-4" /> : <span className="text-[10px]">img</span>}</span>
-          : <span className="grid size-9 place-items-center rounded-lg border bg-muted/40 text-[10px] text-muted-foreground">{layout.image ? "img" : "…"}</span>}
-        <span className="min-w-0"><span className="block truncate font-display text-sm font-semibold" style={layout.nameInAccent ? { color: accent } : undefined}>{layout.icon && !layout.tint && readColumn(layout.icon) && <IndexIconGlyph icon={readColumn(layout.icon)} className="mr-1 inline size-3.5" filled={false} />}{previewItems.find((item) => columns.find((column) => column.header === item.header && isNameColumnSpec(column.spec)))?.text || "Nom de la ligne"}</span><span className="block truncate text-[9px] uppercase tracking-[.14em] text-muted-foreground">{layout.subtitle ? readColumn(layout.subtitle) || layout.subtitle : "Type"}</span></span>
-      </div>}
+      {hover && (() => {
+        const medallion = layout.medallion ?? (layout.tint ? { tint: true, size: 40 } : layout.image ? { column: layout.image, size: 44 } : undefined)
+        const value = medallion?.column ? readColumn(medallion.column) : ""
+        const glyph = value && !isImageSource(value) ? parseGlyphValue(value) : null
+        const size = medallion?.size ?? 44
+        return <div className="flex items-center gap-2">
+          {medallion && <span className={cn("grid shrink-0 place-items-center overflow-hidden", medallion.round ? "rounded-full" : "rounded-lg", medallion.tint ? "text-white" : "border bg-muted/40 text-muted-foreground")} style={{ width: size, height: size, ...(medallion.tint ? { background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)` } : {}) }}>
+            {value && isImageSource(value) ? <IndexImage value={value} alt="" className="size-full object-cover" /> : glyph && (glyph.icon || glyph.emoji) ? <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-[50%]" /> : <span className="text-[10px]">{medallion.column ? "—" : "auto"}</span>}
+          </span>}
+          <span className="min-w-0"><span className="block truncate font-display text-sm font-semibold" style={layout.nameInAccent ? { color: accent } : undefined}>{layout.icon && readColumn(layout.icon) && <IndexIconGlyph icon={readColumn(layout.icon)} className="mr-1 inline size-3.5" filled={false} />}{previewItems.find((item) => columns.find((column) => column.header === item.header && isNameColumnSpec(column.spec)))?.text || "Nom de la ligne"}</span><span className="block truncate text-[9px] uppercase tracking-[.14em] text-muted-foreground">{layout.subtitle ? readColumn(layout.subtitle) || layout.subtitle : "Type"}</span></span>
+        </div>
+      })()}
       <IndexLayoutView
         compact
         accent={accent}

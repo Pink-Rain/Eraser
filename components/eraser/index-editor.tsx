@@ -1246,9 +1246,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </section>}
 
         {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            Les <b className="text-foreground">vues</b> de « {tab.name} » : liste, kanban, maître-détail, calendrier, tableau de bord. Un onglet-fenêtre qui en choisit une la montre avec ces réglages. Gardées dans Eraser, pour tout le monde ; les presets servent dans tous les index.
-          </div>
           <IndexViewsEditor
             key={`${tab.id}:${viewKind}`}
             kind={viewKind}
@@ -1264,9 +1261,6 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </section>}
 
         {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-          <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-            Les <b className="text-foreground">cartes</b> des lignes de « {tab.name} » : la vue « Cartes » de l’index les montre à la place du tableau (recherche, onglets-fenêtres et tri compris). Un onglet peut en avoir plusieurs ; l’étoile choisit celle montrée d’abord. Gardées dans Eraser, pour tout le monde.
-          </div>
           {(() => {
             const entry = cardsOf(tab)
             return <IndexCardEditor

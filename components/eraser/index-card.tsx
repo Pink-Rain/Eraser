@@ -30,6 +30,8 @@ import {
   type CardTemplate,
   type CardTextSize,
   type CardTone,
+  mediaBox,
+  blockBox,
 } from "@/lib/index-cards"
 import { foldName, gaugeScaleOf, isCheckedValue, isImageSource, matchChoice, normalizeSpec, parseGaugeCell, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
@@ -117,7 +119,15 @@ function initialsOf(name: string) {
  * Une image de carte : une image (importée ou par adresse), une icône, un symbole. Sans
  * rien : un fond à la couleur de l'accent avec les initiales, ou un pictogramme discret.
  */
-function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, alt, initials, className = "", style }: {
+/** Une case qui n'est pas une adresse d'image mais un nom d'icône (« skull », « heart-pulse ») ou un émoji : une icône. */
+function glyphOf(value: string, kind: string | undefined) {
+  if (kind === "glyph") return parseGlyphValue(value)
+  const look = parseGlyphValue(value)
+  if (look.emoji) return look
+  return look.icon && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(look.icon) && look.icon.length <= 40 ? look : null
+}
+
+function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, alt, initials, className = "", style, natural = false }: {
   row: CardRowSource
   column: string
   accent: string
@@ -128,25 +138,27 @@ function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, 
   initials: string
   className?: string
   style?: CSSProperties
+  /** La hauteur suit l'image (pas de format imposé). */
+  natural?: boolean
 }) {
   const [failed, setFailed] = useState("")
   const raw = (row.value(column) ?? "").trim()
   const spec = row.spec(column)
   const kind = spec ? normalizeSpec(spec).kind : undefined
   const first = raw.split(/\n+/).map((item) => item.trim()).filter(Boolean)[0] ?? ""
-  const glyph = kind === "glyph" ? parseGlyphValue(raw) : null
+  const glyph = first && !isImageSource(first) ? glyphOf(first, kind) : null
   const background: CSSProperties = tint
     ? { background: `radial-gradient(circle at 35% 30%, ${accent}, color-mix(in srgb, ${accent} 78%, #1d140c) 60%, #1d140c 130%)`, color: "#fffaf0" }
     : { backgroundColor: `color-mix(in srgb, ${accent} 10%, var(--muted))`, color: accent }
-  const box = cn("relative flex shrink-0 items-center justify-center overflow-hidden", shapeClass(shape), className)
-  if (glyph && (glyph.icon || glyph.emoji)) return <span className={box} style={{ ...background, ...style }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-[55%]" filled={Boolean(glyph.emoji) || tint} /></span>
+  const box = cn("relative flex shrink-0 items-center justify-center overflow-hidden", shapeClass(shape), natural && "min-h-12", className)
+  if (glyph && (glyph.icon || glyph.emoji)) return <span className={box} style={{ ...background, ...style }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={natural ? "size-10 my-3" : "size-[55%]"} filled={Boolean(glyph.emoji) || tint} /></span>
   const fallback = initials
     ? <span className="font-display text-[1.15em] font-semibold opacity-80" aria-hidden="true">{initials}</span>
     : <ImageIcon className="size-1/3 max-h-8 max-w-8 opacity-40" aria-hidden="true" />
   return <span className={box} style={{ ...background, ...style }}>
     {first && isImageSource(first) && failed !== first
       // eslint-disable-next-line @next/next/no-img-element -- images d'index : adresses importées ou externes, servies telles quelles
-      ? <img src={first} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(first)} ref={(node) => { if (node?.complete && node.naturalWidth === 0) setFailed(first) }} className={cn("size-full", fit === "contain" ? "object-contain p-[6%]" : "object-cover", shapeClass(shape))} />
+      ? <img src={first} alt={alt} loading="lazy" decoding="async" onError={() => setFailed(first)} ref={(node) => { if (node?.complete && node.naturalWidth === 0) setFailed(first) }} className={cn(natural ? "h-auto w-full" : "size-full", fit === "contain" ? "object-contain p-[6%]" : "object-cover", shapeClass(shape))} />
       : first && !isImageSource(first) ? <IndexImage value={first} alt={alt} className="text-[2em]" fallback={fallback} /> : fallback}
   </span>
 }
@@ -283,8 +295,11 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
     case "image": {
       if (!block.column) return null
       if (!(row.value(block.column) ?? "").trim()) return null
-      return <div className={cn("flex", align === "center" || ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : "")}>
-        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} alt={block.column} initials="" className="w-full" style={{ ...aspectClass(block.aspect ?? "1/1", block.ratio), ...radiusStyle(block.radiusPx), width: `${block.width ?? 100}%` }} />
+      const box = blockBox(block)
+      const touchL = box.edges.includes("left"), touchR = box.edges.includes("right")
+      const justify = touchL && touchR ? "justify-stretch" : touchL ? "justify-start" : touchR ? "justify-end" : ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start"
+      return <div className={cn("flex", justify)}>
+        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} alt={block.column} initials="" natural={box.autoHeight} className="w-full" style={{ ...(box.autoHeight ? {} : { aspectRatio: `${box.widthPct} / ${box.heightPct}` }), ...radiusStyle(block.radiusPx), width: touchL && touchR ? "100%" : `${box.widthPct}%` }} />
       </div>
     }
     case "value": {
@@ -364,7 +379,6 @@ function DetailsBlock({ label, open: initial = false, accent, children }: { labe
 
 const radiusClass = { sm: "rounded-lg", md: "rounded-2xl", lg: "rounded-[1.35rem]" } as const
 const paddingClass = { compact: "p-2.5 gap-1", normal: "p-3.5 gap-1.5", airy: "p-5 gap-2.5" } as const
-const sideWidths = { xs: "w-12", sm: "w-20", md: "w-28", lg: "w-40" } as const
 
 /** Le nom de la ligne (initiales d'une image absente, texte de l'image). */
 function nameOf(card: CardTemplate, row: CardRowSource) {
@@ -445,7 +459,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
     {blocks}
   </div>
 
-  const pictureFor = (extra: string, style?: CSSProperties) => media ? <CardPicture row={row} column={media.column} accent={accent} fit={media.fit} shape={media.shape} tint={media.tint} alt={name} initials={initialsOf(name)} className={extra} style={style} /> : null
+  const pictureFor = (extra: string, style?: CSSProperties) => media ? <CardPicture row={row} column={media.column} accent={accent} fit={media.fit} shape={media.shape} tint={media.tint} alt={name} initials={initialsOf(name)} className={extra} style={style} natural={Boolean(box?.autoHeight) && !(style && "height" in style)} /> : null
   const band = card.band ? <div className="h-1 w-full shrink-0" style={{ backgroundColor: accent }} /> : null
   const corner = card.corner ? (() => {
     const value = cellText(row, card.corner!)
@@ -456,16 +470,23 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   const chevron = card.chevron ? <ChevronRight className="mr-2 size-4 shrink-0 self-center text-muted-foreground/60" aria-hidden="true" /> : null
 
   let content: ReactNode
-  // En haut ou en bas : la hauteur suit les proportions, ou une hauteur fixe ; une marge si demandé.
-  const topStyle = media ? { ...(media.sizing === "height" ? { height: media.heightPx ?? 160 } : aspectClass(media.aspect, media.ratio)), ...radiusStyle(media.radiusPx) } : undefined
-  if (media?.position === "top" || media?.position === "bottom") {
-    const picture = pictureFor(cn("w-full", media.shape === "circle" && "mx-auto mt-3 w-1/2", media.inset && (density === "compact" ? "w-[calc(100%-1rem)] mx-2 mt-2" : "w-[calc(100%-1.5rem)] mx-3 mt-3")), topStyle)
+  // La boîte de l'image principale : largeur et hauteur en % de la carte, collée aux bords cochés, une marge ailleurs.
+  const pad = density === "compact" ? "0.625rem" : density === "airy" ? "1.25rem" : "0.875rem"
+  const box = media ? mediaBox(media) : null
+  const touches = (edge: "top" | "bottom" | "left" | "right") => Boolean(box?.edges.includes(edge))
+  const pictureStyle = (stretch = false): CSSProperties => ({ ...(box && !box.autoHeight && !stretch ? { aspectRatio: `${box.widthPct} / ${box.heightPct}` } : {}), ...(stretch ? { height: "100%" } : {}), ...radiusStyle(media?.radiusPx) })
+  if ((media?.position === "top" || media?.position === "bottom") && box) {
+    const full = touches("left") && touches("right")
+    const justify = full ? "" : touches("left") ? "justify-start" : touches("right") ? "justify-end" : "justify-center"
+    const frame: CSSProperties = { paddingLeft: touches("left") ? 0 : pad, paddingRight: touches("right") ? 0 : pad, paddingTop: media.position === "top" ? (touches("top") ? 0 : pad) : 0, paddingBottom: media.position === "bottom" ? (touches("bottom") ? 0 : pad) : 0 }
+    const picture = <div className={cn("flex min-w-0", justify)} style={frame}>{pictureFor("", { ...pictureStyle(), width: full ? "100%" : `${box.widthPct}%` })}</div>
     content = media.position === "top" ? <>{picture}{band}{body}</> : <>{band}{body}{picture}</>
-  } else if (media?.position === "left" || media?.position === "right") {
-    // Collée en haut et en bas (toute la hauteur), ou seulement en haut, ou en bas.
-    const anchor = media.anchor ?? "top"
-    const inset = media.shape && media.shape !== "rect" ? true : Boolean(media.inset)
-    const side = pictureFor(cn(sideWidths[media.size ?? "md"], anchor === "stretch" ? "self-stretch" : anchor === "bottom" ? "self-end" : "self-start", inset && (density === "compact" ? "m-2" : "m-3")), { ...(anchor === "stretch" ? {} : aspectClass(media.aspect ?? "1/1", media.ratio)), ...radiusStyle(media.radiusPx) })
+  } else if ((media?.position === "left" || media?.position === "right") && box) {
+    // Collée en haut et en bas (toute la hauteur), en haut, en bas, ou flottante au milieu.
+    const stretch = touches("top") && touches("bottom")
+    const align = stretch ? "self-stretch" : touches("top") ? "self-start" : touches("bottom") ? "self-end" : "self-center"
+    const frame: CSSProperties = { width: `${box.widthPct}%`, paddingTop: touches("top") ? 0 : pad, paddingBottom: touches("bottom") ? 0 : pad, paddingLeft: media.position === "left" ? (touches("left") ? 0 : pad) : 0, paddingRight: media.position === "right" ? (touches("right") ? 0 : pad) : 0 }
+    const side = <div className={cn("flex shrink-0", align)} style={frame}>{pictureFor("w-full", pictureStyle(stretch))}</div>
     content = <>{band}<div className={cn("flex min-w-0 flex-1", media.position === "right" && "flex-row-reverse")}>{side}{body}{chevron}</div></>
   } else if (onImage && media) {
     content = <div className="relative grid min-w-0 flex-1" style={aspectClass(media.aspect ?? "4/3", media.ratio)}>
