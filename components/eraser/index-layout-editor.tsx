@@ -329,8 +329,9 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
         {layoutSpans.map((span) => <NativeSelectOption key={span.value} value={String(span.value)} title={span.label}>{span.short}</NativeSelectOption>)}
       </NativeSelect>}
       {!isBlock && (field.large || field.hideLabel) && <span className="flex shrink-0 gap-0.5 text-muted-foreground">{field.large && <Heading className="size-3" aria-label="En grand" />}{field.hideLabel && <Tag className="size-3" aria-label="Sans nom de colonne" />}</span>}
-      {/* Les gestes du champ, dans une petite barre qui flotte au-dessus au survol : le champ reste compact. */}
-      <span className="absolute -top-3.5 right-1 z-20 hidden items-center rounded-md border bg-popover px-0.5 shadow-md group-hover/chip:flex group-focus-within/chip:flex">
+      {/* Les gestes du champ, dans une petite barre qui flotte au-dessus au survol : le champ reste compact.
+          Tant que les réglages sont ouverts, la barre reste affichée : la fenêtre s'ancre dessus, elle ne doit pas disparaître quand la souris part. */}
+      <span className={cn("absolute -top-3.5 right-1 z-20 hidden items-center rounded-md border bg-popover px-0.5 shadow-md group-hover/chip:flex group-focus-within/chip:flex", open && "flex")}>
         <Popover open={open} onOpenChange={(next) => setEditing(next ? field.column : null)}>
           <PopoverTrigger asChild><Button type="button" variant={open ? "secondary" : "ghost"} size="icon-xs" disabled={disabled} title={isBlock ? "Réglages du bloc" : "Libellé, icône, couleur"} aria-label="Réglages">{isBlock ? <Settings2 /> : <Paintbrush />}</Button></PopoverTrigger>
           <PopoverContent align="end" className="w-96 p-3">
