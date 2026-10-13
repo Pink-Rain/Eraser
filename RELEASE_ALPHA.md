@@ -1,31 +1,34 @@
-# Eraser 0.1.1-alpha.220 — « Modifier » protège tes changements ; fiche, survol et séparateurs affinés
+# Eraser 0.1.1-alpha.221 — Les vues, lot 1 : une base commune
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les mises en page déjà réglées se relisent telles quelles.
+Sheets ; les vues déjà réglées se relisent telles quelles. Le lot 2 (un élément sur mesure,
+fait avec le moteur des cartes, dans chaque vue) suit.
 
-## « Modifier » ne perd plus rien
+## « Modifier » : deux volets
 
-- Fermer avec des changements pas encore enregistrés (✕, Échap, clic à côté, « Annuler »)
-  demande : **Continuer à modifier**, **Quitter sans enregistrer** ou **Enregistrer**.
-- **Réduire** (en haut à droite) cache l'éditeur sans rien perdre : on peut changer d'onglet,
-  ouvrir une ligne, regarder l'index… Une petite barre en bas à droite dit combien de
-  changements attendent ; **Reprendre** rouvre l'éditeur tel quel.
+- Dans les vues, les cartes, le formulaire et le survol : **les réglages à gauche, l'aperçu à
+  droite**, chacun avec **sa propre barre de défilement**. Un long menu de réglages ne cache plus
+  l'aperçu.
+- Des réglages lisibles : le libellé **au-dessus** de chaque choix, les listes sur toute la
+  largeur (plus de « C.. »), les boutons qui passent à la ligne au lieu de s'empiler.
 
-## Formulaire
+## Les couleurs
 
-- **L'aperçu en grand est la vraie fiche** : même en-tête, même barre de mise en forme, mêmes
-  champs, même largeur. On peut y taper pour essayer, rien n'est enregistré.
-- La vraie fiche (et le formulaire « Ajouter ») suit enfin **le libellé, l'icône et la couleur**
-  réglés pour chaque champ, et la **couleur d'accent** de la mise en page dans ses blocs.
-- **Style d'ensemble** (Apparence) : le **fond** (teinte de l'accent ou une couleur) et l'allure
-  de **tous les libellés** (taille, capitales, gras, couleur). Le réglage d'un champ l'emporte.
-- **Séparateur** : sa **couleur** (trait et ornement) ; au milieu de l'ornement, **une icône**
-  ou **des caractères** (✦, ❦, ~ • ~, ☙ ❧…).
-- La petite barre d'un champ (pinceau, flèches, ✕) n'est plus coupée dans la colonne latérale.
+- **« Couleur des lignes selon »** lit maintenant une **colonne Couleur** (« #a46a6a ») telle
+  quelle, en plus des couleurs d'une colonne liste.
+- Couleur d'accent et couleur des lignes : Liste, Kanban, Maître-détail, Calendrier, Galerie,
+  Chronologie, Arborescence, Codex ; l'accent seul pour le Tableau de bord.
 
-## Survol
+## Les valeurs selon leur type, partout
 
-- Le bloc **Bouton** s'y pose : « Ouvrir la fiche » mène à la ligne ; une page ou une adresse
-  s'ouvre aussi.
-- **Sous-titre de plusieurs colonnes**, écrites l'une après l'autre : « Attribut • Négatif ».
-- Le style d'ensemble (fond, libellés) vaut aussi pour le survol.
+- Sous le nom d'un élément, dans le panneau de détail et dans les lignes dépliées : les
+  **charges et jauges** s'affichent en icônes ou en barre, une **icône** en icône, une
+  **couleur** en pastille, une **case** en ✓/✗, les **images** en vignettes, les listes en
+  pastilles colorées — comme sur les cartes (plus de « 3|zap|#78716c »).
+- **Libellés au choix** : « Leurs libellés » › Discrets, À la couleur d'accent ou **Sans libellé**.
+
+## Une carte garde sa forme
+
+- Une carte de « Modifier › Cartes » utilisée comme élément d'une vue **n'est plus étirée** :
+  la liste la range comme la vue « Cartes » (sa largeur, ses cartes par rangée) ; le kanban,
+  le maître-détail, la chronologie, l'arborescence la posent à sa largeur.

@@ -11,7 +11,7 @@ import { Check, ChevronDown, ChevronRight, ImageIcon, LayoutGrid, Plus, Table2, 
 import { Button } from "@/components/ui/button"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 
-import { GaugeCell, IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { GaugeCell, GaugeView, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
@@ -77,6 +77,42 @@ function ChoiceIcon({ row, column, value, className = "size-3.5" }: { row: CardR
   if (!icon) return null
   const glyph = parseGlyphValue(icon)
   return <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={cn("inline-block shrink-0 align-[-2px]", className)} filled={Boolean(glyph.emoji)} />
+}
+
+/**
+ * Une valeur affichée selon le type de sa colonne, comme le bloc « Valeur telle quelle » des
+ * cartes : des charges ou une jauge, une icône, une case cochée, une couleur, des images, des
+ * pastilles aux couleurs de la liste, un texte mis en forme, un nombre dans son unité. Les vues
+ * (sous le nom, panneau de détail) s'en servent : elles montrent les cases comme les cartes.
+ */
+export function TypedValue({ row, column, accent, compact = false, className }: { row: CardRowSource; column: string; accent: string; /** Dans une ligne d'élément : plus petit. */ compact?: boolean; className?: string }): ReactNode {
+  const raw = row.value(column) ?? ""
+  if (!raw.trim()) return null
+  const spec = row.spec(column)
+  const kind = spec ? normalizeSpec(spec).kind : "rich"
+  if (kind === "gauge" && spec?.gauge) {
+    const settings = spec.gauge
+    return <span className={cn("inline-flex min-w-0 max-w-full items-center", className)}><GaugeView value={raw} settings={settings} compact={compact} maxValue={gaugeScaleOf(settings) === "from-column" && settings.maxColumn ? cardNumber(row.value(settings.maxColumn) ?? "") : undefined} /></span>
+  }
+  if (kind === "glyph") {
+    const glyph = parseGlyphValue(raw)
+    return <span className={cn("inline-flex", className)} style={{ color: spec?.glyph?.color ?? accent }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={compact ? "size-4" : "size-6"} filled={spec?.glyph?.filled ?? Boolean(glyph.emoji)} /></span>
+  }
+  if (kind === "checkbox") {
+    const checked = isCheckedValue(raw, spec?.emptyChecked)
+    return <span className={cn("inline-flex items-center gap-1 font-medium", compact ? "text-xs" : "text-sm", className)}>{checked ? <Check className="size-4" style={{ color: accent }} /> : <X className="size-4 text-muted-foreground" />}{checked ? "Oui" : "Non"}</span>
+  }
+  if (kind === "color") return <span className={cn("inline-flex items-center gap-1.5 font-mono text-xs", className)}><span className={cn("rounded-full border", compact ? "size-3" : "size-4")} style={{ backgroundColor: raw.trim() }} />{raw.trim()}</span>
+  if (kind === "file") {
+    const files = raw.split(/\n+/).map((item) => item.trim()).filter(Boolean)
+    return <span className={cn("flex flex-wrap gap-1.5", className)}>{files.slice(0, compact ? 4 : 8).map((file) => <IndexImage key={file} value={file} alt={column} className={cn("rounded-lg border object-cover", compact ? "size-8" : "size-14")} fallback={<span className="truncate text-xs underline">{file.split("/").pop()}</span>} />)}</span>
+  }
+  if (["choice", "linked-choice", "tab-sort", "spells", "lookup"].includes(kind)) {
+    return <span className={cn("inline-flex flex-wrap gap-1", className)}>{cardListValues(cellText(row, column)).map((value) => <Pill key={value} value={value} color={choiceColor(row, column, value)} icon={<ChoiceIcon row={row} column={column} value={value} className="size-3" />} />)}</span>
+  }
+  if (/<[a-z][^>]*>/i.test(raw)) return <IndexRichText html={raw} className={cn(compact ? "text-xs leading-5" : "text-sm leading-6", "[&_p]:m-0", className)} />
+  const color = choiceColor(row, column)
+  return <span className={cn(compact ? "text-xs" : "text-sm", className)} style={color ? { color } : undefined}>{cellText(row, column)}</span>
 }
 
 /** La couleur d'accent de la carte pour une ligne : une colonne Couleur, un choix coloré, sinon la couleur choisie. */

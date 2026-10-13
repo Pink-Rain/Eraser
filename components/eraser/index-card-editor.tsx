@@ -805,7 +805,7 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
   const [expanded, setExpanded] = useState(false)
   const index = Math.min(at, rows.length - 1)
   const rem = cardWidthRem(card)
-  return <aside className="grid content-start gap-2 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto">
+  return <aside className="grid min-w-0 content-start gap-2 rounded-xl border bg-muted/20 p-3 lg:min-h-0 lg:overflow-auto">
     <div className="flex flex-wrap items-center justify-between gap-2">
       <span className="flex items-center gap-1"><p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu en direct</p><PreviewExpandButton onClick={() => setExpanded(true)} /></span>
       <span className="flex items-center gap-1">
@@ -1046,8 +1046,9 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
     {creating && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={(next) => { onChange({ ...value, cards: [...value.cards, next] }); onSelect(next.id); setCreating(false) }} onClose={() => setCreating(false)} />}
   </div>
 
-  return <div className="grid items-start gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]">
-    <section className="grid min-w-0 content-start gap-3">
+  // Deux volets : les réglages à gauche, l'aperçu à droite, chacun avec sa barre de défilement.
+  return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)]">
+    <section className="grid min-w-0 content-start gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <Tabs ariaLabel="Réglages de la carte" value={page} options={cardPages} onChange={setPage} />
       {page === "card" && <CardPage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
       {page === "image" && <ImagePage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}

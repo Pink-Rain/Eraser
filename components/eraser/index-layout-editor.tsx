@@ -421,8 +421,9 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   const accent = resolveLayoutColor(layout.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
   const sourceLabel = source === "eraser" ? "forme d’Eraser" : source === "automatic" ? "affichage automatique" : "réglée à la main"
 
-  return <div ref={rootRef} className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
-    <div className="grid content-start gap-3">
+  // Deux volets : la mise en page à gauche, l'aperçu à droite, chacun avec sa barre de défilement.
+  return <div ref={rootRef} className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,1fr)_20rem] xl:grid-cols-[minmax(0,1fr)_24rem]">
+    <div className="grid content-start gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
         <Tabs ariaLabel="Pages de l’éditeur" value={page} onChange={setPage} options={[{ value: "layout", label: "Mise en page", icon: <LayoutTemplate className="size-3.5" /> }, { value: "look", label: "Apparence", icon: <Palette className="size-3.5" /> }]} />
         <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
@@ -618,7 +619,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
 
     {starting && <LayoutStarterDialog kind={kind} columns={columns} sample={sample} sampleRow={sampleRow} eraserStarters={eraserStarters} onPick={(picked) => { set(picked); setStarting(false); setPage("layout") }} onClose={() => setStarting(false)} />}
 
-    <aside className="grid content-start gap-2 rounded-xl border bg-card/70 p-3 xl:sticky xl:top-0 xl:self-start">
+    <aside className="grid min-w-0 content-start gap-2 rounded-xl border bg-card/70 p-3 lg:min-h-0 lg:overflow-auto">
       <div className="flex items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu</p>
         <PreviewExpandButton onClick={() => setExpanded(true)} />

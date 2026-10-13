@@ -1294,7 +1294,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           {statsPanel}
         </section>}
 
-        {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+        {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
           <IndexViewsEditor
             key={`${tab.id}:${viewKind}:${editedView[`${viewKind}:${tab.id}`] ?? MAIN_VIEW_ID}`}
             kind={viewKind}
@@ -1312,7 +1312,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           />
         </section>}
 
-        {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+        {mode === "cards" && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
           {(() => {
             const entry = cardsOf(tab)
             return <IndexCardEditor
@@ -1343,7 +1343,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             const next = list.map((item) => item.id === named.id ? { ...item, layout } : item)
             touchLayout(tab, mode === "form" ? { forms: next } : { hovers: next })
           }
-          return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
+          return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1 lg:grid-rows-[minmax(0,1fr)] lg:overflow-hidden lg:pr-0">
             <IndexLayoutEditor
               key={`${tab.id}:${mode}:${named?.id ?? DEFAULT_FORM_ID}`}
               kind={mode}

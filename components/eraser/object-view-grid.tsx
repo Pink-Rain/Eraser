@@ -157,9 +157,11 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       nameOf={(rowKey) => rawOf(rowKey, "Nom").replace(/<[^>]+>/g, "").trim()}
       valueOf={rawOf}
       optionsOf={(header) => (sources[0] ? specIn(sources[0], header, schemas).options ?? [] : []).map((option) => ({ value: option.value, color: option.color }))}
+      specOf={(header) => sources[0] ? specIn(sources[0], header, schemas) : undefined}
       onOpen={() => undefined}
       onCommit={disabled ? undefined : (rowKey, header, value) => void commit(rowKey, header, value)}
       renderCard={cards ? renderCard : undefined}
+      cardOf={cards ? (rowKey, cardId) => cardOfRow(rowKey, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}
       empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
     /> : layout?.kind === "cards" && firstCard ? <IndexCardGrid
       card={firstCard}

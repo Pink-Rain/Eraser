@@ -1467,10 +1467,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         nameOf={layoutNameOf}
         valueOf={valueOf}
         optionsOf={layoutOptionsOf}
+        specOf={(header) => specOf(table.tabName, header)}
         onOpen={openRow}
         onOpenPage={(rowKey) => { const href = rowHref(rowKey); if (href && !embed) router.push(href); else openRow(rowKey) }}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
+        cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? null : cardId)}
         renderForm={renderViewForm}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard

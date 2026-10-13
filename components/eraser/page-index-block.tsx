@@ -170,9 +170,11 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""}
     valueOf={valueOf}
     optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))}
+    specOf={specOf}
     onOpen={openRow}
     onOpenPage={openRow}
     renderCard={data.cards ? renderCard : undefined}
+    cardOf={data.cards ? (_rowKey, cardId) => pickCard(data.cards!, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}
     renderForm={data.forms ? renderForm : undefined}
     renderStat={data.stats ? renderStat : undefined}
     presentations={data.views}

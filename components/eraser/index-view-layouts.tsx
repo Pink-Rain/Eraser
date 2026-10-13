@@ -1,15 +1,17 @@
 "use client"
 
-import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { createContext, Fragment, useCallback, useContext, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOff } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
-import { parseGlyphValue } from "@/lib/index-columns"
+import { cardGridStyle, cardWidthRem, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
+import type { CardTemplate } from "@/lib/index-cards"
+import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
-import { calendarScaleOf, calendarScales, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
+import { calendarScaleOf, calendarScales, type ViewClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -36,6 +38,8 @@ export type ViewLayoutProps = {
    * ou « * » pour la carte par défaut de son onglet) ; `null` si l'onglet n'a pas cette carte.
    */
   renderCard?: (rowKey: string, cardId: string) => ReactNode
+  /** La carte qu'une ligne prendrait (sa largeur, ses cartes par rangée) : la vue la pose à sa taille, sans la déformer. */
+  cardOf?: (rowKey: string, cardId: string) => CardTemplate | null
   /** Une ligne dessinée avec un formulaire de l'onglet en lecture (`formId` : « principal » ou un formulaire nommé) ; `null` si la page ne sait pas. */
   renderForm?: (rowKey: string, formId: string) => ReactNode
   /** Ouvrir la page de la ligne (« Au clic : ouvrir la page ») ; absent : la fiche. */
@@ -49,15 +53,32 @@ export type ViewLayoutProps = {
   chosen?: string
   onChoose?: (rowKey: string) => void
   inert?: boolean
+  /** Le type de chaque colonne : les valeurs se montrent comme sur les cartes (charges, icônes, couleurs…). */
+  specOf?: (header: string) => IndexColumnSpec | undefined
+}
+
+/** Le type des colonnes de la vue, pour dessiner chaque valeur selon son type. */
+const ViewSpecs = createContext<(header: string) => IndexColumnSpec | undefined>(() => undefined)
+
+/** Une ligne vue comme une carte la voit : ses valeurs et le type de leur colonne. */
+function useRowSource(row: string, valueOf: ViewLayoutProps["valueOf"]): CardRowSource {
+  const specOf = useContext(ViewSpecs)
+  return { value: (header) => valueOf(row, header), spec: specOf }
 }
 
 /**
  * L'élément d'une ligne si la vue en demande un : un formulaire en lecture, ou une carte de
  * « Modifier › Cartes » (si la page sait les dessiner). Le clic y suit « Au clic » de la vue.
  */
-function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert">) {
+function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert" | "cardOf">, options: { fill?: boolean } = {}) {
   const { itemCard, itemForm, click } = props.layout
-  const draw = itemForm && props.renderForm ? (row: string) => props.renderForm!(row, itemForm) : itemCard && props.renderCard ? (row: string) => props.renderCard!(row, itemCard) : null
+  const drawCard = itemCard && props.renderCard ? (row: string) => {
+    const node = props.renderCard!(row, itemCard)
+    const template = options.fill ? null : props.cardOf?.(row, itemCard)
+    // Une carte garde la largeur qu'on lui a donnée dans « Modifier › Cartes » : la vue ne l'étire pas.
+    return node && template && !(template.width === "full" && !template.widthRem) ? <div className="w-full min-w-0" style={{ maxWidth: `${cardWidthRem(template)}rem` }}>{node}</div> : node
+  } : null
+  const draw = itemForm && props.renderForm ? (row: string) => props.renderForm!(row, itemForm) : drawCard
   if (!draw) return null
   // Une carte ouvre la fiche d'elle-même : seulement quand « Au clic » dit autre chose, la vue reprend le clic.
   const intercept = Boolean(itemForm) || (click ?? "sheet") !== "sheet"
@@ -127,7 +148,11 @@ const accentOf = (look: ViewLook) => look.color ?? "var(--primary)"
 function rowColor(layout: ViewLayout, row: string, valueOf: ViewLayoutProps["valueOf"], optionsOf?: ViewLayoutProps["optionsOf"]) {
   const fallback = layout.look?.color
   if (!layout.colorBy) return fallback
-  const value = fold(plain(valueOf(row, layout.colorBy)).split(/\s*[,;]\s*/)[0] ?? "")
+  const raw = (plain(valueOf(row, layout.colorBy)).split(/\s*[,;]\s*/)[0] ?? "").trim()
+  // Une colonne Couleur (« #a46a6a ») donne sa couleur telle quelle ; une liste, la couleur de son choix.
+  const hex = raw.match(/#[0-9a-f]{3,8}\b/i)?.[0]
+  if (hex && (/^#[0-9a-f]{3,8}$/i.test(raw) || !optionsOf?.(layout.colorBy)?.length)) return hex
+  const value = fold(raw)
   return (value ? optionsOf?.(layout.colorBy)?.find((option) => fold(option.value) === value)?.color : undefined) ?? fallback
 }
 
@@ -233,19 +258,24 @@ function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, i
 
 /** Les colonnes montrées sous le nom : texte en ligne, libellés, pastilles colorées ou lignes empilées. */
 function ItemFields({ fields, row, look, valueOf, optionsOf, compact = false, inverted = false }: { fields: string[]; row: string; look: ViewLook; valueOf: ViewLayoutProps["valueOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; compact?: boolean; inverted?: boolean }) {
+  const source = useRowSource(row, valueOf)
   const shown = fields.map((field) => ({ field, value: plain(valueOf(row, field)) })).filter((entry) => entry.value)
   if (!shown.length) return null
+  // Les colonnes d'un type à dessiner (charges, jauge, icône, case, couleur, images) : comme sur les cartes.
+  const drawn = (field: string) => ["gauge", "glyph", "checkbox", "color", "file"].includes(source.spec(field)?.kind ?? "")
+  const typed = (field: string) => <TypedValue row={source} column={field} accent={accentOf(look)} compact />
+  const labels = !look.hideFieldLabels
   const soft = inverted ? "opacity-80" : "text-muted-foreground"
   const labelStyle: CSSProperties | undefined = look.fieldColor === "accent" && !inverted ? { color: accentOf(look) } : undefined
   const style = compact && look.fieldStyle !== "pills" ? "inline" : look.fieldStyle ?? "inline"
   if (style === "pills") {
     const colorOf = (field: string, value: string) => optionsOf?.(field)?.find((option) => fold(option.value) === fold(value))?.color
-    const pills = shown.flatMap((entry) => entry.value.split(/\s*[,;]\s*/).filter(Boolean).slice(0, 4).map((value) => ({ key: `${entry.field}:${value}`, value, color: colorOf(entry.field, value) ?? (look.fieldColor === "accent" ? accentOf(look) : undefined) })))
-    return <span className={`flex min-w-0 gap-1 ${compact ? "overflow-hidden" : "flex-wrap"}`}>{pills.map((pill) => <span key={pill.key} className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border px-2 py-px text-[11px] font-medium" style={pill.color ? { color: pill.color, borderColor: `color-mix(in srgb, ${pill.color} 45%, transparent)`, backgroundColor: `color-mix(in srgb, ${pill.color} 10%, transparent)` } : undefined}>{pill.value}</span>)}</span>
+    const pills = shown.filter((entry) => !drawn(entry.field)).flatMap((entry) => entry.value.split(/\s*[,;]\s*/).filter(Boolean).slice(0, 4).map((value) => ({ key: `${entry.field}:${value}`, value, color: colorOf(entry.field, value) ?? (look.fieldColor === "accent" ? accentOf(look) : undefined) })))
+    return <span className={`flex min-w-0 items-center gap-1 ${compact ? "overflow-hidden" : "flex-wrap"}`}>{pills.map((pill) => <span key={pill.key} className="inline-flex max-w-full shrink-0 items-center truncate rounded-full border px-2 py-px text-[11px] font-medium" style={pill.color ? { color: pill.color, borderColor: `color-mix(in srgb, ${pill.color} 45%, transparent)`, backgroundColor: `color-mix(in srgb, ${pill.color} 10%, transparent)` } : undefined}>{pill.value}</span>)}{shown.filter((entry) => drawn(entry.field)).map((entry) => <span key={entry.field} className="inline-flex shrink-0 items-center">{typed(entry.field)}</span>)}</span>
   }
-  if (style === "labels") return <dl className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-x-3 gap-y-1">{shown.map((entry) => <div key={entry.field} className="min-w-0"><dt className={`truncate text-[10px] font-semibold uppercase tracking-[0.12em] ${soft}`} style={labelStyle}>{entry.field}</dt><dd className="truncate text-xs">{entry.value}</dd></div>)}</dl>
-  if (style === "stacked") return <span className={`grid min-w-0 gap-0.5 text-xs ${soft}`}>{shown.map((entry) => <span key={entry.field} className="line-clamp-2 break-words">{entry.value}</span>)}</span>
-  return <span className={`flex min-w-0 gap-x-3 gap-y-0.5 text-xs ${soft} ${compact ? "truncate" : "flex-wrap"}`}>{shown.map((entry) => <span key={entry.field} className={compact ? "truncate" : ""}><span className={`font-semibold ${inverted ? "" : "text-foreground/60"}`} style={labelStyle}>{entry.field} :</span> {entry.value}</span>)}</span>
+  if (style === "labels") return <dl className="grid min-w-0 grid-cols-[repeat(auto-fill,minmax(7rem,1fr))] gap-x-3 gap-y-1">{shown.map((entry) => <div key={entry.field} className="min-w-0">{labels && <dt className={`truncate text-[10px] font-semibold uppercase tracking-[0.12em] ${soft}`} style={labelStyle}>{entry.field}</dt>}<dd className="min-w-0 truncate text-xs">{typed(entry.field)}</dd></div>)}</dl>
+  if (style === "stacked") return <span className={`grid min-w-0 gap-0.5 text-xs ${soft}`}>{shown.map((entry) => <span key={entry.field} className="line-clamp-2 flex min-w-0 flex-wrap items-center gap-1 break-words">{labels && <span className="font-semibold text-foreground/60" style={labelStyle}>{entry.field} :</span>}{typed(entry.field)}</span>)}</span>
+  return <span className={`flex min-w-0 items-center gap-x-3 gap-y-0.5 text-xs ${soft} ${compact ? "truncate" : "flex-wrap"}`}>{shown.map((entry) => <span key={entry.field} className={`inline-flex items-center gap-1 ${drawn(entry.field) ? "shrink-0" : `min-w-0 ${compact ? "truncate" : ""}`}`}>{labels && <span className={`shrink-0 font-semibold ${inverted ? "" : "text-foreground/60"}`} style={labelStyle}>{entry.field} :</span>}{typed(entry.field)}</span>)}</span>
 }
 
 /** Un élément complet (icône, image, nom, pastille, colonnes), encadré ou non : liste, kanban, chronologie, repli des cartes. */
@@ -369,7 +399,10 @@ function ListLayout(props: ViewLayoutProps) {
   const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const fields = layout.fields ?? []
-  const card = cardFor(props)
+  const specOf = useContext(ViewSpecs)
+  const card = cardFor(props, { fill: true })
+  // Une carte comme élément : rangée comme dans la vue « Cartes » (sa largeur, ses cartes par rangée).
+  const cardTemplate = !layout.itemForm && layout.itemCard && rows[0] ? props.cardOf?.(rows[0], layout.itemCard) ?? null : null
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set())
   const toggle = (row: string) => setOpenRows((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })
   const others = headers.filter((header) => !fields.includes(header))
@@ -377,7 +410,7 @@ function ListLayout(props: ViewLayoutProps) {
   const number = (index: number) => layout.numbered ? <span className="w-6 shrink-0 text-right font-display text-sm font-semibold tabular-nums" style={{ color: accentOf(look) }}>{index + 1}.</span> : null
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${columnsClass}`}>{shown.map((row, index) => <div key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className="min-w-0 flex-1">{card(row) ?? <Item row={row} props={props} framed />}{layout.click === "below" && props.chosen === row && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${cardTemplate ? "" : columnsClass}`} style={cardTemplate ? cardGridStyle(cardTemplate) : undefined}>{shown.map((row, index) => <div key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className="min-w-0 flex-1">{card(row) ?? <Item row={row} props={props} framed />}{layout.click === "below" && props.chosen === row && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div>)}</div>} />} />
   }
   const boxed = look.surface === "boxed"
   const zebra = look.surface === "zebra"
@@ -398,7 +431,7 @@ function ListLayout(props: ViewLayoutProps) {
           ? <><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></>
           : <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"} ${flipped ? "justify-items-end" : ""}`}><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></div>}
       </div>
-      {expanded && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg bg-muted/30 p-2.5 pl-8 text-xs sm:grid-cols-2">{others.map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="font-semibold text-muted-foreground">{header}</dt><dd className="break-words">{value}</dd></div> : null })}</dl>}
+      {expanded && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg bg-muted/30 p-2.5 pl-8 text-xs sm:grid-cols-2">{others.map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="font-semibold text-muted-foreground">{header}</dt><dd className="min-w-0 break-words"><TypedValue row={{ value: (column) => valueOf(row, column), spec: specOf }} column={header} accent={accentOf(look)} compact /></dd></div> : null })}</dl>}
       {chosenBelow && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}
     </li>
   }
@@ -478,6 +511,7 @@ const detailGrids = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-col
 /** Les colonnes d'une ligne (« le détail montre les colonnes ») : nom, image, pastille, puis les colonnes choisies. */
 function DetailFields({ row, props }: { row: string; props: ViewLayoutProps }) {
   const { layout, headers, nameOf, valueOf, optionsOf } = props
+  const source = useRowSource(row, valueOf)
   const look = layout.look ?? {}
   const src = rowImage(layout, row, valueOf)
   const detailImage = layout.detailImage ?? "side"
@@ -487,7 +521,7 @@ function DetailFields({ row, props }: { row: string; props: ViewLayoutProps }) {
     <div className={look.density === "compact" ? "p-3" : look.density === "airy" ? "p-6" : "p-4"}>
       <span className="flex min-w-0 items-center gap-3">{detailImage === "side" && <RowImage src={src} look={look} size="lg" />}<h3 className={`flex items-center gap-2 text-2xl font-semibold ${look.titleFont === "sans" ? "" : "font-display"} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" ? { color } : undefined}><RowIcon layout={layout} row={row} valueOf={valueOf} color={color} className="size-6" />{nameOf(row) || "Sans nom"}<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} /></h3></span>
       <RowGauge layout={layout} row={row} valueOf={valueOf} color={color} />
-      <dl className={`mt-4 grid gap-x-6 gap-y-3 ${detailGrids[layout.detailColumns ?? 2]}`}>{(layout.detailFields?.length ? layout.detailFields : headers).filter((header) => header !== layout.imageColumn || detailImage === "none").map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground" style={look.fieldColor === "accent" ? { color: accentOf(look) } : undefined}>{header}</dt><dd className="mt-0.5 whitespace-pre-line break-words text-sm">{value}</dd></div> : null })}</dl>
+      <dl className={`mt-4 grid gap-x-6 gap-y-3 ${detailGrids[layout.detailColumns ?? 2]}`}>{(layout.detailFields?.length ? layout.detailFields : headers).filter((header) => header !== layout.imageColumn || detailImage === "none").map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground" style={look.fieldColor === "accent" ? { color: accentOf(look) } : undefined}>{header}</dt><dd className="mt-0.5 min-w-0 whitespace-pre-line break-words text-sm"><TypedValue row={source} column={header} accent={accentOf(look)} /></dd></div> : null })}</dl>
     </div>
   </>
 }
@@ -1420,6 +1454,12 @@ export function IndexViewLayout(input: ViewLayoutProps) {
       : panel ? (row: string) => setChosen((current) => current === row && click === "below" ? "" : row)
         : input.onOpen
   const props: ViewLayoutProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
+  return <ViewSpecs.Provider value={input.specOf ?? noSpecs}><ViewLayoutBody props={props} click={click} /></ViewSpecs.Provider>
+}
+
+const noSpecs = () => undefined
+
+function ViewLayoutBody({ props, click }: { props: ViewLayoutProps; click: ViewClick }) {
   if (!props.rows.length && props.layout.kind !== "dashboard") return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{props.empty}</div>
   const body = viewBody(props)
   // L'arborescence « à côté › les enfants » dessine elle-même son panneau.

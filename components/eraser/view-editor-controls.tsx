@@ -41,9 +41,9 @@ export function Segmented<T extends string>({ value, options, onChange, disabled
   </span>
 }
 
-/** Un choix avec son libellé au-dessus. */
+/** Un choix avec son libellé au-dessus (les boutons passent à la ligne quand la place manque). */
 export function Choice<T extends string>({ label, value, options, onChange, disabled, hint }: { label: string; value: T; options: ReadonlyArray<{ value: T; label: string; icon?: ReactNode; title?: string }>; onChange: (value: T) => void; disabled?: boolean; hint?: string }) {
-  return <span className="flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground" title={hint}><span className="shrink-0">{label}</span><Segmented ariaLabel={label} value={value} options={options} onChange={onChange} disabled={disabled} /></span>
+  return <span className="grid min-w-0 content-start justify-items-start gap-1 text-[11px] font-semibold text-muted-foreground" title={hint}><span>{label}</span><Segmented ariaLabel={label} value={value} options={options} onChange={onChange} disabled={disabled} /></span>
 }
 
 export function Toggle({ checked, onChange, children, disabled, title }: { checked: boolean; onChange: (checked: boolean) => void; children: ReactNode; disabled?: boolean; title?: string }) {
@@ -94,7 +94,8 @@ export function ColumnSelect({ value, columns, onChange, empty = "— Aucune —
 }
 
 export function ColumnField({ label, value, columns, onChange, empty, disabled, hint }: { label: string; value: string | undefined; columns: string[]; onChange: (value: string | undefined) => void; empty?: string | null; disabled?: boolean; hint?: string }) {
-  return <label className="flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground" title={hint}><span className="shrink-0">{label}</span><ColumnSelect value={value} columns={columns} onChange={onChange} empty={empty} disabled={disabled} ariaLabel={label} className="min-w-0 flex-1" /></label>
+  // Le libellé au-dessus, la liste sur toute la largeur : le nom de la colonne se lit en entier.
+  return <label className="grid min-w-0 content-start gap-1 text-[11px] font-semibold text-muted-foreground [&_[data-slot=native-select-wrapper]]:w-full" title={hint}><span>{label}</span><ColumnSelect value={value} columns={columns} onChange={onChange} empty={empty} disabled={disabled} ariaLabel={label} className="w-full min-w-0" /></label>
 }
 
 /** Plusieurs colonnes, dans l'ordre : des étiquettes qu'on retire ou avance, et une liste pour en ajouter. */
@@ -138,9 +139,9 @@ export function SettingsRow({ children, className }: { children: ReactNode; clas
   return <div className={cn("flex flex-wrap items-end gap-x-3 gap-y-2", className)}>{children}</div>
 }
 
-/** Un réglage en ligne : son libellé à gauche, le contrôle à droite. */
+/** Un réglage : son libellé au-dessus, le contrôle dessous (sur toute la largeur s'il s'agit d'une liste). */
 export function Inline({ label, children, className, hint }: { label: string; children: ReactNode; className?: string; hint?: string }) {
-  return <label className={cn("flex min-w-0 items-center gap-2 text-[11px] font-semibold text-muted-foreground", className)} title={hint}><span className="shrink-0">{label}</span>{children}</label>
+  return <label className={cn("grid min-w-0 content-start gap-1 text-[11px] font-semibold text-muted-foreground [&_[data-slot=native-select-wrapper]]:w-full", className)} title={hint}><span>{label}</span>{children}</label>
 }
 
 export type ImageBoxValue = { widthPct?: number; heightPct?: number; autoHeight?: boolean; linked?: boolean; edges?: Array<"top" | "bottom" | "left" | "right">; /** Sans fond ni cadre (image détourée). */ bare?: boolean }

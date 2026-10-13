@@ -82,6 +82,8 @@ export type ViewLook = {
   titleSize?: "sm" | "md" | "lg"
   /** Les colonnes montrées sous le nom. */
   fieldStyle?: "inline" | "labels" | "pills" | "stacked"
+  /** Les colonnes montrées sous le nom sans leur nom (« Charges : ») devant la valeur. */
+  hideFieldLabels?: boolean
   /** L'image à côté du nom : sa forme ; sa largeur et sa hauteur en pixels (liées ou non ; `imageSize` : ancien réglage). */
   imageShape?: "square" | "rounded" | "circle"
   imageSize?: "sm" | "md" | "lg"
@@ -392,6 +394,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   shadow: [true],
   titleCaps: [true],
   fieldColor: ["muted", "accent"],
+  hideFieldLabels: [true],
 }
 
 /** L'apparence propre : seulement les choix connus ; `undefined` si rien n'est réglé. */

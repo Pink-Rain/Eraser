@@ -170,7 +170,7 @@ function FieldsLook({ ctx }: { ctx: Ctx }) {
   const { look, setLook, disabled } = ctx
   return <div className="flex flex-wrap items-end gap-3">
     <Choice label="Colonnes montrées" value={look.fieldStyle ?? "inline"} options={fieldStyleOptions} onChange={(fieldStyle) => setLook({ fieldStyle: fieldStyle === "inline" ? undefined : fieldStyle })} disabled={disabled} />
-    <Choice label="Leurs libellés" value={look.fieldColor ?? "muted"} options={[{ value: "muted", label: "Discrets" }, { value: "accent", label: "À la couleur d’accent" }]} onChange={(fieldColor) => setLook({ fieldColor: fieldColor === "muted" ? undefined : fieldColor })} disabled={disabled} />
+    <Choice label="Leurs libellés" value={look.hideFieldLabels ? "hidden" : look.fieldColor ?? "muted"} options={[{ value: "muted", label: "Discrets" }, { value: "accent", label: "À la couleur d’accent" }, { value: "hidden", label: "Sans libellé" }]} onChange={(choice) => setLook(choice === "hidden" ? { hideFieldLabels: true } : { hideFieldLabels: undefined, fieldColor: choice === "muted" ? undefined : choice })} disabled={disabled} />
   </div>
 }
 
@@ -181,8 +181,8 @@ function ColorLook({ ctx, modes = accentOptions, withRows = true }: { ctx: Ctx; 
     <span className={fieldLabel}>Couleur d’accent de la vue <span className="font-normal">— sections, points, lignes, tuiles sans couleur propre</span>
       <ColorSwatches value={look.color} onChange={(color) => setLook({ color })} disabled={disabled} none="Or d’Eraser" ariaLabel="Couleur d’accent de la vue" />
     </span>
-    {withRows && <div className="grid gap-2 sm:grid-cols-2">
-      <ColumnField label="Couleur des lignes selon" value={layout.colorBy} columns={columns} onChange={(colorBy) => set({ colorBy })} empty="— Aucune —" disabled={disabled} hint="Une colonne liste : la couleur de son choix marque chaque ligne" />
+    {withRows && <div className="grid gap-2">
+      <ColumnField label="Couleur des lignes selon" value={layout.colorBy} columns={columns} onChange={(colorBy) => set({ colorBy })} empty="— Aucune —" disabled={disabled} hint="Une colonne Couleur (« #a46a6a ») donne sa couleur ; une colonne liste, la couleur de son choix" />
       <Choice label="Elle marque l’élément par" value={look.accent ?? "border"} options={modes} onChange={(accent) => setLook({ accent: accent === "border" ? undefined : accent })} disabled={disabled} />
     </div>}
   </>
@@ -194,7 +194,7 @@ function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabe
   const grouped = Boolean(layout.groupBy) || Boolean(layout.alphabet)
   return <div className={settingsGroup}>
     <p className={settingsTitle}><LayoutList className="size-3.5" />Sections</p>
-    <div className="grid gap-2 sm:grid-cols-2">
+    <div className="grid gap-2">
       <ColumnField label="Ranger en sections par" value={layout.groupBy} columns={columns} onChange={(groupBy) => set({ groupBy, ...(groupBy ? { alphabet: undefined } : {}) })} empty="— Pas de sections —" disabled={disabled} />
       {withAlphabet && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(layout.alphabet)} onChange={(alphabet) => set({ alphabet: alphabet || undefined, ...(alphabet ? { groupBy: undefined } : {}) })} disabled={disabled}>…ou par première lettre (annuaire)</Toggle></span>}
     </div>
@@ -221,7 +221,7 @@ function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, with
   return <div className={settingsGroup}>
     <p className={settingsTitle}><LayoutList className="size-3.5" />Chaque élément</p>
     <span className={fieldLabel}>{fieldsLabel} <span className="font-normal">({max} au plus, dans l’ordre)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={max} /></span>
-    {withIcon && <div className="grid gap-2 sm:grid-cols-2">
+    {withIcon && <div className="grid gap-2">
       <ColumnField label="Icône devant le nom, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} hint="Une colonne icône (ou un émoji écrit dans une case)" />
       <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe devant chaque nom"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
     </div>}
@@ -240,7 +240,7 @@ function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, with
 
 function SortSettings({ ctx }: { ctx: Ctx }) {
   const { layout, set, columns, disabled } = ctx
-  return <div className="grid gap-2 sm:grid-cols-2">
+  return <div className="grid gap-2">
     <ColumnField label="Trier par" value={layout.sortBy} columns={columns} onChange={(sortBy) => set({ sortBy, sortDesc: sortBy ? layout.sortDesc : undefined })} empty="— L’ordre de la feuille —" disabled={disabled} />
     {layout.sortBy && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(layout.sortDesc)} onChange={(sortDesc) => set({ sortDesc: sortDesc || undefined })} disabled={disabled}>Ordre décroissant</Toggle></span>}
   </div>
@@ -426,7 +426,7 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
     { key: "dates", label: "Dates", icon: <LayoutGrid className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutGrid className="size-3.5" />Le calendrier</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Colonne de la date" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
           <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
         </div>
@@ -673,7 +673,7 @@ function GalleryPages(ctx: Ctx): Page[] {
         <span className={fieldLabel}>Sous le nom <span className="font-normal">(4 au plus)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={4} /></span>
         <FieldsLook ctx={ctx} />
         <ColumnField label="Ruban sur l’image, pris dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucun —" disabled={disabled} hint="Un rang, un type : en ruban dans le coin de la vignette" />
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Icône dans le coin, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
           <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
         </div>
@@ -710,7 +710,7 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
     { key: "time", label: "Temps", icon: <LayoutList className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutList className="size-3.5" />La ligne du temps</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Colonne de la date (ou de l’année)" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
           <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
         </div>
@@ -786,7 +786,7 @@ function TreePages(ctx: Ctx): Page[] {
       </div>
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutList className="size-3.5" />Dates et état</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Date de début, sous le nom" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Aucune —" disabled={disabled} />
           <ColumnField label="Date de fin" value={layout.endColumn} columns={columns} onChange={(endColumn) => set({ endColumn })} empty="— Aucune —" disabled={disabled} />
         </div>
@@ -817,7 +817,7 @@ function CodexPages(ctx: Ctx): Page[] {
         <p className={settingsTitle}><BookOpen className="size-3.5" />Chaque fiche</p>
         <span className={fieldLabel}>Colonnes de chaque fiche <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes des fiches" max={12} /></span>
         <p className={hintText}>Les textes longs se lisent en paragraphes ; les valeurs courtes forment l’encadré.</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Image de chaque fiche" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />
           {layout.imageColumn && style !== "sketch" && <Choice label="Posée" value={look.codexImage ?? "side"} options={[{ value: "side", label: "Dans l’encadré" }, { value: "banner", label: "En bannière" }]} onChange={(codexImage) => setLook({ codexImage: codexImage === "side" ? undefined : codexImage })} disabled={disabled} />}
         </div>
@@ -826,7 +826,7 @@ function CodexPages(ctx: Ctx): Page[] {
           <Toggle checked={Boolean(look.dropCap)} onChange={(dropCap) => setLook({ dropCap: dropCap || undefined })} disabled={disabled}>Lettrine au premier paragraphe</Toggle>
           <Toggle checked={Boolean(layout.chapterNumbers)} onChange={(chapterNumbers) => set({ chapterNumbers: chapterNumbers || undefined })} disabled={disabled}>Fiches numérotées (chapitres)</Toggle>
         </div>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <ColumnField label="Icône devant le titre, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
           <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
         </div>
@@ -842,7 +842,7 @@ function CodexPages(ctx: Ctx): Page[] {
       </div>
       <div className={settingsGroup}>
         <p className={settingsTitle}><Star className="size-3.5" />Recto et verso</p>
-        <div className="grid gap-2 sm:grid-cols-2">
+        <div className="grid gap-2">
           <label className={fieldLabel}>Recto (une carte)<NativeSelect value={layout.codexRecto ?? ""} disabled={disabled} onChange={(event) => set({ codexRecto: event.target.value || undefined, codexVerso: event.target.value ? layout.codexVerso : undefined })} className="h-8 py-0 text-xs"><NativeSelectOption value="">— Pas de recto-verso : la fiche —</NativeSelectOption><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelect></label>
           {layout.codexRecto && <label className={fieldLabel}>Verso<NativeSelect value={layout.codexVerso ?? ""} disabled={disabled} onChange={(event) => set({ codexVerso: event.target.value || undefined })} className="h-8 py-0 text-xs"><NativeSelectOption value="">— La même carte —</NativeSelectOption><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelect></label>}
         </div>
@@ -1122,6 +1122,8 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
     nameOf={(key) => (rows[Number(key)]?.[nameColumn] ?? "").replace(/<[^>]+>/g, "").trim()}
     valueOf={(key, header) => rows[Number(key)]?.[header] ?? ""}
     optionsOf={optionsOf}
+    specOf={(header) => specs.get(foldName(header))}
+    cardOf={(_rowKey, cardId) => pickCard({ cards }, cardId === DEFAULT_ITEM_CARD ? null : cardId)}
     onOpen={() => undefined}
     renderCard={renderCard}
     renderForm={forms.length ? renderForm : undefined}
@@ -1129,12 +1131,13 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
     presentations={value}
     empty="Pas encore de ligne dans cet onglet."
   />
-  return <div className="grid min-h-0 items-start gap-3 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-    <div className="grid content-start gap-2">
+  // Deux volets : les réglages à gauche, l'aperçu à droite, chacun avec sa barre de défilement.
+  return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
+    <div className="grid content-start gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
       <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
     </div>
-    <section className="min-w-0 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto" aria-label="Aperçu">
+    <section className="min-w-0 rounded-xl border bg-muted/20 p-3 lg:min-h-0 lg:overflow-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <span className="flex min-w-0 items-center gap-1"><p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu · {kindLabel} · {rows.length} ligne{rows.length > 1 ? "s" : ""} de « {tabName} »</p><PreviewExpandButton onClick={() => setExpanded(true)} /></span>
         <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={screenOptions} onChange={setScreen} />

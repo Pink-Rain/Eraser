@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { foldName, formatGaugeCell, gaugeScaleOf, parseGaugeCell, parseGlyphValue, type GaugeRowStyle, type GaugeSettings } from "@/lib/index-columns"
+import { cn } from "@/lib/utils"
 
 /** Les couleurs proposées pour une ligne d'une jauge « par ligne ». */
 const rowColors = ["#b9504e", "#c2410c", "#b8872a", "#4d7c0f", "#397f88", "#285f8f", "#6b21a8", "#78716c"]
@@ -643,6 +644,45 @@ export const GaugeCell = memo(function GaugeCell({ label, value, settings, maxVa
 
   return <GaugeBar label={label} current={current} max={max} color={color} disabled={disabled} editor={<span className="flex items-center">{styler}{editor}</span>} onChange={set} />
 })
+
+/**
+ * Une jauge en lecture (vues, cartes, survols) : les mêmes charges, la même barre, le même
+ * anneau que la case du tableau, sans bouton ni saisie — elle se pose dans un élément cliquable.
+ */
+export function GaugeView({ value, settings, maxValue, compact = false }: { value: string; settings: GaugeSettings; maxValue?: number | null; compact?: boolean }) {
+  const row = settings.perRow ? parseGaugeCell(value) : null
+  const look = row ? { icon: row.style.emoji ? undefined : row.style.icon ?? settings.icon, emoji: row.style.emoji ?? (row.style.icon ? undefined : settings.emoji), color: row.style.color ?? settings.color } : settings
+  const text = (row ? row.count : value).trim()
+  const scale = gaugeScaleOf(settings)
+  const number = parseCount(text)
+  const columnMax = Math.max(1, Math.trunc(settings.max || 5))
+  const max = scale === "from-column" ? Math.max(0, Math.round(maxValue ?? 0)) : scale === "cell" ? Math.max(0, Math.round(number ?? 0)) : columnMax
+  const current = scale === "cell" ? max : number === null ? null : Math.max(0, Math.min(max, number))
+  const ratio = max > 0 && current !== null ? current / max : 0
+  const color = settings.levels && scale !== "cell" && !row?.style.color ? levelColor(ratio) : look.color || "var(--primary)"
+  const glyph = compact ? "size-3.5" : "size-4"
+  if (settings.unlimited && text === settings.unlimited) return <span className="text-sm font-semibold" style={{ color }}>{settings.unlimited}</span>
+  if (number === null && text && scale === "cell") return <span className="text-xs">{text}</span>
+  if (scale === "cell" || settings.style === "icons") {
+    const count = Math.min(max, 20)
+    return <span className="inline-flex flex-wrap items-center gap-0.5" style={{ color }} role="img" aria-label={`${current ?? "vide"}${scale === "cell" ? "" : ` sur ${max}`}`}>
+      {Array.from({ length: count }, (_, index) => { const filled = scale === "cell" || (current !== null && index < current); return <span key={index} className={filled ? "" : "opacity-30"}><IndexIconGlyph icon={look.icon} emoji={look.emoji} filled={filled} stroke={settings.strokeColor} className={glyph} /></span> })}
+      {max > 20 && <span className="text-[11px] font-semibold">+{max - 20}</span>}
+    </span>
+  }
+  if (settings.style === "ring") {
+    const radius = 11
+    const length = 2 * Math.PI * radius
+    return <span className="relative grid size-7 place-items-center" role="img" aria-label={`${current ?? "vide"} sur ${max}`}>
+      <svg viewBox="0 0 28 28" className="absolute inset-0 -rotate-90"><circle cx="14" cy="14" r={radius} fill="none" stroke="currentColor" strokeWidth="3" className="text-muted" /><circle cx="14" cy="14" r={radius} fill="none" stroke={color} strokeWidth="3" strokeLinecap="round" strokeDasharray={`${length * ratio} ${length}`} /></svg>
+      <span className="relative text-[10px] font-semibold tabular-nums">{current ?? "—"}</span>
+    </span>
+  }
+  return <span className="inline-flex min-w-24 items-center gap-1.5" role="img" aria-label={`${current ?? "vide"} sur ${max}`}>
+    <span className={cn("block flex-1 overflow-hidden rounded-full bg-muted", compact ? "h-1.5" : "h-2")}><span className="block h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: color }} /></span>
+    <span className="text-[11px] tabular-nums text-muted-foreground">{current ?? "—"}/{max || "?"}</span>
+  </span>
+}
 
 /** La barre : on la fait glisser, ou on tape la valeur. */
 function GaugeBar({ label, current, max, color, disabled, editor, onChange }: { label: string; current: number | null; max: number; color: string; disabled: boolean; editor: ReactNode; onChange: (value: number) => void }) {
