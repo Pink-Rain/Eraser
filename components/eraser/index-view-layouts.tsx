@@ -7,11 +7,11 @@ import { Button } from "@/components/ui/button"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
-import { cardGridStyle, cardWidthRem, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
+import { cardGridStyle, cardWidthRem, IndexCard, TypedValue, type CardRowSource } from "@/components/eraser/index-card"
 import type { CardTemplate } from "@/lib/index-cards"
 import { parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { cellNumber, cellParts } from "@/lib/index-stats"
-import { calendarScaleOf, calendarScales, type ViewClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
+import { calendarScaleOf, calendarScales, VIEW_ITEM_CARD, type ViewClick, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -70,8 +70,25 @@ function useRowSource(row: string, valueOf: ViewLayoutProps["valueOf"]): CardRow
  * L'élément d'une ligne si la vue en demande un : un formulaire en lecture, ou une carte de
  * « Modifier › Cartes » (si la page sait les dessiner). Le clic y suit « Au clic » de la vue.
  */
-function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert" | "cardOf">, options: { fill?: boolean } = {}) {
+/** La carte qui dessine l'élément d'une ligne : l'élément sur mesure de la vue, sinon une carte de l'onglet. */
+function itemTemplateOf(props: Pick<ViewLayoutProps, "layout" | "cardOf">, row: string): CardTemplate | null {
+  const { itemCard, itemTemplate } = props.layout
+  if (itemCard === VIEW_ITEM_CARD) return itemTemplate ?? null
+  return itemCard ? props.cardOf?.(row, itemCard) ?? null : null
+}
+
+function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert" | "cardOf" | "valueOf" | "specOf">, options: { fill?: boolean } = {}) {
   const { itemCard, itemForm, click } = props.layout
+  // L'élément sur mesure : la vue le dessine elle-même avec le moteur des cartes ; son clic suit « Au clic ».
+  const template = itemCard === VIEW_ITEM_CARD ? props.layout.itemTemplate : undefined
+  if (template && !itemForm) {
+    const wide = template.width === "full" && !template.widthRem
+    // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
+    return (row: string) => {
+      const node = <IndexCard card={template} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} onOpen={props.inert ? undefined : () => props.onOpen(row)} />
+      return options.fill || wide ? node : <div className="w-full min-w-0" style={{ maxWidth: `${cardWidthRem(template)}rem` }}>{node}</div>
+    }
+  }
   const drawCard = itemCard && props.renderCard ? (row: string) => {
     const node = props.renderCard!(row, itemCard)
     const template = options.fill ? null : props.cardOf?.(row, itemCard)
@@ -402,7 +419,7 @@ function ListLayout(props: ViewLayoutProps) {
   const specOf = useContext(ViewSpecs)
   const card = cardFor(props, { fill: true })
   // Une carte comme élément : rangée comme dans la vue « Cartes » (sa largeur, ses cartes par rangée).
-  const cardTemplate = !layout.itemForm && layout.itemCard && rows[0] ? props.cardOf?.(rows[0], layout.itemCard) ?? null : null
+  const cardTemplate = !layout.itemForm && layout.itemCard && rows[0] ? itemTemplateOf(props, rows[0]) : null
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set())
   const toggle = (row: string) => setOpenRows((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })
   const others = headers.filter((header) => !fields.includes(header))
@@ -544,7 +561,11 @@ function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: 
     <span className="tabular-nums">{at + 1} / {rows.length}</span>
     <Button type="button" size="sm" variant="ghost" className="h-7" disabled={at < 0 || at >= rows.length - 1} onClick={() => onChoose(rows[at + 1])}>Suivant<ChevronRight /></Button>
   </div> : null
-  const drawn = kind === "form" && renderForm ? renderForm(row, detail.form || "principal") : kind === "card" && renderCard ? renderCard(row, detail.card || layout.itemCard || "*") : null
+  // Le détail en carte : celle choisie, sinon l'élément de la vue (son élément sur mesure, ou sa carte).
+  const ownCard = kind === "card" && !detail.card && layout.itemCard === VIEW_ITEM_CARD && layout.itemTemplate ? layout.itemTemplate : null
+  const drawn = kind === "form" && renderForm ? renderForm(row, detail.form || "principal")
+    : ownCard ? <IndexCard card={ownCard} row={{ value: (header) => props.valueOf(row, header), spec: props.specOf ?? noSpecs }} />
+    : kind === "card" && renderCard ? renderCard(row, detail.card || (layout.itemCard === VIEW_ITEM_CARD ? "*" : layout.itemCard) || "*") : null
   const body = drawn
     ? <div className={inline ? "p-2" : look.density === "compact" ? "p-3" : "p-4"}>{kind === "card" ? <div className="mx-auto w-full max-w-xl">{drawn}</div> : drawn}</div>
     : <DetailFields row={row} props={props} />

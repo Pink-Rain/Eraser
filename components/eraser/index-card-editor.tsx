@@ -849,7 +849,7 @@ function CardsLivePreview({ card, columns, rows, onClose }: { card: CardTemplate
 // Nouvelle carte : les cartes d'Eraser pour cet index, les formes de départ, les presets
 // ---------------------------------------------------------------------------
 
-function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { columns: CardColumn[]; samples: Array<Record<string, string>>; builtins: CardTemplate[]; onPick: (card: CardTemplate) => void; onClose: () => void }) {
+export function NewCardDialog({ columns, samples, builtins, onPick, onClose, title = "Nouvelle carte", builtinsLabel = "Les cartes d’Eraser pour cet index", builtinsHint = "Celle qu’Eraser affiche déjà pour ces lignes, refaite avec le moteur de cartes." }: { columns: CardColumn[]; samples: Array<Record<string, string>>; builtins: CardTemplate[]; onPick: (card: CardTemplate) => void; onClose: () => void; title?: string; builtinsLabel?: string; builtinsHint?: string }) {
   const { cardPresets, deleteCardPreset } = useIndexSettings("")
   const rows = useMemo(() => previewSamples(samples, columns), [columns, samples])
   const source = sampleSource(rows[0], columns)
@@ -866,12 +866,12 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
   return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
     <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[min(94vw,1100px)]">
       <DialogHeader>
-        <DialogTitle className="font-display text-2xl">Nouvelle carte</DialogTitle>
+        <DialogTitle className="font-display text-2xl">{title}</DialogTitle>
         <DialogDescription>Un point de départ, rempli avec les colonnes de cet onglet et ses vraies lignes. Tout se change ensuite : la taille, l’image, les blocs, la composition.</DialogDescription>
       </DialogHeader>
       {builtins.length > 0 && <section className="grid gap-2">
-        <p className={groupTitle}><Star className="size-3.5" />Les cartes d’Eraser pour cet index</p>
-        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((card) => tile(card.id, card.name, "Celle qu’Eraser affiche déjà pour ces lignes, refaite avec le moteur de cartes.", card))}</div>
+        <p className={groupTitle}><Star className="size-3.5" />{builtinsLabel}</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((card) => tile(card.id, card.name, builtinsHint, card))}</div>
       </section>}
       <section className="grid gap-2">
         <p className={groupTitle}><Sparkles className="size-3.5" />Formes de départ</p>
@@ -1029,12 +1029,9 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
   onChange: (value: TabCards) => void
   disabled?: boolean
 }) {
-  const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
-  const [page, setPage] = useState<CardPageKey>("card")
   const [creating, setCreating] = useState(false)
   const card = pickedCard(value, selected)
   const updateCard = (next: CardTemplate) => onChange({ ...value, cards: value.cards.map((entry) => entry.id === next.id ? next : entry) })
-  const selectBlock = (id: string | null) => { setSelectedBlock(id); if (id) setPage("blocks") }
 
   if (!card) return <div className="grid place-items-center rounded-xl border border-dashed p-10 text-center">
     <div className="grid max-w-sm gap-3">
@@ -1046,14 +1043,25 @@ export function IndexCardEditor({ tabName, columns, value, builtins, samples, se
     {creating && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={(next) => { onChange({ ...value, cards: [...value.cards, next] }); onSelect(next.id); setCreating(false) }} onClose={() => setCreating(false)} />}
   </div>
 
-  // Deux volets : les réglages à gauche, l'aperçu à droite, chacun avec sa barre de défilement.
+  return <SingleCardEditor key={card.id} card={card} columns={columns} samples={samples} onChange={updateCard} disabled={disabled} />
+}
+
+/**
+ * Une carte, réglée : ses quatre pages (carte, image, blocs, composition) à gauche, l'aperçu en
+ * direct à droite, chacun avec sa barre de défilement. « Modifier › Cartes » s'en sert pour la
+ * carte choisie, et les vues pour leur élément sur mesure.
+ */
+export function SingleCardEditor({ card, columns, samples, onChange, disabled = false }: { card: CardTemplate; columns: CardColumn[]; samples: Array<Record<string, string>>; onChange: (card: CardTemplate) => void; disabled?: boolean }) {
+  const [selectedBlock, setSelectedBlock] = useState<string | null>(null)
+  const [page, setPage] = useState<CardPageKey>("card")
+  const selectBlock = (id: string | null) => { setSelectedBlock(id); if (id) setPage("blocks") }
   return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,1fr)_minmax(18rem,26rem)]">
     <section className="grid min-w-0 content-start gap-3 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <Tabs ariaLabel="Réglages de la carte" value={page} options={cardPages} onChange={setPage} />
-      {page === "card" && <CardPage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
-      {page === "image" && <ImagePage key={card.id} card={card} columns={columns} onChange={updateCard} disabled={disabled} />}
-      {page === "blocks" && <BlocksPage key={card.id} card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={updateCard} disabled={disabled} />}
-      {page === "composition" && <CompositionPage key={card.id} card={card} selectedBlock={selectedBlock} onSelectBlock={selectBlock} onChange={updateCard} disabled={disabled} />}
+      {page === "card" && <CardPage card={card} columns={columns} onChange={onChange} disabled={disabled} />}
+      {page === "image" && <ImagePage card={card} columns={columns} onChange={onChange} disabled={disabled} />}
+      {page === "blocks" && <BlocksPage card={card} columns={columns} selectedBlock={selectedBlock} onSelectBlock={setSelectedBlock} onChange={onChange} disabled={disabled} />}
+      {page === "composition" && <CompositionPage card={card} selectedBlock={selectedBlock} onSelectBlock={selectBlock} onChange={onChange} disabled={disabled} />}
     </section>
     <CardPreview card={card} columns={columns} samples={samples} selectedBlock={selectedBlock} onSelectBlock={selectBlock} />
   </div>

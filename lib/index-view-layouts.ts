@@ -9,6 +9,7 @@
  * la même case « Présentation (JSON) », sans nouvelle colonne ni nouvelle feuille.
  */
 import { cellNumber, cellParts, cleanStats, type StatDefinition } from "@/lib/index-stats"
+import { parseCardTemplate, type CardTemplate } from "@/lib/index-cards"
 
 export { cellNumber }
 
@@ -170,6 +171,8 @@ export type ViewLayout = {
    * absent : le nom et les colonnes choisies, comme avant.
    */
   itemCard?: string
+  /** L'élément sur mesure de la vue (`itemCard` vaut alors « @vue ») : une carte faite avec le moteur des cartes, gardée dans la vue. */
+  itemTemplate?: CardTemplate
   /** Arborescence : la colonne qui nomme la ligne parente (« Pays » d'une ville, « Région »…). */
   parentColumn?: string
   /** Galerie : forme et taille des images, légende au survol seulement. */
@@ -315,6 +318,9 @@ export type RowGaugeSetting = { column: string; style?: "bar" | "charges"; max?:
 export const viewPalette = ["#927640", "#682522", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#397f88", "#285f8f", "#1e3a8a", "#6b4c9a", "#9d174d", "#78716c"]
 /** Les couleurs d'une arborescence « une couleur par profondeur ». */
 export const depthPalette = ["#927640", "#397f88", "#6b4c9a", "#4d7c0f", "#c2410c", "#285f8f"]
+
+/** La valeur d'`itemCard` qui veut dire « l'élément sur mesure de la vue » (`itemTemplate`). */
+export const VIEW_ITEM_CARD = "@vue"
 
 /** La valeur d'`itemCard` qui veut dire « la carte par défaut de l'onglet ». */
 export const DEFAULT_ITEM_CARD = "*"
@@ -508,6 +514,8 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.showUndated === true) layout.showUndated = true
   if (raw.tileColumns === 1 || raw.tileColumns === 2 || raw.tileColumns === 4 || raw.tileColumns === 5 || raw.tileColumns === 6) layout.tileColumns = raw.tileColumns
   if (text(raw.itemCard, 80)) layout.itemCard = text(raw.itemCard, 80)
+  const itemTemplate = raw.itemTemplate ? parseCardTemplate(raw.itemTemplate) : null
+  if (itemTemplate) layout.itemTemplate = itemTemplate
   if (text(raw.parentColumn)) layout.parentColumn = text(raw.parentColumn)
   if (raw.galleryShape === "square" || raw.galleryShape === "portrait" || raw.galleryShape === "landscape") layout.galleryShape = raw.galleryShape
   if (raw.gallerySize === "sm" || raw.gallerySize === "md" || raw.gallerySize === "lg") layout.gallerySize = raw.gallerySize

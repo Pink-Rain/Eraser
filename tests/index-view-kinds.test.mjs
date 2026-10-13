@@ -40,6 +40,11 @@ test("les nouvelles vues sont des vues de « Modifier », avec leurs presets", (
   assert.deepEqual(views.presentationEntries(versions).map(([kind]) => kind), ["list"]);
   assert.deepEqual(views.presentationVariant({ Lieux: versions }, "lieux", "court"), { kind: "list", fields: ["Type"] });
   assert.equal(views.presentationVariant({ Lieux: versions }, "Lieux", "disparue"), null);
+  // L'élément sur mesure d'une vue : une carte gardée dans la vue, relue comme une carte.
+  const own = views.cleanViewLayout({ kind: "list", itemCard: views.VIEW_ITEM_CARD, itemTemplate: { id: "c1", name: "Élément", blocks: [{ id: "b1", type: "title", column: "Nom" }, { id: "b2", type: "pirate" }] } });
+  assert.equal(own.itemCard, "@vue");
+  assert.deepEqual(own.itemTemplate.blocks.map((block) => block.type), ["title"]);
+  assert.equal(views.cleanViewLayout({ kind: "list", itemTemplate: "illisible" }).itemTemplate, undefined);
   // Un preset appliqué ailleurs : la colonne du parent suit si elle existe.
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "pays" }, ["Nom", "Pays"]).parentColumn, "Pays");
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "Pays" }, ["Nom"]).parentColumn, undefined);

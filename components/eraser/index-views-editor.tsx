@@ -10,9 +10,10 @@
  * montrent avec ces réglages.
  */
 import { useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, BookOpen, Bookmark, Columns3, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, PanelsLeftRight, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, Bookmark, Check, Columns3, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, PanelsLeftRight, Pencil, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, X } from "lucide-react"
 
 import { IndexCard } from "@/components/eraser/index-card"
+import { NewCardDialog, SingleCardEditor } from "@/components/eraser/index-card-editor"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
@@ -29,7 +30,7 @@ import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedViewsOf, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedView, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, VIEW_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedViewsOf, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedView, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
 import { viewStartersFor } from "@/lib/index-view-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
@@ -65,7 +66,12 @@ type Ctx = {
   presentations: TabPresentations
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
+  /** De quoi faire un élément sur mesure (les colonnes typées, les lignes de l'aperçu, les cartes de l'onglet) ; absent : pas d'élément sur mesure. */
+  element?: ElementSource
 }
+
+/** Ce qu'il faut à l'élément sur mesure d'une vue : les colonnes typées, quelques lignes, les cartes de l'onglet (pour partir d'elles). */
+export type ElementSource = { columns: CardColumn[]; samples: Array<Record<string, string>>; tabCards: CardTemplate[] }
 
 /** La formule d'un groupe (en-tête de section ou de colonne) : compte, somme… d'une colonne, contre une cible. */
 function GroupFormulaSettings({ ctx, what = "section" }: { ctx: Ctx; what?: string }) {
@@ -218,6 +224,8 @@ function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabe
 /** Ce qu'un élément montre : les colonnes sous le nom, l'icône, la pastille, l'image. */
 function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, withImage = true, withIcon = true, max = 8 }: { ctx: Ctx; fieldsLabel?: string; withBadge?: boolean; withImage?: boolean; withIcon?: boolean; max?: number }) {
   const { layout, look, set, setLook, columns, disabled } = ctx
+  // Une carte, un formulaire ou un élément sur mesure dessine l'élément : ces réglages ne servent qu'à l'élément simple.
+  if ((layout.itemCard || layout.itemForm) && ctx.kind !== "calendar") return null
   return <div className={settingsGroup}>
     <p className={settingsTitle}><LayoutList className="size-3.5" />Chaque élément</p>
     <span className={fieldLabel}>{fieldsLabel} <span className="font-normal">({max} au plus, dans l’ordre)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={max} /></span>
@@ -248,20 +256,58 @@ function SortSettings({ ctx }: { ctx: Ctx }) {
 
 /** L'élément : chaque ligne dessinée avec les réglages de la vue, une carte de « Modifier › Cartes », ou un formulaire de l'onglet en lecture ; puis « Au clic ». */
 function CardChoice({ ctx }: { ctx: Ctx }) {
-  const { layout, set, cards, forms, disabled } = ctx
+  const { layout, set, cards, forms, disabled, element } = ctx
+  const [picking, setPicking] = useState(false)
+  const [editing, setEditing] = useState(false)
+  const own = layout.itemCard === VIEW_ITEM_CARD
   const value = layout.itemForm ? `form:${layout.itemForm}` : layout.itemCard ?? ""
+  const kindLabel = presentationKinds.find((entry) => entry.value === ctx.kind)?.label ?? ""
+  const choose = (next: string) => {
+    if (next === VIEW_ITEM_CARD) {
+      // L'élément sur mesure : on part d'une forme (une carte de l'onglet, une forme de départ, un preset) s'il n'en a pas encore.
+      if (layout.itemTemplate) set({ itemCard: VIEW_ITEM_CARD, itemForm: undefined })
+      else setPicking(true)
+      return
+    }
+    set(next.startsWith("form:") ? { itemForm: next.slice(5), itemCard: undefined } : { itemCard: next || undefined, itemForm: undefined })
+  }
   return <>
     <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
-      <label className={fieldLabel}>Élément : chaque ligne s’affiche
-        <NativeSelect value={value} disabled={disabled} onChange={(event) => { const next = event.target.value; set(next.startsWith("form:") ? { itemForm: next.slice(5), itemCard: undefined } : { itemCard: next || undefined, itemForm: undefined }) }} className="h-8 py-0 text-xs">
+      <label className={cn(fieldLabel, "[&_[data-slot=native-select-wrapper]]:w-full")}>Élément : chaque ligne s’affiche
+        <NativeSelect value={value} disabled={disabled} onChange={(event) => choose(event.target.value)} className="h-8 w-full py-0 text-xs">
           <NativeSelectOption value="">Avec les réglages de cette vue (nom, colonnes, icône, image)</NativeSelectOption>
-          <NativeSelectOptGroup label="Avec une carte (3)"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}{layout.itemCard && layout.itemCard !== DEFAULT_ITEM_CARD && !cards.some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte à l’étoile la remplace)</NativeSelectOption>}</NativeSelectOptGroup>
-          <NativeSelectOptGroup label="Avec un formulaire en lecture (1)">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+          {(element || own) && <NativeSelectOptGroup label="Sur mesure"><NativeSelectOption value={VIEW_ITEM_CARD}>Un élément propre à cette vue (moteur des cartes)</NativeSelectOption></NativeSelectOptGroup>}
+          <NativeSelectOptGroup label="Avec une carte de l’onglet"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}{layout.itemCard && !own && layout.itemCard !== DEFAULT_ITEM_CARD && !cards.some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte à l’étoile la remplace)</NativeSelectOption>}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Avec un formulaire en lecture">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
         </NativeSelect>
       </label>
-      <p className={hintText}>{layout.itemForm ? "Le formulaire se règle dans « Modifier › Formulaire » : sections, onglets, blocs. Ici il se lit, le clic ouvre la fiche." : layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : "Avec une carte ou un formulaire, l’élément prend le même visuel que dans les autres vues."}</p>
+      {own && layout.itemTemplate && element && <div className="flex flex-wrap gap-1.5">
+        <Button type="button" size="sm" className="h-8" disabled={disabled} onClick={() => setEditing(true)}><Pencil />Modifier l’élément</Button>
+        <Button type="button" size="sm" variant="outline" className="h-8" disabled={disabled} onClick={() => setPicking(true)}><Sparkles />Repartir d’une forme…</Button>
+      </div>}
+      <p className={hintText}>{own ? "Fait avec le moteur des cartes : taille, image, couleurs, blocs (titre, pastilles, libellé : valeur, jauge ou charges, tuiles, détails…), composition. Gardé dans cette vue, qui le pose à sa taille." : layout.itemForm ? "Le formulaire se règle dans « Modifier › Formulaire » : sections, onglets, blocs. Ici il se lit, le clic ouvre la fiche." : layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : "Pour régler l’élément aussi finement qu’une carte : « Un élément propre à cette vue »."}</p>
     </div>
     <ClickSettings ctx={ctx} />
+    {picking && element && <NewCardDialog
+      title={`Élément de la vue ${kindLabel} : point de départ`}
+      columns={element.columns}
+      samples={element.samples}
+      builtins={element.tabCards}
+      builtinsLabel="Les cartes de cet onglet"
+      builtinsHint="Une copie, à retoucher pour cette vue seulement."
+      onPick={(card) => { set({ itemCard: VIEW_ITEM_CARD, itemTemplate: { ...card, name: `Élément · ${kindLabel}` }, itemForm: undefined }); setPicking(false); setEditing(true) }}
+      onClose={() => setPicking(false)}
+    />}
+    {editing && element && layout.itemTemplate && <Dialog open onOpenChange={(open) => { if (!open) setEditing(false) }}>
+      <DialogContent className="flex h-[92svh] max-h-[92svh] flex-col gap-3 sm:max-w-[min(96vw,1360px)]">
+        <DialogHeader className="shrink-0">
+          <DialogTitle className="font-display text-2xl">Élément de la vue {kindLabel}</DialogTitle>
+          <DialogDescription>Chaque ligne de la vue se dessine ainsi : la carte, son image, ses blocs, sa composition. L’aperçu, à droite, montre les lignes de l’onglet. Rien n’est écrit avant « Enregistrer ».</DialogDescription>
+        </DialogHeader>
+        <div className="min-h-0 flex-1 overflow-y-auto lg:overflow-hidden"><SingleCardEditor card={layout.itemTemplate} columns={element.columns} samples={element.samples} onChange={(itemTemplate) => set({ itemTemplate })} disabled={disabled} /></div>
+        <div className="flex shrink-0 justify-end"><Button type="button" onClick={() => setEditing(false)}><Check />Terminé</Button></div>
+      </DialogContent>
+    </Dialog>}
   </>
 }
 
@@ -282,8 +328,8 @@ function ListPages(ctx: Ctx): Page[] {
         </div>
         <Range text="Colonnes de la liste (sur un écran assez large)" value={layout.listColumns ?? 1} min={1} max={5} onChange={(value) => set({ listColumns: value === 1 ? undefined : value as 2 | 3 | 4 | 5 })} disabled={disabled} />
       </div>
-      <ItemSettings ctx={ctx} />
       <CardChoice ctx={ctx} />
+      <ItemSettings ctx={ctx} />
     </> },
     { key: "sections", label: "Sections", icon: <ListTree className="size-3.5" />, render: () => <SectionsSettings ctx={ctx} withAlphabet /> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
@@ -361,7 +407,7 @@ function KanbanPages(ctx: Ctx): Page[] {
       {layout.kanbanColumn && <GroupFormulaSettings ctx={ctx} what="colonne" />}
       <LanesEditor ctx={ctx} />
     </> },
-    { key: "cards", label: "Cartes", icon: <LayoutGrid className="size-3.5" />, render: () => <><ItemSettings ctx={ctx} /><CardChoice ctx={ctx} /></> },
+    { key: "cards", label: "Cartes", icon: <LayoutGrid className="size-3.5" />, render: () => <><CardChoice ctx={ctx} /><ItemSettings ctx={ctx} /></> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin des cartes</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrées" }, { value: "plain", label: "Séparées d’un trait" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
@@ -452,8 +498,8 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
         <Choice label="Entrées" value={look.entryStyle ?? "pill"} options={[{ value: "pill", label: "Pastilles" }, { value: "dot", label: "Points" }, { value: "bar", label: "Barres" }]} onChange={(entryStyle) => setLook({ entryStyle: entryStyle === "pill" ? undefined : entryStyle })} disabled={disabled} />
         <Range text="Entrées par jour, au plus" value={layout.maxPerDay ?? 0} min={0} max={12} format={(value) => value ? String(value) : "toutes"} onChange={(value) => set({ maxPerDay: value || undefined })} disabled={disabled} title="Au-delà, « +N » ouvre le reste" />
       </div>}
-      <ItemSettings ctx={ctx} fieldsLabel={scale === "day" && forms.day === "paragraphs" ? "Sous le nom (la première en paragraphe)" : scale === "week" && forms.week === "table" ? "Colonnes du tableau" : "Sous le nom (listes, fiches)"} />
       <CardChoice ctx={ctx} />
+      <ItemSettings ctx={ctx} fieldsLabel={scale === "day" && forms.day === "paragraphs" ? "Sous le nom (la première en paragraphe)" : scale === "week" && forms.week === "table" ? "Colonnes du tableau" : "Sous le nom (listes, fiches)"} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -738,8 +784,8 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
       </div>
     </> },
     { key: "items", label: "Éléments", icon: <LayoutGrid className="size-3.5" />, render: () => <>
-      <ItemSettings ctx={ctx} withBadge fieldsLabel={style === "bars" || style === "lanes" ? "Sous le nom (jauge)" : "Sous le nom"} />
       <CardChoice ctx={ctx} />
+      <ItemSettings ctx={ctx} withBadge fieldsLabel={style === "bars" || style === "lanes" ? "Sous le nom (jauge)" : "Sous le nom"} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrés" }, { value: "plain", label: "Nus" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
@@ -792,8 +838,8 @@ function TreePages(ctx: Ctx): Page[] {
         </div>
         <ColumnField label="Grisé quand cette colonne est vide ou dit non" value={layout.dimColumn} columns={columns} onChange={(dimColumn) => set({ dimColumn })} empty="— Jamais —" disabled={disabled} hint="Une lignée : les disparus en grisé (« Vivant » vide ou « non »)" />
       </div>
-      <ItemSettings ctx={ctx} fieldsLabel="À droite du nom" />
       <CardChoice ctx={ctx} />
+      <ItemSettings ctx={ctx} fieldsLabel="À droite du nom" />
       {layout.click === "side" && <div className={settingsGroup}><Toggle checked={layout.detail?.kind === "children"} onChange={(children) => set({ detail: { ...(layout.detail ?? {}), kind: children ? "children" : undefined } })} disabled={disabled}>Le panneau montre les enfants du nœud choisi (explorateur)</Toggle><p className={hintText}>Les enfants se dessinent avec l’élément (carte ou lignes) ; un clic sur l’un d’eux descend d’un niveau.</p></div>}
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
@@ -887,7 +933,7 @@ function CodexPages(ctx: Ctx): Page[] {
 type Page = { key: string; label: string; icon: ReactNode; render: () => ReactNode }
 
 /** Les réglages d'une vue (sa forme déjà choisie), en pages propres à son type. */
-export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false }: {
+export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false, element }: {
   kind: PresentationKind
   layout: ViewLayout
   columns: string[]
@@ -900,6 +946,8 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
   presentations?: TabPresentations
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
+  /** De quoi faire un élément sur mesure ; absent (bloc de page) : seulement les éléments existants. */
+  element?: ElementSource
 }) {
   const [page, setPage] = useState("")
   const calendars = useCalendarNames(kind === "calendar" || kind === "timeline")
@@ -914,7 +962,7 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
     for (const key of Object.keys(next) as Array<keyof ViewLook>) if (next[key] === undefined) delete next[key]
     set({ look: Object.keys(next).length ? next : undefined })
   }
-  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, stats, presentations, optionsOf, disabled }
+  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, stats, presentations, optionsOf, disabled, element }
   const pages = kind === "list" ? ListPages(ctx)
     : kind === "kanban" ? KanbanPages(ctx)
     : kind === "master-detail" ? MasterDetailPages(ctx)
@@ -1135,7 +1183,7 @@ export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, colu
   return <div className="grid min-h-0 gap-3 lg:h-full lg:grid-cols-[minmax(0,24rem)_minmax(0,1fr)] xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
     <div className="grid content-start gap-2 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
-      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
+      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} element={cardColumns.length ? { columns: cardColumns, samples: rows, tabCards: cards } : undefined} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
     </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 lg:min-h-0 lg:overflow-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

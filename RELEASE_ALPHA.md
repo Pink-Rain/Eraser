@@ -1,34 +1,27 @@
-# Eraser 0.1.1-alpha.221 — Les vues, lot 1 : une base commune
+# Eraser 0.1.1-alpha.222 — Les vues, lot 2 : un élément sur mesure
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les vues déjà réglées se relisent telles quelles. Le lot 2 (un élément sur mesure,
-fait avec le moteur des cartes, dans chaque vue) suit.
+Sheets ; les vues déjà réglées se relisent telles quelles.
 
-## « Modifier » : deux volets
+## Un élément propre à chaque vue
 
-- Dans les vues, les cartes, le formulaire et le survol : **les réglages à gauche, l'aperçu à
-  droite**, chacun avec **sa propre barre de défilement**. Un long menu de réglages ne cache plus
-  l'aperçu.
-- Des réglages lisibles : le libellé **au-dessus** de chaque choix, les listes sur toute la
-  largeur (plus de « C.. »), les boutons qui passent à la ligne au lieu de s'empiler.
+- Liste, Kanban, Maître-détail, Calendrier, Chronologie et Arborescence : « Élément : chaque ligne
+  s'affiche » propose **« Un élément propre à cette vue (moteur des cartes) »**.
+- On part d'une **carte de l'onglet** (une copie), d'une **forme de départ** ou d'un **preset**,
+  puis **« Modifier l'élément »** ouvre le moteur des cartes en grand : taille, image, couleurs,
+  blocs (titre, ligne composée, pastilles, libellé : valeur, **jauge ou charges**, tuiles,
+  détails repliables, zones de couleur…), composition — avec l'aperçu en direct sur les lignes
+  de l'onglet.
+- L'élément est **gardé dans la vue** (il ne change pas les cartes de l'onglet), et la vue le pose
+  **à sa taille** (la liste le range comme la vue « Cartes »). Le panneau de détail d'un
+  maître-détail le reprend aussi.
+- Les colonnes renommées suivent dans l'élément.
 
-## Les couleurs
+## Des réglages mieux rangés
 
-- **« Couleur des lignes selon »** lit maintenant une **colonne Couleur** (« #a46a6a ») telle
-  quelle, en plus des couleurs d'une colonne liste.
-- Couleur d'accent et couleur des lignes : Liste, Kanban, Maître-détail, Calendrier, Galerie,
-  Chronologie, Arborescence, Codex ; l'accent seul pour le Tableau de bord.
+- Le choix de l'élément vient **en premier** ; les réglages de l'élément simple (colonnes sous
+  le nom, icône, pastille, image, jauge) ne s'affichent que pour lui.
 
-## Les valeurs selon leur type, partout
-
-- Sous le nom d'un élément, dans le panneau de détail et dans les lignes dépliées : les
-  **charges et jauges** s'affichent en icônes ou en barre, une **icône** en icône, une
-  **couleur** en pastille, une **case** en ✓/✗, les **images** en vignettes, les listes en
-  pastilles colorées — comme sur les cartes (plus de « 3|zap|#78716c »).
-- **Libellés au choix** : « Leurs libellés » › Discrets, À la couleur d'accent ou **Sans libellé**.
-
-## Une carte garde sa forme
-
-- Une carte de « Modifier › Cartes » utilisée comme élément d'une vue **n'est plus étirée** :
-  la liste la range comme la vue « Cartes » (sa largeur, ses cartes par rangée) ; le kanban,
-  le maître-détail, la chronologie, l'arborescence la posent à sa largeur.
+Rappel de la 221 : réglages et aperçu en deux volets, « Couleur des lignes » depuis une colonne
+Couleur, valeurs dessinées selon leur type (charges, icônes, couleurs…), libellés au choix,
+cartes jamais étirées.
