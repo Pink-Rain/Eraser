@@ -174,8 +174,8 @@ export type ViewLayout = {
   galleryShape?: "square" | "portrait" | "landscape"
   gallerySize?: "sm" | "md" | "lg"
   captionOnHover?: boolean
-  /** Chronologie : éléments des deux côtés de la ligne du temps, ou tous à droite. */
-  timelineSide?: "alternate" | "right"
+  /** Chronologie : éléments des deux côtés de la ligne du temps, tous à droite, ou un côté par groupe (« groups », avec `groupBy`). */
+  timelineSide?: "alternate" | "right" | "groups"
   /** Codex : le sommaire à côté des fiches. */
   showToc?: boolean
   /** Une colonne icône (ou émoji) montrée devant le nom ; `itemIcon` : une icône fixe quand aucune colonne ne la donne. */
@@ -236,22 +236,38 @@ export type ViewLayout = {
   galleryRadiusPx?: number
   galleryFit?: "cover" | "contain"
   galleryStill?: boolean
-  /** Chronologie : des points, des icônes en médaillon ou des chapitres ; un jalon par an, décennie, siècle ou millénaire ; la date écrite. */
-  timelineStyle?: "dots" | "icons" | "chapters"
+  /** Chronologie : des points, des icônes en médaillon, des chapitres, des barres de durée (`endColumn`) ou des fils (`laneColumn`) ; un jalon par an, décennie, siècle ou millénaire ; la date écrite. */
+  timelineStyle?: "dots" | "icons" | "chapters" | "bars" | "lanes"
   milestoneEvery?: 1 | 10 | 100 | 1000
   milestoneIcon?: string
   dateStyle?: "label" | "badge" | "hidden"
-  /** Arborescence : son dessin ; les icônes des branches et des feuilles ; une couleur par profondeur ; les racines en grandes sections. */
-  treeStyle?: "lines" | "indent" | "boxed"
+  /** Arborescence : son dessin (lignes, retrait, cartes emboîtées, organigramme, carte mentale) ; les icônes des branches et des feuilles ; une couleur par profondeur ; les racines en grandes sections ; `numbered` : 1., 1.1, 1.1.1. */
+  treeStyle?: "lines" | "indent" | "boxed" | "org" | "mindmap"
   branchIcon?: string
   leafIcon?: string
   depthColors?: boolean
   rootsAsSections?: boolean
-  /** Codex : son style ; le texte sur deux colonnes ; les fiches numérotées ; le sommaire à côté ou au-dessus. */
-  codexStyle?: "book" | "scroll" | "plain"
+  /** Codex : son style (livre, parchemin, nu, journal de bord daté, croquis) ; le texte sur deux colonnes ; les fiches numérotées ; le sommaire à côté ou au-dessus. */
+  codexStyle?: "book" | "scroll" | "plain" | "board" | "sketch"
   proseColumns?: 1 | 2
   chapterNumbers?: boolean
   tocPosition?: "side" | "top"
+  /** Codex : deux fiches face à face, feuilletées ; des colonnes nombre en tuiles sous le titre ; des colonnes de relation en renvois (« voir aussi », un clic ouvre la fiche liée) ; recto et verso (deux cartes, retournées au clic). */
+  codexPages?: boolean
+  codexTiles?: string[]
+  codexLinks?: string[]
+  codexRecto?: string
+  codexVerso?: string
+  /** Galerie : mur sans marge, cabinet (fond sombre, cadre, plaque), planche (vignettes larges + texte), carrousel (une image à la fois) ; la largeur de chaque vignette selon une colonne nombre. */
+  galleryStyle?: "plain" | "wall" | "cabinet" | "strip" | "carousel"
+  gallerySizeColumn?: string
+  /** Chronologie : l'axe horizontal (frise) ; les groupes de part et d'autre (« groups ») ; les périodes (les groupes) en bandes ou en échelle (une bande en haut, un clic déplie la période) ; la colonne de fin (durées en barres) ; un fil par valeur d'une colonne (« lanes »). */
+  timelineAxis?: "vertical" | "horizontal"
+  timelinePeriods?: "bands" | "scale"
+  endColumn?: string
+  laneColumn?: string
+  /** Arborescence : une colonne grisant la ligne quand elle est vide ou « non » (lignée) ; les dates de début (`dateColumn`) et de fin (`endColumn`) sous le nom. */
+  dimColumn?: string
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
   look?: ViewLook
 }
@@ -285,7 +301,7 @@ export const viewClicks: Array<{ value: ViewClick; label: string; hint: string }
   { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
   { value: "none", label: "Rien", hint: "Les éléments ne réagissent pas au clic." },
 ]
-export type ViewDetail = { kind?: "fields" | "form" | "card"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
+export type ViewDetail = { kind?: "fields" | "form" | "card" | "children"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
 export type GroupFormulaOp = "count" | "sum" | "avg" | "min" | "max"
 export const groupFormulaOps: Array<{ value: GroupFormulaOp; label: string }> = [
   { value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "avg", label: "Moyenne" }, { value: "min", label: "Plus petite valeur" }, { value: "max", label: "Plus grande valeur" },
@@ -493,7 +509,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.galleryShape === "square" || raw.galleryShape === "portrait" || raw.galleryShape === "landscape") layout.galleryShape = raw.galleryShape
   if (raw.gallerySize === "sm" || raw.gallerySize === "md" || raw.gallerySize === "lg") layout.gallerySize = raw.gallerySize
   if (raw.captionOnHover === true) layout.captionOnHover = true
-  if (raw.timelineSide === "alternate" || raw.timelineSide === "right") layout.timelineSide = raw.timelineSide
+  if (raw.timelineSide === "alternate" || raw.timelineSide === "right" || raw.timelineSide === "groups") layout.timelineSide = raw.timelineSide
   if (raw.showToc === true) layout.showToc = true
   // Les réglages propres à chaque vue (icônes, couleurs, formes libres).
   if (text(raw.iconColumn)) layout.iconColumn = text(raw.iconColumn)
@@ -509,7 +525,7 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.detail && typeof raw.detail === "object") {
     const input = raw.detail as Record<string, unknown>
     const detail: ViewDetail = {}
-    const kind = oneOf(input.kind, ["fields", "form", "card"] as const)
+    const kind = oneOf(input.kind, ["fields", "form", "card", "children"] as const)
     if (kind && kind !== "fields") detail.kind = kind
     if (text(input.form, 40)) detail.form = text(input.form, 40)
     if (text(input.card, 80)) detail.card = text(input.card, 80)
@@ -584,20 +600,36 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (galleryRadiusPx !== undefined) layout.galleryRadiusPx = galleryRadiusPx
   if (raw.galleryFit === "contain") layout.galleryFit = "contain"
   if (raw.galleryStill === true) layout.galleryStill = true
-  const timelineStyle = oneOf(raw.timelineStyle, ["dots", "icons", "chapters"] as const)
+  const timelineStyle = oneOf(raw.timelineStyle, ["dots", "icons", "chapters", "bars", "lanes"] as const)
   if (timelineStyle) layout.timelineStyle = timelineStyle
+  if (raw.timelineAxis === "horizontal") layout.timelineAxis = "horizontal"
+  const timelinePeriods = oneOf(raw.timelinePeriods, ["bands", "scale"] as const)
+  if (timelinePeriods) layout.timelinePeriods = timelinePeriods
+  if (text(raw.endColumn)) layout.endColumn = text(raw.endColumn)
+  if (text(raw.laneColumn)) layout.laneColumn = text(raw.laneColumn)
+  if (text(raw.dimColumn)) layout.dimColumn = text(raw.dimColumn)
+  const galleryStyle = oneOf(raw.galleryStyle, ["plain", "wall", "cabinet", "strip", "carousel"] as const)
+  if (galleryStyle && galleryStyle !== "plain") layout.galleryStyle = galleryStyle
+  if (text(raw.gallerySizeColumn)) layout.gallerySizeColumn = text(raw.gallerySizeColumn)
   if (raw.milestoneEvery === 1 || raw.milestoneEvery === 10 || raw.milestoneEvery === 100 || raw.milestoneEvery === 1000) layout.milestoneEvery = raw.milestoneEvery
   if (text(raw.milestoneIcon, 40)) layout.milestoneIcon = text(raw.milestoneIcon, 40)
   const dateStyle = oneOf(raw.dateStyle, ["label", "badge", "hidden"] as const)
   if (dateStyle) layout.dateStyle = dateStyle
-  const treeStyle = oneOf(raw.treeStyle, ["lines", "indent", "boxed"] as const)
+  const treeStyle = oneOf(raw.treeStyle, ["lines", "indent", "boxed", "org", "mindmap"] as const)
   if (treeStyle) layout.treeStyle = treeStyle
   if (text(raw.branchIcon, 40)) layout.branchIcon = text(raw.branchIcon, 40)
   if (text(raw.leafIcon, 40)) layout.leafIcon = text(raw.leafIcon, 40)
   if (raw.depthColors === true) layout.depthColors = true
   if (raw.rootsAsSections === true) layout.rootsAsSections = true
-  const codexStyle = oneOf(raw.codexStyle, ["book", "scroll", "plain"] as const)
+  const codexStyle = oneOf(raw.codexStyle, ["book", "scroll", "plain", "board", "sketch"] as const)
   if (codexStyle) layout.codexStyle = codexStyle
+  if (raw.codexPages === true) layout.codexPages = true
+  const codexTiles = Array.isArray(raw.codexTiles) ? raw.codexTiles.map((field) => text(field)).filter(Boolean).slice(0, 6) : []
+  if (codexTiles.length) layout.codexTiles = codexTiles
+  const codexLinks = Array.isArray(raw.codexLinks) ? raw.codexLinks.map((field) => text(field)).filter(Boolean).slice(0, 4) : []
+  if (codexLinks.length) layout.codexLinks = codexLinks
+  if (text(raw.codexRecto, 80)) layout.codexRecto = text(raw.codexRecto, 80)
+  if (text(raw.codexVerso, 80)) layout.codexVerso = text(raw.codexVerso, 80)
   if (raw.proseColumns === 2) layout.proseColumns = 2
   if (raw.chapterNumbers === true) layout.chapterNumbers = true
   if (raw.tocPosition === "top") layout.tocPosition = "top"
@@ -786,7 +818,7 @@ export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewL
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.flatMap((tile) => tile.column && !known.has(fold(tile.column)) ? [] : [{ ...tile, maxColumn: one(tile.maxColumn), formulas: tile.formulas?.filter((formula) => !formula.column || known.has(fold(formula.column))) }]),
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), endColumn: one(layout.endColumn), laneColumn: one(layout.laneColumn), dimColumn: one(layout.dimColumn), gallerySizeColumn: one(layout.gallerySizeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), codexTiles: many(layout.codexTiles), codexLinks: many(layout.codexLinks), tiles: layout.tiles?.flatMap((tile) => tile.column && !known.has(fold(tile.column)) ? [] : [{ ...tile, maxColumn: one(tile.maxColumn), formulas: tile.formulas?.filter((formula) => !formula.column || known.has(fold(formula.column))) }]),
     groupFormula: layout.groupFormula && (!layout.groupFormula.column || known.has(fold(layout.groupFormula.column))) ? layout.groupFormula : undefined,
     gauge: layout.gauge && known.has(fold(layout.gauge.column)) ? { ...layout.gauge, maxColumn: one(layout.gauge.maxColumn) } : undefined }
   return cleanViewLayout(next) ?? { kind: layout.kind }

@@ -633,10 +633,13 @@ const galleryWidthOf = (layout: ViewLayout) => layout.galleryWidthRem ?? { sm: 8
 function GalleryPages(ctx: Ctx): Page[] {
   const { layout, look, set, setLook, columns, disabled } = ctx
   const ratio = galleryRatioOf(layout)
+  const style = layout.galleryStyle ?? "plain"
   return [
     { key: "images", label: "Images", icon: <ImageIcon className="size-3.5" />, render: () => <div className={settingsGroup}>
       <p className={settingsTitle}><ImageIcon className="size-3.5" />Les vignettes</p>
       <ColumnField label="Colonne des images" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Choisir… —" disabled={disabled} />
+      <Choice label="Galerie" value={style} options={[{ value: "plain", label: "Mosaïque" }, { value: "wall", label: "Mur sans marge" }, { value: "cabinet", label: "Cabinet (cadres)" }, { value: "strip", label: "Planche large" }, { value: "carousel", label: "Carrousel" }]} onChange={(galleryStyle) => set({ galleryStyle: galleryStyle === "plain" ? undefined : galleryStyle })} disabled={disabled} />
+      <p className={hintText}>{style === "wall" ? "Les images collées les unes aux autres, le nom au survol." : style === "cabinet" ? "Fond sombre, un cadre à la couleur de la ligne (ou de la vue), le nom sur une plaque." : style === "strip" ? "Des vignettes larges, le ruban, le nom et le texte dessous." : style === "carousel" ? "Une image à la fois, ses voisines en retrait, des flèches." : "Les images en grille, chacune à la largeur réglée."}</p>
       <span className={fieldLabel}>Forme de départ <span className="font-normal">— règle les deux curseurs</span>
         <span className="flex flex-wrap gap-1">{galleryShapes.map((shape) => <button key={shape.key} type="button" disabled={disabled} title={shape.label} aria-label={shape.label} aria-pressed={Math.abs(ratio - shape.ratio) < 0.02} onClick={() => set({ galleryHeightRem: Math.round(galleryWidthOf(layout) / shape.ratio * 2) / 2, galleryWidthRem: galleryWidthOf(layout), galleryRatio: undefined })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", Math.abs(ratio - shape.ratio) < 0.02 ? "border-primary bg-primary/10" : "hover:bg-muted")}><span className="block rounded-[2px] border border-current opacity-70" style={{ width: shape.w, height: shape.h }} /></button>)}</span>
       </span>
@@ -652,27 +655,33 @@ function GalleryPages(ctx: Ctx): Page[] {
         radius={layout.galleryRadiusPx ?? { square: 6, rounded: 12, circle: 999 }[look.imageShape ?? "rounded"]}
         onRadius={(galleryRadiusPx) => set({ galleryRadiusPx })}
       />
+      <ColumnField label="Largeur selon une colonne nombre" value={layout.gallerySizeColumn} columns={columns} onChange={(gallerySizeColumn) => set({ gallerySizeColumn })} empty="— Toutes la même largeur —" disabled={disabled} hint="La plus grande valeur prend la largeur réglée, les autres en proportion (une taille, une importance)" />
       <div className="flex flex-wrap items-end gap-3">
         <Choice label="Image" value={layout.galleryFit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(galleryFit) => set({ galleryFit: galleryFit === "cover" ? undefined : galleryFit })} disabled={disabled} />
         <Toggle checked={look.imageShape === "circle"} onChange={(circle) => setLook({ imageShape: circle ? "circle" : undefined })} disabled={disabled}>Rondes (médaillons)</Toggle>
         <Toggle checked={!layout.galleryStill} onChange={(zoom) => set({ galleryStill: zoom ? undefined : true })} disabled={disabled}>Zoom au survol</Toggle>
       </div>
     </div> },
-    { key: "captions", label: "Légendes", icon: <LayoutList className="size-3.5" />, render: () => <div className={settingsGroup}>
-      <p className={settingsTitle}><LayoutList className="size-3.5" />Les légendes</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Le nom" value={look.caption ?? "overlay"} options={[{ value: "overlay", label: "Posé sur l’image" }, { value: "below", label: "Sous l’image" }]} onChange={(caption) => setLook({ caption: caption === "overlay" ? undefined : caption })} disabled={disabled} />
-        {look.caption !== "below" && <Toggle checked={Boolean(layout.captionOnHover)} onChange={(captionOnHover) => set({ captionOnHover: captionOnHover || undefined })} disabled={disabled}>Seulement au survol</Toggle>}
+    { key: "captions", label: "Légendes", icon: <LayoutList className="size-3.5" />, render: () => <>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutList className="size-3.5" />Les légendes</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Choice label="Le nom" value={look.caption ?? "overlay"} options={[{ value: "overlay", label: "Posé sur l’image" }, { value: "below", label: "Sous l’image" }]} onChange={(caption) => setLook({ caption: caption === "overlay" ? undefined : caption })} disabled={disabled} />
+          {look.caption !== "below" && <Toggle checked={Boolean(layout.captionOnHover)} onChange={(captionOnHover) => set({ captionOnHover: captionOnHover || undefined })} disabled={disabled}>Seulement au survol</Toggle>}
+        </div>
+        <TitleLook ctx={ctx} />
+        <span className={fieldLabel}>Sous le nom <span className="font-normal">(4 au plus)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={4} /></span>
+        <FieldsLook ctx={ctx} />
+        <ColumnField label="Ruban sur l’image, pris dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucun —" disabled={disabled} hint="Un rang, un type : en ruban dans le coin de la vignette" />
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ColumnField label="Icône dans le coin, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
+          <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
+        </div>
+        <GaugeSettings ctx={ctx} />
+        <p className={hintText}>Sur la vignette : la barre en bas de l’image, les charges dans un coin.</p>
       </div>
-      <TitleLook ctx={ctx} />
-      <span className={fieldLabel}>Sous le nom <span className="font-normal">(4 au plus)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={4} /></span>
-      <FieldsLook ctx={ctx} />
-      <ColumnField label="Ruban sur l’image, pris dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucun —" disabled={disabled} hint="Un rang, un type : en ruban dans le coin de la vignette" />
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ColumnField label="Icône dans le coin, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
-        <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
-      </div>
-    </div> },
+      <ClickSettings ctx={ctx} />
+    </> },
     { key: "sections", label: "Sections", icon: <ListTree className="size-3.5" />, render: () => <SectionsSettings ctx={ctx} withAlphabet /> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -683,7 +692,7 @@ function GalleryPages(ctx: Ctx): Page[] {
           <Toggle checked={Boolean(look.shadow)} onChange={(shadow) => setLook({ shadow: shadow || undefined })} disabled={disabled}>Ombre</Toggle>
         </div>
       </div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Liseré sous l’image" }, { value: "tint", label: "Halo" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Liseré sous l’image" }, { value: "tint", label: "Halo" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /><p className={hintText}>Le cabinet prend cette couleur pour ses cadres.</p></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri</p><SortSettings ctx={ctx} /></div>
     </> },
   ]
@@ -694,33 +703,47 @@ function GalleryPages(ctx: Ctx): Page[] {
 // ---------------------------------------------------------------------------
 
 function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
-  const { layout, set, columns, disabled } = ctx
+  const { layout, look, set, setLook, columns, disabled } = ctx
+  const style = layout.timelineStyle ?? "dots"
+  const axis = style === "bars" || style === "lanes"
   return [
-    { key: "time", label: "Temps", icon: <LayoutList className="size-3.5" />, render: () => <div className={settingsGroup}>
-      <p className={settingsTitle}><LayoutList className="size-3.5" />La ligne du temps</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ColumnField label="Colonne de la date (ou de l’année)" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
-        <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
-      </div>
-      <p className={hintText}>Une date du calendrier (« 12 Brumaire 1023 ») ou une année seule (« 1023 »). Les lignes sans date restent listées en dessous.</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Disposition" value={layout.timelineSide ?? "alternate"} options={[{ value: "alternate", label: "Des deux côtés" }, { value: "right", label: "D’un seul côté" }]} onChange={(timelineSide) => set({ timelineSide: timelineSide === "alternate" ? undefined : timelineSide })} disabled={disabled} />
-        <Choice label="Un jalon par" value={String(layout.milestoneEvery ?? 1)} options={[{ value: "1", label: "An" }, { value: "10", label: "Décennie" }, { value: "100", label: "Siècle" }, { value: "1000", label: "Millénaire" }]} onChange={(value) => set({ milestoneEvery: value === "1" ? undefined : Number(value) as 10 | 100 | 1000 })} disabled={disabled} />
-        <Choice label="La date de chaque élément" value={layout.dateStyle ?? "label"} options={[{ value: "label", label: "Écrite au-dessus" }, { value: "badge", label: "En étiquette" }, { value: "hidden", label: "Cachée" }]} onChange={(dateStyle) => set({ dateStyle: dateStyle === "label" ? undefined : dateStyle })} disabled={disabled} />
-      </div>
-      <span className={fieldLabel}>Icône des jalons<IconPick value={layout.milestoneIcon} onChange={(milestoneIcon) => set({ milestoneIcon })} disabled={disabled} /></span>
-    </div> },
-    { key: "items", label: "Éléments", icon: <LayoutGrid className="size-3.5" />, render: () => <>
+    { key: "time", label: "Temps", icon: <LayoutList className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
-        <p className={settingsTitle}><Sparkles className="size-3.5" />Le long de la ligne</p>
-        <Choice label="Chaque élément est marqué par" value={layout.timelineStyle ?? "dots"} options={[{ value: "dots", label: "Un point" }, { value: "icons", label: "Un médaillon à icône" }, { value: "chapters", label: "Un chapitre (grand titre)" }]} onChange={(timelineStyle) => set({ timelineStyle: timelineStyle === "dots" ? undefined : timelineStyle })} disabled={disabled} />
+        <p className={settingsTitle}><LayoutList className="size-3.5" />La ligne du temps</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ColumnField label="Colonne de la date (ou de l’année)" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
+          <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
+        </div>
+        <p className={hintText}>Une date du calendrier (« 12 Brumaire 1023 ») ou une année seule (« 1023 »). Les lignes sans date restent listées en dessous.</p>
+        <Choice label="Chaque ligne" value={style} options={[{ value: "dots", label: "Un point" }, { value: "icons", label: "Un médaillon" }, { value: "chapters", label: "Un chapitre" }, { value: "bars", label: "Une barre de durée" }, { value: "lanes", label: "Sur un fil" }]} onChange={(timelineStyle) => set({ timelineStyle: timelineStyle === "dots" ? undefined : timelineStyle })} disabled={disabled} />
+        {style === "bars" && <ColumnField label="Colonne de la fin (date ou année)" value={layout.endColumn} columns={columns} onChange={(endColumn) => set({ endColumn })} empty="— Sans fin : un instant —" disabled={disabled} hint="Chaque ligne devient une barre du début à la fin sur l’axe des années" />}
+        {style === "lanes" && <ColumnField label="Un fil par valeur de" value={layout.laneColumn} columns={columns} onChange={(laneColumn) => set({ laneColumn })} empty="— Choisir… —" disabled={disabled} hint="Une colonne liée (personnage, lieu…) : un fil horizontal par valeur, les événements posés dessus" />}
+        {!axis && <div className="flex flex-wrap items-end gap-3">
+          <Choice label="Axe" value={layout.timelineAxis ?? "vertical"} options={[{ value: "vertical", label: "Vertical" }, { value: "horizontal", label: "Frise horizontale" }]} onChange={(timelineAxis) => set({ timelineAxis: timelineAxis === "vertical" ? undefined : timelineAxis })} disabled={disabled} />
+          {layout.timelineAxis !== "horizontal" && <Choice label="Disposition" value={layout.timelineSide ?? "alternate"} options={[{ value: "alternate", label: "Des deux côtés" }, { value: "right", label: "D’un seul côté" }, { value: "groups", label: "Un côté par groupe" }]} onChange={(timelineSide) => set({ timelineSide: timelineSide === "alternate" ? undefined : timelineSide })} disabled={disabled} hint="« Un côté par groupe » suit la colonne des périodes ci-dessous" />}
+        </div>}
+        <div className="flex flex-wrap items-end gap-3">
+          <Choice label="Un jalon par" value={String(layout.milestoneEvery ?? 1)} options={[{ value: "1", label: "An" }, { value: "10", label: "Décennie" }, { value: "100", label: "Siècle" }, { value: "1000", label: "Millénaire" }]} onChange={(value) => set({ milestoneEvery: value === "1" ? undefined : Number(value) as 10 | 100 | 1000 })} disabled={disabled} />
+          {!axis && <Choice label="La date de chaque élément" value={layout.dateStyle ?? "label"} options={[{ value: "label", label: "Écrite au-dessus" }, { value: "badge", label: "En étiquette" }, { value: "hidden", label: "Cachée" }]} onChange={(dateStyle) => set({ dateStyle: dateStyle === "label" ? undefined : dateStyle })} disabled={disabled} />}
+        </div>
+        {!axis && <span className={fieldLabel}>Icône des jalons<IconPick value={layout.milestoneIcon} onChange={(milestoneIcon) => set({ milestoneIcon })} disabled={disabled} /></span>}
       </div>
-      <ItemSettings ctx={ctx} withBadge={false} />
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><ListTree className="size-3.5" />Les périodes</p>
+        <ColumnField label="Une période par valeur de" value={layout.groupBy} columns={columns} onChange={(groupBy) => set({ groupBy })} empty="— Aucune —" disabled={disabled} hint="Une ère, un règne, une saison : une colonne (ou une colonne liée) dont chaque valeur fait une période" />
+        {layout.groupBy && !axis && <Choice label="Dessinées" value={layout.timelinePeriods ?? "none"} options={[{ value: "none", label: "Pas à part" }, { value: "bands", label: "En bandes" }, { value: "scale", label: "En échelle (clic = déplier)" }]} onChange={(timelinePeriods) => set({ timelinePeriods: timelinePeriods === "none" ? undefined : timelinePeriods })} disabled={disabled} />}
+        {layout.groupBy && <div className="flex flex-wrap items-center gap-x-4 gap-y-2"><Toggle checked={Boolean(layout.hideEmpty)} onChange={(hideEmpty) => set({ hideEmpty: hideEmpty || undefined })} disabled={disabled}>Sans la période « Sans valeur »</Toggle><Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de lignes</Toggle></div>}
+        {layout.groupBy && <span className={fieldLabel}>Icône devant les périodes<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>}
+        <GroupFormulaSettings ctx={ctx} what="période (ou fil)" />
+      </div>
+    </> },
+    { key: "items", label: "Éléments", icon: <LayoutGrid className="size-3.5" />, render: () => <>
+      <ItemSettings ctx={ctx} withBadge fieldsLabel={style === "bars" || style === "lanes" ? "Sous le nom (jauge)" : "Sous le nom"} />
       <CardChoice ctx={ctx} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrés" }, { value: "plain", label: "Nus" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /><p className={hintText}>La ligne du temps et les jalons prennent la couleur d’accent de la vue ; chaque point, celle de sa ligne.</p></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /><p className={hintText}>La ligne du temps et les jalons prennent la couleur d’accent de la vue ; chaque point, celle de sa ligne (ou de sa période).</p></div>
     </> },
   ]
 }
@@ -731,21 +754,27 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
 
 function TreePages(ctx: Ctx): Page[] {
   const { layout, look, set, setLook, columns, disabled } = ctx
+  const style = layout.treeStyle ?? "lines"
   return [
-    { key: "tree", label: "Arbre", icon: <ListTree className="size-3.5" />, render: () => <div className={settingsGroup}>
-      <p className={settingsTitle}><ListTree className="size-3.5" />L’arbre</p>
-      <ColumnField label="Colonne du parent" value={layout.parentColumn} columns={columns} onChange={(parentColumn) => set({ parentColumn })} empty="— Choisir… —" disabled={disabled} hint="La case nomme une autre ligne du même onglet (une ville dont « Pays » vaut « Valdor » se range sous Valdor)" />
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Dessin" value={layout.treeStyle ?? "lines"} options={[{ value: "lines", label: "Lignes de liaison" }, { value: "indent", label: "Simple retrait" }, { value: "boxed", label: "Cartes emboîtées" }]} onChange={(treeStyle) => set({ treeStyle: treeStyle === "lines" ? undefined : treeStyle })} disabled={disabled} />
-        <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
+    { key: "tree", label: "Arbre", icon: <ListTree className="size-3.5" />, render: () => <>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><ListTree className="size-3.5" />L’arbre</p>
+        <ColumnField label="Colonne du parent" value={layout.parentColumn} columns={columns} onChange={(parentColumn) => set({ parentColumn })} empty="— Choisir… —" disabled={disabled} hint="La case nomme une autre ligne du même onglet (une ville dont « Pays » vaut « Valdor » se range sous Valdor)" />
+        <Choice label="Dessin" value={style} options={[{ value: "lines", label: "Lignes" }, { value: "indent", label: "Retrait" }, { value: "boxed", label: "Cartes emboîtées" }, { value: "org", label: "Organigramme" }, { value: "mindmap", label: "Carte mentale" }]} onChange={(treeStyle) => set({ treeStyle: treeStyle === "lines" ? undefined : treeStyle })} disabled={disabled} />
+        <p className={hintText}>{style === "org" ? "Les enfants en rangée sous leur parent, reliés par un trait ; l’élément en carte si tu le veux." : style === "mindmap" ? "La racine au centre, ses branches de part et d’autre, chacune à sa couleur." : style === "boxed" ? "Chaque nœud encadré, ses enfants dedans ; l’élément en carte si tu le veux." : "Un nœud par ligne, en retrait sous son parent."}</p>
+        <div className="flex flex-wrap items-end gap-3">
+          <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
+        </div>
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Branches repliées à l’ouverture</Toggle>
+          <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de lignes</Toggle>
+          <Toggle checked={Boolean(layout.numbered)} onChange={(numbered) => set({ numbered: numbered || undefined })} disabled={disabled}>Numérotés 1., 1.1, 1.1.1</Toggle>
+          <Toggle checked={Boolean(layout.rootsAsSections)} onChange={(rootsAsSections) => set({ rootsAsSections: rootsAsSections || undefined })} disabled={disabled}>Les racines en grandes sections</Toggle>
+          <Toggle checked={Boolean(layout.depthColors)} onChange={(depthColors) => set({ depthColors: depthColors || undefined })} disabled={disabled}>Une couleur par profondeur</Toggle>
+        </div>
       </div>
-      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-        <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Branches repliées à l’ouverture</Toggle>
-        <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de lignes</Toggle>
-        <Toggle checked={Boolean(layout.rootsAsSections)} onChange={(rootsAsSections) => set({ rootsAsSections: rootsAsSections || undefined })} disabled={disabled}>Les racines en grandes sections</Toggle>
-        <Toggle checked={Boolean(layout.depthColors)} onChange={(depthColors) => set({ depthColors: depthColors || undefined })} disabled={disabled}>Une couleur par profondeur</Toggle>
-      </div>
-    </div> },
+      <GroupFormulaSettings ctx={ctx} what="branche (sur ses enfants)" />
+    </> },
     { key: "nodes", label: "Nœuds", icon: <LayoutList className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><Sparkles className="size-3.5" />Icônes</p>
@@ -755,11 +784,21 @@ function TreePages(ctx: Ctx): Page[] {
         </div>
         <p className={hintText}>Une colonne icône (ci-dessous) passe avant ces icônes d’office.</p>
       </div>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutList className="size-3.5" />Dates et état</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ColumnField label="Date de début, sous le nom" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Aucune —" disabled={disabled} />
+          <ColumnField label="Date de fin" value={layout.endColumn} columns={columns} onChange={(endColumn) => set({ endColumn })} empty="— Aucune —" disabled={disabled} />
+        </div>
+        <ColumnField label="Grisé quand cette colonne est vide ou dit non" value={layout.dimColumn} columns={columns} onChange={(dimColumn) => set({ dimColumn })} empty="— Jamais —" disabled={disabled} hint="Une lignée : les disparus en grisé (« Vivant » vide ou « non »)" />
+      </div>
       <ItemSettings ctx={ctx} fieldsLabel="À droite du nom" />
+      <CardChoice ctx={ctx} />
+      {layout.click === "side" && <div className={settingsGroup}><Toggle checked={layout.detail?.kind === "children"} onChange={(children) => set({ detail: { ...(layout.detail ?? {}), kind: children ? "children" : undefined } })} disabled={disabled}>Le panneau montre les enfants du nœud choisi (explorateur)</Toggle><p className={hintText}>Les enfants se dessinent avec l’élément (carte ou lignes) ; un clic sur l’un d’eux descend d’un niveau.</p></div>}
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><TitleLook ctx={ctx} sizes={[{ value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} /><FieldsLook ctx={ctx} /></div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Point et nom" }, { value: "tint", label: "Teinte" }, { value: "dot", label: "Point" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Point et nom" }, { value: "tint", label: "Teinte" }, { value: "dot", label: "Point" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /><p className={hintText}>« Couleur des lignes selon » une colonne de rang teinte chaque niveau de la hiérarchie.</p></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri des enfants</p><SortSettings ctx={ctx} /></div>
     </> },
   ]
@@ -770,32 +809,54 @@ function TreePages(ctx: Ctx): Page[] {
 // ---------------------------------------------------------------------------
 
 function CodexPages(ctx: Ctx): Page[] {
-  const { layout, look, set, setLook, columns, disabled } = ctx
+  const { layout, look, set, setLook, columns, cards, disabled } = ctx
+  const style = layout.codexStyle ?? "book"
   return [
-    { key: "sheets", label: "Fiches", icon: <BookOpen className="size-3.5" />, render: () => <div className={settingsGroup}>
-      <p className={settingsTitle}><BookOpen className="size-3.5" />Chaque fiche</p>
-      <span className={fieldLabel}>Colonnes de chaque fiche <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes des fiches" max={12} /></span>
-      <p className={hintText}>Les textes longs se lisent en paragraphes ; les valeurs courtes forment l’encadré.</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ColumnField label="Image de chaque fiche" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />
-        {layout.imageColumn && <Choice label="Posée" value={look.codexImage ?? "side"} options={[{ value: "side", label: "Dans l’encadré" }, { value: "banner", label: "En bannière" }]} onChange={(codexImage) => setLook({ codexImage: codexImage === "side" ? undefined : codexImage })} disabled={disabled} />}
+    { key: "sheets", label: "Fiches", icon: <BookOpen className="size-3.5" />, render: () => <>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><BookOpen className="size-3.5" />Chaque fiche</p>
+        <span className={fieldLabel}>Colonnes de chaque fiche <span className="font-normal">(toutes si aucune choisie, 12 au plus)</span><ColumnsPicker value={layout.detailFields ?? []} columns={columns} onChange={(detailFields) => set({ detailFields: detailFields.length ? detailFields : undefined })} disabled={disabled} ariaLabel="Colonnes des fiches" max={12} /></span>
+        <p className={hintText}>Les textes longs se lisent en paragraphes ; les valeurs courtes forment l’encadré.</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ColumnField label="Image de chaque fiche" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />
+          {layout.imageColumn && style !== "sketch" && <Choice label="Posée" value={look.codexImage ?? "side"} options={[{ value: "side", label: "Dans l’encadré" }, { value: "banner", label: "En bannière" }]} onChange={(codexImage) => setLook({ codexImage: codexImage === "side" ? undefined : codexImage })} disabled={disabled} />}
+        </div>
+        <div className="flex flex-wrap items-end gap-3">
+          <Choice label="Le texte" value={String(layout.proseColumns ?? 1)} options={[{ value: "1", label: "Sur une colonne" }, { value: "2", label: "Sur deux colonnes" }]} onChange={(value) => set({ proseColumns: value === "2" ? 2 : undefined })} disabled={disabled} />
+          <Toggle checked={Boolean(look.dropCap)} onChange={(dropCap) => setLook({ dropCap: dropCap || undefined })} disabled={disabled}>Lettrine au premier paragraphe</Toggle>
+          <Toggle checked={Boolean(layout.chapterNumbers)} onChange={(chapterNumbers) => set({ chapterNumbers: chapterNumbers || undefined })} disabled={disabled}>Fiches numérotées (chapitres)</Toggle>
+        </div>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <ColumnField label="Icône devant le titre, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
+          <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
+        </div>
+        <ColumnField label="Pastille à droite du titre, prise dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucune —" disabled={disabled} />
       </div>
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Le texte" value={String(layout.proseColumns ?? 1)} options={[{ value: "1", label: "Sur une colonne" }, { value: "2", label: "Sur deux colonnes" }]} onChange={(value) => set({ proseColumns: value === "2" ? 2 : undefined })} disabled={disabled} />
-        <Toggle checked={Boolean(look.dropCap)} onChange={(dropCap) => setLook({ dropCap: dropCap || undefined })} disabled={disabled}>Lettrine au premier paragraphe</Toggle>
-        <Toggle checked={Boolean(layout.chapterNumbers)} onChange={(chapterNumbers) => set({ chapterNumbers: chapterNumbers || undefined })} disabled={disabled}>Fiches numérotées (chapitres)</Toggle>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutGrid className="size-3.5" />Tuiles, renvois, jauge</p>
+        <span className={fieldLabel}>Colonnes en tuiles sous le titre <span className="font-normal">(nombres, 6 au plus)</span><ColumnsPicker value={layout.codexTiles ?? []} columns={columns} onChange={(codexTiles) => set({ codexTiles: codexTiles.length ? codexTiles : undefined })} disabled={disabled} ariaLabel="Colonnes en tuiles" max={6} /></span>
+        <span className={fieldLabel}>Colonnes de renvois (« voir aussi ») <span className="font-normal">(4 au plus)</span><ColumnsPicker value={layout.codexLinks ?? []} columns={columns} onChange={(codexLinks) => set({ codexLinks: codexLinks.length ? codexLinks : undefined })} disabled={disabled} ariaLabel="Colonnes de renvois" max={4} /></span>
+        <p className={hintText}>Une valeur qui nomme une fiche de la vue s’ouvre d’un clic ; les autres restent écrites.</p>
+        <GaugeSettings ctx={ctx} />
+        <p className={hintText}>La jauge se dessine en en-tête de la fiche et en barre dans le sommaire.</p>
       </div>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ColumnField label="Icône devant le titre, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
-        <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><Star className="size-3.5" />Recto et verso</p>
+        <div className="grid gap-2 sm:grid-cols-2">
+          <label className={fieldLabel}>Recto (une carte)<NativeSelect value={layout.codexRecto ?? ""} disabled={disabled} onChange={(event) => set({ codexRecto: event.target.value || undefined, codexVerso: event.target.value ? layout.codexVerso : undefined })} className="h-8 py-0 text-xs"><NativeSelectOption value="">— Pas de recto-verso : la fiche —</NativeSelectOption><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelect></label>
+          {layout.codexRecto && <label className={fieldLabel}>Verso<NativeSelect value={layout.codexVerso ?? ""} disabled={disabled} onChange={(event) => set({ codexVerso: event.target.value || undefined })} className="h-8 py-0 text-xs"><NativeSelectOption value="">— La même carte —</NativeSelectOption><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelect></label>}
+        </div>
+        <p className={hintText}>Chaque fiche devient une carte qu’un bouton retourne : deux cartes de « Modifier › Cartes », une par face.</p>
       </div>
-    </div> },
+      <ClickSettings ctx={ctx} />
+    </> },
     { key: "toc", label: "Sommaire", icon: <ListTree className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
-        <p className={settingsTitle}><ListTree className="size-3.5" />Le sommaire</p>
+        <p className={settingsTitle}><ListTree className="size-3.5" />Le sommaire et les pages</p>
         <div className="flex flex-wrap items-end gap-3">
           <Toggle checked={Boolean(layout.showToc)} onChange={(showToc) => set({ showToc: showToc || undefined })} disabled={disabled}>Un sommaire</Toggle>
           {layout.showToc && <Choice label="Placé" value={layout.tocPosition ?? "side"} options={[{ value: "side", label: "À côté des fiches" }, { value: "top", label: "Au-dessus" }]} onChange={(tocPosition) => set({ tocPosition: tocPosition === "side" ? undefined : tocPosition })} disabled={disabled} />}
+          <Toggle checked={Boolean(layout.codexPages)} onChange={(codexPages) => set({ codexPages: codexPages || undefined })} disabled={disabled} title="Deux fiches face à face, feuilletées ; les sections ne s’appliquent pas">Double page</Toggle>
         </div>
       </div>
       <SectionsSettings ctx={ctx} withAlphabet />
@@ -803,8 +864,10 @@ function CodexPages(ctx: Ctx): Page[] {
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p>
+        <Choice label="Style" value={style} options={[{ value: "book", label: "Livre" }, { value: "scroll", label: "Parchemin" }, { value: "plain", label: "Nu" }, { value: "board", label: "Journal de bord" }, { value: "sketch", label: "Croquis" }]} onChange={(codexStyle) => set({ codexStyle: codexStyle === "book" ? undefined : codexStyle })} disabled={disabled} />
+        {style === "board" && <ColumnField label="Colonne de la date (en tampon, et l’ordre des entrées)" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Aucune —" disabled={disabled} />}
+        {style === "sketch" && <p className={hintText}>L’image d’abord, posée de travers ; le texte et les notes en écriture penchée sur papier pointillé.</p>}
         <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Style" value={layout.codexStyle ?? "book"} options={[{ value: "book", label: "Livre" }, { value: "scroll", label: "Parchemin" }, { value: "plain", label: "Nu" }]} onChange={(codexStyle) => set({ codexStyle: codexStyle === "book" ? undefined : codexStyle })} disabled={disabled} />
           <Choice label="Marges" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           <Choice label="Image" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />
         </div>

@@ -1,6 +1,6 @@
 "use client"
 
-import { useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
+import { Fragment, useCallback, useEffect, useMemo, useState, type CSSProperties, type ReactNode } from "react"
 import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOff } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
@@ -8,7 +8,7 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
 import { parseGlyphValue } from "@/lib/index-columns"
-import { cellNumber } from "@/lib/index-stats"
+import { cellNumber, cellParts } from "@/lib/index-stats"
 import { calendarScaleOf, calendarScales, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
 
 /**
@@ -815,47 +815,103 @@ const galleryWidths = { sm: 8.5, md: 12, lg: 17 } as const
 const galleryRatios = { square: 1, portrait: 0.8, landscape: 1.6 } as const
 const galleryRadius = { square: 6, rounded: 12, circle: 999 } as const
 
+/**
+ * La galerie : les images en mosaïque (nue, mur sans marge, cabinet à cadres et plaques, planche
+ * large avec texte, ou carrousel une image à la fois), la largeur des vignettes fixe ou lue dans
+ * une colonne nombre ; le nom posé sur l'image ou dessous ; la jauge de la ligne sur la vignette
+ * (barre en bas, charges dans un coin) ; les sections et leur formule.
+ */
 function GalleryLayout(props: ViewLayoutProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
-  const width = layout.galleryWidthRem ?? galleryWidths[layout.gallerySize ?? "md"]
-  const circle = look.imageShape === "circle"
-  const ratio = circle ? 1 : layout.galleryHeightRem ? width / layout.galleryHeightRem : layout.galleryRatio ?? galleryRatios[layout.galleryShape ?? "portrait"]
-  const radius = circle ? 999 : layout.galleryRadiusPx ?? galleryRadius[look.imageShape ?? "rounded"]
-  const hover = Boolean(layout.captionOnHover)
-  const below = look.caption === "below" || circle
-  const boxed = look.surface === "boxed" && !circle
+  const [slide, setSlide] = useState(0)
+  const style = layout.galleryStyle ?? "plain"
+  const wall = style === "wall"
+  const cabinet = style === "cabinet"
+  const strip = style === "strip"
+  const width = layout.galleryWidthRem ?? (strip ? 17 : galleryWidths[layout.gallerySize ?? "md"])
+  const circle = look.imageShape === "circle" && !cabinet && !strip
+  const ratio = circle ? 1 : layout.galleryHeightRem ? width / layout.galleryHeightRem : layout.galleryRatio ?? galleryRatios[layout.galleryShape ?? (strip ? "landscape" : "portrait")]
+  const radius = circle ? 999 : wall ? 0 : layout.galleryRadiusPx ?? galleryRadius[look.imageShape ?? "rounded"]
+  const hover = Boolean(layout.captionOnHover) || (wall && look.caption !== "below")
+  const below = look.caption === "below" || circle || cabinet || strip
+  const boxed = (look.surface === "boxed" && !circle) || strip
   const accent = accentOf(look)
+  // La largeur de chaque vignette selon une colonne nombre : de 5 rem à la largeur réglée.
+  const sizes = layout.gallerySizeColumn ? new Map(rows.map((row) => [row, cellNumber(plain(valueOf(row, layout.gallerySizeColumn!)))])) : null
+  const sizeMax = sizes ? Math.max(1, ...[...sizes.values()].map((value) => value ?? 0)) : 1
+  const widthOf = (row: string) => sizes ? 5 + Math.max(0, Math.min(1, (sizes.get(row) ?? 0) / sizeMax)) * (width - 5) : width
   if (!layout.imageColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des images dans les réglages de cette vue.</p>
-  return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid ${look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"}`} style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}rem), 1fr))` }}>
-    {shown.map((row) => {
-      const src = rowImage(layout, row, valueOf)
-      const color = rowColor(layout, row, valueOf, optionsOf)
-      const fields = layout.fields ?? []
-      const marks: CSSProperties = color && look.accent !== "none" && look.accent !== "title" ? (circle ? { boxShadow: `0 0 0 3px ${color}` } : look.accent === "tint" ? { boxShadow: `0 0 0 3px color-mix(in srgb, ${color} 55%, transparent)` } : { boxShadow: `inset 0 -3px 0 ${color}` }) : {}
-      const glyph = rowGlyph(layout, row, valueOf)
-      const picture = <span className={`relative block overflow-hidden border bg-muted/40 ${look.shadow ? "shadow-md" : "shadow-sm"}`} style={{ aspectRatio: String(ratio), borderRadius: radius, ...marks }}>
-        <CoverImage src={src} className={`absolute inset-0 size-full ${layout.galleryFit === "contain" ? "object-contain" : "object-cover"} ${layout.galleryStill ? "" : "transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"}`} fallback={<span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-muted/30 to-muted text-muted-foreground/60"><ImageOff className="size-6" /></span>} />
-        {layout.badgeColumn && (() => { const value = plain(valueOf(row, layout.badgeColumn!)).split(/\s*[,;]\s*/)[0] ?? ""; if (!value) return null; const tint = optionsOf?.(layout.badgeColumn!)?.find((option) => fold(option.value) === fold(value))?.color ?? accent; return <span className="absolute left-0 top-2 z-[1] rounded-r-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white shadow-sm" style={{ backgroundColor: tint }}>{value}</span> })()}
-        {glyph && <span className="absolute right-1.5 top-1.5 z-[1] grid size-6 place-items-center rounded-full bg-black/55 text-white"><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-3.5" /></span>}
-        {!below && <span className={`absolute inset-x-0 bottom-0 grid gap-0.5 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8 text-white transition-opacity ${hover ? "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" : ""}`}>
-          <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`}>{nameOf(row) || "Sans nom"}</span>
-          <ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact inverted />
-        </span>}
-      </span>
-      return <button key={row} type="button" onClick={() => onOpen(row)} title={nameOf(row)} className={`group grid min-w-0 content-start gap-1.5 text-left outline-offset-2 transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${below && circle ? "justify-items-center text-center" : ""} ${boxed ? `border bg-card p-2 pb-3 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}` : ""}`}>
-        {picture}
-        {below && <span className={`grid min-w-0 gap-0.5 ${circle ? "justify-items-center" : ""} ${boxed ? "px-0.5" : ""}`}>
-          <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : undefined}>{nameOf(row) || "Sans nom"}</span>
-          <ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact={look.fieldStyle !== "stacked"} />
-        </span>}
-      </button>
-    })}
-  </div>} />} />
+  const tile = (row: string) => {
+    const src = rowImage(layout, row, valueOf)
+    const color = rowColor(layout, row, valueOf, optionsOf)
+    const fields = layout.fields ?? []
+    const frameColor = color ?? accent
+    const marks: CSSProperties = cabinet ? { boxShadow: `0 0 0 6px ${frameColor}, 0 0 0 7px rgb(0 0 0 / .4), 0 10px 24px rgb(0 0 0 / .45)` } : color && look.accent !== "none" && look.accent !== "title" ? (circle ? { boxShadow: `0 0 0 3px ${color}` } : look.accent === "tint" ? { boxShadow: `0 0 0 3px color-mix(in srgb, ${color} 55%, transparent)` } : { boxShadow: `inset 0 -3px 0 ${color}` }) : {}
+    const glyph = rowGlyph(layout, row, valueOf)
+    const gauge = layout.gauge ? <RowGauge layout={layout} row={row} valueOf={valueOf} color={frameColor} inverted /> : null
+    const title = <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`}>{nameOf(row) || "Sans nom"}</span>
+    const picture = <span className={`relative block overflow-hidden ${cabinet ? "bg-black/40" : "border bg-muted/40"} ${look.shadow && !cabinet ? "shadow-md" : cabinet ? "" : "shadow-sm"}`} style={{ aspectRatio: String(ratio), borderRadius: cabinet ? 2 : radius, ...marks }}>
+      <CoverImage src={src} className={`absolute inset-0 size-full ${layout.galleryFit === "contain" ? "object-contain" : "object-cover"} ${layout.galleryStill ? "" : "transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"}`} fallback={<span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-muted/30 to-muted text-muted-foreground/60"><ImageOff className="size-6" /></span>} />
+      {layout.badgeColumn && (() => { const value = plain(valueOf(row, layout.badgeColumn!)).split(/\s*[,;]\s*/)[0] ?? ""; if (!value) return null; const tint = optionsOf?.(layout.badgeColumn!)?.find((option) => fold(option.value) === fold(value))?.color ?? accent; return <span className="absolute left-0 top-2 z-[1] rounded-r-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white shadow-sm" style={{ backgroundColor: tint }}>{value}</span> })()}
+      {glyph && <span className="absolute right-1.5 top-1.5 z-[1] grid size-6 place-items-center rounded-full bg-black/55 text-white"><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-3.5" /></span>}
+      {gauge && layout.gauge?.style === "charges" && <span className="absolute left-1.5 top-1.5 z-[1] rounded-md bg-black/55 px-1.5 py-0.5">{gauge}</span>}
+      {gauge && layout.gauge?.style !== "charges" && below && <span className="absolute inset-x-0 bottom-0 z-[1] bg-gradient-to-t from-black/70 to-transparent px-2 pb-1.5 pt-4">{gauge}</span>}
+      {!below && <span className={`absolute inset-x-0 bottom-0 grid gap-0.5 bg-gradient-to-t from-black/75 via-black/35 to-transparent px-2.5 pb-2 pt-8 text-white transition-opacity ${hover ? "opacity-0 group-hover:opacity-100 group-focus-visible:opacity-100" : ""}`}>
+        {title}
+        <ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact inverted />
+        {gauge && layout.gauge?.style !== "charges" && gauge}
+      </span>}
+    </span>
+    const caption = below && <span className={`grid min-w-0 gap-0.5 ${circle ? "justify-items-center" : ""} ${boxed ? "px-0.5" : ""} ${cabinet ? "mt-3 justify-items-center" : ""}`}>
+      {cabinet
+        ? <span className="inline-block max-w-full truncate rounded-sm border border-[#8a7340] bg-[#2a2520] px-2.5 py-0.5 font-display text-[11px] font-semibold uppercase tracking-[0.16em] text-[#e8d8b0] shadow-inner">{nameOf(row) || "Sans nom"}</span>
+        : <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : undefined}>{nameOf(row) || "Sans nom"}</span>}
+      <ItemFields fields={fields} row={row} look={{ ...look, fieldStyle: strip ? look.fieldStyle ?? "stacked" : look.fieldStyle }} valueOf={valueOf} optionsOf={optionsOf} compact={!strip && look.fieldStyle !== "stacked"} inverted={cabinet} />
+    </span>
+    return <button key={row} type="button" onClick={() => onOpen(row)} title={nameOf(row)} className={`group grid min-w-0 content-start gap-1.5 text-left outline-offset-2 transition hover:-translate-y-0.5 focus-visible:outline-2 focus-visible:outline-primary motion-reduce:transition-none motion-reduce:hover:translate-y-0 ${below && circle ? "justify-items-center text-center" : ""} ${boxed && !cabinet ? `border bg-card p-2 pb-3 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}` : ""} ${cabinet ? "p-3" : ""}`} style={sizes ? { width: `${widthOf(row)}rem`, maxWidth: "100%" } : undefined}>
+      {picture}
+      {caption}
+    </button>
+  }
+  const gap = wall ? "gap-0" : look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-5" : "gap-3"
+  const grid = (shown: string[]) => sizes
+    ? <div className={`flex flex-wrap items-end ${gap}`}>{shown.map(tile)}</div>
+    : <div className={`grid ${gap}`} style={{ gridTemplateColumns: `repeat(auto-fill, minmax(min(100%, ${width}rem), 1fr))` }}>{shown.map(tile)}</div>
+  if (style === "carousel") {
+    const at = Math.min(slide, Math.max(0, rows.length - 1))
+    const current = rows[at]
+    const neighbour = (row: string | undefined, side: "left" | "right") => row ? <button type="button" onClick={() => setSlide(rows.indexOf(row))} className={`hidden min-w-0 self-center overflow-hidden opacity-50 transition hover:opacity-80 md:block ${side === "left" ? "justify-self-end" : "justify-self-start"}`} style={{ width: `${width * 0.6}rem`, aspectRatio: String(ratio), borderRadius: radius }} aria-label={nameOf(row)}><CoverImage src={rowImage(layout, row, valueOf)} className="size-full object-cover" /></button> : <span />
+    return <div className="grid gap-3">
+      <div className="grid items-center gap-3 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)]">
+        {neighbour(rows[at - 1], "left")}
+        <div className="mx-auto grid gap-2" style={{ width: `${width * 2}rem`, maxWidth: "100%" }}>{current && tile(current)}</div>
+        {neighbour(rows[at + 1], "right")}
+      </div>
+      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+        <Button type="button" size="icon-sm" variant="outline" aria-label="Précédente" disabled={at <= 0} onClick={() => setSlide(at - 1)}><ChevronLeft /></Button>
+        <span className="tabular-nums">{rows.length ? at + 1 : 0} / {rows.length}</span>
+        <Button type="button" size="icon-sm" variant="outline" aria-label="Suivante" disabled={at >= rows.length - 1} onClick={() => setSlide(at + 1)}><ChevronRight /></Button>
+      </div>
+    </div>
+  }
+  const body = <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={grid} />} />
+  return cabinet ? <div className={`bg-[#1d1a16] p-4 text-[#e8d8b0] ${radii[look.radius ?? "md"]} [&_.text-muted-foreground]:text-[#c9b98f]`}>{body}</div> : body
 }
 
 /* ---------- Chronologie ---------- */
 
+/** Une date placée sur un axe des années : l'année, puis la part du mois et du jour. */
+function yearPosition(date: { year: number; month: number; day: number }, monthsCount: number) {
+  return date.year + (date.month + Math.max(0, date.day - 1) / 30) / Math.max(1, monthsCount)
+}
+
+/**
+ * La chronologie : les lignes le long de la ligne du temps (verticale, ou horizontale en frise),
+ * marquées d'un point, d'un médaillon ou d'un chapitre ; des deux côtés, d'un seul, ou un côté par
+ * groupe ; les périodes (les groupes) en bandes ou en échelle ; des barres de durée (début, fin) ;
+ * un fil par valeur d'une colonne liée. Formule par période, jauge sous chaque événement.
+ */
 function TimelineLayout(props: ViewLayoutProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
@@ -863,45 +919,126 @@ function TimelineLayout(props: ViewLayoutProps) {
   const calendars = useCalendars()
   const named = layout.calendar && layout.calendar !== REAL_CALENDAR ? calendars?.find((candidate) => fold(candidate.name) === fold(layout.calendar!)) : undefined
   const calendar = named ?? realCalendar
-  const { dated, undated } = useMemo(() => !layout.dateColumn ? { dated: [], undated: rows } : timelineEntries(rows, (row) => valueOf(row, layout.dateColumn!), (text) => parseCalendarDate(text, calendar)), [calendar, layout.dateColumn, rows, valueOf])
+  const parse = useCallback((text: string) => parseCalendarDate(text, calendar), [calendar])
+  const { dated, undated } = useMemo(() => !layout.dateColumn ? { dated: [], undated: rows } : timelineEntries(rows, (row) => valueOf(row, layout.dateColumn!), parse), [layout.dateColumn, parse, rows, valueOf])
+  const [period, setPeriod] = useState("")
   if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans les réglages de cette vue.</p>
-  const alternate = (layout.timelineSide ?? "alternate") === "alternate"
+  const side = layout.timelineSide ?? "alternate"
   const every = layout.milestoneEvery ?? 1
-  const period = (year: number) => Math.floor(year / every) * every
+  const periodOf = (year: number) => Math.floor(year / every) * every
   const style = layout.timelineStyle ?? "dots"
   const accent = accentOf(look)
-  // Les années (ou décennies, siècles…) servent de jalons : un repère chaque fois que la période change ; les éléments alternent de côté.
-  const placed = dated.map((entry, index) => ({ ...entry, milestone: index === 0 || period(dated[index - 1].date.year) !== period(entry.date.year), right: !alternate || index % 2 === 0 }))
-  const milestoneLabel = (year: number) => every === 1 ? `${year}${calendar.era ? ` ${calendar.era}` : ""}` : every === 10 ? `Années ${period(year)}` : every === 100 ? `${Math.floor(period(year) / 100) + 1}ᵉ siècle` : `${Math.floor(period(year) / 1000) + 1}ᵉ millénaire`
-  const lineClass = style === "icons" ? "before:left-[1.1875rem]" : "before:left-[0.6875rem]"
-  return <div className="space-y-4">
-    <ol className={`relative grid ${gaps[look.density ?? "normal"]} ${alternate ? "md:before:left-1/2" : ""} before:absolute before:inset-y-1 ${lineClass} before:w-0.5 before:rounded-full before:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_25%,transparent),color-mix(in_srgb,var(--eraser-timeline)_5%,transparent))] md:before:-translate-x-1/2`} style={{ ["--eraser-timeline" as string]: accent }}>
-      {placed.map(({ row, date, milestone, right }) => {
-        const color = rowColor(layout, row, valueOf, optionsOf) ?? accent
-        // Une année seule est déjà dite par le jalon : pas de date répétée au-dessus de l'élément.
-        const when = layout.dateStyle === "hidden" || (date.yearOnly && every === 1) ? "" : formatCalendarDate(date, calendar)
-        const body = card?.(row) ?? (style === "chapters"
-          ? <article className={`min-w-0 ${look.surface === "boxed" ? `border bg-card ${boxClass(look)} ${paddings[look.density ?? "normal"]}` : ""}`}>
-            <ItemTitle row={row} look={{ ...look, titleFont: look.titleFont ?? "display" }} color={color} nameOf={nameOf} onOpen={onOpen} size={look.titleSize ?? "lg"} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} className="size-5" />} />
-            <div className="mt-1"><ItemFields fields={(layout.fields ?? []).filter((field) => field !== layout.dateColumn)} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /></div>
-          </article>
-          : <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== layout.dateColumn)} framed={look.surface !== "plain"} />)
-        const glyph = style === "icons" ? rowGlyph(layout, row, valueOf, layout.itemIcon ?? "sparkle") : null
+  const horizontal = layout.timelineAxis === "horizontal"
+  const months = calendar.months.length || 12
+  const milestoneLabel = (year: number) => every === 1 ? `${year}${calendar.era ? ` ${calendar.era}` : ""}` : every === 10 ? `Années ${periodOf(year)}` : every === 100 ? `${Math.floor(periodOf(year) / 100) + 1}ᵉ siècle` : `${Math.floor(periodOf(year) / 1000) + 1}ᵉ millénaire`
+  // Les groupes (périodes, côtés) : une colonne, dans l'ordre de ses choix puis de leur première date.
+  const groupOptions = layout.groupBy ? optionsOf?.(layout.groupBy) ?? [] : []
+  const groups = layout.groupBy ? groupRowsBy(dated, (entry) => valueOf(entry.row, layout.groupBy!), groupOptions.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: groupOptions.find((option) => fold(option.value) === fold(group.name))?.color })) : []
+  const groupIndexOf = (row: string) => groups.findIndex((group) => group.rows.some((entry) => entry.row === row))
+  const colorOf = (row: string) => rowColor(layout, row, valueOf, optionsOf) ?? (layout.groupBy && !layout.colorBy ? groups[groupIndexOf(row)]?.color : undefined) ?? accent
+  const formula = (entries: typeof dated, color?: string, inverted = false) => layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={entries.map((entry) => entry.row)} valueOf={valueOf} color={color} inverted={inverted} /> : null
+  const fields = (layout.fields ?? []).filter((field) => field !== layout.dateColumn && field !== layout.endColumn)
+  const whenOf = (entry: (typeof dated)[number]) => layout.dateStyle === "hidden" || (entry.date.yearOnly && every === 1 && style !== "bars" && style !== "lanes") ? "" : entry.date.yearOnly ? `${entry.date.year}${calendar.era ? ` ${calendar.era}` : ""}` : formatCalendarDate(entry.date, calendar)
+  const body = (row: string, color: string) => card?.(row) ?? (style === "chapters"
+    ? <article className={`min-w-0 ${look.surface === "boxed" ? `border bg-card ${boxClass(look)} ${paddings[look.density ?? "normal"]}` : ""}`}>
+      <ItemTitle row={row} look={{ ...look, titleFont: look.titleFont ?? "display" }} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} size={look.titleSize ?? "lg"} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} className="size-5" />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} />
+      <div className="mt-1 grid gap-1"><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></div>
+    </article>
+    : <Item row={row} props={props} fields={fields} framed={look.surface !== "plain"} />)
+
+  /* ---- L'axe des années (barres de durée, fils) ---- */
+  if (style === "bars" || style === "lanes") {
+    const ends = new Map(dated.map((entry) => { const text = layout.endColumn ? plain(valueOf(entry.row, layout.endColumn)) : ""; const end = text ? parse(text) ?? (cellNumber(text) !== null && Number.isInteger(cellNumber(text)) ? { year: cellNumber(text)!, month: 0, day: 0 } : null) : null; return [entry.row, end ?? entry.date] }))
+    const positions = dated.flatMap((entry) => [yearPosition(entry.date, months), yearPosition(ends.get(entry.row) ?? entry.date, months)])
+    const from = positions.length ? Math.floor(Math.min(...positions) / every) * every : 0
+    const to = positions.length ? Math.max(from + every, Math.ceil((Math.max(...positions) + 0.01) / every) * every) : every
+    const span = Math.max(1, to - from)
+    const left = (year: number) => `${Math.max(0, Math.min(100, ((year - from) / span) * 100))}%`
+    const ticks = Array.from({ length: Math.min(60, Math.floor(span / every) + 1) }, (_, index) => from + index * every)
+    const axis = <div className="relative h-5 border-b text-[10px] text-muted-foreground">{ticks.map((year) => <span key={year} className="absolute -translate-x-1/2 whitespace-nowrap" style={{ left: left(year) }}>{year}</span>)}</div>
+    const lines = style === "bars"
+      ? dated.map((entry) => ({ key: entry.row, name: nameOf(entry.row) || "Sans nom", row: entry.row, entries: [entry] }))
+      : (layout.laneColumn ? groupRowsBy(dated, (entry) => valueOf(entry.row, layout.laneColumn!)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ key: group.name || "*", name: group.name || "Sans valeur", row: undefined, entries: group.rows })) : [])
+    if (style === "lanes" && !layout.laneColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne des fils (personnage, lieu…) dans les réglages de cette vue.</p>
+    return <div className="space-y-4">
+      <div className={`overflow-x-auto border bg-card/70 p-3 ${radii[look.radius ?? "md"]}`}><div className="grid min-w-[36rem] grid-cols-[minmax(8rem,12rem)_minmax(0,1fr)] gap-x-3 gap-y-1">
+        <span />{axis}
+        {lines.map((line) => {
+          const color = line.row ? colorOf(line.row) : accent
+          return <Fragment key={line.key}>
+            <div className={`grid min-w-0 content-center ${look.density === "compact" ? "py-0.5" : "py-1"}`}>
+              {line.row
+                ? <><ItemTitle row={line.row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={<RowIcon layout={layout} row={line.row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={line.row} valueOf={valueOf} optionsOf={optionsOf} />} /><RowGauge layout={layout} row={line.row} valueOf={valueOf} color={color} /></>
+                : <span className="flex min-w-0 items-center gap-1.5 text-sm font-semibold"><span className="truncate">{line.name}</span>{!layout.hideCounts && <span className="text-xs font-normal text-muted-foreground">{line.entries.length}</span>}{formula(line.entries)}</span>}
+            </div>
+            <div className={`relative ${look.density === "compact" ? "h-6" : look.density === "airy" ? "h-10" : "h-8"} border-b border-border/60`}>
+              {style === "bars"
+                ? (() => { const entry = line.entries[0]; const start = yearPosition(entry.date, months); const end = Math.max(start + span / 400, yearPosition(ends.get(entry.row) ?? entry.date, months)); return <button type="button" onClick={() => onOpen(entry.row)} title={`${line.name} · ${whenOf(entry)}${layout.endColumn ? ` → ${plain(valueOf(entry.row, layout.endColumn))}` : ""}`} className="absolute inset-y-1 overflow-hidden rounded-md px-1.5 text-left text-[10px] font-semibold text-white shadow-sm hover:brightness-110" style={{ left: left(start), width: `${Math.max(0.5, ((end - start) / span) * 100)}%`, backgroundColor: color }}><span className="block truncate leading-[1.4rem]">{line.name}</span></button> })()
+                : line.entries.map((entry) => <button key={entry.row} type="button" onClick={() => onOpen(entry.row)} title={`${nameOf(entry.row)} · ${whenOf(entry)}`} className="absolute top-1/2 size-3.5 -translate-x-1/2 -translate-y-1/2 rounded-full border-2 border-background shadow hover:scale-125" style={{ left: left(yearPosition(entry.date, months)), backgroundColor: colorOf(entry.row) }} />)}
+            </div>
+          </Fragment>
+        })}
+      </div></div>
+      {undated.length > 0 && <p className="text-xs text-muted-foreground">{undated.length} ligne{undated.length > 1 ? "s" : ""} sans date lisible dans « {layout.dateColumn} ».</p>}
+    </div>
+  }
+
+  /* ---- La ligne du temps (verticale ou en frise), pour un lot de lignes ---- */
+  const line = (entries: typeof dated) => {
+    const placed = entries.map((entry, index) => ({ ...entry, milestone: index === 0 || periodOf(entries[index - 1].date.year) !== periodOf(entry.date.year), right: side === "right" || (side === "alternate" ? index % 2 === 0 : groupIndexOf(entry.row) % 2 === 0) }))
+    const alternate = side !== "right"
+    const lineClass = style === "icons" ? "before:left-[1.1875rem]" : "before:left-[0.6875rem]"
+    const marker = (row: string, color: string, right: boolean) => {
+      const glyph = style === "icons" ? rowGlyph(layout, row, valueOf, layout.itemIcon ?? "sparkle") : null
+      return style === "icons"
+        ? <span aria-hidden className={`absolute grid size-10 place-items-center rounded-full border-2 border-background text-white shadow ${horizontal ? "-top-5 left-1/2 -translate-x-1/2" : `top-1 left-0 ${alternate ? (right ? "md:-left-5" : "md:left-auto md:-right-5") : ""}`}`} style={{ backgroundColor: color }}>{glyph && <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-5" />}</span>
+        : <span aria-hidden className={`absolute size-3 rounded-full border-2 border-background shadow ${horizontal ? "-top-[0.4375rem] left-1/2 -translate-x-1/2" : `top-3.5 left-[0.3125rem] ${alternate ? (right ? "md:-left-1.5" : "md:left-auto md:-right-1.5") : ""}`}`} style={{ backgroundColor: color }} />
+    }
+    const when = (entry: (typeof placed)[number], color: string) => { const text = whenOf(entry); return text ? (layout.dateStyle === "badge" ? <p className="mb-1"><span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: color }}>{text}</span></p> : <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color }}>{text}</p>) : null }
+    const milestone = (year: number) => <span className={`flex items-center gap-1.5 rounded-full border bg-background px-3 py-0.5 font-display font-semibold shadow-sm ${style === "chapters" ? "text-base" : "text-sm"}`} style={{ borderColor: `color-mix(in srgb, ${accent} 45%, transparent)`, color: accent }}><Glyph value={layout.milestoneIcon} />{milestoneLabel(year)}</span>
+    if (horizontal) return <div className="overflow-x-auto pb-2"><ol className={`relative flex ${look.density === "compact" ? "gap-3" : look.density === "airy" ? "gap-6" : "gap-4"} px-2 pt-10 before:absolute before:inset-x-0 before:top-[2.1875rem] before:h-0.5 before:rounded-full before:bg-[linear-gradient(to_right,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_15%,transparent))]`} style={{ ["--eraser-timeline" as string]: accent }}>
+      {placed.map((entry) => { const color = colorOf(entry.row); return <li key={entry.row} className="relative w-64 shrink-0 pt-3">
+        {entry.milestone && <div className="absolute -top-10 left-0">{milestone(entry.date.year)}</div>}
+        {marker(entry.row, color, true)}
+        {when(entry, color)}
+        {body(entry.row, color)}
+      </li> })}
+    </ol></div>
+    return <ol className={`relative grid ${gaps[look.density ?? "normal"]} ${alternate ? "md:before:left-1/2" : ""} before:absolute before:inset-y-1 ${lineClass} before:w-0.5 before:rounded-full before:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_25%,transparent),color-mix(in_srgb,var(--eraser-timeline)_5%,transparent))] md:before:-translate-x-1/2`} style={{ ["--eraser-timeline" as string]: accent }}>
+      {placed.map((entry) => {
+        const color = colorOf(entry.row)
         const pad = style === "icons" ? "pl-12" : "pl-8"
-        return <li key={row} className="contents">
-          {milestone && <div className={`relative z-[1] flex ${alternate ? "md:justify-center" : ""}`}><span className={`flex items-center gap-1.5 rounded-full border bg-background px-3 py-0.5 font-display font-semibold shadow-sm ${style === "chapters" ? "text-base" : "text-sm"}`} style={{ borderColor: `color-mix(in srgb, ${accent} 45%, transparent)`, color: accent }}><Glyph value={layout.milestoneIcon} />{milestoneLabel(date.year)}</span></div>}
-          <div className={`relative grid ${pad} ${alternate ? `md:w-1/2 md:pl-0 ${right ? `md:ml-auto md:${pad}` : style === "icons" ? "md:pr-12" : "md:pr-8"}` : ""}`}>
-            {style === "icons"
-              ? <span aria-hidden className={`absolute top-1 left-0 grid size-10 place-items-center rounded-full border-2 border-background text-white shadow ${alternate ? (right ? "md:-left-5" : "md:left-auto md:-right-5") : ""}`} style={{ backgroundColor: color }}>{glyph && <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-5" />}</span>
-              : <span aria-hidden className={`absolute top-3.5 left-[0.3125rem] size-3 rounded-full border-2 border-background shadow ${alternate ? (right ? "md:-left-1.5" : "md:left-auto md:-right-1.5") : ""}`} style={{ backgroundColor: color }} />}
-            {when && (layout.dateStyle === "badge"
-              ? <p className="mb-1"><span className="inline-block rounded-full px-2 py-0.5 text-[10px] font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: color }}>{when}</span></p>
-              : <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color }}>{when}</p>)}
-            {body}
+        return <li key={entry.row} className="contents">
+          {entry.milestone && <div className={`relative z-[1] flex ${alternate ? "md:justify-center" : ""}`}>{milestone(entry.date.year)}</div>}
+          <div className={`relative grid ${pad} ${alternate ? `md:w-1/2 md:pl-0 ${entry.right ? `md:ml-auto md:${pad}` : style === "icons" ? "md:pr-12" : "md:pr-8"}` : ""}`}>
+            {marker(entry.row, color, entry.right)}
+            {when(entry, color)}
+            {body(entry.row, color)}
           </div>
         </li>
       })}
     </ol>
+  }
+
+  /* ---- Les périodes : les groupes en bandes, ou en échelle (une bande en haut, un clic déplie) ---- */
+  const legend = side === "groups" && groups.length > 0 && <ul className="flex flex-wrap justify-center gap-1.5 text-[11px]">{groups.map((group, index) => <li key={group.name || "*"} className="inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5" style={{ borderColor: `color-mix(in srgb, ${group.color ?? accent} 45%, transparent)`, color: group.color ?? accent }}><span className="size-2 rounded-full" style={{ backgroundColor: group.color ?? accent }} />{group.name || "Sans valeur"}<span className="opacity-70">{index % 2 === 0 ? "à droite" : "à gauche"}</span></li>)}</ul>
+  const ordered = [...groups].sort((left, right) => (left.rows[0] ? yearPosition(left.rows[0].date, months) : 0) - (right.rows[0] ? yearPosition(right.rows[0].date, months) : 0))
+  let content: ReactNode
+  if (layout.groupBy && layout.timelinePeriods === "bands" && ordered.length) {
+    content = <div className="grid gap-6">{ordered.map((group) => { const tint = group.color ?? accent; return <section key={group.name || "*"} className="grid gap-3">
+      <p className={`flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-[0.14em] text-white ${radii[look.radius ?? "md"]}`} style={{ backgroundColor: tint }}><span className="flex items-center gap-1.5"><Glyph value={look.sectionIcon} />{group.name || "Sans valeur"}<span className="font-normal normal-case tracking-normal opacity-80">{group.rows[0] ? whenOf(group.rows[0]).replace(/^$/, String(group.rows[0].date.year)) : ""}{group.rows.length > 1 ? ` → ${whenOf(group.rows[group.rows.length - 1]) || group.rows[group.rows.length - 1].date.year}` : ""}</span></span><span className="flex items-center gap-1">{formula(group.rows, undefined, true)}{!layout.hideCounts && <span className="rounded-full bg-white/20 px-1.5 tabular-nums">{group.rows.length}</span>}</span></p>
+      {line(group.rows)}
+    </section> })}</div>
+  } else if (layout.groupBy && layout.timelinePeriods === "scale" && ordered.length) {
+    const chosen = ordered.find((group) => group.name === period)
+    content = <div className="grid gap-4">
+      <div className={`flex overflow-hidden border ${radii[look.radius ?? "md"]}`}>{ordered.map((group) => { const tint = group.color ?? accent; const active = group === chosen; return <button key={group.name || "*"} type="button" aria-pressed={active} onClick={() => setPeriod(active ? "" : group.name)} className={`grid min-w-0 place-items-center gap-0.5 px-2 py-1.5 text-[11px] font-semibold uppercase tracking-[0.08em] text-white transition ${active ? "" : "opacity-75 hover:opacity-100"}`} style={{ flex: `${Math.max(1, group.rows.length)} 0 0`, backgroundColor: tint, outline: active ? `3px solid color-mix(in srgb, ${tint} 60%, black)` : undefined, outlineOffset: -3 }} title={group.name}><span className="max-w-full truncate">{group.name || "Sans valeur"}</span><span className="flex items-center gap-1 text-[10px] font-normal normal-case tracking-normal opacity-90">{group.rows[0]?.date.year}{group.rows.length > 1 ? ` → ${group.rows[group.rows.length - 1].date.year}` : ""}{formula(group.rows, undefined, true)}</span></button> })}</div>
+      {chosen ? line(chosen.rows) : <p className="text-center text-xs text-muted-foreground">Clique sur une période pour en déplier les événements.</p>}
+    </div>
+  } else content = line(dated)
+  return <div className="space-y-4">
+    {legend}
+    {content}
     {undated.length > 0 && <div className="grid gap-1.5 border-t pt-3">
       <p className="text-xs text-muted-foreground">{undated.length} ligne{undated.length > 1 ? "s" : ""} sans date lisible dans « {layout.dateColumn} » ({calendar === realCalendar ? "« 12 mars 1023 », « 1023-03-12 » ou une année seule" : `« 12 ${calendar.months[0]?.name ?? "Mois"} 1023 » ou une année seule`}).</p>
       <ul className="flex flex-wrap gap-1.5">{undated.map((row) => <li key={row}><button type="button" onClick={() => onOpen(row)} className="rounded-full border px-2 py-0.5 text-xs hover:bg-muted">{nameOf(row) || "Sans nom"}</button></li>)}</ul>
@@ -911,6 +1048,19 @@ function TimelineLayout(props: ViewLayoutProps) {
 
 /* ---------- Arborescence ---------- */
 
+/** Toutes les lignes sous un nœud (lui non compris). */
+function descendantsOf(node: RowTreeNode<string>): string[] {
+  return node.children.flatMap((child) => [child.row, ...descendantsOf(child)])
+}
+
+/**
+ * L'arborescence : les lignes sous leur parent, en lignes de liaison, simple retrait, cartes
+ * emboîtées, organigramme (les enfants en rangée sous le parent) ou carte mentale (la racine au
+ * centre, ses branches de part et d'autre) ; numérotées 1., 1.1 ; grisées selon une colonne ;
+ * datées (début, fin) ; la formule d'une branche sur ses enfants, la jauge d'une feuille ;
+ * l'élément en carte ; au clic « afficher à côté » avec « les enfants » : le nœud choisi déplie
+ * ses enfants dans le panneau.
+ */
 function TreeLayout(props: ViewLayoutProps) {
   const { layout, rows, nameOf, valueOf, optionsOf } = props
   const look = layout.look ?? {}
@@ -918,28 +1068,63 @@ function TreeLayout(props: ViewLayoutProps) {
   const tree = useMemo(() => parentColumn ? rowTree(rows, nameOf, (row) => valueOf(row, parentColumn)) : [], [nameOf, parentColumn, rows, valueOf])
   // Les nœuds ouverts ou fermés à la main ; les autres suivent « replié à l'ouverture ».
   const [toggled, setToggled] = useState<Set<string>>(() => new Set())
+  const card = cardFor(props)
   if (!parentColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne du parent dans les réglages de cette vue (par exemple « Pays » pour des villes).</p>
   const isOpen = (row: string) => toggled.has(row) ? Boolean(layout.collapsed) : !layout.collapsed
   const toggle = (row: string) => setToggled((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })
   const all = (open: boolean) => setToggled(open === !layout.collapsed ? new Set() : new Set(rows))
   const style = layout.treeStyle ?? "lines"
-  const framed = style !== "boxed" && look.surface !== "plain"
+  const framed = (style === "lines" || style === "indent") && look.surface !== "plain"
   const heading = look.sectionStyle === "heading"
+  const nodeProps = { ...props, isOpen, toggle, card, chosen: props.chosen }
+  const list = (nodes: RowTreeNode<string>[], prefix = "") => nodes.map((node, index) => <TreeNode key={node.row} {...nodeProps} node={node} prefix={layout.numbered ? `${prefix}${index + 1}.` : undefined} />)
+  let body: ReactNode
   if (layout.rootsAsSections) {
-    // Chaque racine est une section (titre, nombre), ses enfants en arbre dessous.
-    return <div className={heading ? "space-y-14" : "space-y-5"}>
-      {tree.map((node) => <Section key={node.row} title={plain(nameOf(node.row)) || "Sans nom"} count={treeSize(node)} collapsible={Boolean(layout.collapsed) || Boolean(layout.collapsible)} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} icon={look.sectionIcon ?? layout.branchIcon} accent={look.color} color={rowColor(layout, node.row, valueOf, optionsOf)}>
-        <ul role="tree" aria-label={plain(nameOf(node.row))} className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : ""}>{node.children.map((child) => <TreeNode key={child.row} node={{ ...child, depth: 0 }} isOpen={isOpen} toggle={toggle} {...props} />)}</ul>
+    // Chaque racine est une section (titre, nombre, formule), ses enfants en arbre dessous.
+    body = <div className={heading ? "space-y-14" : "space-y-5"}>
+      {tree.map((node, index) => <Section key={node.row} title={plain(nameOf(node.row)) || "Sans nom"} count={treeSize(node)} collapsible={Boolean(layout.collapsed) || Boolean(layout.collapsible)} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} icon={look.sectionIcon ?? layout.branchIcon} accent={look.color} color={rowColor(layout, node.row, valueOf, optionsOf)} extra={layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={descendantsOf(node)} valueOf={valueOf} color={rowColor(layout, node.row, valueOf, optionsOf)} /> : undefined}>
+        <ul role="tree" aria-label={plain(nameOf(node.row))} className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : style === "org" ? "flex justify-center overflow-x-auto pb-2" : ""}>{list(node.children.map((child) => ({ ...child, depth: 0 })), layout.numbered ? `${index + 1}.` : "")}</ul>
       </Section>)}
     </div>
+  } else if (style === "mindmap") {
+    // La carte mentale : la (première) racine au centre, ses branches de part et d'autre, chacune à sa couleur.
+    const root = tree[0]
+    const branches = root ? root.children : tree
+    const left = branches.filter((_, index) => index % 2 === 1)
+    const right = branches.filter((_, index) => index % 2 === 0)
+    const column = (nodes: RowTreeNode<string>[], mirrored: boolean) => <ul role="tree" className={`grid content-center gap-3 ${mirrored ? "justify-items-end" : ""}`}>{nodes.map((node, index) => <TreeNode key={node.row} {...nodeProps} node={{ ...node, depth: 0 }} prefix={layout.numbered ? `${index * 2 + (mirrored ? 2 : 1)}.` : undefined} mirrored={mirrored} />)}</ul>
+    body = <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_auto_minmax(0,1fr)] md:items-center">
+      {column(left, true)}
+      {root && tree.length === 1
+        ? <div className="justify-self-center">{card?.(root.row) ?? <button type="button" onClick={() => props.onOpen(root.row)} className={`rounded-2xl border-2 px-5 py-3 text-center font-display text-lg font-semibold shadow-md hover:bg-muted ${props.inert ? "pointer-events-none" : ""}`} style={{ borderColor: rowColor(layout, root.row, valueOf, optionsOf) ?? accentOf(look), color: rowColor(layout, root.row, valueOf, optionsOf) ?? accentOf(look) }}>{nameOf(root.row) || "Sans nom"}</button>}</div>
+        : <div className="justify-self-center rounded-full border px-4 py-1 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground">{tree.length} racines</div>}
+      {column(right, false)}
+    </div>
+  } else {
+    body = <div className="grid gap-2">
+      <div className="flex flex-wrap items-center gap-2 text-xs"><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(true)}>Tout déplier</Button><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(false)}>Tout replier</Button><span className="text-muted-foreground">{tree.length} racine{tree.length > 1 ? "s" : ""} · rangées par « {parentColumn} »</span></div>
+      <ul role="tree" aria-label="Arborescence" className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : style === "boxed" ? `grid ${gaps[look.density ?? "normal"]}` : style === "org" ? "flex justify-center gap-6 overflow-x-auto pb-2" : ""}>{list(tree)}</ul>
+    </div>
   }
-  return <div className="grid gap-2">
-    <div className="flex flex-wrap items-center gap-2 text-xs"><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(true)}>Tout déplier</Button><Button type="button" size="sm" variant="ghost" className="h-7" onClick={() => all(false)}>Tout replier</Button><span className="text-muted-foreground">{tree.length} racine{tree.length > 1 ? "s" : ""} · rangées par « {parentColumn} »</span></div>
-    <ul role="tree" aria-label="Arborescence" className={framed ? `border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]}` : style === "boxed" ? `grid ${gaps[look.density ?? "normal"]}` : ""}>{tree.map((node) => <TreeNode key={node.row} node={node} isOpen={isOpen} toggle={toggle} {...props} />)}</ul>
-  </div>
+  // « Afficher à côté › les enfants » : le nœud choisi déplie ses enfants (en cartes) dans le panneau.
+  if (layout.click === "side" && layout.detail?.kind === "children") {
+    const find = (nodes: RowTreeNode<string>[]): RowTreeNode<string> | undefined => { for (const node of nodes) { if (node.row === props.chosen) return node; const found = find(node.children); if (found) return found } return undefined }
+    const chosen = props.chosen ? find(tree) : undefined
+    return <div className={`grid gap-4 ${detailWidths[layout.detail.width ?? "normal"]}`}>
+      <div className="min-w-0">{body}</div>
+      <aside className={`min-w-0 overflow-hidden border bg-card/80 md:sticky md:top-4 md:self-start ${boxClass(look)}`}>
+        {chosen
+          ? <><p className="flex items-center justify-between gap-2 border-b px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-muted-foreground"><span className="truncate">{nameOf(chosen.row) || "Sans nom"}</span><span className="flex items-center gap-2">{!layout.hideCounts && <span>{chosen.children.length} enfant{chosen.children.length > 1 ? "s" : ""}</span>}{props.openSheet && !props.inert && <Button type="button" size="sm" variant="ghost" className="h-6 px-1.5" onClick={() => props.openSheet!(chosen.row)}><ExternalLink />Fiche</Button>}</span></p>
+            <div className={`grid ${gaps[look.density ?? "normal"]} p-2`}>{chosen.children.length ? chosen.children.map((child) => <div key={child.row} className="cursor-pointer" onClick={() => props.onChoose?.(child.row)}>{card?.(child.row) ?? <Item row={child.row} props={{ ...props, onOpen: (row) => props.onChoose?.(row) }} fields={(layout.fields ?? []).filter((field) => field !== parentColumn)} framed />}</div>) : <p className="py-6 text-center text-xs text-muted-foreground">Aucun enfant : une feuille.</p>}</div></>
+          : <p className="py-10 text-center text-sm text-muted-foreground">Choisis un nœud : ses enfants s’affichent ici.</p>}
+      </aside>
+    </div>
+  }
+  return body
 }
 
-function TreeNode({ node, isOpen, toggle, layout, nameOf, valueOf, optionsOf, onOpen }: ViewLayoutProps & { node: RowTreeNode<string>; isOpen: (row: string) => boolean; toggle: (row: string) => void }) {
+function TreeNode({ node, isOpen, toggle, card, prefix, mirrored = false, ...props }: ViewLayoutProps & { node: RowTreeNode<string>; isOpen: (row: string) => boolean; toggle: (row: string) => void; card: ((row: string) => ReactNode) | null; prefix?: string; mirrored?: boolean }) {
+  const { layout, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const open = isOpen(node.row)
   const size = treeSize(node)
@@ -947,24 +1132,46 @@ function TreeNode({ node, isOpen, toggle, layout, nameOf, valueOf, optionsOf, on
   const depthColor = layout.depthColors ? depthPalette[node.depth % depthPalette.length] : undefined
   const color = rowColor(layout, node.row, valueOf, optionsOf) ?? depthColor
   const style = layout.treeStyle ?? "lines"
-  const boxed = style === "boxed"
+  const boxed = style === "boxed" || style === "org" || style === "mindmap"
+  const org = style === "org"
   const step = look.density === "airy" ? 1.6 : look.density === "compact" ? 1 : 1.25
   const titleLook: ViewLook = { ...look, titleSize: node.depth === 0 ? look.titleSize ?? "md" : look.titleSize === "lg" ? "md" : "sm", titleFont: node.depth === 0 ? look.titleFont ?? "display" : look.titleFont, accent: look.accent === "border" || !look.accent ? (leaf ? "dot" : "title") : look.accent }
   const frame = look.accent === "tint" ? accentFrame(look, color) : { className: "" }
   const fallbackIcon = leaf ? layout.leafIcon : layout.branchIcon
   const icon = <RowIcon layout={layout} row={node.row} valueOf={valueOf} color={color} fallback={layout.itemIcon ?? fallbackIcon} />
-  const rowLine = <div className={`group flex min-w-0 items-center gap-1.5 rounded-lg pr-2 hover:bg-muted/60 ${look.density === "compact" ? "py-0.5" : look.density === "airy" ? "py-1.5" : "py-1"} ${frame.className}`} style={{ paddingLeft: boxed ? "0.25rem" : `${0.25 + node.depth * step}rem`, ...frame.style }}>
-    {leaf ? <span className="size-6 shrink-0" /> : <button type="button" onClick={() => toggle(node.row)} aria-label={open ? "Replier" : "Déplier"} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><ChevronDown className={`size-4 transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} /></button>}
-    <RowImage src={rowImage(layout, node.row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
-    <ItemTitle row={node.row} look={titleLook} color={color} nameOf={nameOf} onOpen={onOpen} truncate icon={icon} badge={<RowBadge layout={layout} row={node.row} valueOf={valueOf} optionsOf={optionsOf} />} />
-    {!leaf && !layout.hideCounts && <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-semibold tabular-nums text-muted-foreground">{size}</span>}
-    <span className="ml-auto hidden min-w-0 md:block"><ItemFields fields={(layout.fields ?? []).filter((field) => field !== layout.parentColumn)} row={node.row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /></span>
-  </div>
-  const children = !leaf && open && <ul role="group" className={boxed ? `grid ${gaps[look.density ?? "normal"]} pl-4 pt-1` : "relative"}>
+  // Grisé quand la colonne est vide ou dit non (une lignée : les disparus) ; les dates sous le nom.
+  const dimmed = layout.dimColumn ? (() => { const value = plain(valueOf(node.row, layout.dimColumn!)); return !value || /^(non|no|false|0|✗|—)$/i.test(value) })() : false
+  const dates = layout.dateColumn ? [plain(valueOf(node.row, layout.dateColumn)), layout.endColumn ? plain(valueOf(node.row, layout.endColumn)) : ""].filter(Boolean).join(" – ") : ""
+  const chosen = props.chosen === node.row
+  const numberLabel = prefix ? <span className="shrink-0 font-display text-xs font-semibold tabular-nums" style={{ color: color ?? accentOf(look) }}>{prefix}</span> : null
+  const formula = !leaf && layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={descendantsOf(node)} valueOf={valueOf} color={color} /> : null
+  const count = !leaf && !layout.hideCounts ? <span className="shrink-0 rounded-full bg-muted px-1.5 text-[10px] font-semibold tabular-nums text-muted-foreground">{size}</span> : null
+  const caret = leaf ? <span className="size-6 shrink-0" /> : <button type="button" onClick={() => toggle(node.row)} aria-label={open ? "Replier" : "Déplier"} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"><ChevronDown className={`size-4 transition-transform motion-reduce:transition-none ${open ? "" : "-rotate-90"}`} /></button>
+  const drawn = boxed && card ? card(node.row) : null
+  const rowLine = drawn
+    ? <div className={`relative min-w-0 ${chosen ? "ring-2 ring-primary/50 rounded-xl" : ""} ${dimmed ? "opacity-50" : ""}`}>{drawn}{!leaf && <span className="absolute -right-2 -top-2 z-[1] flex items-center gap-1 rounded-full border bg-background px-1 shadow-sm">{caret}{count}{formula}</span>}</div>
+    : <div className={`group flex min-w-0 items-center gap-1.5 rounded-lg pr-2 hover:bg-muted/60 ${look.density === "compact" ? "py-0.5" : look.density === "airy" ? "py-1.5" : "py-1"} ${frame.className} ${chosen ? "bg-muted ring-1 ring-primary/40" : ""} ${dimmed ? "opacity-50 grayscale" : ""} ${mirrored ? "flex-row-reverse text-right" : ""}`} style={{ paddingLeft: boxed ? "0.25rem" : `${0.25 + node.depth * step}rem`, ...frame.style }}>
+      {caret}
+      {numberLabel}
+      <RowImage src={rowImage(layout, node.row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
+      <span className="grid min-w-0 gap-0.5">
+        <ItemTitle row={node.row} look={titleLook} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={icon} badge={<RowBadge layout={layout} row={node.row} valueOf={valueOf} optionsOf={optionsOf} />} />
+        {dates && <span className="text-[10px] tabular-nums text-muted-foreground">{dates}</span>}
+        <RowGauge layout={layout} row={node.row} valueOf={valueOf} color={color} />
+      </span>
+      {count}{formula}
+      <span className={`min-w-0 md:block ${mirrored ? "mr-auto" : "ml-auto"} hidden`}><ItemFields fields={(layout.fields ?? []).filter((field) => field !== layout.parentColumn && field !== layout.dateColumn && field !== layout.endColumn)} row={node.row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /></span>
+    </div>
+  const childPrefix = (index: number) => prefix ? `${prefix}${index + 1}.` : undefined
+  const children = !leaf && open && <ul role="group" className={org ? `relative mt-4 flex justify-center gap-4 pt-4 before:absolute before:left-1/2 before:top-0 before:h-4 before:w-px before:-translate-x-1/2 before:bg-border` : boxed ? `grid ${gaps[look.density ?? "normal"]} pl-4 pt-1` : "relative"}>
     {!boxed && style === "lines" && <span aria-hidden className="absolute inset-y-0 w-px" style={{ left: `${0.25 + node.depth * step + 0.75}rem`, backgroundColor: color ? `color-mix(in srgb, ${color} 45%, transparent)` : "var(--border)" }} />}
-    {node.children.map((child) => <TreeNode key={child.row} node={child} isOpen={isOpen} toggle={toggle} layout={layout} nameOf={nameOf} valueOf={valueOf} optionsOf={optionsOf} onOpen={onOpen} rows={[]} headers={[]} empty="" />)}
+    {node.children.map((child, index) => <TreeNode key={child.row} {...props} node={child} isOpen={isOpen} toggle={toggle} card={card} prefix={childPrefix(index)} mirrored={mirrored} />)}
   </ul>
-  return <li role="treeitem" aria-expanded={leaf ? undefined : open} aria-selected={false} className={`min-w-0 ${boxed ? `border bg-card/80 p-1.5 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : ""}` : ""}`} style={boxed && color ? { borderLeft: `4px solid ${color}` } : undefined}>
+  if (org) return <li role="treeitem" aria-expanded={leaf ? undefined : open} aria-selected={chosen} className="relative flex min-w-0 flex-col items-center before:absolute before:-top-4 before:left-1/2 before:h-4 before:w-px before:bg-border first:before:hidden">
+    <div className={`w-56 shrink-0 ${drawn ? "" : `border bg-card/80 p-1.5 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : "shadow-sm"}`}`} style={!drawn && color ? { borderTop: `3px solid ${color}` } : undefined}>{rowLine}</div>
+    {children}
+  </li>
+  return <li role="treeitem" aria-expanded={leaf ? undefined : open} aria-selected={chosen} className={`min-w-0 ${boxed ? `border bg-card/80 p-1.5 ${radii[look.radius ?? "md"]} ${look.shadow ? "shadow-md" : ""}` : ""}`} style={boxed && color && !drawn ? (mirrored ? { borderRight: `4px solid ${color}` } : { borderLeft: `4px solid ${color}` }) : undefined}>
     {rowLine}
     {children}
   </li>
@@ -974,62 +1181,106 @@ function TreeNode({ node, isOpen, toggle, layout, nameOf, valueOf, optionsOf, on
 
 const codexTitles = { sm: "text-xl", md: "text-2xl", lg: "text-3xl" } as const
 
+/**
+ * Le codex : les fiches l'une après l'autre, à lire comme un livre (livre, parchemin, nu, journal
+ * de bord daté, croquis), avec un sommaire ; des tuiles de valeurs sous le titre ; des renvois
+ * vers les fiches citées ; deux fiches face à face feuilletées ; recto et verso (deux cartes,
+ * retournées au clic) ; la jauge de la fiche en en-tête et en barre dans le sommaire.
+ */
 function CodexLayout(props: ViewLayoutProps) {
-  const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen } = props
+  const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen, renderCard } = props
   const look = layout.look ?? {}
+  const [flipped, setFlipped] = useState<Set<string>>(() => new Set())
+  const [page, setPage] = useState(0)
   const fields = layout.detailFields?.length ? layout.detailFields : headers
   const anchor = (row: string) => `codex-${row.replace(/[^a-z0-9_-]/gi, "-")}`
   const style = layout.codexStyle ?? "book"
+  const paper = style === "scroll" || style === "board" || style === "sketch"
   const accent = accentOf(look)
-  const numberOf = new Map(rows.map((row, index) => [row, index + 1]))
+  // Le journal de bord : les fiches dans l'ordre de leur date (sinon l'ordre de la vue).
+  const ordered = useMemo(() => style === "board" && layout.dateColumn ? [...rows].sort((left, right) => { const a = plain(valueOf(left, layout.dateColumn!)), b = plain(valueOf(right, layout.dateColumn!)); const na = cellNumber(a), nb = cellNumber(b); return na !== null && nb !== null ? na - nb : a.localeCompare(b, "fr", { numeric: true }) }) : rows, [layout.dateColumn, rows, style, valueOf])
+  const numberOf = new Map(ordered.map((row, index) => [row, index + 1]))
+  const byName = useMemo(() => new Map(rows.map((row) => [fold(plain(nameOf(row))), row])), [nameOf, rows])
+  const gaugeRatio = (row: string) => { const gauge = layout.gauge; if (!gauge) return null; const value = cellNumber(plain(valueOf(row, gauge.column))); if (value === null) return null; const max = gauge.maxColumn ? cellNumber(plain(valueOf(row, gauge.maxColumn))) : gauge.max ?? null; return Math.max(0, Math.min(1, max ? value / max : value / 100)) }
   const article = (row: string) => {
     const color = rowColor(layout, row, valueOf, optionsOf)
     const src = rowImage(layout, row, valueOf)
-    const entries = fields.filter((field) => field !== layout.imageColumn && field !== layout.iconColumn).map((field) => ({ field, value: plain(valueOf(row, field)) })).filter((entry) => entry.value && entry.value !== plain(nameOf(row)))
+    const excluded = new Set([layout.imageColumn, layout.iconColumn, layout.badgeColumn, ...(layout.codexTiles ?? []), ...(layout.codexLinks ?? []), layout.gauge?.column, style === "board" ? layout.dateColumn : undefined].filter(Boolean) as string[])
+    const entries = fields.filter((field) => !excluded.has(field)).map((field) => ({ field, value: plain(valueOf(row, field)) })).filter((entry) => entry.value && entry.value !== plain(nameOf(row)))
     // Les textes longs se lisent en paragraphes ; les valeurs courtes forment l'encadré.
     const prose = (entry: { field: string; value: string }) => entry.value.length > 80 || /descri|histoire|lore|note|texte|r[ée]sum|contenu|effet|r[eè]gle|biograph|apparence|personnalit/i.test(entry.field)
     const short = entries.filter((entry) => !prose(entry))
     const long = entries.filter(prose)
-    const banner = look.codexImage === "banner" && src
+    const banner = (look.codexImage === "banner" || style === "sketch") && src
     const frame = look.accent === "tint" ? accentFrame(look, color) : { className: "", style: color && (look.accent ?? "border") === "border" ? { borderTop: `3px solid ${color}` } : undefined }
-    const shell = style === "scroll"
-      ? { className: "border border-[#d9c7a3] text-[#3b2f1e] shadow-[0_10px_30px_rgb(120_90_40/0.12)]", style: { backgroundColor: "#f6ecd6", backgroundImage: "linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 30%, rgb(120 90 40 / 0.06))" } as CSSProperties }
+    const shell = paper
+      ? { className: `border border-[#d9c7a3] text-[#3b2f1e] shadow-[0_10px_30px_rgb(120_90_40/0.12)] ${style === "sketch" ? "[background-image:radial-gradient(rgb(120_90_40/0.08)_1px,transparent_1px)] [background-size:12px_12px]" : ""}`, style: { backgroundColor: style === "sketch" ? "#fbf7ee" : "#f6ecd6", backgroundImage: style === "sketch" ? undefined : "linear-gradient(180deg, rgb(255 255 255 / 0.35), transparent 30%, rgb(120 90 40 / 0.06))" } as CSSProperties }
       : style === "plain" ? { className: "border-b pb-6 last:border-b-0", style: undefined }
       : { className: `border bg-card/80 ${boxClass(look)}`, style: undefined }
-    const chapter = layout.chapterNumbers ? <span className="mr-2 font-display text-base font-normal opacity-60">{style === "scroll" ? "✦ " : ""}{numberOf.get(row)}.</span> : null
+    const chapter = layout.chapterNumbers ? <span className="mr-2 font-display text-base font-normal opacity-60">{paper ? "✦ " : ""}{numberOf.get(row)}.</span> : null
+    const muted = paper ? "opacity-70" : "text-muted-foreground"
+    const tiles = (layout.codexTiles ?? []).map((field) => ({ field, value: plain(valueOf(row, field)) })).filter((tile) => tile.value)
+    // Les renvois : les valeurs des colonnes de relation ; celles qui nomment une fiche de la vue s'ouvrent d'un clic.
+    const links = (layout.codexLinks ?? []).flatMap((field) => cellParts(valueOf(row, field)).map((value) => ({ field, value: plain(value), target: byName.get(fold(plain(value))) })))
+    const dateStamp = style === "board" && layout.dateColumn ? plain(valueOf(row, layout.dateColumn)) : ""
+    // Recto et verso : deux cartes de l'onglet, retournées au clic.
+    if (layout.codexRecto && renderCard) {
+      const back = flipped.has(row)
+      const face = renderCard(row, back ? layout.codexVerso || layout.codexRecto : layout.codexRecto)
+      return <div key={row} id={anchor(row)} className="scroll-mt-24 grid justify-items-center gap-2">
+        <div className={`w-full max-w-xl transition-transform duration-300 ${back ? "[transform:rotateY(180deg)] [&>*]:[transform:rotateY(180deg)]" : ""}`} style={{ perspective: 1200 }}>{face ?? <p className="text-center text-xs text-muted-foreground">Carte introuvable.</p>}</div>
+        <div className="flex items-center gap-2"><Button type="button" size="sm" variant="outline" onClick={() => setFlipped((current) => { const next = new Set(current); if (next.has(row)) next.delete(row); else next.add(row); return next })}>{back ? "Recto" : "Verso"}</Button>{!props.inert && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}</div>
+      </div>
+    }
     return <article key={row} id={anchor(row)} className={`scroll-mt-24 overflow-hidden ${style === "plain" ? "" : radii[look.radius ?? "lg"]} ${shell.className} ${frame.className}`} style={{ ...shell.style, ...frame.style }}>
-      {banner && <CoverImage src={src} className="aspect-[21/8] w-full border-b object-cover" />}
+      {banner && <CoverImage src={src} className={style === "sketch" ? "mx-auto mt-5 max-h-72 w-auto max-w-[90%] rotate-[-1deg] border-8 border-white object-contain shadow-md" : "aspect-[21/8] w-full border-b object-cover"} />}
       <div className={style === "plain" ? "" : look.density === "compact" ? "p-4" : look.density === "airy" ? "p-7" : "p-5"}>
-        <header className={`flex flex-wrap items-start justify-between gap-3 pb-3 ${style === "scroll" ? "border-b border-[#d9c7a3]" : "border-b"}`}>
-          <h3 className={`flex items-center gap-2 ${look.titleFont === "sans" ? "" : "font-display"} ${codexTitles[look.titleSize ?? "md"]} font-semibold leading-tight ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : style === "scroll" ? { color: color ?? "#6b4a1e" } : undefined}>{chapter}<RowIcon layout={layout} row={row} valueOf={valueOf} color={color ?? accent} className="size-6" />{nameOf(row) || "Sans nom"}<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} /></h3>
-          <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>
+        <header className={`flex flex-wrap items-start justify-between gap-3 pb-3 ${paper ? "border-b border-[#d9c7a3]" : "border-b"}`}>
+          <div className="grid min-w-0 gap-1">
+            {dateStamp && <span className="inline-block justify-self-start rounded-sm border border-[#b89a62] px-2 py-0.5 font-display text-[11px] font-semibold uppercase tracking-[0.14em] text-[#6b4a1e]">{dateStamp}</span>}
+            <h3 className={`flex items-center gap-2 ${look.titleFont === "sans" ? "" : "font-display"} ${style === "sketch" ? "italic" : ""} ${codexTitles[look.titleSize ?? "md"]} font-semibold leading-tight ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" && color ? { color } : paper ? { color: color ?? "#6b4a1e" } : undefined}>{chapter}<RowIcon layout={layout} row={row} valueOf={valueOf} color={color ?? accent} className="size-6" />{nameOf(row) || "Sans nom"}<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} /></h3>
+            <RowGauge layout={layout} row={row} valueOf={valueOf} color={color ?? accent} />
+          </div>
+          {!props.inert && <Button type="button" size="sm" variant="ghost" onClick={() => onOpen(row)}><ExternalLink />Ouvrir la fiche</Button>}
         </header>
+        {tiles.length > 0 && <div className="mt-4 grid grid-cols-[repeat(auto-fill,minmax(6rem,1fr))] gap-2">{tiles.map((tile) => <div key={tile.field} className={`grid gap-0.5 border px-2.5 py-2 text-center ${radii[look.radius ?? "md"]} ${paper ? "border-[#d9c7a3] bg-white/40" : "bg-muted/25"}`}><span className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${muted}`}>{tile.field}</span><span className={`font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} text-xl`} style={{ color: color ?? accent }}>{tile.value}</span></div>)}</div>}
         <div className="mt-4 grid gap-5 md:grid-cols-[minmax(0,1fr)_minmax(12rem,16rem)]">
           <div className={`min-w-0 space-y-4 text-[15px] leading-7 ${layout.proseColumns === 2 ? "md:[column-count:2] md:[column-gap:2rem] [&>section]:[break-inside:avoid]" : ""}`}>
-            {long.length ? long.map((entry, index) => <section key={entry.field}><h4 className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${style === "scroll" ? "opacity-70" : "text-muted-foreground"}`} style={look.fieldColor === "accent" ? { color: accent } : undefined}>{entry.field}</h4><p className={`mt-1 whitespace-pre-line break-words ${look.dropCap && index === 0 ? "first-letter:float-left first-letter:mr-2 first-letter:mt-1 first-letter:[font-family:var(--font-serif)] first-letter:text-5xl first-letter:font-semibold first-letter:leading-[0.8] first-letter:text-[color:var(--dropcap)]" : ""}`} style={look.dropCap && index === 0 ? { ["--dropcap" as string]: color ?? accent } : undefined}>{entry.value}</p></section>) : <p className={`text-sm italic ${style === "scroll" ? "opacity-70" : "text-muted-foreground"}`}>Pas encore de texte.</p>}
+            {long.length ? long.map((entry, index) => <section key={entry.field}><h4 className={`text-[11px] font-semibold uppercase tracking-[0.14em] ${muted}`} style={look.fieldColor === "accent" ? { color: accent } : undefined}>{entry.field}</h4><p className={`mt-1 whitespace-pre-line break-words ${style === "sketch" ? "font-display italic" : ""} ${look.dropCap && index === 0 ? "first-letter:float-left first-letter:mr-2 first-letter:mt-1 first-letter:[font-family:var(--font-serif)] first-letter:text-5xl first-letter:font-semibold first-letter:leading-[0.8] first-letter:text-[color:var(--dropcap)]" : ""}`} style={look.dropCap && index === 0 ? { ["--dropcap" as string]: color ?? accent } : undefined}>{entry.value}</p></section>) : <p className={`text-sm italic ${muted}`}>Pas encore de texte.</p>}
           </div>
-          {((src && !banner) || short.length > 0) && <aside className={`grid content-start gap-3 border p-3 text-sm md:order-last ${radii[look.radius ?? "md"]} ${style === "scroll" ? "border-[#d9c7a3] bg-white/40" : "bg-muted/25"}`}>
+          {((src && !banner) || short.length > 0) && <aside className={`grid content-start gap-3 border p-3 text-sm md:order-last ${radii[look.radius ?? "md"]} ${paper ? "border-[#d9c7a3] bg-white/40" : "bg-muted/25"} ${style === "sketch" ? "border-dashed font-display italic" : ""}`}>
             {!banner && <CoverImage src={src} className={`w-full border object-cover ${look.imageShape === "circle" ? "aspect-square rounded-full" : look.imageShape === "square" ? "rounded-none" : "rounded-lg"}`} />}
             {short.length > 0 && (look.fieldStyle === "pills"
               ? <ItemFields fields={short.map((entry) => entry.field)} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} />
-              : <dl className="grid gap-2">{short.map((entry) => <div key={entry.field} className="grid gap-0.5"><dt className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${style === "scroll" ? "opacity-70" : "text-muted-foreground"}`} style={look.fieldColor === "accent" ? { color: accent } : undefined}>{entry.field}</dt><dd className="break-words">{entry.value}</dd></div>)}</dl>)}
+              : <dl className="grid gap-2">{short.map((entry) => <div key={entry.field} className="grid gap-0.5"><dt className={`text-[10px] font-semibold uppercase tracking-[0.12em] ${muted}`} style={look.fieldColor === "accent" ? { color: accent } : undefined}>{entry.field}</dt><dd className="break-words">{entry.value}</dd></div>)}</dl>)}
           </aside>}
         </div>
+        {links.length > 0 && <p className={`mt-4 flex flex-wrap items-center gap-1.5 border-t pt-3 text-xs ${paper ? "border-[#d9c7a3]" : ""}`}><span className={`font-semibold uppercase tracking-[0.12em] ${muted}`}>Voir aussi</span>{links.map((link, index) => link.target && !props.inert
+          ? <button key={index} type="button" onClick={() => onOpen(link.target!)} title={link.field} className="rounded-full border px-2 py-0.5 font-medium underline-offset-2 hover:underline" style={{ borderColor: `color-mix(in srgb, ${color ?? accent} 45%, transparent)`, color: color ?? accent }}>{link.value}</button>
+          : <span key={index} title={link.field} className={`rounded-full border px-2 py-0.5 ${muted}`}>{link.value}</span>)}</p>}
       </div>
     </article>
   }
+  const tocBar = (row: string) => { const ratio = gaugeRatio(row); return ratio === null ? null : <span className="mt-0.5 block h-1 w-full overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: rowColor(layout, row, valueOf, optionsOf) ?? accent }} /></span> }
   const toc = layout.showToc && (layout.tocPosition === "top"
     ? <nav aria-label="Sommaire" className="flex flex-wrap items-center gap-1.5 rounded-xl border bg-muted/20 px-3 py-2">
       <span className="mr-1 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"><BookOpen className="size-3.5" />Sommaire</span>
-      {rows.map((row) => <a key={row} href={`#${anchor(row)}`} className="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground hover:text-primary">{layout.chapterNumbers ? `${numberOf.get(row)}. ` : ""}{nameOf(row) || "Sans nom"}</a>)}
+      {ordered.map((row) => <a key={row} href={`#${anchor(row)}`} onClick={layout.codexPages ? () => setPage(Math.floor(ordered.indexOf(row) / 2)) : undefined} className="rounded-full border bg-background px-2 py-0.5 text-xs text-muted-foreground hover:text-primary">{layout.chapterNumbers ? `${numberOf.get(row)}. ` : ""}{nameOf(row) || "Sans nom"}</a>)}
     </nav>
     : <nav aria-label="Sommaire" className="lg:sticky lg:top-4 lg:max-h-[80vh] lg:self-start lg:overflow-y-auto">
       <p className="mb-2 flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground"><BookOpen className="size-3.5" />Sommaire</p>
-      <ol className="grid gap-0.5 border-l pl-3 text-sm" style={{ borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }}>{rows.map((row) => <li key={row}><a href={`#${anchor(row)}`} className="block truncate py-0.5 text-muted-foreground hover:text-primary">{layout.chapterNumbers ? `${numberOf.get(row)}. ` : ""}{nameOf(row) || "Sans nom"}</a></li>)}</ol>
+      <ol className="grid gap-0.5 border-l pl-3 text-sm" style={{ borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }}>{ordered.map((row) => <li key={row}><a href={`#${anchor(row)}`} onClick={layout.codexPages ? () => setPage(Math.floor(ordered.indexOf(row) / 2)) : undefined} className="block py-0.5 text-muted-foreground hover:text-primary"><span className="block truncate">{layout.chapterNumbers ? `${numberOf.get(row)}. ` : ""}{nameOf(row) || "Sans nom"}</span>{tocBar(row)}</a></li>)}</ol>
     </nav>)
+  // Deux fiches face à face, feuilletées.
+  const pages = layout.codexPages
+    ? (() => { const count = Math.max(1, Math.ceil(ordered.length / 2)); const at = Math.min(page, count - 1); return <div className="grid gap-3">
+      <div className="grid gap-4 md:grid-cols-2">{ordered.slice(at * 2, at * 2 + 2).map(article)}</div>
+      <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground"><Button type="button" size="icon-sm" variant="outline" aria-label="Pages précédentes" disabled={at <= 0} onClick={() => setPage(at - 1)}><ChevronLeft /></Button><span className="tabular-nums">Double page {at + 1} / {count}</span><Button type="button" size="icon-sm" variant="outline" aria-label="Pages suivantes" disabled={at >= count - 1} onClick={() => setPage(at + 1)}><ChevronRight /></Button></div>
+    </div> })()
+    : null
   return <div className={layout.showToc && layout.tocPosition !== "top" ? "grid gap-5 lg:grid-cols-[13rem_minmax(0,1fr)]" : "grid gap-4"}>
     {toc}
-    <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid ${look.density === "compact" ? "gap-3" : "gap-5"}`}>{shown.map(article)}</div>} />} />
+    {pages ?? <Sections layout={layout} rows={ordered} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid ${look.density === "compact" ? "gap-3" : "gap-5"}`}>{shown.map(article)}</div>} />} />}
   </div>
 }
 
@@ -1171,7 +1422,8 @@ export function IndexViewLayout(input: ViewLayoutProps) {
   const props: ViewLayoutProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
   if (!props.rows.length && props.layout.kind !== "dashboard") return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{props.empty}</div>
   const body = viewBody(props)
-  if (click === "side" && props.layout.kind !== "master-detail") {
+  // L'arborescence « à côté › les enfants » dessine elle-même son panneau.
+  if (click === "side" && props.layout.kind !== "master-detail" && !(props.layout.kind === "tree" && props.layout.detail?.kind === "children")) {
     const selected = props.chosen || props.rows[0]
     return <div className={`grid gap-4 ${detailWidths[props.layout.detail?.width ?? "normal"]}`}>
       <div className="min-w-0">{body}</div>

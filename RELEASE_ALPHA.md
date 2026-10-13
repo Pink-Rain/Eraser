@@ -1,54 +1,56 @@
-# Eraser 0.1.1-alpha.217 — Lot C : 7 Calendrier, 8 Tableau de bord
+# Eraser 0.1.1-alpha.218 — Lot D : 9 Galerie, 10 Chronologie, 11 Arborescence, 12 Codex
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les réglages enregistrés par l'alpha 216 se relisent tels quels (un calendrier en
-« Agenda » reste un agenda, un tableau de bord garde ses tuiles).
+Sheets ; les réglages enregistrés par l'alpha 217 se relisent tels quels. Le chantier 1→12
+est complet : chaque vue a ses formes de base dessinées sur tes lignes et tous ses réglages.
 
-## 7 Calendrier : six échelles qui s'emboîtent
+## 9 Galerie
 
-- **Échelle** : Année, Mois, Semaine, Jour, Agenda ou Saisons, chacune avec **sa forme** :
-  - Année : douze mini-grilles, bande par saison, ou un mois par ligne (compte et formule).
-  - Mois : grille (pastilles, points ou barres, N par jour puis « +n »), ou un jour par ligne
-    (les jours vides masqués si tu veux).
-  - Semaine : sept colonnes, une ligne par jour, ou un tableau (jour, nom, colonnes choisies).
-  - Jour : une page avec ses lignes en fiches (élément au choix), ou en paragraphes (titre +
-    texte long).
-  - Agenda : par date, en fil (comme une chronologie), ou groupé par semaine.
-  - Saisons : l'année en bande de saisons, ou un panneau à la couleur de chaque saison.
-- **Les échelles s'emboîtent** : un mois de l'année ouvre le mois, un jour du mois (ou de
-  l'agenda, de la semaine) ouvre le jour ; précédent / suivant à chaque échelle ; une **barre
-  des échelles** au-dessus si tu l'actives ; « Revenir » ramène à l'échelle réglée.
-- **Bannière** au-dessus du calendrier : l'image du mois ou de la saison (nouvelle colonne
-  « Image » des onglets Mois et Saisons de l'Index des calendriers), ou une image fixe ; sa
-  hauteur.
-- Les briques communes y sont : **élément** (vue, carte, formulaire en lecture), **au clic**
-  (fiche, page, à côté, dessous, rien), **formule dans l'en-tête** du mois, de la semaine ou
-  de la saison (contre une cible), **jauge ou charges** sous chaque ligne datée, couleur des
-  lignes selon une colonne, icône, image, pastille.
-- Dix-huit formes de base, dessinées sur tes lignes : Année (3), Mois (3 dont bannière),
-  Semaine (3), Agenda (3 dont élément = carte), Jour (3 dont liste + détail), Saisons (2),
-  Jauge et charges : mois + jour.
+- **Cinq galeries** : mosaïque, **mur sans marge** (le nom au survol), **cabinet** (fond sombre,
+  cadre à la couleur de la ligne ou de la vue, nom sur une plaque), **planche** (vignettes larges,
+  ruban, texte dessous), **carrousel** (une image à la fois, voisines en retrait, flèches).
+- **Largeur selon une colonne nombre** : la plus grande valeur prend la largeur réglée, les
+  autres en proportion.
+- **Jauge et charges sur la vignette** : la barre en bas de l'image, les charges dans le coin ;
+  la formule de section dans l'en-tête. « Au clic » comme partout.
+- Six formes de base : Mur, Cabinet, Planche, Carrousel, Taille selon une colonne, Jauge et
+  charges.
 
-## 8 Tableau de bord : des tuiles mixtes
+## 10 Chronologie
 
-- Aux tuiles chiffres (nombre, somme, moyenne, min, max, remplies, répartition) s'ajoutent :
-  - **Jauge ou charges** : une formule sur les lignes, ou la case d'une ligne précise (« Vie »
-    d'Aldric sur « Vie max »), contre une cible ; anneau, barre ou charges, rouge au-delà.
-  - **Statistique de l'index** : une stat de « Modifier › Stats » posée en tuile (barres,
-    anneaux, histogrammes…), calculée sur les lignes de la vue.
-  - **Une autre vue de l'onglet** : liste, galerie, chronologie… avec ses propres réglages,
-    limitée à N lignes (triée : un top N).
-  - **Une ligne** : nommée, dessinée avec une carte ou un formulaire en lecture.
-  - **Texte à formules** : « Le groupe compte {nombre} membres et porte {somme Or} po » ; les
-    formules se recalculent et se surlignent. Aussi {moyenne X}, {min X}, {max X},
-    {remplies X}, {Or de Aldric} (la case d'une ligne), {Or} (sa somme).
-  - **Une tuile par ligne d'un onglet lié** : une colonne liée (personnage, lieu…) donne une
-    tuile par valeur, avec ses formules sur les lignes qui la citent.
-- **Sections** : chaque tuile nomme sa section ; les tuiles d'une même section vont ensemble,
-  repliables (repliées à l'ouverture si tu veux), avec une icône. Largeur d'une tuile : une
-  place, deux, ou toute la rangée.
-- Huit formes de base : Tuiles chiffres, Tuiles mixtes, Tuiles jauges, Une tuile par ligne
-  d'un onglet lié, Tuile texte, Tuile vue : top N, Tuiles en sections repliables, Texte avec
-  formules incrustées.
-- Dans les pages : un bloc Vue en tableau de bord reçoit les vues et les statistiques que ses
-  tuiles lisent.
+- **Chaque ligne** : un point, un médaillon, un chapitre, **une barre de durée** (colonne de fin)
+  ou **posée sur un fil** (un fil par valeur d'une colonne liée : personnage, lieu…).
+- **Axe** vertical ou **frise horizontale** ; des deux côtés, d'un seul, ou **un côté par
+  groupe** (à sa couleur, légende).
+- **Périodes** : une colonne (ou un onglet lié) dont chaque valeur fait une période, dessinées
+  **en bandes** (ère, règne, saison, avec leurs dates et leur formule) ou **en échelle** (une
+  bande en haut, un clic déplie la période).
+- Jauge sous chaque événement (chapitres compris), formule par période ou par fil, élément en
+  carte.
+- Onze formes de base : Chronique, Frise, Ères, Chapitres, Médaillons, Deux côtés, Durées en
+  barres, Un fil par ligne liée, Périodes puis détail, Élément = carte, Jauge et charges.
+
+## 11 Arborescence
+
+- **Cinq dessins** : lignes, retrait, cartes emboîtées, **organigramme** (les enfants en rangée
+  sous le parent, reliés), **carte mentale** (la racine au centre, les branches de part et
+  d'autre). L'élément en carte dans les trois derniers.
+- **Numérotés** 1., 1.1, 1.1.1 ; **dates** de début et de fin sous le nom ; **grisé** selon une
+  colonne vide ou « non » (une lignée) ; teinte par niveau ou par colonne de rang.
+- **Explorateur** : « Au clic : afficher à côté » avec « les enfants » : le nœud choisi déplie
+  ses enfants (en cartes) dans le panneau, un clic descend d'un niveau.
+- **Formule par branche** sur ses enfants (compte, somme… contre un total), **jauge ou charges**
+  sur chaque feuille.
+- Neuf formes de base : Organigramme, Atlas, Cartes emboîtées, Sommaire numéroté, Explorateur,
+  Carte mentale, Lignée, Hiérarchie, Jauge et charges.
+
+## 12 Codex
+
+- **Cinq styles** : livre, parchemin, nu, **journal de bord** (entrées datées, en tampon, dans
+  l'ordre des dates), **croquis** (image posée de travers, écriture penchée sur papier pointillé).
+- **Tuiles** : des colonnes nombre sous le titre. **Renvois** : des colonnes de relation en
+  « voir aussi », un clic ouvre la fiche citée. **Double page** : deux fiches face à face,
+  feuilletées. **Recto-verso** : deux cartes de l'onglet, retournées au clic.
+- **Jauge** en en-tête de la fiche et **en barre dans le sommaire** ; pastille à droite du titre.
+- Dix formes de base : Grimoire, Encyclopédie, Illustré, Double page, Bestiaire, Journal de
+  bord, Croquis, Recto-verso, Renvois, Jauge et charges.

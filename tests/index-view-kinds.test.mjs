@@ -247,3 +247,41 @@ test("calendriers : jours comptés, semaines et images des mois (monde et réel)
   assert.equal(parsed.months[1].image, undefined);
   assert.equal(parsed.seasons[0].image, "/api/files/hiver.jpg");
 });
+
+test("lot D : galerie, chronologie, arborescence et codex — réglages nouveaux relus et bornés, formes de base propres", async () => {
+  const gallery = views.cleanViewLayout({ kind: "gallery", imageColumn: "Portrait", galleryStyle: "cabinet", gallerySizeColumn: "Taille", gauge: { column: "Vie", style: "charges", max: 3 } });
+  assert.deepEqual(gallery, { kind: "gallery", imageColumn: "Portrait", gauge: { column: "Vie", style: "charges", max: 3 }, galleryStyle: "cabinet", gallerySizeColumn: "Taille" });
+  assert.equal(views.cleanViewLayout({ kind: "gallery", galleryStyle: "plain" }).galleryStyle, undefined);
+  const timeline = views.cleanViewLayout({ kind: "timeline", dateColumn: "Date", endColumn: "Fin", laneColumn: "Personnage", timelineStyle: "bars", timelineAxis: "horizontal", timelineSide: "groups", timelinePeriods: "scale", groupBy: "Ère" });
+  assert.deepEqual(timeline, { kind: "timeline", groupBy: "Ère", dateColumn: "Date", timelineSide: "groups", timelineStyle: "bars", timelineAxis: "horizontal", timelinePeriods: "scale", endColumn: "Fin", laneColumn: "Personnage" });
+  assert.equal(views.cleanViewLayout({ kind: "timeline", timelineAxis: "vertical", timelinePeriods: "bidon" }).timelineAxis, undefined);
+  const tree = views.cleanViewLayout({ kind: "tree", parentColumn: "Parent", treeStyle: "mindmap", numbered: true, dimColumn: "Vivant", dateColumn: "Naissance", endColumn: "Mort", click: "side", detail: { kind: "children", width: "wide" } });
+  assert.deepEqual(tree, { kind: "tree", dateColumn: "Naissance", parentColumn: "Parent", numbered: true, click: "side", detail: { kind: "children", width: "wide" }, treeStyle: "mindmap", endColumn: "Mort", dimColumn: "Vivant" });
+  const codex = views.cleanViewLayout({ kind: "codex", codexStyle: "board", codexPages: true, codexTiles: ["PV", "CA", "", "Force", "Dex", "Con", "Int", "Sag"], codexLinks: ["Allié", "Ennemi"], codexRecto: "*", codexVerso: "CARTE-2", dateColumn: "Date" });
+  assert.deepEqual(codex, { kind: "codex", dateColumn: "Date", codexStyle: "board", codexPages: true, codexTiles: ["PV", "CA", "Force", "Dex", "Con", "Int"], codexLinks: ["Allié", "Ennemi"], codexRecto: "*", codexVerso: "CARTE-2" });
+  // Appliqués à un autre onglet : les colonnes absentes s'effacent (fin, fil, grisé, taille, tuiles, renvois).
+  const fitted = views.fitLayoutToColumns({ ...timeline, ...codex, kind: "timeline" }, ["Nom", "Date", "Ère", "PV"]);
+  assert.deepEqual([fitted.endColumn, fitted.laneColumn, fitted.codexTiles, fitted.codexLinks, fitted.groupBy], [undefined, undefined, ["PV"], undefined, "Ère"]);
+
+  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
+  const columns = [{ header: "Nom" }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Date" }, { header: "Date de fin" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
+  const counts = { gallery: 6, timeline: 11, tree: 9, codex: 10 };
+  for (const [kind, expected] of Object.entries(counts)) {
+    const list = starters.viewStartersFor(kind, columns);
+    assert.equal(list.length, expected, kind);
+    for (const starter of list) {
+      const clean = views.cleanViewLayout(starter.layout);
+      assert.ok(clean, starter.key);
+      assert.deepEqual(views.cleanViewLayout(clean), clean, starter.key);
+      assert.equal(clean.kind, kind, starter.key);
+    }
+  }
+  const timelines = starters.viewStartersFor("timeline", columns);
+  assert.ok(timelines.every((starter) => starter.layout.dateColumn === "Date"));
+  assert.equal(timelines.find((starter) => starter.key === "chr-bars").layout.endColumn, "Date de fin");
+  assert.equal(timelines.find((starter) => starter.key === "chr-lanes").layout.laneColumn, "Personnage");
+  assert.ok(starters.viewStartersFor("tree", columns).every((starter) => starter.layout.parentColumn === "Personnage"));
+  assert.deepEqual(starters.viewStartersFor("codex", columns).find((starter) => starter.key === "cdx-bestiary").layout.codexTiles, ["Or", "Vie"]);
+  // Toutes les formes de départ des douze vues, sur un onglet réduit au nom : jamais une forme cassée.
+  for (const kind of ["list", "kanban", "master-detail", "calendar", "dashboard", "gallery", "timeline", "tree", "codex"]) for (const starter of starters.viewStartersFor(kind, [{ header: "Nom" }])) assert.ok(views.cleanViewLayout(starter.layout), `${kind} ${starter.key}`);
+});
