@@ -389,7 +389,7 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
 }
 
 /** La largeur de la carte de survol d'une mise en page. */
-function hoverWidthClass(layout: ResolvedLayout | undefined) {
+export function hoverWidthClass(layout: ResolvedLayout | undefined) {
   if (!layout) return "w-80"
   const width = layout.width === "sm" ? "w-80" : layout.width === "lg" ? "w-[32rem]" : "w-[26rem]"
   return `max-h-[min(34rem,75vh)] ${width} max-w-[calc(100vw-2rem)] overflow-y-auto`

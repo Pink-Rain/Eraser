@@ -1,15 +1,15 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, Star, FilePlus2 } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
-import { LayoutPresetBar, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
+import { LayoutViewsPanel, PresetBar, useColumnPresets } from "@/components/eraser/index-presets-ui"
 import { IndexLayoutEditor, type LayoutColumn } from "@/components/eraser/index-layout-editor"
 import { CardsPanel, IndexCardEditor, duplicateCard } from "@/components/eraser/index-card-editor"
 import { ColumnDescriptionButton, ColumnLockButton, ColumnTypeMenu } from "@/components/eraser/index-column-toolbar"
-import { IndexViewsEditor, ViewsPanel } from "@/components/eraser/index-views-editor"
+import { IndexViewsEditor, MAIN_VIEW_ID, ViewsPanel } from "@/components/eraser/index-views-editor"
 import { columnStyleCss, pillStyle, stylePalette } from "@/components/eraser/index-style"
 import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogFooter, AlertDialogHeader, AlertDialogTitle, AlertDialogTrigger } from "@/components/ui/alert-dialog"
 import { Button } from "@/components/ui/button"
@@ -53,7 +53,7 @@ import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
 import type { StatDefinition } from "@/lib/index-stats"
-import { fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
+import { fitLayoutToColumns, presentationEntries, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 import { layoutIcons } from "@/components/eraser/index-views"
 
 /** Ce que montre l'éditeur : les colonnes, le formulaire, le survol, les cartes ou une vue. */
@@ -81,6 +81,9 @@ type DraftColumn = { id: string; original?: string; originalIndex?: number; head
 
 /** Une colonne dont le nom, le type ou la présence sont protégés. */
 const isLockedPolicy = (policy: ColumnPolicy) => policy.reasons.length > 0 || (!policy.rename && !policy.type && !policy.remove)
+/** Les mises en page touchées d'un onglet : les étoilées (`null` : retour à celle d'Eraser), les autres versions. */
+type LayoutDraft = { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }
+
 type DraftTab = { id: string; original?: string; name: string; itemLabel?: string; originalItemLabel?: string; columns: DraftColumn[]; removed: boolean; remove: boolean; removeReason?: string; rename?: boolean; renameReason?: string; addColumns: boolean; addColumnsReason?: string }
 
 let draftCounter = 0
@@ -756,7 +759,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   /** Les mises en page enregistrées (fiche et survol), par onglet. */
   layouts?: Record<string, TabLayouts>
   /** Enregistre les mises en page changées. Absent : pas d'onglets « Fiche » et « Survol ». */
-  onSaveLayouts?: (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }>) => Promise<void>
+  onSaveLayouts?: (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }>) => Promise<void>
   /** La clé de l'index pour ses cartes (celles qu'Eraser avait déjà). */
   cardsIndex?: string
   /** Les cartes enregistrées, par onglet. */
@@ -770,7 +773,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   onSavePresentations?: (changes: Array<{ tab: string; presentations: TabPresentations | null }>) => Promise<void>
   /** Les presets de vues, communs à tous les index. */
   viewPresets?: ViewPreset[]
-  onSaveViewPreset?: (preset: { name: string; layout: ViewLayout }) => Promise<unknown>
+  onSaveViewPreset?: (preset: { id?: string; name: string; layout: ViewLayout }) => Promise<unknown>
   onDeleteViewPreset?: (id: string) => Promise<unknown>
   /** Des lignes de chaque onglet (en-tête → valeur) pour l'aperçu des vues. */
   previewRows?: Record<string, Array<Record<string, string>>>
@@ -827,9 +830,11 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
    * Les mises en page touchées, par onglet (identifiant du brouillon) : le formulaire étoilé
    * (`null` : retour à celui d'Eraser ou à l'automatique), le survol, les autres formulaires.
    */
-  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[] }>>({})
-  // Le formulaire ouvert dans l'éditeur, par onglet (« principal » : l'étoilé).
-  const [editedForm, setEditedForm] = useState<Record<string, string>>({})
+  const [layoutDrafts, setLayoutDrafts] = useState<Record<string, LayoutDraft>>({})
+  // Le formulaire ou le survol ouvert dans l'éditeur, par genre et par onglet (« principal » : l'étoilé).
+  const [editedLayout, setEditedLayout] = useState<Record<string, string>>({})
+  // La version de chaque vue ouverte dans l'éditeur, par genre et par onglet (« principal » : l'étoilée).
+  const [editedView, setEditedView] = useState<Record<string, string>>({})
   const [layoutSaving, setLayoutSaving] = useState(false)
   const [layoutError, setLayoutError] = useState("")
   const layoutsEnabled = Boolean(onSaveLayouts) && !readOnly
@@ -847,13 +852,15 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     return saved ? { layout: saved, source: "saved" } : fallback()
   }
   const sampleRowsOf = (draft: DraftTab) => sampleRows[draft.original ?? draft.name] ?? []
-  /** Les autres formulaires d'un onglet (touchés, sinon enregistrés). */
-  const namedFormsOf = (draft: DraftTab): NamedLayout[] => {
+  /** Les autres formulaires (ou survols) d'un onglet (touchés, sinon enregistrés). */
+  const namedLayoutsOf = (draft: DraftTab, kind: LayoutKind): NamedLayout[] => {
+    const key = kind === "form" ? "forms" : "hovers"
     const touched = layoutDrafts[draft.id]
-    if (touched && "forms" in touched) return touched.forms ?? []
-    return savedLayoutsOf(draft)?.forms ?? []
+    if (touched && key in touched) return touched[key] ?? []
+    return savedLayoutsOf(draft)?.[key] ?? []
   }
-  const touchLayout = (draft: DraftTab, changes: { form?: IndexLayout | null; hover?: IndexLayout | null; forms?: NamedLayout[] }) => setLayoutDrafts((current) => ({ ...current, [draft.id]: { ...current[draft.id], ...changes } }))
+  const namedFormsOf = (draft: DraftTab) => namedLayoutsOf(draft, "form")
+  const touchLayout = (draft: DraftTab, changes: LayoutDraft) => setLayoutDrafts((current) => ({ ...current, [draft.id]: { ...current[draft.id], ...changes } }))
   /**
    * Ce qu'il faut écrire : les mises en page touchées, et celles qui suivent un onglet ou
    * des colonnes renommés (elles nomment leurs colonnes). La mise en page d'Eraser (ou
@@ -862,7 +869,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const layoutChanges = useMemo(() => tabs.flatMap((draft) => {
     if (draft.removed) return []
     const savedEntry = draft.original ? tabLayoutsOf(layouts, draft.original) : null
-    const saved = { form: savedEntry?.form ?? null, hover: savedEntry?.hover ?? null, forms: savedEntry?.forms ?? [] }
+    const saved = { form: savedEntry?.form ?? null, hover: savedEntry?.hover ?? null, forms: savedEntry?.forms ?? [], hovers: savedEntry?.hovers ?? [] }
     const touched = layoutDrafts[draft.id] ?? {}
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
     const builtinRenamed = (kind: LayoutKind) => {
@@ -878,14 +885,15 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const form = next("form")
     const hover = next("hover")
     const forms = ("forms" in touched ? touched.forms ?? [] : saved.forms).map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) }))
+    const hovers = ("hovers" in touched ? touched.hovers ?? [] : saved.hovers).map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) }))
     const name = draft.name.trim()
     const renamed = Boolean(draft.original) && name !== draft.original
-    const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover) || serializeNamedLayouts(forms) !== serializeNamedLayouts(saved.forms)
+    const changed = renamed || serializeIndexLayout(form) !== serializeIndexLayout(saved.form) || serializeIndexLayout(hover) !== serializeIndexLayout(saved.hover) || serializeNamedLayouts(forms) !== serializeNamedLayouts(saved.forms) || serializeNamedLayouts(hovers) !== serializeNamedLayouts(saved.hovers)
     if (!changed || !name) return []
     // Un onglet renommé : sa mise en page suit son nouveau nom, l'ancienne ligne est retirée.
-    const retired = renamed && (saved.form || saved.hover || saved.forms.length) ? [{ tab: draft.original!, form: null, hover: null, forms: [] as NamedLayout[] }] : []
-    if (renamed && !form && !hover && !forms.length && !retired.length) return []
-    return [...retired, { tab: name, form, hover, forms }]
+    const retired = renamed && (saved.form || saved.hover || saved.forms.length || saved.hovers.length) ? [{ tab: draft.original!, form: null, hover: null, forms: [] as NamedLayout[], hovers: [] as NamedLayout[] }] : []
+    if (renamed && !form && !hover && !forms.length && !hovers.length && !retired.length) return []
+    return [...retired, { tab: name, form, hover, forms, hovers }]
   }), [layoutDrafts, layouts, model.key, tabs])
 
   // Les cartes touchées, par onglet (identifiant du brouillon) ; `null` : retour aux cartes d'Eraser.
@@ -938,8 +946,11 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     const renames = new Map(draft.columns.filter((item) => item.original && !item.removed && item.header.trim() && item.header.trim() !== item.original).map((item) => [foldName(item.original!), item.header.trim()]))
     if (!touched && !renamed && !renames.size) return []
     const rename = (value?: string) => value ? renames.get(foldName(value)) ?? value : value
+    const renamedLayout = <T extends ViewLayout>(layout: T): T => ({ ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })) })
     const base = touched ? presentationDrafts[draft.id] : saved
-    const next: TabPresentations = Object.fromEntries(Object.entries(base).map(([kind, layout]) => [kind, { ...layout, groupBy: rename(layout.groupBy), kanbanColumn: rename(layout.kanbanColumn), dateColumn: rename(layout.dateColumn), sortBy: rename(layout.sortBy), colorBy: rename(layout.colorBy), imageColumn: rename(layout.imageColumn), fields: layout.fields?.map((field) => rename(field)!), detailFields: layout.detailFields?.map((field) => rename(field)!), tiles: layout.tiles?.map((tile) => ({ ...tile, column: rename(tile.column) })) }]))
+    // Chaque vue étoilée, et les autres versions (`named`), suivent les colonnes renommées.
+    const next: TabPresentations = Object.fromEntries(presentationEntries(base).map(([kind, layout]) => [kind, renamedLayout(layout)]))
+    if (base.named?.length) next.named = base.named.map((item) => ({ ...item, layout: renamedLayout(item.layout) }))
     if (!renamed && JSON.stringify(next) === JSON.stringify(saved)) return []
     const retired = renamed && Object.keys(saved).length ? [{ tab: draft.original!, presentations: null }] : []
     return [...retired, { tab: name, presentations: Object.keys(next).length ? next : null }]
@@ -1084,6 +1095,11 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
     updateColumn({ ...column, spec: { ...base, ...keep, kind } })
   }
 
+  /** Les autres onglets (pas à la corbeille), pour « Copier vers… ». */
+  const otherTabsOf = (draft: DraftTab) => tabs.filter((candidate) => candidate.id !== draft.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))
+  /** Les colonnes qu'une vue peut lire (sans l'identifiant). */
+  const viewColumnsOf = (draft: DraftTab) => draft.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())
+
   const policy = column?.policy ?? freePolicy
   const columnDisabled = readOnly || Boolean(column?.removed) || Boolean(tab?.removed)
   // Une colonne verrouillée garde son affichage modifiable (style, emplacement, description…).
@@ -1113,73 +1129,81 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
           <Button type="button" variant="ghost" size="icon-sm" onClick={() => setAsideOpen(true)} aria-label="Afficher les onglets" title="Afficher le panneau des onglets"><PanelLeftOpen /></Button>
           <span className="[writing-mode:vertical-rl] rotate-180 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">{tab?.name ?? "Onglets"}</span>
         </aside>}
-        <aside className={`min-h-0 flex-col gap-1 overflow-y-auto rounded-xl border bg-muted/20 p-2 ${asideOpen ? "flex" : "hidden"}`}>
-          <div className="flex items-center justify-between gap-1 px-1">
-            <p className={sectionTitle}>Onglets</p>
-            <Button type="button" variant="ghost" size="icon-xs" onClick={() => setAsideOpen(false)} aria-label="Replier les onglets" title="Replier le panneau des onglets"><PanelLeftClose /></Button>
-          </div>
-          {tabs.map((candidate) => <div key={candidate.id} {...(readOnly ? {} : tabDrag.props(candidate))} className={`group flex items-center gap-1 rounded-lg px-1 ${candidate.id === tab?.id ? "bg-primary/10" : "hover:bg-muted/60"} ${tabDrag.over === candidate.id ? "ring-2 ring-primary/50" : ""}`}>
-            {!readOnly && <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />}
-            {renaming === candidate.id
-              ? <Input autoFocus value={candidate.name} onChange={(event) => updateTab({ ...candidate, name: event.target.value })} onBlur={() => setRenaming(null)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") setRenaming(null) }} className="h-7 text-sm" />
-              : <button type="button" onClick={() => { setSelectedTab(candidate.id); setSelectedColumn(candidate.columns[0]?.id ?? "") }} onDoubleClick={() => { if (!readOnly && (candidate.rename ?? true) && !candidate.removed) setRenaming(candidate.id) }} className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-1.5 text-left text-sm ${candidate.removed ? "line-through opacity-60" : ""}`} title={candidate.rename === false ? candidate.renameReason : "Double-clic pour renommer"}>{candidate.name}{!candidate.original && <span className="ml-1 text-[10px] text-primary">nouveau</span>}</button>}
-            {!readOnly && !candidate.removed && renaming !== candidate.id && <Button type="button" variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100" disabled={candidate.rename === false} title={candidate.rename === false ? candidate.renameReason : "Renommer l’onglet"} onClick={() => setRenaming(candidate.id)} aria-label="Renommer l’onglet">{candidate.rename === false ? <Lock /> : <Pencil />}</Button>}
-            {candidate.removed
-              ? <Button type="button" variant="ghost" size="icon-xs" onClick={() => updateTab({ ...candidate, removed: false })} title="Annuler la suppression" aria-label="Annuler la suppression"><Undo2 /></Button>
-              : <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={readOnly || !candidate.remove || liveTabs.length <= 1} onClick={() => updateTab({ ...candidate, removed: true })} title={candidate.remove ? "Mettre l’onglet à la corbeille" : candidate.removeReason} aria-label="Supprimer l’onglet">{candidate.remove ? <Trash2 /> : <Lock />}</Button>}
-          </div>)}
-          {model.addTabs && !readOnly
-            ? <form className="mt-1 grid gap-1" onSubmit={(event) => { event.preventDefault(); addTab() }}>
-              <span className="flex gap-1"><Input value={newTab} onChange={(event) => setNewTab(event.target.value)} placeholder="Nouvel onglet" className="h-8 text-xs" /><Button type="submit" size="icon-sm" variant="outline" aria-label="Ajouter l’onglet"><Plus /></Button></span>
-              {presets.length > 0 && <NativeSelect value={newTabPreset} onChange={(event) => setNewTabPreset(event.target.value)} className="h-7 text-[11px]" aria-label="Colonnes du nouvel onglet">
-                <NativeSelectOption value="">Sans preset (Nom et ID)</NativeSelectOption>
-                {presets.map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>Preset : {preset.name}</NativeSelectOption>)}
-              </NativeSelect>}
-            </form>
-            : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
-          {(mode === "form" || mode === "hover") && layoutsEnabled && tab && !tab.removed && (() => {
-            const named = namedFormsOf(tab)
-            const formId = mode === "form" ? editedForm[tab.id] ?? DEFAULT_FORM_ID : DEFAULT_FORM_ID
-            const chosen = formId !== DEFAULT_FORM_ID ? named.find((item) => item.id === formId) : undefined
-            const current = chosen ? chosen.layout : layoutOf(tab, mode).layout
-            const busy = pending || layoutSaving
-            const rename = (id: string, name: string) => touchLayout(tab, { forms: named.map((item) => item.id === id ? { ...item, name } : item) })
-            const star = (id: string) => {
-              // L'étoile passe à ce formulaire : il devient le formulaire étoilé, l'ancien garde une place nommée.
-              const target = named.find((item) => item.id === id)
-              if (!target) return
-              const previous = layoutOf(tab, "form").layout
-              touchLayout(tab, { form: target.layout, forms: [...named.filter((item) => item.id !== id), { id: layoutId(), name: "Ancien formulaire principal", layout: previous }] })
-              setEditedForm((state) => ({ ...state, [tab.id]: DEFAULT_FORM_ID }))
-            }
-            return <div className="mt-2 grid gap-1.5 rounded-lg border border-dashed bg-background/40 p-2">
-              <p className={`${sectionTitle} px-1`}>{mode === "form" ? "Formulaires" : "Survol"}</p>
-              {mode === "form" && <>
-                <div className="flex items-center gap-1">
-                  <NativeSelect value={formId} disabled={busy} onChange={(event) => setEditedForm((state) => ({ ...state, [tab.id]: event.target.value }))} className="h-7 min-w-0 flex-1 py-0 text-[11px]" aria-label="Formulaire modifié">
-                    <NativeSelectOption value={DEFAULT_FORM_ID}>★ Formulaire principal</NativeSelectOption>
-                    {named.map((item) => <NativeSelectOption key={item.id} value={item.id}>{item.name}</NativeSelectOption>)}
-                  </NativeSelect>
-                  {chosen && <Button type="button" variant="ghost" size="icon-xs" disabled={busy} onClick={() => star(chosen.id)} title="En faire le formulaire étoilé (celui qu’ouvre le nom d’une ligne)" aria-label="Étoiler ce formulaire"><Star /></Button>}
-                </div>
-                {chosen && <Input value={chosen.name} disabled={busy} maxLength={60} onChange={(event) => rename(chosen.id, event.target.value)} className="h-7 text-[11px]" aria-label="Nom du formulaire" />}
-                <div className="flex flex-wrap gap-1">
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={busy || named.length >= 11} onClick={() => { const id = layoutId(); touchLayout(tab, { forms: [...named, { id, name: `Formulaire ${named.length + 2}`, layout: automaticLayoutFor("form", layoutColumnsOf(tab, "form")) }] }); setEditedForm((state) => ({ ...state, [tab.id]: id })) }} title="Un formulaire de plus, à partir de l’affichage automatique"><FilePlus2 />Nouveau</Button>
-                  <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={busy || named.length >= 11} onClick={() => { const id = layoutId(); touchLayout(tab, { forms: [...named, { id, name: `${chosen ? chosen.name : "Formulaire principal"} (copie)`, layout: current }] }); setEditedForm((state) => ({ ...state, [tab.id]: id })) }} title="Une copie du formulaire affiché"><Copy />Dupliquer</Button>
-                  {chosen && <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px] text-destructive hover:text-destructive" disabled={busy} onClick={() => { touchLayout(tab, { forms: named.filter((item) => item.id !== chosen.id) }); setEditedForm((state) => ({ ...state, [tab.id]: DEFAULT_FORM_ID })) }}><Trash2 />Retirer</Button>}
-                </div>
-              </>}
-              <LayoutPresetBar
-                kind={mode}
-                tabName={tab.name}
-                layout={current}
-                compact
-                otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
-                disabled={busy}
-                onApply={(layout) => chosen ? touchLayout(tab, { forms: named.map((item) => item.id === chosen.id ? { ...item, layout } : item) }) : touchLayout(tab, { [mode]: layout })}
-                onCopyTo={(ids) => setLayoutDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => [id, { ...state[id], [mode]: current }])) }))}
-              />
+        <aside className={`min-h-0 flex-col gap-2 overflow-y-auto ${asideOpen ? "flex" : "hidden"}`}>
+          {/* Les onglets de l'index, et les réglages de l'onglet choisi */}
+          <section className="flex shrink-0 flex-col gap-1 rounded-xl border bg-muted/20 p-2" aria-label="Onglets">
+            <div className="flex items-center justify-between gap-1 px-1">
+              <p className={sectionTitle}>Onglets</p>
+              <Button type="button" variant="ghost" size="icon-xs" onClick={() => setAsideOpen(false)} aria-label="Replier les onglets" title="Replier le panneau des onglets"><PanelLeftClose /></Button>
             </div>
+            {tabs.map((candidate) => <div key={candidate.id} {...(readOnly ? {} : tabDrag.props(candidate))} className={`group flex items-center gap-1 rounded-lg px-1 ${candidate.id === tab?.id ? "bg-primary/10" : "hover:bg-muted/60"} ${tabDrag.over === candidate.id ? "ring-2 ring-primary/50" : ""}`}>
+              {!readOnly && <GripVertical className="size-3.5 shrink-0 cursor-grab text-muted-foreground/60" aria-hidden="true" />}
+              {renaming === candidate.id
+                ? <Input autoFocus value={candidate.name} onChange={(event) => updateTab({ ...candidate, name: event.target.value })} onBlur={() => setRenaming(null)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === "Escape") setRenaming(null) }} className="h-7 text-sm" />
+                : <button type="button" onClick={() => { setSelectedTab(candidate.id); setSelectedColumn(candidate.columns[0]?.id ?? "") }} onDoubleClick={() => { if (!readOnly && (candidate.rename ?? true) && !candidate.removed) setRenaming(candidate.id) }} className={`min-w-0 flex-1 truncate rounded-md px-1.5 py-1.5 text-left text-sm ${candidate.removed ? "line-through opacity-60" : ""}`} title={candidate.rename === false ? candidate.renameReason : "Double-clic pour renommer"}>{candidate.name}{!candidate.original && <span className="ml-1 text-[10px] text-primary">nouveau</span>}</button>}
+              {!readOnly && !candidate.removed && renaming !== candidate.id && <Button type="button" variant="ghost" size="icon-xs" className="opacity-0 group-hover:opacity-100" disabled={candidate.rename === false} title={candidate.rename === false ? candidate.renameReason : "Renommer l’onglet"} onClick={() => setRenaming(candidate.id)} aria-label="Renommer l’onglet">{candidate.rename === false ? <Lock /> : <Pencil />}</Button>}
+              {candidate.removed
+                ? <Button type="button" variant="ghost" size="icon-xs" onClick={() => updateTab({ ...candidate, removed: false })} title="Annuler la suppression" aria-label="Annuler la suppression"><Undo2 /></Button>
+                : <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={readOnly || !candidate.remove || liveTabs.length <= 1} onClick={() => updateTab({ ...candidate, removed: true })} title={candidate.remove ? "Mettre l’onglet à la corbeille" : candidate.removeReason} aria-label="Supprimer l’onglet">{candidate.remove ? <Trash2 /> : <Lock />}</Button>}
+            </div>)}
+            {model.addTabs && !readOnly
+              ? <form className="mt-1 grid gap-1" onSubmit={(event) => { event.preventDefault(); addTab() }}>
+                <span className="flex gap-1"><Input value={newTab} onChange={(event) => setNewTab(event.target.value)} placeholder="Nouvel onglet" className="h-8 text-xs" /><Button type="submit" size="icon-sm" variant="outline" aria-label="Ajouter l’onglet"><Plus /></Button></span>
+                {presets.length > 0 && <NativeSelect value={newTabPreset} onChange={(event) => setNewTabPreset(event.target.value)} className="h-7 text-[11px]" aria-label="Colonnes du nouvel onglet">
+                  <NativeSelectOption value="">Sans preset (Nom et ID)</NativeSelectOption>
+                  {presets.map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>Preset : {preset.name}</NativeSelectOption>)}
+                </NativeSelect>}
+              </form>
+              : model.addTabsReason && <p className="mt-1 flex gap-1 px-1 text-[11px] text-muted-foreground"><Lock className="mt-0.5 size-3 shrink-0" />{model.addTabsReason}</p>}
+            {!readOnly && tab && !tab.removed && tab.itemLabel !== undefined && <label className="mt-1 grid gap-1 border-t border-dashed px-1 pt-2 text-[11px] text-muted-foreground" title="Le mot des boutons et messages de l’onglet : « + Ajouter un lieu », « Ce lieu a été supprimé »…">
+              Une ligne de « {tab.name} » s’appelle
+              <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
+            </label>}
+            {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-1 grid gap-1 border-t border-dashed pt-2">
+              <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
+                <Columns3 />Aligner les autres onglets sur « {tab.name} »
+              </Button>
+              {alignNotice && <p className="text-[10px] leading-4 text-muted-foreground">{alignNotice}</p>}
+            </div>}
+            {!readOnly && tabs.length > 1 && <p className="px-1 pt-1 text-[10px] leading-4 text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
+          </section>
+
+          {/* La vue modifiée de l'onglet choisi : le même menu partout (versions, presets) */}
+          {(mode === "form" || mode === "hover") && layoutsEnabled && tab && !tab.removed && (() => {
+            const kind: LayoutKind = mode
+            const named = namedLayoutsOf(tab, kind)
+            const editKey = `${kind}:${tab.id}`
+            const chosen = named.find((item) => item.id === editedLayout[editKey])
+            const current = chosen ? chosen.layout : layoutOf(tab, kind).layout
+            const label = kind === "form" ? "Formulaire" : "Survol"
+            const select = (id: string) => setEditedLayout((state) => ({ ...state, [editKey]: id }))
+            const setNamed = (list: NamedLayout[], main?: IndexLayout) => touchLayout(tab, { ...(kind === "form" ? { forms: list } : { hovers: list }), ...(main ? kind === "form" ? { form: main } : { hover: main } : {}) })
+            const add = (name: string, layout: IndexLayout) => { const id = layoutId(); setNamed([...named, { id, name, layout }]); select(id) }
+            return <LayoutViewsPanel
+              key={editKey}
+              kind={kind}
+              tabName={tab.name}
+              items={[{ id: DEFAULT_FORM_ID, name: `${label} principal` }, ...named.map((item) => ({ id: item.id, name: item.name }))]}
+              selectedId={chosen?.id ?? DEFAULT_FORM_ID}
+              onSelect={select}
+              onStar={(id) => {
+                // L'étoile passe à cette version : elle devient celle qu'Eraser montre, l'ancienne garde une place nommée.
+                const target = named.find((item) => item.id === id)
+                if (!target) return
+                setNamed([...named.filter((item) => item.id !== id), { id: layoutId(), name: `Ancien ${label.toLocaleLowerCase("fr")} principal`, layout: layoutOf(tab, kind).layout }], target.layout)
+                select(DEFAULT_FORM_ID)
+              }}
+              onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
+              onNew={() => add(`${label} ${named.length + 2}`, automaticLayoutFor(kind, layoutColumnsOf(tab, kind)))}
+              onDuplicate={() => add(`${chosen ? chosen.name : `${label} principal`} (copie)`, current)}
+              onRemove={() => { if (!chosen) return; setNamed(named.filter((item) => item.id !== chosen.id)); select(DEFAULT_FORM_ID) }}
+              full={named.length >= 11}
+              layout={current}
+              otherTabs={otherTabsOf(tab)}
+              disabled={pending || layoutSaving}
+              onApply={(layout) => chosen ? setNamed(named.map((item) => item.id === chosen.id ? { ...item, layout } : item)) : touchLayout(tab, kind === "form" ? { form: layout } : { hover: layout })}
+              onCopyTo={(ids) => setLayoutDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => [id, { ...state[id], ...(kind === "form" ? { form: current } : { hover: current }) }])) }))}
+            />
           })()}
           {mode === "cards" && cardsEnabled && tab && !tab.removed && (() => {
             const entry = cardsOf(tab)
@@ -1191,7 +1215,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               builtin={entry.builtin}
               builtins={tabCardsOf({}, cardsIndex ?? model.key, tab.original ?? tab.name.trim()).cards}
               samples={sampleRows[tab.original ?? tab.name] ?? []}
-              otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
+              otherTabs={otherTabsOf(tab)}
               selected={selectedCard[tab.id] ?? null}
               onSelect={(id) => setSelectedCard((current) => ({ ...current, [tab.id]: id }))}
               disabled={pending || layoutSaving}
@@ -1205,40 +1229,27 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             />
           })()}
           {viewKind && presentationsEnabled && tab && !tab.removed && (() => {
-            const current = presentationsOf(tab)
-            const columnsOfTab = tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())
+            const editKey = `${viewKind}:${tab.id}`
             return <ViewsPanel
-              key={`${tab.id}:${viewKind}`}
+              key={editKey}
               kind={viewKind}
-              columns={columnsOfTab}
-              layout={current[viewKind] ?? { kind: viewKind }}
-              configured={Boolean(current[viewKind])}
+              tabName={tab.name}
+              columns={viewColumnsOf(tab)}
+              value={presentationsOf(tab)}
+              selectedId={editedView[editKey] ?? MAIN_VIEW_ID}
+              onSelect={(id) => setEditedView((state) => ({ ...state, [editKey]: id }))}
+              onChange={(next) => setPresentationDrafts((state) => ({ ...state, [tab.id]: next }))}
               presets={viewPresets}
-              onApply={(layout) => setPresentationDrafts((state) => ({ ...state, [tab.id]: { ...current, [viewKind]: layout } }))}
-              onReset={() => setPresentationDrafts((state) => { const next = { ...current }; delete next[viewKind]; return { ...state, [tab.id]: next } })}
               onSavePreset={onSaveViewPreset}
               onDeletePreset={onDeleteViewPreset}
-              otherTabs={tabs.filter((candidate) => candidate.id !== tab.id && !candidate.removed).map((candidate) => ({ id: candidate.id, name: candidate.name }))}
-              onCopyTo={(ids) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => {
+              otherTabs={otherTabsOf(tab)}
+              onCopyTo={(ids, layout) => setPresentationDrafts((state) => ({ ...state, ...Object.fromEntries(ids.map((id) => {
                 const target = tabs.find((candidate) => candidate.id === id)
-                const base = target ? presentationsOf(target) : {}
-                const headers = target ? target.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim()) : []
-                return [id, { ...base, [viewKind]: fitLayoutToColumns(current[viewKind] ?? { kind: viewKind }, headers) }]
+                return [id, { ...(target ? presentationsOf(target) : {}), [viewKind]: fitLayoutToColumns(layout, target ? viewColumnsOf(target) : []) }]
               })) }))}
               disabled={pending || layoutSaving}
             />
           })()}
-          {!readOnly && tab && !tab.removed && tab.itemLabel !== undefined && <label className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2 text-[11px] text-muted-foreground" title="Le mot des boutons et messages de l’onglet : « + Ajouter un lieu », « Ce lieu a été supprimé »…">
-            Une ligne de « {tab.name} » s’appelle
-            <Input value={tab.itemLabel} maxLength={60} onChange={(event) => updateTab({ ...tab, itemLabel: event.target.value })} placeholder="une ligne" className="h-7 text-xs" />
-          </label>}
-          {model.family === "objects" && !readOnly && tab && !tab.removed && liveTabs.length > 1 && <div className="mt-2 grid gap-1 rounded-lg border border-dashed bg-background/40 p-2">
-            <Button type="button" variant="outline" size="sm" className="h-auto min-h-8 whitespace-normal py-1 text-xs" onClick={() => alignOn(tab)} title="Mêmes noms (fautes corrigées), mêmes types, mêmes styles imposés et même ordre pour tous les onglets. Rien n’est supprimé.">
-              <Columns3 />Aligner les autres onglets sur « {tab.name} »
-            </Button>
-            {alignNotice && <p className="text-[10px] leading-4 text-muted-foreground">{alignNotice}</p>}
-          </div>}
-          {!readOnly && tabs.length > 1 && <p className="mt-auto px-1 pt-2 text-[10px] text-muted-foreground">Glisse un onglet par sa poignée pour changer l’ordre ; double-clic pour le renommer.</p>}
         </aside>
 
         {mode === "stats" && statsPanel && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
@@ -1250,8 +1261,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
 
         {viewKind && tab && <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
           <IndexViewsEditor
-            key={`${tab.id}:${viewKind}`}
+            key={`${tab.id}:${viewKind}:${editedView[`${viewKind}:${tab.id}`] ?? MAIN_VIEW_ID}`}
             kind={viewKind}
+            versionId={editedView[`${viewKind}:${tab.id}`] ?? MAIN_VIEW_ID}
             tabName={tab.name}
             columns={tab.columns.filter((item) => !item.removed && item.header.trim() && !/^id$/i.test(item.header.trim())).map((item) => item.header.trim())}
             rows={previewRows[tab.original ?? tab.name.trim()] ?? sampleRows[tab.original ?? tab.name.trim()] ?? []}
@@ -1284,31 +1296,30 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </section>}
 
         {(mode === "form" || mode === "hover") && tab && (() => {
-          const formId = mode === "form" ? editedForm[tab.id] ?? DEFAULT_FORM_ID : DEFAULT_FORM_ID
-          const named = mode === "form" && formId !== DEFAULT_FORM_ID ? namedFormsOf(tab).find((item) => item.id === formId) : undefined
+          const formId = editedLayout[`${mode}:${tab.id}`] ?? DEFAULT_FORM_ID
+          const list = namedLayoutsOf(tab, mode)
+          const named = formId !== DEFAULT_FORM_ID ? list.find((item) => item.id === formId) : undefined
           const main = layoutOf(tab, mode)
           const current = named ? { layout: named.layout, source: "saved" as const } : main
           const columns = layoutColumnsOf(tab, mode)
           const sampleRows = sampleRowsOf(tab)
-          const update = (layout: IndexLayout) => named
-            ? touchLayout(tab, { forms: namedFormsOf(tab).map((item) => item.id === named.id ? { ...item, layout } : item) })
-            : touchLayout(tab, { [mode]: layout })
+          const update = (layout: IndexLayout) => {
+            if (!named) return touchLayout(tab, mode === "form" ? { form: layout } : { hover: layout })
+            const next = list.map((item) => item.id === named.id ? { ...item, layout } : item)
+            touchLayout(tab, mode === "form" ? { forms: next } : { hovers: next })
+          }
           return <section className="grid min-h-0 content-start gap-3 overflow-y-auto pr-1">
-            <div className="rounded-xl border bg-muted/20 px-3 py-2 text-xs leading-5 text-muted-foreground">
-              {mode === "form"
-                ? <>{named ? <>Le formulaire <b className="text-foreground">« {named.name} »</b> de « {tab.name} » : les pages du créateur de pages peuvent l’afficher (bloc « Valeurs de la ligne »).</> : <>Le <b className="text-foreground">formulaire étoilé</b> de « {tab.name} » : celui qu’ouvre le nom d’une ligne (et le formulaire « Ajouter »). Toutes les colonnes peuvent y être placées, masquées comprises ; les blocs (tuiles, inventaire, bouton…) s’ajoutent à côté.</>}</>
-                : <>Ce qu’affiche le <b className="text-foreground">survol</b> d’une ligne de « {tab.name} » citée en entier avec « {"{"} » (dans une description, une note, un chat…). Pour les joueurs, les colonnes privées restent cachées.</>}
-            </div>
             <IndexLayoutEditor
-              key={`${tab.id}:${mode}:${formId}`}
+              key={`${tab.id}:${mode}:${named?.id ?? DEFAULT_FORM_ID}`}
               kind={mode}
               columns={columns}
               value={current.layout}
               source={current.source}
               onChange={update}
-              onReset={named ? undefined : () => touchLayout(tab, { [mode]: null })}
+              onReset={named ? undefined : () => touchLayout(tab, mode === "form" ? { form: null } : { hover: null })}
               resetLabel={tab.original && builtinLayoutFor(model.key, tab.original, mode) ? "Revenir à la mise en page d’Eraser" : "Revenir à l’affichage automatique"}
               sample={sampleRows[0]}
+              samples={sampleRows}
               sampleRow={sampleRows[0] ? { index: model.key, id: sampleRows[0].ID ?? "", tab: tab.original ?? tab.name } : undefined}
               forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((item) => ({ id: item.id, name: item.name }))]}
               eraserStarters={tab.original ? eraserLayoutStarters(model.key, tab.original, mode) : []}
@@ -1418,7 +1429,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </div>
         {showChanges && <ul className="mt-1 grid max-h-32 gap-0.5 overflow-y-auto text-muted-foreground">
           {operations.map((operation, index) => <li key={index}>• {describe(operation)}</li>)}
-          {presentationChanges.map((change, index) => <li key={`views-${index}`}>• Vues de « {change.tab} » (dans Eraser) : {change.presentations ? Object.keys(change.presentations).length + " réglée(s)" : "réglages d’office"}</li>)}
+          {presentationChanges.map((change, index) => <li key={`views-${index}`}>• Vues de « {change.tab} » (dans Eraser) : {change.presentations ? `${presentationEntries(change.presentations).length} réglée(s)${change.presentations.named?.length ? `, ${change.presentations.named.length} autre(s) version(s)` : ""}` : "réglages d’office"}</li>)}
           {cardChanges.map((change, index) => <li key={`cards-${index}`}>• Cartes de « {change.tab} » (dans Eraser) : {change.cards ? `${change.cards.cards.length} carte${change.cards.cards.length > 1 ? "s" : ""}` : "retour aux cartes d’Eraser"}</li>)}
           {lockChanges.map((change, index) => <li key={`locks-${index}`}>• Cadenas de « {change.tab} » (dans Eraser) : {change.locks ? `${Object.keys(change.locks).length} colonne${Object.keys(change.locks).length > 1 ? "s" : ""} réglée${Object.keys(change.locks).length > 1 ? "s" : ""}` : "ceux d’Eraser"}</li>)}
           {layoutChanges.map((change, index) => <li key={`layout-${index}`}>• Mise en page de « {change.tab} » (dans Eraser) : {!change.form && !change.hover && !change.forms?.length ? "affichage d’Eraser" : [change.form ? "formulaire réglé" : "formulaire d’Eraser", change.hover ? "survol réglé" : "survol d’Eraser", ...(change.forms?.length ? [`${change.forms.length} autre${change.forms.length > 1 ? "s" : ""} formulaire${change.forms.length > 1 ? "s" : ""}`] : [])].join(", ")}</li>)}

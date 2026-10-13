@@ -66,7 +66,7 @@ export function useIndexSettings(index: string) {
     return payload.id ?? ""
   }, [update])
   /** Les mises en page (fiche, survol) d'onglets de cet index ; `null` : l'affichage automatique. */
-  const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }>) => {
+  const saveLayouts = useCallback(async (changes: Array<{ tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }>) => {
     if (!changes.length) return
     const payload = await postSettings({ action: "save-layouts", index, changes })
     if (payload.layouts) update({ layouts: payload.layouts })

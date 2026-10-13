@@ -770,8 +770,28 @@ export type PresentationKind = Exclude<ViewLayoutKind, "table" | "cards" | "stat
 export const presentationKinds = viewLayoutKinds.filter((kind): kind is (typeof viewLayoutKinds)[number] & { value: PresentationKind } => kind.value !== "table" && kind.value !== "cards")
 export const isPresentationKind = (value: unknown): value is PresentationKind => presentationKinds.some((kind) => kind.value === value)
 
-/** Les réglages de chaque présentation d'un onglet (Modifier › Vues), enregistrés dans Eraser. */
-export type TabPresentations = Partial<Record<PresentationKind, ViewLayout>>
+/** Une version de plus d'une vue, sous son nom (« Liste courte », « Kanban par lieu ») : son genre est celui de sa forme. */
+export type NamedView = { id: string; name: string; layout: ViewLayout & { kind: PresentationKind } }
+
+/**
+ * Les réglages de chaque présentation d'un onglet (Modifier › Vues), enregistrés dans Eraser :
+ * sous son genre, la version étoilée (celle que montrent les pages et le tableau de bord) ;
+ * dans `named`, les autres versions, qu'un bloc de page peut choisir.
+ */
+export type TabPresentations = Partial<Record<PresentationKind, ViewLayout>> & { named?: NamedView[] }
+
+/** Le choix « une autre version de la vue » d'un bloc de page, rangé avec les presets (`vue:<id>`). */
+export const VIEW_VARIANT_PREFIX = "vue:"
+
+function parseNamedView(input: unknown): NamedView | null {
+  if (!input || typeof input !== "object") return null
+  const raw = input as Record<string, unknown>
+  const id = (typeof raw.id === "string" ? raw.id : "").replace(/[^A-Za-z0-9-]/g, "").slice(0, 40)
+  const layout = cleanViewLayout(raw.layout)
+  if (!id || !layout || !isPresentationKind(layout.kind)) return null
+  const name = (typeof raw.name === "string" ? raw.name : "").replace(/\s+/g, " ").trim().slice(0, 60)
+  return { id, name: name || "Vue", layout: layout as NamedView["layout"] }
+}
 
 export function parseTabPresentations(input: unknown): TabPresentations | null {
   let value = input
@@ -785,7 +805,27 @@ export function parseTabPresentations(input: unknown): TabPresentations | null {
     const clean = cleanViewLayout({ ...(layout as Record<string, unknown>), kind: key })
     if (clean) result[key] = clean
   }
+  const seen = new Set<string>()
+  const named = (Array.isArray((value as { named?: unknown }).named) ? (value as { named: unknown[] }).named : []).map(parseNamedView).filter((item): item is NamedView => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 60)
+  if (named.length) result.named = named
   return result
+}
+
+/** Les autres versions d'une vue d'un onglet (toutes, sans genre). */
+export function namedViewsOf(entry: TabPresentations | null | undefined, kind?: PresentationKind): NamedView[] {
+  return (entry?.named ?? []).filter((item) => !kind || item.layout.kind === kind)
+}
+
+/** Les genres de vue réglés dans une entrée (la version étoilée), sans la liste des autres versions. */
+export function presentationEntries(entry: TabPresentations | null | undefined): Array<[PresentationKind, ViewLayout]> {
+  return Object.entries(entry ?? {}).filter((pair): pair is [PresentationKind, ViewLayout] => isPresentationKind(pair[0]) && Boolean(pair[1]))
+}
+
+/** Une autre version d'une vue d'un onglet, par son identifiant ; `null` si elle n'existe plus. */
+export function presentationVariant(stored: Record<string, TabPresentations> | null | undefined, tab: string, id: string): ViewLayout | null {
+  const fold = (value: string) => value.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  const entry = stored ? Object.entries(stored).find(([name]) => fold(name) === fold(tab))?.[1] : undefined
+  return namedViewsOf(entry).find((item) => item.id === id)?.layout ?? null
 }
 
 /** La présentation à montrer : celle réglée pour l'onglet, sinon ses réglages par défaut. */

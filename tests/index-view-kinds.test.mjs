@@ -32,6 +32,14 @@ test("les nouvelles vues sont des vues de « Modifier », avec leurs presets", (
   for (const preset of views.builtinViewPresets) assert.ok(views.cleanViewPreset(preset), preset.id);
   const parsed = views.parseTabPresentations({ tree: { parentColumn: "Région" }, gallery: { kind: "list", imageColumn: "Image" } });
   assert.deepEqual(parsed, { tree: { kind: "tree", parentColumn: "Région" }, gallery: { kind: "gallery", imageColumn: "Image" } });
+  // Les autres versions d'une vue : gardées sous « named », sans doublon ni genre inconnu ; l'étoilée ne bouge pas.
+  const versions = views.parseTabPresentations(JSON.stringify({ list: { compact: true }, named: [{ id: "court", name: "Liste courte", layout: { kind: "list", fields: ["Type"] } }, { id: "court", name: "doublon", layout: { kind: "list" } }, { id: "tableau", name: "Tableau", layout: { kind: "table" } }, { id: "k", name: "", layout: { kind: "kanban", kanbanColumn: "État" } }] }));
+  assert.deepEqual(versions.list, { kind: "list", compact: true });
+  assert.deepEqual(versions.named.map((item) => [item.id, item.name, item.layout.kind]), [["court", "Liste courte", "list"], ["k", "Vue", "kanban"]]);
+  assert.deepEqual(views.namedViewsOf(versions, "kanban").map((item) => item.id), ["k"]);
+  assert.deepEqual(views.presentationEntries(versions).map(([kind]) => kind), ["list"]);
+  assert.deepEqual(views.presentationVariant({ Lieux: versions }, "lieux", "court"), { kind: "list", fields: ["Type"] });
+  assert.equal(views.presentationVariant({ Lieux: versions }, "Lieux", "disparue"), null);
   // Un preset appliqué ailleurs : la colonne du parent suit si elle existe.
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "pays" }, ["Nom", "Pays"]).parentColumn, "Pays");
   assert.equal(views.fitLayoutToColumns({ kind: "tree", parentColumn: "Pays" }, ["Nom"]).parentColumn, undefined);

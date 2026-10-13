@@ -2,7 +2,9 @@
  * Ce qu'une référence affiche d'une ligne d'index : la valeur d'une case citée (comme
  * dans le tableau) ou le détail montré au survol du nom. Sans dépendance au serveur.
  */
-import { foldName, rowColumnStyle, type IndexColumnSpec } from "@/lib/index-columns"
+import { foldName, isIdHeader, rowColumnStyle, type IndexColumnSpec } from "@/lib/index-columns"
+import { arrangeLayout, blockColumns, resolveLayoutColor, type IndexLayout } from "@/lib/index-layouts"
+import type { ResolvedLayout, ResolvedLayoutField } from "@/lib/index-references"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
 
 export type SourceRow = { id: string; name: string; values: string[]; html: string[] }
@@ -102,3 +104,58 @@ export function rowDetails(table: SourceTable, row: SourceRow, options: { object
   }
 }
 
+/**
+ * Les cases du survol, rangées : vides et colonnes privées (joueurs) laissées de côté. Le
+ * serveur s'en sert pour les citations « { », l'aperçu de « Modifier › Survol » aussi.
+ */
+export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden: (column: string) => boolean): ResolvedLayout {
+  const columns = table.headers.filter((header) => header.trim() && !hidden(header) && !isIdHeader(header))
+  const cells = columns.flatMap((header): ResolvedLayoutField[] => {
+    const cell = citedCell(table, row, header)
+    return cell && cell.value.trim() ? [{ column: cell.column, value: cell.value, valueHtml: cell.valueHtml, look: cell.look }] : []
+  })
+  // Un bloc (paliers, tuiles…) emporte les cases qu'il lit, vides comprises (il sait quoi en faire).
+  const arranged = arrangeLayout(layout, cells, (cell) => cell.column, (field) => {
+    const needed = blockColumns(field.block).filter((column) => !hidden(column))
+    const read = needed.flatMap((column) => { const cell = citedCell(table, row, column); return cell ? [[cell.column, { value: cell.value, valueHtml: cell.valueHtml }] as const] : [] })
+    return { column: field.column, value: "", valueHtml: "", block: field.block, cells: Object.fromEntries(read) }
+  })
+  const fieldOf = (field: { item: ResolvedLayoutField; span?: number; hideLabel?: boolean; large?: boolean; label?: string; icon?: string; color?: string }): ResolvedLayoutField => ({ ...field.item, ...(field.span ? { span: field.span } : {}), ...(field.hideLabel ? { hideLabel: true } : {}), ...(field.large ? { large: true } : {}), ...(field.label ? { label: field.label } : {}), ...(field.icon ? { icon: field.icon } : {}), ...(field.color ? { color: field.color } : {}) })
+  const sections = arranged.sections.map((section) => ({ id: section.id, ...(section.title ? { title: section.title } : {}), ...(section.framed ? { framed: true } : {}), ...(section.look ? { look: section.look } : {}), ...(section.color ? { color: section.color } : {}), ...(section.icon ? { icon: section.icon } : {}), ...(section.collapsible ? { collapsible: true } : {}), ...(section.collapsed ? { collapsed: true } : {}), ...(section.columns ? { columns: section.columns } : {}), rows: section.rows.map((line) => ({ id: line.id, fields: line.fields.map(fieldOf) })) }))
+  // « Montrer le reste » : les cases non placées, à la suite, deux par deux.
+  if (arranged.rest.length) {
+    const rows: Array<{ id: string; fields: ResolvedLayoutField[] }> = []
+    for (let start = 0; start < arranged.rest.length; start += 2) rows.push({ id: `reste-${start}`, fields: arranged.rest.slice(start, start + 2).map((item) => ({ ...item, span: 6 as const })) })
+    sections.push({ id: "reste", rows })
+  }
+  const pick = (column: string | undefined) => {
+    if (!column || hidden(column)) return ""
+    const at = columnAt(table.headers, [column])
+    return at >= 0 ? (row.values[at] ?? "").trim() : ""
+  }
+  const image = pick(layout.image)
+  const subtitle = pick(layout.subtitle)
+  const icon = pick(layout.icon)
+  // Le médaillon : la colonne choisie, sinon l'image ou l'icône de la ligne (résolues par la référence).
+  const medallion = layout.medallion ? { value: layout.medallion.column ? pick(layout.medallion.column) : "", ...(layout.medallion.size ? { size: layout.medallion.size } : {}), ...(layout.medallion.round ? { round: true } : {}), ...(layout.medallion.tint ? { tint: true } : {}), ...(layout.medallion.bare ? { bare: true } : {}) } : undefined
+  const bannerValue = layout.banner?.column ? pick(layout.banner.column) : ""
+  const banner = layout.banner && bannerValue ? { value: bannerValue, ...(layout.banner.height ? { height: layout.banner.height } : {}) } : undefined
+  // La couleur d'accent réglée (« {Couleur} », « #… ») : résolue ici, la carte n'a pas la ligne.
+  const accent = layout.accent ? resolveLayoutColor(layout.accent, "", (column) => pick(column)) : ""
+  return {
+    ...(image ? { image } : {}),
+    ...(subtitle ? { subtitle } : {}),
+    ...(icon ? { icon } : {}),
+    ...(accent ? { accent } : {}),
+    ...(layout.tint ? { tint: true } : {}),
+    ...(medallion ? { medallion } : {}),
+    ...(banner ? { banner } : {}),
+    ...(layout.tabs ? { tabs: true } : {}),
+    ...(layout.nameInAccent ? { nameInAccent: true } : {}),
+    ...(layout.width ? { width: layout.width } : {}),
+    ...(layout.asideWidth ? { asideWidth: layout.asideWidth } : {}),
+    ...(layout.asideSide === "right" ? { asideSide: "right" as const } : {}),
+    aside: arranged.aside.map(fieldOf),
+    sections,
+  }
+}

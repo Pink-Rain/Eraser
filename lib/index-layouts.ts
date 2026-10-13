@@ -144,9 +144,10 @@ export type NamedLayout = { id: string; name: string; layout: IndexLayout }
 
 /**
  * Les mises en page d'un onglet : `form` est le formulaire étoilé (celui qu'ouvre le nom
- * d'une ligne), `forms` les autres formulaires, `hover` le survol.
+ * d'une ligne), `forms` les autres formulaires, `hover` le survol étoilé (celui des
+ * citations « { »), `hovers` les autres survols, gardés pour passer de l'un à l'autre.
  */
-export type TabLayouts = { form?: IndexLayout; hover?: IndexLayout; forms?: NamedLayout[] }
+export type TabLayouts = { form?: IndexLayout; hover?: IndexLayout; forms?: NamedLayout[]; hovers?: NamedLayout[] }
 
 export type LayoutKind = "form" | "hover"
 
@@ -375,10 +376,16 @@ export function parseTabLayouts(input: unknown): TabLayouts | null {
   const raw = value as Record<string, unknown>
   const form = parseIndexLayout(raw.form)
   const hover = parseIndexLayout(raw.hover)
+  const forms = parseNamedLayouts(raw.forms)
+  const hovers = parseNamedLayouts(raw.hovers)
+  if (!form && !hover && !forms.length && !hovers.length) return null
+  return { ...(form ? { form } : {}), ...(hover ? { hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}) }
+}
+
+/** Une liste de mises en page nommées (formulaires ou survols de plus) : lisibles, sans doublon, 12 au plus. */
+export function parseNamedLayouts(input: unknown): NamedLayout[] {
   const seen = new Set<string>([DEFAULT_FORM_ID])
-  const forms = (Array.isArray(raw.forms) ? raw.forms : []).map(parseNamedLayout).filter((item): item is NamedLayout => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 12)
-  if (!form && !hover && !forms.length) return null
-  return { ...(form ? { form } : {}), ...(hover ? { hover } : {}), ...(forms.length ? { forms } : {}) }
+  return (Array.isArray(input) ? input : []).map(parseNamedLayout).filter((item): item is NamedLayout => Boolean(item) && !seen.has(item!.id) && Boolean(seen.add(item!.id))).slice(0, 12)
 }
 
 /** Le texte JSON d'un formulaire nommé. */
@@ -423,6 +430,7 @@ export function renameTabLayouts(entry: TabLayouts, renames: Map<string, string>
     ...(entry.form ? { form: renameLayoutColumns(entry.form, renames) } : {}),
     ...(entry.hover ? { hover: renameLayoutColumns(entry.hover, renames) } : {}),
     ...(entry.forms ? { forms: entry.forms.map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) })) } : {}),
+    ...(entry.hovers ? { hovers: entry.hovers.map((item) => ({ ...item, layout: renameLayoutColumns(item.layout, renames) })) } : {}),
   }
 }
 

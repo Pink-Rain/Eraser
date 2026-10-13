@@ -7,7 +7,7 @@ import { IconPicker } from "@/components/eraser/index-gauge"
 import { PageIcon, calloutTones, formatWhen } from "@/components/eraser/custom-page-view"
 import { blockIcons } from "@/components/eraser/page-studio-icons"
 import { ViewKindSettings } from "@/components/eraser/index-views-editor"
-import { isPresentationKind, type ViewLayout } from "@/lib/index-view-layouts"
+import { isPresentationKind, VIEW_VARIANT_PREFIX, type ViewLayout } from "@/lib/index-view-layouts"
 import { ALL_PINNED_STATS } from "@/lib/custom-pages-data"
 import { eraserModules, moduleSections } from "@/lib/eraser-modules"
 import { describeCondition, viewOperators, type ViewCondition } from "@/lib/index-views"
@@ -96,7 +96,7 @@ function RadioCards<T extends string>({ name, value, options, onChange, disabled
 
 type IndexEntry = { key: string; title: string; path: string }
 type IndexDetails = {
-  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
+  tabs: Array<{ name: string; configured?: ViewBlockKind[]; forms?: Partial<Record<ViewBlockKind, ViewLayout>>; cards: boolean; cardList?: Array<{ id: string; name: string }>; viewList?: Array<{ id: string; name: string; kind: string }>; formList?: Array<{ id: string; name: string }>; columns?: string[]; choices?: Record<string, string[]> }>
   stats: Array<{ id: string; title: string; pinned: boolean }>
   presets?: Array<{ id: string; name: string; kind: string; builtin: boolean }>
 }
@@ -195,6 +195,7 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
   const presentation = isPresentationKind(block.kind)
   const kindLabel = viewBlockKinds.find((item) => item.value === block.kind)?.label ?? ""
   const presets = (details?.presets ?? []).filter((preset) => preset.kind === block.kind)
+  const variants = (tab?.viewList ?? []).filter((item) => item.kind === block.kind)
   const columns = tab?.columns ?? []
   // La forme propre part de celle de l'onglet (sinon de la forme par défaut) : rien n'est perdu à basculer.
   const startFrom = (kind: ViewBlockKind): ViewLayout => ({ ...(tab?.forms?.[kind] ?? {}), kind })
@@ -230,12 +231,13 @@ function ViewSettings({ block, rowOf, onChange }: { block: Extract<PageBlock, { 
         {block.cardId && !(tab?.cardList ?? []).some((card) => card.id === block.cardId) && <option value={block.cardId}>Carte supprimée (celle par défaut la remplace)</option>}
       </select>
     </Field>}
-    {block.tab && presentation && <Field label="Forme" hint={<>Pour avoir plusieurs {kindLabel.toLocaleLowerCase("fr")}s, règle chacun dans l’index (Modifier › {kindLabel}) et enregistre-le en preset : il apparaît ici. <RefreshLink onClick={reload} loading={loading} /></>}>
+    {block.tab && presentation && <Field label="Forme" hint={<>Les versions de l’onglet (Modifier › {kindLabel} › Nouveau) et les presets apparaissent ici. <RefreshLink onClick={reload} loading={loading} /></>}>
       <select className={fieldClass} value={form} onChange={(event) => pickForm(event.target.value)}>
-        <option value="">{configured.includes(block.kind) ? `Celle de l’onglet (Modifier › ${kindLabel})` : `Celle de l’onglet (${kindLabel} par défaut)`}</option>
+        <option value="">{configured.includes(block.kind) ? `Celle à l’étoile de l’onglet (Modifier › ${kindLabel})` : `Celle de l’onglet (${kindLabel} par défaut)`}</option>
+        {variants.length > 0 && <optgroup label="Les autres versions de l’onglet">{variants.map((item) => <option key={item.id} value={`preset:${VIEW_VARIANT_PREFIX}${item.id}`}>{item.name}</option>)}</optgroup>}
         {presets.some((preset) => !preset.builtin) && <optgroup label="Tes presets">{presets.filter((preset) => !preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
         {presets.some((preset) => preset.builtin) && <optgroup label="Presets d’Eraser">{presets.filter((preset) => preset.builtin).map((preset) => <option key={preset.id} value={`preset:${preset.id}`}>{preset.name}</option>)}</optgroup>}
-        {block.presetId && !presets.some((preset) => preset.id === block.presetId) && details && <option value={`preset:${block.presetId}`}>Preset supprimé (la forme de l’onglet le remplace)</option>}
+        {block.presetId && !presets.some((preset) => preset.id === block.presetId) && !variants.some((item) => `${VIEW_VARIANT_PREFIX}${item.id}` === block.presetId) && details && <option value={`preset:${block.presetId}`}>{block.presetId.startsWith(VIEW_VARIANT_PREFIX) ? "Version supprimée (celle à l’étoile la remplace)" : "Preset supprimé (la forme de l’onglet le remplace)"}</option>}
         <option value="own">Propre à cette page…</option>
       </select>
     </Field>}

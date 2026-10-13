@@ -177,6 +177,11 @@ test("blocs, allure des sections, formulaires nommés : lus et réécrits tels q
   assert.equal(layouts.formOf(entry, "inconnu"), entry.form);
   assert.equal(layouts.formOf(entry), entry.form);
   assert.equal(layouts.parseTabLayouts("{}"), null);
+  // Les autres survols : gardés comme les formulaires (sans doublon de l'étoilé), et renommés avec les colonnes.
+  const hovers = layouts.parseTabLayouts({ hover: sample, hovers: [{ id: "court", name: "Survol court", layout: sample }, { id: "principal", name: "doublon", layout: sample }] });
+  assert.deepEqual(hovers.hovers.map((item) => [item.id, item.name]), [["court", "Survol court"]]);
+  assert.deepEqual(layouts.parseTabLayouts({ hovers: [{ id: "seul", name: "Seul", layout: sample }] }).hovers.map((item) => item.id), ["seul"]);
+  assert.equal(layouts.renameTabLayouts(hovers, new Map([["portrait", "Visage"]])).hovers[0].layout.aside[0].column, "Visage");
   // Une couleur réglée se résout pour une ligne.
   assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", (column) => column === "Couleur" ? "#b3261e" : ""), "#b3261e");
   assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", () => "pas une couleur"), "#000000");

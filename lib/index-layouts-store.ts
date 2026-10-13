@@ -55,8 +55,8 @@ export async function listIndexLayouts(index: string): Promise<Record<string, Ta
   return (await all()).get(index.trim()) ?? {}
 }
 
-/** Ce qu'un onglet enregistre : le formulaire étoilé, le survol, les autres formulaires ; tout vide : l'affichage automatique. */
-export type TabLayoutChange = { tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[] }
+/** Ce qu'un onglet enregistre : le formulaire et le survol étoilés, les autres formulaires et survols ; tout vide : l'affichage automatique. */
+export type TabLayoutChange = { tab: string; form: IndexLayout | null; hover: IndexLayout | null; forms?: NamedLayout[]; hovers?: NamedLayout[] }
 
 /** Enregistre les mises en page d'onglets d'un index ; `null` partout : l'affichage automatique. */
 export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]) {
@@ -65,8 +65,9 @@ export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]
   for (const change of changes.filter((item) => item.tab.trim()).slice(0, 100)) {
     const key = recordKey(index, change.tab)
     const forms = (change.forms ?? []).filter((item) => parseIndexLayout(item.layout))
-    if (!change.form && !change.hover && !forms.length) { await deleteSharedRecord(SCOPE, key); continue }
-    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}) })
+    const hovers = (change.hovers ?? []).filter((item) => parseIndexLayout(item.layout))
+    if (!change.form && !change.hover && !forms.length && !hovers.length) { await deleteSharedRecord(SCOPE, key); continue }
+    const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}) })
     if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")
     await writeSharedRecord(SCOPE, key, value)
   }

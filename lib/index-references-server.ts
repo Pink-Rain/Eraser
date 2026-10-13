@@ -8,7 +8,7 @@ import { onForgetGoogleData } from "@/lib/data-refresh"
 import { listObjectIndexTablesForDisplay, resolveJdrSheet, type ObjectIndexTable } from "@/lib/google-sheets"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { foldName, isIdHeader, normalizeSpec, objectColumnSpec } from "@/lib/index-columns"
-import { citedCell, columnAt, objectNameHeaders, rowDetails, type SourceRow, type SourceTable } from "@/lib/index-references-cells"
+import { citedCell, columnAt, hoverOf, objectNameHeaders, rowDetails, type SourceRow, type SourceTable } from "@/lib/index-references-cells"
 import { entityReferenceKeys, isEntityReferenceKey, loadEntitySource } from "@/lib/index-references-entities"
 import {
   indexEntries,
@@ -18,11 +18,9 @@ import {
   type ReferenceEntry,
   type ReferenceIndex,
   type ReferenceRequest,
-  type ResolvedLayout,
-  type ResolvedLayoutField,
   type ResolvedReference,
 } from "@/lib/index-references"
-import { arrangeLayout, blockColumns, resolveLayoutColor, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
+import type { TabLayouts } from "@/lib/index-layouts"
 import { builtinLayoutFor } from "@/lib/index-layout-defaults"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
 import type { JdrSheetKey } from "@/lib/jdr-sheets"
@@ -253,58 +251,6 @@ async function hoverLayoutOf(index: string, tab: string, cache: Map<string, Prom
   return (exact ?? (layouts.length === 1 ? layouts[0] : undefined))?.[1].hover ?? builtinLayoutFor(index, tab, "hover")
 }
 
-/** Les cases du survol, rangées : vides et colonnes privées (joueurs) laissées de côté. */
-function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden: (column: string) => boolean): ResolvedLayout {
-  const columns = table.headers.filter((header) => header.trim() && !hidden(header) && !isIdHeader(header))
-  const cells = columns.flatMap((header): ResolvedLayoutField[] => {
-    const cell = citedCell(table, row, header)
-    return cell && cell.value.trim() ? [{ column: cell.column, value: cell.value, valueHtml: cell.valueHtml, look: cell.look }] : []
-  })
-  // Un bloc (paliers, tuiles…) emporte les cases qu'il lit, vides comprises (il sait quoi en faire).
-  const arranged = arrangeLayout(layout, cells, (cell) => cell.column, (field) => {
-    const needed = blockColumns(field.block).filter((column) => !hidden(column))
-    const read = needed.flatMap((column) => { const cell = citedCell(table, row, column); return cell ? [[cell.column, { value: cell.value, valueHtml: cell.valueHtml }] as const] : [] })
-    return { column: field.column, value: "", valueHtml: "", block: field.block, cells: Object.fromEntries(read) }
-  })
-  const fieldOf = (field: { item: ResolvedLayoutField; span?: number; hideLabel?: boolean; large?: boolean; label?: string; icon?: string; color?: string }): ResolvedLayoutField => ({ ...field.item, ...(field.span ? { span: field.span } : {}), ...(field.hideLabel ? { hideLabel: true } : {}), ...(field.large ? { large: true } : {}), ...(field.label ? { label: field.label } : {}), ...(field.icon ? { icon: field.icon } : {}), ...(field.color ? { color: field.color } : {}) })
-  const sections = arranged.sections.map((section) => ({ id: section.id, ...(section.title ? { title: section.title } : {}), ...(section.framed ? { framed: true } : {}), ...(section.look ? { look: section.look } : {}), ...(section.color ? { color: section.color } : {}), ...(section.icon ? { icon: section.icon } : {}), ...(section.collapsible ? { collapsible: true } : {}), ...(section.collapsed ? { collapsed: true } : {}), ...(section.columns ? { columns: section.columns } : {}), rows: section.rows.map((line) => ({ id: line.id, fields: line.fields.map(fieldOf) })) }))
-  // « Montrer le reste » : les cases non placées, à la suite, deux par deux.
-  if (arranged.rest.length) {
-    const rows: Array<{ id: string; fields: ResolvedLayoutField[] }> = []
-    for (let start = 0; start < arranged.rest.length; start += 2) rows.push({ id: `reste-${start}`, fields: arranged.rest.slice(start, start + 2).map((item) => ({ ...item, span: 6 as const })) })
-    sections.push({ id: "reste", rows })
-  }
-  const pick = (column: string | undefined) => {
-    if (!column || hidden(column)) return ""
-    const at = columnAt(table.headers, [column])
-    return at >= 0 ? (row.values[at] ?? "").trim() : ""
-  }
-  const image = pick(layout.image)
-  const subtitle = pick(layout.subtitle)
-  const icon = pick(layout.icon)
-  // Le médaillon : la colonne choisie, sinon l'image ou l'icône de la ligne (résolues par la référence).
-  const medallion = layout.medallion ? { value: layout.medallion.column ? pick(layout.medallion.column) : "", ...(layout.medallion.size ? { size: layout.medallion.size } : {}), ...(layout.medallion.round ? { round: true } : {}), ...(layout.medallion.tint ? { tint: true } : {}), ...(layout.medallion.bare ? { bare: true } : {}) } : undefined
-  const bannerValue = layout.banner?.column ? pick(layout.banner.column) : ""
-  const banner = layout.banner && bannerValue ? { value: bannerValue, ...(layout.banner.height ? { height: layout.banner.height } : {}) } : undefined
-  // La couleur d'accent réglée (« {Couleur} », « #… ») : résolue ici, la carte n'a pas la ligne.
-  const accent = layout.accent ? resolveLayoutColor(layout.accent, "", (column) => pick(column)) : ""
-  return {
-    ...(image ? { image } : {}),
-    ...(subtitle ? { subtitle } : {}),
-    ...(icon ? { icon } : {}),
-    ...(accent ? { accent } : {}),
-    ...(layout.tint ? { tint: true } : {}),
-    ...(medallion ? { medallion } : {}),
-    ...(banner ? { banner } : {}),
-    ...(layout.tabs ? { tabs: true } : {}),
-    ...(layout.nameInAccent ? { nameInAccent: true } : {}),
-    ...(layout.width ? { width: layout.width } : {}),
-    ...(layout.asideWidth ? { asideWidth: layout.asideWidth } : {}),
-    ...(layout.asideSide === "right" ? { asideSide: "right" as const } : {}),
-    aside: arranged.aside.map(fieldOf),
-    sections,
-  }
-}
 
 // « Actualiser » : la liste des références « { » est reconstruite.
 onForgetGoogleData(() => { catalogCache = null })

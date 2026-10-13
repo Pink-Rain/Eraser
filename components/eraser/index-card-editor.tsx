@@ -17,7 +17,6 @@ import {
   ArrowDown,
   ArrowUp,
   Bookmark,
-  BookmarkPlus,
   ChevronLeft,
   ChevronRight,
   Columns3,
@@ -49,6 +48,7 @@ import {
 import { IndexCard, cardGridStyle, cardWidthRem, type CardRowSource } from "@/components/eraser/index-card"
 import { Choice, ImageBoxControls, SettingsRow, Tabs } from "@/components/eraser/view-editor-controls"
 import { useIndexSettings } from "@/components/eraser/index-views"
+import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, ViewVariantsPanel } from "@/components/eraser/index-view-panel"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -802,11 +802,12 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
   const [at, setAt] = useState(0)
   const [grid, setGrid] = useState(false)
   const [screen, setScreen] = useState<keyof typeof screens>("desktop")
+  const [expanded, setExpanded] = useState(false)
   const index = Math.min(at, rows.length - 1)
   const rem = cardWidthRem(card)
   return <aside className="grid content-start gap-2 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto">
     <div className="flex flex-wrap items-center justify-between gap-2">
-      <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu en direct</p>
+      <span className="flex items-center gap-1"><p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu en direct</p><PreviewExpandButton onClick={() => setExpanded(true)} /></span>
       <span className="flex items-center gap-1">
         {rows.length > 1 && !grid && <>
           <Button type="button" variant="ghost" size="icon-xs" disabled={index === 0} onClick={() => setAt(index - 1)} aria-label="Ligne précédente"><ChevronLeft /></Button>
@@ -825,7 +826,23 @@ function CardPreview({ card, columns, samples, selectedBlock, onSelectBlock }: {
         <IndexCard card={card} row={sampleSource(rows[index], columns)} selectedBlock={selectedBlock} onSelectBlock={onSelectBlock} />
       </div>}
     <p className="text-[10px] leading-4 text-muted-foreground">Clique sur un bloc de l’aperçu pour le régler. Un bloc vide pour cette ligne reste en pointillés ici, et disparaît sur la vraie carte.</p>
+    {expanded && <CardsLivePreview card={card} columns={columns} rows={rows} onClose={() => setExpanded(false)} />}
   </aside>
+}
+
+/** L'aperçu en grand : les cartes de toutes les lignes, dans la grille de la vue « Cartes », sur l'écran choisi. */
+function CardsLivePreview({ card, columns, rows, onClose }: { card: CardTemplate; columns: CardColumn[]; rows: Array<Record<string, string>>; onClose: () => void }) {
+  const [screen, setScreen] = useState<keyof typeof screens>("desktop")
+  return <PreviewDialog
+    title={`Aperçu de « ${card.name} »`}
+    description="Comme dans la vue « Cartes » de l’index, sur les lignes de l’onglet. Un bloc vide pour une ligne n’y apparaît pas."
+    tools={<Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />}
+    onClose={onClose}
+  >
+    <div className={cn("mx-auto grid items-start gap-3", screen === "phone" && card.grid?.phone !== 2 && "!grid-cols-1", screen === "phone" && card.grid?.phone === 2 && "!grid-cols-2")} style={{ ...cardGridStyle(card), maxWidth: screens[screen] }}>
+      {rows.map((sample, position) => <IndexCard key={position} card={card} row={sampleSource(sample, columns)} />)}
+    </div>
+  </PreviewDialog>
 }
 
 // ---------------------------------------------------------------------------
@@ -871,55 +888,6 @@ function NewCardDialog({ columns, samples, builtins, onPick, onClose }: { column
   </Dialog>
 }
 
-function SavePresetDialog({ card, onClose }: { card: CardTemplate; onClose: () => void }) {
-  const { cardPresets, saveCardPreset } = useIndexSettings("")
-  const [name, setName] = useState(card.name)
-  const [pending, setPending] = useState(false)
-  const [error, setError] = useState("")
-  const same = cardPresets.find((preset) => preset.name.toLocaleLowerCase("fr") === name.trim().toLocaleLowerCase("fr"))
-  async function save() {
-    setPending(true); setError("")
-    try { await saveCardPreset({ id: same?.id, name, card }); onClose() } catch (caught) { setError(caught instanceof Error ? caught.message : "Le preset n’a pas pu être enregistré.") }
-    setPending(false)
-  }
-  return <Dialog open onOpenChange={(open) => { if (!open && !pending) onClose() }}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>Enregistrer la carte en preset</DialogTitle>
-        <DialogDescription>Le preset garde la forme, la composition et les blocs, avec les noms de colonnes. Appliqué ailleurs, une colonne absente est simplement sautée (et signalée).</DialogDescription>
-      </DialogHeader>
-      <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); void save() }}>
-        <Input autoFocus value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Nom du preset" />
-        {same && <p className="text-xs text-muted-foreground">Un preset porte déjà ce nom : il sera remplacé.</p>}
-        {error && <p className="text-xs text-destructive">{error}</p>}
-        <div className="flex justify-end gap-2">
-          <Button type="button" variant="outline" onClick={onClose} disabled={pending}>Annuler</Button>
-          <Button type="submit" disabled={pending || !name.trim()}><BookmarkPlus />{same ? "Remplacer" : "Enregistrer"}</Button>
-        </div>
-      </form>
-    </DialogContent>
-  </Dialog>
-}
-
-function CopyDialog({ card, tabs, onCopy, onClose }: { card: CardTemplate; tabs: Array<{ id: string; name: string }>; onCopy: (ids: string[]) => void; onClose: () => void }) {
-  const [chosen, setChosen] = useState<string[]>([])
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>Copier « {card.name} » vers d’autres onglets</DialogTitle>
-        <DialogDescription>La carte s’ajoute aux cartes de chaque onglet choisi (rien n’est remplacé).</DialogDescription>
-      </DialogHeader>
-      <div className="grid max-h-72 gap-1 overflow-y-auto">
-        {tabs.map((tab) => <label key={tab.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"><Checkbox checked={chosen.includes(tab.id)} onCheckedChange={(checked) => setChosen((current) => checked === true ? [...current, tab.id] : current.filter((id) => id !== tab.id))} />{tab.name}</label>)}
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-        <Button type="button" disabled={!chosen.length} onClick={() => onCopy(chosen)}><Copy />Copier</Button>
-      </div>
-    </DialogContent>
-  </Dialog>
-}
-
 // ---------------------------------------------------------------------------
 // Le panneau des cartes (sous les onglets) et l'éditeur de la carte choisie
 // ---------------------------------------------------------------------------
@@ -959,9 +927,10 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
   onReset?: () => void
   disabled?: boolean
 }) {
-  const [dialog, setDialog] = useState<"new" | "preset" | "copy" | null>(null)
+  const { cardPresets, saveCardPreset, deleteCardPreset } = useIndexSettings("")
+  const [dialog, setDialog] = useState<"new" | "preset" | "copy" | "manage" | null>(null)
   const card = pickedCard(value, selected)
-  const defaultId = value.defaultId && value.cards.some((entry) => entry.id === value.defaultId) ? value.defaultId : value.cards[0]?.id
+  const defaultId = value.defaultId && value.cards.some((entry) => entry.id === value.defaultId) ? value.defaultId : value.cards[0]?.id ?? ""
   const setCards = (cards: CardTemplate[], extra: Partial<TabCards> = {}) => onChange({ ...value, ...extra, cards, ...(extra.defaultId === undefined && value.defaultId && !cards.some((entry) => entry.id === value.defaultId) ? { defaultId: undefined } : {}) })
   const addCard = (next: CardTemplate) => { setCards([...value.cards, next]); onSelect(next.id); setDialog(null) }
   const moveCard = (delta: number) => {
@@ -974,38 +943,67 @@ export function CardsPanel({ tabName, columns, value, builtin, builtins, samples
     cards.splice(target, 0, moved)
     setCards(cards)
   }
-  const at = card ? value.cards.findIndex((entry) => entry.id === card.id) : -1
-  const full = value.cards.length >= 12
-  return <div className="mt-2 grid gap-1.5 rounded-lg border border-dashed bg-background/40 p-2">
-    <p className={`${groupTitle} px-1`}>Cartes de « {tabName} »</p>
-    {value.cards.length > 0 && <div className="flex items-center gap-1">
-      <NativeSelect value={card?.id ?? ""} disabled={disabled} onChange={(event) => onSelect(event.target.value || null)} className="h-7 min-w-0 flex-1 py-0 text-[11px]" aria-label="Carte modifiée">
-        {value.cards.map((entry) => <NativeSelectOption key={entry.id} value={entry.id}>{entry.id === defaultId ? "★ " : ""}{entry.name}</NativeSelectOption>)}
-      </NativeSelect>
-      {card && <Button type="button" variant="ghost" size="icon-xs" className={card.id === defaultId ? "text-[#c9a227]" : ""} disabled={disabled || card.id === defaultId} onClick={() => onChange({ ...value, defaultId: card.id })} title={card.id === defaultId ? "Carte montrée d’abord" : "Montrer cette carte d’abord (l’étoile)"} aria-label="Carte par défaut"><Star fill={card.id === defaultId ? "currentColor" : "none"} /></Button>}
-    </div>}
-    {card && <div className="flex items-center gap-1">
-      <Input value={card.name} disabled={disabled} maxLength={60} onChange={(event) => setCards(value.cards.map((entry) => entry.id === card.id ? { ...entry, name: event.target.value } : entry))} className="h-7 min-w-0 flex-1 text-[11px]" aria-label="Nom de la carte" />
-      <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || at <= 0} onClick={() => moveCard(-1)} aria-label="Avancer la carte" title="Avancer dans la liste des cartes"><ArrowUp /></Button>
-      <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || at < 0 || at >= value.cards.length - 1} onClick={() => moveCard(1)} aria-label="Reculer la carte" title="Reculer dans la liste des cartes"><ArrowDown /></Button>
-    </div>}
-    {!value.cards.length && <p className="rounded-lg border border-dashed p-2 text-center text-[11px] text-muted-foreground">Aucune carte : cet onglet s’affiche en tableau seulement.</p>}
-    <div className="flex flex-wrap gap-1">
-      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || full} onClick={() => setDialog("new")} title="Une carte de plus, à partir d’une carte d’Eraser, d’une forme de départ ou d’un preset"><Plus />Nouvelle</Button>
-      {card && <>
-        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || full} onClick={() => addCard(duplicateCard(card, `${card.name} (copie)`))} title="Une copie de la carte affichée"><Copy />Dupliquer</Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setDialog("preset")} title="Garder cette carte pour la reprendre dans n’importe quel index"><BookmarkPlus />Preset</Button>
-        <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || !otherTabs.length} onClick={() => setDialog("copy")} title={otherTabs.length ? "Copier cette carte vers d’autres onglets" : "Cet index n’a pas d’autre onglet"}><Copy />Copier vers…</Button>
-        <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px] text-destructive hover:text-destructive" disabled={disabled} onClick={() => { const cards = value.cards.filter((entry) => entry.id !== card.id); setCards(cards); onSelect(cards[0]?.id ?? null) }}><Trash2 />Retirer</Button>
+  return <>
+    <ViewVariantsPanel
+      title={`Cartes de « ${tabName} »`}
+      icon={LayoutGrid}
+      noun="carte"
+      items={value.cards.map((entry) => ({ id: entry.id, name: entry.name }))}
+      selectedId={card?.id ?? ""}
+      starredId={defaultId}
+      onSelect={(id) => onSelect(id || null)}
+      onStar={(id) => onChange({ ...value, defaultId: id })}
+      starHint="la carte montrée d’abord"
+      onRename={(id, name) => setCards(value.cards.map((entry) => entry.id === id ? { ...entry, name } : entry))}
+      onMove={moveCard}
+      onNew={() => setDialog("new")}
+      newHint="Nouvelle carte : une carte d’Eraser, une forme de départ ou un preset"
+      onDuplicate={() => { if (card) addCard(duplicateCard(card, `${card.name} (copie)`)) }}
+      onRemove={() => { if (!card) return; const cards = value.cards.filter((entry) => entry.id !== card.id); setCards(cards); onSelect(cards[0]?.id ?? null) }}
+      full={value.cards.length >= 12}
+      empty={<p className="rounded-lg border border-dashed p-2 text-center text-[11px] text-muted-foreground">Aucune carte : cet onglet s’affiche en tableau seulement. « + » en crée une.</p>}
+      presets={cardPresets.map((preset) => ({ id: preset.id, name: preset.name }))}
+      onApplyPreset={(id) => {
+        const preset = cardPresets.find((entry) => entry.id === id)
+        // La carte choisie prend la forme du preset ; elle garde sa place et son nom.
+        if (preset && card) setCards(value.cards.map((entry) => entry.id === card.id ? { ...duplicateCard(preset.card), id: card.id, name: card.name } : entry))
+      }}
+      onSavePreset={card ? () => setDialog("preset") : undefined}
+      savePresetHint="Crée d’abord une carte"
+      onCopy={otherTabs.length ? () => setDialog("copy") : undefined}
+      copyHint={otherTabs.length ? "Copier cette carte vers d’autres onglets…" : "Cet index n’a pas d’autre onglet"}
+      onManagePresets={cardPresets.length ? () => setDialog("manage") : undefined}
+      disabled={disabled}
+      footer={<>
+        {builtin && value.cards.length > 0 && <p className="rounded-lg bg-primary/5 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground"><Star className="mr-1 inline size-3 text-[#c9a227]" />Les cartes qu’Eraser affiche déjà pour cet index. Modifie-les librement : elles sont enregistrées pour tout le monde à « Enregistrer ».</p>}
+        {!builtin && onReset && builtins.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={onReset}><RotateCcw />Revenir aux cartes d’Eraser</Button>}
       </>}
-    </div>
-    {builtin && value.cards.length > 0 && <p className="rounded-lg bg-primary/5 px-2 py-1.5 text-[10px] leading-4 text-muted-foreground"><Star className="mr-1 inline size-3 text-[#c9a227]" />Les cartes qu’Eraser affiche déjà pour cet index. Modifie-les librement : elles sont enregistrées pour tout le monde à « Enregistrer ».</p>}
-    {!builtin && onReset && builtins.length > 0 && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={onReset}><RotateCcw />Revenir aux cartes d’Eraser</Button>}
-
+    />
     {dialog === "new" && <NewCardDialog columns={columns} samples={samples} builtins={builtins} onPick={addCard} onClose={() => setDialog(null)} />}
-    {dialog === "preset" && card && <SavePresetDialog card={card} onClose={() => setDialog(null)} />}
-    {dialog === "copy" && card && <CopyDialog card={card} tabs={otherTabs} onClose={() => setDialog(null)} onCopy={(ids) => { onCopyTo(ids, card); setDialog(null) }} />}
-  </div>
+    {dialog === "preset" && card && <NamePresetDialog
+      title="Enregistrer la carte en preset"
+      description="Le preset garde la forme, la composition et les blocs, avec les noms de colonnes. Appliqué ailleurs, une colonne absente est simplement sautée."
+      initialName={card.name}
+      existing={cardPresets}
+      onSave={(name, id) => saveCardPreset({ id, name, card })}
+      onClose={() => setDialog(null)}
+    />}
+    {dialog === "copy" && card && <CopyToTabsDialog
+      title={`Copier « ${card.name} » vers d’autres onglets`}
+      description="La carte s’ajoute aux cartes de chaque onglet choisi (rien n’est remplacé)."
+      tabs={otherTabs}
+      onCopy={(ids) => { onCopyTo(ids, card); setDialog(null) }}
+      onClose={() => setDialog(null)}
+    />}
+    {dialog === "manage" && <ManagePresetsDialog
+      title="Presets de cartes"
+      description="Communs à tous les index. Supprimer un preset ne change aucune carte."
+      presets={cardPresets.map((preset) => ({ id: preset.id, name: preset.name, hint: `Enregistré le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}` }))}
+      onRename={(id, name) => { const preset = cardPresets.find((entry) => entry.id === id); return preset ? saveCardPreset({ id, name, card: preset.card }) : Promise.resolve() }}
+      onDelete={deleteCardPreset}
+      onClose={() => setDialog(null)}
+    />}
+  </>
 }
 
 type CardPageKey = "card" | "image" | "blocks" | "composition"

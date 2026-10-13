@@ -10,16 +10,16 @@
  * montrent avec ces réglages.
  */
 import { useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, BookOpen, Bookmark, BookmarkPlus, Check, Columns3, Copy, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, LoaderCircle, Monitor, MousePointerClick, Palette, PanelsLeftRight, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, Bookmark, Columns3, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, Monitor, MousePointerClick, Palette, PanelsLeftRight, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, X } from "lucide-react"
 
 import { IndexCard } from "@/components/eraser/index-card"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
-import { useIndexSettings } from "@/components/eraser/index-views"
+import { layoutIcons, useIndexSettings } from "@/components/eraser/index-views"
+import { CopyToTabsDialog, ManagePresetsDialog, NamePresetDialog, PreviewDialog, PreviewExpandButton, ViewVariantsPanel } from "@/components/eraser/index-view-panel"
 import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/view-editor-controls"
 import { Button } from "@/components/ui/button"
-import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOptGroup, NativeSelectOption } from "@/components/ui/native-select"
@@ -29,7 +29,7 @@ import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
 import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, namedViewsOf, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type NamedView, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
 import { viewStartersFor } from "@/lib/index-view-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
@@ -932,80 +932,129 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
 }
 
 // ---------------------------------------------------------------------------
-// Le panneau (sous les onglets) : presets, enregistrer, copier, revenir
+// Le panneau (sous les onglets) : les versions de la vue et ses presets
 // ---------------------------------------------------------------------------
 
-function CopyDialog({ kindLabel, tabs, onCopy, onClose }: { kindLabel: string; tabs: Array<{ id: string; name: string }>; onCopy: (ids: string[]) => void; onClose: () => void }) {
-  const [chosen, setChosen] = useState<string[]>([])
-  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle>Copier la vue « {kindLabel} » vers d’autres onglets</DialogTitle>
-        <DialogDescription>Les réglages remplacent ceux de la même vue dans chaque onglet choisi ; les colonnes absentes y sont retirées.</DialogDescription>
-      </DialogHeader>
-      <div className="grid max-h-72 gap-1 overflow-y-auto">
-        {tabs.map((tab) => <label key={tab.id} className="flex items-center gap-2 rounded-md px-2 py-1.5 text-sm hover:bg-muted"><Checkbox checked={chosen.includes(tab.id)} onCheckedChange={(checked) => setChosen((current) => checked === true ? [...current, tab.id] : current.filter((id) => id !== tab.id))} />{tab.name}</label>)}
-      </div>
-      <div className="flex justify-end gap-2">
-        <Button type="button" variant="outline" onClick={onClose}>Annuler</Button>
-        <Button type="button" disabled={!chosen.length} onClick={() => onCopy(chosen)}><Copy />Copier</Button>
-      </div>
-    </DialogContent>
-  </Dialog>
+/** L'identifiant de la version étoilée d'une vue (celle rangée sous son genre). */
+export const MAIN_VIEW_ID = "principal"
+
+/** Les versions d'une vue d'un onglet : l'étoilée d'abord, puis les autres. */
+export function viewVersionsOf(value: TabPresentations, kind: PresentationKind) {
+  return [{ id: MAIN_VIEW_ID, name: "Vue principale", layout: value[kind] ?? { kind } }, ...namedViewsOf(value, kind)]
 }
 
-/** Le panneau d'une vue, sous les onglets : les presets (d'Eraser, les tiens), enregistrer, copier, revenir. */
-export function ViewsPanel({ kind, columns, layout, configured, presets, onApply, onReset, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
+/** La forme de la version choisie d'une vue (l'étoilée si elle n'existe plus). */
+export function viewVersionOf(value: TabPresentations, kind: PresentationKind, id: string): ViewLayout {
+  return (id !== MAIN_VIEW_ID ? namedViewsOf(value, kind).find((item) => item.id === id)?.layout : undefined) ?? value[kind] ?? { kind }
+}
+
+/** Les vues d'un onglet où la version choisie prend cette forme. */
+export function withViewVersion(value: TabPresentations, kind: PresentationKind, id: string, layout: ViewLayout): TabPresentations {
+  if (id === MAIN_VIEW_ID || !namedViewsOf(value, kind).some((item) => item.id === id)) return { ...value, [kind]: { ...layout, kind } }
+  return { ...value, named: (value.named ?? []).map((item) => item.id === id ? { ...item, layout: { ...layout, kind } } : item) }
+}
+
+const viewId = () => Math.random().toString(36).slice(2, 10)
+
+/** Le panneau d'une vue, sous les onglets : ses versions (l'étoile, nouvelle, dupliquer…) et ses presets. */
+export function ViewsPanel({ kind, tabName, columns, value, selectedId, onSelect, onChange, presets, onSavePreset, onDeletePreset, otherTabs, onCopyTo, disabled = false }: {
   kind: PresentationKind
+  tabName: string
   columns: string[]
-  layout: ViewLayout
-  /** La vue a des réglages enregistrés (ou en brouillon) pour cet onglet. */
-  configured: boolean
+  /** Toutes les vues de l'onglet (brouillon compris). */
+  value: TabPresentations
+  /** La version modifiée. */
+  selectedId: string
+  onSelect: (id: string) => void
+  onChange: (next: TabPresentations) => void
   presets: ViewPreset[]
-  onApply: (layout: ViewLayout) => void
-  onReset: () => void
-  onSavePreset?: (preset: { name: string; layout: ViewLayout }) => Promise<unknown>
+  onSavePreset?: (preset: { id?: string; name: string; layout: ViewLayout }) => Promise<unknown>
   onDeletePreset?: (id: string) => Promise<unknown>
   otherTabs: Array<{ id: string; name: string }>
-  onCopyTo: (tabIds: string[]) => void
+  /** La version choisie donnée, comme vue à l'étoile, aux onglets cochés. */
+  onCopyTo: (tabIds: string[], layout: ViewLayout) => void
   disabled?: boolean
 }) {
-  const [presetName, setPresetName] = useState("")
-  const [busy, setBusy] = useState(false)
-  const [message, setMessage] = useState("")
-  const [copying, setCopying] = useState(false)
-  const available = [...builtinViewPresets, ...presets].filter((preset) => preset.layout.kind === kind)
-  const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
-  async function run(task: () => Promise<unknown>, done: string) {
-    setBusy(true); setMessage("")
-    try { await task(); setMessage(done) } catch (caught) { setMessage(caught instanceof Error ? caught.message : "Le preset n’a pas pu être enregistré.") }
-    setBusy(false)
+  const [dialog, setDialog] = useState<"save" | "copy" | "manage" | null>(null)
+  const kindInfo = presentationKinds.find((entry) => entry.value === kind)
+  const kindLabel = kindInfo?.label ?? ""
+  const versions = viewVersionsOf(value, kind)
+  const selected = versions.find((item) => item.id === selectedId) ?? versions[0]
+  const layout = selected.layout
+  const named = namedViewsOf(value, kind)
+  const others = (value.named ?? []).filter((item) => item.layout.kind !== kind)
+  const setNamed = (list: NamedView[], main?: ViewLayout | null) => {
+    const next: TabPresentations = { ...value, named: [...others, ...list] }
+    if (main === null) delete next[kind]
+    else if (main) next[kind] = main
+    if (!next.named?.length) delete next.named
+    onChange(next)
   }
-  return <div className="mt-2 grid gap-1.5 rounded-lg border border-dashed bg-background/40 p-2">
-    <p className={`${settingsTitle} px-1`}>{kindLabel}</p>
-    <NativeSelect value="" disabled={disabled || busy} onChange={(event) => {
-      const preset = available.find((entry) => entry.id === event.target.value)
-      if (preset) { onApply(fitLayoutToColumns({ ...layout, ...preset.layout, kind }, columns)); setMessage(`« ${preset.name} » appliqué.`) }
-    }} className="h-7 py-0 text-[11px]" aria-label="Appliquer un preset">
-      <NativeSelectOption value="">Appliquer un preset…</NativeSelectOption>
-      <NativeSelectOptGroup label="Eraser">{available.filter((preset) => preset.builtin).map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>{preset.name}</NativeSelectOption>)}</NativeSelectOptGroup>
-      {available.some((preset) => !preset.builtin) && <NativeSelectOptGroup label="Les tiens">{available.filter((preset) => !preset.builtin).map((preset) => <NativeSelectOption key={preset.id} value={preset.id}>{preset.name}</NativeSelectOption>)}</NativeSelectOptGroup>}
-    </NativeSelect>
-    {onSavePreset && <form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); if (presetName.trim()) void run(async () => { await onSavePreset({ name: presetName.trim(), layout }); setPresetName("") }, "Preset enregistré : proposé dans tous les index.") }}>
-      <Input value={presetName} onChange={(event) => setPresetName(event.target.value)} placeholder="Nom du preset" maxLength={60} className="h-7 min-w-0 flex-1 text-[11px]" disabled={disabled || busy} aria-label="Nom du preset" />
-      <Button type="submit" size="sm" variant="outline" className="h-7 text-[11px]" disabled={disabled || busy || !presetName.trim()} title="Garder ces réglages pour les reprendre dans n’importe quel index">{busy ? <LoaderCircle className="animate-spin" /> : <BookmarkPlus />}Preset</Button>
-    </form>}
-    <div className="flex flex-wrap gap-1">
-      <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled || !otherTabs.length} onClick={() => setCopying(true)} title={otherTabs.length ? "Copier ces réglages vers d’autres onglets" : "Cet index n’a pas d’autre onglet"}><Copy />Copier vers…</Button>
-      {configured && <Button type="button" variant="ghost" size="sm" className="h-7 text-[11px] text-muted-foreground" disabled={disabled} onClick={onReset}><RotateCcw />Réglages d’office</Button>}
-    </div>
-    {onDeletePreset && available.some((preset) => !preset.builtin) && <details className="text-[11px]">
-      <summary className="cursor-pointer text-muted-foreground">Supprimer un de tes presets</summary>
-      <ul className="mt-1 space-y-0.5">{available.filter((preset) => !preset.builtin).map((preset) => <li key={preset.id} className="flex items-center justify-between gap-1"><span className="truncate">{preset.name}</span><Button type="button" size="icon-xs" variant="ghost" className="text-destructive" disabled={busy} onClick={() => void run(() => onDeletePreset(preset.id), "Preset supprimé.")} aria-label={`Supprimer ${preset.name}`}><Trash2 /></Button></li>)}</ul>
-    </details>}
-    {message && <p className="flex items-center gap-1 text-[11px] text-primary"><Check className="size-3" />{message}</p>}
-    {copying && <CopyDialog kindLabel={kindLabel} tabs={otherTabs} onClose={() => setCopying(false)} onCopy={(ids) => { onCopyTo(ids); setCopying(false) }} />}
-  </div>
+  const add = (name: string, shape: ViewLayout) => { const id = viewId(); setNamed([...named, { id, name, layout: { ...shape, kind } }]); onSelect(id) }
+  const available = [...builtinViewPresets, ...presets].filter((preset) => preset.layout.kind === kind)
+  const mine = available.filter((preset) => !preset.builtin)
+  const configured = selected.id === MAIN_VIEW_ID ? Boolean(value[kind]) : Object.keys(layout).length > 1
+  return <>
+    <ViewVariantsPanel
+      title={`${kindLabel} de « ${tabName} »`}
+      icon={layoutIcons[kind]}
+      noun="vue"
+      items={versions.map((item) => ({ id: item.id, name: item.name }))}
+      selectedId={selected.id}
+      starredId={MAIN_VIEW_ID}
+      onSelect={onSelect}
+      onStar={(id) => {
+        // L'étoile passe à cette version : elle devient celle des pages, l'ancienne garde une place nommée.
+        const target = named.find((item) => item.id === id)
+        if (!target) return
+        setNamed([...named.filter((item) => item.id !== id), ...(value[kind] ? [{ id: viewId(), name: "Ancienne vue principale", layout: { ...value[kind]!, kind } }] : [])], target.layout)
+        onSelect(MAIN_VIEW_ID)
+      }}
+      starHint="celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"
+      onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
+      renameable={(id) => id !== MAIN_VIEW_ID}
+      onNew={() => add(`${kindLabel} ${named.length + 2}`, { kind })}
+      newHint={`Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
+      onDuplicate={() => add(`${selected.id === MAIN_VIEW_ID ? kindLabel : selected.name} (copie)`, layout)}
+      onRemove={() => { setNamed(named.filter((item) => item.id !== selected.id)); onSelect(MAIN_VIEW_ID) }}
+      removable={(id) => id !== MAIN_VIEW_ID}
+      full={named.length >= 11}
+      presets={available.map((preset) => ({ id: preset.id, name: preset.name, group: preset.builtin ? "Eraser" : "Les tiens" }))}
+      onApplyPreset={(id) => {
+        const preset = available.find((entry) => entry.id === id)
+        if (preset) onChange(withViewVersion(value, kind, selected.id, fitLayoutToColumns({ ...layout, ...preset.layout, kind }, columns)))
+      }}
+      onSavePreset={onSavePreset ? () => setDialog("save") : undefined}
+      onCopy={otherTabs.length ? () => setDialog("copy") : undefined}
+      copyHint={otherTabs.length ? "Copier cette vue vers d’autres onglets…" : "Cet index n’a pas d’autre onglet"}
+      onManagePresets={onDeletePreset && mine.length ? () => setDialog("manage") : undefined}
+      disabled={disabled}
+      footer={configured && <Button type="button" variant="ghost" size="sm" className="h-7 justify-start text-[11px] text-muted-foreground" disabled={disabled} onClick={() => selected.id === MAIN_VIEW_ID ? setNamed(named, null) : onChange(withViewVersion(value, kind, selected.id, { kind }))}><RotateCcw />Revenir aux réglages d’office</Button>}
+    />
+    {dialog === "save" && onSavePreset && <NamePresetDialog
+      title="Enregistrer en preset"
+      description={<>Les réglages de cette vue {kindLabel}, pour les reprendre dans n’importe quel index (Forme de base, bloc de page). Les colonnes absentes y sont sautées.</>}
+      initialName={selected.id === MAIN_VIEW_ID ? `${kindLabel} · ${tabName}` : selected.name}
+      existing={mine}
+      onSave={(name, id) => onSavePreset({ id, name, layout })}
+      onClose={() => setDialog(null)}
+    />}
+    {dialog === "copy" && <CopyToTabsDialog
+      title={`Copier la vue ${kindLabel} vers d’autres onglets`}
+      description="Elle remplace la vue à l’étoile de chaque onglet choisi ; les colonnes absentes y sont retirées."
+      tabs={otherTabs}
+      onCopy={(ids) => { onCopyTo(ids, layout); setDialog(null) }}
+      onClose={() => setDialog(null)}
+    />}
+    {dialog === "manage" && onDeletePreset && <ManagePresetsDialog
+      title={`Presets de ${kindLabel}`}
+      description="Tes presets, communs à tous les index. Ceux d’Eraser restent. Supprimer un preset ne change aucune vue."
+      presets={mine.map((preset) => ({ id: preset.id, name: preset.name, ...(preset.updatedAt ? { hint: `Enregistré le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}` } : {}) }))}
+      onRename={onSavePreset ? (id, name) => { const preset = mine.find((entry) => entry.id === id); return preset ? onSavePreset({ id, name, layout: preset.layout }) : Promise.resolve() } : undefined}
+      onDelete={onDeletePreset}
+      onClose={() => setDialog(null)}
+    />}
+  </>
 }
 
 // ---------------------------------------------------------------------------
@@ -1013,10 +1062,13 @@ export function ViewsPanel({ kind, columns, layout, configured, presets, onApply
 // ---------------------------------------------------------------------------
 
 const screens = { phone: "24rem", tablet: "44rem", desktop: "100%" } as const
+const screenOptions: Array<{ value: keyof typeof screens; label: string; icon: ReactNode; title: string }> = [{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]
 
-export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
+export function IndexViewsEditor({ kind, versionId = MAIN_VIEW_ID, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
+  /** La version de la vue modifiée (l'étoilée par défaut). */
+  versionId?: string
   tabName: string
   /** Les colonnes de l'onglet (sans l'identifiant). */
   columns: string[]
@@ -1036,8 +1088,10 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
 }) {
   const [screen, setScreen] = useState<keyof typeof screens>("desktop")
   const [starting, setStarting] = useState(false)
-  const layout: ViewLayout = value[kind] ?? { kind }
-  const setLayout = (next: ViewLayout) => onChange({ ...value, [kind]: { ...next, kind } })
+  const [expanded, setExpanded] = useState(false)
+  const [bigScreen, setBigScreen] = useState<keyof typeof screens>("desktop")
+  const layout: ViewLayout = viewVersionOf(value, kind, versionId)
+  const setLayout = (next: ViewLayout) => onChange(withViewVersion(value, kind, versionId, next))
   const nameColumn = columns.find((column) => /^nom\b/i.test(column)) ?? columns[0] ?? ""
   const keys = useMemo(() => rows.map((_, index) => String(index)), [rows])
   const specs = useMemo(() => new Map(cardColumns.map((column) => [foldName(column.header), column.spec])), [cardColumns])
@@ -1082,13 +1136,21 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
     </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
-        <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu · {kindLabel} · {rows.length} ligne{rows.length > 1 ? "s" : ""} de « {tabName} »</p>
-        <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />
+        <span className="flex min-w-0 items-center gap-1"><p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu · {kindLabel} · {rows.length} ligne{rows.length > 1 ? "s" : ""} de « {tabName} »</p><PreviewExpandButton onClick={() => setExpanded(true)} /></span>
+        <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={screenOptions} onChange={setScreen} />
       </div>
       <div className={cn("overflow-auto rounded-lg", screen !== "desktop" && "mx-auto border bg-background/60 p-2")} style={{ maxWidth: screens[screen] }}>
         {preview(layout)}
       </div>
     </section>
+    {expanded && <PreviewDialog
+      title={`Aperçu · ${kindLabel}`}
+      description={`Comme sur une page ou dans un tableau de bord, sur ${rows.length} ligne${rows.length > 1 ? "s" : ""} de « ${tabName} ». Rien ne s’ouvre au clic ici.`}
+      tools={<Segmented ariaLabel="Largeur d’écran simulée" value={bigScreen} options={screenOptions} onChange={setBigScreen} />}
+      onClose={() => setExpanded(false)}
+    >
+      <div className={cn("mx-auto", bigScreen !== "desktop" && "rounded-lg border bg-background/60 p-2")} style={{ maxWidth: screens[bigScreen] }}>{preview(layout)}</div>
+    </PreviewDialog>}
     {starting && <ViewStarterDialog kind={kind} columns={columns} cardColumns={cardColumns} preview={(shown) => preview(fitLayoutToColumns(shown, columns), 6)} onPick={(picked) => { setLayout(fitLayoutToColumns({ ...picked, kind }, columns)); setStarting(false) }} onClose={() => setStarting(false)} />}
   </div>
 }

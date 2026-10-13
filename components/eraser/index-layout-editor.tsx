@@ -10,6 +10,11 @@ import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/inde
 import { RichTextField } from "@/components/eraser/rich-text"
 import { useIndexSettings } from "@/components/eraser/index-views"
 import { Tabs } from "@/components/eraser/view-editor-controls"
+import { IndexFormView } from "@/components/eraser/index-form-view"
+import { hoverWidthClass, LayoutDetails } from "@/components/eraser/index-references"
+import { PreviewDialog, PreviewExpandButton } from "@/components/eraser/index-view-panel"
+import { hoverOf, rowDetails } from "@/lib/index-references-cells"
+import type { ResolvedReference } from "@/lib/index-references"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -205,7 +210,7 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
  * première ligne de l'onglet. Le point de départ est toujours la mise en page réellement
  * utilisée (celle réglée, celle d'Eraser, ou l'automatique écrite d'après les colonnes).
  */
-export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, resetLabel, disabled = false, forms, sampleRow, eraserStarters }: {
+export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, samples, resetLabel, disabled = false, forms, sampleRow, eraserStarters }: {
   kind: LayoutKind
   /** Les colonnes que la mise en page peut placer. */
   columns: LayoutColumn[]
@@ -217,6 +222,8 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   onReset?: () => void
   /** Une ligne de l'onglet (en-tête → texte), pour l'aperçu. */
   sample?: Record<string, string>
+  /** Les premières lignes de l'onglet, pour l'aperçu en grand (on passe de l'une à l'autre). */
+  samples?: Array<Record<string, string>>
   resetLabel?: string
   disabled?: boolean
   /** Les formulaires de l'onglet (un bouton « Ouvrir la fiche » en choisit un). */
@@ -234,6 +241,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   // Les deux pages de l'éditeur : la mise en page (colonnes, sections), et l'apparence (accent, en-tête du survol).
   const [page, setPage] = useState<"layout" | "look">("layout")
   const [starting, setStarting] = useState(false)
+  const [expanded, setExpanded] = useState(false)
   const hover = kind === "hover"
   const layout = value
   const placed = useMemo(() => new Set([...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(field.column))), [layout])
@@ -540,9 +548,13 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
     {starting && <LayoutStarterDialog kind={kind} columns={columns} sample={sample} sampleRow={sampleRow} eraserStarters={eraserStarters} onPick={(picked) => { set(picked); setStarting(false); setPage("layout") }} onClose={() => setStarting(false)} />}
 
     <aside className="grid content-start gap-2 rounded-xl border bg-card/70 p-3 xl:sticky xl:top-0 xl:self-start">
-      <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu</p>
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu</p>
+        <PreviewExpandButton onClick={() => setExpanded(true)} />
+      </div>
       <LayoutPreview kind={kind} layout={layout} columns={columns} sample={sample} sampleRow={sampleRow} />
     </aside>
+    {expanded && <LayoutLivePreview kind={kind} layout={layout} columns={columns} samples={samples?.length ? samples : [sample]} index={sampleRow?.index ?? ""} tab={sampleRow?.tab ?? ""} onClose={() => setExpanded(false)} />}
   </div>
 }
 
@@ -584,6 +596,50 @@ function LayoutPreview({ kind, layout, columns, sample = {}, sampleRow }: { kind
         render={(item, field) => previewField(item, field)}
         renderRest={(rest) => <div className="grid gap-2 md:grid-cols-2">{rest.map((item) => <div key={item.header}>{previewField(item, { column: item.header })}</div>)}</div>}
       />
+  </div>
+}
+
+/**
+ * L'aperçu en grand, avec son vrai rendu sur les lignes de l'onglet : la fiche telle qu'elle
+ * se lit (le formulaire en lecture des pages et des vues), ou la carte du survol telle qu'elle
+ * s'ouvre sur une citation « { » (construite par le même code que celui du serveur).
+ */
+function LayoutLivePreview({ kind, layout, columns, samples, index, tab, onClose }: { kind: LayoutKind; layout: IndexLayout; columns: LayoutColumn[]; samples: Array<Record<string, string>>; index: string; tab: string; onClose: () => void }) {
+  const [at, setAt] = useState(0)
+  const position = Math.min(at, samples.length - 1)
+  const sample = samples[position] ?? {}
+  const valueOf = (header: string) => Object.entries(sample).find(([name]) => sameColumn(name, header))?.[1] ?? ""
+  const row = { index, id: valueOf("ID"), tab }
+  const hover = kind === "hover"
+  const tools = samples.length > 1 && <span className="flex items-center gap-1 text-xs text-muted-foreground">
+    <Button type="button" variant="outline" size="icon-sm" disabled={position === 0} onClick={() => setAt(position - 1)} aria-label="Ligne précédente"><ArrowLeft /></Button>
+    <span className="min-w-14 text-center tabular-nums">Ligne {position + 1} / {samples.length}</span>
+    <Button type="button" variant="outline" size="icon-sm" disabled={position === samples.length - 1} onClick={() => setAt(position + 1)} aria-label="Ligne suivante"><ArrowRight /></Button>
+  </span>
+  return <PreviewDialog title={hover ? "Aperçu du survol" : "Aperçu du formulaire"} description={hover ? "Tel qu’il s’ouvre au survol d’une ligne citée avec « { », sur les lignes de l’onglet." : "Tel qu’il se lit, sur les lignes de l’onglet (la fiche y ajoute ses champs à remplir)."} tools={tools} onClose={onClose}>
+    {hover
+      ? <HoverLivePreview layout={layout} columns={columns} sample={sample} row={row} />
+      : <div className="mx-auto max-w-5xl rounded-2xl border bg-card p-5 shadow-sm"><IndexFormView layout={layout} columns={columns} valueOf={valueOf} row={row} /></div>}
+  </PreviewDialog>
+}
+
+/** La carte du survol d'une ligne, comme à côté d'une citation « { ». */
+function HoverLivePreview({ layout, columns, sample, row }: { layout: IndexLayout; columns: LayoutColumn[]; sample: Record<string, string>; row: { index: string; id: string; tab: string } }) {
+  // Toutes les colonnes de la ligne, comme sur le serveur (le survol ne propose pas la colonne du nom, mais il la lit).
+  const headers = [...new Set([...Object.keys(sample), ...columns.map((column) => column.header)])]
+  const html = headers.map((header) => sample[header] ?? Object.entries(sample).find(([name]) => sameColumn(name, header))?.[1] ?? "")
+  const values = html.map((value) => value.replace(/<[^>]+>/g, " ").replace(/&nbsp;/g, " ").replace(/\s+/g, " ").trim())
+  const named = columns.find((column) => isNameColumnSpec(column.spec))?.header
+  const nameAt = Math.max(0, named ? headers.indexOf(named) : headers.findIndex((header) => /^nom\b/i.test(header.trim())))
+  const table = { tab: row.tab, headers, columns: headers, name: nameAt, specs: new Map(columns.map((column) => [foldName(column.header), column.spec])), rows: [] }
+  const source = { id: row.id, name: values[nameAt] ?? "", values, html }
+  const details = rowDetails(table, source)
+  const resolved = hoverOf(layout, table, source, () => false)
+  const reference: ResolvedReference = { index: row.index, id: row.id, tab: row.tab, name: source.name || "Nom de la ligne", ...(html[nameAt] && /<[a-z]/i.test(html[nameAt]) ? { nameHtml: html[nameAt] } : {}), ...details }
+  return <div className="grid min-h-64 place-items-center rounded-xl bg-muted/30 p-6">
+    <div className={cn(hoverWidthClass(resolved), "rounded-2xl border bg-popover p-3.5 text-popover-foreground shadow-lg")} style={reference.color ? { borderColor: `${reference.color}55` } : undefined}>
+      <LayoutDetails reference={reference} layout={resolved} color={reference.color} depth={0} />
+    </div>
   </div>
 }
 
