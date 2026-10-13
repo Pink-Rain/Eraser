@@ -136,7 +136,7 @@ function glyphOf(value: string, kind: string | undefined) {
   return look.icon && /^[a-z0-9]+(-[a-z0-9]+)*$/.test(look.icon) && look.icon.length <= 40 ? look : null
 }
 
-function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, alt, initials, className = "", style, natural = false }: {
+function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, bare = false, alt, initials, className = "", style, natural = false }: {
   row: CardRowSource
   column: string
   accent: string
@@ -149,6 +149,8 @@ function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, 
   style?: CSSProperties
   /** La hauteur suit l'image (pas de format imposé). */
   natural?: boolean
+  /** Sans fond ni teinte derrière l'image (image détourée). */
+  bare?: boolean
 }) {
   const [failed, setFailed] = useState("")
   const raw = (row.value(column) ?? "").trim()
@@ -156,9 +158,11 @@ function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, 
   const kind = spec ? normalizeSpec(spec).kind : undefined
   const first = raw.split(/\n+/).map((item) => item.trim()).filter(Boolean)[0] ?? ""
   const glyph = first && !isImageSource(first) ? glyphOf(first, kind) : null
-  const background: CSSProperties = tint
-    ? { background: `radial-gradient(circle at 35% 30%, ${accent}, color-mix(in srgb, ${accent} 78%, #1d140c) 60%, #1d140c 130%)`, color: "#fffaf0" }
-    : { backgroundColor: `color-mix(in srgb, ${accent} 10%, var(--muted))`, color: accent }
+  const background: CSSProperties = bare && !tint
+    ? { color: accent }
+    : tint
+      ? { background: `radial-gradient(circle at 35% 30%, ${accent}, color-mix(in srgb, ${accent} 78%, #1d140c) 60%, #1d140c 130%)`, color: "#fffaf0" }
+      : { backgroundColor: `color-mix(in srgb, ${accent} 10%, var(--muted))`, color: accent }
   const box = cn("relative flex shrink-0 items-center justify-center overflow-hidden", shapeClass(shape), natural && "min-h-12", className)
   if (glyph && (glyph.icon || glyph.emoji)) return <span className={box} style={{ ...background, ...style }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={natural ? "size-10 my-3" : "size-[55%]"} filled={Boolean(glyph.emoji) || tint} /></span>
   const fallback = initials
@@ -308,7 +312,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const touchL = box.edges.includes("left"), touchR = box.edges.includes("right")
       const justify = touchL && touchR ? "justify-stretch" : touchL ? "justify-start" : touchR ? "justify-end" : ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start"
       return <div className={cn("flex", justify)}>
-        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} alt={block.column} initials="" natural={box.autoHeight} className="w-full" style={{ ...(box.autoHeight ? {} : { aspectRatio: `${box.widthPct} / ${box.heightPct}` }), ...radiusStyle(block.radiusPx), width: touchL && touchR ? "100%" : `${box.widthPct}%` }} />
+        <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} bare={block.bare} alt={block.column} initials="" natural={box.autoHeight} className="w-full" style={{ ...(box.autoHeight ? {} : { aspectRatio: `${box.widthPct} / ${box.heightPct}` }), ...radiusStyle(block.radiusPx), width: touchL && touchR ? "100%" : `${box.widthPct}%` }} />
       </div>
     }
     case "value": {
@@ -468,7 +472,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
     {blocks}
   </div>
 
-  const pictureFor = (extra: string, style?: CSSProperties) => media ? <CardPicture row={row} column={media.column} accent={accent} fit={media.fit} shape={media.shape} tint={media.tint} alt={name} initials={initialsOf(name)} className={extra} style={style} natural={Boolean(box?.autoHeight) && !(style && "height" in style)} /> : null
+  const pictureFor = (extra: string, style?: CSSProperties) => media ? <CardPicture row={row} column={media.column} accent={accent} fit={media.fit} shape={media.shape} tint={media.tint} bare={media.bare} alt={name} initials={initialsOf(name)} className={extra} style={style} natural={Boolean(box?.autoHeight) && !(style && "height" in style)} /> : null
   const band = card.band ? <div className="h-1 w-full shrink-0" style={{ backgroundColor: accent }} /> : null
   const corner = card.corner ? (() => {
     const value = cellText(row, card.corner!)

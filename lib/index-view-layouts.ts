@@ -59,6 +59,8 @@ export type ViewLook = {
   imageWidth?: number
   imageHeight?: number
   imageLinked?: boolean
+  /** L'image ou l'icône à côté du nom sans fond ni cadre (image détourée). */
+  imageBare?: boolean
   /** Kanban : colonnes sobres, teintées, ou à en-tête coloré. */
   laneStyle?: "plain" | "tinted" | "header"
   /** Calendrier : grille du mois ou agenda (liste par date) ; style des entrées. */
@@ -265,6 +267,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   imageWidth: [],
   imageHeight: [],
   imageLinked: [true],
+  imageBare: [true],
   radius: ["sm", "md", "lg"],
   shadow: [true],
   titleCaps: [true],

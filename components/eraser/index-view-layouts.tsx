@@ -134,10 +134,10 @@ function RowImage({ src, look, size }: { src: string; look: ViewLook; size?: key
   if (!/^(https?:\/\/|\/)/.test(src)) {
     const glyph = parseGlyphValue(src)
     if (!glyph.icon && !glyph.emoji) return null
-    return <span className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} grid shrink-0 place-items-center border bg-muted/40`} style={style}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-[60%]" /></span>
+    return <span className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} grid shrink-0 place-items-center ${look.imageBare ? "" : "border bg-muted/40"}`} style={style}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-[60%]" /></span>
   }
   // eslint-disable-next-line @next/next/no-img-element -- images des index (Drive ou app)
-  return failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} shrink-0 border object-cover`} style={style} /> : null
+  return failed !== src ? <img src={src} alt="" loading="lazy" onError={() => setFailed(src)} className={`${sized} ${imageShapes[look.imageShape ?? "rounded"]} shrink-0 ${look.imageBare ? "object-contain" : "border object-cover"}`} style={style} /> : null
 }
 
 /** Le cadre d'un élément selon « la couleur marque l'élément par… » (liseré par défaut). */

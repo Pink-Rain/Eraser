@@ -1,36 +1,42 @@
-# Eraser 0.1.1-alpha.214 — Accueil, Classes et Vocabulaire dessinés par le moteur des pages
+# Eraser 0.1.1-alpha.215 — Lot A : 1 Formulaire, 2 Survol, 3 Carte
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les réglages enregistrés par l'alpha 213 se relisent tels quels.
+Sheets ; les réglages enregistrés par l'alpha 214 se relisent tels quels.
 
-## Trois pages d'Eraser passent par le moteur
+Les vues sont numérotées : 1 Formulaire, 2 Survol, 3 Carte, 4 Liste, 5 Kanban,
+6 Maître-détail, 7 Calendrier, 8 Tableau de bord, 9 Galerie, 10 Chronologie,
+11 Arborescence, 12 Codex. Cette alpha fait 1, 2 et 3.
 
-- **Accueil, Règles › Classes et Règles › Vocabulaire** ne sont plus dessinées par du code
-  à part : elles se rendent depuis leur plan de blocs, avec les vues, les cartes et les formes
-  réglées dans leur index. Changer la « Carte de classe » dans l'Index des classes change la
-  page des classes ; changer l'« Entrée de glossaire » dans l'Index du vocabulaire change le
-  glossaire ; les cartes de l'accueil sont la « Carte en grille » des campagnes et des
-  personnages.
-- Rien à enregistrer : tant qu'aucune page du créateur ne les remplace, elles se dessinent
-  d'elles-mêmes. « Modifier la page » (admin) les reprend dans l'atelier comme avant ;
-  « Voir la page d'origine » (admins et MJ) montre encore l'ancien rendu.
-- Accueil : une recherche au-dessus de « Mes campagnes » / « Mes personnages » ; chaque
-  carte de personnage porte ses campagnes en pastilles, aux couleurs des campagnes. Ce sont
-  des colonnes dérivées des pages (« Campagnes » d'un personnage, « Personnages » d'une
-  campagne), jamais écrites dans la feuille.
-- Classes : la difficulté garde son icône (plume, jauge, flamme, couronne) ; la finition
-  reste calculée sur les sorts réellement liés, comme avant.
-- Vocabulaire : les mots rangés par lettre, la lettre en marge, le menu des lettres en haut.
-  Les MJ ajoutent et modifient les mots depuis l'Index du vocabulaire (lien en haut de page).
+## Images : avec ou sans fond
 
-## Vues : deux briques de plus, pour toutes les listes
+- Une image détourée ou un pictogramme n'a plus de fond imposé. **« Fond »** se règle
+  partout où une image se règle : l'image principale et les blocs image d'une carte (3),
+  l'image à côté du nom dans les vues, le médaillon d'un survol (2). Pour la carte et le
+  médaillon : **Neutre** (cadre et fond discret), **Accent** (médaillon coloré), **Aucun**
+  (rien derrière). Pour les blocs image et les vues : la case « Fond ».
 
-- **La lettre (ou le nom de la section) en marge**, grande et qui reste visible en défilant :
-  « Titre des sections › En marge (glossaire) ».
-- **Un menu relié aux sections** (lettres ou noms), en haut ou sur le côté ; un clic descend à
-  la section.
+## 3 Carte : la taille de la carte comme celle d'une image
 
-## Listes de choix : une icône par valeur
+- Une seule ligne : **lier / délier, Largeur, Hauteur, Arrondi**. Liées, la hauteur suit la
+  largeur (les proportions de la carte sont tenues) ; déliées, la hauteur est une hauteur
+  minimale. Le bout du curseur de hauteur rend la carte à son contenu. Les formes rapides
+  (carré, rectangles), « au plus par ligne » et le téléphone passent sur la ligne suivante.
 
-- Une option d'une colonne à choix peut porter une icône : les cartes la montrent devant la
-  valeur (champ, pastille). Les difficultés des classes en sont le premier usage.
+## 1 Formulaire et 2 Survol : formes de base et éditeur en deux pages
+
+- Un bouton **« Forme de base »** ouvre la grille des formes avec leur aperçu sur la première
+  ligne de l'onglet : la fiche ou le survol d'Eraser pour cet onglet (créature, PNJ, état,
+  modificateur) quand il en a un, les formes de départ remplies avec les colonnes de
+  l'onglet, et les presets enregistrés. En choisir une remplace la mise en page ; tout se
+  mélange et se modifie ensuite.
+- Fiche : Automatique, **Fiche courte**, **Fiche à onglets**, Portrait à gauche, Deux
+  colonnes, Sections encadrées. Survol : Automatique, **Survol à tuiles**, **Survol
+  illustré**, Médaillon teinté, Survol compact.
+- L'éditeur se range en deux pages : **Mise en page** (colonne latérale, sections, champs
+  non placés) et **Apparence** (couleur d'accent, sections en onglets ; pour le survol :
+  sous-titre, icône, largeur, nom coloré, médaillon, bannière). La phrase d'explication
+  cède la place à une pastille (« forme d'Eraser », « automatique », « réglée à la main »).
+- **Sections en onglets** : les sections d'une fiche ou d'un survol deviennent des onglets,
+  une section à la fois, la colonne latérale restant à côté. La fiche d'une ligne et le
+  survol les respectent.
+- **Bannière du survol** : une colonne image en travers au-dessus du nom, hauteur réglable.

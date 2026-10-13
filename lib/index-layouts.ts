@@ -128,11 +128,15 @@ export type IndexLayout = {
    * icône, au choix de la case ; absente : l'image ou l'icône de la ligne), sa taille en
    * pixels, rond ou carré, sur un fond à la couleur de l'accent.
    */
-  medallion?: { column?: string; size?: number; round?: boolean; tint?: boolean }
+  medallion?: { column?: string; size?: number; round?: boolean; tint?: boolean; /** Sans fond ni cadre (image détourée). */ bare?: boolean }
+  /** Survol : une image en bannière au-dessus du nom (une colonne image ; sa hauteur en pixels). */
+  banner?: { column?: string; height?: number }
   /** Survol : le nom prend la couleur de l'accent. */
   nameInAccent?: boolean
   /** La largeur de la carte de survol. */
   width?: "sm" | "md" | "lg"
+  /** Les sections deviennent des onglets (une à la fois, la première ouverte) ; la colonne latérale reste. */
+  tabs?: boolean
 }
 
 /** Un formulaire de plus, sous son nom (« Fiche courte », « Fiche de combat »). */
@@ -335,11 +339,18 @@ export function parseIndexLayout(input: unknown): IndexLayout | null {
     const medallion = raw.medallion as Record<string, unknown>
     const column = cleanText(medallion.column, 120)
     const size = typeof medallion.size === "number" && Number.isFinite(medallion.size) ? Math.max(20, Math.min(160, Math.round(medallion.size))) : undefined
-    layout.medallion = { ...(column ? { column } : {}), ...(size ? { size } : {}), ...(medallion.round === true ? { round: true } : {}), ...(medallion.tint === true ? { tint: true } : {}) }
+    layout.medallion = { ...(column ? { column } : {}), ...(size ? { size } : {}), ...(medallion.round === true ? { round: true } : {}), ...(medallion.tint === true ? { tint: true } : {}), ...(medallion.bare === true ? { bare: true } : {}) }
+  }
+  if (raw.banner && typeof raw.banner === "object") {
+    const banner = raw.banner as Record<string, unknown>
+    const column = cleanText(banner.column, 120)
+    const height = typeof banner.height === "number" && Number.isFinite(banner.height) ? Math.max(40, Math.min(400, Math.round(banner.height))) : undefined
+    layout.banner = { ...(column ? { column } : {}), ...(height ? { height } : {}) }
   }
   if (raw.nameInAccent === true) layout.nameInAccent = true
   if (raw.width === "sm" || raw.width === "lg") layout.width = raw.width
-  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !layout.medallion) return null
+  if (raw.tabs === true) layout.tabs = true
+  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !layout.medallion && !layout.banner) return null
   return layout
 }
 
@@ -401,6 +412,7 @@ export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, st
     ...(layout.subtitle ? { subtitle: rename(layout.subtitle) } : {}),
     ...(layout.icon ? { icon: rename(layout.icon) } : {}),
     ...(layout.medallion?.column ? { medallion: { ...layout.medallion, column: rename(layout.medallion.column) } } : {}),
+    ...(layout.banner?.column ? { banner: { ...layout.banner, column: rename(layout.banner.column) } } : {}),
   }
 }
 
@@ -422,6 +434,8 @@ export type ArrangedLayout<T> = {
   asideSide: "left" | "right"
   accent?: string
   sections: Array<ArrangedSection<T>>
+  /** Les sections en onglets. */
+  tabs?: boolean
   /** Les éléments que la mise en page ne place pas (affichés à la suite, sauf « masquées »). */
   rest: T[]
 }
@@ -460,7 +474,7 @@ export function arrangeLayout<T>(layout: IndexLayout, items: T[], keyOf: (item: 
     rows: section.rows.map((row) => ({ id: row.id, fields: row.fields.flatMap(take) })).filter((row) => row.fields.length),
   })).filter((section) => section.rows.length || section.title)
   const rest = layout.rest === "hide" ? [] : items.filter((item) => !used.has(foldName(keyOf(item))))
-  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), sections, rest }
+  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), rest }
 }
 
 /** La clé d'un nouveau bloc. */
@@ -554,7 +568,7 @@ export function layoutPlaces(layout: IndexLayout | null | undefined, column: str
   if (!layout) return false
   const key = foldName(column)
   const fields = [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))]
-  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, layout.subtitle, layout.icon, layout.medallion?.column].some((value) => value !== undefined && foldName(value) === key)
+  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, layout.subtitle, layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
 }
 
 /** Tous les formulaires d'un onglet (étoilé compris) placent-ils cette colonne ? L'un d'eux suffit. */

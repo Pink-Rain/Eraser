@@ -61,7 +61,6 @@ import {
   cardPalette,
   cardRoles,
   cardStarters,
-  cardWidths,
   DEFAULT_CARD_ACCENT,
   blockBox,
   mediaBox,
@@ -407,7 +406,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
           <Choice label="Image" value={block.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => set({ fit })} disabled={disabled} />
           <span className="self-end pb-1.5"><Toggle checked={block.shape === "circle"} onChange={(circle) => set({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle></span>
         </SettingsRow>
-        <ImageBoxControls value={{ widthPct: block.widthPct, heightPct: block.heightPct, autoHeight: block.autoHeight, linked: block.linked, edges: block.edges }} defaults={box} onChange={(changes) => set(changes)} disabled={disabled} radius={block.radiusPx ?? (block.shape === "rounded" ? 12 : 0)} onRadius={(radiusPx) => set({ radiusPx })} edgeLabels={{ top: "haut", bottom: "bas" }} />
+        <ImageBoxControls value={{ widthPct: block.widthPct, heightPct: block.heightPct, autoHeight: block.autoHeight, linked: block.linked, edges: block.edges, bare: block.bare }} defaults={box} onChange={(changes) => set(changes)} disabled={disabled} radius={block.radiusPx ?? (block.shape === "rounded" ? 12 : 0)} onRadius={(radiusPx) => set({ radiusPx })} edgeLabels={{ top: "haut", bottom: "bas" }} />
       </div>
     }
     case "value":
@@ -654,32 +653,43 @@ function CardPage({ card, columns, onChange, disabled }: { card: CardTemplate; c
   const shape = card.ratio === undefined ? "free" : shapeStarters.find((starter) => Math.abs(starter.ratio - card.ratio!) < 0.02)?.key ?? "custom"
   return <div className="grid gap-3">
     <div className={group}>
-      <p className={groupTitle}><LayoutGrid className="size-3.5" />Taille et place dans la grille</p>
+      <p className={groupTitle}><LayoutGrid className="size-3.5" />Taille de la carte</p>
+      {/* Comme une image : lier / délier, largeur, hauteur (« contenu » au bout du curseur), arrondi, sur une ligne. */}
+      {(() => {
+        const linked = card.sizeLinked ?? card.ratio !== undefined
+        const heightRem = card.ratio ? widthRem / card.ratio : card.minHeightPx ? card.minHeightPx / 16 : null
+        const HEIGHT_MAX = 60
+        const setWidth = (value: number) => set({ widthRem: value, width: undefined })
+        const setHeight = (value: number) => {
+          if (value > HEIGHT_MAX) { set({ ratio: undefined, minHeightPx: undefined }); return }
+          if (linked) set({ ratio: Math.round(widthRem / value * 100) / 100, minHeightPx: undefined })
+          else set({ minHeightPx: Math.round(value * 16), ratio: undefined })
+        }
+        const toggleLinked = () => {
+          if (linked) set({ sizeLinked: undefined, ...(card.ratio ? { minHeightPx: Math.round(widthRem / card.ratio * 16), ratio: undefined } : {}) })
+          else set({ sizeLinked: true, ...(heightRem ? { ratio: Math.round(widthRem / heightRem * 100) / 100, minHeightPx: undefined } : {}) })
+        }
+        return <SettingsRow>
+          <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
+          <button type="button" disabled={disabled} aria-pressed={linked} onClick={toggleLinked} title={linked ? "Liées : la hauteur suit la largeur (proportions fixes)" : "Déliées : la hauteur est une hauteur minimale, la largeur celle de la grille"} className={cn("grid size-8 shrink-0 place-items-center rounded-md border text-base", linked ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted")}>{linked ? "🔗" : "⛓️‍💥"}</button>
+          {!list && <span className="min-w-32 flex-1"><Range text="Largeur" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem`} onChange={setWidth} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." /></span>}
+          <span className="min-w-32 flex-1"><Range text="Hauteur" value={heightRem ?? HEIGHT_MAX + 1} min={4} max={HEIGHT_MAX + 1} step={0.5} format={(value) => value > HEIGHT_MAX ? "contenu" : `${fr(value, 1)} rem${linked ? "" : " au moins"}`} onChange={setHeight} disabled={disabled} title="Au bout du curseur : la hauteur du contenu. Liée : les proportions de la carte ; déliée : une hauteur minimale." /></span>
+          <span className="min-w-24 flex-1"><Range text="Arrondi" value={card.radiusPx ?? radiusOf[card.radius ?? "md"]} min={0} max={64} step={1} format={(value) => `${value} px`} onChange={(radiusPx) => set({ radiusPx })} disabled={disabled} /></span>
+        </SettingsRow>
+      })()}
       <SettingsRow>
-        <Segmented ariaLabel="Place dans la grille" value={list ? "list" : "grid"} options={[{ value: "grid", label: "Grille", icon: <LayoutGrid className="size-3.5" /> }, { value: "list", label: "Une par ligne", icon: <ListTree className="size-3.5" /> }]} onChange={(value) => value === "list" ? set({ width: "full", widthRem: undefined, grid: undefined }) : set({ width: "md", widthRem: card.widthRem ?? 15 })} disabled={disabled} />
-        {!list && <>
-          <span className="min-w-36 flex-1"><Range text="Largeur" value={widthRem} min={6} max={48} step={0.5} format={(value) => `${fr(value, 1)} rem · ${cardWidths.filter((entry) => entry.rem).reduce((best, entry) => Math.abs(entry.rem - value) < Math.abs(best.rem - value) ? entry : best).label.toLowerCase()}`} onChange={(value) => set({ widthRem: value, width: undefined })} disabled={disabled} title="La grille met autant de cartes de cette largeur que la place le permet ; elles s’élargissent pour remplir la ligne." /></span>
-          <span className="min-w-32 flex-1"><Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value}` : "libre"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." /></span>
-          <Choice label="Téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "1 / ligne" }, { value: "2", label: "2 / ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} />
-        </>}
-      </SettingsRow>
-    </div>
-
-    <div className={group}>
-      <p className={groupTitle}><Square className="size-3.5" />Forme de la carte</p>
-      <SettingsRow>
-        <span className={label}>Hauteur
+        <span className={label}>Formes rapides
           <span className="flex flex-wrap gap-1">
-            <button type="button" disabled={disabled} aria-pressed={shape === "free"} onClick={() => set({ ratio: undefined })} className={cn("h-8 rounded-md border px-2 text-xs", shape === "free" ? "border-primary bg-primary/10" : "hover:bg-muted")} title="La carte prend la hauteur de son contenu">Libre</button>
-            {shapeStarters.map((starter) => <button key={starter.key} type="button" disabled={disabled} title={starter.label} aria-label={starter.label} aria-pressed={shape === starter.key} onClick={() => set({ ratio: starter.ratio })} className={cn("grid h-8 min-w-9 place-items-center rounded-md border px-1.5", shape === starter.key ? "border-primary bg-primary/10" : "hover:bg-muted")}>
+            <button type="button" disabled={disabled} aria-pressed={shape === "free"} onClick={() => set({ ratio: undefined, minHeightPx: undefined, sizeLinked: undefined })} className={cn("h-8 rounded-md border px-2 text-xs", shape === "free" ? "border-primary bg-primary/10" : "hover:bg-muted")} title="La carte prend la hauteur de son contenu">Libre</button>
+            {shapeStarters.map((starter) => <button key={starter.key} type="button" disabled={disabled} title={starter.label} aria-label={starter.label} aria-pressed={shape === starter.key} onClick={() => set({ ratio: starter.ratio, minHeightPx: undefined, sizeLinked: true })} className={cn("grid h-8 min-w-9 place-items-center rounded-md border px-1.5", shape === starter.key ? "border-primary bg-primary/10" : "hover:bg-muted")}>
               <span className="block rounded-[2px] border border-current opacity-70" style={{ width: starter.w * 0.8, height: starter.h * 0.8 }} />
             </button>)}
           </span>
         </span>
-        {card.ratio !== undefined
-          ? <span className="min-w-36 flex-1"><Range text="Proportions (l ÷ h)" value={card.ratio} min={0.3} max={4} step={0.05} format={(value) => fr(value)} onChange={(ratio) => set({ ratio })} disabled={disabled} /></span>
-          : <span className="min-w-36 flex-1"><Range text="Hauteur minimale" value={card.minHeightPx ?? 0} min={0} max={600} step={10} format={(value) => value ? `${value} px` : "contenu"} onChange={(value) => set({ minHeightPx: value || undefined })} disabled={disabled} /></span>}
-        <span className="min-w-28 flex-1"><Range text="Arrondi" value={card.radiusPx ?? radiusOf[card.radius ?? "md"]} min={0} max={64} step={1} format={(value) => `${value} px`} onChange={(radiusPx) => set({ radiusPx })} disabled={disabled} /></span>
+        {!list && <>
+          <span className="min-w-28 flex-1"><Range text="Au plus, par ligne" value={card.grid?.max ?? 0} min={0} max={8} step={1} format={(value) => value ? `${value}` : "libre"} onChange={(value) => set({ grid: { ...card.grid, max: value || undefined } })} disabled={disabled} title="Sur un grand écran, les cartes ne se multiplient pas au-delà : elles s’élargissent." /></span>
+          <Choice label="Téléphone" value={String(card.grid?.phone ?? 1)} options={[{ value: "1", label: "1 / ligne" }, { value: "2", label: "2 / ligne" }]} onChange={(value) => set({ grid: { ...card.grid, phone: value === "2" ? 2 : undefined } })} disabled={disabled} />
+        </>}
       </SettingsRow>
       <div className="flex flex-wrap gap-3">
         <span className={label}>Contenu<Segmented ariaLabel="Alignement du contenu" value={card.align ?? "left"} options={[...alignOptions]} onChange={(align) => set({ align: align === "left" ? undefined : align })} disabled={disabled} /></span>
@@ -744,9 +754,9 @@ function ImagePage({ card, columns, onChange, disabled }: { card: CardTemplate; 
       </label>
       {media && <label className={cn(label, "min-w-40 flex-1")}>Colonne (image ou icône)<ColumnSelect value={media.column} columns={columns} empty={null} onChange={(column) => column && setMedia({ column })} disabled={disabled} ariaLabel="Colonne de l’image principale" /></label>}
       {media && position !== "background" && <Choice label="Image" value={media.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => setMedia({ fit })} disabled={disabled} />}
+      {media && position !== "background" && <Choice label="Fond" value={media.tint ? "accent" : media.bare ? "none" : "neutral"} options={[{ value: "neutral", label: "Neutre" }, { value: "accent", label: "Accent" }, { value: "none", label: "Aucun" }]} onChange={(fond) => setMedia({ tint: fond === "accent" || undefined, bare: fond === "none" || undefined })} disabled={disabled} />}
       {media && <span className="flex items-center gap-3 self-end pb-1.5">
         <Toggle checked={media.shape === "circle"} onChange={(circle) => setMedia({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle>
-        <Toggle checked={Boolean(media.tint)} onChange={(tint) => setMedia({ tint: tint || undefined })} disabled={disabled} title="Une icône (succès, état) sur un médaillon coloré ; une image absente, sur la couleur de la ligne">Fond accent</Toggle>
       </span>}
     </SettingsRow>
     {media && box && position !== "background" && <ImageBoxControls
@@ -756,8 +766,9 @@ function ImagePage({ card, columns, onChange, disabled }: { card: CardTemplate; 
       disabled={disabled}
       radius={media.radiusPx ?? (media.shape === "rounded" ? 12 : 0)}
       onRadius={(radiusPx) => setMedia({ radiusPx })}
+      withBare={false}
     />}
-    {media && position === "background" && <ImageBoxControls value={{ widthPct: media.widthPct, heightPct: media.heightPct, linked: media.linked }} defaults={{ widthPct: 100, heightPct: box?.heightPct ?? 75, edges: ["top", "bottom", "left", "right"] }} onChange={(changes) => setMedia(changes)} disabled={disabled} withEdges={false} />}
+    {media && position === "background" && <ImageBoxControls value={{ widthPct: media.widthPct, heightPct: media.heightPct, linked: media.linked }} defaults={{ widthPct: 100, heightPct: box?.heightPct ?? 75, edges: ["top", "bottom", "left", "right"] }} onChange={(changes) => setMedia(changes)} disabled={disabled} withEdges={false} withBare={false} />}
   </div>
 }
 

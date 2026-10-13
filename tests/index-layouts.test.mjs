@@ -238,3 +238,55 @@ test("le médaillon d'un survol et la taille libre des images se relisent", asyn
   assert.deepEqual(cards.mediaBox({ column: "P", position: "top", aspect: "4/3", inset: true }), { widthPct: 100, edges: [], heightPct: 75 });
   assert.equal(cards.cardStarters.length, 13);
 });
+
+test("lot A : image sans fond, bannière et onglets du survol, taille liée de la carte, formes de base de la fiche et du survol", async () => {
+  const cards = await vite.ssrLoadModule("/lib/index-cards.ts");
+  const views = await vite.ssrLoadModule("/lib/index-view-layouts.ts");
+  const defaults = await vite.ssrLoadModule("/lib/index-layout-defaults.ts");
+  // Le médaillon sans fond, la bannière, les sections en onglets se relisent et se renomment.
+  const parsed = layouts.parseIndexLayout({ aside: [], sections: [{ id: "a", title: "Identité", rows: [{ fields: [{ column: "Nom" }] }] }, { id: "b", title: "Lore", rows: [{ fields: [{ column: "Histoire" }] }] }], rest: "hide", medallion: { size: 44, bare: true }, banner: { column: "Portrait", height: 9999 }, tabs: true });
+  assert.deepEqual(parsed.medallion, { size: 44, bare: true });
+  assert.deepEqual(parsed.banner, { column: "Portrait", height: 400 });
+  assert.equal(parsed.tabs, true);
+  const renamed = layouts.renameLayoutColumns(parsed, new Map([["portrait", "Image"]]));
+  assert.equal(renamed.banner.column, "Image");
+  assert.equal(layouts.layoutPlaces(parsed, "Portrait"), true);
+  assert.equal(layouts.arrangeLayout(parsed, [{ header: "Nom" }, { header: "Histoire" }], (item) => item.header).tabs, true);
+  // Une bannière seule suffit à faire un survol.
+  assert.ok(layouts.parseIndexLayout({ aside: [], sections: [], rest: "hide", banner: { column: "Portrait" } }));
+  // Les images des cartes et des vues : « sans fond » ; la taille de la carte liée.
+  const card = cards.parseCardTemplate({ id: "c", name: "C", media: { column: "Portrait", position: "left", bare: true }, blocks: [{ id: "b", type: "image", column: "Icône", bare: true }], widthRem: 12, ratio: 0.75, sizeLinked: true });
+  assert.equal(card.media.bare, true);
+  assert.equal(card.blocks[0].bare, true);
+  assert.equal(card.sizeLinked, true);
+  assert.equal(views.cleanViewLayout({ kind: "list", look: { imageBare: true } }).look.imageBare, true);
+  // Les formes de base de la fiche et du survol, bâties sur les colonnes de l'onglet.
+  const columns = [
+    { header: "Nom", spec: { kind: "name" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice", options: [{ value: "Bête" }] } },
+    { header: "Rang", spec: { kind: "rich" } }, { header: "Force", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Description", spec: { kind: "rich" } }, { header: "Couleur", spec: { kind: "color" } },
+  ];
+  const starterOf = (key) => defaults.layoutStarters.find((starter) => starter.key === key).build(columns);
+  const short = starterOf("short");
+  assert.deepEqual(short.aside, [{ column: "Portrait", hideLabel: true }]);
+  assert.equal(short.sections[0].rows[0].fields[0].column, "Nom");
+  assert.equal(short.sections[0].rows[0].fields[0].large, true);
+  assert.equal(short.rest, "hide");
+  const tabs = starterOf("tabs");
+  assert.equal(tabs.tabs, true);
+  assert.deepEqual(tabs.sections.map((section) => section.title), ["Identité", "Description", "Valeurs"]);
+  assert.equal(tabs.sections[2].rows[0].fields[0].block.kind, "tiles");
+  const tiles = starterOf("hover-tiles");
+  assert.deepEqual(tiles.medallion, { column: "Portrait", size: 44, round: true });
+  assert.equal(tiles.accent, "{Couleur}");
+  assert.equal(tiles.subtitle, "Type");
+  const banner = starterOf("hover-banner");
+  assert.deepEqual(banner.banner, { column: "Portrait", height: 110 });
+  // Chaque forme passe telle quelle le nettoyage de l'enregistrement.
+  for (const starter of defaults.layoutStarters) {
+    const built = starter.build(columns);
+    assert.ok(layouts.parseIndexLayout(built), starter.key);
+  }
+  // Les formes d'Eraser d'un onglet, et rien pour un onglet sans forme d'Eraser.
+  assert.equal(defaults.eraserLayoutStarters("npcs", "PNJs", "form")[0].label, "Fiche de PNJ");
+  assert.deepEqual(defaults.eraserLayoutStarters("vocabulary", "Vocabulaire", "form"), []);
+});

@@ -118,6 +118,8 @@ export type ImageBox = {
   autoHeight?: boolean
   linked?: boolean
   edges?: ImageEdge[]
+  /** Sans fond ni cadre derrière l'image (une image détourée, un pictogramme) : rien que l'image. */
+  bare?: boolean
 }
 
 /** L'image principale de la carte (portrait, bannière, icône…). */
@@ -180,6 +182,8 @@ export type CardTemplate = {
   /** Une hauteur minimale (en pixels), ou des proportions fixes pour toute la carte (largeur ÷ hauteur). */
   minHeightPx?: number
   ratio?: number
+  /** Largeur et hauteur liées dans l'éditeur (bouger l'une bouge l'autre : `ratio` les tient). */
+  sizeLinked?: boolean
   /** La grille : au plus tant de cartes par ligne ; sur téléphone, une ou deux par ligne. */
   grid?: { max?: number; phone?: 1 | 2 }
 }
@@ -338,6 +342,7 @@ export function cleanImageBox(raw: Record<string, unknown>): ImageBox {
   if (typeof raw.heightPct === "number" && Number.isFinite(raw.heightPct)) box.heightPct = Math.max(5, Math.min(300, Math.round(raw.heightPct)))
   if (raw.autoHeight === true) box.autoHeight = true
   if (raw.linked === true) box.linked = true
+  if (raw.bare === true) box.bare = true
   const edges = Array.isArray(raw.edges) ? raw.edges.filter((edge): edge is ImageEdge => imageEdges.includes(edge as ImageEdge)) : []
   if (Array.isArray(raw.edges)) box.edges = [...new Set(edges)]
   return box
@@ -516,6 +521,7 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   if (typeof raw.radiusPx === "number" && Number.isFinite(raw.radiusPx)) card.radiusPx = Math.max(0, Math.min(64, Math.round(raw.radiusPx)))
   if (typeof raw.minHeightPx === "number" && Number.isFinite(raw.minHeightPx)) card.minHeightPx = Math.max(0, Math.min(1200, Math.round(raw.minHeightPx)))
   if (typeof raw.ratio === "number" && Number.isFinite(raw.ratio)) card.ratio = Math.max(0.3, Math.min(4, Math.round(raw.ratio * 100) / 100))
+  if (raw.sizeLinked === true) card.sizeLinked = true
   if (raw.grid && typeof raw.grid === "object") {
     const grid = raw.grid as Record<string, unknown>
     const clean: NonNullable<CardTemplate["grid"]> = {}

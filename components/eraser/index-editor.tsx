@@ -47,7 +47,7 @@ import {
 } from "@/lib/index-columns"
 import { columnFormulaValue, computeFormulaDisplay, formulaDisplayText, formulaFunctions, formulaProblem, seededRandom } from "@/lib/index-formula"
 import { DEFAULT_FORM_ID, layoutId, renameLayoutColumns, serializeIndexLayout, serializeNamedLayouts, tabLayout, type IndexLayout, type LayoutKind, type NamedLayout, type TabLayouts } from "@/lib/index-layouts"
-import { automaticLayoutFor, builtinLayoutFor, tabLayoutsOf } from "@/lib/index-layout-defaults"
+import { automaticLayoutFor, builtinLayoutFor, eraserLayoutStarters, tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
@@ -1306,6 +1306,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               sample={sampleRows[0]}
               sampleRow={sampleRows[0] ? { index: model.key, id: sampleRows[0].ID ?? "", tab: tab.original ?? tab.name } : undefined}
               forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((item) => ({ id: item.id, name: item.name }))]}
+              eraserStarters={tab.original ? eraserLayoutStarters(model.key, tab.original, mode) : []}
               disabled={pending || layoutSaving || tab.removed}
             />
           </section>

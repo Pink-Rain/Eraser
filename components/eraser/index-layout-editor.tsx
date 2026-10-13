@@ -1,19 +1,23 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Blocks, GripVertical, Heading, Paintbrush, Plus, RotateCcw, Settings2, Tag, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Blocks, Bookmark, GripVertical, Heading, LayoutTemplate, Paintbrush, Palette, Plus, RotateCcw, Settings2, Sparkles, Star, Tag, Trash2, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { LayoutBlockView, layoutBlockSummary } from "@/components/eraser/index-layout-blocks"
 import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/index-layout-view"
 import { RichTextField } from "@/components/eraser/rich-text"
+import { useIndexSettings } from "@/components/eraser/index-views"
+import { Tabs } from "@/components/eraser/view-editor-controls"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
+import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
 import { cardPalette } from "@/lib/index-cards"
+import { layoutStarters, type LayoutColumnInfo } from "@/lib/index-layout-defaults"
 import { foldName, indexColumnKinds, isImageSource, isNameColumnSpec, normalizeSpec, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import {
   arrangeLayout,
@@ -95,6 +99,7 @@ function placeField(layout: IndexLayout, column: string, place: Place, position?
 
 const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
 const group = "grid gap-2 rounded-xl border bg-muted/15 p-2.5"
+const groupTitle = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
 
 /** Une couleur : une pastille de la palette, une colonne Couleur (« {Couleur} »), ou aucune. */
 function ColorPick({ value, onChange, columns, disabled, label, allowAccent = true }: { value?: string; onChange: (value: string | undefined) => void; columns?: string[]; disabled?: boolean; label: string; allowAccent?: boolean }) {
@@ -200,7 +205,7 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
  * première ligne de l'onglet. Le point de départ est toujours la mise en page réellement
  * utilisée (celle réglée, celle d'Eraser, ou l'automatique écrite d'après les colonnes).
  */
-export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, resetLabel, disabled = false, forms, sampleRow }: {
+export function IndexLayoutEditor({ kind, columns, value, source = "saved", onChange, onReset, sample = {}, resetLabel, disabled = false, forms, sampleRow, eraserStarters }: {
   kind: LayoutKind
   /** Les colonnes que la mise en page peut placer. */
   columns: LayoutColumn[]
@@ -218,12 +223,17 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
   forms?: Array<{ id: string; name: string }>
   /** La ligne de l'aperçu (son identifiant, son onglet). */
   sampleRow?: { index: string; id: string; tab: string }
+  /** Les formes d'Eraser pour cet onglet (fiche de créature, survol d'un état…), proposées en formes de base. */
+  eraserStarters?: Array<{ key: string; label: string; hint: string; layout: IndexLayout }>
 }) {
   // La colonne qu'on glisse (le texte du glisser la porte aussi, pour un dépôt d'ailleurs).
   const [dragging, setDragging] = useState<string | null>(null)
   const [over, setOver] = useState<string | null>(null)
   // Le champ dont on ouvre les réglages (libellé, icône, couleur ; ou les réglages d'un bloc).
   const [editing, setEditing] = useState<string | null>(null)
+  // Les deux pages de l'éditeur : la mise en page (colonnes, sections), et l'apparence (accent, en-tête du survol).
+  const [page, setPage] = useState<"layout" | "look">("layout")
+  const [starting, setStarting] = useState(false)
   const hover = kind === "hover"
   const layout = value
   const placed = useMemo(() => new Set([...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))].map((field) => foldName(field.column))), [layout])
@@ -367,30 +377,25 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
     {blockPalette(place)}
   </span>
 
-  // L'aperçu : les champs de l'onglet avec le texte de sa première ligne, et les blocs remplis pareil.
-  const previewItems = columns.map((column) => ({ header: column.header, text: (sample[column.header] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html: sample[column.header] ?? "" }))
-  type PreviewItem = (typeof previewItems)[number] & { block?: LayoutBlock }
-  const preview = arrangeLayout<PreviewItem>(layout, previewItems, (item) => item.header, (field) => ({ header: field.column, text: "", html: "", block: field.block }))
-  const readColumn = (column: string) => previewItems.find((item) => sameColumn(item.header, column))?.text ?? ""
-  const htmlOf = (column: string) => previewItems.find((item) => sameColumn(item.header, column))?.html ?? ""
+  // La couleur d'accent résolue sur la première ligne : les sections de la page la montrent.
+  const readColumn = (column: string) => (sample[column] ?? sample[columns.find((item) => sameColumn(item.header, column))?.header ?? ""] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()
   const accent = resolveLayoutColor(layout.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
-  const previewField = (item: PreviewItem, field: LayoutField): ReactNode => item.block
-    ? <div className="grid gap-0.5">{!field.hideLabel && field.label && <span className="text-[10px] font-semibold text-muted-foreground">{field.label}</span>}<LayoutBlockView block={item.block} ctx={{ valueOf: readColumn, htmlOf, accent, compact: hover, preview: true, row: sampleRow }} /></div>
-    : <div className="grid gap-0.5">
-      {!field.hideLabel && <span className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground" style={field.color ? { color: resolveLayoutColor(field.color, accent, readColumn) } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || item.header}</span>}
-      <span className={cn("block min-h-6 truncate rounded-md border bg-background/70 px-1.5 py-1", field.large ? "font-display text-sm font-semibold" : "text-[11px]")}>{item.text || <span className="text-muted-foreground/60">—</span>}</span>
-    </div>
-  const sourceLabel = source === "eraser" ? "la mise en page d’Eraser" : source === "automatic" ? "l’affichage automatique" : "la mise en page enregistrée"
+  const sourceLabel = source === "eraser" ? "forme d’Eraser" : source === "automatic" ? "affichage automatique" : "réglée à la main"
 
   return <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_20rem]">
     <div className="grid content-start gap-3">
-      <p className="flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
-        <span>{hover ? "Le survol" : "Le formulaire"} affiché ici est {sourceLabel}{source !== "saved" ? " : modifie-le, il sera enregistré pour tout le monde." : "."}</span>
-        {source === "saved" && onReset && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-[11px]" disabled={disabled} onClick={onReset}><RotateCcw className="size-3" />{resetLabel ?? "Revenir à l’affichage d’Eraser"}</Button>}
-      </p>
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-1.5">
+        <Tabs ariaLabel="Pages de l’éditeur" value={page} onChange={setPage} options={[{ value: "layout", label: "Mise en page", icon: <LayoutTemplate className="size-3.5" /> }, { value: "look", label: "Apparence", icon: <Palette className="size-3.5" /> }]} />
+        <span className="ml-auto flex flex-wrap items-center gap-x-2 gap-y-1 text-[11px] text-muted-foreground">
+          <span className="rounded-full border px-2 py-0.5">{sourceLabel}</span>
+          {source === "saved" && onReset && <Button type="button" variant="link" size="sm" className="h-auto p-0 text-[11px]" disabled={disabled} onClick={onReset}><RotateCcw className="size-3" />{resetLabel ?? "Revenir à l’affichage d’Eraser"}</Button>}
+          <Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet"><Sparkles className="size-3.5" />Forme de base</Button>
+        </span>
+      </div>
 
-      <div className={cn(group, "sm:grid-cols-2")}>
+      {page === "look" && <div className={cn(group, "sm:grid-cols-2")}>
         <span className={smallLabel}>Couleur d’accent <span className="font-normal">— titres de sections, séparateurs, boutons</span><ColorPick label="Couleur d’accent" value={layout.accent} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(accent) => set({ ...layout, accent })} /></span>
+        <span className={cn(smallLabel, "self-end")}><label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(layout.tabs)} onCheckedChange={(checked) => set({ ...layout, tabs: checked === true || undefined })} />Sections en onglets <span className="font-normal text-muted-foreground">— une section à la fois, la colonne latérale reste</span></label></span>
         {hover && <div className="grid gap-2 sm:col-span-2">
           <div className="flex flex-wrap items-end gap-x-3 gap-y-2">
             <label className={smallLabel}>Sous-titre
@@ -423,12 +428,27 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
                 </label>
                 <label className="grid min-w-28 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Taille</span><span className="font-normal tabular-nums">{medallion.size ?? 44} px</span></span><input type="range" min={20} max={160} step={2} value={medallion.size ?? 44} disabled={disabled} onChange={(event) => update({ size: Number(event.target.value) })} className="accent-primary" /></label>
                 <label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(medallion.round)} onCheckedChange={(checked) => update({ round: checked === true || undefined })} />Rond</label>
-                <label className="flex items-center gap-1.5 pb-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(medallion.tint)} onCheckedChange={(checked) => update({ tint: checked === true || undefined })} />Fond à la couleur de l’accent</label>
+                <span className={smallLabel}>Fond<Segmented label="Fond du médaillon" value={medallion.tint ? "accent" : medallion.bare ? "none" : "neutral"} disabled={disabled} onChange={(fond) => update({ tint: fond === "accent" || undefined, bare: fond === "none" || undefined })} options={[{ value: "neutral", label: "Neutre", title: "Un cadre et un fond discret" }, { value: "accent", label: "Accent", title: "Un médaillon à la couleur de l’accent" }, { value: "none", label: "Aucun", title: "Rien derrière : une image détourée, un pictogramme" }]} /></span>
                 <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set({ ...layout, image: undefined, tint: undefined, medallion: undefined })} aria-label="Retirer le médaillon" title="Retirer le médaillon"><X /></Button>
               </div>
             })()}
+          {/* La bannière : une image en travers au-dessus du nom. */}
+          {!layout.banner
+            ? <div><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => set({ ...layout, banner: { column: columns.find((column) => normalizeSpec(column.spec).kind === "file" || /image|portrait|banni|illustration/i.test(column.header))?.header, height: 110 } })}><Plus />Ajouter une bannière</Button></div>
+            : <div className="flex flex-wrap items-end gap-x-3 gap-y-2 rounded-lg border border-dashed bg-background/40 p-2">
+              <label className={smallLabel}>Bannière
+                <NativeSelect disabled={disabled} value={layout.banner.column ?? ""} onChange={(event) => set({ ...layout, banner: { ...layout.banner, column: event.target.value || undefined } })} className="h-8 py-0 text-xs">
+                  <NativeSelectOption value="">— Choisir une colonne image —</NativeSelectOption>
+                  {columns.map((column) => <NativeSelectOption key={column.header} value={column.header}>{column.header}</NativeSelectOption>)}
+                </NativeSelect>
+              </label>
+              <label className="grid min-w-28 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Hauteur</span><span className="font-normal tabular-nums">{layout.banner.height ?? 110} px</span></span><input type="range" min={40} max={400} step={5} value={layout.banner.height ?? 110} disabled={disabled} onChange={(event) => set({ ...layout, banner: { ...layout.banner, height: Number(event.target.value) } })} className="accent-primary" /></label>
+              <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set({ ...layout, banner: undefined })} aria-label="Retirer la bannière" title="Retirer la bannière"><X /></Button>
+            </div>}
         </div>}
-      </div>
+      </div>}
+
+      {page === "layout" && <>
 
       <div className={`grid gap-2 rounded-xl border p-3 ${over === "aside" ? "border-primary bg-primary/5" : "bg-muted/10"}`} {...dropProps({ area: "aside" }, "aside")}>
         <div className="flex flex-wrap items-center justify-between gap-2">
@@ -514,10 +534,36 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
           <label className="flex items-center gap-1.5"><input type="radio" disabled={disabled} checked={(layout.rest ?? (hover ? "hide" : "show")) === "hide"} onChange={() => set({ ...layout, rest: "hide" })} />sont masquées</label>
         </div>
       </div>
+      </>}
     </div>
+
+    {starting && <LayoutStarterDialog kind={kind} columns={columns} sample={sample} sampleRow={sampleRow} eraserStarters={eraserStarters} onPick={(picked) => { set(picked); setStarting(false); setPage("layout") }} onClose={() => setStarting(false)} />}
 
     <aside className="grid content-start gap-2 rounded-xl border bg-card/70 p-3 xl:sticky xl:top-0 xl:self-start">
       <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu</p>
+      <LayoutPreview kind={kind} layout={layout} columns={columns} sample={sample} sampleRow={sampleRow} />
+    </aside>
+  </div>
+}
+
+/** L'aperçu d'une mise en page sur la première ligne de l'onglet : l'en-tête du survol (médaillon, bannière, nom, sous-titre), puis les sections. */
+function LayoutPreview({ kind, layout, columns, sample = {}, sampleRow }: { kind: LayoutKind; layout: IndexLayout; columns: LayoutColumn[]; sample?: Record<string, string>; sampleRow?: { index: string; id: string; tab: string } }) {
+  const hover = kind === "hover"
+  const previewItems = columns.map((column) => ({ header: column.header, text: (sample[column.header] ?? "").replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim(), html: sample[column.header] ?? "" }))
+  type PreviewItem = (typeof previewItems)[number] & { block?: LayoutBlock }
+  const preview = arrangeLayout<PreviewItem>(layout, previewItems, (item) => item.header, (field) => ({ header: field.column, text: "", html: "", block: field.block }))
+  const readColumn = (column: string) => previewItems.find((item) => sameColumn(item.header, column))?.text ?? ""
+  const htmlOf = (column: string) => previewItems.find((item) => sameColumn(item.header, column))?.html ?? ""
+  const accent = resolveLayoutColor(layout.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
+  const previewField = (item: PreviewItem, field: LayoutField): ReactNode => item.block
+    ? <div className="grid gap-0.5">{!field.hideLabel && field.label && <span className="text-[10px] font-semibold text-muted-foreground">{field.label}</span>}<LayoutBlockView block={item.block} ctx={{ valueOf: readColumn, htmlOf, accent, compact: hover, preview: true, row: sampleRow }} /></div>
+    : <div className="grid gap-0.5">
+      {!field.hideLabel && <span className="flex items-center gap-1 text-[10px] font-semibold text-muted-foreground" style={field.color ? { color: resolveLayoutColor(field.color, accent, readColumn) } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || item.header}</span>}
+      <span className={cn("block min-h-6 truncate rounded-md border bg-background/70 px-1.5 py-1", field.large ? "font-display text-sm font-semibold" : "text-[11px]")}>{item.text || <span className="text-muted-foreground/60">—</span>}</span>
+    </div>
+  const bannerValue = layout.banner?.column ? readColumn(layout.banner.column) : ""
+  return <div className="grid gap-2">
+      {hover && bannerValue && isImageSource(bannerValue) && <div className="-mx-3 -mt-2 overflow-hidden rounded-t-lg" style={{ height: Math.round((layout.banner?.height ?? 110) * 0.6) }}><IndexImage value={bannerValue} alt="" className="size-full object-cover" /></div>}
       {hover && (() => {
         const medallion = layout.medallion ?? (layout.tint ? { tint: true, size: 40 } : layout.image ? { column: layout.image, size: 44 } : undefined)
         const value = medallion?.column ? readColumn(medallion.column) : ""
@@ -538,6 +584,44 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
         render={(item, field) => previewField(item, field)}
         renderRest={(rest) => <div className="grid gap-2 md:grid-cols-2">{rest.map((item) => <div key={item.header}>{previewField(item, { column: item.header })}</div>)}</div>}
       />
-    </aside>
   </div>
+}
+
+/**
+ * « Forme de base » : les formes d'Eraser pour cet onglet, les formes de départ génériques
+ * (remplies avec ses colonnes) et les presets enregistrés, chacune en vignette avec son aperçu
+ * sur une vraie ligne. En choisir une remplace la mise en page affichée (tout se modifie après).
+ */
+function LayoutStarterDialog({ kind, columns, sample, sampleRow, eraserStarters = [], onPick, onClose }: { kind: LayoutKind; columns: LayoutColumn[]; sample?: Record<string, string>; sampleRow?: { index: string; id: string; tab: string }; eraserStarters?: Array<{ key: string; label: string; hint: string; layout: IndexLayout }>; onPick: (layout: IndexLayout) => void; onClose: () => void }) {
+  const { layoutPresets } = useIndexSettings("")
+  const presets = layoutPresets.filter((preset) => preset.kind === kind)
+  const infos: LayoutColumnInfo[] = columns
+  const starters = useMemo(() => layoutStarters.filter((starter) => starter.kind === kind).map((starter) => ({ key: starter.key, label: starter.label, hint: starter.hint, layout: starter.build(infos) })), [infos, kind])
+  const tile = (key: string, title: string, hint: string, layout: IndexLayout) => <button key={key} type="button" onClick={() => onPick(layout)} className="group grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md">
+    <span className="pointer-events-none block max-h-56 min-h-24 overflow-hidden rounded-lg bg-muted/30 p-2"><span className="block origin-top-left scale-[0.78]" style={{ width: "128%" }}><LayoutPreview kind={kind} layout={layout} columns={columns} sample={sample} sampleRow={sampleRow} /></span></span>
+    <span><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span></span>
+  </button>
+  const what = kind === "form" ? "fiche" : "survol"
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[min(94vw,1100px)]">
+      <DialogHeader>
+        <DialogTitle className="font-display text-2xl">Forme de base {kind === "form" ? "de la fiche" : "du survol"}</DialogTitle>
+        <DialogDescription>Un point de départ, rempli avec les colonnes de cet onglet et sa première ligne. Tout se mélange et se modifie ensuite ; la mise en page affichée est remplacée.</DialogDescription>
+      </DialogHeader>
+      {eraserStarters.length > 0 && <section className="grid gap-2">
+        <p className={groupTitle}><Star className="size-3.5" />{kind === "form" ? "La fiche d’Eraser pour cet onglet" : "Le survol d’Eraser pour cet onglet"}</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{eraserStarters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.layout))}</div>
+      </section>}
+      <section className="grid gap-2">
+        <p className={groupTitle}><Sparkles className="size-3.5" />Formes de départ</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.layout))}</div>
+      </section>
+      <section className="grid gap-2">
+        <p className={groupTitle}><Bookmark className="size-3.5" />Presets enregistrés</p>
+        {presets.length
+          ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{presets.map((preset) => tile(preset.id, preset.name, `Enregistré le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}. Les colonnes absentes ici sont sautées.`, preset.layout))}</div>
+          : <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun preset pour l’instant : « Preset » dans le panneau garde {kind === "form" ? "une fiche" : "un survol"} pour {what === "fiche" ? "la" : "le"} reprendre dans n’importe quel index.</p>}
+      </section>
+    </DialogContent>
+  </Dialog>
 }

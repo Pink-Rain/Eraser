@@ -218,7 +218,11 @@ export type ResolvedLayout = {
   icon?: string
   tint?: boolean
   /** Le médaillon en tête : la valeur (adresse d'image ou icône), sa taille, rond, teinté. */
-  medallion?: { value: string; size?: number; round?: boolean; tint?: boolean }
+  medallion?: { value: string; size?: number; round?: boolean; tint?: boolean; bare?: boolean }
+  /** Une image en bannière au-dessus du nom (la valeur de la colonne), et sa hauteur. */
+  banner?: { value: string; height?: number }
+  /** Les sections en onglets. */
+  tabs?: boolean
   nameInAccent?: boolean
   /** La couleur d'accent de la mise en page, résolue pour cette ligne. */
   accent?: string

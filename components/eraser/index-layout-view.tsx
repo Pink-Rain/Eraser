@@ -81,6 +81,20 @@ function SectionView<T>({ section, accent, compact, readColumn, children }: { se
   </section>
 }
 
+/** Les sections en onglets : une barre d'onglets (titre, icône), une section à la fois, la première ouverte. */
+function SectionTabs<T>({ sections, accent, compact, render }: { sections: Array<ArrangedSection<T>>; accent: string; compact: boolean; render: (section: ArrangedSection<T>) => ReactNode }) {
+  const [active, setActive] = useState(sections[0]?.id ?? "")
+  const current = sections.find((section) => section.id === active) ?? sections[0]
+  return <div className={cn("grid min-w-0 content-start", compact ? "gap-2" : "gap-3")}>
+    <div role="tablist" className="flex flex-wrap gap-0 border-b">
+      {sections.map((section, index) => <button key={section.id} type="button" role="tab" aria-selected={section.id === current?.id} onClick={() => setActive(section.id)} className={cn("-mb-px inline-flex items-center gap-1.5 border-b-2 font-semibold uppercase tracking-[.12em] transition", compact ? "h-7 px-2 text-[10px]" : "h-8 px-3 text-xs", section.id === current?.id ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground")} style={section.id === current?.id ? { color: accent } : undefined}>
+        {section.icon && <IndexIconGlyph icon={section.icon} className={compact ? "size-3" : "size-3.5"} filled={false} />}{section.title || `Section ${index + 1}`}
+      </button>)}
+    </div>
+    {current && render(current)}
+  </div>
+}
+
 /**
  * Une mise en page rangée (`arrangeLayout`) : la colonne latérale (à gauche ou à droite),
  * puis les sections et leurs lignes de champs, et enfin ce qui n'est pas placé. `render`
@@ -100,13 +114,16 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
 }) {
   const gap = compact ? "gap-2.5" : "gap-4"
   const color = accent ?? resolveLayoutColor(arranged.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
+  const sectionBody = (section: ArrangedSection<T>) => <SectionView key={section.id} section={section} accent={color} compact={compact} readColumn={readColumn}>
+    {section.rows.map((row) => <div key={row.id} className={layoutRowClass} style={layoutRowStyle(row.fields)}>
+      {/* En colonne : un champ peut occuper toute la hauteur de sa ligne (une case à cocher s'aligne en bas). */}
+      {row.fields.map((field) => <div key={field.column} className="flex min-w-0 flex-col self-stretch">{render(field.item, field)}</div>)}
+    </div>)}
+  </SectionView>
   const main = <div className={`grid min-w-0 content-start ${gap}`}>
-    {arranged.sections.map((section) => <SectionView key={section.id} section={section} accent={color} compact={compact} readColumn={readColumn}>
-      {section.rows.map((row) => <div key={row.id} className={layoutRowClass} style={layoutRowStyle(row.fields)}>
-        {/* En colonne : un champ peut occuper toute la hauteur de sa ligne (une case à cocher s'aligne en bas). */}
-        {row.fields.map((field) => <div key={field.column} className="flex min-w-0 flex-col self-stretch">{render(field.item, field)}</div>)}
-      </div>)}
-    </SectionView>)}
+    {arranged.tabs && arranged.sections.length > 1
+      ? <SectionTabs sections={arranged.sections} accent={color} compact={compact} render={(section) => sectionBody({ ...section, title: undefined, icon: undefined, collapsible: undefined })} />
+      : arranged.sections.map(sectionBody)}
     {arranged.rest.length > 0 && renderRest && <section className={`grid min-w-0 content-start ${compact ? "gap-2" : "gap-3"}`}>
       {arranged.sections.length > 0 && restTitle && <p className={`font-semibold uppercase tracking-[.14em] text-muted-foreground ${compact ? "text-[10px]" : "text-xs"}`}>{restTitle}</p>}
       {renderRest(arranged.rest)}

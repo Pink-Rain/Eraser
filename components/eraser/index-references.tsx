@@ -344,6 +344,7 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
     asideWidth: layout.asideWidth ?? "md",
     asideSide: layout.asideSide ?? "left" as const,
     sections: layout.sections.map((section) => ({ ...section, rows: section.rows.map((row) => ({ id: row.id, fields: wrap(row.fields) })) })),
+    ...(layout.tabs ? { tabs: true } : {}),
     rest: [] as ResolvedLayoutField[],
   }
   const nameColor = layout.nameInAccent ? accent : color
@@ -356,9 +357,9 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
   const medallionGlyph = medallionValue && !isImageSource(medallionValue) ? parseGlyphValue(medallionValue) : null
   const medallionSize = medallion?.size ?? 44
   const medallionNode = medallion
-    ? <span className={cn("flex shrink-0 items-center justify-center overflow-hidden shadow-sm", medallion.round ? "rounded-full" : "rounded-xl", !medallion.tint && "border bg-muted/40")} style={{ width: medallionSize, height: medallionSize, ...(medallion.tint ? { background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)`, color: "#fff" } : { color: accent }) }}>
+    ? <span className={cn("flex shrink-0 items-center justify-center overflow-hidden", medallion.round ? "rounded-full" : "rounded-xl", !medallion.tint && !medallion.bare && "border bg-muted/40 shadow-sm", medallion.tint && "shadow-sm")} style={{ width: medallionSize, height: medallionSize, ...(medallion.tint ? { background: `radial-gradient(circle at 35% 30%, ${accent}, ${accent}cc 60%, #1d140c 140%)`, color: "#fff" } : { color: accent }) }}>
       {medallionValue && isImageSource(medallionValue)
-        ? <IndexImage value={medallionValue} alt="" className="size-full object-cover" fallback={<IndexIconGlyph icon="file-text" className="size-[45%]" filled={false} />} />
+        ? <IndexImage value={medallionValue} alt="" className={medallion.bare && !medallion.tint ? "size-full object-contain" : "size-full object-cover"} fallback={<IndexIconGlyph icon="file-text" className="size-[45%]" filled={false} />} />
         : medallionGlyph && (medallionGlyph.icon || medallionGlyph.emoji)
           ? <IndexIconGlyph icon={medallionGlyph.icon} emoji={medallionGlyph.emoji} className="size-[50%]" filled={Boolean(medallionGlyph.emoji) || Boolean(medallion.tint)} stroke={medallion.tint ? accent : undefined} />
           : <IndexIconGlyph icon={medallion.tint ? "clock" : "file-text"} className="size-[45%]" filled={Boolean(medallion.tint)} stroke={medallion.tint ? accent : undefined} />}
@@ -367,7 +368,12 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
   // L'icône devant le nom (colonne Icône d'un modificateur), de la couleur du nom.
   const inlineIcon = layout.icon && hasGlyph ? <span className="mr-1 inline-flex translate-y-[0.12em]" style={{ color: nameColor ?? accent }}><IndexIconGlyph icon={look.icon} emoji={look.emoji} className="size-[1em]" filled={Boolean(look.emoji)} /></span> : null
   const subtitle = layout.subtitle || reference.type || (layout.icon ? "" : reference.tab)
+  // La bannière : une image en travers, au-dessus du nom (elle déborde du rembourrage de la carte).
+  const banner = layout.banner?.value && isImageSource(layout.banner.value)
+    ? <div className="-mx-3.5 -mt-3.5 mb-1 overflow-hidden rounded-t-2xl" style={{ height: layout.banner.height ?? 110 }}><IndexImage value={layout.banner.value} alt="" className="size-full object-cover" /></div>
+    : null
   return <div className="grid gap-2.5">
+    {banner}
     <div className="flex items-start gap-3">
       {medallionNode}
       <div className="min-w-0">
