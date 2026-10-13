@@ -6,10 +6,10 @@ import { BookOpen, ChevronDown, ChevronLeft, ChevronRight, ExternalLink, ImageOf
 import { Button } from "@/components/ui/button"
 import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { calendarsFromTables, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
+import { addDays, addMonths, calendarsFromTables, compareCalendarDates, dateFromDayNumber, dayNumber, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, weekdayOf, weekStartOf, yearLength, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
 import { parseGlyphValue } from "@/lib/index-columns"
 import { cellNumber } from "@/lib/index-stats"
-import { dashboardTileKinds, dashboardTileValue, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, rowTree, sortLayoutRows, timelineEntries, treeSize, type KanbanLane, type RowTreeNode, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
+import { calendarScaleOf, calendarScales, dashboardTileKinds, dashboardTileValue, DEFAULT_ITEM_CARD, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, linkedTiles, rowTree, sortLayoutRows, textWithFormulas, tileGaugeValue, timelineEntries, treeSize, viewLayoutKinds, viewPalette, type CalendarScale, type DashboardTile, type KanbanLane, type RowTreeNode, type TabPresentations, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -40,6 +40,9 @@ export type ViewLayoutProps = {
   renderForm?: (rowKey: string, formId: string) => ReactNode
   /** Ouvrir la page de la ligne (« Au clic : ouvrir la page ») ; absent : la fiche. */
   onOpenPage?: (rowKey: string) => void
+  /** Tableau de bord : les autres vues de l'onglet (tuile « vue ») ; une statistique de l'index dessinée (tuile « stat »). */
+  presentations?: TabPresentations
+  renderStat?: (statId: string) => ReactNode
   empty: ReactNode
   /** Réglé par la vue elle-même d'après « Au clic » : ouvrir la fiche, la ligne choisie (à côté, dessous), rien. */
   openSheet?: (rowKey: string) => void
@@ -566,94 +569,241 @@ function useCalendars() {
   return calendars
 }
 
-/** Une entrée du calendrier : pastille, point de couleur ou barre, avec son icône. */
-function CalendarEntry({ row, date, calendar, color, props }: { row: string; date: CalendarDate; calendar: CalendarDefinition; color?: string; props: ViewLayoutProps }) {
+/** Une entrée du calendrier : pastille, point de couleur ou barre, avec son icône ; sa jauge dessous si la vue en a une. */
+function CalendarEntry({ row, date, calendar, color, props, style: wanted }: { row: string; date: CalendarDate; calendar: CalendarDefinition; color?: string; props: ViewLayoutProps; style?: ViewLook["entryStyle"] }) {
   const look = props.layout.look ?? {}
-  const style = look.entryStyle ?? "pill"
+  const style = wanted ?? look.entryStyle ?? "pill"
   const tint = color ?? accentOf(look)
-  const common = "flex w-full items-center gap-1 text-left text-[11px] font-medium"
+  const common = `flex w-full items-center gap-1 text-left text-[11px] font-medium ${props.inert ? "" : "cursor-pointer"}`
   const label = <span className="truncate">{props.nameOf(row) || "Sans nom"}</span>
   const icon = <RowIcon layout={props.layout} row={row} valueOf={props.valueOf} className="size-3" />
   const open = () => props.onOpen(row)
   const title = formatCalendarDate(date, calendar)
-  if (style === "dot") return <button type="button" onClick={open} title={title} className={`${common} rounded px-1 py-0.5 hover:bg-muted`}><span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tint }} />{icon}{label}</button>
-  if (style === "bar") return <button type="button" onClick={open} title={title} className={`${common} rounded-r border-l-[3px] bg-muted/60 px-1.5 py-0.5 hover:bg-muted`} style={{ borderLeftColor: tint }}>{icon}{label}</button>
-  return <button type="button" onClick={open} title={title} className={`${common} rounded px-1.5 py-0.5 hover:brightness-95`} style={{ backgroundColor: `color-mix(in srgb, ${tint} 14%, transparent)`, color: tint }}>{icon}{label}</button>
+  const gauge = props.layout.gauge ? <div className="px-1"><RowGauge layout={props.layout} row={row} valueOf={props.valueOf} color={tint} /></div> : null
+  const button = style === "dot" ? <button type="button" onClick={open} title={title} className={`${common} rounded px-1 py-0.5 hover:bg-muted`}><span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: tint }} />{icon}{label}</button>
+    : style === "bar" ? <button type="button" onClick={open} title={title} className={`${common} rounded-r border-l-[3px] bg-muted/60 px-1.5 py-0.5 hover:bg-muted`} style={{ borderLeftColor: tint }}>{icon}{label}</button>
+      : <button type="button" onClick={open} title={title} className={`${common} rounded px-1.5 py-0.5 hover:brightness-95`} style={{ backgroundColor: `color-mix(in srgb, ${tint} 14%, transparent)`, color: tint }}>{icon}{label}</button>
+  return gauge ? <div className="grid gap-0.5">{button}{gauge}</div> : button
 }
 
+type DatedRow = { row: string; date: CalendarDate }
+
+/**
+ * Le calendrier : les lignes placées à leur date dans un calendrier du monde (ou le réel), à
+ * l'échelle réglée — année, mois, semaine, jour, agenda, saisons — chacune sous sa forme. Les
+ * échelles s'emboîtent : un mois de l'année ouvre le mois, un jour du mois ouvre le jour ; la
+ * barre des échelles passe de l'une à l'autre. L'élément, le clic, la formule des groupes et la
+ * jauge des lignes sont ceux de toutes les vues.
+ */
 function CalendarLayout(props: ViewLayoutProps) {
   const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
   const look = layout.look ?? {}
   const calendars = useCalendars()
   const calendar = (!layout.calendar || layout.calendar === REAL_CALENDAR ? realCalendar : calendars?.find((candidate) => fold(candidate.name) === fold(layout.calendar!))) ?? (calendars ? realCalendar : null)
-  const dated = useMemo(() => !calendar || !layout.dateColumn ? [] : rows.flatMap((row) => { const date = parseCalendarDate(valueOf(row, layout.dateColumn!), calendar); return date ? [{ row, date }] : [] }), [calendar, layout.dateColumn, rows, valueOf])
+  const dated = useMemo<DatedRow[]>(() => !calendar || !layout.dateColumn ? [] : rows.flatMap((row) => { const date = parseCalendarDate(valueOf(row, layout.dateColumn!), calendar); return date ? [{ row, date }] : [] }).sort((left, right) => compareCalendarDates(left.date, right.date)), [calendar, layout.dateColumn, rows, valueOf])
   const today = new Date()
-  const start = dated[0]?.date ?? (calendar === realCalendar ? { year: today.getFullYear(), month: today.getMonth(), day: 1 } : { year: 1, month: 0, day: 1 })
-  const [shown, setShown] = useState<{ year: number; month: number } | null>(null)
+  const start: CalendarDate = dated[0]?.date ?? (calendar === realCalendar ? { year: today.getFullYear(), month: today.getMonth(), day: 1 } : { year: 1, month: 0, day: 1 })
+  const [scaleOverride, setScale] = useState<CalendarScale | null>(null)
+  const [cursor, setCursor] = useState<CalendarDate | null>(null)
   const [expandedDays, setExpandedDays] = useState<Set<number>>(() => new Set())
-  const current = shown ?? { year: start.year, month: start.month }
+  const card = cardFor(props)
+  const scale = scaleOverride ?? calendarScaleOf(layout)
+  const at = cursor ?? start
   if (!layout.dateColumn) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Choisis la colonne de la date dans les réglages de cette vue.</p>
   if (!calendar) return <p className="py-10 text-center text-sm text-muted-foreground">Chargement du calendrier…</p>
   if (!calendar.months.length) return <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Le calendrier « {calendar.name} » n’a pas encore de mois : ajoute-les dans l’Index des calendriers, onglet Mois.</p>
+  const forms = layout.calendarForms ?? {}
   const week = calendar.weekdays.length || 7
-  const length = monthLength(calendar, current.year, current.month)
-  const offset = firstWeekdayOf(calendar, current.year, current.month)
-  const cells = [...Array(offset).fill(null), ...Array.from({ length }, (_, index) => index + 1)]
-  const move = (step: number) => {
-    let month = current.month + step
-    let year = current.year
-    if (month < 0) { month = calendar.months.length - 1; year -= 1 }
-    if (month >= calendar.months.length) { month = 0; year += 1 }
-    setShown({ year, month })
-    setExpandedDays(new Set())
-  }
-  const season = seasonOf(calendar, current.month)
-  const undated = rows.length - dated.length
-  const sorted = [...dated].sort((left, right) => left.date.year - right.date.year || left.date.month - right.date.month || left.date.day - right.date.day)
-  const monthOf = (date: CalendarDate) => `${date.year}:${date.month}`
   const accent = accentOf(look)
+  const drill = !layout.calendarStay
+  const fields = (layout.fields ?? []).filter((field) => field !== layout.dateColumn)
+  const season = seasonOf(calendar, at.month)
   const seasonTint = layout.monthStyle === "season" && season?.color ? season.color : undefined
   const headingClass = `${look.titleFont === "sans" ? "" : "font-display"} text-xl font-semibold ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`
-  return <div className="space-y-3">
-    {look.calendarMode === "agenda"
-      // L'agenda : toutes les dates à la suite, rangées par mois.
-      ? <div className="grid gap-4">{[...new Set(sorted.map((entry) => monthOf(entry.date)))].map((key) => {
-        const entries = sorted.filter((entry) => monthOf(entry.date) === key)
-        const first = entries[0].date
-        const monthSeason = seasonOf(calendar, first.month)
-        return <section key={key} className="grid gap-1.5">
-          <h3 className={`${headingClass} flex items-center gap-2 border-b pb-1`} style={layout.monthStyle === "season" && monthSeason?.color ? { color: monthSeason.color, borderColor: monthSeason.color } : { borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }}>{calendar.months[first.month]?.name} {first.year}{calendar.era ? ` ${calendar.era}` : ""}{!layout.hideSeasons && monthSeason && <span className="text-xs font-normal text-muted-foreground">· {monthSeason.name}</span>}</h3>
-          <ol className={`grid ${gaps[look.density ?? "normal"]}`}>{entries.map(({ row, date }) => {
-            const color = rowColor(layout, row, valueOf, optionsOf)
-            return <li key={row} className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-3">
-              <span className="grid justify-items-center rounded-lg border bg-card py-1 leading-none" style={{ borderColor: color ?? `color-mix(in srgb, ${accent} 40%, transparent)` }}><span className="font-display text-xl font-semibold tabular-nums" style={{ color: color ?? accent }}>{date.day}</span><span className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{calendar.weekdays[(firstWeekdayOf(calendar, date.year, date.month) + date.day - 1) % week]?.slice(0, 3) ?? ""}</span></span>
-              <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== layout.dateColumn)} framed={look.surface !== "plain"} />
-            </li>
-          })}</ol>
-        </section>
-      })}{!sorted.length && <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Aucune date lisible pour l’instant.</p>}</div>
-      : <>
-        <div className={`flex flex-wrap items-center justify-between gap-2 ${seasonTint ? "rounded-xl px-3 py-2" : ""}`} style={seasonTint ? { backgroundColor: `color-mix(in srgb, ${seasonTint} 12%, transparent)`, borderLeft: `4px solid ${seasonTint}` } : undefined}>
-          <div className="flex items-center gap-1"><Button type="button" size="icon-sm" variant="outline" aria-label="Mois précédent" onClick={() => move(-1)}><ChevronLeft /></Button><Button type="button" size="icon-sm" variant="outline" aria-label="Mois suivant" onClick={() => move(1)}><ChevronRight /></Button></div>
-          <h3 className={headingClass} style={seasonTint ? { color: seasonTint } : undefined}>{calendar.months[current.month]?.name} {current.year}{calendar.era ? ` ${calendar.era}` : ""}</h3>
-          <span className="flex items-center gap-2 text-xs text-muted-foreground">{season && !layout.hideSeasons && <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5" style={season.color ? { borderColor: season.color, color: season.color } : undefined}>{season.name}</span>}{calendar.name}</span>
+  const undated = rows.length - dated.length
+  const era = calendar.era ? ` ${calendar.era}` : ""
+  const monthName = (month: number) => calendar.months[month]?.name ?? ""
+  const weekdayName = (date: CalendarDate, short = false) => { const name = calendar.weekdays[weekdayOf(calendar, date)] ?? ""; return short ? name.slice(0, 3) : name }
+  const sameDay = (left: CalendarDate, right: CalendarDate) => compareCalendarDates(left, right) === 0
+  const entriesOn = (date: CalendarDate) => dated.filter((entry) => sameDay(entry.date, date))
+  const entriesInMonth = (year: number, month: number) => dated.filter((entry) => entry.date.year === year && entry.date.month === month)
+  const colorOf = (row: string) => rowColor(layout, row, valueOf, optionsOf)
+  const formula = (group: DatedRow[], color?: string) => layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={group.map((entry) => entry.row)} valueOf={valueOf} color={color} /> : null
+  const goMonth = (year: number, month: number) => { setCursor({ year, month, day: 1 }); setScale("month"); setExpandedDays(new Set()) }
+  const goDay = (date: CalendarDate) => { setCursor(date); setScale("day") }
+  const move = (step: number) => {
+    setExpandedDays(new Set())
+    if (scale === "year" || scale === "seasons") setCursor({ ...at, year: at.year + step })
+    else if (scale === "month") setCursor({ ...addMonths(calendar, at.year, at.month, step), day: 1 })
+    else if (scale === "week") setCursor(addDays(calendar, at, step * week))
+    else if (scale === "day") setCursor(addDays(calendar, at, step))
+  }
+  const title = scale === "year" || scale === "seasons" ? `${at.year}${era}`
+    : scale === "month" ? `${monthName(at.month)} ${at.year}${era}`
+      : scale === "week" ? `Semaine du ${formatCalendarDate(weekStartOf(calendar, at), calendar)}`
+        : scale === "day" ? `${weekdayName(at)} ${formatCalendarDate(at, calendar)}`.trim()
+          : "Agenda"
+  const element = (row: string, extraFields = fields) => card?.(row) ?? <Item row={row} props={props} fields={extraFields} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />
+  const dayButton = (date: CalendarDate, label: ReactNode, className = "") => drill
+    ? <button type="button" onClick={() => goDay(date)} className={`${className} rounded hover:bg-muted`} title="Ouvrir ce jour">{label}</button>
+    : <span className={className}>{label}</span>
+  const monthButton = (year: number, month: number, label: ReactNode, className = "") => drill
+    ? <button type="button" onClick={() => goMonth(year, month)} className={`${className} rounded hover:bg-muted`} title="Ouvrir ce mois">{label}</button>
+    : <span className={className}>{label}</span>
+  // Les cases d'un mois : les vides avant le 1er, puis les jours.
+  const cellsOf = (year: number, month: number) => [...Array(firstWeekdayOf(calendar, year, month)).fill(null) as null[], ...Array.from({ length: monthLength(calendar, year, month) }, (_, index) => index + 1)]
+  const bannerSrc = layout.calendarBanner === "fixed" ? layout.bannerImage ?? "" : layout.calendarBanner === "month" ? calendar.months[at.month]?.image ?? "" : layout.calendarBanner === "season" ? season?.image ?? "" : ""
+  const banner = bannerSrc ? <CoverImage src={bannerSrc} className={`w-full object-cover ${radii[look.radius ?? "md"]}`} style={{ height: layout.bannerHeight ?? 120 }} /> : null
+  const switcher = layout.calendarSwitcher ? <div role="tablist" className="flex flex-wrap gap-0.5 rounded-lg border bg-muted/40 p-0.5">{calendarScales.map((option) => <button key={option.value} type="button" role="tab" aria-selected={scale === option.value} onClick={() => { setScale(option.value); setExpandedDays(new Set()) }} className={`rounded-md px-2 py-0.5 text-[11px] font-semibold ${scale === option.value ? "bg-background shadow-sm" : "text-muted-foreground hover:text-foreground"}`} style={scale === option.value ? { color: accent } : undefined}>{option.label}</button>)}</div> : null
+  const header = <div className={`flex flex-wrap items-center justify-between gap-2 ${seasonTint ? "rounded-xl px-3 py-2" : ""}`} style={seasonTint ? { backgroundColor: `color-mix(in srgb, ${seasonTint} 12%, transparent)`, borderLeft: `4px solid ${seasonTint}` } : undefined}>
+    <div className="flex items-center gap-1">{scale !== "agenda" && <><Button type="button" size="icon-sm" variant="outline" aria-label="Précédent" onClick={() => move(-1)}><ChevronLeft /></Button><Button type="button" size="icon-sm" variant="outline" aria-label="Suivant" onClick={() => move(1)}><ChevronRight /></Button></>}{scaleOverride && scaleOverride !== calendarScaleOf(layout) && !layout.calendarSwitcher && <Button type="button" size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setScale(null)}>Revenir</Button>}</div>
+    <h3 className={`${headingClass} flex items-center gap-2`} style={seasonTint ? { color: seasonTint } : undefined}>{title}{scale === "month" || scale === "year" ? formula(scale === "month" ? entriesInMonth(at.year, at.month) : dated.filter((entry) => entry.date.year === at.year), seasonTint) : null}</h3>
+    <span className="flex items-center gap-2 text-xs text-muted-foreground">{switcher}{season && !layout.hideSeasons && scale !== "year" && scale !== "seasons" && scale !== "agenda" && <span className="inline-flex items-center gap-1 rounded-full border px-2 py-0.5" style={season.color ? { borderColor: season.color, color: season.color } : undefined}>{season.name}</span>}{calendar.name}</span>
+  </div>
+
+  /* ---- Mois ---- */
+  const monthGrid = (year: number, month: number) => {
+    const cells = cellsOf(year, month)
+    return <div className="overflow-x-auto"><div className={`grid min-w-[36rem] gap-px overflow-hidden border bg-border ${radii[look.radius ?? "md"]}`} style={{ gridTemplateColumns: `repeat(${week}, minmax(0, 1fr))` }}>
+      {Array.from({ length: week }, (_, index) => <div key={`head:${index}`} className="bg-muted/60 px-2 py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{calendar.weekdays[index] ?? `Jour ${index + 1}`}</div>)}
+      {cells.map((day, index) => {
+        const date: CalendarDate | null = day ? { year, month, day } : null
+        const entries = date ? entriesOn(date) : []
+        const limit = layout.maxPerDay && !expandedDays.has(index) ? layout.maxPerDay : entries.length
+        const hidden = entries.length - limit
+        return <div key={index} className={`${look.density === "compact" ? "min-h-14" : look.density === "airy" ? "min-h-28" : "min-h-20"} p-1.5 ${day ? "bg-card" : "bg-muted/20"}`}>
+          {date && dayButton(date, day, "px-1 text-[11px] font-semibold text-muted-foreground")}
+          <div className="mt-0.5 space-y-0.5">
+            {entries.slice(0, limit).map((entry) => <CalendarEntry key={entry.row} row={entry.row} date={entry.date} calendar={calendar} color={colorOf(entry.row)} props={props} />)}
+            {hidden > 0 && <button type="button" onClick={() => setExpandedDays((set) => new Set(set).add(index))} className="w-full rounded px-1 text-left text-[10px] font-semibold hover:bg-muted" style={{ color: accent }}>+{hidden}</button>}
+          </div>
         </div>
-        <div className="overflow-x-auto"><div className={`grid min-w-[36rem] gap-px overflow-hidden border bg-border ${radii[look.radius ?? "md"]}`} style={{ gridTemplateColumns: `repeat(${week}, minmax(0, 1fr))` }}>
-          {Array.from({ length: week }, (_, index) => <div key={`head:${index}`} className="bg-muted/60 px-2 py-1.5 text-center text-[11px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{calendar.weekdays[index] ?? `Jour ${index + 1}`}</div>)}
-          {cells.map((day, index) => {
-            const entries = day ? dated.filter((entry) => entry.date.year === current.year && entry.date.month === current.month && entry.date.day === day) : []
-            const limit = layout.maxPerDay && !expandedDays.has(index) ? layout.maxPerDay : entries.length
-            const hidden = entries.length - limit
-            return <div key={index} className={`${look.density === "compact" ? "min-h-14" : look.density === "airy" ? "min-h-28" : "min-h-20"} p-1.5 ${day ? "bg-card" : "bg-muted/20"}`}>
-              {day && <span className="text-[11px] font-semibold text-muted-foreground">{day}</span>}
-              <div className="mt-0.5 space-y-0.5">
-                {entries.slice(0, limit).map((entry) => <CalendarEntry key={entry.row} row={entry.row} date={entry.date} calendar={calendar} color={rowColor(layout, entry.row, valueOf, optionsOf)} props={props} />)}
-                {hidden > 0 && <button type="button" onClick={() => setExpandedDays((set) => new Set(set).add(index))} className="w-full rounded px-1 text-left text-[10px] font-semibold hover:bg-muted" style={{ color: accent }}>+{hidden}</button>}
-              </div>
-            </div>
-          })}
-        </div></div>
-      </>}
+      })}
+    </div></div>
+  }
+  const dayLines = (dates: CalendarDate[]) => <ol className={`grid ${gaps[look.density ?? "normal"]}`}>{dates.flatMap((date) => {
+    const entries = entriesOn(date)
+    if (layout.hideEmptyDays && !entries.length) return []
+    return [<li key={`${date.year}:${date.month}:${date.day}`} className="grid grid-cols-[3.5rem_minmax(0,1fr)] items-start gap-3">
+      {dayButton(date, <span className="grid justify-items-center rounded-lg border bg-card py-1 leading-none"><span className="font-display text-xl font-semibold tabular-nums" style={{ color: entries[0] ? colorOf(entries[0].row) ?? accent : undefined }}>{date.day}</span><span className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{weekdayName(date, true)}</span></span>, "block text-left")}
+      <div className={`grid ${gaps[look.density ?? "normal"]}`}>{entries.length ? entries.map((entry) => <div key={entry.row}>{element(entry.row)}</div>) : <p className="py-2 text-xs text-muted-foreground">—</p>}</div>
+    </li>]
+  })}</ol>
+  const monthBody = forms.month === "lines"
+    ? dayLines(Array.from({ length: monthLength(calendar, at.year, at.month) }, (_, index) => ({ year: at.year, month: at.month, day: index + 1 })))
+    : monthGrid(at.year, at.month)
+
+  /* ---- Année ---- */
+  const yearMonths = calendar.months.map((_, month) => ({ month, entries: entriesInMonth(at.year, month), season: seasonOf(calendar, month) }))
+  const yearGrids = <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">{yearMonths.map(({ month, entries, season: monthSeason }) => <section key={month} className={`border bg-card/70 p-2 ${radii[look.radius ?? "md"]}`} style={layout.monthStyle === "season" && monthSeason?.color ? { borderColor: `color-mix(in srgb, ${monthSeason.color} 45%, var(--border))` } : undefined}>
+    <p className="flex items-center justify-between gap-2 text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: layout.monthStyle === "season" && monthSeason?.color ? monthSeason.color : accent }}>{monthButton(at.year, month, monthName(month), "px-1 text-left")}<span className="flex items-center gap-1 normal-case tracking-normal text-muted-foreground">{formula(entries, monthSeason?.color)}{!layout.hideCounts && entries.length > 0 && <span className="tabular-nums">{entries.length}</span>}</span></p>
+    <div className="mt-1 grid gap-px text-[9px]" style={{ gridTemplateColumns: `repeat(${week}, minmax(0, 1fr))` }}>
+      {cellsOf(at.year, month).map((day, index) => {
+        const date = day ? { year: at.year, month, day } : null
+        const own = date ? entriesOn(date) : []
+        const tint = own[0] ? colorOf(own[0].row) ?? accent : undefined
+        return <span key={index} className={`grid aspect-square place-items-center rounded ${day ? "" : "opacity-0"}`}>{date ? dayButton(date, <span className="grid place-items-center leading-none"><span className={own.length ? "font-semibold" : "text-muted-foreground"}>{day}</span>{own.length > 0 && <span aria-hidden className="mt-px size-1.5 rounded-full" style={{ backgroundColor: tint }} title={own.map((entry) => nameOf(entry.row)).join(", ")} />}</span>, "size-full") : null}</span>
+      })}
+    </div>
+  </section>)}</div>
+  const band = (segments: Array<{ key: string; label: string; days: number; color?: string; onClick?: () => void }>, entries: DatedRow[], origin: number, total: number) => <div className="grid gap-2">
+    <div className="relative">
+      <div className={`flex h-9 overflow-hidden border ${radii[look.radius ?? "md"]}`}>{segments.map((segment) => <button key={segment.key} type="button" disabled={!segment.onClick} onClick={segment.onClick} className="grid min-w-0 place-items-center truncate px-1 text-[10px] font-semibold uppercase tracking-[0.08em] disabled:cursor-default" style={{ flex: `${segment.days} 0 0`, backgroundColor: segment.color ? `color-mix(in srgb, ${segment.color} 22%, var(--card))` : "var(--muted)", color: segment.color ?? undefined, borderRight: "1px solid var(--border)" }} title={segment.label}><span className="truncate">{segment.label}</span></button>)}</div>
+      {entries.map((entry) => { const left = ((dayNumber(calendar, entry.date) - origin) / Math.max(1, total)) * 100; return <button key={entry.row} type="button" onClick={() => onOpen(entry.row)} title={`${nameOf(entry.row)} · ${formatCalendarDate(entry.date, calendar)}`} className="absolute -top-1.5 size-3 -translate-x-1/2 rounded-full border-2 border-background shadow" style={{ left: `${Math.max(0, Math.min(100, left))}%`, backgroundColor: colorOf(entry.row) ?? accent }} /> })}
+    </div>
+    <ul className="flex flex-wrap gap-1.5">{entries.map((entry) => <li key={entry.row}><CalendarEntry row={entry.row} date={entry.date} calendar={calendar} color={colorOf(entry.row)} props={props} style={look.entryStyle ?? "pill"} /></li>)}</ul>
+  </div>
+  const yearOrigin = dayNumber(calendar, { year: at.year, month: 0, day: 1 })
+  const yearDays = yearLength(calendar, at.year)
+  const yearEntries = dated.filter((entry) => entry.date.year === at.year)
+  const yearBand = band(calendar.months.map((month, index) => ({ key: String(index), label: month.name, days: monthLength(calendar, at.year, index), color: seasonOf(calendar, index)?.color || undefined, onClick: drill ? () => goMonth(at.year, index) : undefined })), yearEntries, yearOrigin, yearDays)
+  const yearLines = <ol className="divide-y">{yearMonths.map(({ month, entries, season: monthSeason }) => <li key={month} className="grid grid-cols-[minmax(6rem,9rem)_minmax(0,1fr)] items-start gap-3 py-1.5">
+    <span className="flex flex-col"><span className="text-xs font-semibold uppercase tracking-[0.12em]" style={{ color: layout.monthStyle === "season" && monthSeason?.color ? monthSeason.color : accent }}>{monthButton(at.year, month, monthName(month), "px-1 text-left")}</span><span className="flex items-center gap-1 px-1 text-[11px] text-muted-foreground">{!layout.hideCounts && <span className="tabular-nums">{entries.length}</span>}{formula(entries, monthSeason?.color)}</span></span>
+    <ul className="flex flex-wrap gap-1">{entries.map((entry) => <li key={entry.row} className="max-w-56"><CalendarEntry row={entry.row} date={entry.date} calendar={calendar} color={colorOf(entry.row)} props={props} /></li>)}{!entries.length && <li className="text-xs text-muted-foreground">—</li>}</ul>
+  </li>)}</ol>
+  const yearBody = forms.year === "band" ? yearBand : forms.year === "lines" ? yearLines : yearGrids
+
+  /* ---- Semaine ---- */
+  const weekStart = weekStartOf(calendar, at)
+  const weekDates = Array.from({ length: week }, (_, index) => addDays(calendar, weekStart, index))
+  const weekEntries = weekDates.flatMap((date) => entriesOn(date).map((entry) => ({ ...entry, weekday: weekdayName(date, true) })))
+  const weekColumns = <div className="overflow-x-auto"><div className={`grid min-w-[36rem] gap-px overflow-hidden border bg-border ${radii[look.radius ?? "md"]}`} style={{ gridTemplateColumns: `repeat(${week}, minmax(0, 1fr))` }}>
+    {weekDates.map((date, index) => <div key={index} className="bg-muted/60 px-2 py-1.5 text-center">{dayButton(date, <span className="block"><span className="block text-[10px] font-semibold uppercase tracking-[0.1em] text-muted-foreground">{calendar.weekdays[index] ?? `Jour ${index + 1}`}</span><span className="font-display text-lg font-semibold leading-none" style={sameDay(date, at) ? { color: accent } : undefined}>{date.day}</span></span>, "w-full")}</div>)}
+    {weekDates.map((date, index) => <div key={`body:${index}`} className={`grid content-start ${gaps[look.density ?? "normal"]} bg-card p-1.5 ${look.density === "compact" ? "min-h-24" : look.density === "airy" ? "min-h-48" : "min-h-36"}`}>{entriesOn(date).map((entry) => <div key={entry.row}>{element(entry.row)}</div>)}</div>)}
+  </div></div>
+  const weekLines = dayLines(weekDates)
+  const weekTable = <div className={`overflow-x-auto border ${radii[look.radius ?? "md"]}`}><table className="w-full border-collapse text-[13px]">
+    <thead><tr><th className="whitespace-nowrap border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Jour</th><th className="border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">Nom</th>{fields.map((field) => <th key={field} className="border-b bg-muted px-3 py-2 text-left text-[11px] font-semibold uppercase tracking-[0.08em] text-muted-foreground">{field}</th>)}</tr></thead>
+    <tbody>{weekEntries.map((entry) => <tr key={entry.row} className="border-b border-border/60 last:border-b-0">
+      <td className="whitespace-nowrap px-3 py-1.5 align-top text-xs text-muted-foreground">{dayButton(entry.date, <>{entry.weekday} {entry.date.day}</>, "px-1")}</td>
+      <td className="px-3 py-1.5 align-top"><ItemTitle row={entry.row} look={look} color={colorOf(entry.row)} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={entry.row} valueOf={valueOf} color={colorOf(entry.row)} />} badge={<RowBadge layout={layout} row={entry.row} valueOf={valueOf} optionsOf={optionsOf} />} /><RowGauge layout={layout} row={entry.row} valueOf={valueOf} color={colorOf(entry.row)} /></td>
+      {fields.map((field) => <td key={field} className="max-w-[18rem] px-3 py-1.5 align-top text-xs"><span className="line-clamp-3">{plain(valueOf(entry.row, field))}</span></td>)}
+    </tr>)}{!weekEntries.length && <tr><td colSpan={2 + fields.length} className="px-3 py-6 text-center text-xs text-muted-foreground">Rien cette semaine.</td></tr>}</tbody>
+  </table></div>
+  const weekBody = forms.week === "lines" ? weekLines : forms.week === "table" ? weekTable : weekColumns
+
+  /* ---- Jour ---- */
+  const dayEntries = entriesOn(at)
+  const dayBody = <div className={`grid ${gaps[look.density ?? "normal"]}`}>
+    {dayEntries.length ? dayEntries.map((entry) => forms.day === "paragraphs"
+      ? <article key={entry.row} className={`min-w-0 ${look.surface === "boxed" ? `border bg-card ${boxClass(look)} ${paddings[look.density ?? "normal"]}` : "border-b pb-3"}`}>
+        <ItemTitle row={entry.row} look={{ ...look, titleFont: look.titleFont ?? "display" }} color={colorOf(entry.row)} nameOf={nameOf} onOpen={onOpen} inert={props.inert} size={look.titleSize ?? "lg"} icon={<RowIcon layout={layout} row={entry.row} valueOf={valueOf} color={colorOf(entry.row)} className="size-5" />} badge={<RowBadge layout={layout} row={entry.row} valueOf={valueOf} optionsOf={optionsOf} />} />
+        {fields[0] && <p className="mt-1.5 whitespace-pre-line text-sm leading-6">{plain(valueOf(entry.row, fields[0]))}</p>}
+        <div className="mt-1.5"><ItemFields fields={fields.slice(1)} row={entry.row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={entry.row} valueOf={valueOf} color={colorOf(entry.row)} /></div>
+      </article>
+      : <div key={entry.row}>{element(entry.row)}</div>)
+      : <p className="rounded-xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Rien ce jour-là.</p>}
+  </div>
+
+  /* ---- Agenda ---- */
+  const monthKey = (date: CalendarDate) => `${date.year}:${date.month}`
+  const agendaMonths = [...new Set(dated.map((entry) => monthKey(entry.date)))].map((key) => { const entries = dated.filter((entry) => monthKey(entry.date) === key); return { key, entries, first: entries[0].date, season: seasonOf(calendar, entries[0].date.month) } })
+  const agendaHeading = (first: CalendarDate, monthSeason: ReturnType<typeof seasonOf>, entries: DatedRow[]) => <h3 className={`${headingClass} flex items-center gap-2 border-b pb-1`} style={layout.monthStyle === "season" && monthSeason?.color ? { color: monthSeason.color, borderColor: monthSeason.color } : { borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }}>{monthButton(first.year, first.month, <>{monthName(first.month)} {first.year}{era}</>, "px-1 text-left")}{!layout.hideSeasons && monthSeason && <span className="text-xs font-normal text-muted-foreground">· {monthSeason.name}</span>}{formula(entries, monthSeason?.color)}</h3>
+  const agendaList = <div className="grid gap-4">{agendaMonths.map(({ key, entries, first, season: monthSeason }) => <section key={key} className="grid gap-1.5">
+    {agendaHeading(first, monthSeason, entries)}
+    <ol className={`grid ${gaps[look.density ?? "normal"]}`}>{entries.map(({ row, date }) => <li key={row} className="grid grid-cols-[3.25rem_minmax(0,1fr)] items-start gap-3">
+      {dayButton(date, <span className="grid justify-items-center rounded-lg border bg-card py-1 leading-none" style={{ borderColor: colorOf(row) ?? `color-mix(in srgb, ${accent} 40%, transparent)` }}><span className="font-display text-xl font-semibold tabular-nums" style={{ color: colorOf(row) ?? accent }}>{date.day}</span><span className="mt-0.5 text-[9px] font-semibold uppercase tracking-[0.12em] text-muted-foreground">{weekdayName(date, true)}</span></span>, "block text-left")}
+      {element(row)}
+    </li>)}</ol>
+  </section>)}</div>
+  const agendaThread = <ol className={`relative grid ${gaps[look.density ?? "normal"]} pl-6 before:absolute before:inset-y-1 before:left-[0.4375rem] before:w-0.5 before:rounded-full before:bg-[linear-gradient(to_bottom,color-mix(in_srgb,var(--eraser-timeline)_50%,transparent),color-mix(in_srgb,var(--eraser-timeline)_10%,transparent))]`} style={{ ["--eraser-timeline" as string]: accent }}>{dated.map(({ row, date }) => <li key={row} className="relative">
+    <span aria-hidden className="absolute top-2 -left-[1.1875rem] size-3 rounded-full border-2 border-background shadow" style={{ backgroundColor: colorOf(row) ?? accent }} />
+    <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.12em]" style={{ color: colorOf(row) ?? accent }}>{dayButton(date, formatCalendarDate(date, calendar), "px-1")}</p>
+    {element(row)}
+  </li>)}</ol>
+  const agendaWeeks = (() => {
+    const keys = [...new Set(dated.map((entry) => dayNumber(calendar, weekStartOf(calendar, entry.date))))]
+    return <div className="grid gap-4">{keys.map((startNumber) => {
+      const begin = dateFromDayNumber(calendar, startNumber)
+      const entries = dated.filter((entry) => dayNumber(calendar, weekStartOf(calendar, entry.date)) === startNumber)
+      const days = [...new Set(entries.map((entry) => dayNumber(calendar, entry.date)))].map((number) => dateFromDayNumber(calendar, number))
+      return <section key={startNumber} className="grid gap-1.5">
+        <h3 className={`${headingClass} flex items-center gap-2 border-b pb-1 text-base`} style={{ borderColor: `color-mix(in srgb, ${accent} 40%, transparent)` }}>Semaine du {formatCalendarDate(begin, calendar)}{formula(entries)}</h3>
+        {dayLines(days)}
+      </section>
+    })}</div>
+  })()
+  const agendaBody = !dated.length ? <p className="rounded-xl border border-dashed px-5 py-10 text-center text-sm text-muted-foreground">Aucune date lisible pour l’instant.</p> : forms.agenda === "thread" ? agendaThread : forms.agenda === "weeks" ? agendaWeeks : agendaList
+
+  /* ---- Saisons ---- */
+  const seasonsOfYear = calendar.seasons.map((item) => ({ ...item, months: calendar.months.map((month, index) => ({ month, index })).filter(({ month }) => fold(month.season) === fold(item.name)) }))
+  const seasonEntries = (item: (typeof seasonsOfYear)[number]) => yearEntries.filter((entry) => item.months.some(({ index }) => index === entry.date.month))
+  const seasonsBand = seasonsOfYear.length
+    ? band(seasonsOfYear.map((item) => ({ key: item.name, label: item.name, days: item.months.reduce((sum, { index }) => sum + monthLength(calendar, at.year, index), 0) || 1, color: item.color || undefined })), yearEntries, yearOrigin, yearDays)
+    : yearBand
+  const seasonsPanels = seasonsOfYear.length
+    ? <div className="grid gap-3 md:grid-cols-2">{seasonsOfYear.map((item) => { const entries = seasonEntries(item); const tint = item.color || accent; return <section key={item.name} className={`overflow-hidden border ${radii[look.radius ?? "md"]}`} style={{ borderColor: `color-mix(in srgb, ${tint} 45%, var(--border))` }}>
+      <p className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: tint }}><span>{item.name}<span className="ml-2 font-normal normal-case tracking-normal opacity-80">{item.months.map(({ month }) => month.name).join(" · ")}</span></span><span className="flex items-center gap-1">{layout.groupFormula && <GroupFormulaBadge layout={layout} rows={entries.map((entry) => entry.row)} valueOf={valueOf} inverted />}{!layout.hideCounts && <span className="rounded-full bg-white/20 px-1.5 tabular-nums">{entries.length}</span>}</span></p>
+      <div className={`grid ${gaps[look.density ?? "normal"]} p-2`} style={{ backgroundColor: `color-mix(in srgb, ${tint} 6%, var(--card))` }}>{entries.length ? entries.map((entry) => <div key={entry.row}>{element(entry.row)}</div>) : <p className="py-3 text-center text-xs text-muted-foreground">Rien cette saison.</p>}</div>
+    </section> })}</div>
+    : <p className="rounded-xl border border-dashed px-5 py-8 text-center text-sm text-muted-foreground">Le calendrier « {calendar.name} » n’a pas de saisons : ajoute-les dans l’Index des calendriers (onglet Saisons, et la saison de chaque mois).</p>
+  const seasonsBody = forms.seasons === "panels" ? seasonsPanels : seasonsBand
+
+  const body = scale === "year" ? yearBody : scale === "week" ? weekBody : scale === "day" ? dayBody : scale === "agenda" ? agendaBody : scale === "seasons" ? seasonsBody : monthBody
+  return <div className="space-y-3">
+    {banner}
+    {header}
+    {body}
     {undated > 0 && layout.showUndated && <ul className="flex flex-wrap gap-1.5">{rows.filter((row) => !dated.some((entry) => entry.row === row)).map((row) => <li key={row}><button type="button" onClick={() => onOpen(row)} className="flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs hover:bg-muted"><RowIcon layout={layout} row={row} valueOf={valueOf} className="size-3" />{nameOf(row) || "Sans nom"}</button></li>)}</ul>}
     {undated > 0 && <p className="text-xs text-muted-foreground">{undated} ligne{undated > 1 ? "s" : ""} sans date lisible dans « {layout.dateColumn} » ({calendar === realCalendar ? "« 12 mars 1023 » ou « 1023-03-12 »" : `« 12 ${calendar.months[0]?.name ?? "Mois"} 1023 »`}).</p>}
   </div>
@@ -888,27 +1038,119 @@ function CodexLayout(props: ViewLayoutProps) {
 const tileGrids = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 xl:grid-cols-3", 4: "sm:grid-cols-2 xl:grid-cols-4", 5: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-5", 6: "sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6" } as const
 const tileNumbers = { sm: "text-3xl", md: "text-4xl", lg: "text-5xl" } as const
 
-function DashboardLayout({ layout, rows, valueOf }: ViewLayoutProps) {
+/** Un anneau de jauge (SVG) : la part remplie à la couleur, le reste discret. */
+function Ring({ ratio, color, size = 56, children }: { ratio: number; color: string; size?: number; children?: ReactNode }) {
+  const stroke = 6
+  const radius = (size - stroke) / 2
+  const length = 2 * Math.PI * radius
+  return <span className="relative inline-grid shrink-0 place-items-center" style={{ width: size, height: size }}>
+    <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} aria-hidden className="-rotate-90">
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={`color-mix(in srgb, ${color} 18%, var(--muted))`} strokeWidth={stroke} />
+      <circle cx={size / 2} cy={size / 2} r={radius} fill="none" stroke={color} strokeWidth={stroke} strokeLinecap="round" strokeDasharray={`${length * Math.max(0, Math.min(1, ratio))} ${length}`} />
+    </svg>
+    <span className="absolute inset-0 grid place-items-center text-xs font-semibold tabular-nums">{children}</span>
+  </span>
+}
+
+/** La jauge d'une tuile (une formule ou une ligne précise, contre une cible) : anneau, barre ou charges. */
+function TileGauge({ tile, rows, props, color }: { tile: DashboardTile; rows: string[]; props: ViewLayoutProps; color: string }) {
+  const { value, max, row } = tileGaugeValue(tile, rows, props.valueOf, props.nameOf)
+  const ratio = max ? value / max : Math.max(0, Math.min(1, value / 100))
+  const over = max !== null && value > max
+  const tint = over ? "var(--destructive)" : color
+  const shown = `${formatViewNumber(value)}${max ? ` / ${formatViewNumber(max)}` : ""}${tile.unit ? ` ${tile.unit}` : ""}`
+  const name = row ? <button type="button" onClick={() => props.onOpen(row)} className="text-left text-sm font-semibold hover:underline">{props.nameOf(row)}</button> : null
+  if (tile.style === "charges") {
+    const total = Math.max(1, Math.min(30, Math.round(max ?? value)))
+    const filled = Math.max(0, Math.min(total, Math.round(value)))
+    return <div className="mt-2 grid gap-1.5">{name}<span className="flex flex-wrap gap-1">{Array.from({ length: total }, (_, at) => <span key={at} aria-hidden className="size-3.5 rounded-full border-2" style={{ borderColor: tint, backgroundColor: at < filled ? tint : "transparent" }} />)}</span><span className="text-xs tabular-nums text-muted-foreground">{shown}</span></div>
+  }
+  if (tile.style === "bar") return <div className="mt-2 grid gap-1.5">{name}<span className="block h-2.5 overflow-hidden rounded-full" style={{ backgroundColor: `color-mix(in srgb, ${tint} 18%, var(--muted))` }}><span className="block h-full rounded-full transition-[width]" style={{ width: `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)}%`, backgroundColor: tint }} /></span><span className={`text-xs tabular-nums ${over ? "text-destructive" : "text-muted-foreground"}`}>{shown}</span></div>
+  return <div className="mt-2 flex items-center gap-3"><Ring ratio={ratio} color={tint}>{max ? `${Math.round(Math.max(0, Math.min(1, ratio)) * 100)} %` : formatViewNumber(value)}</Ring><span className="grid gap-0.5">{name}<span className={`text-sm tabular-nums ${over ? "text-destructive" : "text-muted-foreground"}`}>{shown}</span></span></div>
+}
+
+/**
+ * Le tableau de bord : ses tuiles sur une grille, rangées en sections (repliables si la vue le
+ * veut). Un chiffre, une répartition, une jauge, une statistique de l'index, une autre vue de
+ * l'onglet, une ligne en carte ou en formulaire, un texte à formules, une tuile par ligne liée.
+ */
+function DashboardLayout(props: ViewLayoutProps) {
+  const { layout, rows, valueOf, nameOf, headers, renderCard, renderForm, renderStat, presentations } = props
   const look = layout.look ?? {}
   const tiles = layout.tiles?.length ? layout.tiles : [{ kind: "count" as const }]
   const grid = tileGrids[layout.tileColumns ?? 3]
   const tileStyle = look.tileStyle ?? "plain"
   const accent = accentOf(look)
-  return <div className={`grid ${look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-4" : "gap-3"} ${grid}`}>{tiles.map((tile, index) => {
-    const result = dashboardTileValue(tile, rows, valueOf)
-    const label = tile.label || `${dashboardTileKinds.find((kind) => kind.value === tile.kind)?.label ?? ""}${tile.column && tile.kind !== "count" ? ` · ${tile.column}` : ""}`
-    const top = Math.max(1, ...result.breakdown.map((entry) => entry.count))
+  const [closed, setClosed] = useState<Set<string>>(() => new Set(layout.collapsed ? tiles.map((tile) => tile.section ?? "") : []))
+  const padding = look.density === "compact" ? "p-3" : look.density === "airy" ? "p-6" : "p-4"
+  const span = (tile: DashboardTile) => tile.full ? "col-span-full" : tile.wide ? "sm:col-span-2" : tile.kind === "breakdown" && (layout.tileColumns ?? 3) >= 3 ? "sm:col-span-2 xl:col-span-1" : ""
+  const findRow = (name: string | undefined) => name ? rows.find((row) => fold(plain(nameOf(row))) === fold(name)) : undefined
+  const kindLabel = (tile: DashboardTile) => dashboardTileKinds.find((kind) => kind.value === tile.kind)?.label ?? ""
+  const tileNode = (tile: DashboardTile, index: number) => {
     const color = tile.color ?? accent
     const style: CSSProperties = tileStyle === "tinted" ? { backgroundColor: `color-mix(in srgb, ${color} 10%, var(--card))`, borderColor: `color-mix(in srgb, ${color} 35%, var(--border))` } : tileStyle === "accent" ? { borderTop: `4px solid ${color}` } : {}
     const glyph = tile.icon ? parseGlyphValue(tile.icon) : null
-    return <article key={index} style={style} className={`relative border bg-card/80 ${boxClass(look)} ${look.density === "compact" ? "p-3" : look.density === "airy" ? "p-6" : "p-4"} ${tile.wide ? "sm:col-span-2" : tile.kind === "breakdown" && (layout.tileColumns ?? 3) >= 3 ? "sm:col-span-2 xl:col-span-1" : ""}`}>
+    const label = tile.label || (tile.kind === "count" || tile.kind === "text" || tile.kind === "stat" || tile.kind === "card" ? (tile.kind === "count" ? kindLabel(tile) : "") : tile.kind === "view" ? (tile.view ? viewLayoutKinds.find((kind) => kind.value === tile.view)?.label ?? "" : "Vue") : `${kindLabel(tile)}${tile.column ? ` · ${tile.column}` : ""}`)
+    const frame = (children: ReactNode, extra = "") => <article key={index} style={style} className={`relative min-w-0 border bg-card/80 ${boxClass(look)} ${padding} ${span(tile)} ${extra}`}>
       {glyph && <span className="absolute right-3 top-3 grid size-9 place-items-center rounded-full" style={{ backgroundColor: `color-mix(in srgb, ${color} 14%, transparent)`, color }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-5" /></span>}
-      <p className="pr-10 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>
-      {tile.kind === "breakdown"
-        ? <ul className="mt-3 space-y-1.5">{result.breakdown.map((entry) => <li key={entry.name} className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs"><span className="truncate">{entry.name}</span><span className="h-2 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(entry.count / top) * 100}%`, backgroundColor: color }} /></span><span className="text-right tabular-nums text-muted-foreground">{entry.count}</span></li>)}</ul>
-        : <p className={`mt-2 font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} ${tileNumbers[tile.size ?? (look.titleSize === "sm" ? "sm" : look.titleSize === "lg" ? "lg" : "md")]}`} style={tileStyle !== "plain" || tile.color || look.color ? { color } : undefined}>{Number.isInteger(result.number) ? result.number : result.number.toLocaleString("fr-FR", { maximumFractionDigits: 2 })}{tile.unit && <span className="ml-1 text-base font-normal text-muted-foreground">{tile.unit}</span>}</p>}
+      {label && <p className="pr-10 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>}
+      {children}
       {tile.note && <p className="mt-1 text-[11px] text-muted-foreground">{tile.note}</p>}
     </article>
+    switch (tile.kind) {
+      case "gauge": return frame(<TileGauge tile={tile} rows={rows} props={props} color={color} />)
+      case "stat": {
+        const drawn = tile.stat ? renderStat?.(tile.stat) : null
+        return <div key={index} className={`min-w-0 ${span(tile)}`}>{drawn ?? frame(<p className="mt-2 text-xs text-muted-foreground">{tile.stat ? "Cette statistique se dessine dans l’index et dans les pages." : "Choisis une statistique de l’index dans les réglages de la tuile."}</p>)}</div>
+      }
+      case "view": {
+        const nested: ViewLayout = tile.view && tile.view !== "dashboard" ? presentations?.[tile.view] ?? { kind: tile.view } : { kind: "list" }
+        const shown = sortLayoutRows(rows, nested, valueOf).slice(0, tile.limit ?? 10)
+        return frame(<div className="mt-2 min-w-0"><IndexViewLayout {...props} layout={nested} rows={shown} presentations={undefined} empty="Aucune ligne." /></div>, tile.wide || tile.full ? "" : "sm:col-span-2 xl:col-span-1")
+      }
+      case "card": {
+        const row = findRow(tile.row)
+        const drawn = row ? (tile.form ? renderForm?.(row, tile.form) : renderCard?.(row, tile.card || DEFAULT_ITEM_CARD)) ?? <Item row={row} props={props} framed={false} /> : null
+        return drawn && !tile.form ? <div key={index} className={`min-w-0 ${span(tile)}`}>{label && <p className="mb-1 text-[11px] font-semibold uppercase tracking-[0.14em] text-muted-foreground">{label}</p>}{drawn}</div>
+          : frame(drawn ? <div className="mt-2">{drawn}</div> : <p className="mt-2 text-xs text-muted-foreground">{tile.row ? `Aucune ligne nommée « ${tile.row} » dans la vue.` : "Nomme la ligne à montrer dans les réglages de la tuile."}</p>)
+      }
+      case "text": {
+        const segments = textWithFormulas(tile.text ?? "", rows, valueOf, nameOf, headers)
+        return frame(<p className={`mt-2 whitespace-pre-line text-sm leading-7 ${look.titleFont === "sans" ? "" : "font-display"}`}>{segments.map((segment, at) => "text" in segment ? <span key={at}>{segment.text}</span> : <b key={at} title={segment.formula} className="rounded px-1 font-semibold tabular-nums" style={{ backgroundColor: `color-mix(in srgb, ${tile.color ?? viewPalette[segment.at % viewPalette.length]} 20%, transparent)`, color: tile.color ?? viewPalette[segment.at % viewPalette.length] }}>{segment.value}</b>)}</p>)
+      }
+      case "linked": {
+        const linked = linkedTiles(tile, rows, valueOf)
+        return frame(linked.length
+          ? <div className="mt-2 grid gap-2 sm:grid-cols-2 lg:grid-cols-3">{linked.map((entry) => <div key={entry.name} className={`min-w-0 border bg-background/60 p-2.5 ${radii[look.radius ?? "md"]}`}>
+            <p className="truncate text-sm font-semibold">{entry.name}</p>
+            <dl className="mt-1 grid gap-0.5">{entry.values.map((item, at) => <div key={at} className="flex items-baseline justify-between gap-2 text-xs"><dt className="truncate text-muted-foreground">{item.label}</dt><dd className={`font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} text-base`} style={{ color }}>{formatViewNumber(item.value)}{item.unit && <span className="ml-0.5 text-[10px] font-normal text-muted-foreground">{item.unit}</span>}</dd></div>)}</dl>
+          </div>)}</div>
+          : <p className="mt-2 text-xs text-muted-foreground">{tile.column ? "Aucune ligne ne cite cette colonne." : "Choisis la colonne liée (personnage, lieu…) dans les réglages de la tuile."}</p>, "sm:col-span-2")
+      }
+      default: {
+        const result = dashboardTileValue(tile, rows, valueOf)
+        const top = Math.max(1, ...result.breakdown.map((entry) => entry.count))
+        return frame(tile.kind === "breakdown"
+          ? <ul className="mt-3 space-y-1.5">{result.breakdown.map((entry) => <li key={entry.name} className="grid grid-cols-[minmax(0,8rem)_minmax(0,1fr)_2.5rem] items-center gap-2 text-xs"><span className="truncate">{entry.name}</span><span className="h-2 overflow-hidden rounded-full bg-muted"><span className="block h-full rounded-full" style={{ width: `${(entry.count / top) * 100}%`, backgroundColor: color }} /></span><span className="text-right tabular-nums text-muted-foreground">{entry.count}</span></li>)}</ul>
+          : <p className={`mt-2 font-semibold tabular-nums ${look.titleFont === "sans" ? "" : "font-display"} ${tileNumbers[tile.size ?? (look.titleSize === "sm" ? "sm" : look.titleSize === "lg" ? "lg" : "md")]}`} style={tileStyle !== "plain" || tile.color || look.color ? { color } : undefined}>{formatViewNumber(result.number)}{tile.unit && <span className="ml-1 text-base font-normal text-muted-foreground">{tile.unit}</span>}</p>)
+      }
+    }
+  }
+  // Les sections : dans l'ordre où elles apparaissent ; les tuiles sans section d'abord.
+  const sections = [...new Set(tiles.map((tile) => tile.section ?? ""))].sort((left, right) => (left ? 1 : 0) - (right ? 1 : 0)).map((name) => ({ name, tiles: tiles.map((tile, index) => ({ tile, index })).filter(({ tile }) => (tile.section ?? "") === name) }))
+  const gridOf = (entries: Array<{ tile: DashboardTile; index: number }>) => <div className={`grid ${look.density === "compact" ? "gap-2" : look.density === "airy" ? "gap-4" : "gap-3"} ${grid}`}>{entries.map(({ tile, index }) => tileNode(tile, index))}</div>
+  if (sections.length === 1 && !sections[0].name) return gridOf(sections[0].tiles)
+  return <div className="grid gap-5">{sections.map((section) => {
+    if (!section.name) return <div key="*">{gridOf(section.tiles)}</div>
+    const open = !closed.has(section.name)
+    const toggle = () => setClosed((current) => { const next = new Set(current); if (next.has(section.name)) next.delete(section.name); else next.add(section.name); return next })
+    const head = <span className="flex flex-1 items-center justify-between gap-2"><span className="flex items-center gap-2"><Glyph value={look.sectionIcon} />{section.name}</span><span className="font-normal normal-case tracking-normal text-muted-foreground">{section.tiles.length} tuile{section.tiles.length > 1 ? "s" : ""}</span></span>
+    return <section key={section.name} className="space-y-2">
+      {layout.collapsible
+        ? <button type="button" aria-expanded={open} onClick={toggle} className="flex w-full items-center gap-2 border-b pb-1.5 text-left text-xs font-semibold uppercase tracking-[0.14em] opacity-80 hover:opacity-100" style={{ color: accent }}><ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} />{head}</button>
+        : <p className="flex items-center gap-2 border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] opacity-80" style={{ color: accent }}>{head}</p>}
+      {open && gridOf(section.tiles)}
+    </section>
   })}</div>
 }
 

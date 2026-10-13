@@ -47,6 +47,10 @@ export type ViewBlockData = {
   cards?: TabCards
   /** Les formulaires de l'onglet qu'un élément ou un détail « formulaire en lecture » dessine, par identifiant. */
   forms?: Record<string, IndexLayout>
+  /** Tableau de bord : les autres vues réglées de l'onglet (tuile « vue ») et les statistiques de l'index (tuile « stat »). */
+  views?: TabPresentations
+  stats?: StatDefinition[]
+  statGroups?: StatColumnGroup[]
 }
 
 export type StatBlockData = {
@@ -182,7 +186,7 @@ export function matchesWhere(where: Pick<ViewWhere, "match" | "conditions">, cel
 }
 
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
-export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards>; layouts?: Record<string, TabLayouts> }, options: BlockDataOptions): ViewBlockData | null {
+export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards>; layouts?: Record<string, TabLayouts>; stats?: { stats: StatDefinition[]; groups: StatColumnGroup[] } }, options: BlockDataOptions): ViewBlockData | null {
   const found = findTable(source, input.tab)
   if (!found) return null
   // Les conditions du bloc se lisent sur toutes les colonnes, masquées comprises : un joueur reçoit
@@ -219,7 +223,13 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
     // Les formulaires que la vue lit (élément, détail) : celui de l'onglet, sinon celui d'Eraser, sinon l'automatique sur les colonnes visibles.
     const wanted = [...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])]
     const forms = Object.fromEntries(wanted.map((id) => [id, tabFormOrBuiltin(settings.layouts, source.key, table.tabName, id) ?? automaticLayoutFor("form", headers.map((header) => ({ header, spec: specs[header] })))]))
-    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard || layout.detail?.kind === "card" ? { cards: cards() } : {}), ...(wanted.length ? { forms } : {}) }
+    // Le tableau de bord : ses tuiles « vue » lisent les autres vues de l'onglet, ses tuiles « stat » les statistiques de l'index, ses tuiles « carte » les cartes.
+    const tiles = layout.kind === "dashboard" ? layout.tiles ?? [] : []
+    const views = tiles.some((tile) => tile.kind === "view") ? Object.fromEntries(tiles.flatMap((tile) => tile.kind === "view" && tile.view ? [[tile.view, fitLayoutToColumns(presentationFor(settings.presentations, table.tabName, tile.view), headers)]] : [])) as TabPresentations : undefined
+    const statIds = new Set(tiles.flatMap((tile) => tile.kind === "stat" && tile.stat ? [tile.stat] : []))
+    const stats = statIds.size && settings.stats ? settings.stats.stats.filter((stat) => statIds.has(stat.id)) : []
+    const withCards = layout.itemCard || layout.detail?.kind === "card" || tiles.some((tile) => tile.kind === "card" && !tile.form)
+    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(withCards ? { cards: cards() } : {}), ...(wanted.length ? { forms } : {}), ...(views ? { views } : {}), ...(stats.length ? { stats, statGroups: settings.stats?.groups ?? [] } : {}) }
   }
   return base
 }

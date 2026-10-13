@@ -1,45 +1,54 @@
-# Eraser 0.1.1-alpha.216 — Lot B : Élément, Au clic, 4 Liste, 5 Kanban, 6 Maître-détail
+# Eraser 0.1.1-alpha.217 — Lot C : 7 Calendrier, 8 Tableau de bord
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les réglages enregistrés par l'alpha 215 se relisent tels quels.
+Sheets ; les réglages enregistrés par l'alpha 216 se relisent tels quels (un calendrier en
+« Agenda » reste un agenda, un tableau de bord garde ses tuiles).
 
-## Sur toutes les vues : Élément et Au clic
+## 7 Calendrier : six échelles qui s'emboîtent
 
-- **Élément** : chaque ligne s'affiche avec les réglages de la vue, avec une carte (3) de
-  l'onglet, ou avec **un formulaire (1) en lecture** (le formulaire principal ou un formulaire
-  nommé, sections et onglets compris). Un formulaire changé dans « Modifier › Formulaire »
-  change aussitôt ici.
-- **Au clic** : ouvrir la fiche (d'office), **ouvrir la page** de la ligne, **afficher à
-  côté** (n'importe quelle vue devient un maître-détail), **afficher dessous** (la ligne se
-  déplie à sa place dans une liste ou un kanban, sous la vue ailleurs), ou **rien**.
-- **Le panneau de détail** a son réglage : les colonnes de la ligne, un formulaire en
-  lecture, ou une carte ; sa largeur ; **précédent / suivant** avec la position. Le même
-  panneau sert au maître-détail (6), qui reste dans la liste comme raccourci.
-- Les pages du créateur de pages suivent : un bloc Vue dont l'élément ou le détail est un
-  formulaire reçoit ce formulaire avec ses lignes.
+- **Échelle** : Année, Mois, Semaine, Jour, Agenda ou Saisons, chacune avec **sa forme** :
+  - Année : douze mini-grilles, bande par saison, ou un mois par ligne (compte et formule).
+  - Mois : grille (pastilles, points ou barres, N par jour puis « +n »), ou un jour par ligne
+    (les jours vides masqués si tu veux).
+  - Semaine : sept colonnes, une ligne par jour, ou un tableau (jour, nom, colonnes choisies).
+  - Jour : une page avec ses lignes en fiches (élément au choix), ou en paragraphes (titre +
+    texte long).
+  - Agenda : par date, en fil (comme une chronologie), ou groupé par semaine.
+  - Saisons : l'année en bande de saisons, ou un panneau à la couleur de chaque saison.
+- **Les échelles s'emboîtent** : un mois de l'année ouvre le mois, un jour du mois (ou de
+  l'agenda, de la semaine) ouvre le jour ; précédent / suivant à chaque échelle ; une **barre
+  des échelles** au-dessus si tu l'actives ; « Revenir » ramène à l'échelle réglée.
+- **Bannière** au-dessus du calendrier : l'image du mois ou de la saison (nouvelle colonne
+  « Image » des onglets Mois et Saisons de l'Index des calendriers), ou une image fixe ; sa
+  hauteur.
+- Les briques communes y sont : **élément** (vue, carte, formulaire en lecture), **au clic**
+  (fiche, page, à côté, dessous, rien), **formule dans l'en-tête** du mois, de la semaine ou
+  de la saison (contre une cible), **jauge ou charges** sous chaque ligne datée, couleur des
+  lignes selon une colonne, icône, image, pastille.
+- Dix-huit formes de base, dessinées sur tes lignes : Année (3), Mois (3 dont bannière),
+  Semaine (3), Agenda (3 dont élément = carte), Jour (3 dont liste + détail), Saisons (2),
+  Jauge et charges : mois + jour.
 
-## Briques nouvelles, sur toutes les vues à sections ou à colonnes
+## 8 Tableau de bord : des tuiles mixtes
 
-- **Formule dans l'en-tête** de chaque section ou colonne du kanban : nombre de lignes, somme,
-  moyenne, plus petite ou plus grande valeur d'une colonne nombre ; une cible optionnelle
-  (chiffre, ou barre vers la cible, en rouge au-delà) ; un libellé.
-- **Jauge sous chaque élément** : une colonne nombre en barre ou en **charges** (des points
-  pleins sur un total), sur un maximum fixe ou lu dans une autre colonne, avec son libellé.
-  Dans la liste, le kanban, le maître-détail (liste et détail).
-- **Menu des sections › Onglets** : les groupes deviennent des onglets, un seul groupe à la
-  fois, avec son nombre et sa formule.
-- Liste : **image alternée gauche / droite** (zigzag).
-
-## Formes de base de 4, 5 et 6, avec aperçu sur tes lignes
-
-- Un bouton **« Forme de base »** au-dessus des réglages de chaque vue ouvre la grille : les
-  formes de départ bâties sur les colonnes de l'onglet, les presets d'Eraser, les presets
-  enregistrés, chacune dessinée sur les premières lignes de l'onglet.
-- 4 Liste : Tableau aligné, Annuaire par lettre (menu des lettres), Entrées aérées,
-  Sections + menu, Sections + compte + formule, Jauge et charges, Groupes en onglets, Image
-  alternée, Liste + détail à côté, Accordéon.
-- 5 Kanban : Colonnes à bandeau (élément = carte), Colonnes sobres + compte, Colonnes ×
-  couloirs, Colonnes étroites, Colonnes = lignes d'un onglet lié + formule, Formule dans
-  l'en-tête, Jauge et charges.
-- 6 Maître-détail : Liste étroite + formulaire en lecture, Liste à droite + bannière, Détail
-  en onglets, Détail = une carte, Précédent / suivant, Jauge et charges.
+- Aux tuiles chiffres (nombre, somme, moyenne, min, max, remplies, répartition) s'ajoutent :
+  - **Jauge ou charges** : une formule sur les lignes, ou la case d'une ligne précise (« Vie »
+    d'Aldric sur « Vie max »), contre une cible ; anneau, barre ou charges, rouge au-delà.
+  - **Statistique de l'index** : une stat de « Modifier › Stats » posée en tuile (barres,
+    anneaux, histogrammes…), calculée sur les lignes de la vue.
+  - **Une autre vue de l'onglet** : liste, galerie, chronologie… avec ses propres réglages,
+    limitée à N lignes (triée : un top N).
+  - **Une ligne** : nommée, dessinée avec une carte ou un formulaire en lecture.
+  - **Texte à formules** : « Le groupe compte {nombre} membres et porte {somme Or} po » ; les
+    formules se recalculent et se surlignent. Aussi {moyenne X}, {min X}, {max X},
+    {remplies X}, {Or de Aldric} (la case d'une ligne), {Or} (sa somme).
+  - **Une tuile par ligne d'un onglet lié** : une colonne liée (personnage, lieu…) donne une
+    tuile par valeur, avec ses formules sur les lignes qui la citent.
+- **Sections** : chaque tuile nomme sa section ; les tuiles d'une même section vont ensemble,
+  repliables (repliées à l'ouverture si tu veux), avec une icône. Largeur d'une tuile : une
+  place, deux, ou toute la rangée.
+- Huit formes de base : Tuiles chiffres, Tuiles mixtes, Tuiles jauges, Une tuile par ligne
+  d'un onglet lié, Tuile texte, Tuile vue : top N, Tuiles en sections repliables, Texte avec
+  formules incrustées.
+- Dans les pages : un bloc Vue en tableau de bord reçoit les vues et les statistiques que ses
+  tuiles lisent.

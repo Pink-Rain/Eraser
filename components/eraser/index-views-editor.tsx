@@ -14,6 +14,7 @@ import { ArrowDown, ArrowUp, BookOpen, Bookmark, BookmarkPlus, Check, Columns3, 
 
 import { IndexCard } from "@/components/eraser/index-card"
 import { IndexFormView } from "@/components/eraser/index-form-view"
+import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
 import { useIndexSettings } from "@/components/eraser/index-views"
 import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/view-editor-controls"
@@ -26,8 +27,9 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
+import type { StatDefinition } from "@/lib/index-stats"
 import type { NamedLayout } from "@/lib/index-layouts"
-import { builtinViewPresets, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, presentationKinds, viewClicks, type DashboardTile, type KanbanLane, type PresentationKind, type TabPresentations, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import { builtinViewPresets, calendarFormChoices, calendarScaleOf, calendarScales, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, presentationKinds, viewClicks, type CalendarForms, type CalendarScale, type DashboardTile, type KanbanLane, type PresentationKind, type TabPresentations, type TileFormula, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
 import { viewStartersFor } from "@/lib/index-view-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
@@ -58,6 +60,9 @@ type Ctx = {
   cards: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé), pour l'élément et le détail. */
   forms: Array<{ id: string; name: string }>
+  /** Les statistiques de l'index et les autres vues réglées de l'onglet (tuiles du tableau de bord). */
+  stats: Array<{ id: string; title: string }>
+  presentations: TabPresentations
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
 }
@@ -408,45 +413,68 @@ function MasterDetailPages(ctx: Ctx): Page[] {
 
 function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
   const { layout, look, set, setLook, columns, disabled } = ctx
+  const scale = calendarScaleOf(layout)
+  const forms = layout.calendarForms ?? {}
+  const setForm = (value: string) => {
+    const next = { ...forms, [scale]: calendarFormChoices[scale][0].value === value ? undefined : value } as CalendarForms
+    for (const key of Object.keys(next) as CalendarScale[]) if (next[key] === undefined) delete next[key]
+    set({ calendarForms: Object.keys(next).length ? next : undefined })
+  }
+  const withLines = (scale === "month" && forms.month === "lines") || (scale === "week" && forms.week === "lines")
+  const withGrid = scale === "month" && forms.month !== "lines"
   return [
-    { key: "dates", label: "Dates", icon: <LayoutGrid className="size-3.5" />, render: () => <div className={settingsGroup}>
-      <p className={settingsTitle}><LayoutGrid className="size-3.5" />Le calendrier</p>
-      <div className="grid gap-2 sm:grid-cols-2">
-        <ColumnField label="Colonne de la date" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
-        <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
-      </div>
-      <p className={hintText}>Les calendriers (mois, saisons, jours de la semaine) se créent dans l’Index des calendriers. « 12 Brumaire 1023 » dans la case : la ligne se place à sa date.</p>
-      <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Affichage" value={look.calendarMode ?? "month"} options={[{ value: "month", label: "Grille du mois" }, { value: "agenda", label: "Agenda (liste par date)" }]} onChange={(calendarMode) => setLook({ calendarMode: calendarMode === "month" ? undefined : calendarMode })} disabled={disabled} />
-        <Toggle checked={Boolean(layout.showUndated)} onChange={(showUndated) => set({ showUndated: showUndated || undefined })} disabled={disabled}>Lister les lignes sans date</Toggle>
-      </div>
-    </div> },
-    { key: "entries", label: "Entrées", icon: <LayoutList className="size-3.5" />, render: () => <>
+    { key: "dates", label: "Dates", icon: <LayoutGrid className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
-        <p className={settingsTitle}><LayoutList className="size-3.5" />Les entrées</p>
-        {look.calendarMode !== "agenda" && <>
-          <Choice label="Dans la grille" value={look.entryStyle ?? "pill"} options={[{ value: "pill", label: "Pastilles" }, { value: "dot", label: "Points" }, { value: "bar", label: "Barres" }]} onChange={(entryStyle) => setLook({ entryStyle: entryStyle === "pill" ? undefined : entryStyle })} disabled={disabled} />
-          <Range text="Entrées par jour, au plus" value={layout.maxPerDay ?? 0} min={0} max={12} format={(value) => value ? String(value) : "toutes"} onChange={(value) => set({ maxPerDay: value || undefined })} disabled={disabled} title="Au-delà, « +N » ouvre le reste" />
-        </>}
+        <p className={settingsTitle}><LayoutGrid className="size-3.5" />Le calendrier</p>
         <div className="grid gap-2 sm:grid-cols-2">
-          <ColumnField label="Icône devant chaque entrée, prise dans" value={layout.iconColumn} columns={columns} onChange={(iconColumn) => set({ iconColumn })} empty="— Aucune colonne —" disabled={disabled} />
-          <span className={fieldLabel}>{layout.iconColumn ? "Sinon, une icône fixe" : "Une icône fixe"}<IconPick value={layout.itemIcon} onChange={(itemIcon) => set({ itemIcon })} disabled={disabled} /></span>
+          <ColumnField label="Colonne de la date" value={layout.dateColumn} columns={columns} onChange={(dateColumn) => set({ dateColumn })} empty="— Choisir… —" disabled={disabled} />
+          <label className={fieldLabel}>Calendrier<NativeSelect value={layout.calendar ?? REAL_CALENDAR} disabled={disabled} onChange={(event) => set({ calendar: event.target.value })} className="h-8 py-0 text-xs">{[...new Set([...calendars, ...(layout.calendar ? [layout.calendar] : [])])].map((name) => <NativeSelectOption key={name} value={name}>{name}</NativeSelectOption>)}</NativeSelect></label>
         </div>
-        {look.calendarMode === "agenda" && <span className={fieldLabel}>Sous le nom (agenda)<ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" /></span>}
-        {look.calendarMode === "agenda" && <ColumnField label="Image à côté du nom (agenda)" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} />}
+        <p className={hintText}>Les calendriers (mois, saisons, jours de la semaine, images) se créent dans l’Index des calendriers. « 12 Brumaire 1023 » dans la case : la ligne se place à sa date.</p>
       </div>
+      <div className={settingsGroup}>
+        <p className={settingsTitle}><Sparkles className="size-3.5" />L’échelle</p>
+        <Choice label="Échelle" value={scale} options={calendarScales.map((option) => ({ value: option.value, label: option.label, title: option.hint }))} onChange={(calendarScale) => set({ calendarScale, look: look.calendarMode ? { ...look, calendarMode: undefined } : look })} disabled={disabled} />
+        <Choice label="Forme" value={(forms[scale] ?? calendarFormChoices[scale][0].value) as string} options={calendarFormChoices[scale] as ReadonlyArray<{ value: string; label: string }>} onChange={setForm} disabled={disabled} />
+        <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+          <Toggle checked={Boolean(layout.calendarSwitcher)} onChange={(calendarSwitcher) => set({ calendarSwitcher: calendarSwitcher || undefined })} disabled={disabled} title="Année · Mois · Semaine · Jour · Agenda · Saisons, au-dessus du calendrier">Barre des échelles</Toggle>
+          <Toggle checked={!layout.calendarStay} onChange={(drill) => set({ calendarStay: drill ? undefined : true })} disabled={disabled} title="Un mois de l’année ouvre le mois, un jour du mois ouvre le jour">Les échelles s’emboîtent au clic</Toggle>
+          <Toggle checked={Boolean(layout.showUndated)} onChange={(showUndated) => set({ showUndated: showUndated || undefined })} disabled={disabled}>Lister les lignes sans date</Toggle>
+          {withLines && <Toggle checked={Boolean(layout.hideEmptyDays)} onChange={(hideEmptyDays) => set({ hideEmptyDays: hideEmptyDays || undefined })} disabled={disabled}>Masquer les jours vides</Toggle>}
+        </div>
+        <p className={hintText}>{calendarScales.find((option) => option.value === scale)?.hint}</p>
+      </div>
+      <GroupFormulaSettings ctx={ctx} what={scale === "week" ? "semaine" : scale === "seasons" ? "saison" : "mois"} />
+    </> },
+    { key: "entries", label: "Entrées", icon: <LayoutList className="size-3.5" />, render: () => <>
+      {withGrid && <div className={settingsGroup}>
+        <p className={settingsTitle}><LayoutList className="size-3.5" />Dans la grille</p>
+        <Choice label="Entrées" value={look.entryStyle ?? "pill"} options={[{ value: "pill", label: "Pastilles" }, { value: "dot", label: "Points" }, { value: "bar", label: "Barres" }]} onChange={(entryStyle) => setLook({ entryStyle: entryStyle === "pill" ? undefined : entryStyle })} disabled={disabled} />
+        <Range text="Entrées par jour, au plus" value={layout.maxPerDay ?? 0} min={0} max={12} format={(value) => value ? String(value) : "toutes"} onChange={(value) => set({ maxPerDay: value || undefined })} disabled={disabled} title="Au-delà, « +N » ouvre le reste" />
+      </div>}
+      <ItemSettings ctx={ctx} fieldsLabel={scale === "day" && forms.day === "paragraphs" ? "Sous le nom (la première en paragraphe)" : scale === "week" && forms.week === "table" ? "Colonnes du tableau" : "Sous le nom (listes, fiches)"} />
+      <CardChoice ctx={ctx} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
+        <p className={settingsTitle}><ImageIcon className="size-3.5" />Bannière</p>
+        <Choice label="Image" value={layout.calendarBanner ?? "none"} options={[{ value: "none", label: "Aucune" }, { value: "month", label: "Du mois" }, { value: "season", label: "De la saison" }, { value: "fixed", label: "Fixe" }]} onChange={(calendarBanner) => set({ calendarBanner: calendarBanner === "none" ? undefined : calendarBanner })} disabled={disabled} hint="L’image du mois ou de la saison se lit dans la colonne « Image » de l’Index des calendriers" />
+        {layout.calendarBanner === "fixed" && <Input value={layout.bannerImage ?? ""} disabled={disabled} onChange={(event) => set({ bannerImage: event.target.value || undefined })} placeholder="Adresse de l’image (https://… ou /api/…)" aria-label="Image de la bannière" className="h-8 text-xs" />}
+        {layout.calendarBanner && <Range text="Hauteur" value={layout.bannerHeight ?? 120} min={40} max={400} step={10} format={(value) => `${value} px`} onChange={(value) => set({ bannerHeight: value === 120 ? undefined : value })} disabled={disabled} />}
+      </div>
+      <div className={settingsGroup}>
         <p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p>
         <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Hauteur des jours" value={look.density ?? "normal"} options={[{ value: "compact", label: "Basse" }, { value: "normal", label: "Normale" }, { value: "airy", label: "Haute" }]} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
+          <Choice label={withGrid ? "Hauteur des jours" : "Espacement"} value={look.density ?? "normal"} options={withGrid ? [{ value: "compact", label: "Basse" }, { value: "normal", label: "Normale" }, { value: "airy", label: "Haute" }] : densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           <Choice label="En-tête du mois" value={layout.monthStyle ?? "plain"} options={[{ value: "plain", label: "Sobre" }, { value: "season", label: "À la couleur de la saison" }]} onChange={(monthStyle) => set({ monthStyle: monthStyle === "plain" ? undefined : monthStyle })} disabled={disabled} />
           <Toggle checked={!layout.hideSeasons} onChange={(shown) => set({ hideSeasons: shown ? undefined : true })} disabled={disabled}>Afficher la saison</Toggle>
+          <Toggle checked={!layout.hideCounts} onChange={(shown) => set({ hideCounts: shown ? undefined : true })} disabled={disabled}>Compter les lignes par mois</Toggle>
         </div>
+        <FrameLook ctx={ctx} surfaces={[{ value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrés" }]} />
         <TitleLook ctx={ctx} />
+        <FieldsLook ctx={ctx} />
       </div>
-      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Sa couleur" }, { value: "none", label: "Rien" }]} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
     </> },
   ]
 }
@@ -454,6 +482,96 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
 // ---------------------------------------------------------------------------
 // Tableau de bord
 // ---------------------------------------------------------------------------
+
+const tileViewKinds = presentationKinds.filter((kind) => kind.value !== "dashboard")
+
+/** Une tuile du tableau de bord : son genre, puis les réglages propres à ce genre, puis les communs. */
+function TileEditor({ tile, position, total, ctx, onChange, onMove, onRemove }: { tile: DashboardTile; position: number; total: number; ctx: Ctx; onChange: (tile: DashboardTile) => void; onMove: (delta: number) => void; onRemove: () => void }) {
+  const { columns, cards, forms, stats, presentations, disabled } = ctx
+  const patch = (changes: Partial<DashboardTile>) => { const next = { ...tile, ...changes }; for (const key of Object.keys(next) as Array<keyof DashboardTile>) if (next[key] === undefined) delete next[key]; onChange(next) }
+  const needsColumn = dashboardTileKinds.find((kind) => kind.value === tile.kind)?.needsColumn
+  const numeric = ["count", "sum", "average", "min", "max", "filled"].includes(tile.kind)
+  const columnSelect = (value: string | undefined, onPick: (value: string | undefined) => void, label: string, empty = "Colonne…") => <NativeSelect value={value ?? ""} disabled={disabled} onChange={(event) => onPick(event.target.value || undefined)} aria-label={label} className="h-8 min-w-32 flex-1 py-0 text-xs"><NativeSelectOption value="">{empty}</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect>
+  const formulas = tile.formulas?.length ? tile.formulas : [{ op: "count" as const }]
+  const setFormula = (at: number, formula: TileFormula | null) => patch({ formulas: formulas.flatMap((item, index) => index === at ? formula ? [formula] : [] : [item]) })
+  return <div className="grid gap-2 rounded-lg border bg-background/70 p-2">
+    <div className="flex flex-wrap items-center gap-1.5">
+      <NativeSelect value={tile.kind} disabled={disabled} onChange={(event) => patch({ kind: event.target.value as DashboardTile["kind"] })} aria-label="Tuile" className="h-8 min-w-40 flex-1 py-0 text-xs">
+        <NativeSelectOptGroup label="Chiffres">{dashboardTileKinds.filter((kind) => kind.group === "number").map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}</NativeSelectOption>)}</NativeSelectOptGroup>
+        <NativeSelectOptGroup label="Autres tuiles">{dashboardTileKinds.filter((kind) => kind.group === "other").map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}</NativeSelectOption>)}</NativeSelectOptGroup>
+      </NativeSelect>
+      {needsColumn && columnSelect(tile.column, (column) => patch({ column }), "Colonne", tile.kind === "linked" ? "Colonne liée…" : "Colonne…")}
+      <span className="flex shrink-0">
+        <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || position === 0} onClick={() => onMove(-1)} aria-label="Avancer la tuile"><ArrowUp /></Button>
+        <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || position === total - 1} onClick={() => onMove(1)} aria-label="Reculer la tuile"><ArrowDown /></Button>
+        <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={onRemove} aria-label="Retirer la tuile"><X /></Button>
+      </span>
+    </div>
+    {tile.kind === "gauge" && <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <Choice label="Mesure" value={tile.row !== undefined ? "row" : tile.measure ?? "count"} options={[{ value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "average", label: "Moyenne" }, { value: "min", label: "Min" }, { value: "max", label: "Max" }, { value: "row", label: "Une ligne précise" }]} onChange={(measure) => patch(measure === "row" ? { row: tile.row ?? "", measure: undefined } : { measure: measure === "count" ? undefined : measure, row: undefined, maxColumn: undefined })} disabled={disabled} />
+        <Choice label="Dessin" value={tile.style ?? "ring"} options={[{ value: "ring", label: "Anneau" }, { value: "bar", label: "Barre" }, { value: "charges", label: "Charges" }]} onChange={(style) => patch({ style: style === "ring" ? undefined : style })} disabled={disabled} />
+      </div>
+      <div className="flex flex-wrap items-center gap-1.5">
+        {tile.row !== undefined && <Input value={tile.row} disabled={disabled} onChange={(event) => patch({ row: event.target.value })} placeholder="Nom de la ligne" aria-label="Nom de la ligne" className="h-8 min-w-32 flex-1 text-xs" />}
+        {(tile.row !== undefined || (tile.measure && tile.measure !== "count")) && columnSelect(tile.column, (column) => patch({ column }), "Colonne du nombre", "Colonne du nombre…")}
+        <Input type="number" min={0} step="any" value={tile.target ?? ""} disabled={disabled} onChange={(event) => patch({ target: event.target.value ? Number(event.target.value) : undefined })} placeholder="Cible" aria-label="Cible" className="h-8 w-24 text-xs" />
+        {tile.row !== undefined && columnSelect(tile.maxColumn, (maxColumn) => patch({ maxColumn }), "Colonne du maximum", "ou le maximum lu dans…")}
+      </div>
+      <p className={hintText}>Une formule sur les lignes de la vue, ou la case d’une ligne (« Vie » d’Aldric sur « Vie max »), contre une cible : au-delà, la jauge passe au rouge.</p>
+    </div>}
+    {tile.kind === "stat" && <div className="grid gap-1.5">
+      <NativeSelect value={tile.stat ?? ""} disabled={disabled} onChange={(event) => patch({ stat: event.target.value || undefined })} aria-label="Statistique" className="h-8 py-0 text-xs"><NativeSelectOption value="">— Choisir une statistique… —</NativeSelectOption>{stats.map((stat) => <NativeSelectOption key={stat.id} value={stat.id}>{stat.title}</NativeSelectOption>)}{tile.stat && !stats.some((stat) => stat.id === tile.stat) && <NativeSelectOption value={tile.stat}>Statistique retirée ({tile.stat})</NativeSelectOption>}</NativeSelect>
+      <p className={hintText}>Les statistiques se construisent dans « Modifier › Stats » (barres, anneaux, histogrammes…) ; ici elle se calcule sur les lignes de la vue.</p>
+    </div>}
+    {tile.kind === "view" && <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-2">
+        <NativeSelect value={tile.view ?? ""} disabled={disabled} onChange={(event) => patch({ view: (event.target.value || undefined) as DashboardTile["view"] })} aria-label="Vue" className="h-8 min-w-40 flex-1 py-0 text-xs"><NativeSelectOption value="">— Choisir une vue… —</NativeSelectOption>{tileViewKinds.map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}{presentations[kind.value] ? " (réglée)" : ""}</NativeSelectOption>)}</NativeSelect>
+      </div>
+      <Range text="Lignes au plus" value={tile.limit ?? 10} min={1} max={100} onChange={(value) => patch({ limit: value === 10 ? undefined : value })} disabled={disabled} />
+      <p className={hintText}>La vue garde ses propres réglages (Modifier › la vue) : trier par une colonne et limiter donne un « top N ».</p>
+    </div>}
+    {tile.kind === "card" && <div className="grid gap-1.5">
+      <div className="flex flex-wrap items-center gap-1.5">
+        <Input value={tile.row ?? ""} disabled={disabled} onChange={(event) => patch({ row: event.target.value || undefined })} placeholder="Nom de la ligne" aria-label="Nom de la ligne" className="h-8 min-w-32 flex-1 text-xs" />
+        <NativeSelect value={tile.form ? `form:${tile.form}` : tile.card ?? DEFAULT_ITEM_CARD} disabled={disabled} onChange={(event) => { const next = event.target.value; patch(next.startsWith("form:") ? { form: next.slice(5), card: undefined } : { card: next === DEFAULT_ITEM_CARD ? undefined : next, form: undefined }) }} aria-label="Élément" className="h-8 min-w-40 flex-1 py-0 text-xs">
+          <NativeSelectOptGroup label="Avec une carte (3)"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Avec un formulaire en lecture (1)">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+        </NativeSelect>
+      </div>
+    </div>}
+    {tile.kind === "text" && <div className="grid gap-1.5">
+      <textarea value={tile.text ?? ""} disabled={disabled} maxLength={2000} onChange={(event) => patch({ text: event.target.value || undefined })} rows={3} placeholder="Le groupe compte {nombre} membres et porte {somme Or} po…" aria-label="Texte" className="min-h-16 rounded-md border bg-background px-2 py-1.5 text-xs" />
+      <p className={hintText}>Entre accolades, des formules recalculées sur les lignes de la vue : {"{nombre}"}, {"{somme Or}"}, {"{moyenne Niveau}"}, {"{min X}"}, {"{max X}"}, {"{remplies X}"}, {"{Or de Aldric}"} (la case d’une ligne nommée), {"{Or}"} (sa somme).</p>
+    </div>}
+    {tile.kind === "linked" && <div className="grid gap-1.5">
+      <p className={hintText}>Une tuile par valeur de la colonne liée (chaque personnage, chaque lieu…), avec des formules sur les lignes qui la citent.</p>
+      {formulas.map((formula, at) => <div key={at} className="flex flex-wrap items-center gap-1.5">
+        <NativeSelect value={formula.op} disabled={disabled} onChange={(event) => setFormula(at, { ...formula, op: event.target.value as TileFormula["op"] })} aria-label="Formule" className="h-8 min-w-28 py-0 text-xs">{groupFormulaOps.map((op) => <NativeSelectOption key={op.value} value={op.value}>{op.label}</NativeSelectOption>)}</NativeSelect>
+        {formula.op !== "count" && columnSelect(formula.column, (column) => setFormula(at, { ...formula, column }), "Colonne de la formule")}
+        <Input value={formula.label ?? ""} disabled={disabled} maxLength={40} onChange={(event) => setFormula(at, { ...formula, label: event.target.value || undefined })} placeholder="Libellé" aria-label="Libellé" className="h-8 w-28 text-xs" />
+        <Input value={formula.unit ?? ""} disabled={disabled} maxLength={12} onChange={(event) => setFormula(at, { ...formula, unit: event.target.value || undefined })} placeholder="Unité" aria-label="Unité" className="h-8 w-16 text-xs" />
+        <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled || formulas.length <= 1} onClick={() => setFormula(at, null)} aria-label="Retirer la formule"><X /></Button>
+      </div>)}
+      <div className="flex flex-wrap items-center gap-3">
+        <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled || formulas.length >= 4} onClick={() => patch({ formulas: [...formulas, { op: "sum", column: columns[0] }] })}><Plus />Formule</Button>
+        <Range text="Tuiles au plus" value={tile.limit ?? 24} min={1} max={100} onChange={(value) => patch({ limit: value === 24 ? undefined : value })} disabled={disabled} />
+      </div>
+    </div>}
+    <div className="grid gap-1.5 sm:grid-cols-3">
+      <Input value={tile.label ?? ""} disabled={disabled} onChange={(event) => patch({ label: event.target.value || undefined })} placeholder="Titre (facultatif)" aria-label="Titre de la tuile" className="h-8 text-xs" />
+      {(numeric || tile.kind === "gauge") && <Input value={tile.unit ?? ""} disabled={disabled} maxLength={12} onChange={(event) => patch({ unit: event.target.value || undefined })} placeholder="Unité (PO, %, km)" aria-label="Unité" className="h-8 text-xs" />}
+      <Input value={tile.note ?? ""} disabled={disabled} maxLength={80} onChange={(event) => patch({ note: event.target.value || undefined })} placeholder="Une ligne sous la tuile" aria-label="Note" className="h-8 text-xs" />
+      <Input value={tile.section ?? ""} disabled={disabled} maxLength={60} onChange={(event) => patch({ section: event.target.value || undefined })} placeholder="Section (Groupe, Monde…)" aria-label="Section" className="h-8 text-xs" />
+    </div>
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+      <span className={cn(fieldLabel, "flex-row items-center")}>Icône<IconPick value={tile.icon} onChange={(icon) => patch({ icon })} disabled={disabled} /></span>
+      {numeric && <Choice label="Nombre" value={tile.size ?? "md"} options={[{ value: "sm", label: "Petit" }, { value: "md", label: "Moyen" }, { value: "lg", label: "Grand" }]} onChange={(size) => patch({ size: size === "md" ? undefined : size })} disabled={disabled} />}
+      <Choice label="Largeur" value={tile.full ? "full" : tile.wide ? "wide" : "one"} options={[{ value: "one", label: "Une place" }, { value: "wide", label: "Deux" }, { value: "full", label: "Toute la rangée" }]} onChange={(width) => patch({ wide: width === "wide" || undefined, full: width === "full" || undefined })} disabled={disabled} />
+    </div>
+    <ColorSwatches value={tile.color} onChange={(color) => patch({ color })} disabled={disabled} none="Accent de la vue" ariaLabel="Couleur de la tuile" />
+  </div>
+}
 
 function TilesEditor({ ctx }: { ctx: Ctx }) {
   const { layout, set, columns, disabled } = ctx
@@ -463,42 +581,28 @@ function TilesEditor({ ctx }: { ctx: Ctx }) {
   return <div className={settingsGroup}>
     <div className="flex items-center justify-between gap-2">
       <p className={settingsTitle}><LayoutGrid className="size-3.5" />Les tuiles</p>
-      <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled || tiles.length >= 16} onClick={() => set({ tiles: [...tiles, { kind: "breakdown", column: columns[0] }] })}><Plus />Ajouter une tuile</Button>
+      <Button type="button" size="sm" variant="outline" className="h-7 text-xs" disabled={disabled || tiles.length >= 24} onClick={() => set({ tiles: [...tiles, { kind: "breakdown", column: columns[0] }] })}><Plus />Ajouter une tuile</Button>
     </div>
     <div className="grid gap-2">
-      {tiles.map((tile, position) => {
-        const needsColumn = dashboardTileKinds.find((kind) => kind.value === tile.kind)?.needsColumn
-        return <div key={position} className="grid gap-2 rounded-lg border bg-background/70 p-2">
-          <div className="flex flex-wrap items-center gap-1.5">
-            <NativeSelect value={tile.kind} disabled={disabled} onChange={(event) => setTile(position, { ...tile, kind: event.target.value as DashboardTile["kind"] })} aria-label="Tuile" className="h-8 min-w-40 flex-1 py-0 text-xs">{dashboardTileKinds.map((kind) => <NativeSelectOption key={kind.value} value={kind.value}>{kind.label}</NativeSelectOption>)}</NativeSelect>
-            {needsColumn && <NativeSelect value={tile.column ?? ""} disabled={disabled} onChange={(event) => setTile(position, { ...tile, column: event.target.value || undefined })} aria-label="Colonne" className="h-8 min-w-32 flex-1 py-0 text-xs"><NativeSelectOption value="">Colonne…</NativeSelectOption>{columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}</NativeSelect>}
-            <span className="flex shrink-0">
-              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || position === 0} onClick={() => move(position, -1)} aria-label="Avancer la tuile"><ArrowUp /></Button>
-              <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || position === tiles.length - 1} onClick={() => move(position, 1)} aria-label="Reculer la tuile"><ArrowDown /></Button>
-              <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => setTile(position, null)} aria-label="Retirer la tuile"><X /></Button>
-            </span>
-          </div>
-          <div className="grid gap-1.5 sm:grid-cols-3">
-            <Input value={tile.label ?? ""} disabled={disabled} onChange={(event) => setTile(position, { ...tile, label: event.target.value || undefined })} placeholder="Titre (facultatif)" aria-label="Titre de la tuile" className="h-8 text-xs" />
-            <Input value={tile.unit ?? ""} disabled={disabled} maxLength={12} onChange={(event) => setTile(position, { ...tile, unit: event.target.value || undefined })} placeholder="Unité (PO, %, km)" aria-label="Unité" className="h-8 text-xs" />
-            <Input value={tile.note ?? ""} disabled={disabled} maxLength={80} onChange={(event) => setTile(position, { ...tile, note: event.target.value || undefined })} placeholder="Une ligne sous le nombre" aria-label="Note" className="h-8 text-xs" />
-          </div>
-          <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
-            <span className={cn(fieldLabel, "flex-row items-center")}>Icône<IconPick value={tile.icon} onChange={(icon) => setTile(position, { ...tile, icon })} disabled={disabled} /></span>
-            <Choice label="Nombre" value={tile.size ?? "md"} options={[{ value: "sm", label: "Petit" }, { value: "md", label: "Moyen" }, { value: "lg", label: "Grand" }]} onChange={(size) => setTile(position, { ...tile, size: size === "md" ? undefined : size })} disabled={disabled} />
-            <Toggle checked={Boolean(tile.wide)} onChange={(wide) => setTile(position, { ...tile, wide: wide || undefined })} disabled={disabled}>Tuile large</Toggle>
-          </div>
-          <ColorSwatches value={tile.color} onChange={(color) => setTile(position, { ...tile, color })} disabled={disabled} none="Accent de la vue" ariaLabel="Couleur de la tuile" />
-        </div>
-      })}
+      {tiles.map((tile, position) => <TileEditor key={position} tile={tile} position={position} total={tiles.length} ctx={ctx} onChange={(next) => setTile(position, next)} onMove={(delta) => move(position, delta)} onRemove={() => setTile(position, null)} />)}
     </div>
   </div>
 }
 
 function DashboardPages(ctx: Ctx): Page[] {
   const { layout, look, set, setLook, disabled } = ctx
+  const sections = [...new Set((layout.tiles ?? []).map((tile) => tile.section).filter(Boolean))]
   return [
     { key: "tiles", label: "Tuiles", icon: <LayoutGrid className="size-3.5" />, render: () => <TilesEditor ctx={ctx} /> },
+    { key: "sections", label: "Sections", icon: <ListTree className="size-3.5" />, render: () => <div className={settingsGroup}>
+      <p className={settingsTitle}><ListTree className="size-3.5" />Les sections</p>
+      <p className={hintText}>Chaque tuile nomme sa section dans ses réglages (« Groupe », « Monde », « Règles ») : les tuiles d’une même section vont ensemble, sous son titre.{sections.length ? ` Sections : ${sections.join(", ")}.` : " Aucune pour l’instant."}</p>
+      <div className="flex flex-wrap items-center gap-x-4 gap-y-2">
+        <Toggle checked={Boolean(layout.collapsible)} onChange={(collapsible) => set({ collapsible: collapsible || undefined, collapsed: collapsible ? layout.collapsed : undefined })} disabled={disabled}>Sections repliables</Toggle>
+        {layout.collapsible && <Toggle checked={Boolean(layout.collapsed)} onChange={(collapsed) => set({ collapsed: collapsed || undefined })} disabled={disabled}>Repliées à l’ouverture</Toggle>}
+      </div>
+      <span className={fieldLabel}>Icône devant les titres de sections<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
+    </div> },
     { key: "look", label: "Grille et apparence", icon: <Palette className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutGrid className="size-3.5" />La grille</p>
@@ -720,7 +824,7 @@ function CodexPages(ctx: Ctx): Page[] {
 type Page = { key: string; label: string; icon: ReactNode; render: () => ReactNode }
 
 /** Les réglages d'une vue (sa forme déjà choisie), en pages propres à son type. */
-export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], optionsOf, disabled = false }: {
+export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], stats = [], presentations = {}, optionsOf, disabled = false }: {
   kind: PresentationKind
   layout: ViewLayout
   columns: string[]
@@ -728,6 +832,9 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
   cards?: Array<{ id: string; name: string }>
   /** Les formulaires de l'onglet (« principal » : l'étoilé) : l'élément et le détail peuvent en lire un. */
   forms?: Array<{ id: string; name: string }>
+  /** Les statistiques de l'index et les vues réglées de l'onglet : le tableau de bord en fait des tuiles. */
+  stats?: Array<{ id: string; title: string }>
+  presentations?: TabPresentations
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
 }) {
@@ -744,7 +851,7 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
     for (const key of Object.keys(next) as Array<keyof ViewLook>) if (next[key] === undefined) delete next[key]
     set({ look: Object.keys(next).length ? next : undefined })
   }
-  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, optionsOf, disabled }
+  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, stats, presentations, optionsOf, disabled }
   const pages = kind === "list" ? ListPages(ctx)
     : kind === "kanban" ? KanbanPages(ctx)
     : kind === "master-detail" ? MasterDetailPages(ctx)
@@ -844,7 +951,7 @@ export function ViewsPanel({ kind, columns, layout, configured, presets, onApply
 
 const screens = { phone: "24rem", tablet: "44rem", desktop: "100%" } as const
 
-export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], disabled = false }: {
+export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], stats = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
   tabName: string
@@ -860,6 +967,8 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
   cardColumns?: CardColumn[]
   /** Les formulaires de l'onglet (brouillon compris) : un élément ou un détail « formulaire en lecture » les dessine. */
   forms?: NamedLayout[]
+  /** Les statistiques de l'index (Modifier › Stats) : une tuile du tableau de bord en dessine une. */
+  stats?: StatDefinition[]
   disabled?: boolean
 }) {
   const [screen, setScreen] = useState<keyof typeof screens>("desktop")
@@ -882,6 +991,13 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
     return form ? <IndexFormView layout={form.layout} columns={cardColumns.length ? cardColumns : columns.map((header) => ({ header }))} valueOf={(header) => values.get(foldName(header)) ?? ""} compact /> : null
   }
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
+  const previewNameOf = (key: string) => (rows[Number(key)]?.[nameColumn] ?? "").replace(/<[^>]+>/g, "").trim()
+  const previewValueOf = (key: string, header: string) => rows[Number(key)]?.[header] ?? ""
+  // Une statistique de l'index, calculée sur les lignes de l'aperçu (sans ses colonnes regroupées).
+  const renderStat = (statId: string) => {
+    const stat = stats.find((item) => item.id === statId)
+    return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} pinnedOnly single rows={keys} columns={columns} tabs={[tabName]} valueOf={previewValueOf} tabOf={() => tabName} nameOf={previewNameOf} optionsOf={optionsOf ?? (() => [])} canEdit={false} onSave={async () => undefined} /> : null
+  }
   const preview = (shown: ViewLayout, limit?: number) => <IndexViewLayout
     layout={shown}
     rows={limit ? keys.slice(0, limit) : keys}
@@ -892,12 +1008,14 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
     onOpen={() => undefined}
     renderCard={renderCard}
     renderForm={forms.length ? renderForm : undefined}
+    renderStat={stats.length ? renderStat : undefined}
+    presentations={value}
     empty="Pas encore de ligne dans cet onglet."
   />
   return <div className="grid min-h-0 items-start gap-3 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
     <div className="grid content-start gap-2">
       <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
-      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} optionsOf={optionsOf} disabled={disabled} />
+      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} stats={stats.map((stat) => ({ id: stat.id, title: stat.title }))} presentations={value} optionsOf={optionsOf} disabled={disabled} />
     </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">

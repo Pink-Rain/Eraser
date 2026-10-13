@@ -14,15 +14,24 @@ export { cellNumber }
 
 export type ViewLayoutKind = "table" | "cards" | "list" | "kanban" | "master-detail" | "calendar" | "dashboard" | "gallery" | "timeline" | "tree" | "codex" | "stats"
 
-export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown"
+/**
+ * Les tuiles d'un tableau de bord : un chiffre (nombre de lignes, somme, moyenne… d'une colonne),
+ * une répartition, une jauge (une formule ou une ligne précise contre une cible), une statistique
+ * de « Modifier › Stats », une autre vue de l'onglet (limitée à N lignes), une ligne dessinée avec
+ * une carte ou un formulaire, un texte à formules incrustées, ou une tuile par ligne d'un onglet
+ * lié (une colonne liée, des formules sur les lignes qui lui sont liées). Tout se mélange.
+ */
+export type DashboardTileKind = "count" | "sum" | "average" | "min" | "max" | "filled" | "breakdown" | "gauge" | "stat" | "view" | "card" | "text" | "linked"
+export type TileFormula = { op: GroupFormulaOp; column?: string; label?: string; unit?: string }
 export type DashboardTile = {
   kind: DashboardTileKind
   column?: string
   label?: string
   /** Couleur de la tuile (#hex). */
   color?: string
-  /** Tuile large (deux places). */
+  /** Tuile large (deux places), ou sur toute la rangée. */
   wide?: boolean
+  full?: boolean
   /** Une icône (nom d'icône ou émoji) dans la tuile. */
   icon?: string
   /** Une unité écrite après le nombre (« PO », « % »). */
@@ -31,6 +40,26 @@ export type DashboardTile = {
   size?: "sm" | "md" | "lg"
   /** Une ligne sous le nombre (« sur l'ensemble des lieux »). */
   note?: string
+  /** La section de la tuile (« Groupe », « Monde ») : les tuiles d'une même section vont ensemble, repliables si la vue le veut. */
+  section?: string
+  /** Jauge : la formule (compte d'office) sur la colonne, ou la case d'une ligne précise (`row` : son nom) ; la cible (nombre, ou colonne de la ligne) ; anneau, barre ou charges. */
+  measure?: "count" | "sum" | "average" | "min" | "max"
+  row?: string
+  target?: number
+  maxColumn?: string
+  style?: "ring" | "bar" | "charges"
+  /** Stat : l'identifiant d'une statistique de l'index. */
+  stat?: string
+  /** Vue : une autre vue de l'onglet (ses réglages de « Modifier › Vues »), tant de lignes au plus. */
+  view?: PresentationKind
+  limit?: number
+  /** Carte : la ligne (`row`) dessinée avec une carte (identifiant, ou « * ») ou un formulaire en lecture. */
+  card?: string
+  form?: string
+  /** Texte : un texte libre où « {nombre} », « {somme Or} », « {moyenne Niveau} », « {Or de Aldric} »… s'incrustent et se recalculent. */
+  text?: string
+  /** Lié : une tuile par valeur de la colonne liée, chacune avec ses formules sur les lignes qui la citent. */
+  formulas?: TileFormula[]
 }
 
 /** Une colonne du kanban réglée à la main : son libellé, sa couleur, son icône, cachée, une limite. */
@@ -183,6 +212,22 @@ export type ViewLayout = {
   hideSeasons?: boolean
   monthStyle?: "plain" | "season"
   maxPerDay?: number
+  /**
+   * Calendrier : l'échelle montrée (mois d'office ; « agenda » reprend l'ancien `look.calendarMode`),
+   * la forme de chaque échelle, la barre des échelles au-dessus, et le clic sur un mois ou un jour
+   * qui n'ouvre pas son échelle (`calendarStay`). Les échelles s'emboîtent : un mois de l'année
+   * ouvre le mois, un jour du mois ouvre le jour.
+   */
+  calendarScale?: CalendarScale
+  calendarForms?: CalendarForms
+  calendarSwitcher?: boolean
+  calendarStay?: boolean
+  /** Calendrier : une bannière au-dessus (l'image du mois ou de la saison lue dans l'Index des calendriers, ou une image fixe), sa hauteur en pixels. */
+  calendarBanner?: "month" | "season" | "fixed"
+  bannerImage?: string
+  bannerHeight?: number
+  /** Calendrier (mois en lignes, semaine en lignes) : les jours sans ligne ne s'affichent pas. */
+  hideEmptyDays?: boolean
   /** Galerie : la largeur et la hauteur des vignettes (rem, liées ou non ; `galleryRatio` : ancien réglage), l'arrondi (px), le recadrage, sans zoom au survol. */
   galleryWidthRem?: number
   galleryHeightRem?: number
@@ -210,6 +255,27 @@ export type ViewLayout = {
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
   look?: ViewLook
 }
+
+export type CalendarScale = "year" | "month" | "week" | "day" | "agenda" | "seasons"
+export const calendarScales: Array<{ value: CalendarScale; label: string; hint: string }> = [
+  { value: "year", label: "Année", hint: "Douze mini-grilles, une bande par saison, ou un mois par ligne." },
+  { value: "month", label: "Mois", hint: "La grille du mois, ou un jour par ligne." },
+  { value: "week", label: "Semaine", hint: "Sept colonnes, une ligne par jour, ou un tableau." },
+  { value: "day", label: "Jour", hint: "Une page par jour : ses lignes en fiches ou en paragraphes." },
+  { value: "agenda", label: "Agenda", hint: "Toutes les dates à la suite : liste, fil, ou groupées par semaine." },
+  { value: "seasons", label: "Saisons", hint: "L’année en bande, ou un panneau par saison." },
+]
+export type CalendarForms = { year?: "grids" | "band" | "lines"; month?: "grid" | "lines"; week?: "columns" | "lines" | "table"; day?: "sheets" | "paragraphs"; agenda?: "list" | "thread" | "weeks"; seasons?: "band" | "panels" }
+export const calendarFormChoices: { [K in CalendarScale]: ReadonlyArray<{ value: NonNullable<CalendarForms[K]>; label: string }> } = {
+  year: [{ value: "grids", label: "Douze mini-grilles" }, { value: "band", label: "Bande par saison" }, { value: "lines", label: "Un mois par ligne" }],
+  month: [{ value: "grid", label: "Grille" }, { value: "lines", label: "Un jour par ligne" }],
+  week: [{ value: "columns", label: "Sept colonnes" }, { value: "lines", label: "Une ligne par jour" }, { value: "table", label: "Tableau" }],
+  day: [{ value: "sheets", label: "Fiches" }, { value: "paragraphs", label: "Paragraphes" }],
+  agenda: [{ value: "list", label: "Par date" }, { value: "thread", label: "Fil" }, { value: "weeks", label: "Par semaine" }],
+  seasons: [{ value: "band", label: "Bande" }, { value: "panels", label: "Un panneau par saison" }],
+}
+/** L'échelle d'un calendrier : celle réglée, sinon l'ancien « Agenda », sinon le mois. */
+export const calendarScaleOf = (layout: Pick<ViewLayout, "calendarScale" | "look">): CalendarScale => layout.calendarScale ?? (layout.look?.calendarMode === "agenda" ? "agenda" : "month")
 
 export type ViewClick = "sheet" | "page" | "side" | "below" | "none"
 export const viewClicks: Array<{ value: ViewClick; label: string; hint: string }> = [
@@ -256,14 +322,20 @@ export const viewLayoutKinds: Array<{ value: ViewLayoutKind; label: string; hint
   { value: "codex", label: "Codex", hint: "Les fiches l’une après l’autre, à lire comme un livre, avec un sommaire." },
 ]
 
-export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string; needsColumn: boolean }> = [
-  { value: "count", label: "Nombre de lignes", needsColumn: false },
-  { value: "sum", label: "Somme d’une colonne", needsColumn: true },
-  { value: "average", label: "Moyenne d’une colonne", needsColumn: true },
-  { value: "min", label: "Plus petite valeur", needsColumn: true },
-  { value: "max", label: "Plus grande valeur", needsColumn: true },
-  { value: "filled", label: "Lignes remplies dans une colonne", needsColumn: true },
-  { value: "breakdown", label: "Répartition par valeur", needsColumn: true },
+export const dashboardTileKinds: Array<{ value: DashboardTileKind; label: string; needsColumn: boolean; group: "number" | "other" }> = [
+  { value: "count", label: "Nombre de lignes", needsColumn: false, group: "number" },
+  { value: "sum", label: "Somme d’une colonne", needsColumn: true, group: "number" },
+  { value: "average", label: "Moyenne d’une colonne", needsColumn: true, group: "number" },
+  { value: "min", label: "Plus petite valeur", needsColumn: true, group: "number" },
+  { value: "max", label: "Plus grande valeur", needsColumn: true, group: "number" },
+  { value: "filled", label: "Lignes remplies dans une colonne", needsColumn: true, group: "number" },
+  { value: "breakdown", label: "Répartition par valeur", needsColumn: true, group: "number" },
+  { value: "gauge", label: "Jauge ou charges (contre une cible)", needsColumn: false, group: "other" },
+  { value: "stat", label: "Statistique de l’index", needsColumn: false, group: "other" },
+  { value: "view", label: "Une autre vue de l’onglet", needsColumn: false, group: "other" },
+  { value: "card", label: "Une ligne (carte ou formulaire)", needsColumn: false, group: "other" },
+  { value: "text", label: "Texte à formules", needsColumn: false, group: "other" },
+  { value: "linked", label: "Une tuile par ligne d’un onglet lié", needsColumn: true, group: "other" },
 ]
 
 // « stats » n'est pas proposée parmi les présentations d'un onglet-fenêtre : c'est l'onglet stat.
@@ -371,8 +443,38 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
     const size = oneOf(entry.size, ["sm", "md", "lg"] as const)
     if (size) tile.size = size
     if (text(entry.note, 80)) tile.note = text(entry.note, 80)
+    if (entry.full === true) tile.full = true
+    if (text(entry.section, 60)) tile.section = text(entry.section, 60)
+    const measure = oneOf(entry.measure, ["count", "sum", "average", "min", "max"] as const)
+    if (measure && measure !== "count") tile.measure = measure
+    if (text(entry.row, 120)) tile.row = text(entry.row, 120)
+    const target = typeof entry.target === "number" && Number.isFinite(entry.target) ? Math.round(entry.target * 100) / 100 : undefined
+    if (target !== undefined && target > 0) tile.target = target
+    if (text(entry.maxColumn)) tile.maxColumn = text(entry.maxColumn)
+    const style = oneOf(entry.style, ["ring", "bar", "charges"] as const)
+    if (style && style !== "ring") tile.style = style
+    if (text(entry.stat, 80)) tile.stat = text(entry.stat, 80)
+    const view = oneOf(entry.view, ["list", "kanban", "master-detail", "calendar", "gallery", "timeline", "tree", "codex"] as const)
+    if (view) tile.view = view
+    const limit = bounded(entry.limit, 1, 100)
+    if (limit) tile.limit = limit
+    if (text(entry.card, 80)) tile.card = text(entry.card, 80)
+    if (text(entry.form, 40)) tile.form = text(entry.form, 40)
+    if (typeof entry.text === "string" && entry.text.trim()) tile.text = entry.text.trim().slice(0, 2000)
+    const formulas = Array.isArray(entry.formulas) ? entry.formulas.flatMap((input): TileFormula[] => {
+      if (!input || typeof input !== "object") return []
+      const raw = input as Record<string, unknown>
+      const op = oneOf(raw.op, ["count", "sum", "avg", "min", "max"] as const)
+      if (!op) return []
+      const formula: TileFormula = { op }
+      if (text(raw.column)) formula.column = text(raw.column)
+      if (text(raw.label, 40)) formula.label = text(raw.label, 40)
+      if (text(raw.unit, 12)) formula.unit = text(raw.unit, 12)
+      return [formula]
+    }).slice(0, 4) : []
+    if (formulas.length) tile.formulas = formulas
     return [tile]
-  }).slice(0, 16) : []
+  }).slice(0, 24) : []
   if (tiles.length) layout.tiles = tiles
   if (text(raw.sortBy)) layout.sortBy = text(raw.sortBy)
   if (raw.sortDesc === true) layout.sortDesc = true
@@ -452,6 +554,25 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (raw.monthStyle === "season") layout.monthStyle = "season"
   const maxPerDay = bounded(raw.maxPerDay, 1, 12)
   if (maxPerDay) layout.maxPerDay = maxPerDay
+  const calendarScale = oneOf(raw.calendarScale, ["year", "month", "week", "day", "agenda", "seasons"] as const)
+  if (calendarScale) layout.calendarScale = calendarScale
+  if (raw.calendarForms && typeof raw.calendarForms === "object") {
+    const input = raw.calendarForms as Record<string, unknown>
+    const forms: CalendarForms = {}
+    for (const scale of Object.keys(calendarFormChoices) as CalendarScale[]) {
+      const choice = calendarFormChoices[scale].find((option, index) => index > 0 && option.value === input[scale])
+      if (choice) (forms as Record<string, string>)[scale] = choice.value
+    }
+    if (Object.keys(forms).length) layout.calendarForms = forms
+  }
+  if (raw.calendarSwitcher === true) layout.calendarSwitcher = true
+  if (raw.calendarStay === true) layout.calendarStay = true
+  const calendarBanner = oneOf(raw.calendarBanner, ["month", "season", "fixed"] as const)
+  if (calendarBanner) layout.calendarBanner = calendarBanner
+  if (text(raw.bannerImage, 400)) layout.bannerImage = text(raw.bannerImage, 400)
+  const bannerHeight = bounded(raw.bannerHeight, 40, 400)
+  if (bannerHeight) layout.bannerHeight = bannerHeight
+  if (raw.hideEmptyDays === true) layout.hideEmptyDays = true
   const galleryWidthRem = bounded(raw.galleryWidthRem, 5, 30, 0.5)
   if (galleryWidthRem) layout.galleryWidthRem = galleryWidthRem
   const galleryHeightRem = bounded(raw.galleryHeightRem, 3, 40, 0.5)
@@ -541,6 +662,75 @@ export function dashboardTileValue<T>(tile: DashboardTile, rows: T[], valueOf: (
   return { number: tile.kind === "sum" ? sum : numbers.length ? sum / numbers.length : 0, breakdown: [] }
 }
 
+/** La valeur d'une tuile jauge : une formule sur les lignes, ou la case d'une ligne précise ; son maximum (la cible, ou la colonne de la ligne). */
+export function tileGaugeValue<T>(tile: DashboardTile, rows: T[], valueOf: (row: T, column: string) => string, nameOf: (row: T) => string): { value: number; max: number | null; row?: T } {
+  const fold = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  if (tile.row) {
+    const row = rows.find((candidate) => fold(nameOf(candidate)) === fold(tile.row!))
+    const value = row && tile.column ? cellNumber(valueOf(row, tile.column)) ?? 0 : 0
+    const max = tile.target ?? (row && tile.maxColumn ? cellNumber(valueOf(row, tile.maxColumn)) : null)
+    return { value, max, row }
+  }
+  const measure = tile.measure ?? "count"
+  const value = groupFormulaValue({ op: measure === "average" ? "avg" : measure, column: tile.column }, rows, valueOf)
+  return { value, max: tile.target ?? null }
+}
+
+/** Les tuiles d'une tuile « liée » : une par valeur de la colonne liée (les lignes qui la citent), chacune avec ses formules. */
+export function linkedTiles<T>(tile: DashboardTile, rows: T[], valueOf: (row: T, column: string) => string) {
+  if (!tile.column) return []
+  const groups = groupRowsBy(rows, (row) => valueOf(row, tile.column!)).filter((group) => group.name)
+  const formulas = tile.formulas?.length ? tile.formulas : [{ op: "count" as const }]
+  return groups.slice(0, tile.limit ?? 24).map((group) => ({
+    name: group.name,
+    count: group.rows.length,
+    values: formulas.map((formula) => ({ label: formula.label ?? (formula.op === "count" ? "lignes" : `${groupFormulaOps.find((op) => op.value === formula.op)?.label ?? ""} · ${formula.column ?? ""}`), value: groupFormulaValue(formula, group.rows, valueOf), unit: formula.unit })),
+  }))
+}
+
+export type TextSegment = { text: string } | { formula: string; value: string; at: number }
+
+/**
+ * Un texte à formules incrustées : « {nombre} », « {somme Or} », « {moyenne Niveau} », « {min X} »,
+ * « {max X} », « {remplies X} », « {Or de Aldric} » (la case d'une ligne nommée), « {Colonne} »
+ * (sa somme). Chaque formule devient un morceau à part, recalculé sur les lignes de la vue.
+ */
+export function textWithFormulas<T>(text: string, rows: T[], valueOf: (row: T, column: string) => string, nameOf: (row: T) => string, columns: string[] = []): TextSegment[] {
+  const fold = (value: string) => value.replace(/<[^>]+>/g, " ").normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+  const column = (name: string) => columns.find((candidate) => fold(candidate) === fold(name)) ?? name
+  const ops: Record<string, GroupFormulaOp> = { somme: "sum", moyenne: "avg", min: "min", max: "max" }
+  const evaluate = (formula: string): string => {
+    const inner = formula.trim()
+    if (!inner) return ""
+    if (/^nombre$/i.test(inner)) return formatViewNumber(rows.length)
+    const rowRef = inner.match(/^(.+?)\s+de\s+(.+)$/i)
+    if (rowRef) {
+      const target = column(rowRef[1])
+      const row = rows.find((candidate) => fold(nameOf(candidate)) === fold(rowRef[2]))
+      return row ? valueOf(row, target).replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() : "—"
+    }
+    const op = inner.match(/^(somme|moyenne|min|max|remplies)\s+(.+)$/i)
+    if (op) {
+      const target = column(op[2])
+      if (/^remplies$/i.test(op[1])) return formatViewNumber(rows.filter((row) => cellParts(valueOf(row, target)).length > 0).length)
+      return formatViewNumber(groupFormulaValue({ op: ops[op[1].toLocaleLowerCase("fr")], column: target }, rows, valueOf))
+    }
+    return formatViewNumber(groupFormulaValue({ op: "sum", column: column(inner) }, rows, valueOf))
+  }
+  const segments: TextSegment[] = []
+  let at = 0
+  let index = 0
+  const pattern = /\{([^{}]+)\}/g
+  for (const match of text.matchAll(pattern)) {
+    if (match.index > at) segments.push({ text: text.slice(at, match.index) })
+    segments.push({ formula: match[1].trim(), value: evaluate(match[1]), at: index })
+    index += 1
+    at = match.index + match[0].length
+  }
+  if (at < text.length) segments.push({ text: text.slice(at) })
+  return segments
+}
+
 /* ---------- Vues d'un onglet (Modifier › Vues, à côté de Cartes) ---------- */
 
 /** Les vues réglées dans « Modifier », que les onglets-fenêtres affichent. */
@@ -596,7 +786,7 @@ export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewL
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))),
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.flatMap((tile) => tile.column && !known.has(fold(tile.column)) ? [] : [{ ...tile, maxColumn: one(tile.maxColumn), formulas: tile.formulas?.filter((formula) => !formula.column || known.has(fold(formula.column))) }]),
     groupFormula: layout.groupFormula && (!layout.groupFormula.column || known.has(fold(layout.groupFormula.column))) ? layout.groupFormula : undefined,
     gauge: layout.gauge && known.has(fold(layout.gauge.column)) ? { ...layout.gauge, maxColumn: one(layout.gauge.maxColumn) } : undefined }
   return cleanViewLayout(next) ?? { kind: layout.kind }

@@ -64,9 +64,9 @@ async function viewData(key: WorldIndexKey, raw: ViewBlock, match: Parameters<ty
   const me = block.where?.conditions.some(isMeCondition) ? await identityUidsForUser(uid).catch(() => [uid]) : undefined
   // Ce qu'une vue lit : l'index (copie en mémoire), les formes et les cartes de l'index (copies
   // du serveur partagé, relues toutes les 30 s) et, s'il est choisi, un preset. Jamais Google.
-  const [source, presentations, cards, preset, layouts] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({}))])
+  const [source, presentations, cards, preset, layouts, stats] = await Promise.all([indexSourceOf(key), listIndexPresentations(key).catch(() => ({})), listIndexCards(key).catch(() => ({})), presetLayout(block.presetId), listIndexLayouts(key).catch(() => ({})), block.kind === "dashboard" ? listIndexStatsRecord(key).catch(() => ({ stats: [], groups: [] })) : undefined])
   const input = { tab: block.tab, kind: block.kind, limit: block.limit, match, layout: block.layout, preset, cardId: block.cardId, where: block.where, sort: block.sort, me, click: block.click }
-  const data = viewBlockData(source, input, { presentations, cards, layouts }, readOptions(key, player, rowPageOf))
+  const data = viewBlockData(source, input, { presentations, cards, layouts, stats }, readOptions(key, player, rowPageOf))
   if (!data) return null
   return { ...data, ...(block.kind === "calendar" ? { calendars: await calendarTables() } : {}) }
 }

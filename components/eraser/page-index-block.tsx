@@ -154,6 +154,11 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     const form = data.forms?.[formId] ?? data.forms?.[Object.keys(data.forms ?? {})[0] ?? ""]
     return form ? <IndexFormView layout={form} columns={data.headers.map((header) => ({ header, spec: specOf(header) }))} valueOf={(header) => valueOf(rowKey, header)} compact={false} /> : null
   }, [data.forms, data.headers, specOf, valueOf])
+  // Une statistique de l'index (tuile « stat » du tableau de bord), calculée sur les lignes du bloc.
+  const renderStat = useCallback((statId: string) => {
+    const stat = data.stats?.find((item) => item.id === statId)
+    return stat ? <IndexStats stats={[{ ...stat, pinned: true }]} groups={data.statGroups} pinnedOnly single rows={data.rows.map((row) => row.key)} columns={data.headers} tabs={[data.tab]} valueOf={valueOf} tabOf={() => data.tab} nameOf={(rowKey) => byKey.get(rowKey)?.name ?? ""} optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))} onOpen={data.rows.some((row) => row.href) ? (rowKey) => openRow(rowKey) : undefined} canEdit={false} onSave={async () => undefined} /> : null
+  }, [byKey, data.headers, data.rows, data.statGroups, data.stats, data.tab, openRow, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
   if (data.view === "cards") return card
     ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} empty={empty} />
@@ -169,6 +174,8 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     onOpenPage={openRow}
     renderCard={data.cards ? renderCard : undefined}
     renderForm={data.forms ? renderForm : undefined}
+    renderStat={data.stats ? renderStat : undefined}
+    presentations={data.views}
     empty={empty}
   />
   if (!data.rows.length) return <Placeholder>{empty}</Placeholder>

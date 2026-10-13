@@ -52,6 +52,7 @@ import { renameCardColumns, serializeTabCards, tabCardsOf, type CardColumn, type
 import { lockOverrideFor, sameTabLocks, type TabLocks } from "@/lib/index-locks"
 import { tabLocksOf } from "@/lib/index-locks"
 import { unitFamilies, type UnitFamily } from "@/lib/index-numbers"
+import type { StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, presentationKinds, type PresentationKind, type TabPresentations, type ViewLayout, type ViewPreset } from "@/lib/index-view-layouts"
 import { layoutIcons } from "@/components/eraser/index-views"
 
@@ -733,7 +734,7 @@ function useDragList<T extends { id: string }>(items: T[], onMove: (next: T[]) =
  * milieu, les réglages de la colonne choisie à droite, tous visibles. Rien n'est écrit
  * tant qu'on n'a pas enregistré ; le résumé dit exactement ce qui va changer.
  */
-export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel }: {
+export function IndexEditor({ model, open, pending = false, error = "", title, intro, onClose, onApply, onDeleteIndex, leading, submitLabel = "Enregistrer", startTabs = [], canSubmit = true, sampleRows = {}, layouts = {}, onSaveLayouts, cardsIndex, cards = {}, onSaveCards, initialMode = "columns", initialTab, locks = {}, onSaveLocks, presentations = {}, onSavePresentations, viewPresets = [], onSaveViewPreset, onDeleteViewPreset, previewRows = {}, optionsOf, statsPanel, stats = [] }: {
   model: IndexEditorModel
   open: boolean
   pending?: boolean
@@ -777,6 +778,8 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   optionsOf?: (tab: string, header: string) => Array<{ value: string; color?: string }>
   /** Le constructeur des statistiques de l'index (onglet « Stats ») ; absent : pas d'onglet. */
   statsPanel?: ReactNode
+  /** Les statistiques de l'index : une tuile du tableau de bord en dessine une. */
+  stats?: StatDefinition[]
   /** L'onglet ouvert d'abord (son nom). */
   initialTab?: string
   /** Les cadenas réglés (posés, retirés, usages ajoutés), par onglet. */
@@ -1258,6 +1261,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             cards={cardsEnabled ? cardsOf(tab).cards : []}
             cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
             forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal", layout: layoutOf(tab, "form").layout }, ...namedFormsOf(tab)]}
+            stats={stats}
           />
         </section>}
 

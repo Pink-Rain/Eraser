@@ -16,12 +16,14 @@ export const CALENDAR_SEASON_HEADER = "Saison"
 export const CALENDAR_COLOR_HEADER = "Couleur"
 export const CALENDAR_ERA_HEADER = "Ère"
 export const CALENDAR_DESCRIPTION_HEADER = "Description"
+export const CALENDAR_IMAGE_HEADER = "Image"
 
 /** « Calendrier réel » : le calendrier grégorien, toujours proposé. */
 export const REAL_CALENDAR = "Calendrier réel"
 
-export type CalendarMonth = { name: string; days: number; season: string }
-export type CalendarSeason = { name: string; color: string; months: number }
+/** Un mois ou une saison peut porter une image (colonne « Image » de son onglet) : la bannière du calendrier la montre. */
+export type CalendarMonth = { name: string; days: number; season: string; image?: string }
+export type CalendarSeason = { name: string; color: string; months: number; image?: string }
 export type CalendarDefinition = { name: string; era: string; description: string; months: CalendarMonth[]; seasons: CalendarSeason[]; weekdays: string[] }
 
 type Table = { tabName: string; headers: string[]; rows: Array<{ values: string[] }> }
@@ -49,20 +51,22 @@ export const realCalendar: CalendarDefinition = {
 /** Les calendriers d'un Index des calendriers chargé ; un mois sans nombre de jours en compte 30. */
 export function calendarsFromTables(tables: Table[]): CalendarDefinition[] {
   const tab = (name: string) => tables.find((table) => fold(table.tabName) === fold(name))
-  const rowsOf = (table: Table | undefined) => (table?.rows ?? []).map((row) => (header: string) => {
+  // Une case lue en texte simple ; `raw` : telle quelle (l'adresse d'une image tient dans sa balise).
+  const rowsOf = (table: Table | undefined) => (table?.rows ?? []).map((row) => Object.assign((header: string) => {
     const column = table!.headers.findIndex((candidate) => fold(candidate) === fold(header))
     return column >= 0 ? plain(row.values[column]) : ""
-  })
+  }, { raw: (header: string) => { const column = table!.headers.findIndex((candidate) => fold(candidate) === fold(header)); return column >= 0 ? row.values[column] ?? "" : "" } }))
   const ordered = <T extends { order: number; position: number }>(items: T[]) => [...items].sort((left, right) => (left.order - right.order) || (left.position - right.position))
   const order = (value: string, position: number) => { const number = Number.parseFloat(value.replace(",", ".")); return Number.isFinite(number) ? number : position + 1000 }
-  const months = rowsOf(tab(CALENDAR_MONTHS_TAB)).map((cell, position) => ({ calendar: fold(cell(CALENDAR_HEADER)), name: cell("Nom"), days: Math.max(1, Math.min(400, Number.parseInt(cell(CALENDAR_DAYS_HEADER), 10) || 30)), season: cell(CALENDAR_SEASON_HEADER), order: order(cell(CALENDAR_ORDER_HEADER), position), position })).filter((month) => month.name)
-  const seasons = rowsOf(tab(CALENDAR_SEASONS_TAB)).map((cell, position) => ({ calendar: fold(cell(CALENDAR_HEADER)), name: cell("Nom"), color: /^#[0-9a-f]{6}$/i.test(cell(CALENDAR_COLOR_HEADER)) ? cell(CALENDAR_COLOR_HEADER) : "", order: order(cell(CALENDAR_ORDER_HEADER), position), position })).filter((season) => season.name)
+  const image = (value: string) => value.match(/(https:\/\/[^\s"'<>]+|\/api\/[^\s"'<>]+)/)?.[0] ?? ""
+  const months = rowsOf(tab(CALENDAR_MONTHS_TAB)).map((cell, position) => ({ calendar: fold(cell(CALENDAR_HEADER)), name: cell("Nom"), days: Math.max(1, Math.min(400, Number.parseInt(cell(CALENDAR_DAYS_HEADER), 10) || 30)), season: cell(CALENDAR_SEASON_HEADER), image: image(cell.raw(CALENDAR_IMAGE_HEADER)), order: order(cell(CALENDAR_ORDER_HEADER), position), position })).filter((month) => month.name)
+  const seasons = rowsOf(tab(CALENDAR_SEASONS_TAB)).map((cell, position) => ({ calendar: fold(cell(CALENDAR_HEADER)), name: cell("Nom"), color: /^#[0-9a-f]{6}$/i.test(cell(CALENDAR_COLOR_HEADER)) ? cell(CALENDAR_COLOR_HEADER) : "", image: image(cell.raw(CALENDAR_IMAGE_HEADER)), order: order(cell(CALENDAR_ORDER_HEADER), position), position })).filter((season) => season.name)
   const weekdays = rowsOf(tab(CALENDAR_WEEKDAYS_TAB)).map((cell, position) => ({ calendar: fold(cell(CALENDAR_HEADER)), name: cell("Nom"), order: order(cell(CALENDAR_ORDER_HEADER), position), position })).filter((day) => day.name)
   return rowsOf(tab(CALENDARS_TAB)).flatMap((cell) => {
     const name = cell("Nom")
     if (!name) return []
     const key = fold(name)
-    const ownMonths = ordered(months.filter((month) => month.calendar === key)).map(({ name: monthName, days, season }) => ({ name: monthName, days, season }))
+    const ownMonths = ordered(months.filter((month) => month.calendar === key)).map(({ name: monthName, days, season, image: monthImage }) => ({ name: monthName, days, season, ...(monthImage ? { image: monthImage } : {}) }))
     const ownSeasons = ordered(seasons.filter((season) => season.calendar === key))
     return [{
       name,
@@ -70,7 +74,7 @@ export function calendarsFromTables(tables: Table[]): CalendarDefinition[] {
       description: cell(CALENDAR_DESCRIPTION_HEADER),
       months: ownMonths,
       // Combien de mois dans chaque saison : ceux qui la citent.
-      seasons: ownSeasons.map((season) => ({ name: season.name, color: season.color, months: ownMonths.filter((month) => fold(month.season) === fold(season.name)).length })),
+      seasons: ownSeasons.map((season) => ({ name: season.name, color: season.color, months: ownMonths.filter((month) => fold(month.season) === fold(season.name)).length, ...(season.image ? { image: season.image } : {}) })),
       weekdays: ordered(weekdays.filter((day) => day.calendar === key)).map((day) => day.name),
     }]
   })
@@ -142,4 +146,71 @@ export function formatCalendarDate(date: CalendarDate, calendar: CalendarDefinit
 export function seasonOf(calendar: CalendarDefinition, month: number) {
   const name = calendar.months[month]?.season ?? ""
   return calendar.seasons.find((season) => fold(season.name) === fold(name)) ?? (name ? { name, color: "", months: 0 } : null)
+}
+
+/** Le nombre de jours d'une année (bissextile dans le calendrier réel). */
+export function yearLength(calendar: CalendarDefinition, year: number) {
+  return calendar.months.reduce((sum, _month, index) => sum + monthLength(calendar, year, index), 0) || 360
+}
+
+/**
+ * Le rang d'un jour depuis le 1er du premier mois de l'an 1 (0 pour ce jour-là) : il compare
+ * deux dates, fait avancer ou reculer une date, trouve le début d'une semaine. Le calendrier
+ * réel compte ses bissextiles ; un monde n'en a pas.
+ */
+export function dayNumber(calendar: CalendarDefinition, date: CalendarDate) {
+  if (calendar.name === REAL_CALENDAR) {
+    const at = new Date(Date.UTC(2000, 0, 1))
+    at.setUTCFullYear(date.year, date.month, date.day)
+    const origin = new Date(Date.UTC(2000, 0, 1))
+    origin.setUTCFullYear(1, 0, 1)
+    return Math.round((at.getTime() - origin.getTime()) / 86_400_000)
+  }
+  const yearDays = yearLength(calendar, date.year)
+  return (date.year - 1) * yearDays + calendar.months.slice(0, date.month).reduce((sum, month) => sum + month.days, 0) + date.day - 1
+}
+
+/** La date d'un rang de jour (l'inverse de `dayNumber`). */
+export function dateFromDayNumber(calendar: CalendarDefinition, number: number): CalendarDate {
+  if (calendar.name === REAL_CALENDAR) {
+    const origin = new Date(Date.UTC(2000, 0, 1))
+    origin.setUTCFullYear(1, 0, 1)
+    const at = new Date(origin.getTime() + number * 86_400_000)
+    return { year: at.getUTCFullYear(), month: at.getUTCMonth(), day: at.getUTCDate() }
+  }
+  const yearDays = yearLength(calendar, 1)
+  let year = Math.floor(number / yearDays) + 1
+  let rest = number - (year - 1) * yearDays
+  if (rest < 0) { year -= 1; rest += yearDays }
+  let month = 0
+  while (month < calendar.months.length - 1 && rest >= calendar.months[month].days) { rest -= calendar.months[month].days; month += 1 }
+  return { year, month, day: rest + 1 }
+}
+
+/** Une date décalée de tant de jours (négatif : en arrière). */
+export function addDays(calendar: CalendarDefinition, date: CalendarDate, delta: number): CalendarDate {
+  return dateFromDayNumber(calendar, dayNumber(calendar, date) + delta)
+}
+
+/** Le jour de la semaine d'une date (0 = premier jour de la semaine du calendrier). */
+export function weekdayOf(calendar: CalendarDefinition, date: CalendarDate) {
+  const week = calendar.weekdays.length || 7
+  return (firstWeekdayOf(calendar, date.year, date.month) + date.day - 1) % week
+}
+
+/** Le premier jour de la semaine qui contient la date. */
+export function weekStartOf(calendar: CalendarDefinition, date: CalendarDate) {
+  return addDays(calendar, date, -weekdayOf(calendar, date))
+}
+
+/** Deux dates comparées dans le temps (négatif : la première est avant). */
+export function compareCalendarDates(left: CalendarDate, right: CalendarDate) {
+  return left.year - right.year || left.month - right.month || left.day - right.day
+}
+
+/** Un mois décalé (négatif : en arrière), d'une année à l'autre. */
+export function addMonths(calendar: CalendarDefinition, year: number, month: number, delta: number) {
+  const count = calendar.months.length || 12
+  const total = year * count + month + delta
+  return { year: Math.floor(total / count), month: ((total % count) + count) % count }
 }

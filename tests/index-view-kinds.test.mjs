@@ -150,3 +150,100 @@ test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, z
   assert.deepEqual(gauge.layout.gauge, { column: "Prix", style: "bar", maxColumn: "Vie" });
   assert.equal(starters.viewStartersFor("list", columns).find((form) => form.key === "list-zigzag").layout.imageColumn, "Portrait");
 });
+
+test("lot C : calendrier (échelles, formes, bannière) et tableau de bord (tuiles mixtes, sections) se relisent et se bornent", async () => {
+  const calendar = views.cleanViewLayout({ kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", month: "grid", day: "paragraphs", agenda: "bidon" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 900, hideEmptyDays: true });
+  assert.deepEqual(calendar, { kind: "calendar", dateColumn: "Date", calendarScale: "week", calendarForms: { week: "table", day: "paragraphs" }, calendarSwitcher: true, calendarStay: true, calendarBanner: "season", bannerImage: "https://x/y.png", bannerHeight: 400, hideEmptyDays: true });
+  // L'ancien « Agenda » (apparence) reste une échelle ; une échelle réglée prend le pas.
+  assert.equal(views.calendarScaleOf({ look: { calendarMode: "agenda" } }), "agenda");
+  assert.equal(views.calendarScaleOf({ calendarScale: "year", look: { calendarMode: "agenda" } }), "year");
+  assert.equal(views.calendarScaleOf({}), "month");
+  const dashboard = views.cleanViewLayout({ kind: "dashboard", collapsible: true, tiles: [
+    { kind: "gauge", measure: "sum", column: "Or", target: 100, style: "bar", section: "Groupe", full: true },
+    { kind: "gauge", row: "Aldric", column: "Vie", maxColumn: "Vie max", style: "charges" },
+    { kind: "stat", stat: "st-12" },
+    { kind: "view", view: "list", limit: 500 },
+    { kind: "view", view: "dashboard" },
+    { kind: "card", row: "Aldric", form: "principal" },
+    { kind: "text", text: "  {nombre} lignes  " },
+    { kind: "linked", column: "Personnage", formulas: [{ op: "count" }, { op: "sum", column: "Or", label: "Or", unit: "po" }, { op: "bidon" }] },
+    { kind: "bidon" },
+  ] });
+  assert.deepEqual(dashboard.tiles, [
+    { kind: "gauge", column: "Or", full: true, section: "Groupe", measure: "sum", target: 100, style: "bar" },
+    { kind: "gauge", column: "Vie", row: "Aldric", maxColumn: "Vie max", style: "charges" },
+    { kind: "stat", stat: "st-12" },
+    { kind: "view", view: "list", limit: 100 },
+    { kind: "view" },
+    { kind: "card", row: "Aldric", form: "principal" },
+    { kind: "text", text: "{nombre} lignes" },
+    { kind: "linked", column: "Personnage", formulas: [{ op: "count" }, { op: "sum", column: "Or", label: "Or", unit: "po" }] },
+  ]);
+  assert.equal(dashboard.collapsible, true);
+  // Appliqué à un autre onglet : les colonnes absentes des tuiles et de leurs formules s'effacent.
+  const fitted = views.fitLayoutToColumns(dashboard, ["Nom", "Personnage", "Vie"]);
+  assert.deepEqual(fitted.tiles.map((tile) => tile.kind), ["gauge", "stat", "view", "view", "card", "text", "linked"]);
+  assert.deepEqual(fitted.tiles[0], { kind: "gauge", column: "Vie", row: "Aldric", style: "charges" });
+  assert.deepEqual(fitted.tiles[6].formulas, [{ op: "count" }]);
+
+  // Les valeurs des tuiles : jauge (formule ou ligne), tuiles liées, texte à formules.
+  const rows = [{ name: "Aldric", or: "120", vie: "40", max: "50", perso: "Aldric" }, { name: "Brisaïs", or: "30", vie: "14", max: "40", perso: "Aldric, Colombe" }, { name: "Colombe", or: "", vie: "32", max: "32", perso: "" }];
+  const valueOf = (row, column) => ({ Or: row.or, Vie: row.vie, "Vie max": row.max, Personnage: row.perso })[column] ?? "";
+  const nameOf = (row) => row.name;
+  assert.deepEqual(views.tileGaugeValue({ kind: "gauge", measure: "sum", column: "Or", target: 100 }, rows, valueOf, nameOf), { value: 150, max: 100 });
+  assert.deepEqual(views.tileGaugeValue({ kind: "gauge" }, rows, valueOf, nameOf), { value: 3, max: null });
+  const own = views.tileGaugeValue({ kind: "gauge", row: "aldric", column: "Vie", maxColumn: "Vie max" }, rows, valueOf, nameOf);
+  assert.deepEqual([own.value, own.max, own.row?.name], [40, 50, "Aldric"]);
+  assert.deepEqual(views.linkedTiles({ kind: "linked", column: "Personnage", formulas: [{ op: "count" }, { op: "sum", column: "Or", label: "Or", unit: "po" }] }, rows, valueOf), [
+    { name: "Aldric", count: 2, values: [{ label: "lignes", value: 2, unit: undefined }, { label: "Or", value: 150, unit: "po" }] },
+    { name: "Colombe", count: 1, values: [{ label: "lignes", value: 1, unit: undefined }, { label: "Or", value: 30, unit: "po" }] },
+  ]);
+  const segments = views.textWithFormulas("{nombre} membres, {somme Or} po, {moyenne vie} de vie, {Vie de Brisaïs} pour elle, {Or}, {remplies Or}, {Inconnu de Personne}.", rows, valueOf, nameOf, ["Or", "Vie", "Vie max", "Personnage"]);
+  assert.deepEqual(segments.filter((segment) => "formula" in segment).map((segment) => segment.value), ["3", "150", "28,67", "14", "150", "2", "—"]);
+  assert.equal(segments[0].value, "3");
+  assert.equal(segments[1].text, " membres, ");
+
+  // Les formes de départ du lot C : dix-huit pour le calendrier, huit pour le tableau de bord, toutes propres.
+  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
+  const columns = [{ header: "Nom" }, { header: "Date" }, { header: "Type", spec: { kind: "choice", options: [{ value: "A" }] } }, { header: "Or", spec: { kind: "number" } }, { header: "Personnage", spec: { kind: "linked" } }, { header: "Description" }];
+  const calendars = starters.viewStartersFor("calendar", columns);
+  const dashboards = starters.viewStartersFor("dashboard", columns);
+  assert.equal(calendars.length, 18);
+  assert.equal(dashboards.length, 8);
+  for (const starter of [...calendars, ...dashboards]) {
+    const clean = views.cleanViewLayout(starter.layout);
+    assert.ok(clean, starter.key);
+    assert.deepEqual(views.cleanViewLayout(clean), clean, starter.key);
+  }
+  assert.ok(calendars.every((starter) => starter.layout.dateColumn === "Date"));
+  assert.ok(new Set(calendars.map((starter) => starter.layout.calendarScale ?? "month")).size === 6, "toutes les échelles sont proposées");
+  assert.ok(dashboards.some((starter) => starter.layout.tiles.some((tile) => tile.kind === "linked" && tile.column === "Personnage")));
+});
+
+test("calendriers : jours comptés, semaines et images des mois (monde et réel)", () => {
+  const world = { name: "Brume", era: "AR", description: "", months: [{ name: "Givrelune", days: 30, season: "Hiver" }, { name: "Brumaire", days: 31, season: "Hiver" }, { name: "Floréal", days: 29, season: "Printemps" }], seasons: [{ name: "Hiver", color: "#285f8f", months: 2 }, { name: "Printemps", color: "#4d7c0f", months: 1 }], weekdays: ["Lun", "Mar", "Mer", "Jeu", "Ven", "Sam"] };
+  assert.equal(calendars.yearLength(world, 1), 90);
+  assert.equal(calendars.dayNumber(world, { year: 1, month: 0, day: 1 }), 0);
+  assert.equal(calendars.dayNumber(world, { year: 2, month: 1, day: 3 }), 90 + 30 + 2);
+  assert.deepEqual(calendars.dateFromDayNumber(world, 122), { year: 2, month: 1, day: 3 });
+  assert.deepEqual(calendars.addDays(world, { year: 1, month: 2, day: 29 }, 1), { year: 2, month: 0, day: 1 });
+  assert.deepEqual(calendars.addDays(world, { year: 2, month: 0, day: 1 }, -1), { year: 1, month: 2, day: 29 });
+  assert.equal(calendars.weekdayOf(world, { year: 1, month: 0, day: 7 }), 0);
+  assert.deepEqual(calendars.weekStartOf(world, { year: 1, month: 0, day: 9 }), { year: 1, month: 0, day: 7 });
+  assert.deepEqual(calendars.addMonths(world, 1, 2, 1), { year: 2, month: 0 });
+  assert.deepEqual(calendars.addMonths(world, 2, 0, -1), { year: 1, month: 2 });
+  // Le calendrier réel : les bissextiles comptent, la semaine commence le lundi.
+  const real = calendars.realCalendar;
+  assert.equal(calendars.dayNumber(real, { year: 2024, month: 2, day: 1 }) - calendars.dayNumber(real, { year: 2024, month: 1, day: 28 }), 2);
+  assert.deepEqual(calendars.addDays(real, { year: 2023, month: 11, day: 31 }, 1), { year: 2024, month: 0, day: 1 });
+  assert.deepEqual(calendars.weekStartOf(real, { year: 2026, month: 9, day: 13 }), { year: 2026, month: 9, day: 12 });
+  // L'image d'un mois ou d'une saison vient de la colonne « Image » de son onglet.
+  const [parsed] = calendars.calendarsFromTables([
+    { tabName: "Calendriers", headers: ["Nom", "Ère"], rows: [{ values: ["Brume", "AR"] }] },
+    { tabName: "Mois", headers: ["Calendrier", "Nom", "Nombre de jours", "Saison", "Image"], rows: [{ values: ["Brume", "Givrelune", "30", "Hiver", "<img src=\"https://img/givrelune.png\">"] }, { values: ["Brume", "Floréal", "29", "Printemps", ""] }] },
+    { tabName: "Saisons", headers: ["Calendrier", "Nom", "Couleur", "Image"], rows: [{ values: ["Brume", "Hiver", "#285f8f", "/api/files/hiver.jpg"] }] },
+  ]);
+  assert.equal(parsed.months[0].image, "https://img/givrelune.png");
+  assert.equal(parsed.months[1].image, undefined);
+  assert.equal(parsed.seasons[0].image, "/api/files/hiver.jpg");
+});

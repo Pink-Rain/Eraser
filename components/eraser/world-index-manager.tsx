@@ -1417,6 +1417,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onDeleteViewPreset={settings.deleteViewPreset}
         previewRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 40).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
         optionsOf={(tabName, header) => (specOf(tabName, header).options ?? []).map((option) => ({ value: option.value, color: option.color }))}
+        stats={indexStats}
         statsPanel={<IndexStats stats={indexStats} groups={settings.statGroups} rows={statRowKeys} columns={statHeaders} tabs={statTabs} valueOf={statValueOf} tabOf={statTabOf} nameOf={layoutNameOf} optionsOf={statOptionsOf} separatorOf={statSeparatorOf} onOpen={(rowKey, list) => { setSheetError(""); setStatSheetRows(list ?? null); setDetails(rowKey) }} canEdit={!busy} onSave={saveStats} />}
         initialMode={editorMode}
         initialTab={table?.tabName}
