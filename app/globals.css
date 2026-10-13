@@ -646,9 +646,10 @@ body:has(.tabletop-detail-windows) [data-radix-popper-content-wrapper] {
  * Une référence à une ligne d'index (menu « { » de l'éditeur) : un lien vers la ligne,
  * montré comme une étiquette dans l'éditeur et les notes. Les textes d'index affichés
  * hors tableau la remplacent par le nom de la ligne ou la valeur de la case citée.
- * Hors couche : passe devant le soulignement des liens des zones de texte.
+ * Hors couche : passe devant le soulignement des liens des zones de texte. Un bouton qui
+ * mène à une ligne (bloc Bouton d'un survol) garde son allure de bouton.
  */
-a[href^="/reference/"] {
+a[href^="/reference/"]:not([data-slot]) {
   display: inline;
   border-radius: 0.375rem;
   padding: 0.05em 0.35em;

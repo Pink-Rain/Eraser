@@ -9,11 +9,11 @@ import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover"
-import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView, type LayoutBlockContext } from "@/components/eraser/index-layout-blocks"
 import { richTextPlainText } from "@/components/eraser/rich-text"
 import { foldName, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"
-import { arrangeLayout, type IndexLayout, type LayoutBlock } from "@/lib/index-layouts"
+import { arrangeLayout, resolveLayoutColor, type IndexLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 
 export type RowSheetField = { key: string; label: string; spec: IndexColumnSpec; value: string; long?: boolean; /** Un bloc de la mise en page (tuiles, inventaire…) à la place d'une colonne. */ block?: LayoutBlock }
 
@@ -97,9 +97,11 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
     navigation.onGo(target)
   }
 
+  const background = sheetBackgroundOf(layout, fields)
   return <Dialog open={open} onOpenChange={(value) => { if (!value) close() }}>
     <DialogContent
       className={`flex max-h-[92svh] flex-col gap-4 ${layout?.aside.length ? "sm:max-w-5xl" : "sm:max-w-4xl"}`}
+      style={background ? { background } : undefined}
       onKeyDown={(event) => {
         // Alt + ← / → : ligne précédente ou suivante, sans quitter le clavier.
         if (!event.altKey || event.ctrlKey || event.metaKey) return
@@ -276,14 +278,20 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   const pictures = fields.filter((field) => pictureField(normalizeSpec(field.spec)))
   const others = fields.filter((field) => !pictureField(normalizeSpec(field.spec)) && normalizeSpec(field.spec).kind !== "id")
 
-  const field = (item: RowSheetField, hideLabel = false, label?: string) => {
+  const byLabel = (column: string) => fields.find((item) => foldName(item.label) === foldName(column))
+  const readColumn = (column: string) => { const item = byLabel(column); return item ? richTextPlainText(valueOf(item)) : "" }
+  // La mise en page : sa couleur d'accent (blocs, couleurs « accent »), le style d'ensemble des libellés.
+  const accent = resolveLayoutColor(layout?.accent, DEFAULT_LAYOUT_ACCENT, readColumn)
+  const labels = labelLookOf(layout?.look, accent, readColumn)
+  const field = (item: RowSheetField, hideLabel = false, placed?: LayoutField) => {
     const own = renderField?.(item)
-    return own !== undefined ? <div key={item.key} className={item.long ? "md:col-span-2" : undefined}>{own}</div> : plainField(item, hideLabel, label)
+    return own !== undefined ? <div key={item.key} className={item.long ? "md:col-span-2" : undefined}>{own}</div> : plainField(item, hideLabel, placed)
   }
-  // `label` : le texte que la mise en page écrit au-dessus du champ (sinon le nom de la colonne).
-  const plainField = (item: RowSheetField, hideLabel: boolean, label?: string) => <IndexField
+  // `placed` : ce que la mise en page règle pour le champ (le texte au-dessus, son icône, sa couleur).
+  const plainField = (item: RowSheetField, hideLabel: boolean, placed?: LayoutField) => <IndexField
     key={item.key}
-    label={label || item.label}
+    label={placed?.label || item.label}
+    labelLook={{ className: labels.className, color: placed?.color ? resolveLayoutColor(placed.color, accent, readColumn) : labels.color, icon: placed?.icon }}
     // Dans la fiche, le nom se modifie : il n'ouvre pas une autre fiche.
     spec={item.spec.kind === "name-form" ? { ...item.spec, kind: "name" } : item.spec}
     value={valueOf(item)}
@@ -295,12 +303,11 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   // Une mise en page réglée dans « Modifier » : ses sections, ses lignes et sa colonne latérale.
   // Rangés par le nom de leur colonne (l'index des items désigne ses champs par leur place).
   // Un bloc (tuiles, inventaire, bouton…) devient un champ à part, dessiné par le moteur des blocs.
-  const byLabel = (column: string) => fields.find((item) => foldName(item.label) === foldName(column))
   const arranged = layout ? arrangeLayout(layout, fields.filter((item) => normalizeSpec(item.spec).kind !== "id"), (item) => item.label, (placed) => ({ key: placed.column, label: placed.label ?? "", spec: { kind: "rich" } as IndexColumnSpec, value: "", block: placed.block })) : null
   const blockContext: LayoutBlockContext = {
-    valueOf: (column) => { const item = byLabel(column); return item ? richTextPlainText(valueOf(item)) : "" },
+    valueOf: readColumn,
     htmlOf: (column) => { const item = byLabel(column); return item ? valueOf(item) : "" },
-    accent: DEFAULT_LAYOUT_ACCENT,
+    accent,
     row: rowRef,
     onChange: (column, value) => { const item = byLabel(column); if (item) change(item, value) },
     inventoryEndpoint,
@@ -313,8 +320,8 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
         readColumn={blockContext.valueOf}
         // Une case à cocher (sans libellé au-dessus) s'aligne sur le bas des champs de sa ligne.
         render={(item, placed) => item.block
-          ? <div key={item.key} className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" className="text-xs font-semibold text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={blockContext} /></div>
-          : <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed.label)}</div>}
+          ? <div key={item.key} className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readColumn} look={layout?.look} className="text-xs font-semibold text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={blockContext} /></div>
+          : <div className={placed.large ? largeFieldClass : normalizeSpec(item.spec).kind === "checkbox" ? "grid flex-1" : undefined}>{field(item, placed.hideLabel, placed)}</div>}
         renderRest={(rest) => <div className="grid content-start gap-3 md:grid-cols-2">{rest.map((item) => field(item))}</div>}
       />
       : <div className={pictures.length ? "grid gap-4 md:grid-cols-[minmax(0,1fr)_16rem]" : ""}>
@@ -322,5 +329,47 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
         {pictures.length > 0 && <div className="grid content-start gap-3">{pictures.map((item) => field(item))}</div>}
       </div>}
     {!fields.length && <p className="py-8 text-center text-sm text-muted-foreground">Aucun champ dans la fiche : règle sa mise en page dans « Modifier ».</p>}
+  </div>
+}
+
+/** Le fond de la fiche (« Apparence » › style d'ensemble), résolu sur les valeurs de la ligne. */
+function sheetBackgroundOf(layout: IndexLayout | null | undefined, fields: RowSheetField[]) {
+  if (!layout?.look?.background) return undefined
+  const readColumn = (column: string) => richTextPlainText(fields.find((item) => foldName(item.label) === foldName(column))?.value ?? "")
+  return layoutBackgroundOf(layout.look, resolveLayoutColor(layout.accent, DEFAULT_LAYOUT_ACCENT, readColumn), readColumn)
+}
+
+/**
+ * La fiche telle qu'elle s'ouvre, dessinée en place (l'aperçu en grand de « Modifier ») : le
+ * même en-tête, la même barre de mise en forme, le même corps, la même largeur. On peut y
+ * taper pour essayer : rien n'est enregistré.
+ */
+export function RowSheetPreview({ title, subtitle, fields, layout, rowRef }: { title: string; subtitle?: string; fields: RowSheetField[]; layout?: IndexLayout | null; rowRef?: { index: string; id: string; tab?: string } }) {
+  const retryRef = useRef<(() => void) | null>(null)
+  const targetRef = useRef<RichTextTarget | null>(null)
+  const [toolbarReady, setToolbarReady] = useState(false)
+  const toolbarHost = useMemo(() => ({ activate: (target: RichTextTarget) => { targetRef.current = target; setToolbarReady(true) } }), [])
+  const id = fields.find((field) => normalizeSpec(field.spec).kind === "id")
+  const background = sheetBackgroundOf(layout, fields)
+  return <div className={`mx-auto grid w-full gap-4 rounded-lg border bg-background p-6 text-left shadow-lg ${layout?.aside.length ? "max-w-5xl" : "max-w-4xl"}`} style={background ? { background } : undefined}>
+    <div className="flex flex-col gap-2">
+      <h2 className="font-display text-3xl leading-none font-semibold">{title || "Sans nom"}</h2>
+      {subtitle && <p className="text-sm text-muted-foreground">{subtitle}</p>}
+    </div>
+    <div className="-mx-1 flex flex-wrap items-center gap-1 rounded-xl border bg-card/80 px-2 py-1">
+      <RichTextToolbar targetRef={targetRef} ready={toolbarReady} />
+      {!toolbarReady && <span className="ml-1 text-[11px] text-muted-foreground">Clique dans un champ pour le mettre en forme.</span>}
+    </div>
+    <RichTextToolbarHost.Provider value={toolbarHost}>
+      <RowSheetBody rowKey="apercu" fields={fields} layout={layout} retryRef={retryRef} onSave={() => undefined} onStatus={() => undefined} rowRef={rowRef} />
+    </RichTextToolbarHost.Provider>
+    <div className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr]">
+      <span className="font-mono text-[11px] text-muted-foreground">{id?.value ? `ID ${id.value}` : ""}</span>
+      <span className="flex items-center justify-center gap-1">
+        <Button type="button" variant="outline" size="sm" disabled><ChevronLeft />Précédente</Button>
+        <Button type="button" variant="outline" size="sm" disabled>Suivante<ChevronRight /></Button>
+      </span>
+      <span className="text-right text-xs text-muted-foreground">Aperçu : rien n’est enregistré</span>
+    </div>
   </div>
 }

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen } from "lucide-react"
+import { ArrowDown, ArrowLeftRight, ArrowUp, Bold, BookOpen, Columns3, LayoutGrid, LayoutTemplate, MessageSquareQuote, CircleHelp, Copy, Dices, Eye, EyeOff, FolderTree, FunctionSquare, Gauge, GripVertical, Hash, Italic, List, ListChecks, ListTree, LoaderCircle, Lock, LockOpen, MousePointerClick, Palette, Paperclip, Pencil, Plus, Save, Search as SearchIcon, Settings2, Sigma, Sparkles, SquareCheck, Strikethrough, Trash2, TriangleAlert, Type as TypeIcon, Underline, Undo2, type LucideIcon, Shapes, X, PanelLeftClose, PanelLeftOpen, Maximize2, Minimize2 } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexGuide, type GuideSection } from "@/components/eraser/index-guide"
@@ -806,6 +806,9 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const [guide, setGuide] = useState<GuideSection | null>(null)
   // Le panneau des onglets, à gauche : on le replie pour donner la place aux réglages.
   const [asideOpen, setAsideOpen] = useState(true)
+  // « Réduire » : l'éditeur se cache (ses brouillons restent) ; fermer avec des changements demande confirmation.
+  const [minimized, setMinimized] = useState(false)
+  const [confirmClose, setConfirmClose] = useState(false)
   // La carte modifiée, par onglet (le panneau des cartes et l'éditeur la partagent).
   const [selectedCard, setSelectedCard] = useState<Record<string, string | null>>({})
   const readOnly = Boolean(model.readOnly)
@@ -1107,10 +1110,41 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
   const displayDisabled = columnDisabled
   const lockedTitle = (item: DraftColumn) => item.policy.reasons.length ? `${item.policy.reasons.join("\n")}\n\nModifiable sans risque : ${item.policy.allowed}\nPour le reste : « Modifier quand même », dans ses réglages.` : undefined
 
-  return <Dialog open={open} onOpenChange={(next) => { if (!next && !pending) onClose() }}>
+  // Les changements pas encore enregistrés : fermer demande confirmation ; « Réduire » les garde en attente.
+  const pendingCount = operations.length + layoutChanges.length + cardChanges.length + presentationChanges.length + lockChanges.length
+  const requestClose = () => {
+    if (pending) return
+    if (pendingCount > 0 && !readOnly) setConfirmClose(true)
+    else onClose()
+  }
+  const canSave = !readOnly && !pending && !layoutSaving && canSubmit && pendingCount > 0 && problems.length === 0
+
+  return <>
+  {minimized && open && <div className="fixed right-4 bottom-4 z-50 flex max-w-[calc(100vw-2rem)] items-center gap-2 rounded-full border bg-popover py-1.5 pr-1.5 pl-4 text-sm shadow-xl" role="status">
+    <Pencil className="size-4 shrink-0 text-primary" aria-hidden="true" />
+    <span className="min-w-0 truncate"><b className="font-semibold">{title ?? `Modifier « ${model.title} »`}</b>{pendingCount > 0 && <span className="text-muted-foreground"> · {pendingCount} changement{pendingCount > 1 ? "s" : ""} en attente</span>}</span>
+    <Button type="button" size="sm" className="h-8 rounded-full" onClick={() => setMinimized(false)}><Maximize2 />Reprendre</Button>
+    <Button type="button" variant="ghost" size="icon-sm" className="rounded-full" onClick={requestClose} aria-label="Fermer l’éditeur" title="Fermer l’éditeur"><X /></Button>
+  </div>}
+  <AlertDialog open={confirmClose} onOpenChange={setConfirmClose}>
+    <AlertDialogContent className="sm:max-w-xl">
+      <AlertDialogHeader>
+        <AlertDialogTitle>Quitter sans enregistrer ?</AlertDialogTitle>
+        <AlertDialogDescription>{pendingCount} changement{pendingCount > 1 ? "s" : ""} de « {model.title} » {pendingCount > 1 ? "ne sont pas enregistrés" : "n’est pas enregistré"} : en quittant, {pendingCount > 1 ? "ils seront perdus" : "il sera perdu"}. « Réduire » (en haut de la fenêtre) les garde de côté pendant que tu regardes l’index.</AlertDialogDescription>
+      </AlertDialogHeader>
+      <AlertDialogFooter className="flex-wrap gap-2 sm:justify-between">
+        <AlertDialogAction variant="destructive" onClick={() => { setConfirmClose(false); setMinimized(false); onClose() }}>Quitter sans enregistrer</AlertDialogAction>
+        <span className="flex flex-col-reverse gap-2 sm:flex-row">
+          <AlertDialogCancel>Continuer à modifier</AlertDialogCancel>
+          {canSave && <AlertDialogAction onClick={() => { setConfirmClose(false); setMinimized(false); void submit() }}><Save />{submitLabel}</AlertDialogAction>}
+        </span>
+      </AlertDialogFooter>
+    </AlertDialogContent>
+  </AlertDialog>
+  <Dialog open={open && !minimized} onOpenChange={(next) => { if (!next) requestClose() }}>
     <DialogContent className="flex h-[94svh] max-h-[94svh] flex-col gap-3 sm:max-w-[min(96vw,1440px)]">
       <DialogHeader className="shrink-0">
-        <div className="flex flex-wrap items-start justify-between gap-2 pr-8">
+        <div className="flex flex-wrap items-start justify-between gap-2 pr-28">
           <div>
             <DialogTitle className="font-display text-2xl">{title ?? `Modifier « ${model.title} »`}</DialogTitle>
             <DialogDescription>{intro ?? (readOnly ? model.readOnlyReason : "Onglets à gauche, colonnes au milieu, réglages de la colonne choisie à droite. Rien n’est écrit dans Google Sheets avant « Enregistrer » ; ce qui est supprimé part dans la corbeille.")}</DialogDescription>
@@ -1119,6 +1153,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             {(layoutsEnabled || cardsEnabled || presentationsEnabled) && <span className="inline-flex flex-wrap rounded-lg border bg-muted/30 p-0.5" role="tablist" aria-label="Que modifier">
               {([["columns", Columns3, "Colonnes"], ...(layoutsEnabled ? [["form", LayoutTemplate, "Formulaire"], ["hover", MessageSquareQuote, "Survol"]] as const : []), ...(cardsEnabled ? [["cards", LayoutGrid, "Cartes"]] as const : []), ...(presentationsEnabled ? presentationKinds.map((kind) => [`view:${kind.value}`, layoutIcons[kind.value], kind.label] as const) : []), ...(statsPanel && !readOnly ? [["stats", layoutIcons.stats, "Stats"] as const] : [])] as Array<readonly [EditorMode, LucideIcon, string]>).map(([key, Icon, label]) => <Button key={key} type="button" role="tab" aria-selected={mode === key} size="sm" variant={mode === key ? "default" : "ghost"} className="h-7" onClick={() => setMode(key)}><Icon />{label}</Button>)}
             </span>}
+            {!readOnly && <Button type="button" variant="ghost" size="sm" className="absolute top-3 right-11 h-7 text-muted-foreground" onClick={() => setMinimized(true)} title="Réduire : les modifications restent en attente pendant que tu regardes l’index (changer d’onglet, ouvrir une ligne…) ; « Reprendre » rouvre l’éditeur tel quel."><Minimize2 />Réduire</Button>}
           </span>
         </div>
       </DialogHeader>
@@ -1320,6 +1355,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
               resetLabel={tab.original && builtinLayoutFor(model.key, tab.original, mode) ? "Revenir à la mise en page d’Eraser" : "Revenir à l’affichage automatique"}
               sample={sampleRows[0]}
               samples={sampleRows}
+              indexTitle={model.title}
               sampleRow={sampleRows[0] ? { index: model.key, id: sampleRows[0].ID ?? "", tab: tab.original ?? tab.name } : undefined}
               forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal" }, ...namedFormsOf(tab).map((item) => ({ id: item.id, name: item.name }))]}
               eraserStarters={tab.original ? eraserLayoutStarters(model.key, tab.original, mode) : []}
@@ -1453,13 +1489,14 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
         </span>
         <span className="flex gap-2">
         <Button type="button" variant="outline" size="icon" onClick={() => setGuide("types")} aria-label="Guide des colonnes" title="Guide : types de colonnes, formules, boutons, aléatoire"><BookOpen /></Button>
-        <Button type="button" variant="outline" onClick={onClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
+        <Button type="button" variant="outline" onClick={requestClose} disabled={pending}>{readOnly ? "Fermer" : "Annuler"}</Button>
         {!readOnly && <Button type="button" disabled={pending || layoutSaving || !canSubmit || !(operations.length || layoutChanges.length || cardChanges.length || presentationChanges.length || lockChanges.length) || problems.length > 0} onClick={() => void submit()}>{pending || layoutSaving ? <LoaderCircle className="animate-spin" /> : <Save />}{submitLabel}</Button>}
         </span>
       </DialogFooter>
       {guide && <IndexGuide open section={guide} onClose={() => setGuide(null)} />}
     </DialogContent>
   </Dialog>
+  </>
 }
 
 /**

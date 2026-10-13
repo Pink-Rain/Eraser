@@ -43,8 +43,11 @@ export type LayoutBlock =
   | { kind: "inventory"; accept: "all" | "Armes" | "Équipement" | "Esthétique" | "Bourse"; title?: string }
   /** Un texte libre écrit dans la mise en page (une consigne, un titre, une note). */
   | { kind: "text"; html: string; tone?: "normal" | "muted" | "accent" | "callout" }
-  /** Un trait, ou un peu d'air. */
-  | { kind: "divider"; style?: "line" | "space" | "ornament" }
+  /**
+   * Un trait, un ornement, ou un peu d'air. `color` : celle du trait et de l'ornement (sinon
+   * l'accent) ; l'ornement au milieu : une icône, ou des caractères tapés (« ✦ », « ~ • ~ »).
+   */
+  | { kind: "divider"; style?: "line" | "space" | "ornament"; color?: string; icon?: string; ornament?: string }
   /** Un bouton : ouvre la fiche de la ligne, une page ou une adresse. */
   | { kind: "button"; label: string; icon?: string; action: "open-form" | "open-page" | "link"; href?: string; formId?: string; tone?: "default" | "outline" | "accent" }
 
@@ -56,7 +59,7 @@ export const layoutBlockKinds: Array<{ value: LayoutBlockKind; label: string; hi
   { value: "inventory", label: "Inventaire", hint: "Un inventaire propre à la ligne : tout ce qu’on veut, ou une seule famille d’items (armes, équipement…).", form: true },
   { value: "text", label: "Texte libre", hint: "Une consigne, une note, un sous-titre écrit dans la mise en page.", hover: true, form: true },
   { value: "divider", label: "Séparateur", hint: "Un trait fin, un ornement, ou un peu d’air.", hover: true, form: true },
-  { value: "button", label: "Bouton", hint: "Ouvre la fiche de la ligne, une page créée ou une adresse.", form: true },
+  { value: "button", label: "Bouton", hint: "Ouvre la fiche de la ligne, une page créée ou une adresse.", hover: true, form: true },
 ]
 
 /** Le préfixe de la clé d'un bloc (sa « colonne ») : il ne peut pas être le nom d'une colonne. */
@@ -117,9 +120,11 @@ export type IndexLayout = {
   rest?: "show" | "hide"
   /** La couleur d'accent de la mise en page : fixe (« #927640 ») ou lue dans une colonne (« {Couleur} »). */
   accent?: string
-  /** Survol seulement : la colonne de l'image (ou de l'icône) en tête, et celle du sous-titre. */
+  /** Survol seulement : la colonne de l'image (ou de l'icône) en tête, et celle du sous-titre (ancien réglage, voir `subtitles`). */
   image?: string
   subtitle?: string
+  /** Survol : les colonnes du sous-titre, écrites l'une après l'autre, séparées par « • ». */
+  subtitles?: string[]
   /** Survol : la colonne de l'icône devant le nom ; l'image ou l'icône sur un médaillon à la couleur de l'accent (ancien réglage, voir `medallion`). */
   icon?: string
   tint?: boolean
@@ -137,6 +142,40 @@ export type IndexLayout = {
   width?: "sm" | "md" | "lg"
   /** Les sections deviennent des onglets (une à la fois, la première ouverte) ; la colonne latérale reste. */
   tabs?: boolean
+  /** Le style d'ensemble : le fond, l'allure des libellés. Le réglage d'un champ l'emporte toujours. */
+  look?: LayoutLook
+}
+
+/**
+ * Le style d'ensemble d'une mise en page. `background` : « tint » (une teinte de l'accent), une
+ * couleur fixe (« #… ») ou lue dans une colonne (« {Couleur} », en teinte). Les libellés : leur
+ * couleur, leur taille, en capitales ou non, en gras ou non.
+ */
+export type LayoutLook = {
+  background?: string
+  labelColor?: string
+  labelSize?: "sm" | "md" | "lg"
+  labelCase?: "upper" | "normal"
+  labelWeight?: "normal" | "bold"
+}
+
+/** Les colonnes du sous-titre d'un survol (la nouvelle liste, sinon l'ancien sous-titre seul). */
+export function subtitleColumnsOf(layout: Pick<IndexLayout, "subtitle" | "subtitles">): string[] {
+  return layout.subtitles?.length ? layout.subtitles : layout.subtitle ? [layout.subtitle] : []
+}
+
+function cleanLook(input: unknown): LayoutLook | undefined {
+  if (!input || typeof input !== "object") return undefined
+  const raw = input as Record<string, unknown>
+  const look: LayoutLook = {}
+  const background = raw.background === "tint" ? "tint" : cleanColor(raw.background)
+  if (background) look.background = background
+  const labelColor = cleanColor(raw.labelColor)
+  if (labelColor) look.labelColor = labelColor
+  if (raw.labelSize === "sm" || raw.labelSize === "md" || raw.labelSize === "lg") look.labelSize = raw.labelSize
+  if (raw.labelCase === "upper" || raw.labelCase === "normal") look.labelCase = raw.labelCase
+  if (raw.labelWeight === "normal" || raw.labelWeight === "bold") look.labelWeight = raw.labelWeight
+  return Object.keys(look).length ? look : undefined
 }
 
 /** Un formulaire de plus, sous son nom (« Fiche courte », « Fiche de combat »). */
@@ -238,7 +277,10 @@ export function cleanLayoutBlock(input: unknown): LayoutBlock | null {
     }
     case "divider": {
       const style = raw.style === "space" || raw.style === "ornament" ? raw.style : undefined
-      return { kind: "divider", ...(style ? { style } : {}) }
+      const color = cleanColor(raw.color)
+      const icon = cleanText(raw.icon, 40)
+      const ornament = cleanText(raw.ornament, 16)
+      return { kind: "divider", ...(style ? { style } : {}), ...(color ? { color } : {}), ...(icon ? { icon } : {}), ...(ornament ? { ornament } : {}) }
     }
     case "button": {
       const action = raw.action === "open-page" || raw.action === "link" ? raw.action : "open-form"
@@ -331,9 +373,11 @@ export function parseIndexLayout(input: unknown): IndexLayout | null {
   if (accent) layout.accent = accent
   const image = cleanText(raw.image, 120)
   const subtitle = cleanText(raw.subtitle, 120)
+  const subtitles = (Array.isArray(raw.subtitles) ? raw.subtitles : []).map((item) => cleanText(item, 120)).filter(Boolean).slice(0, 4)
   const icon = cleanText(raw.icon, 120)
   if (image) layout.image = image
-  if (subtitle) layout.subtitle = subtitle
+  if (subtitles.length) layout.subtitles = subtitles
+  else if (subtitle) layout.subtitle = subtitle
   if (icon) layout.icon = icon
   if (raw.tint === true) layout.tint = true
   if (raw.medallion && typeof raw.medallion === "object") {
@@ -351,7 +395,9 @@ export function parseIndexLayout(input: unknown): IndexLayout | null {
   if (raw.nameInAccent === true) layout.nameInAccent = true
   if (raw.width === "sm" || raw.width === "lg") layout.width = raw.width
   if (raw.tabs === true) layout.tabs = true
-  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !layout.medallion && !layout.banner) return null
+  const look = cleanLook(raw.look)
+  if (look) layout.look = look
+  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !subtitles.length && !layout.medallion && !layout.banner) return null
   return layout
 }
 
@@ -417,6 +463,7 @@ export function renameLayoutColumns(layout: IndexLayout, renames: Map<string, st
     sections: layout.sections.map((section) => ({ ...section, rows: section.rows.map((row) => ({ ...row, fields: row.fields.map(field) })) })),
     ...(layout.image ? { image: rename(layout.image) } : {}),
     ...(layout.subtitle ? { subtitle: rename(layout.subtitle) } : {}),
+    ...(layout.subtitles ? { subtitles: layout.subtitles.map(rename) } : {}),
     ...(layout.icon ? { icon: rename(layout.icon) } : {}),
     ...(layout.medallion?.column ? { medallion: { ...layout.medallion, column: rename(layout.medallion.column) } } : {}),
     ...(layout.banner?.column ? { banner: { ...layout.banner, column: rename(layout.banner.column) } } : {}),
@@ -441,6 +488,7 @@ export type ArrangedLayout<T> = {
   asideWidth: "sm" | "md" | "lg"
   asideSide: "left" | "right"
   accent?: string
+  look?: LayoutLook
   sections: Array<ArrangedSection<T>>
   /** Les sections en onglets. */
   tabs?: boolean
@@ -482,7 +530,7 @@ export function arrangeLayout<T>(layout: IndexLayout, items: T[], keyOf: (item: 
     rows: section.rows.map((row) => ({ id: row.id, fields: row.fields.flatMap(take) })).filter((row) => row.fields.length),
   })).filter((section) => section.rows.length || section.title)
   const rest = layout.rest === "hide" ? [] : items.filter((item) => !used.has(foldName(keyOf(item))))
-  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), rest }
+  return { aside, asideWidth: layout.asideWidth ?? "md", asideSide: layout.asideSide ?? "left", ...(layout.accent ? { accent: layout.accent } : {}), ...(layout.look ? { look: layout.look } : {}), sections, ...(layout.tabs ? { tabs: true } : {}), rest }
 }
 
 /** La clé d'un nouveau bloc. */
@@ -576,7 +624,7 @@ export function layoutPlaces(layout: IndexLayout | null | undefined, column: str
   if (!layout) return false
   const key = foldName(column)
   const fields = [...layout.aside, ...layout.sections.flatMap((section) => section.rows.flatMap((row) => row.fields))]
-  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, layout.subtitle, layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
+  return fields.some((field) => field.block ? blockColumns(field.block).some((column) => foldName(column) === key) : foldName(field.column) === key) || [layout.image, ...subtitleColumnsOf(layout), layout.icon, layout.medallion?.column, layout.banner?.column].some((value) => value !== undefined && foldName(value) === key)
 }
 
 /** Tous les formulaires d'un onglet (étoilé compris) placent-ils cette colonne ? L'un d'eux suffit. */

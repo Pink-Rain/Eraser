@@ -15,10 +15,11 @@ import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover
 import type { SpellIndexKind } from "@/lib/class-content"
 import { conversionsOf, findUnit, formatIndexNumber, numberSortKey, parseIndexNumber, unitsOf, unitTone, type NumberFormat } from "@/lib/index-numbers"
 import { ActionsCell, FormulaCell, RandomCell } from "@/components/eraser/index-computed-cells"
-import { GaugeCell, GlyphCell } from "@/components/eraser/index-gauge"
-import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView, largeFieldClass } from "@/components/eraser/index-layout-view"
+import { GaugeCell, GlyphCell, IndexIconGlyph } from "@/components/eraser/index-gauge"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, labelLookOf, largeFieldClass, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { columnStyleCss, pillStyle } from "@/components/eraser/index-style"
+import { cn } from "@/lib/utils"
 import {
   checkboxValue,
   columnTypeLabel,
@@ -46,7 +47,7 @@ import {
 import { creatureTokenId, uploadCreaturePortrait } from "@/components/eraser/creature-portrait"
 import { TokenButton } from "@/components/eraser/token-editor"
 import type { FormulaDisplay } from "@/lib/index-formula"
-import { arrangeLayout, type IndexLayout, type LayoutBlock } from "@/lib/index-layouts"
+import { arrangeLayout, resolveLayoutColor, type IndexLayout, type LayoutBlock, type LayoutField } from "@/lib/index-layouts"
 import { isBuiltinWorldIndexKey, splitNames, worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { announceWorldIndexChange, onWorldIndexChange } from "@/lib/world-index-events"
 import { soundVolume } from "@/lib/sounds"
@@ -1152,6 +1153,8 @@ export type IndexFieldProps = {
   hideLabel?: boolean
   /** La barre de mise en forme des textes enrichis : au focus (par défaut) ou toujours visible. */
   richToolbar?: "focus" | "always"
+  /** Mise en page de la fiche : l'allure du libellé (style d'ensemble), sa couleur et son icône (réglage du champ). */
+  labelLook?: { className?: string; color?: string; icon?: string }
   /** Dans une fiche : les colonnes calculées, les tirages et les boutons de la ligne. */
   row?: {
     formula?: (spec: IndexColumnSpec) => FormulaDisplay
@@ -1181,7 +1184,7 @@ export function IndexField(props: IndexFieldProps) {
   return <IndexFieldOfType {...props} disabled={props.disabled || Boolean(props.spec.readOnly)} />
 }
 
-function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false, richToolbar = "focus" }: IndexFieldProps) {
+function IndexFieldOfType({ label, spec: input, value, onChange, long = false, autoFocus = false, placeholder, disabled = false, row, hideLabel = false, richToolbar = "focus", labelLook }: IndexFieldProps) {
   const spec = normalizeSpec(input)
   const look = columnStyleCss(spec.style)
   // Le style imposé à la colonne (couleur, gras, police…) habille aussi son champ dans la fiche, comme sa case dans le tableau.
@@ -1190,7 +1193,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     : node
   const title = hideLabel
     ? <span className="sr-only">{label}</span>
-    : <span className="flex items-center gap-1">{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
+    : <span className={cn("flex items-center gap-1", labelLook?.className)} style={labelLook?.color ? { color: labelLook.color } : undefined}>{labelLook?.icon && <IndexIconGlyph icon={labelLook.icon} className="size-3.5" filled={false} />}{label}{spec.kind === "linked" && <Link2 className="size-3 text-primary" aria-label="Colonne liée" />}{spec.readOnly && <span className="font-normal text-muted-foreground" title="Lecture seule : se modifie ailleurs">· lecture seule</span>}{spec.description && <span className="font-normal text-muted-foreground" title={spec.description}>ⓘ</span>}</span>
   switch (spec.kind) {
     case "choice":
       return <div className={fieldLabel}>{title}{styled(<ChoicePicker compact={false} label={label} value={value} options={spec.options ?? []} allowCustom={spec.allowCustom} multiple={spec.multiple} groups={spec.groups} disabled={disabled} onChange={onChange} />)}</div>
@@ -1199,7 +1202,7 @@ function IndexFieldOfType({ label, spec: input, value, onChange, long = false, a
     case "linked-choice":
       return spec.source ? <div className={fieldLabel}>{title}{styled(<LinkedChoicePicker compact={false} label={label} source={spec.source} moreSources={spec.moreSources} separator={spec.listSeparator} strict={spec.strict} multiple={spec.multiple} value={value} disabled={disabled} onChange={onChange} />)}</div> : null
     case "checkbox":
-      return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} />{label}</label>
+      return <label className="flex h-9 items-center gap-2 self-end rounded-lg border bg-background/50 px-3 text-sm font-semibold"><Checkbox checked={isCheckedValue(value, spec.emptyChecked)} disabled={disabled} onCheckedChange={(checked) => onChange(checkboxValue(checked === true, value))} /><span className={cn("flex items-center gap-1", labelLook?.className)} style={labelLook?.color ? { color: labelLook.color } : undefined}>{labelLook?.icon && <IndexIconGlyph icon={labelLook.icon} className="size-3.5" filled={false} />}{label}</span></label>
     case "file":
       return spec.file?.accept === "image" && !spec.file.multiple
         ? <div className={fieldLabel}>{title}<ImageField label={label} value={value} onChange={onChange} upload={row?.upload ?? fileUploadFor(spec)} aspect={fileAspectClass(spec.file.aspect)} disabled={disabled}>
@@ -1266,9 +1269,15 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
   const [values, setValues] = useState<Record<string, string>>(() => Object.fromEntries(fields.map((field) => [field.key, ""])))
   const nameField = fields.find((field) => field.spec.kind === "name" || field.spec.kind === "name-form")
   const named = !nameField || (values[nameField.key] ?? "").replace(/<[^>]+>/g, "").trim().length > 0
-  const entryField = (field: IndexFormField, hideLabel = false) => <IndexField
+  // La mise en page : sa couleur d'accent, le style d'ensemble des libellés et le réglage de chaque champ (texte, icône, couleur).
+  const readEntry = (column: string) => richTextPlainText(values[fields.find((field) => foldName(field.label) === foldName(column))?.key ?? ""] ?? "")
+  const accent = resolveLayoutColor(layout?.accent, DEFAULT_LAYOUT_ACCENT, readEntry)
+  const labels = labelLookOf(layout?.look, accent, readEntry)
+  const background = layoutBackgroundOf(layout?.look, accent, readEntry)
+  const entryField = (field: IndexFormField, hideLabel = false, placed?: LayoutField) => <IndexField
     key={field.key}
-    label={field.label}
+    label={placed?.label || field.label}
+    labelLook={{ className: labels.className, color: placed?.color ? resolveLayoutColor(placed.color, accent, readEntry) : labels.color, icon: placed?.icon }}
     // Dans le formulaire, le nom se saisit toujours : il n'ouvre pas de fiche.
     spec={field.spec.kind === "name-form" ? { ...field.spec, kind: "name" } : field.spec}
     value={values[field.key] ?? ""}
@@ -1277,7 +1286,7 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
     autoFocus={field === nameField}
     onChange={(value) => setValues((current) => ({ ...current, [field.key]: value }))}
   />
-  return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm">
+  return <section className="rounded-2xl border bg-card/90 p-4 shadow-sm" style={background ? { background } : undefined}>
     <div className="flex items-center justify-between gap-3">
       <h3 className="font-display text-xl font-semibold">{title}</h3>
       <Button type="button" variant="ghost" size="icon-sm" onClick={onCancel} aria-label="Fermer"><X /></Button>
@@ -1287,11 +1296,11 @@ export function IndexEntryForm({ title, fields, pending, leading, layout, onCanc
         {leading && <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{leading}</div>}
         <IndexLayoutView
           arranged={arrangeLayout(layout, fields, (field) => field.label, (placed) => ({ key: placed.column, label: placed.label ?? "", spec: { kind: "rich" } as IndexColumnSpec, block: placed.block }))}
-          readColumn={(column) => richTextPlainText(values[fields.find((field) => foldName(field.label) === foldName(column))?.key ?? ""] ?? "")}
+          readColumn={readEntry}
           // Un bloc (tuiles de valeurs…) écrit dans ses cases ; un inventaire attend que la ligne existe.
           render={(field, placed) => field.block
-            ? <LayoutBlockView block={field.block} ctx={{ valueOf: (column) => richTextPlainText(values[fields.find((item) => foldName(item.label) === foldName(column))?.key ?? ""] ?? ""), accent: DEFAULT_LAYOUT_ACCENT, onChange: (column, value) => { const target = fields.find((item) => foldName(item.label) === foldName(column)); if (target) setValues((current) => ({ ...current, [target.key]: value })) } }} />
-            : <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel)}</div>}
+            ? <div className="grid gap-1">{!placed.hideLabel && placed.label && <FieldLabel field={placed} fallback="" accent={accent} readColumn={readEntry} look={layout.look} className="text-xs font-semibold" />}<LayoutBlockView block={field.block} ctx={{ valueOf: readEntry, accent, onChange: (column, value) => { const target = fields.find((item) => foldName(item.label) === foldName(column)); if (target) setValues((current) => ({ ...current, [target.key]: value })) } }} /></div>
+            : <div className={placed.large ? largeFieldClass : undefined}>{entryField(field, placed.hideLabel, placed)}</div>}
           renderRest={(rest) => <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">{rest.map((field) => entryField(field))}</div>}
         />
       </div>

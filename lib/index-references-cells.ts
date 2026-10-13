@@ -3,7 +3,7 @@
  * dans le tableau) ou le détail montré au survol du nom. Sans dépendance au serveur.
  */
 import { foldName, isIdHeader, rowColumnStyle, type IndexColumnSpec } from "@/lib/index-columns"
-import { arrangeLayout, blockColumns, resolveLayoutColor, type IndexLayout } from "@/lib/index-layouts"
+import { arrangeLayout, blockColumns, resolveLayoutColor, subtitleColumnsOf, type IndexLayout } from "@/lib/index-layouts"
 import type { ResolvedLayout, ResolvedLayoutField } from "@/lib/index-references"
 import { formatIndexNumber, parseIndexNumber } from "@/lib/index-numbers"
 
@@ -134,7 +134,8 @@ export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow,
     return at >= 0 ? (row.values[at] ?? "").trim() : ""
   }
   const image = pick(layout.image)
-  const subtitle = pick(layout.subtitle)
+  // Plusieurs colonnes possibles : leurs valeurs remplies, séparées par « • ».
+  const subtitle = subtitleColumnsOf(layout).map(pick).map((value) => value.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim()).filter(Boolean).join(" • ")
   const icon = pick(layout.icon)
   // Le médaillon : la colonne choisie, sinon l'image ou l'icône de la ligne (résolues par la référence).
   const medallion = layout.medallion ? { value: layout.medallion.column ? pick(layout.medallion.column) : "", ...(layout.medallion.size ? { size: layout.medallion.size } : {}), ...(layout.medallion.round ? { round: true } : {}), ...(layout.medallion.tint ? { tint: true } : {}), ...(layout.medallion.bare ? { bare: true } : {}) } : undefined
@@ -151,6 +152,7 @@ export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow,
     ...(medallion ? { medallion } : {}),
     ...(banner ? { banner } : {}),
     ...(layout.tabs ? { tabs: true } : {}),
+    ...(layout.look ? { look: layout.look } : {}),
     ...(layout.nameInAccent ? { nameInAccent: true } : {}),
     ...(layout.width ? { width: layout.width } : {}),
     ...(layout.asideWidth ? { asideWidth: layout.asideWidth } : {}),

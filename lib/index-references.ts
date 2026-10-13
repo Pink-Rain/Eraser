@@ -8,7 +8,7 @@
  * réécrire aucun texte. Sans dépendance au serveur.
  */
 import { internalAppPath } from "@/lib/app-links"
-import type { LayoutBlock, LayoutSection } from "@/lib/index-layouts"
+import type { LayoutBlock, LayoutLook, LayoutSection } from "@/lib/index-layouts"
 import type { ColumnStyle } from "@/lib/index-columns"
 
 export const REFERENCE_PATH = "/reference/"
@@ -223,6 +223,8 @@ export type ResolvedLayout = {
   banner?: { value: string; height?: number }
   /** Les sections en onglets. */
   tabs?: boolean
+  /** Le style d'ensemble (fond, libellés). */
+  look?: LayoutLook
   nameInAccent?: boolean
   /** La couleur d'accent de la mise en page, résolue pour cette ligne. */
   accent?: string

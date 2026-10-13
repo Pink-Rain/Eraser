@@ -1,34 +1,31 @@
-# Eraser 0.1.1-alpha.219 — « Modifier » : un seul menu des vues, l'aperçu en grand
+# Eraser 0.1.1-alpha.220 — « Modifier » protège tes changements ; fiche, survol et séparateurs affinés
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les formulaires, survols, cartes et vues déjà réglés se relisent tels quels (la version
-à l'étoile reste celle qu'Eraser montre).
+Sheets ; les mises en page déjà réglées se relisent telles quelles.
 
-## La barre de gauche, rangée
+## « Modifier » ne perd plus rien
 
-- **Deux encadrés** : en haut, les **onglets** de l'index (avec « Une ligne s'appelle… » et
-  l'alignement des onglets d'objets) ; en bas, la **vue** modifiée.
-- **Le même menu dans toutes les vues** (Formulaire, Survol, Cartes, Liste, Kanban,
-  Maître-détail, Calendrier, Tableau de bord, Galerie, Chronologie, Arborescence, Codex) :
-  - en tête, **＋ Nouveau** et **⧉ Dupliquer**, en icônes ;
-  - la liste des versions, avec **l'étoile** pour celle qu'Eraser montre ; le nom et 🗑 pour
-    les autres ;
-  - **Presets** : 🔖 enregistrer, ➤ copier vers d'autres onglets, ⚙ gérer (renommer,
-    supprimer), et « Appliquer un preset… ». Chaque bouton s'explique au survol.
-- Les bandeaux d'explication au-dessus du formulaire et du survol sont retirés.
+- Fermer avec des changements pas encore enregistrés (✕, Échap, clic à côté, « Annuler »)
+  demande : **Continuer à modifier**, **Quitter sans enregistrer** ou **Enregistrer**.
+- **Réduire** (en haut à droite) cache l'éditeur sans rien perdre : on peut changer d'onglet,
+  ouvrir une ligne, regarder l'index… Une petite barre en bas à droite dit combien de
+  changements attendent ; **Reprendre** rouvre l'éditeur tel quel.
 
-## Plusieurs versions partout
+## Formulaire
 
-- **Survol** : plusieurs survols par onglet ; l'étoile choisit celui des citations « { ».
-- **Liste, Kanban… (les 12 vues)** : plusieurs versions par vue. L'étoilée est celle des pages
-  et du tableau de bord ; les autres se choisissent dans un **bloc de page** (Forme › « Les
-  autres versions de l'onglet »).
-- Une colonne renommée suit dans toutes les versions.
+- **L'aperçu en grand est la vraie fiche** : même en-tête, même barre de mise en forme, mêmes
+  champs, même largeur. On peut y taper pour essayer, rien n'est enregistré.
+- La vraie fiche (et le formulaire « Ajouter ») suit enfin **le libellé, l'icône et la couleur**
+  réglés pour chaque champ, et la **couleur d'accent** de la mise en page dans ses blocs.
+- **Style d'ensemble** (Apparence) : le **fond** (teinte de l'accent ou une couleur) et l'allure
+  de **tous les libellés** (taille, capitales, gras, couleur). Le réglage d'un champ l'emporte.
+- **Séparateur** : sa **couleur** (trait et ornement) ; au milieu de l'ornement, **une icône**
+  ou **des caractères** (✦, ❦, ~ • ~, ☙ ❧…).
+- La petite barre d'un champ (pinceau, flèches, ✕) n'est plus coupée dans la colonne latérale.
 
-## L'aperçu en grand
+## Survol
 
-- Un petit bouton ⤢ à droite de **« Aperçu »**, dans chaque vue, ouvre l'aperçu en grand avec
-  son **vrai rendu** : le formulaire tel qu'il se lit, la **carte du survol** telle qu'elle
-  s'ouvre sur une citation « { » (même code que le vrai survol), les cartes dans la grille de la
-  vue « Cartes », et chaque vue sur toutes les lignes de l'aperçu. Les lignes se feuillettent ;
-  téléphone, tablette ou toute la largeur au choix.
+- Le bloc **Bouton** s'y pose : « Ouvrir la fiche » mène à la ligne ; une page ou une adresse
+  s'ouvre aussi.
+- **Sous-titre de plusieurs colonnes**, écrites l'une après l'autre : « Attribut • Négatif ».
+- Le style d'ensemble (fond, libellés) vaut aussi pour le survol.

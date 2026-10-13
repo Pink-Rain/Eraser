@@ -4,7 +4,7 @@ import { useState, type CSSProperties, type ReactNode } from "react"
 import { ChevronDown } from "lucide-react"
 
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
-import { resolveLayoutColor, type ArrangedLayout, type ArrangedSection, type LayoutField } from "@/lib/index-layouts"
+import { resolveLayoutColor, type ArrangedLayout, type ArrangedSection, type LayoutField, type LayoutLook } from "@/lib/index-layouts"
 import { cn } from "@/lib/utils"
 
 const asideColumns: Record<"sm" | "md" | "lg", string> = {
@@ -143,11 +143,38 @@ export function IndexLayoutView<T>({ arranged, render, renderRest, restTitle = "
 /** Le grand format d'un champ « en grand » de la fiche (un nom, un titre). */
 export const largeFieldClass = "[&_input]:h-11 [&_input]:font-display [&_input]:text-xl [&_input]:font-semibold [&_[contenteditable]]:font-display [&_[contenteditable]]:text-xl [&_[contenteditable]]:font-semibold"
 
+/**
+ * Le style d'ensemble des libellés (« Apparence » de la mise en page) : des classes qui
+ * remplacent celles du rendu (taille, capitales, gras) et une couleur. Le réglage d'un
+ * champ (sa couleur) l'emporte toujours.
+ */
+export function labelLookOf(look: LayoutLook | undefined, accent: string, readColumn?: (column: string) => string): { className: string; color?: string } {
+  if (!look) return { className: "" }
+  return {
+    className: cn(
+      look.labelSize === "sm" && "text-[10px]", look.labelSize === "md" && "text-xs", look.labelSize === "lg" && "text-sm",
+      look.labelCase === "upper" && "uppercase tracking-[.12em]", look.labelCase === "normal" && "normal-case tracking-normal",
+      look.labelWeight === "bold" && "font-semibold", look.labelWeight === "normal" && "font-normal",
+    ),
+    ...(look.labelColor ? { color: resolveLayoutColor(look.labelColor, accent, readColumn) } : {}),
+  }
+}
+
+/** Le fond d'ensemble : une teinte de l'accent, une couleur fixe, ou la teinte d'une couleur lue dans une colonne. */
+export function layoutBackgroundOf(look: LayoutLook | undefined, accent: string, readColumn?: (column: string) => string): string | undefined {
+  const background = look?.background
+  if (!background) return undefined
+  if (background === "tint") return `color-mix(in srgb, ${accent} 7%, var(--background))`
+  if (background.startsWith("{")) return `color-mix(in srgb, ${resolveLayoutColor(background, accent, readColumn)} 10%, var(--background))`
+  return resolveLayoutColor(background, accent, readColumn)
+}
+
 /** Le libellé d'un champ placé : son texte (ou le nom de la colonne), son icône et sa couleur. */
-export function FieldLabel({ field, fallback, accent, readColumn, className }: { field: Pick<LayoutField, "label" | "icon" | "color" | "hideLabel">; fallback: string; accent?: string; readColumn?: (column: string) => string; className?: string }) {
+export function FieldLabel({ field, fallback, accent, readColumn, className, look }: { field: Pick<LayoutField, "label" | "icon" | "color" | "hideLabel">; fallback: string; accent?: string; readColumn?: (column: string) => string; className?: string; /** Le style d'ensemble des libellés. */ look?: LayoutLook }) {
   if (field.hideLabel) return null
-  const color = field.color ? resolveLayoutColor(field.color, accent ?? DEFAULT_LAYOUT_ACCENT, readColumn) : undefined
-  return <span className={cn("flex items-center gap-1", className)} style={color ? { color } : undefined}>
+  const base = labelLookOf(look, accent ?? DEFAULT_LAYOUT_ACCENT, readColumn)
+  const color = field.color ? resolveLayoutColor(field.color, accent ?? DEFAULT_LAYOUT_ACCENT, readColumn) : base.color
+  return <span className={cn("flex items-center gap-1", className, base.className)} style={color ? { color } : undefined}>
     {field.icon && <IndexIconGlyph icon={field.icon} className="size-3.5" filled={false} />}
     {field.label || fallback}
   </span>

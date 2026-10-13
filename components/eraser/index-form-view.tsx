@@ -5,7 +5,7 @@ import type { ReactNode } from "react"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
-import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { IndexRichText } from "@/components/eraser/index-references"
 import { foldName, isImageSource, normalizeSpec, parseGlyphValue, type IndexColumnSpec } from "@/lib/index-columns"
 import { arrangeLayout, resolveLayoutColor, type IndexLayout, type LayoutBlock } from "@/lib/index-layouts"
@@ -38,14 +38,14 @@ export function IndexFormView({ layout, columns, valueOf, accent, compact = fals
   const arranged = arrangeLayout<Item>(layout, items, (item) => item.header, (field) => ({ header: field.column, block: field.block }))
   const specOf = (header: string) => columns.find((column) => foldName(column.header) === foldName(header))?.spec
   const render = (item: Item, field: Parameters<Parameters<typeof IndexLayoutView<Item>>[0]["render"]>[1]): ReactNode => {
-    if (item.block) return <div className="grid gap-1">{!field.hideLabel && field.label && <FieldLabel field={field} fallback="" accent={color} readColumn={plain} className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={{ valueOf: plain, htmlOf: (header) => valueOf(header) ?? "", accent: color, compact, row }} /></div>
+    if (item.block) return <div className="grid gap-1">{!field.hideLabel && field.label && <FieldLabel field={field} fallback="" accent={color} readColumn={plain} look={layout.look} className="text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" />}<LayoutBlockView block={item.block} ctx={{ valueOf: plain, htmlOf: (header) => valueOf(header) ?? "", accent: color, compact, row }} /></div>
     const html = valueOf(item.header) ?? ""
     const text = plain(item.header)
     const spec = item.spec ?? specOf(item.header)
     const kind = spec ? normalizeSpec(spec).kind : undefined
     const picture = (kind === "file" && spec?.file?.accept === "image") || isImageSource(text)
     const glyph = kind === "glyph" ? parseGlyphValue(text) : null
-    const label = <FieldLabel field={field} fallback={item.header} accent={color} readColumn={plain} className={cn("text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground")} />
+    const label = <FieldLabel field={field} fallback={item.header} accent={color} readColumn={plain} look={layout.look} className={cn("text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground")} />
     if (picture && text) return <div className="grid gap-1">{label}<span className={cn("block overflow-hidden rounded-xl", compact ? "max-w-40" : "max-w-64")}><IndexImage value={text.split(/\s+/)[0]} alt={item.header} className="h-auto w-full" /></span></div>
     if (glyph && (glyph.icon || glyph.emoji)) return <div className="grid gap-1">{label}<span style={{ color }}><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-6" filled={Boolean(glyph.emoji)} /></span></div>
     return <div className="grid gap-0.5">
@@ -53,7 +53,8 @@ export function IndexFormView({ layout, columns, valueOf, accent, compact = fals
       <div className={cn(field.large ? "font-display text-lg font-semibold leading-snug" : compact ? "text-xs leading-5" : "text-sm leading-6", "[&_a]:underline")}>{text ? <IndexRichText html={html} /> : <span className="text-muted-foreground/60">—</span>}</div>
     </div>
   }
-  return <div className={cn("min-w-0", className)}>
+  const background = layoutBackgroundOf(layout.look, color, plain)
+  return <div className={cn("min-w-0", background && "rounded-xl p-3", className)} style={background ? { background } : undefined}>
     <IndexLayoutView
       compact={compact}
       accent={color}

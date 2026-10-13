@@ -21,7 +21,7 @@ import type { StateDefinition, StatesCatalog } from "@/lib/character-states"
 import { foldName, isImageSource, matchChoice, parseGlyphValue, type ColumnStyle } from "@/lib/index-columns"
 import { parseReferenceHref, referenceKey, referenceNameFromLabel, type ReferenceRequest, type ResolvedLayout, type ResolvedLayoutField, type ResolvedReference } from "@/lib/index-references"
 import type { LayoutSpan } from "@/lib/index-layouts"
-import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView } from "@/components/eraser/index-layout-view"
+import { DEFAULT_LAYOUT_ACCENT, IndexLayoutView, labelLookOf, layoutBackgroundOf } from "@/components/eraser/index-layout-view"
 import { LayoutBlockView } from "@/components/eraser/index-layout-blocks"
 import { resolveReference } from "@/components/eraser/reference-store"
 import { objectIconImage } from "@/lib/object-icons"
@@ -372,7 +372,10 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
   const banner = layout.banner?.value && isImageSource(layout.banner.value)
     ? <div className="-mx-3.5 -mt-3.5 mb-1 overflow-hidden rounded-t-2xl" style={{ height: layout.banner.height ?? 110 }}><IndexImage value={layout.banner.value} alt="" className="size-full object-cover" /></div>
     : null
-  return <div className="grid gap-2.5">
+  // Le style d'ensemble : le fond peint toute la carte (sous son rembourrage), les libellés prennent son allure.
+  const background = layoutBackgroundOf(layout.look, accent)
+  const labels = labelLookOf(layout.look, accent)
+  return <div className={cn("grid gap-2.5", background && "-m-3.5 rounded-2xl p-3.5")} style={background ? { background } : undefined}>
     {banner}
     <div className="flex items-start gap-3">
       {medallionNode}
@@ -381,8 +384,11 @@ export function LayoutDetails({ reference, layout, color, depth, level }: { refe
         {subtitle && <p className="text-[10px] font-semibold uppercase tracking-[.16em] text-muted-foreground">{subtitle}</p>}
       </div>
     </div>
-    <IndexLayoutView compact accent={accent} arranged={arranged} render={(field) => <div className="grid gap-0.5">
-      {!field.hideLabel && <p className="flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground" style={field.color ? { color: field.color.startsWith("#") ? field.color : accent } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || field.column}</p>}
+    <IndexLayoutView compact accent={accent} arranged={arranged} render={(field) => field.block
+      // Un bloc (bouton, séparateur, tuiles…) : son libellé seulement s'il en a un, et pas l'allure d'un texte.
+      ? <div className="grid gap-1">{!field.hideLabel && field.label && <p className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground", labels.className)} style={labels.color ? { color: labels.color } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label}</p>}<div><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div></div>
+      : <div className="grid gap-0.5">
+      {!field.hideLabel && <p className={cn("flex items-center gap-1 text-[10px] font-semibold uppercase tracking-[.12em] text-muted-foreground", labels.className)} style={field.color ? { color: field.color.startsWith("#") ? field.color : accent } : labels.color ? { color: labels.color } : undefined}>{field.icon && <IndexIconGlyph icon={field.icon} className="size-3" filled={false} />}{field.label || field.column}</p>}
       <div className={field.large ? "font-display text-base font-semibold leading-snug" : "text-xs leading-5 [&_a]:underline"}><LayoutValue reference={reference} field={field} depth={depth} accent={accent} level={level} /></div>
     </div>} />
   </div>

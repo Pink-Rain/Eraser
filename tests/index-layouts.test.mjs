@@ -182,6 +182,15 @@ test("blocs, allure des sections, formulaires nommés : lus et réécrits tels q
   assert.deepEqual(hovers.hovers.map((item) => [item.id, item.name]), [["court", "Survol court"]]);
   assert.deepEqual(layouts.parseTabLayouts({ hovers: [{ id: "seul", name: "Seul", layout: sample }] }).hovers.map((item) => item.id), ["seul"]);
   assert.equal(layouts.renameTabLayouts(hovers, new Map([["portrait", "Visage"]])).hovers[0].layout.aside[0].column, "Visage");
+  // Le séparateur garde sa couleur et son ornement ; le style d'ensemble et le sous-titre multiple se relisent.
+  const styled = layouts.parseIndexLayout({ aside: [], sections: [{ rows: [{ fields: [{ column: "bloc:sep", block: { kind: "divider", style: "ornament", color: "#b3261e", ornament: "~ • ~", icon: "skull", pirate: 1 } }, { column: "Nom" }] }] }], subtitles: ["Type", "Sous-type", ""], look: { background: "tint", labelColor: "{Couleur}", labelSize: "lg", labelCase: "upper", labelWeight: "bold", pirate: "x" } });
+  assert.deepEqual(styled.sections[0].rows[0].fields[0].block, { kind: "divider", style: "ornament", color: "#b3261e", icon: "skull", ornament: "~ • ~" });
+  assert.deepEqual(styled.look, { background: "tint", labelColor: "{Couleur}", labelSize: "lg", labelCase: "upper", labelWeight: "bold" });
+  assert.deepEqual(layouts.subtitleColumnsOf(styled), ["Type", "Sous-type"]);
+  assert.deepEqual(layouts.subtitleColumnsOf({ subtitle: "Type" }), ["Type"]);
+  assert.deepEqual(layouts.renameLayoutColumns(styled, new Map([["sous-type", "Rareté"]])).subtitles, ["Type", "Rareté"]);
+  assert.equal(layouts.parseIndexLayout({ aside: [], sections: [], look: { background: "rouge" } }), null);
+  assert.ok(layouts.layoutBlockKinds.find((entry) => entry.value === "button").hover);
   // Une couleur réglée se résout pour une ligne.
   assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", (column) => column === "Couleur" ? "#b3261e" : ""), "#b3261e");
   assert.equal(layouts.resolveLayoutColor("{Couleur}", "#000000", () => "pas une couleur"), "#000000");
@@ -294,4 +303,16 @@ test("lot A : image sans fond, bannière et onglets du survol, taille liée de l
   // Les formes d'Eraser d'un onglet, et rien pour un onglet sans forme d'Eraser.
   assert.equal(defaults.eraserLayoutStarters("npcs", "PNJs", "form")[0].label, "Fiche de PNJ");
   assert.deepEqual(defaults.eraserLayoutStarters("vocabulary", "Vocabulaire", "form"), []);
+});
+
+test("le survol d'une ligne écrit son sous-titre de plusieurs colonnes, séparées par « • »", async () => {
+  const cells = await vite.ssrLoadModule("/lib/index-references-cells.ts");
+  const table = { tab: "Tout", headers: ["Nom", "Type", "Sous-type", "Description", "ID"], columns: ["Nom", "Type", "Sous-type", "Description"], name: 0, specs: new Map(), rows: [] };
+  const row = { id: "M1", name: "Irrégulière", values: ["Irrégulière", "Attribut", "Négatif", "Malus de -10", "M1"], html: ["", "", "", "Malus de -10", ""] };
+  const layout = { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Description" }] }] }], subtitles: ["Type", "Sous-type"], look: { labelCase: "normal" } };
+  const resolved = cells.hoverOf(layout, table, row, () => false);
+  assert.equal(resolved.subtitle, "Attribut • Négatif");
+  assert.deepEqual(resolved.look, { labelCase: "normal" });
+  // Une colonne vide pour cette ligne est sautée (pas de « • » orphelin).
+  assert.equal(cells.hoverOf(layout, table, { ...row, values: ["Irrégulière", "", "Négatif", "Malus", "M1"] }, () => false).subtitle, "Négatif");
 });

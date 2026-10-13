@@ -12,6 +12,7 @@ import { Input } from "@/components/ui/input"
 import { characteristicShort, type CharacteristicName } from "@/lib/characteristics"
 import { foldName } from "@/lib/index-columns"
 import { resolveLayoutColor, type LayoutBlock } from "@/lib/index-layouts"
+import { referenceHref } from "@/lib/index-references"
 import { cn } from "@/lib/utils"
 
 /**
@@ -115,10 +116,20 @@ function TextBlock({ block, ctx }: { block: Extract<LayoutBlock, { kind: "text" 
   return <IndexRichText html={block.html} className={cn(base, tone === "muted" && "text-muted-foreground", tone === "accent" && "font-semibold", "[&_p]:m-0")} style={tone === "accent" ? { color: ctx.accent } : undefined} />
 }
 
+/** Un séparateur : un trait (de sa couleur), un ornement au milieu (une icône ou des caractères), ou un peu d'air. */
 function DividerBlock({ block, ctx }: { block: Extract<LayoutBlock, { kind: "divider" }>; ctx: LayoutBlockContext }) {
   if (block.style === "space") return <div className={ctx.compact ? "h-2" : "h-4"} aria-hidden="true" />
-  if (block.style === "ornament") return <div className="flex items-center gap-2 text-[10px] tracking-[.4em]" style={{ color: ctx.accent }} aria-hidden="true"><span className="h-px flex-1" style={{ backgroundColor: `${ctx.accent}55` }} />✦<span className="h-px flex-1" style={{ backgroundColor: `${ctx.accent}55` }} /></div>
-  return <hr className="border-t" style={{ borderColor: `color-mix(in srgb, ${ctx.accent} 25%, var(--border))` }} />
+  // Sans couleur choisie : l'accent, adouci comme avant ; une couleur choisie se montre telle quelle.
+  const color = block.color ? resolveLayoutColor(block.color, ctx.accent, ctx.valueOf) : ctx.accent
+  const line = block.color ? `color-mix(in srgb, ${color} 70%, transparent)` : `color-mix(in srgb, ${color} 33%, transparent)`
+  if (block.style === "ornament") return <div className="flex items-center gap-2" style={{ color }} aria-hidden="true">
+    <span className="h-px flex-1" style={{ backgroundColor: line }} />
+    {block.icon
+      ? <IndexIconGlyph icon={block.icon} className={ctx.compact ? "size-3.5" : "size-4"} filled={false} />
+      : <span className={cn("whitespace-pre leading-none", block.ornament ? (ctx.compact ? "text-xs" : "text-sm") : "text-[10px]")}>{block.ornament || "✦"}</span>}
+    <span className="h-px flex-1" style={{ backgroundColor: line }} />
+  </div>
+  return <hr className="border-t" style={{ borderColor: block.color ? line : `color-mix(in srgb, ${ctx.accent} 25%, var(--border))` }} />
 }
 
 /** Un bouton : ouvre la fiche de la ligne (un de ses formulaires), une page, ou une adresse. */
@@ -126,7 +137,9 @@ function ButtonBlock({ block, ctx }: { block: Extract<LayoutBlock, { kind: "butt
   const variant = block.tone === "outline" ? "outline" : block.tone === "accent" ? "default" : "secondary"
   const style = block.tone === "accent" ? { backgroundColor: ctx.accent, borderColor: ctx.accent } : undefined
   const icon = block.icon ? <IndexIconGlyph icon={block.icon} className="size-4" filled={false} /> : block.action === "open-form" ? <PenLine /> : block.action === "link" ? <ExternalLink /> : <FileText />
-  if (block.action === "open-form") return <Button type="button" variant={variant} size="sm" style={style} disabled={ctx.preview || !ctx.openForm} onClick={() => ctx.openForm?.(block.formId)}>{icon}{block.label}</Button>
+  // Dans une fiche : le formulaire s'ouvre sur place. Ailleurs (un survol) : un lien vers la ligne, qui ouvre sa fiche.
+  if (block.action === "open-form" && (ctx.openForm || ctx.preview || !ctx.row?.id)) return <Button type="button" variant={variant} size="sm" style={style} disabled={ctx.preview || !ctx.openForm} onClick={() => ctx.openForm?.(block.formId)}>{icon}{block.label}</Button>
+  if (block.action === "open-form") return <Button asChild variant={variant} size="sm" style={style}><Link href={referenceHref({ index: ctx.row!.index, id: ctx.row!.id })} prefetch={false}>{icon}{block.label}</Link></Button>
   const href = (block.href ?? "").replace(/\{ID\}/gi, encodeURIComponent(ctx.row?.id ?? "")).replace(/\{([^{}]+)\}/g, (_, column: string) => encodeURIComponent(plain(ctx.valueOf(column.trim()))))
   if (!href || ctx.preview) return <Button type="button" variant={variant} size="sm" style={style} disabled>{icon}{block.label}</Button>
   const external = /^https?:\/\//i.test(href)
