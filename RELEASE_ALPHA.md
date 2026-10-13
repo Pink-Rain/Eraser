@@ -1,42 +1,45 @@
-# Eraser 0.1.1-alpha.215 — Lot A : 1 Formulaire, 2 Survol, 3 Carte
+# Eraser 0.1.1-alpha.216 — Lot B : Élément, Au clic, 4 Liste, 5 Kanban, 6 Maître-détail
 
 Cette version arrive par la mise à jour sans réinstallation. Rien n'est effacé dans Google
-Sheets ; les réglages enregistrés par l'alpha 214 se relisent tels quels.
+Sheets ; les réglages enregistrés par l'alpha 215 se relisent tels quels.
 
-Les vues sont numérotées : 1 Formulaire, 2 Survol, 3 Carte, 4 Liste, 5 Kanban,
-6 Maître-détail, 7 Calendrier, 8 Tableau de bord, 9 Galerie, 10 Chronologie,
-11 Arborescence, 12 Codex. Cette alpha fait 1, 2 et 3.
+## Sur toutes les vues : Élément et Au clic
 
-## Images : avec ou sans fond
+- **Élément** : chaque ligne s'affiche avec les réglages de la vue, avec une carte (3) de
+  l'onglet, ou avec **un formulaire (1) en lecture** (le formulaire principal ou un formulaire
+  nommé, sections et onglets compris). Un formulaire changé dans « Modifier › Formulaire »
+  change aussitôt ici.
+- **Au clic** : ouvrir la fiche (d'office), **ouvrir la page** de la ligne, **afficher à
+  côté** (n'importe quelle vue devient un maître-détail), **afficher dessous** (la ligne se
+  déplie à sa place dans une liste ou un kanban, sous la vue ailleurs), ou **rien**.
+- **Le panneau de détail** a son réglage : les colonnes de la ligne, un formulaire en
+  lecture, ou une carte ; sa largeur ; **précédent / suivant** avec la position. Le même
+  panneau sert au maître-détail (6), qui reste dans la liste comme raccourci.
+- Les pages du créateur de pages suivent : un bloc Vue dont l'élément ou le détail est un
+  formulaire reçoit ce formulaire avec ses lignes.
 
-- Une image détourée ou un pictogramme n'a plus de fond imposé. **« Fond »** se règle
-  partout où une image se règle : l'image principale et les blocs image d'une carte (3),
-  l'image à côté du nom dans les vues, le médaillon d'un survol (2). Pour la carte et le
-  médaillon : **Neutre** (cadre et fond discret), **Accent** (médaillon coloré), **Aucun**
-  (rien derrière). Pour les blocs image et les vues : la case « Fond ».
+## Briques nouvelles, sur toutes les vues à sections ou à colonnes
 
-## 3 Carte : la taille de la carte comme celle d'une image
+- **Formule dans l'en-tête** de chaque section ou colonne du kanban : nombre de lignes, somme,
+  moyenne, plus petite ou plus grande valeur d'une colonne nombre ; une cible optionnelle
+  (chiffre, ou barre vers la cible, en rouge au-delà) ; un libellé.
+- **Jauge sous chaque élément** : une colonne nombre en barre ou en **charges** (des points
+  pleins sur un total), sur un maximum fixe ou lu dans une autre colonne, avec son libellé.
+  Dans la liste, le kanban, le maître-détail (liste et détail).
+- **Menu des sections › Onglets** : les groupes deviennent des onglets, un seul groupe à la
+  fois, avec son nombre et sa formule.
+- Liste : **image alternée gauche / droite** (zigzag).
 
-- Une seule ligne : **lier / délier, Largeur, Hauteur, Arrondi**. Liées, la hauteur suit la
-  largeur (les proportions de la carte sont tenues) ; déliées, la hauteur est une hauteur
-  minimale. Le bout du curseur de hauteur rend la carte à son contenu. Les formes rapides
-  (carré, rectangles), « au plus par ligne » et le téléphone passent sur la ligne suivante.
+## Formes de base de 4, 5 et 6, avec aperçu sur tes lignes
 
-## 1 Formulaire et 2 Survol : formes de base et éditeur en deux pages
-
-- Un bouton **« Forme de base »** ouvre la grille des formes avec leur aperçu sur la première
-  ligne de l'onglet : la fiche ou le survol d'Eraser pour cet onglet (créature, PNJ, état,
-  modificateur) quand il en a un, les formes de départ remplies avec les colonnes de
-  l'onglet, et les presets enregistrés. En choisir une remplace la mise en page ; tout se
-  mélange et se modifie ensuite.
-- Fiche : Automatique, **Fiche courte**, **Fiche à onglets**, Portrait à gauche, Deux
-  colonnes, Sections encadrées. Survol : Automatique, **Survol à tuiles**, **Survol
-  illustré**, Médaillon teinté, Survol compact.
-- L'éditeur se range en deux pages : **Mise en page** (colonne latérale, sections, champs
-  non placés) et **Apparence** (couleur d'accent, sections en onglets ; pour le survol :
-  sous-titre, icône, largeur, nom coloré, médaillon, bannière). La phrase d'explication
-  cède la place à une pastille (« forme d'Eraser », « automatique », « réglée à la main »).
-- **Sections en onglets** : les sections d'une fiche ou d'un survol deviennent des onglets,
-  une section à la fois, la colonne latérale restant à côté. La fiche d'une ligne et le
-  survol les respectent.
-- **Bannière du survol** : une colonne image en travers au-dessus du nom, hauteur réglable.
+- Un bouton **« Forme de base »** au-dessus des réglages de chaque vue ouvre la grille : les
+  formes de départ bâties sur les colonnes de l'onglet, les presets d'Eraser, les presets
+  enregistrés, chacune dessinée sur les premières lignes de l'onglet.
+- 4 Liste : Tableau aligné, Annuaire par lettre (menu des lettres), Entrées aérées,
+  Sections + menu, Sections + compte + formule, Jauge et charges, Groupes en onglets, Image
+  alternée, Liste + détail à côté, Accordéon.
+- 5 Kanban : Colonnes à bandeau (élément = carte), Colonnes sobres + compte, Colonnes ×
+  couloirs, Colonnes étroites, Colonnes = lignes d'un onglet lié + formule, Formule dans
+  l'en-tête, Jauge et charges.
+- 6 Maître-détail : Liste étroite + formulaire en lecture, Liste à droite + bannière, Détail
+  en onglets, Détail = une carte, Précédent / suivant, Jauge et charges.

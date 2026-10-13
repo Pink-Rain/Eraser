@@ -10,10 +10,12 @@
  * montrent avec ces réglages.
  */
 import { useMemo, useState, type ReactNode } from "react"
-import { ArrowDown, ArrowUp, BookOpen, BookmarkPlus, Check, Columns3, Copy, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, LoaderCircle, Monitor, Palette, PanelsLeftRight, Plus, RotateCcw, Smartphone, Sparkles, Tablet, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowUp, BookOpen, Bookmark, BookmarkPlus, Check, Columns3, Copy, Gauge, Image as ImageIcon, LayoutGrid, LayoutList, ListTree, LoaderCircle, Monitor, MousePointerClick, Palette, PanelsLeftRight, Plus, RotateCcw, Sigma, Smartphone, Sparkles, Star, Tablet, Trash2, X } from "lucide-react"
 
 import { IndexCard } from "@/components/eraser/index-card"
+import { IndexFormView } from "@/components/eraser/index-form-view"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
+import { useIndexSettings } from "@/components/eraser/index-views"
 import { accentOptions, Choice, ColorSwatches, ColumnField, ColumnsPicker, densityOptions, fieldLabel, fieldStyleOptions, hintText, IconPick, ImageBoxControls, imageShapeOptions, radiusOptions, Range, Segmented, settingsGroup, settingsTitle, SettingsRow, sizeOptions, Tabs, Toggle } from "@/components/eraser/view-editor-controls"
 import { Button } from "@/components/ui/button"
 import { Checkbox } from "@/components/ui/checkbox"
@@ -24,7 +26,9 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { calendarsFromTables, REAL_CALENDAR } from "@/lib/calendars"
 import { pickCard, type CardColumn, type CardTemplate } from "@/lib/index-cards"
 import { foldName } from "@/lib/index-columns"
-import { builtinViewPresets, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, presentationKinds, type DashboardTile, type KanbanLane, type PresentationKind, type TabPresentations, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import type { NamedLayout } from "@/lib/index-layouts"
+import { builtinViewPresets, dashboardTileKinds, DEFAULT_ITEM_CARD, fitLayoutToColumns, groupFormulaOps, presentationKinds, viewClicks, type DashboardTile, type KanbanLane, type PresentationKind, type TabPresentations, type ViewLayout, type ViewLook, type ViewPreset } from "@/lib/index-view-layouts"
+import { viewStartersFor } from "@/lib/index-view-starters"
 import { cn } from "@/lib/utils"
 import { useEffect } from "react"
 
@@ -45,14 +49,90 @@ function useCalendarNames(active: boolean) {
 // ---------------------------------------------------------------------------
 
 type Ctx = {
+  kind: PresentationKind
   layout: ViewLayout
   columns: string[]
   set: (changes: Partial<ViewLayout>) => void
   setLook: (changes: Partial<ViewLook>) => void
   look: ViewLook
   cards: Array<{ id: string; name: string }>
+  /** Les formulaires de l'onglet (« principal » : l'étoilé), pour l'élément et le détail. */
+  forms: Array<{ id: string; name: string }>
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
+}
+
+/** La formule d'un groupe (en-tête de section ou de colonne) : compte, somme… d'une colonne, contre une cible. */
+function GroupFormulaSettings({ ctx, what = "section" }: { ctx: Ctx; what?: string }) {
+  const { layout, set, columns, disabled } = ctx
+  const formula = layout.groupFormula
+  const update = (changes: Partial<NonNullable<ViewLayout["groupFormula"]>>) => set({ groupFormula: { op: "count", ...formula, ...changes } })
+  return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
+    <SettingsRow>
+      <label className={fieldLabel}><span className="flex items-center gap-1"><Sigma className="size-3" />Formule dans l’en-tête de chaque {what}</span>
+        <NativeSelect value={formula ? formula.op : ""} disabled={disabled} onChange={(event) => event.target.value ? update({ op: event.target.value as NonNullable<ViewLayout["groupFormula"]>["op"] }) : set({ groupFormula: undefined })} className="h-8 py-0 text-xs">
+          <NativeSelectOption value="">— Aucune —</NativeSelectOption>
+          {groupFormulaOps.map((op) => <NativeSelectOption key={op.value} value={op.value}>{op.label}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>
+      {formula && formula.op !== "count" && <ColumnField label="D’une colonne nombre" value={formula.column} columns={columns} onChange={(column) => update({ column })} empty="— Choisir… —" disabled={disabled} />}
+      {formula && <label className={fieldLabel}>Cible <span className="font-normal">(vide : aucune)</span><Input type="number" min={0} step="any" value={formula.target ?? ""} disabled={disabled} placeholder="—" onChange={(event) => update({ target: Number(event.target.value) > 0 ? Number(event.target.value) : undefined })} className="h-8 w-24 text-xs" /></label>}
+      {formula && <label className={fieldLabel}>Libellé<Input value={formula.label ?? ""} disabled={disabled} maxLength={40} placeholder="Σ, PV…" onChange={(event) => update({ label: event.target.value || undefined })} className="h-8 w-28 text-xs" /></label>}
+      {formula && formula.target !== undefined && <Choice label="Dessin" value={formula.style ?? "text"} options={[{ value: "text", label: "Chiffre" }, { value: "bar", label: "Barre vers la cible" }]} onChange={(style) => update({ style: style === "text" ? undefined : style })} disabled={disabled} />}
+    </SettingsRow>
+  </div>
+}
+
+/** La jauge sous chaque élément : une colonne nombre en barre ou en charges, sur son maximum. */
+function GaugeSettings({ ctx }: { ctx: Ctx }) {
+  const { layout, set, columns, disabled } = ctx
+  const gauge = layout.gauge
+  const update = (changes: Partial<NonNullable<ViewLayout["gauge"]>>) => set({ gauge: gauge ? { ...gauge, ...changes } : undefined })
+  return <SettingsRow>
+    <label className={fieldLabel}><span className="flex items-center gap-1"><Gauge className="size-3" />Jauge sous chaque élément, prise dans</span>
+      <NativeSelect value={gauge?.column ?? ""} disabled={disabled} onChange={(event) => event.target.value ? set({ gauge: { ...gauge, column: event.target.value } }) : set({ gauge: undefined })} className="h-8 py-0 text-xs">
+        <NativeSelectOption value="">— Aucune —</NativeSelectOption>
+        {columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}
+      </NativeSelect>
+    </label>
+    {gauge && <Choice label="Dessin" value={gauge.style ?? "bar"} options={[{ value: "bar", label: "Barre" }, { value: "charges", label: "Charges (points)" }]} onChange={(style) => update({ style: style === "bar" ? undefined : style })} disabled={disabled} />}
+    {gauge && <label className={fieldLabel}>Maximum <span className="font-normal">(vide : 100, ou la colonne)</span><Input type="number" min={0} step="any" value={gauge.max ?? ""} disabled={disabled} placeholder="—" onChange={(event) => update({ max: Number(event.target.value) > 0 ? Number(event.target.value) : undefined })} className="h-8 w-20 text-xs" /></label>}
+    {gauge && <ColumnField label="…ou le maximum d’une colonne" value={gauge.maxColumn} columns={columns} onChange={(maxColumn) => update({ maxColumn })} empty="— Aucune —" disabled={disabled} />}
+    {gauge && <label className={fieldLabel}>Libellé<Input value={gauge.label ?? ""} disabled={disabled} maxLength={40} placeholder={gauge.column} onChange={(event) => update({ label: event.target.value || undefined })} className="h-8 w-28 text-xs" /></label>}
+  </SettingsRow>
+}
+
+/** « Au clic » sur un élément, et le panneau de détail (à côté, dessous, maître-détail). */
+function ClickSettings({ ctx }: { ctx: Ctx }) {
+  const { kind, layout, set, cards, forms, disabled } = ctx
+  const master = kind === "master-detail"
+  const click = master ? "side" : layout.click ?? "sheet"
+  const panel = click === "side" || click === "below"
+  const detail = layout.detail ?? {}
+  const update = (changes: Partial<NonNullable<ViewLayout["detail"]>>) => { const next = { ...detail, ...changes }; for (const key of Object.keys(next) as Array<keyof typeof next>) if (next[key] === undefined) delete next[key]; set({ detail: Object.keys(next).length ? next : undefined }) }
+  return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
+    <SettingsRow>
+      {!master && <label className={fieldLabel}><span className="flex items-center gap-1"><MousePointerClick className="size-3" />Au clic sur un élément</span>
+        <NativeSelect value={click} disabled={disabled} onChange={(event) => set({ click: event.target.value === "sheet" ? undefined : event.target.value as ViewLayout["click"] })} className="h-8 py-0 text-xs" title={viewClicks.find((entry) => entry.value === click)?.hint}>
+          {viewClicks.map((entry) => <NativeSelectOption key={entry.value} value={entry.value}>{entry.label}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>}
+      {panel && <label className={fieldLabel}>{master ? "Le détail montre" : "Le panneau montre"}
+        <NativeSelect value={detail.kind === "form" ? `form:${detail.form ?? "principal"}` : detail.kind === "card" ? `card:${detail.card ?? DEFAULT_ITEM_CARD}` : "fields"} disabled={disabled} onChange={(event) => {
+          const value = event.target.value
+          if (value === "fields") update({ kind: undefined, form: undefined, card: undefined })
+          else if (value.startsWith("form:")) update({ kind: "form", form: value.slice(5) === "principal" ? undefined : value.slice(5), card: undefined })
+          else update({ kind: "card", card: value.slice(5) === DEFAULT_ITEM_CARD ? undefined : value.slice(5), form: undefined })
+        }} className="h-8 py-0 text-xs">
+          <NativeSelectOption value="fields">Les colonnes de la ligne</NativeSelectOption>
+          <NativeSelectOptGroup label="Un formulaire, en lecture">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Une carte"><NativeSelectOption value={`card:${DEFAULT_ITEM_CARD}`}>La carte à l’étoile</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={`card:${card.id}`}>{card.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+        </NativeSelect>
+      </label>}
+      {click === "side" && !master && <Choice label="Largeur du panneau" value={detail.width ?? "normal"} options={[{ value: "narrow", label: "Étroit" }, { value: "normal", label: "Normal" }, { value: "wide", label: "Large" }]} onChange={(width) => update({ width: width === "normal" ? undefined : width })} disabled={disabled} />}
+      {panel && <span className={cn(fieldLabel, "self-end pb-1.5")}><Toggle checked={Boolean(detail.nav)} onChange={(nav) => update({ nav: nav || undefined })} disabled={disabled}>Précédent / suivant</Toggle></span>}
+    </SettingsRow>
+  </div>
 }
 
 /** Le nom des éléments : police, taille, capitales. */
@@ -122,9 +202,10 @@ function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabe
       </div>
       <div className="flex flex-wrap items-end gap-3">
         <Choice label="Titre des sections" value={look.sectionStyle ?? "bar"} options={[{ value: "bar", label: "Trait discret" }, { value: "heading", label: "Grand titre centré" }, { value: "letter", label: "En marge (glossaire)" }]} onChange={(sectionStyle) => setLook({ sectionStyle: sectionStyle === "bar" ? undefined : sectionStyle })} disabled={disabled} />
-        <Choice label="Menu des sections" value={layout.menu ?? "none"} options={[{ value: "none", label: "Aucun" }, { value: "top", label: "En haut" }, { value: "side", label: "Sur le côté" }]} onChange={(menu) => set({ menu: menu === "none" ? undefined : menu })} disabled={disabled} />
+        <Choice label="Menu des sections" value={layout.menu ?? "none"} options={[{ value: "none", label: "Aucun" }, { value: "top", label: "En haut" }, { value: "side", label: "Sur le côté" }, { value: "tabs", label: "Onglets" }]} onChange={(menu) => set({ menu: menu === "none" ? undefined : menu })} disabled={disabled} />
         <span className={fieldLabel}>Icône des sections<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
       </div>
+      <GroupFormulaSettings ctx={ctx} />
     </>}
   </div>
 }
@@ -146,7 +227,9 @@ function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, with
         {layout.imageColumn && <Choice label="Forme" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />}
       </SettingsRow>
       {layout.imageColumn && <ImageBoxControls value={{ widthPct: look.imageWidth, heightPct: look.imageHeight, linked: look.imageLinked, bare: look.imageBare }} defaults={{ widthPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], heightPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], edges: [] }} onChange={(changes) => setLook({ ...(changes.widthPct !== undefined ? { imageWidth: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { imageHeight: changes.heightPct } : {}), ...(changes.linked !== undefined ? { imageLinked: changes.linked || undefined } : {}), ...("bare" in changes ? { imageBare: changes.bare || undefined } : {}) })} disabled={disabled} unit="px" widthRange={[12, 240]} heightRange={[12, 240]} withEdges={false} />}
+      {layout.imageColumn && ctx.kind === "list" && !layout.compact && <span className={fieldLabel}><Toggle checked={Boolean(look.zigzag)} onChange={(zigzag) => setLook({ zigzag: zigzag || undefined })} disabled={disabled}>Image alternée gauche / droite (zigzag)</Toggle></span>}
     </>}
+    <GaugeSettings ctx={ctx} />
   </div>
 }
 
@@ -158,20 +241,23 @@ function SortSettings({ ctx }: { ctx: Ctx }) {
   </div>
 }
 
-/** Chaque élément dessiné avec une carte de « Modifier › Cartes ». */
+/** L'élément : chaque ligne dessinée avec les réglages de la vue, une carte de « Modifier › Cartes », ou un formulaire de l'onglet en lecture ; puis « Au clic ». */
 function CardChoice({ ctx }: { ctx: Ctx }) {
-  const { layout, set, cards, disabled } = ctx
-  return <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
-    <label className={fieldLabel}>Chaque élément s’affiche
-      <NativeSelect value={layout.itemCard ?? ""} disabled={disabled} onChange={(event) => set({ itemCard: event.target.value || undefined })} className="h-8 py-0 text-xs">
-        <NativeSelectOption value="">Avec les réglages de cette vue (nom, colonnes, icône, image)</NativeSelectOption>
-        <NativeSelectOption value={DEFAULT_ITEM_CARD}>Avec la carte à l’étoile de l’onglet</NativeSelectOption>
-        {cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>Avec la carte « {card.name} »</NativeSelectOption>)}
-        {layout.itemCard && layout.itemCard !== DEFAULT_ITEM_CARD && !cards.some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte à l’étoile la remplace)</NativeSelectOption>}
-      </NativeSelect>
-    </label>
-    <p className={hintText}>{layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : "Avec une carte, l’élément prend le même visuel que la vue Cartes."}</p>
-  </div>
+  const { layout, set, cards, forms, disabled } = ctx
+  const value = layout.itemForm ? `form:${layout.itemForm}` : layout.itemCard ?? ""
+  return <>
+    <div className="grid gap-1.5 rounded-lg border border-dashed bg-background/50 p-2.5">
+      <label className={fieldLabel}>Élément : chaque ligne s’affiche
+        <NativeSelect value={value} disabled={disabled} onChange={(event) => { const next = event.target.value; set(next.startsWith("form:") ? { itemForm: next.slice(5), itemCard: undefined } : { itemCard: next || undefined, itemForm: undefined }) }} className="h-8 py-0 text-xs">
+          <NativeSelectOption value="">Avec les réglages de cette vue (nom, colonnes, icône, image)</NativeSelectOption>
+          <NativeSelectOptGroup label="Avec une carte (3)"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}{layout.itemCard && layout.itemCard !== DEFAULT_ITEM_CARD && !cards.some((card) => card.id === layout.itemCard) && <NativeSelectOption value={layout.itemCard}>Carte retirée (la carte à l’étoile la remplace)</NativeSelectOption>}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Avec un formulaire en lecture (1)">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+        </NativeSelect>
+      </label>
+      <p className={hintText}>{layout.itemForm ? "Le formulaire se règle dans « Modifier › Formulaire » : sections, onglets, blocs. Ici il se lit, le clic ouvre la fiche." : layout.itemCard ? "La carte se dessine dans « Modifier › Cartes » : image, couleurs, blocs, composition. Une carte changée là change aussi ici." : "Avec une carte ou un formulaire, l’élément prend le même visuel que dans les autres vues."}</p>
+    </div>
+    <ClickSettings ctx={ctx} />
+  </>
 }
 
 // ---------------------------------------------------------------------------
@@ -267,6 +353,7 @@ function KanbanPages(ctx: Ctx): Page[] {
         </div>
         <span className={fieldLabel}>Icône d’office des colonnes<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
       </div>
+      {layout.kanbanColumn && <GroupFormulaSettings ctx={ctx} what="colonne" />}
       <LanesEditor ctx={ctx} />
     </> },
     { key: "cards", label: "Cartes", icon: <LayoutGrid className="size-3.5" />, render: () => <><ItemSettings ctx={ctx} /><CardChoice ctx={ctx} /></> },
@@ -633,12 +720,14 @@ function CodexPages(ctx: Ctx): Page[] {
 type Page = { key: string; label: string; icon: ReactNode; render: () => ReactNode }
 
 /** Les réglages d'une vue (sa forme déjà choisie), en pages propres à son type. */
-export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], optionsOf, disabled = false }: {
+export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], forms = [], optionsOf, disabled = false }: {
   kind: PresentationKind
   layout: ViewLayout
   columns: string[]
   onChange: (layout: ViewLayout) => void
   cards?: Array<{ id: string; name: string }>
+  /** Les formulaires de l'onglet (« principal » : l'étoilé) : l'élément et le détail peuvent en lire un. */
+  forms?: Array<{ id: string; name: string }>
   optionsOf?: (header: string) => Array<{ value: string; color?: string }>
   disabled?: boolean
 }) {
@@ -655,7 +744,7 @@ export function ViewKindSettings({ kind, layout, columns, onChange, cards = [], 
     for (const key of Object.keys(next) as Array<keyof ViewLook>) if (next[key] === undefined) delete next[key]
     set({ look: Object.keys(next).length ? next : undefined })
   }
-  const ctx: Ctx = { layout, columns, set, setLook, look, cards, optionsOf, disabled }
+  const ctx: Ctx = { kind, layout, columns, set, setLook, look, cards, forms, optionsOf, disabled }
   const pages = kind === "list" ? ListPages(ctx)
     : kind === "kanban" ? KanbanPages(ctx)
     : kind === "master-detail" ? MasterDetailPages(ctx)
@@ -755,7 +844,7 @@ export function ViewsPanel({ kind, columns, layout, configured, presets, onApply
 
 const screens = { phone: "24rem", tablet: "44rem", desktop: "100%" } as const
 
-export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], disabled = false }: {
+export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange, optionsOf, cards = [], cardColumns = [], forms = [], disabled = false }: {
   /** La vue réglée (l'onglet de « Modifier » : Liste, Kanban…). */
   kind: PresentationKind
   tabName: string
@@ -769,9 +858,12 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
   /** Les cartes de l'onglet (Modifier › Cartes, brouillon compris) et ses colonnes typées, pour l'aperçu. */
   cards?: CardTemplate[]
   cardColumns?: CardColumn[]
+  /** Les formulaires de l'onglet (brouillon compris) : un élément ou un détail « formulaire en lecture » les dessine. */
+  forms?: NamedLayout[]
   disabled?: boolean
 }) {
   const [screen, setScreen] = useState<keyof typeof screens>("desktop")
+  const [starting, setStarting] = useState(false)
   const layout: ViewLayout = value[kind] ?? { kind }
   const setLayout = (next: ViewLayout) => onChange({ ...value, [kind]: { ...next, kind } })
   const nameColumn = columns.find((column) => /^nom\b/i.test(column)) ?? columns[0] ?? ""
@@ -783,27 +875,78 @@ export function IndexViewsEditor({ kind, tabName, columns, rows, value, onChange
     const values = new Map(Object.entries(sample).map(([header, cell]) => [foldName(header), cell]))
     return card ? <IndexCard card={card} row={{ value: (header) => values.get(foldName(header)) ?? "", spec: (header) => specs.get(foldName(header)) }} /> : null
   }
+  const renderForm = (key: string, formId: string) => {
+    const form = forms.find((item) => item.id === formId) ?? forms[0]
+    const sample = rows[Number(key)] ?? {}
+    const values = new Map(Object.entries(sample).map(([header, cell]) => [foldName(header), cell]))
+    return form ? <IndexFormView layout={form.layout} columns={cardColumns.length ? cardColumns : columns.map((header) => ({ header }))} valueOf={(header) => values.get(foldName(header)) ?? ""} compact /> : null
+  }
   const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
+  const preview = (shown: ViewLayout, limit?: number) => <IndexViewLayout
+    layout={shown}
+    rows={limit ? keys.slice(0, limit) : keys}
+    headers={columns}
+    nameOf={(key) => (rows[Number(key)]?.[nameColumn] ?? "").replace(/<[^>]+>/g, "").trim()}
+    valueOf={(key, header) => rows[Number(key)]?.[header] ?? ""}
+    optionsOf={optionsOf}
+    onOpen={() => undefined}
+    renderCard={renderCard}
+    renderForm={forms.length ? renderForm : undefined}
+    empty="Pas encore de ligne dans cet onglet."
+  />
   return <div className="grid min-h-0 items-start gap-3 xl:grid-cols-[minmax(0,26rem)_minmax(0,1fr)]">
-    <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} optionsOf={optionsOf} disabled={disabled} />
+    <div className="grid content-start gap-2">
+      <div className="flex justify-end"><Button type="button" variant="outline" size="sm" className="h-7 text-[11px]" disabled={disabled} onClick={() => setStarting(true)} title="Repartir d’une forme de base, remplie avec les colonnes de cet onglet et dessinée sur ses lignes"><Sparkles className="size-3.5" />Forme de base</Button></div>
+      <ViewKindSettings kind={kind} layout={layout} columns={columns} onChange={setLayout} cards={cards.map((card) => ({ id: card.id, name: card.name }))} forms={forms.map((form) => ({ id: form.id, name: form.name }))} optionsOf={optionsOf} disabled={disabled} />
+    </div>
     <section className="min-w-0 rounded-xl border bg-muted/20 p-3 xl:sticky xl:top-0 xl:max-h-[calc(94svh-14rem)] xl:self-start xl:overflow-y-auto" aria-label="Aperçu">
       <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
         <p className="text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground">Aperçu · {kindLabel} · {rows.length} ligne{rows.length > 1 ? "s" : ""} de « {tabName} »</p>
         <Segmented ariaLabel="Largeur d’écran simulée" value={screen} options={[{ value: "phone", label: "", icon: <Smartphone className="size-3.5" />, title: "Téléphone" }, { value: "tablet", label: "", icon: <Tablet className="size-3.5" />, title: "Tablette" }, { value: "desktop", label: "", icon: <Monitor className="size-3.5" />, title: "Toute la largeur" }]} onChange={setScreen} />
       </div>
       <div className={cn("overflow-auto rounded-lg", screen !== "desktop" && "mx-auto border bg-background/60 p-2")} style={{ maxWidth: screens[screen] }}>
-        <IndexViewLayout
-          layout={layout}
-          rows={keys}
-          headers={columns}
-          nameOf={(key) => (rows[Number(key)]?.[nameColumn] ?? "").replace(/<[^>]+>/g, "").trim()}
-          valueOf={(key, header) => rows[Number(key)]?.[header] ?? ""}
-          optionsOf={optionsOf}
-          onOpen={() => undefined}
-          renderCard={renderCard}
-          empty="Pas encore de ligne dans cet onglet."
-        />
+        {preview(layout)}
       </div>
     </section>
+    {starting && <ViewStarterDialog kind={kind} columns={columns} cardColumns={cardColumns} preview={(shown) => preview(fitLayoutToColumns(shown, columns), 6)} onPick={(picked) => { setLayout(fitLayoutToColumns({ ...picked, kind }, columns)); setStarting(false) }} onClose={() => setStarting(false)} />}
   </div>
+}
+
+/**
+ * « Forme de base » d'une vue : les formes de départ bâties sur les colonnes de l'onglet, les
+ * presets d'Eraser et les presets enregistrés, chacune dessinée sur les premières lignes de
+ * l'onglet. En choisir une remplace les réglages de la vue (tout se modifie après).
+ */
+function ViewStarterDialog({ kind, columns, cardColumns, preview, onPick, onClose }: { kind: PresentationKind; columns: string[]; cardColumns: CardColumn[]; preview: (layout: ViewLayout) => ReactNode; onPick: (layout: ViewLayout) => void; onClose: () => void }) {
+  const { viewPresets } = useIndexSettings("")
+  const starters = useMemo(() => viewStartersFor(kind, cardColumns.length ? cardColumns : columns.map((header) => ({ header }))), [cardColumns, columns, kind])
+  const builtins = builtinViewPresets.filter((preset) => preset.layout.kind === kind)
+  const saved = viewPresets.filter((preset) => preset.layout.kind === kind)
+  const kindLabel = presentationKinds.find((entry) => entry.value === kind)?.label ?? ""
+  const tile = (key: string, title: string, hint: string, layout: ViewLayout) => <button key={key} type="button" onClick={() => onPick(layout)} className="group grid content-start gap-2 rounded-xl border bg-card/70 p-2.5 text-left transition hover:border-primary hover:shadow-md">
+    <span className="pointer-events-none block max-h-60 min-h-24 overflow-hidden rounded-lg bg-muted/30 p-2"><span className="block origin-top-left scale-[0.7]" style={{ width: "143%" }}>{preview(layout)}</span></span>
+    <span><span className="block text-sm font-semibold">{title}</span><span className="block text-[11px] leading-4 text-muted-foreground">{hint}</span></span>
+  </button>
+  return <Dialog open onOpenChange={(open) => { if (!open) onClose() }}>
+    <DialogContent className="max-h-[90svh] overflow-y-auto sm:max-w-[min(94vw,1200px)]">
+      <DialogHeader>
+        <DialogTitle className="font-display text-2xl">Forme de base · {kindLabel}</DialogTitle>
+        <DialogDescription>Un point de départ, rempli avec les colonnes de cet onglet et dessiné sur ses lignes. Tout se mélange et se modifie ensuite ; les réglages de la vue sont remplacés.</DialogDescription>
+      </DialogHeader>
+      <section className="grid gap-2">
+        <p className={settingsTitle}><Sparkles className="size-3.5" />Formes de départ</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{starters.map((starter) => tile(starter.key, starter.label, starter.hint, starter.layout))}</div>
+      </section>
+      {builtins.length > 0 && <section className="grid gap-2">
+        <p className={settingsTitle}><Star className="size-3.5" />Presets d’Eraser</p>
+        <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{builtins.map((preset) => tile(preset.id, preset.name, "Sans colonne : il se complète avec celles de l’onglet.", preset.layout))}</div>
+      </section>}
+      <section className="grid gap-2">
+        <p className={settingsTitle}><Bookmark className="size-3.5" />Presets enregistrés</p>
+        {saved.length
+          ? <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">{saved.map((preset) => tile(preset.id, preset.name, `Enregistré${preset.updatedAt ? ` le ${new Date(preset.updatedAt).toLocaleDateString("fr-FR")}` : ""}. Les colonnes absentes ici sont sautées.`, preset.layout))}</div>
+          : <p className="rounded-lg border border-dashed p-4 text-center text-xs text-muted-foreground">Aucun preset pour l’instant : « Preset » dans le panneau garde une vue pour la reprendre dans n’importe quel index.</p>}
+      </section>
+    </DialogContent>
+  </Dialog>
 }

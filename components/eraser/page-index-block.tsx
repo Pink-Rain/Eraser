@@ -6,6 +6,7 @@ import { createContext, useCallback, useContext, useDeferredValue, useEffect, us
 import { ChevronRight, LoaderCircle, RotateCcw, Search, TriangleAlert, X } from "lucide-react"
 
 import { IndexCard, IndexCardGrid, type CardRowSource } from "@/components/eraser/index-card"
+import { IndexFormView } from "@/components/eraser/index-form-view"
 import { primeWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexStats } from "@/components/eraser/index-stats"
 import { IndexViewLayout } from "@/components/eraser/index-view-layouts"
@@ -148,6 +149,11 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     const chosen = data.cards ? pickCard(data.cards, cardId === DEFAULT_ITEM_CARD ? null : cardId) : null
     return chosen ? <IndexCard card={chosen} row={rowSource(rowKey)} onOpen={hrefOf(rowKey) ? () => openRow(rowKey) : undefined} href={hrefOf(rowKey)} /> : null
   }, [data.cards, hrefOf, openRow, rowSource])
+  // Un formulaire de l'onglet, en lecture, sur la ligne (élément ou détail « formulaire »).
+  const renderForm = useCallback((rowKey: string, formId: string) => {
+    const form = data.forms?.[formId] ?? data.forms?.[Object.keys(data.forms ?? {})[0] ?? ""]
+    return form ? <IndexFormView layout={form} columns={data.headers.map((header) => ({ header, spec: specOf(header) }))} valueOf={(header) => valueOf(rowKey, header)} compact={false} /> : null
+  }, [data.forms, data.headers, specOf, valueOf])
   const empty = searching ? "Aucune ligne ne correspond à la recherche." : "Aucune ligne dans cette vue pour le moment."
   if (data.view === "cards") return card
     ? <IndexCardGrid card={card} rows={data.rows} rowSource={rowSource} onOpen={openRow} hrefOf={hrefOf} empty={empty} />
@@ -160,7 +166,9 @@ function ViewContent({ data, block, searching = false }: { data: ViewData; block
     valueOf={valueOf}
     optionsOf={(header) => (specOf(header)?.options ?? []).map((option) => ({ value: option.value, color: option.color }))}
     onOpen={openRow}
+    onOpenPage={openRow}
     renderCard={data.cards ? renderCard : undefined}
+    renderForm={data.forms ? renderForm : undefined}
     empty={empty}
   />
   if (!data.rows.length) return <Placeholder>{empty}</Placeholder>

@@ -313,6 +313,14 @@ test("Données d'un bloc Vue ou Stat : colonnes privées et masquées retirées,
   assert.equal(forMj.rows[0].name, "Aldric");
   assert.equal(blockData.viewBlockData(source, { tab: "Inconnu", kind: "table", limit: 0 }, settings, { player: false }), null);
   assert.deepEqual(blockData.viewKindsOf(settings.presentations, "Bibliothèque"), ["kanban"]);
+  // Élément ou détail « formulaire en lecture » : le bloc emporte le formulaire de l'onglet (ici celui d'Eraser pour les PNJ), ou l'automatique sur les colonnes visibles.
+  const withForm = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "list", limit: 0, layout: { kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court" } } }, { ...settings, layouts: { "Bibliothèque": { forms: [{ id: "court", name: "Court", layout: { aside: [], sections: [{ id: "s", rows: [{ id: "r", fields: [{ column: "Titre" }] }] }] } }] } } }, { player: true, hiddenForPlayers: hidden });
+  assert.deepEqual(Object.keys(withForm.forms), ["principal", "court"]);
+  assert.equal(withForm.forms.court.sections[0].rows[0].fields[0].column, "Titre");
+  assert.ok(withForm.forms.principal.sections.length > 0);
+  assert.equal(withForm.layout.click, "side");
+  const automatic = blockData.viewBlockData(source, { tab: "Campagne", kind: "list", limit: 0, layout: { kind: "list", itemForm: "principal" } }, settings, { player: false });
+  assert.ok(automatic.forms.principal.sections[0].rows.some((row) => row.fields.some((field) => field.column === "Titre")));
   // Une présentation non réglée dans l'index : sa forme par défaut, jamais le tableau.
   const gallery = blockData.viewBlockData(source, { tab: "Bibliothèque", kind: "gallery", limit: 0 }, settings, { player: false });
   assert.equal(gallery.view, "gallery");

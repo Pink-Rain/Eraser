@@ -25,7 +25,8 @@ import { IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoic
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ALL_SOURCES, matchesView, viewIdOfSelectKey, viewSelectKey } from "@/lib/index-views"
 import { layoutPlaces } from "@/lib/index-layouts"
-import { tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
+import { automaticLayoutFor, tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
+import { IndexFormView } from "@/components/eraser/index-form-view"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
@@ -1151,6 +1152,16 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const card = pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? null : cardId)
     return card ? <IndexCard card={card} row={cardRow(rowKey)} onOpen={() => openRow(rowKey)} href={rowHref(rowKey)} /> : null
   }, [cardRow, indexKey, openRow, rowHref, settings.cards])
+  // Une ligne dessinée avec un formulaire de son onglet, en lecture (l'élément « formulaire » d'une vue, le détail d'un maître-détail).
+  const renderViewForm = useCallback((rowKey: string, formId: string) => {
+    const found = locate(rowKey)
+    if (!found) return null
+    const tab = found.table.tabName
+    const columns = (data?.columns[tab] ?? []).filter((column) => !isIdHeader(column.header))
+    const layout = tabFormOrBuiltin(settings.layouts, indexKey, tab, formId) ?? automaticLayoutFor("form", columns)
+    const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
+    return <IndexFormView layout={layout} columns={columns} valueOf={(header) => rawOf(rowKey, header)} row={id ? { index: indexKey, id, tab } : undefined} />
+  }, [data, indexKey, locate, rawOf, settings.layouts])
   // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre.
   // Une présentation enregistrée par une version précédente (kanban, liste…) est ignorée — elle
   // reste dans la feuille, et part quand on enregistre l'onglet ; ces vues se posent dans une page.
@@ -1456,8 +1467,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         valueOf={valueOf}
         optionsOf={layoutOptionsOf}
         onOpen={openRow}
+        onOpenPage={(rowKey) => { const href = rowHref(rowKey); if (href && !embed) router.push(href); else openRow(rowKey) }}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
+        renderForm={renderViewForm}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
         ? viewLayout?.groupBy

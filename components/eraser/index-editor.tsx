@@ -1257,6 +1257,7 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
             optionsOf={optionsOf ? (header) => optionsOf(tab.original ?? tab.name.trim(), header) : undefined}
             cards={cardsEnabled ? cardsOf(tab).cards : []}
             cardColumns={cardsEnabled ? cardColumnsOf(tab) : []}
+            forms={[{ id: DEFAULT_FORM_ID, name: "Formulaire principal", layout: layoutOf(tab, "form").layout }, ...namedFormsOf(tab)]}
           />
         </section>}
 

@@ -110,3 +110,43 @@ test("sections : la lettre en marge et le menu des sections se relisent", () => 
   assert.equal(views.cleanViewLayout({ kind: "list", menu: "bottom" }).menu, undefined);
   assert.equal(views.cleanViewLayout({ kind: "list", look: { sectionStyle: "huge" } }).look?.sectionStyle, undefined);
 });
+
+test("lot B : élément, au clic, détail, formule par groupe, jauge, onglets, zigzag se relisent et se bornent", async () => {
+  const starters = await vite.ssrLoadModule("/lib/index-view-starters.ts");
+  const layout = views.cleanViewLayout({ kind: "list", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, menu: "tabs", look: { zigzag: true } });
+  assert.deepEqual(layout, { kind: "list", menu: "tabs", itemForm: "principal", click: "side", detail: { kind: "form", form: "court", width: "wide", nav: true }, groupFormula: { op: "sum", column: "Prix", target: 100, label: "Σ", style: "bar" }, gauge: { column: "Vie", style: "charges", max: 5, maxColumn: "Vie totale", label: "PV" }, look: { zigzag: true } });
+  // « Ouvrir la fiche » est l'office : rien n'est écrit ; une formule sans opération connue ou une jauge sans colonne disparaissent.
+  assert.equal(views.cleanViewLayout({ kind: "list", click: "sheet", groupFormula: { op: "median" }, gauge: { style: "bar" } }).click, undefined);
+  assert.equal(views.cleanViewLayout({ kind: "list", groupFormula: { op: "median" } }).groupFormula, undefined);
+  assert.equal(views.cleanViewLayout({ kind: "list", gauge: { style: "bar" } }).gauge, undefined);
+  // Appliquée à un autre onglet : la formule et la jauge ne gardent que les colonnes connues.
+  const fitted = views.fitLayoutToColumns(layout, ["Nom", "Vie"]);
+  assert.equal(fitted.groupFormula, undefined);
+  assert.deepEqual(fitted.gauge, { column: "Vie", style: "charges", max: 5, label: "PV" });
+  // La formule d'un groupe.
+  const rows = [{ Prix: "10" }, { Prix: "25,5" }, { Prix: "" }];
+  const valueOf = (row, column) => row[column] ?? "";
+  assert.equal(views.groupFormulaValue({ op: "count" }, rows, valueOf), 3);
+  assert.equal(views.groupFormulaValue({ op: "sum", column: "Prix" }, rows, valueOf), 35.5);
+  assert.equal(views.groupFormulaValue({ op: "max", column: "Prix" }, rows, valueOf), 25.5);
+  assert.equal(views.groupFormulaValue({ op: "avg", column: "Prix" }, rows, valueOf), 17.75);
+  assert.equal(views.formatViewNumber(17.75), "17,75");
+  // Les formes de base de 4, 5 et 6, bâties sur les colonnes, passent telles quelles le nettoyage.
+  const columns = [{ header: "Nom", spec: { kind: "name" } }, { header: "Portrait", spec: { kind: "file", file: { accept: "image" } } }, { header: "Type", spec: { kind: "choice", options: [{ value: "Arme" }] } }, { header: "Prix", spec: { kind: "number" } }, { header: "Vie", spec: { kind: "number" } }, { header: "Description", spec: { kind: "rich" } }, { header: "Lieu", spec: { kind: "linked-choice" } }];
+  for (const kind of ["list", "kanban", "master-detail"]) {
+    const forms = starters.viewStartersFor(kind, columns);
+    assert.ok(forms.length >= 6, kind);
+    for (const form of forms) {
+      const clean = views.cleanViewLayout(form.layout);
+      assert.ok(clean, form.key);
+      assert.equal(clean.kind, kind, form.key);
+      assert.deepEqual(views.cleanViewLayout(clean), clean, form.key);
+    }
+  }
+  const linked = starters.viewStartersFor("kanban", columns).find((form) => form.key === "kanban-linked");
+  assert.equal(linked.layout.kanbanColumn, "Lieu");
+  assert.deepEqual(linked.layout.groupFormula, { op: "sum", column: "Prix" });
+  const gauge = starters.viewStartersFor("list", columns).find((form) => form.key === "list-gauge");
+  assert.deepEqual(gauge.layout.gauge, { column: "Prix", style: "bar", maxColumn: "Vie" });
+  assert.equal(starters.viewStartersFor("list", columns).find((form) => form.key === "list-zigzag").layout.imageColumn, "Portrait");
+});

@@ -7,6 +7,8 @@
  * Règles pures : la route /api/pages/block-data et les tests s'en servent.
  */
 import { tabCardsOf, type TabCards } from "@/lib/index-cards"
+import { automaticLayoutFor, tabFormOrBuiltin } from "@/lib/index-layout-defaults"
+import { DEFAULT_FORM_ID, type IndexLayout, type TabLayouts } from "@/lib/index-layouts"
 import { foldName, isComputedSpec, isIdHeader, isRichSpec, type IndexColumnSpec } from "@/lib/index-columns"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
 import { fitLayoutToColumns, isPresentationKind, presentationFor, sortLayoutRows, type TabPresentations, type ViewLayout } from "@/lib/index-view-layouts"
@@ -43,6 +45,8 @@ export type ViewBlockData = {
   total: number
   layout?: ViewLayout
   cards?: TabCards
+  /** Les formulaires de l'onglet qu'un élément ou un détail « formulaire en lecture » dessine, par identifiant. */
+  forms?: Record<string, IndexLayout>
 }
 
 export type StatBlockData = {
@@ -178,7 +182,7 @@ export function matchesWhere(where: Pick<ViewWhere, "match" | "conditions">, cel
 }
 
 /** Les données d'un bloc Vue : l'onglet, sa vue réglée dans l'index (ou ses cartes), ses lignes. */
-export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards> }, options: BlockDataOptions): ViewBlockData | null {
+export function viewBlockData(source: IndexSource, input: ViewBlockInput, settings: { presentations: Record<string, TabPresentations>; cards: Record<string, TabCards>; layouts?: Record<string, TabLayouts> }, options: BlockDataOptions): ViewBlockData | null {
   const found = findTable(source, input.tab)
   if (!found) return null
   // Les conditions du bloc se lisent sur toutes les colonnes, masquées comprises : un joueur reçoit
@@ -212,7 +216,10 @@ export function viewBlockData(source: IndexSource, input: ViewBlockInput, settin
     ?? (isPresentationKind(input.kind) ? presentationFor(settings.presentations, table.tabName, input.kind) : null)
   if (chosen) {
     const layout = fitLayoutToColumns(chosen, headers)
-    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard ? { cards: cards() } : {}) }
+    // Les formulaires que la vue lit (élément, détail) : celui de l'onglet, sinon celui d'Eraser, sinon l'automatique sur les colonnes visibles.
+    const wanted = [...(layout.itemForm ? [layout.itemForm] : []), ...(layout.detail?.kind === "form" ? [layout.detail.form ?? DEFAULT_FORM_ID] : [])]
+    const forms = Object.fromEntries(wanted.map((id) => [id, tabFormOrBuiltin(settings.layouts, source.key, table.tabName, id) ?? automaticLayoutFor("form", headers.map((header) => ({ header, spec: specs[header] })))]))
+    return { ...base, view: layout.kind as ViewBlockKind, layout, ...(layout.itemCard || layout.detail?.kind === "card" ? { cards: cards() } : {}), ...(wanted.length ? { forms } : {}) }
   }
   return base
 }

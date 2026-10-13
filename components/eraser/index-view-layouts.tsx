@@ -8,7 +8,8 @@ import { loadWorldIndexData } from "@/components/eraser/index-cells"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { calendarsFromTables, firstWeekdayOf, formatCalendarDate, monthLength, parseCalendarDate, realCalendar, REAL_CALENDAR, seasonOf, type CalendarDate, type CalendarDefinition } from "@/lib/calendars"
 import { parseGlyphValue } from "@/lib/index-columns"
-import { dashboardTileKinds, dashboardTileValue, depthPalette, groupRowsBy, rowTree, sortLayoutRows, timelineEntries, treeSize, type KanbanLane, type RowTreeNode, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
+import { cellNumber } from "@/lib/index-stats"
+import { dashboardTileKinds, dashboardTileValue, depthPalette, formatViewNumber, groupFormulaValue, groupRowsBy, rowTree, sortLayoutRows, timelineEntries, treeSize, type KanbanLane, type RowTreeNode, type ViewLayout, type ViewLook } from "@/lib/index-view-layouts"
 
 /**
  * Les présentations d'un onglet-fenêtre autres que le tableau et les cartes : liste,
@@ -35,13 +36,75 @@ export type ViewLayoutProps = {
    * ou « * » pour la carte par défaut de son onglet) ; `null` si l'onglet n'a pas cette carte.
    */
   renderCard?: (rowKey: string, cardId: string) => ReactNode
+  /** Une ligne dessinée avec un formulaire de l'onglet en lecture (`formId` : « principal » ou un formulaire nommé) ; `null` si la page ne sait pas. */
+  renderForm?: (rowKey: string, formId: string) => ReactNode
+  /** Ouvrir la page de la ligne (« Au clic : ouvrir la page ») ; absent : la fiche. */
+  onOpenPage?: (rowKey: string) => void
   empty: ReactNode
+  /** Réglé par la vue elle-même d'après « Au clic » : ouvrir la fiche, la ligne choisie (à côté, dessous), rien. */
+  openSheet?: (rowKey: string) => void
+  chosen?: string
+  onChoose?: (rowKey: string) => void
+  inert?: boolean
 }
 
-/** La carte d'une ligne si la vue en demande une (et que la page sait la dessiner). */
-function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard">) {
-  const { itemCard } = props.layout
-  return itemCard && props.renderCard ? (row: string) => props.renderCard!(row, itemCard) : null
+/**
+ * L'élément d'une ligne si la vue en demande un : un formulaire en lecture, ou une carte de
+ * « Modifier › Cartes » (si la page sait les dessiner). Le clic y suit « Au clic » de la vue.
+ */
+function cardFor(props: Pick<ViewLayoutProps, "layout" | "renderCard" | "renderForm" | "onOpen" | "inert">) {
+  const { itemCard, itemForm, click } = props.layout
+  const draw = itemForm && props.renderForm ? (row: string) => props.renderForm!(row, itemForm) : itemCard && props.renderCard ? (row: string) => props.renderCard!(row, itemCard) : null
+  if (!draw) return null
+  // Une carte ouvre la fiche d'elle-même : seulement quand « Au clic » dit autre chose, la vue reprend le clic.
+  const intercept = Boolean(itemForm) || (click ?? "sheet") !== "sheet"
+  // eslint-disable-next-line react/display-name -- un rendu par ligne, pas un composant
+  return (row: string) => {
+    const node = draw(row)
+    if (!node || !intercept) return node
+    return <div onClickCapture={(event) => { event.stopPropagation(); event.preventDefault(); if (!props.inert) props.onOpen(row) }} className={props.inert ? "" : "cursor-pointer"}>{node}</div>
+  }
+}
+
+/** La jauge d'une ligne (« Jauge sous chaque élément ») : une colonne nombre en barre ou en charges, sur son maximum. */
+function RowGauge({ layout, row, valueOf, color, inverted = false }: { layout: ViewLayout; row: string; valueOf: ViewLayoutProps["valueOf"]; color?: string; inverted?: boolean }) {
+  const gauge = layout.gauge
+  if (!gauge) return null
+  const value = cellNumber(plain(valueOf(row, gauge.column)))
+  if (value === null) return null
+  const max = gauge.maxColumn ? cellNumber(plain(valueOf(row, gauge.maxColumn))) : gauge.max ?? null
+  const tint = inverted ? "#fff" : color ?? accentOf(layout.look ?? {})
+  const label = gauge.label ?? gauge.column
+  const shown = max ? `${formatViewNumber(value)} / ${formatViewNumber(max)}` : formatViewNumber(value)
+  if (gauge.style === "charges") {
+    const total = Math.max(1, Math.min(20, Math.round(max ?? value)))
+    const filled = Math.max(0, Math.min(total, Math.round(value)))
+    return <span className={`flex min-w-0 flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] ${inverted ? "opacity-90" : "text-muted-foreground"}`} title={`${label} : ${shown}`}>
+      <span className="font-semibold uppercase tracking-[0.08em]">{label}</span>
+      <span className="flex flex-wrap gap-0.5">{Array.from({ length: total }, (_, at) => <span key={at} aria-hidden className="size-2.5 rounded-full border" style={{ borderColor: tint, backgroundColor: at < filled ? tint : "transparent" }} />)}</span>
+      <span className="tabular-nums">{shown}</span>
+    </span>
+  }
+  const ratio = Math.max(0, Math.min(1, max ? value / max : value / 100))
+  return <span className={`grid min-w-0 gap-0.5 text-[10px] ${inverted ? "opacity-90" : "text-muted-foreground"}`} title={`${label} : ${shown}`}>
+    <span className="flex justify-between gap-2"><span className="truncate font-semibold uppercase tracking-[0.08em]">{label}</span><span className="tabular-nums">{shown}</span></span>
+    <span className="block h-1.5 overflow-hidden rounded-full" style={{ backgroundColor: inverted ? "rgb(255 255 255 / .3)" : `color-mix(in srgb, ${tint} 18%, var(--muted))` }}><span className="block h-full rounded-full" style={{ width: `${Math.round(ratio * 100)}%`, backgroundColor: tint }} /></span>
+  </span>
+}
+
+/** La formule d'un groupe (en-tête de section, de colonne du kanban) : son nombre, contre sa cible en barre si elle en a une. */
+function GroupFormulaBadge({ layout, rows, valueOf, color, inverted = false }: { layout: ViewLayout; rows: string[]; valueOf: ViewLayoutProps["valueOf"]; color?: string; inverted?: boolean }) {
+  const formula = layout.groupFormula
+  if (!formula) return null
+  const value = groupFormulaValue(formula, rows, valueOf)
+  const tint = inverted ? "#fff" : color ?? accentOf(layout.look ?? {})
+  const text = `${formula.label ? `${formula.label} ` : ""}${formatViewNumber(value)}${formula.target ? ` / ${formatViewNumber(formula.target)}` : ""}`
+  const over = formula.target !== undefined && value > formula.target
+  if (formula.style === "bar" && formula.target) return <span className="flex min-w-24 items-center gap-1.5 text-[10px] font-semibold normal-case tracking-normal" title={text}>
+    <span className="block h-1.5 w-16 overflow-hidden rounded-full" style={{ backgroundColor: inverted ? "rgb(255 255 255 / .3)" : `color-mix(in srgb, ${tint} 18%, var(--muted))` }}><span className="block h-full rounded-full" style={{ width: `${Math.round(Math.min(1, value / formula.target) * 100)}%`, backgroundColor: over ? "var(--destructive)" : tint }} /></span>
+    <span className={`tabular-nums ${over && !inverted ? "text-destructive" : ""}`}>{text}</span>
+  </span>
+  return <span className={`rounded-full px-1.5 text-[10px] font-semibold normal-case tracking-normal tabular-nums ${inverted ? "bg-white/20" : over ? "bg-destructive/15 text-destructive" : "bg-muted"}`} title={formula.column ? `${formula.op} · ${formula.column}` : undefined}>{text}</span>
 }
 
 function plain(value: string) {
@@ -151,14 +214,16 @@ function accentFrame(look: ViewLook, color: string | undefined): { className: st
 }
 
 /** Le nom d'un élément : police, taille, capitales, icône, couleur ou pastille selon l'apparence. */
-function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, icon, badge }: { row: string; look: ViewLook; color?: string; nameOf: ViewLayoutProps["nameOf"]; onOpen: (row: string) => void; truncate?: boolean; size?: keyof typeof titleSizes; icon?: ReactNode; badge?: ReactNode }) {
+function ItemTitle({ row, look, color, nameOf, onOpen, truncate = false, size, icon, badge, inert = false }: { row: string; look: ViewLook; color?: string; nameOf: ViewLayoutProps["nameOf"]; onOpen: (row: string) => void; truncate?: boolean; size?: keyof typeof titleSizes; icon?: ReactNode; badge?: ReactNode; /** « Au clic : rien » : le nom n'est pas un bouton. */ inert?: boolean }) {
   const accent = look.accent ?? "border"
+  const inner = <>
+    {accent === "dot" && color && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
+    {icon}
+    <span className={truncate ? "truncate" : "min-w-0"}>{nameOf(row) || "Sans nom"}</span>
+  </>
+  const classes = `flex min-w-0 items-center gap-1.5 text-left font-semibold leading-tight ${inert ? "" : "hover:underline"} ${look.titleFont === "display" ? "font-display" : ""} ${titleSizes[size ?? look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`
   return <span className={`flex min-w-0 items-center gap-1.5 ${truncate ? "shrink-0" : ""}`}>
-    <button type="button" onClick={() => onOpen(row)} className={`flex min-w-0 items-center gap-1.5 text-left font-semibold leading-tight hover:underline ${look.titleFont === "display" ? "font-display" : ""} ${titleSizes[size ?? look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={accent === "title" && color ? { color } : undefined}>
-      {accent === "dot" && color && <span aria-hidden className="size-2.5 shrink-0 rounded-full" style={{ backgroundColor: color }} />}
-      {icon}
-      <span className={truncate ? "truncate" : "min-w-0"}>{nameOf(row) || "Sans nom"}</span>
-    </button>
+    {inert ? <span className={classes} style={accent === "title" && color ? { color } : undefined}>{inner}</span> : <button type="button" onClick={() => onOpen(row)} className={classes} style={accent === "title" && color ? { color } : undefined}>{inner}</button>}
     {badge}
   </span>
 }
@@ -192,8 +257,9 @@ function Item({ row, props, fields, framed, extra, className = "", lead }: { row
       {lead}
       <RowImage src={rowImage(layout, row, valueOf)} look={look} />
       <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"}`}>
-        <ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} />
+        <ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} />
         <ItemFields fields={fieldList} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} />
+        <RowGauge layout={layout} row={row} valueOf={valueOf} color={color} />
       </div>
       {extra}
     </div>
@@ -203,7 +269,7 @@ function Item({ row, props, fields, framed, extra, className = "", lead }: { row
 /** L'ancre d'une section dans la page (le menu des sections y descend). */
 const sectionAnchor = (title: string) => `section-${(title || "sans-valeur").normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").replace(/[^a-z0-9#]+/g, "-")}`
 
-function Section({ title, count, collapsible, startCollapsed, color, hideCount, heading, letter, icon, accent, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; heading?: boolean; letter?: boolean; icon?: string; accent?: string; children: ReactNode }) {
+function Section({ title, count, collapsible, startCollapsed, color, hideCount, heading, letter, icon, accent, extra, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; heading?: boolean; letter?: boolean; icon?: string; accent?: string; /** La formule du groupe, à côté du nombre. */ extra?: ReactNode; children: ReactNode }) {
   const [open, setOpen] = useState(!startCollapsed)
   const glyph = <Glyph value={icon} className={heading ? "size-6" : "size-3.5"} color={color ?? accent} />
   const anchor = sectionAnchor(title)
@@ -213,18 +279,18 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
       {collapsible
         ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 font-display text-6xl font-semibold leading-none hover:text-primary sm:text-[7.5rem]" style={{ color: color ?? accent }}>{title || "—"}</button>
         : <h2 className="font-display text-6xl font-semibold leading-none sm:text-[7.5rem]" style={{ color: color ?? accent }}>{glyph}{title || "—"}</h2>}
-      {!hideCount && <p className="mt-1 text-xs text-muted-foreground">{count}</p>}
+      {(!hideCount || extra) && <p className="mt-1 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">{!hideCount && count}{extra}</p>}
     </div>
     {open && <div className="min-w-0">{children}</div>}
   </section>
   // Un grand titre centré, au-dessus d'un trait (les familles de la page des classes).
   if (heading) return <section id={anchor} className="space-y-5">
     {collapsible
-      ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold hover:text-primary sm:text-4xl"><ChevronDown className={`size-5 transition-transform ${open ? "" : "-rotate-90"}`} />{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</button>
-      : <h2 className="flex items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold sm:text-4xl">{color && !icon && <span className="size-3 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</h2>}
+      ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold hover:text-primary sm:text-4xl"><ChevronDown className={`size-5 transition-transform ${open ? "" : "-rotate-90"}`} />{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}{extra && <span className="text-sm font-normal">{extra}</span>}</button>
+      : <h2 className="flex items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold sm:text-4xl">{color && !icon && <span className="size-3 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}{extra && <span className="text-sm font-normal">{extra}</span>}</h2>}
     {open && children}
   </section>
-  const label = <><span className="flex items-center gap-2">{color && !icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}</span>{!hideCount && <span className="text-muted-foreground">{count}</span>}</>
+  const label = <><span className="flex items-center gap-2">{color && !icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}</span><span className="flex items-center gap-2">{extra}{!hideCount && <span className="text-muted-foreground">{count}</span>}</span></>
   const tone: CSSProperties = { color: accent ?? "var(--primary)" }
   return <section id={anchor} className="space-y-2">
     {collapsible
@@ -243,25 +309,41 @@ function SectionMenu({ names, accent, side }: { names: string[]; accent?: string
   </nav>
 }
 
+/** Les sections en onglets (« Menu des sections : onglets ») : une section à la fois, son nombre et sa formule dans l'onglet. */
+function SectionTabs({ groups, layout, valueOf, accent, render }: { groups: Array<{ name: string; rows: string[]; color?: string }>; layout: ViewLayout; valueOf: ViewLayoutProps["valueOf"]; accent?: string; render: (rows: string[]) => ReactNode }) {
+  const [active, setActive] = useState(groups[0]?.name ?? "")
+  const current = groups.find((group) => group.name === active) ?? groups[0]
+  return <div className="grid gap-4">
+    <div role="tablist" className="flex flex-wrap gap-0 border-b">
+      {groups.map((group) => <button key={group.name || "*"} type="button" role="tab" aria-selected={group === current} onClick={() => setActive(group.name)} className={`-mb-px inline-flex h-8 items-center gap-1.5 border-b-2 px-3 text-xs font-semibold uppercase tracking-[0.12em] transition ${group === current ? "border-current" : "border-transparent text-muted-foreground hover:text-foreground"}`} style={group === current ? { color: group.color ?? accent ?? "var(--primary)" } : undefined}>
+        {group.color && <span className="size-2 rounded-full" style={{ backgroundColor: group.color }} />}{group.name || "Sans valeur"}{!layout.hideCounts && <span className="font-normal normal-case tracking-normal text-muted-foreground">{group.rows.length}</span>}<GroupFormulaBadge layout={layout} rows={group.rows} valueOf={valueOf} color={group.color} />
+      </button>)}
+    </div>
+    {current && render(current.rows)}
+  </div>
+}
+
 function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout: ViewLayout; rows: string[]; valueOf: ViewLayoutProps["valueOf"]; nameOf?: ViewLayoutProps["nameOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; render: (rows: string[]) => ReactNode }) {
   const look = layout.look ?? {}
   const heading = look.sectionStyle === "heading"
   const letter = look.sectionStyle === "letter"
   const spacing = heading ? "space-y-14" : letter ? "space-y-10" : "space-y-5"
   // Le menu des sections (lettres ou noms) : au-dessus des sections, ou à leur gauche sur un grand écran.
-  const withMenu = (names: string[], body: ReactNode) => !layout.menu ? body
+  const withMenu = (names: string[], body: ReactNode) => !layout.menu || layout.menu === "tabs" ? body
     : layout.menu === "side" ? <div className="grid gap-5 lg:grid-cols-[9rem_minmax(0,1fr)]"><SectionMenu names={names} accent={look.color} side />{body}</div>
       : <div className="grid gap-5"><SectionMenu names={names} accent={look.color} />{body}</div>
+  const formula = (group: string[], color?: string) => layout.groupFormula ? <GroupFormulaBadge layout={layout} rows={group} valueOf={valueOf} color={color} /> : undefined
+  let groups: Array<{ name: string; rows: string[]; color?: string }>
   if (!layout.groupBy && layout.alphabet && nameOf) {
     // L'annuaire : une section par première lettre (les accents pliés, les chiffres et symboles sous « # »).
     const first = (row: string) => { const initial = plain(nameOf(row)).normalize("NFD").replace(/[̀-ͯ]/g, "").charAt(0).toLocaleUpperCase("fr"); return /[A-Z]/.test(initial) ? initial : "#" }
-    const groups = [...new Set(rows.map(first))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => first(row) === name) }))
-    return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color}>{render(group.rows)}</Section>)}</div>)
-  }
-  if (!layout.groupBy) return <>{render(rows)}</>
-  const options = optionsOf?.(layout.groupBy) ?? []
-  const groups = groupRowsBy(rows, (row) => valueOf(row, layout.groupBy!), options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty)
-  return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color} color={options.find((option) => fold(option.value) === fold(group.name))?.color}>{render(group.rows)}</Section>)}</div>)
+    groups = [...new Set(rows.map(first))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => first(row) === name) }))
+  } else if (layout.groupBy) {
+    const options = optionsOf?.(layout.groupBy) ?? []
+    groups = groupRowsBy(rows, (row) => valueOf(row, layout.groupBy!), options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty).map((group) => ({ ...group, color: options.find((option) => fold(option.value) === fold(group.name))?.color }))
+  } else return <>{render(rows)}</>
+  if (layout.menu === "tabs") return <SectionTabs groups={groups} layout={layout} valueOf={valueOf} accent={look.color} render={render} />
+  return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color} color={group.color} extra={formula(group.rows, group.color)}>{render(group.rows)}</Section>)}</div>)
 }
 
 const PAGE = 60
@@ -292,7 +374,7 @@ function ListLayout(props: ViewLayoutProps) {
   const number = (index: number) => layout.numbered ? <span className="w-6 shrink-0 text-right font-display text-sm font-semibold tabular-nums" style={{ color: accentOf(look) }}>{index + 1}.</span> : null
   if (card) {
     // Chaque élément est une carte : une, deux ou trois par rangée, sections comprises.
-    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${columnsClass}`}>{shown.map((row, index) => <div key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className="min-w-0 flex-1">{card(row) ?? <Item row={row} props={props} framed />}</div></div>)}</div>} />} />
+    return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => <div className={`grid items-start ${layout.compact || look.density === "compact" ? "gap-1.5" : "gap-3"} ${columnsClass}`}>{shown.map((row, index) => <div key={row} className="flex min-w-0 items-start gap-1.5">{number(index)}<div className="min-w-0 flex-1">{card(row) ?? <Item row={row} props={props} framed />}{layout.click === "below" && props.chosen === row && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div></div>)}</div>} />} />
   }
   const boxed = look.surface === "boxed"
   const zebra = look.surface === "zebra"
@@ -301,16 +383,20 @@ function ListLayout(props: ViewLayoutProps) {
     const color = rowColor(layout, row, valueOf, optionsOf)
     const frame = accentFrame(look, color)
     const folding = layout.collapsible && !layout.compact && !layout.groupBy && !layout.alphabet
-    return <li key={row} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${frame.className}`} style={frame.style}>
-      <div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"}`}>
+    // Zigzag : l'image change de côté une ligne sur deux.
+    const flipped = Boolean(look.zigzag) && index % 2 === 1
+    const chosenBelow = layout.click === "below" && props.chosen === row
+    return <li key={row} className={`min-w-0 ${paddings[layout.compact ? "compact" : look.density ?? "normal"]} ${boxed ? `border bg-card ${boxClass(look)}` : columnsClass ? "border-b" : ""} ${zebra && index % 2 === 1 ? "bg-muted/35" : ""} ${chosenBelow ? "ring-1 ring-primary/40" : ""} ${frame.className}`} style={frame.style}>
+      <div className={`flex min-w-0 items-center ${look.density === "airy" ? "gap-3" : "gap-2"} ${flipped ? "flex-row-reverse text-right" : ""}`}>
         {number(index)}
         <RowImage src={rowImage(layout, row, valueOf)} look={look} size={layout.compact ? "sm" : undefined} />
         {folding && <button type="button" aria-expanded={expanded} aria-label={expanded ? "Replier" : "Déplier"} onClick={() => toggle(row)} className="grid size-6 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-muted"><ChevronDown className={`size-4 transition-transform ${expanded ? "" : "-rotate-90"}`} /></button>}
         {layout.compact
-          ? <><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} truncate icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /></>
-          : <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"}`}><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /></div>}
+          ? <><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} truncate icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></>
+          : <div className={`grid min-w-0 flex-1 ${look.density === "compact" ? "gap-0.5" : "gap-1"} ${flipped ? "justify-items-end" : ""}`}><ItemTitle row={row} look={look} color={color} nameOf={nameOf} onOpen={onOpen} inert={props.inert} icon={<RowIcon layout={layout} row={row} valueOf={valueOf} color={color} />} badge={<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} />} /><ItemFields fields={fields} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} /><RowGauge layout={layout} row={row} valueOf={valueOf} color={color} /></div>}
       </div>
       {expanded && <dl className="mt-2 grid gap-x-4 gap-y-1 rounded-lg bg-muted/30 p-2.5 pl-8 text-xs sm:grid-cols-2">{others.map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="font-semibold text-muted-foreground">{header}</dt><dd className="break-words">{value}</dd></div> : null })}</dl>}
+      {chosenBelow && <div className="mt-2"><DetailPanel row={row} rows={rows} props={props} inline /></div>}
     </li>
   }
   return <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <Paged rows={group} render={(shown) => boxed
@@ -353,7 +439,7 @@ function KanbanLayout(props: ViewLayoutProps) {
       const closed = layout.laneCollapse && folded.has(lane.name)
       const laneLook: CSSProperties = laneStyle === "tinted" ? { backgroundColor: `color-mix(in srgb, ${tint} 9%, transparent)`, borderColor: `color-mix(in srgb, ${tint} 30%, var(--border))` } : {}
       const full = lane.limit !== undefined && lane.rows.length > lane.limit
-      const count = layout.hideCounts ? null : <span className={`rounded-full px-1.5 tabular-nums ${laneStyle === "header" ? "bg-white/20" : full ? "bg-destructive/15 text-destructive" : ""}`}>{lane.rows.length}{lane.limit !== undefined ? ` / ${lane.limit}` : ""}</span>
+      const count = <span className="flex items-center gap-1">{layout.groupFormula && <GroupFormulaBadge layout={layout} rows={lane.rows} valueOf={valueOf} color={lane.color} inverted={laneStyle === "header"} />}{!layout.hideCounts && <span className={`rounded-full px-1.5 tabular-nums ${laneStyle === "header" ? "bg-white/20" : full ? "bg-destructive/15 text-destructive" : ""}`}>{lane.rows.length}{lane.limit !== undefined ? ` / ${lane.limit}` : ""}</span>}</span>
       const toggle = () => { if (layout.laneCollapse) setFolded((current) => { const next = new Set(current); if (next.has(lane.name)) next.delete(lane.name); else next.add(lane.name); return next }) }
       const head = laneStyle === "header"
         ? <p className="flex items-center justify-between gap-2 px-3 py-2 text-xs font-semibold uppercase tracking-[0.12em] text-white" style={{ backgroundColor: tint }}><span className="flex items-center gap-1.5"><Glyph value={lane.icon} />{lane.label || "Sans valeur"}</span>{count}</p>
@@ -372,7 +458,7 @@ function KanbanLayout(props: ViewLayoutProps) {
             const drawn = card?.(row)
             const drag = { draggable: movable(row), onDragStart: () => setDragged(row), onDragEnd: () => { setDragged(""); setOver(null) }, title: onCommit && !movable(row) ? "Plusieurs valeurs ou texte mis en forme : modifie la case dans la fiche" : undefined }
             const cursor = `${movable(row) ? "cursor-grab active:cursor-grabbing" : ""} ${dragged === row ? "opacity-50" : ""}`
-            return <div key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}</div>
+            return <div key={row} {...drag} className={`min-w-0 ${cursor}`}>{drawn ?? <Item row={row} props={props} fields={(layout.fields ?? []).filter((field) => field !== column)} framed={look.surface !== "plain"} className={look.surface === "plain" ? "border-b border-border/70" : ""} />}{layout.click === "below" && props.chosen === row && <div className="mt-1.5"><DetailPanel row={row} rows={rows} props={props} inline /></div>}</div>
           })}
         </div>}
       </section>
@@ -386,17 +472,62 @@ const masterWidths = { narrow: "md:grid-cols-[minmax(11rem,15rem)_minmax(0,1fr)]
 const masterWidthsRight = { narrow: "md:grid-cols-[minmax(0,1fr)_minmax(11rem,15rem)]", normal: "md:grid-cols-[minmax(0,1fr)_minmax(14rem,20rem)]", wide: "md:grid-cols-[minmax(0,1fr)_minmax(18rem,28rem)]" } as const
 const detailGrids = { 1: "", 2: "sm:grid-cols-2", 3: "sm:grid-cols-2 lg:grid-cols-3" } as const
 
-function MasterDetailLayout(props: ViewLayoutProps) {
-  const { layout, rows, headers, nameOf, valueOf, optionsOf, onOpen } = props
+/** Les colonnes d'une ligne (« le détail montre les colonnes ») : nom, image, pastille, puis les colonnes choisies. */
+function DetailFields({ row, props }: { row: string; props: ViewLayoutProps }) {
+  const { layout, headers, nameOf, valueOf, optionsOf } = props
   const look = layout.look ?? {}
-  const card = cardFor(props)
+  const src = rowImage(layout, row, valueOf)
+  const detailImage = layout.detailImage ?? "side"
+  const color = rowColor(layout, row, valueOf, optionsOf)
+  return <>
+    {detailImage === "banner" && src && <CoverImage src={src} className="aspect-[21/8] w-full border-b object-cover" />}
+    <div className={look.density === "compact" ? "p-3" : look.density === "airy" ? "p-6" : "p-4"}>
+      <span className="flex min-w-0 items-center gap-3">{detailImage === "side" && <RowImage src={src} look={look} size="lg" />}<h3 className={`flex items-center gap-2 text-2xl font-semibold ${look.titleFont === "sans" ? "" : "font-display"} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" ? { color } : undefined}><RowIcon layout={layout} row={row} valueOf={valueOf} color={color} className="size-6" />{nameOf(row) || "Sans nom"}<RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} /></h3></span>
+      <RowGauge layout={layout} row={row} valueOf={valueOf} color={color} />
+      <dl className={`mt-4 grid gap-x-6 gap-y-3 ${detailGrids[layout.detailColumns ?? 2]}`}>{(layout.detailFields?.length ? layout.detailFields : headers).filter((header) => header !== layout.imageColumn || detailImage === "none").map((header) => { const value = plain(valueOf(row, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground" style={look.fieldColor === "accent" ? { color: accentOf(look) } : undefined}>{header}</dt><dd className="mt-0.5 whitespace-pre-line break-words text-sm">{value}</dd></div> : null })}</dl>
+    </div>
+  </>
+}
+
+/**
+ * Le panneau de détail d'une ligne : ce que « Le détail montre » demande (les colonnes, un
+ * formulaire en lecture, une carte), « Ouvrir la fiche », et précédent / suivant si la vue le
+ * veut. Il sert au maître-détail, à « afficher à côté » et à « afficher dessous » (en place).
+ */
+function DetailPanel({ row, rows, props, inline = false }: { row: string; rows: string[]; props: ViewLayoutProps; inline?: boolean }) {
+  const { layout, renderCard, renderForm, onChoose } = props
+  const look = layout.look ?? {}
+  const detail = layout.detail ?? {}
+  const kind = detail.kind ?? (layout.kind === "master-detail" && layout.itemCard && !layout.itemForm ? "card" : "fields")
+  const color = rowColor(layout, row, props.valueOf, props.optionsOf)
+  const open = props.openSheet ?? props.onOpen
+  const at = rows.indexOf(row)
+  const nav = detail.nav && onChoose && rows.length > 1 ? <div className="flex items-center justify-between gap-2 border-b px-3 py-1.5 text-xs text-muted-foreground">
+    <Button type="button" size="sm" variant="ghost" className="h-7" disabled={at <= 0} onClick={() => onChoose(rows[at - 1])}><ChevronLeft />Précédent</Button>
+    <span className="tabular-nums">{at + 1} / {rows.length}</span>
+    <Button type="button" size="sm" variant="ghost" className="h-7" disabled={at < 0 || at >= rows.length - 1} onClick={() => onChoose(rows[at + 1])}>Suivant<ChevronRight /></Button>
+  </div> : null
+  const drawn = kind === "form" && renderForm ? renderForm(row, detail.form || "principal") : kind === "card" && renderCard ? renderCard(row, detail.card || layout.itemCard || "*") : null
+  const body = drawn
+    ? <div className={inline ? "p-2" : look.density === "compact" ? "p-3" : "p-4"}>{kind === "card" ? <div className="mx-auto w-full max-w-xl">{drawn}</div> : drawn}</div>
+    : <DetailFields row={row} props={props} />
+  const footer = !props.inert && open ? <div className={`flex justify-end gap-2 border-t px-3 py-2`}><Button type="button" size="sm" variant="outline" onClick={() => open(row)}><ExternalLink />Ouvrir la fiche</Button></div> : null
+  return <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`} style={color && look.accent === "tint" ? { backgroundColor: `color-mix(in srgb, ${color} 8%, var(--card))` } : color && (look.accent ?? "border") === "border" ? { borderTop: `4px solid ${color}` } : undefined}>
+    {nav}
+    {body}
+    {footer}
+  </article>
+}
+
+const detailWidths = { narrow: "md:grid-cols-[minmax(0,1fr)_minmax(14rem,18rem)]", normal: "md:grid-cols-[minmax(0,1fr)_minmax(18rem,24rem)]", wide: "md:grid-cols-[minmax(0,1fr)_minmax(22rem,32rem)]" } as const
+
+function MasterDetailLayout(props: ViewLayoutProps) {
+  const { layout, rows, nameOf, valueOf, optionsOf, onOpen } = props
+  const look = layout.look ?? {}
   const [chosen, setChosen] = useState("")
   const selected = rows.includes(chosen) ? chosen : rows[0] ?? ""
   const right = layout.masterSide === "right"
   const columns = right ? masterWidthsRight[look.masterWidth ?? "normal"] : masterWidths[look.masterWidth ?? "normal"]
-  const src = selected ? rowImage(layout, selected, valueOf) : ""
-  const detailImage = layout.detailImage ?? "side"
-  const color = selected ? rowColor(layout, selected, valueOf, optionsOf) : undefined
   return <div className={`grid gap-4 ${columns}`}>
     <div className={`max-h-[70vh] overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`}>
       <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : "space-y-0.5"}>{group.map((row) => {
@@ -410,23 +541,15 @@ function MasterDetailLayout(props: ViewLayoutProps) {
             <span className="grid min-w-0 flex-1 gap-0.5">
               <span className={`flex min-w-0 items-center gap-1.5 font-semibold ${look.titleFont === "display" ? "font-display" : ""} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`}>{look.accent === "dot" && rowTint && <span aria-hidden className="size-2 shrink-0 rounded-full" style={{ backgroundColor: rowTint }} />}<span className="truncate" style={look.accent === "title" && rowTint && !current ? { color: rowTint } : undefined}>{nameOf(row) || "Sans nom"}</span><RowBadge layout={layout} row={row} valueOf={valueOf} optionsOf={optionsOf} inverted={current} /></span>
               <ItemFields fields={layout.fields ?? []} row={row} look={look} valueOf={valueOf} optionsOf={optionsOf} compact={look.fieldStyle !== "stacked" && look.fieldStyle !== "labels"} inverted={current} />
+              <RowGauge layout={layout} row={row} valueOf={valueOf} color={rowTint} inverted={current} />
             </span>
           </span>
         </button>
       })}</div>} />
     </div>
-    {selected && card?.(selected) ? <div className="grid min-w-0 content-start gap-2">
-      <div className="mx-auto w-full max-w-xl">{card(selected)}</div>
-      <Button type="button" size="sm" variant="outline" className="justify-self-center" onClick={() => onOpen(selected)}><ExternalLink />Ouvrir la fiche</Button>
-    </div> : <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`} style={color && look.accent === "tint" ? { backgroundColor: `color-mix(in srgb, ${color} 8%, var(--card))` } : color && (look.accent ?? "border") === "border" ? { borderTop: `4px solid ${color}` } : undefined}>
-      {selected ? <>
-        {detailImage === "banner" && src && <CoverImage src={src} className="aspect-[21/8] w-full border-b object-cover" />}
-        <div className={look.density === "compact" ? "p-3" : look.density === "airy" ? "p-6" : "p-4"}>
-          <div className="flex items-start justify-between gap-3"><span className="flex min-w-0 items-center gap-3">{detailImage === "side" && <RowImage src={src} look={look} size="lg" />}<h3 className={`flex items-center gap-2 text-2xl font-semibold ${look.titleFont === "sans" ? "" : "font-display"} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`} style={look.accent === "title" ? { color } : undefined}><RowIcon layout={layout} row={selected} valueOf={valueOf} color={color} className="size-6" />{nameOf(selected) || "Sans nom"}<RowBadge layout={layout} row={selected} valueOf={valueOf} optionsOf={optionsOf} /></h3></span><Button type="button" size="sm" variant="outline" onClick={() => onOpen(selected)}><ExternalLink />Ouvrir la fiche</Button></div>
-          <dl className={`mt-4 grid gap-x-6 gap-y-3 ${detailGrids[layout.detailColumns ?? 2]}`}>{(layout.detailFields?.length ? layout.detailFields : headers).filter((header) => header !== layout.imageColumn || detailImage === "none").map((header) => { const value = plain(valueOf(selected, header)); return value ? <div key={header} className="min-w-0"><dt className="text-[11px] font-semibold uppercase tracking-[0.12em] text-muted-foreground" style={look.fieldColor === "accent" ? { color: accentOf(look) } : undefined}>{header}</dt><dd className="mt-0.5 whitespace-pre-line break-words text-sm">{value}</dd></div> : null })}</dl>
-        </div>
-      </> : <p className="py-10 text-center text-sm text-muted-foreground">Aucune ligne.</p>}
-    </article>}
+    {selected
+      ? <DetailPanel row={selected} rows={rows} props={{ ...props, openSheet: props.openSheet ?? onOpen, onChoose: setChosen }} />
+      : <article className={`min-w-0 overflow-hidden border bg-card/80 ${boxClass(look)}`}><p className="py-10 text-center text-sm text-muted-foreground">Aucune ligne.</p></article>}
   </div>
 }
 
@@ -789,10 +912,36 @@ function DashboardLayout({ layout, rows, valueOf }: ViewLayoutProps) {
   })}</div>
 }
 
-/** La présentation d'un onglet-fenêtre (hors tableau et cartes, que la page dessine elle-même). */
+/**
+ * La présentation d'un onglet-fenêtre (hors tableau et cartes, que la page dessine elle-même).
+ * « Au clic » se décide ici, pour toutes les vues : ouvrir la fiche (d'office), ouvrir la page,
+ * afficher à côté (la vue devient un maître-détail), afficher dessous, rien.
+ */
 export function IndexViewLayout(input: ViewLayoutProps) {
-  const props = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf) }
+  const [chosen, setChosen] = useState("")
+  const click = input.layout.click ?? "sheet"
+  const panel = click === "side" || click === "below"
+  const openSheet = input.onOpen
+  const onOpen = click === "none" ? () => undefined
+    : click === "page" ? (input.onOpenPage ?? input.onOpen)
+      : panel ? (row: string) => setChosen((current) => current === row && click === "below" ? "" : row)
+        : input.onOpen
+  const props: ViewLayoutProps = { ...input, rows: sortLayoutRows(input.rows, input.layout, input.valueOf), onOpen, openSheet, inert: click === "none", ...(panel ? { chosen: input.rows.includes(chosen) ? chosen : (click === "side" ? input.rows[0] ?? "" : ""), onChoose: setChosen } : {}) }
   if (!props.rows.length && props.layout.kind !== "dashboard") return <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">{props.empty}</div>
+  const body = viewBody(props)
+  if (click === "side" && props.layout.kind !== "master-detail") {
+    const selected = props.chosen || props.rows[0]
+    return <div className={`grid gap-4 ${detailWidths[props.layout.detail?.width ?? "normal"]}`}>
+      <div className="min-w-0">{body}</div>
+      {selected && <div className="min-w-0 md:sticky md:top-4 md:self-start"><DetailPanel row={selected} rows={props.rows} props={props} /></div>}
+    </div>
+  }
+  // « Dessous » : la liste et le kanban déplient la ligne à sa place ; les autres vues, sous la vue.
+  if (click === "below" && props.chosen && props.layout.kind !== "list" && props.layout.kind !== "kanban" && props.layout.kind !== "master-detail") return <div className="grid gap-4">{body}<DetailPanel row={props.chosen} rows={props.rows} props={props} /></div>
+  return body
+}
+
+function viewBody(props: ViewLayoutProps) {
   switch (props.layout.kind) {
     case "list": return <ListLayout {...props} />
     case "kanban": return <KanbanLayout {...props} />

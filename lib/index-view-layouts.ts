@@ -88,6 +88,8 @@ export type ViewLook = {
   titleCaps?: boolean
   /** Les libellés des colonnes montrées : discrets, ou à la couleur d'accent. */
   fieldColor?: "muted" | "accent"
+  /** Liste : l'image change de côté une ligne sur deux. */
+  zigzag?: boolean
 }
 
 export type ViewLayout = {
@@ -155,8 +157,21 @@ export type ViewLayout = {
   /** Liste : les lignes numérotées ; rangées par première lettre (sans autre section). */
   numbered?: boolean
   alphabet?: boolean
-  /** Un menu relié aux sections (lettres ou noms des sections) : en haut ou sur le côté ; un clic y descend. */
-  menu?: "top" | "side"
+  /** Un menu relié aux sections (lettres ou noms des sections) : en haut ou sur le côté (un clic y descend), ou en onglets (une section à la fois). */
+  menu?: "top" | "side" | "tabs"
+  /**
+   * Élément : chaque ligne dessinée avec un formulaire de l'onglet, en lecture (« principal » :
+   * le formulaire étoilé). Prend le pas sur `itemCard`.
+   */
+  itemForm?: string
+  /** Au clic sur un élément : ouvrir la fiche (d'office), ouvrir la page de la ligne, afficher à côté, afficher dessous, rien. */
+  click?: ViewClick
+  /** Le panneau de détail (à côté, dessous, et le maître-détail) : les colonnes, un formulaire en lecture, ou une carte ; sa largeur ; précédent / suivant. */
+  detail?: ViewDetail
+  /** Une formule dans l'en-tête de chaque groupe (section, colonne du kanban) : compte, somme, moyenne, min, max d'une colonne, contre une cible. */
+  groupFormula?: GroupFormula
+  /** Une jauge sous chaque élément : une colonne nombre en barre ou en charges, sur un maximum (nombre ou colonne). */
+  gauge?: RowGaugeSetting
   /** Kanban : ses colonnes réglées une à une ; repliables d'un clic sur leur en-tête. */
   lanes?: KanbanLane[]
   laneCollapse?: boolean
@@ -195,6 +210,22 @@ export type ViewLayout = {
   /** L'apparence des éléments (Modifier › la vue › Apparence). */
   look?: ViewLook
 }
+
+export type ViewClick = "sheet" | "page" | "side" | "below" | "none"
+export const viewClicks: Array<{ value: ViewClick; label: string; hint: string }> = [
+  { value: "sheet", label: "Ouvrir la fiche", hint: "Le formulaire étoilé de la ligne (d’office)." },
+  { value: "page", label: "Ouvrir la page", hint: "La page de la ligne, si l’index en a une." },
+  { value: "side", label: "Afficher à côté", hint: "La ligne choisie dans un panneau à côté : la vue devient un maître-détail." },
+  { value: "below", label: "Afficher dessous", hint: "La ligne choisie se déplie sous l’élément (ou sous la vue)." },
+  { value: "none", label: "Rien", hint: "Les éléments ne réagissent pas au clic." },
+]
+export type ViewDetail = { kind?: "fields" | "form" | "card"; form?: string; card?: string; width?: "narrow" | "normal" | "wide"; nav?: boolean }
+export type GroupFormulaOp = "count" | "sum" | "avg" | "min" | "max"
+export const groupFormulaOps: Array<{ value: GroupFormulaOp; label: string }> = [
+  { value: "count", label: "Nombre de lignes" }, { value: "sum", label: "Somme" }, { value: "avg", label: "Moyenne" }, { value: "min", label: "Plus petite valeur" }, { value: "max", label: "Plus grande valeur" },
+]
+export type GroupFormula = { op: GroupFormulaOp; column?: string; target?: number; label?: string; style?: "text" | "bar" }
+export type RowGaugeSetting = { column: string; style?: "bar" | "charges"; max?: number; maxColumn?: string; label?: string }
 
 /** Les icônes et couleurs proposées dans les éditeurs de vues (les mêmes que les cartes). */
 export const viewPalette = ["#927640", "#682522", "#b3261e", "#c2410c", "#b7791f", "#4d7c0f", "#315b55", "#397f88", "#285f8f", "#1e3a8a", "#6b4c9a", "#9d174d", "#78716c"]
@@ -268,6 +299,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   imageHeight: [],
   imageLinked: [true],
   imageBare: [true],
+  zigzag: [true],
   radius: ["sm", "md", "lg"],
   shadow: [true],
   titleCaps: [true],
@@ -367,8 +399,48 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (text(raw.badgeColumn)) layout.badgeColumn = text(raw.badgeColumn)
   if (raw.numbered === true) layout.numbered = true
   if (raw.alphabet === true) layout.alphabet = true
-  const menu = oneOf(raw.menu, ["top", "side"] as const)
+  const menu = oneOf(raw.menu, ["top", "side", "tabs"] as const)
   if (menu) layout.menu = menu
+  if (text(raw.itemForm, 40)) layout.itemForm = text(raw.itemForm, 40)
+  const click = oneOf(raw.click, ["sheet", "page", "side", "below", "none"] as const)
+  if (click && click !== "sheet") layout.click = click
+  if (raw.detail && typeof raw.detail === "object") {
+    const input = raw.detail as Record<string, unknown>
+    const detail: ViewDetail = {}
+    const kind = oneOf(input.kind, ["fields", "form", "card"] as const)
+    if (kind && kind !== "fields") detail.kind = kind
+    if (text(input.form, 40)) detail.form = text(input.form, 40)
+    if (text(input.card, 80)) detail.card = text(input.card, 80)
+    const width = oneOf(input.width, ["narrow", "normal", "wide"] as const)
+    if (width && width !== "normal") detail.width = width
+    if (input.nav === true) detail.nav = true
+    if (Object.keys(detail).length) layout.detail = detail
+  }
+  if (raw.groupFormula && typeof raw.groupFormula === "object") {
+    const input = raw.groupFormula as Record<string, unknown>
+    const op = oneOf(input.op, ["count", "sum", "avg", "min", "max"] as const)
+    if (op) {
+      const formula: GroupFormula = { op }
+      if (text(input.column)) formula.column = text(input.column)
+      const target = typeof input.target === "number" && Number.isFinite(input.target) ? Math.round(input.target * 100) / 100 : undefined
+      if (target !== undefined && target > 0) formula.target = target
+      if (text(input.label, 40)) formula.label = text(input.label, 40)
+      if (input.style === "bar") formula.style = "bar"
+      layout.groupFormula = formula
+    }
+  }
+  if (raw.gauge && typeof raw.gauge === "object") {
+    const input = raw.gauge as Record<string, unknown>
+    if (text(input.column)) {
+      const gauge: RowGaugeSetting = { column: text(input.column) }
+      if (input.style === "charges") gauge.style = "charges"
+      const max = typeof input.max === "number" && Number.isFinite(input.max) ? Math.round(input.max * 100) / 100 : undefined
+      if (max !== undefined && max > 0) gauge.max = max
+      if (text(input.maxColumn)) gauge.maxColumn = text(input.maxColumn)
+      if (text(input.label, 40)) gauge.label = text(input.label, 40)
+      layout.gauge = gauge
+    }
+  }
   const lanes = Array.isArray(raw.lanes) ? raw.lanes.map(cleanLane).filter((lane): lane is KanbanLane => Boolean(lane)).slice(0, 24) : []
   if (lanes.length) layout.lanes = lanes
   if (raw.laneCollapse === true) layout.laneCollapse = true
@@ -437,6 +509,22 @@ export function groupRowsBy<T>(rows: T[], valueOf: (row: T) => string, order: st
     const rightRank = rank.get(right.name.toLocaleLowerCase("fr")) ?? Number.MAX_SAFE_INTEGER
     return leftRank - rightRank || left.name.localeCompare(right.name, "fr", { numeric: true })
   })
+}
+
+/** La valeur d'une formule de groupe (en-tête de section ou de colonne) sur des lignes : un nombre. */
+export function groupFormulaValue<T>(formula: GroupFormula, rows: T[], valueOf: (row: T, column: string) => string) {
+  if (formula.op === "count" || !formula.column) return rows.length
+  const numbers = rows.map((row) => cellNumber(valueOf(row, formula.column!))).filter((number): number is number => number !== null)
+  if (!numbers.length) return 0
+  const sum = numbers.reduce((total, number) => total + number, 0)
+  if (formula.op === "sum") return sum
+  if (formula.op === "avg") return sum / numbers.length
+  return formula.op === "min" ? Math.min(...numbers) : Math.max(...numbers)
+}
+
+/** Un nombre de vue écrit court (entier, sinon deux décimales). */
+export function formatViewNumber(value: number) {
+  return Number.isInteger(value) ? String(value) : value.toLocaleString("fr-FR", { maximumFractionDigits: 2 })
 }
 
 /** La valeur d'une tuile de tableau de bord : un nombre, ou une répartition (les 8 premières valeurs). */
@@ -508,7 +596,9 @@ export function fitLayoutToColumns(layout: ViewLayout, columns: string[]): ViewL
   const known = new Map(columns.map((column) => [fold(column), column]))
   const one = (value?: string) => value ? known.get(fold(value)) : undefined
   const many = (values?: string[]) => (values ?? []).flatMap((value) => known.get(fold(value)) ?? [])
-  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))) }
+  const next: ViewLayout = { ...layout, groupBy: one(layout.groupBy), kanbanColumn: one(layout.kanbanColumn), dateColumn: one(layout.dateColumn), sortBy: one(layout.sortBy), parentColumn: one(layout.parentColumn), colorBy: one(layout.colorBy), imageColumn: one(layout.imageColumn), iconColumn: one(layout.iconColumn), badgeColumn: one(layout.badgeColumn), fields: many(layout.fields), detailFields: many(layout.detailFields), tiles: layout.tiles?.filter((tile) => !tile.column || known.has(fold(tile.column))),
+    groupFormula: layout.groupFormula && (!layout.groupFormula.column || known.has(fold(layout.groupFormula.column))) ? layout.groupFormula : undefined,
+    gauge: layout.gauge && known.has(fold(layout.gauge.column)) ? { ...layout.gauge, maxColumn: one(layout.gauge.maxColumn) } : undefined }
   return cleanViewLayout(next) ?? { kind: layout.kind }
 }
 
