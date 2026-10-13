@@ -955,6 +955,8 @@ function builtinCardsFor(index: string, tab: string): CardTemplate[] {
             { id: "b2", type: "line", parts: [{ column: "Classe" }, { column: "Level", prefix: "rang " }], separator: " · ", size: "xs", tone: "accent", bold: true, clamp: 1 },
             { id: "b3", type: "line", parts: [{ column: "Titre honorifique" }], size: "xs", tone: "muted", italic: true, clamp: 1 },
             { id: "b4", type: "line", parts: [{ column: "Joueur" }], size: "xs", tone: "accent", caps: true, clamp: 1 },
+            // Ses campagnes, aux couleurs des campagnes (colonne dérivée des pages ; vide dans l'index).
+            { id: "b5", type: "pills", columns: ["Campagnes"], tone: "column" },
           ],
         },
         {

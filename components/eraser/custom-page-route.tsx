@@ -11,6 +11,7 @@ import { canManagePages, pageForViewer, studioHref, type CustomPage, type PagePl
 import { findCustomPage } from "@/lib/custom-pages-store"
 import { campaignsOf, indexPathsOf, linkTargetsKnown, linkTargetsOf, viewerFor } from "@/lib/custom-pages-server"
 import { replacementLabel, rowOfRoute, type ReplaceMode } from "@/lib/page-replacements"
+import { isVirtualPageId } from "@/lib/eraser-page-blueprints"
 import { blocksForRow, fillRowText, packRowContext, rowContextOf, rowValuesOf, rowFormIdsOf } from "@/lib/custom-pages-rows"
 import { indexSourceOf, readOptions } from "@/lib/custom-pages-server"
 import { listIndexLayouts } from "@/lib/index-layouts-store"
@@ -69,9 +70,10 @@ export async function ReplacementView({ page, view: viewed, mode, pathname, acco
   const links = linkTargetsKnown(view, account)
   const indexPaths = indexPathsOf(view, account.role)
   const label = replacementLabel(page.replaces ?? pathname)
+  const virtual = isVirtualPageId(page.id)
   const notice = manager ? <p className="flex flex-wrap items-center gap-x-3 gap-y-1.5 rounded-xl border border-dashed border-primary/35 bg-primary/[0.035] px-3.5 py-2 text-[12.5px] text-muted-foreground">
     <Replace className="size-3.5 shrink-0 text-primary" />
-    <span className="min-w-0 flex-1">{mode === "replace" ? `Cette page remplace « ${label} » d’Eraser.` : `La page « ${view.title} » complète « ${label} » ${mode === "before" ? "au-dessus" : "en dessous"} de son contenu.`}</span>
+    <span className="min-w-0 flex-1">{virtual ? "Page d’Eraser dessinée par le moteur des pages : ses vues, ses cartes et ses formes sont celles réglées dans leur index. « Modifier la page » la reprend dans l’atelier." : mode === "replace" ? `Cette page remplace « ${label} » d’Eraser.` : `La page « ${view.title} » complète « ${label} » ${mode === "before" ? "au-dessus" : "en dessous"} de son contenu.`}</span>
     {mode === "replace" && <Link href={`${pathname}?origine=1`} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><ExternalLink className="size-3.5" />Voir la page d’origine</Link>}
     {view.editable && <Link href={studioHref(page.id)} prefetch={false} className="inline-flex items-center gap-1 font-medium text-primary hover:underline"><PenLine className="size-3.5" />Modifier</Link>}
   </p> : null

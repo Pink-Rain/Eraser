@@ -32,10 +32,13 @@ type Loaded = { data: ViewData | StatBlockData | BacklinksData | null; error: st
  * Où lire les données : le bloc d'une page enregistrée (`pageId`), ou (atelier) l'index
  * directement ; `asPlayer` : l'aperçu « Voir comme Joueur » reçoit ce qu'un joueur recevrait.
  */
-export type BlockSource = { pageId: string; draft?: boolean; row?: { index: string; id: string } } | { direct: true; asPlayer?: boolean }
+export type BlockSource = { pageId: string; draft?: boolean; row?: { index: string; id: string } } | { blueprint: string; row?: { index: string; id: string } } | { direct: true; asPlayer?: boolean }
 
 function dataUrl(block: ViewBlock | StatBlock | BacklinksBlock, source: BlockSource) {
-  if ("pageId" in source) return `/api/pages/block-data?page=${encodeURIComponent(source.pageId)}&block=${encodeURIComponent(block.id)}${source.draft ? "&draft=1" : ""}${source.row ? `&rowIndex=${encodeURIComponent(source.row.index)}&rowId=${encodeURIComponent(source.row.id)}` : ""}`
+  const rowQuery = "row" in source && source.row ? `&rowIndex=${encodeURIComponent(source.row.index)}&rowId=${encodeURIComponent(source.row.id)}` : ""
+  if ("pageId" in source) return `/api/pages/block-data?page=${encodeURIComponent(source.pageId)}&block=${encodeURIComponent(block.id)}${source.draft ? "&draft=1" : ""}${rowQuery}`
+  // Une page d'Eraser dessinée par le moteur : ses blocs se lisent d'après son plan.
+  if ("blueprint" in source) return `/api/pages/block-data?blueprint=${encodeURIComponent(source.blueprint)}&block=${encodeURIComponent(block.id)}${rowQuery}`
   if (block.type === "backlinks") return ""
   if (!block.index) return ""
   const as = source.asPlayer ? "&as=joueur" : ""

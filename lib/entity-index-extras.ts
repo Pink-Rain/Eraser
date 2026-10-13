@@ -172,17 +172,48 @@ async function withPageClassRanks(data: WorldIndexData): Promise<WorldIndexData>
  * et leur finition réelle (calculée sur leurs sorts, comme la page Règles › Classes : la case
  * « Finition » de la feuille n'est qu'un repli). Affichage seulement, rien n'est écrit.
  */
+/**
+ * Une colonne de plus pour les pages : « Campagnes » d'un personnage (aux couleurs des
+ * campagnes), « Personnages » d'une campagne — les liens que l'index local connaît, que
+ * l'accueil montrait sous chaque carte. Affichage seulement : rien n'est écrit dans la feuille.
+ */
+async function withEntityLinkColumn(data: WorldIndexData): Promise<WorldIndexData> {
+  const character = data.key === "characters"
+  const header = character ? "Campagnes" : "Personnages"
+  const links = new Map<string, Array<{ name: string; color?: string }>>()
+  if (character) for (const item of await listAllCharactersForAdmin()) links.set(item.id, item.campaigns.map((campaign) => ({ name: campaign.name, color: campaign.accentColor })))
+  else for (const item of await listAllCampaignsForAdmin()) links.set(item.id, item.characters.map((entry) => ({ name: entry.name })))
+  const options = new Map<string, { value: string; color?: string }>()
+  for (const list of links.values()) for (const link of list) if (link.name && !options.has(link.name)) options.set(link.name, { value: link.name, ...(link.color ? { color: link.color } : {}) })
+  const present = (headers: string[]) => headers.some((candidate) => foldName(candidate) === foldName(header))
+  const tables = data.tables.map((table) => {
+    const idColumn = table.headers.findIndex((candidate) => foldName(candidate) === "id")
+    if (idColumn < 0 || present(table.headers)) return table
+    return { ...table, headers: [...table.headers, header], rows: table.rows.map((row) => {
+      const cell = (links.get((row.values[idColumn] ?? "").trim()) ?? []).map((link) => link.name).filter(Boolean).join(", ")
+      return { ...row, values: [...row.values, cell], html: [...row.html, cell] }
+    }) }
+  })
+  const columns = { ...data.columns }
+  for (const table of tables) {
+    const known = columns[table.tabName] ?? []
+    if (!present(known.map((column) => column.header))) columns[table.tabName] = [...known, { header, spec: { kind: "choice", multiple: true, options: [...options.values()] } }]
+  }
+  return { ...data, tables, columns }
+}
+
 export async function forPageReading(data: WorldIndexData): Promise<WorldIndexData> {
   if (data.key === "class-spells") return withPageClassRanks(data)
-  // Les personnages et les campagnes à la corbeille ne s'affichent pas (comme dans leur index).
+  // Les personnages et les campagnes à la corbeille ne s'affichent pas (comme dans leur index) ;
+  // chaque personnage montre ses campagnes, chaque campagne ses personnages (colonne dérivée).
   if (data.key === "characters" || data.key === "campaigns") {
     try {
       const trashed = await trashedItemIds(data.key === "characters" ? "character" : "campaign")
-      if (!trashed.size) return data
-      return { ...data, tables: data.tables.map((table) => {
+      const kept = !trashed.size ? data : { ...data, tables: data.tables.map((table) => {
         const idColumn = table.headers.findIndex((header) => foldName(header) === "id")
         return idColumn < 0 ? table : { ...table, rows: table.rows.filter((row) => !trashed.has((row.values[idColumn] ?? "").trim())) }
       }) }
+      return await withEntityLinkColumn(kept)
     } catch (error) {
       console.error("PAGE_TRASHED_ENTITIES_FAILED", error instanceof Error ? error.message : "UNKNOWN_ERROR")
       return data

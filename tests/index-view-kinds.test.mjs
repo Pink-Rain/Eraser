@@ -103,3 +103,10 @@ test("les réglages propres à chaque vue se relisent (icônes, couleurs, colonn
   assert.deepEqual(fitted, { kind: "list", iconColumn: "Icône", itemIcon: "star" });
   for (const preset of views.builtinViewPresets) assert.deepEqual(views.cleanViewLayout(preset.layout), preset.layout, preset.id);
 });
+
+test("sections : la lettre en marge et le menu des sections se relisent", () => {
+  const glossary = views.cleanViewLayout({ kind: "list", alphabet: true, menu: "top", look: { sectionStyle: "letter" } });
+  assert.deepEqual(glossary, { kind: "list", alphabet: true, menu: "top", look: { sectionStyle: "letter" } });
+  assert.equal(views.cleanViewLayout({ kind: "list", menu: "bottom" }).menu, undefined);
+  assert.equal(views.cleanViewLayout({ kind: "list", look: { sectionStyle: "huge" } }).look?.sectionStyle, undefined);
+});

@@ -63,11 +63,20 @@ function cellText(row: CardRowSource, column: string) {
 }
 
 /** La couleur d'une valeur dans une liste à couleurs (« Actif » en rouge…). */
-function choiceColor(row: CardRowSource, column: string, value?: string) {
-  const spec = row.spec(column)
-  const options = spec?.options
+function choiceOf(row: CardRowSource, column: string, value?: string) {
+  const options = row.spec(column)?.options
   if (!options?.length) return undefined
-  return matchChoice((value ?? plainCardText(row.value(column) ?? "")).trim(), options)?.color
+  return matchChoice((value ?? plainCardText(row.value(column) ?? "")).trim(), options)
+}
+function choiceColor(row: CardRowSource, column: string, value?: string) {
+  return choiceOf(row, column, value)?.color
+}
+/** L'icône de l'option choisie (la difficulté d'une classe…), devant sa valeur. */
+function ChoiceIcon({ row, column, value, className = "size-3.5" }: { row: CardRowSource; column: string; value?: string; className?: string }) {
+  const icon = choiceOf(row, column, value)?.icon
+  if (!icon) return null
+  const glyph = parseGlyphValue(icon)
+  return <IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className={cn("inline-block shrink-0 align-[-2px]", className)} filled={Boolean(glyph.emoji)} />
 }
 
 /** La couleur d'accent de la carte pour une ligne : une colonne Couleur, un choix coloré, sinon la couleur choisie. */
@@ -169,14 +178,14 @@ function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, 
 
 type BlockContext = { card: CardTemplate; row: CardRowSource; accent: string; onImage: boolean; name: string }
 
-function Pill({ value, color, variant = "soft" }: { value: string; color?: string; variant?: CardBlock["pill"] }) {
+function Pill({ value, color, variant = "soft", icon }: { value: string; color?: string; variant?: CardBlock["pill"]; icon?: ReactNode }) {
   const tint = color && color !== "muted" ? color : undefined
   const style: CSSProperties | undefined = !tint
     ? undefined
     : variant === "solid" ? { backgroundColor: tint, color: "#fffaf0", borderColor: tint }
       : variant === "outline" ? { color: tint, borderColor: tint, backgroundColor: "transparent" }
         : pillStyle(tint)
-  return <span className="inline-block max-w-full whitespace-normal break-words rounded-full border border-foreground/15 bg-muted/40 px-2 py-0.5 text-[11px] font-medium leading-4 [overflow-wrap:anywhere]" style={style}>{value}</span>
+  return <span className="inline-flex max-w-full items-center gap-1 whitespace-normal break-words rounded-full border border-foreground/15 bg-muted/40 px-2 py-0.5 text-[11px] font-medium leading-4 [overflow-wrap:anywhere]" style={style}>{icon}{value}</span>
 }
 
 /**
@@ -187,7 +196,7 @@ function pillsOf(ctx: BlockContext, columns: string[], variant: CardBlock["pill"
   const forced = tone === "accent" ? ctx.accent : tone && tone.startsWith("#") ? tone : undefined
   return columns.flatMap((column) => {
     const values = cardListValues(cellText(ctx.row, column))
-    return values.map((value) => <Pill key={`${column}:${value}`} value={value} color={forced ?? (tone === "muted" ? undefined : choiceColor(ctx.row, column, value))} variant={variant} />)
+    return values.map((value) => <Pill key={`${column}:${value}`} value={value} color={forced ?? (tone === "muted" ? undefined : choiceColor(ctx.row, column, value))} variant={variant} icon={<ChoiceIcon row={ctx.row} column={column} value={value} className="size-3" />} />)
   })
 }
 
@@ -258,7 +267,7 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       return <div className={cn("flex min-w-0 items-baseline gap-2", base(block.size, "xs"))}>
         <span className="shrink-0 text-muted-foreground">{block.label || block.column}</span>
         <span className="min-w-4 flex-1 translate-y-[-3px] border-b border-dotted border-foreground/20" aria-hidden="true" />
-        <span className={cn("min-w-0 text-right font-semibold", look.className)} style={look.style}>{value}</span>
+        <span className={cn("inline-flex min-w-0 items-center justify-end gap-1 text-right font-semibold", look.className)} style={look.style}><ChoiceIcon row={row} column={block.column} value={value} />{value}</span>
       </div>
     }
     case "bar": {

@@ -73,8 +73,8 @@ export type ViewLook = {
   dropCap?: boolean
   /** Maître-détail : largeur de la liste. */
   masterWidth?: "narrow" | "normal" | "wide"
-  /** Sections : un trait discret (d'office) ou un grand titre centré, comme les familles de classes. */
-  sectionStyle?: "bar" | "heading"
+  /** Sections : un trait discret (d'office), un grand titre centré (les familles de classes), ou la lettre en marge (le glossaire). */
+  sectionStyle?: "bar" | "heading" | "letter"
   /** Une couleur d'accent propre à la vue (#hex) : titres de sections, pastilles, ligne du temps, tuiles sans couleur… */
   color?: string
   /** Une icône (nom d'icône ou émoji) devant les titres de sections (et les colonnes du kanban sans icône propre). */
@@ -153,6 +153,8 @@ export type ViewLayout = {
   /** Liste : les lignes numérotées ; rangées par première lettre (sans autre section). */
   numbered?: boolean
   alphabet?: boolean
+  /** Un menu relié aux sections (lettres ou noms des sections) : en haut ou sur le côté ; un clic y descend. */
+  menu?: "top" | "side"
   /** Kanban : ses colonnes réglées une à une ; repliables d'un clic sur leur en-tête. */
   lanes?: KanbanLane[]
   laneCollapse?: boolean
@@ -257,7 +259,7 @@ const lookChoices: { [K in keyof ViewLook]-?: readonly unknown[] } = {
   codexImage: ["side", "banner"],
   dropCap: [true],
   masterWidth: ["narrow", "normal", "wide"],
-  sectionStyle: ["bar", "heading"],
+  sectionStyle: ["bar", "heading", "letter"],
   color: [],
   sectionIcon: [],
   imageWidth: [],
@@ -362,6 +364,8 @@ export function cleanViewLayout(value: unknown): ViewLayout | undefined {
   if (text(raw.badgeColumn)) layout.badgeColumn = text(raw.badgeColumn)
   if (raw.numbered === true) layout.numbered = true
   if (raw.alphabet === true) layout.alphabet = true
+  const menu = oneOf(raw.menu, ["top", "side"] as const)
+  if (menu) layout.menu = menu
   const lanes = Array.isArray(raw.lanes) ? raw.lanes.map(cleanLane).filter((lane): lane is KanbanLane => Boolean(lane)).slice(0, 24) : []
   if (lanes.length) layout.lanes = lanes
   if (raw.laneCollapse === true) layout.laneCollapse = true

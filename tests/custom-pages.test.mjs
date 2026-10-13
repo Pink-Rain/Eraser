@@ -420,7 +420,7 @@ test("Pages d'Eraser : chaque page modifiable a un contenu de départ propre, re
   // L'accueil : « Mes campagnes » et « Mes personnages » en vues filtrées sur le lecteur, le reste en modules.
   const home = blueprints.eraserPageBlueprint("/");
   assert.equal(home.hideHeader, true);
-  assert.deepEqual(pages.allBlocks(home).map((block) => block.type === "view" ? `${block.index}:${block.vis}:${block.where.conditions[0].value}` : block.module), ["accueil-salutation", "campaigns:mj-seul:{Moi}", "characters:joueurs:{Moi}", "accueil-a-faire", "accueil-cote", "accueil-succes"]);
+  assert.deepEqual(pages.allBlocks(home).map((block) => block.type === "view" ? `${block.index}:${block.vis}:${block.where.conditions[0].value}` : block.type === "search" ? "search" : block.module), ["accueil-salutation", "search", "campaigns:mj-seul:{Moi}", "characters:joueurs:{Moi}", "accueil-a-faire", "accueil-cote", "accueil-succes"]);
   // La page d'une classe : sorts rangés par la colonne de la classe, lien vers son créateur qui cite la ligne.
   const classPage = pages.cleanContent(blueprints.eraserPageBlueprint("/regles/classes/[id]"));
   const spells = pages.allBlocks(classPage).find((block) => block.type === "view" && block.index === "class-spells");
@@ -537,4 +537,35 @@ test("Sorts lus par une page : la colonne de rang de chaque classe prend l'ident
   assert.deepEqual(rankHeaders, { Sorts: ["CLA-1", "CLA-2"] });
   assert.equal(ranks.classRankLabels.length, 21);
   assert.equal(tables[0].headers[3], "Guerrier·e");
+});
+
+test("les pages d'Eraser dessinées par le moteur : un plan aux identifiants stables, une page virtuelle lisible", () => {
+  const first = blueprints.stableBlueprint("/regles/classes");
+  const second = blueprints.stableBlueprint("/regles/classes");
+  assert.deepEqual(first, second);
+  const ids = first.sections.flatMap((section) => section.cols.flat()).map((block) => block.id);
+  assert.deepEqual(ids, ids.map((_, at) => `b${at + 1}`));
+  assert.equal(first.sections[0].id, "s1");
+  // Les mêmes identifiants que le plan adopté, sans le hasard : la route des blocs les retrouve.
+  const page = blueprints.virtualEraserPage("/regles/vocabulaire");
+  assert.equal(page.id, "eraser:/regles/vocabulaire");
+  assert.equal(blueprints.virtualPagePath(page.id), "/regles/vocabulaire");
+  assert.equal(page.replaces, "/regles/vocabulaire");
+  assert.equal(page.status, "publiee");
+  const view = pages.pageForViewer(page, { role: "joueur", uid: "u1", member: false, manager: false });
+  assert.ok(view, "un joueur lit la page virtuelle");
+  const blocks = view.sections.flatMap((section) => section.cols.flat());
+  const glossary = blocks.find((block) => block.type === "view");
+  assert.equal(glossary.index, "vocabulary");
+  assert.equal(glossary.layout.alphabet, true);
+  assert.equal(glossary.layout.menu, "top");
+  assert.equal(glossary.layout.look.sectionStyle, "letter");
+  assert.equal(glossary.layout.itemCard, "eraser-vocabulaire-entree");
+  // Le lien « Ouvrir l'index » est réservé aux MJ : un joueur ne le reçoit pas.
+  assert.ok(!blocks.some((block) => block.type === "link"));
+  // Hors des pages dessinées par le moteur : rien.
+  assert.equal(blueprints.virtualEraserPage("/regles/combat"), null);
+  assert.equal(blueprints.enginePageOf("/regles/classes?x=1"), "/regles/classes");
+  assert.equal(blueprints.enginePageOf("/regles/classes/CLA-1"), null);
+  assert.equal(blueprints.enginePageOf("/"), "/");
 });

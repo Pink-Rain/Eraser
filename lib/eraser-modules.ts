@@ -24,6 +24,7 @@ export type EraserModuleKey =
   | "accueil-a-faire"
   | "classe-presentation"
   | "classe-specificites"
+  | "classes-accents"
 
 export type EraserModule = { key: EraserModuleKey; label: string; hint: string }
 
@@ -37,6 +38,7 @@ export const eraserModules: EraserModule[] = [
   { key: "accueil-cote", label: "Accueil : colonne de côté", hint: "Règles, joueurs et MJ, index favoris, outils" },
   { key: "accueil-succes", label: "Accueil : succès", hint: "Les succès du compte" },
   { key: "accueil-a-faire", label: "Accueil : choses à faire", hint: "La liste des choses à faire des admins (admins seulement)" },
+  { key: "classes-accents", label: "Classes : couleurs d’accent", hint: "Règles › Classes : calcule en arrière-plan la couleur d’accent des classes qui n’en ont pas (admins seulement, rien d’affiché)" },
   { key: "classe-presentation", label: "Classe : présentation", hint: "Page d’une classe : caractéristiques principales et secondaires, spécialités" },
   { key: "classe-specificites", label: "Classe : spécificités", hint: "Page d’une classe : ses tableaux propres (les cartes du Cartomancien…)" },
 ]

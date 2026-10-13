@@ -109,6 +109,9 @@ export const EFFECT_FX_APPLY_HEADER = "FX appliqué à"
  * lues et écrites ailleurs par le code d'Eraser (par le nom de leurs colonnes) ; le moteur
  * leur donne tout le reste : tableau, fiche, « Modifier », onglets-fenêtres, formules…
  */
+/** L'icône de chaque difficulté de classe (celles de la carte de Règles › Classes). */
+export const classDifficultyIcons: Record<(typeof classDifficultyValues)[number], string> = { Facile: "feather", Intermédiaire: "gauge", Difficile: "flame", Expert: "crown", X: "circle-help" }
+
 export type EntityWorldIndexKey = "npcs" | "campaigns" | "characters" | "classes" | "class-spells" | "creature-spells" | "rank-bonuses"
 
 export type BuiltinWorldIndexKey = "creatures" | "places" | "religions" | "peoples" | "languages" | "states" | "weapon-modifiers" | "skills" | "achievements" | "vocabulary" | "calendars" | EntityWorldIndexKey
@@ -871,7 +874,7 @@ function entityColumnSpec(index: EntityWorldIndexKey, header: string): IndexColu
     // =IMAGE, image dans la cellule ou fichier du Drive) ; en importer une la remplace.
     if (is("Image")) return { kind: "file", file: { accept: "image" }, description: "L’image de la classe. Importer une image (ou coller une adresse) la remplace dans la case." }
     if (is("Type")) return { kind: "choice", options: classTypeValues.map((value) => ({ value })) }
-    if (is("Difficulté")) return { kind: "choice", options: classDifficultyValues.map((value) => ({ value })) }
+    if (is("Difficulté")) return { kind: "choice", options: classDifficultyValues.map((value) => ({ value, icon: classDifficultyIcons[value] })) }
     if (is("Couleur d’accent sombre", "Couleur d’accent clair")) return { kind: "color" }
     return { kind: "rich" }
   }

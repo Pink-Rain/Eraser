@@ -14,6 +14,7 @@ import { listIndexCards } from "@/lib/index-cards-store"
 import { listIndexPresentations, listIndexStatsRecord, listViewPresets } from "@/lib/index-presentations-store"
 import { builtinViewPresets, presentationFor, type PresentationKind } from "@/lib/index-view-layouts"
 import { rowOfRoute } from "@/lib/page-replacements"
+import { virtualEraserPage } from "@/lib/eraser-page-blueprints"
 import { authorizedAccount } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick, knownWorldIndexKey } from "@/lib/world-indexes"
@@ -130,8 +131,10 @@ export async function GET(request: Request) {
     }
 
     const pageId = parameters.get("page")
-    if (pageId) {
-      const page = await readCustomPage(pageId)
+    const blueprintPath = parameters.get("blueprint")
+    if (pageId || blueprintPath) {
+      // Une page d'Eraser dessinée par le moteur (sans page enregistrée) : son plan, aux mêmes identifiants de blocs.
+      const page = pageId ? await readCustomPage(pageId) : virtualEraserPage(blueprintPath ?? "")
       const view = page ? pageForViewer(page, await viewerFor(account, page), { draft: parameters.get("draft") === "1" }) : null
       const block = view?.sections.flatMap((section) => section.cols.flat()).find((item) => item.id === parameters.get("block"))
       if (!block || (block.type !== "view" && block.type !== "stat" && block.type !== "backlinks")) return NextResponse.json({ error: "Ce bloc n’existe pas, ou il ne t’est pas ouvert." }, { status: 404 })

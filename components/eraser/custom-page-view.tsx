@@ -5,6 +5,7 @@ import { useMemo, useState, type ReactNode } from "react"
 import { ChevronRight, EyeOff, Puzzle, FileText, ImageOff, Info, LoaderCircle, LockKeyhole, NotebookPen, PenLine, ShieldAlert, Sparkles, TriangleAlert, WandSparkles } from "lucide-react"
 
 import { usePageEditTarget } from "@/components/eraser/app-shell"
+import { virtualPagePath } from "@/lib/eraser-page-blueprints"
 import { Button } from "@/components/ui/button"
 import { IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { DEFAULT_LAYOUT_ACCENT, FieldLabel, IndexLayoutView } from "@/components/eraser/index-layout-view"
@@ -368,7 +369,7 @@ export function CustomPageView({ initial, links, campaignName, indexPaths, row: 
   }
 
   const context: BlockContext = {
-    source: { pageId: view.id, draft: view.draft, ...(row ? { row: { index: row.index, id: row.id } } : {}) },
+    source: virtualPagePath(view.id) ? { blueprint: virtualPagePath(view.id)!, ...(row ? { row: { index: row.index, id: row.id } } : {}) } : { pageId: view.id, draft: view.draft, ...(row ? { row: { index: row.index, id: row.id } } : {}) },
     row,
     canReveal: view.canReveal,
     links,

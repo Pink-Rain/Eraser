@@ -119,6 +119,8 @@ export type ChoiceOption = {
   aliases?: string[]
   /** Couleur de la pastille (code CSS). */
   color?: string
+  /** Une icône (nom d'icône ou émoji) devant la valeur, dans les cartes et les vues. */
+  icon?: string
   /** Groupe de l'option (« À faire », « En cours », « Fini »…). */
   group?: string
 }

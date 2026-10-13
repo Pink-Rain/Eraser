@@ -16,7 +16,7 @@
  */
 import { hasUnpublishedChanges, newId, slugify, type CustomPage, type PageRole, type PageVisibility, type ModuleBlock, type PageBlock, type PageContent, type PageSection, type PageSectionBlock, type SectionLayout } from "@/lib/custom-pages"
 import type { EraserModuleKey } from "@/lib/eraser-modules"
-import { replaceableRoutes, replacementLabel, type ReplaceMode } from "@/lib/page-replacements"
+import { matchesReplacement, replaceableRoutes, replacementLabel, type ReplaceMode } from "@/lib/page-replacements"
 
 type Blueprint = Omit<PageContent, "sections"> & { sections: PageSectionBlock[] }
 
@@ -43,6 +43,7 @@ const blueprints: Record<string, () => Blueprint> = {
     sections: [
       section("1", [eraserModule("accueil-salutation")]),
       section("side-r", [
+        { id: newId("b"), vis: "tous", type: "search", placeholder: "Chercher une campagne, un personnage", heading: "" },
         { id: newId("b"), vis: "mj-seul", type: "view", index: "campaigns", tab: "Campagnes", kind: "list", limit: 0, height: "auto", heading: "Mes campagnes", rowMatch: "",
           layout: { kind: "list", itemCard: "eraser-campagne-grille", listColumns: 2 }, where: { match: "toutes", conditions: [{ column: "MJ", operator: "est", value: "{Moi}" }] }, sort: { column: "Nom de la campagne", desc: false }, click: "/campagne/{ID}" },
         { id: newId("b"), vis: "joueurs", type: "view", index: "characters", tab: "Personnages", kind: "list", limit: 0, height: "auto", heading: "Mes personnages", rowMatch: "",
@@ -63,6 +64,7 @@ const blueprints: Record<string, () => Blueprint> = {
     sections: [section("1", [
       link("/creation-de-classe", "Créateur de classe", "Créer une classe, ses rangs et ses sorts.", { compact: true, vis: "mj" }),
       { id: newId("b"), vis: "tous", type: "view", index: "classes", tab: "Classes", kind: "list", limit: 0, height: "auto", heading: "", rowMatch: "", presetId: "eraser:classes-par-famille" },
+      { ...eraserModule("classes-accents"), vis: "admin" },
     ])],
   }),
   // La page d'une classe : la page de chaque ligne de l'index des classes. Ses sorts sont une
@@ -87,9 +89,15 @@ const blueprints: Record<string, () => Blueprint> = {
       section("1", [eraserModule("classe-specificites")]),
     ],
   }),
+  // Le glossaire : une vue de l'index du vocabulaire, rangée par première lettre, la lettre en
+  // marge, le menu des lettres en haut, chaque mot dessiné avec la carte « Entrée de glossaire ».
   "/regles/vocabulaire": () => ({
     title: "Vocabulaire", icon: "book-text", emoji: "", description: "Le dictionnaire des mots qu’on utilise sans arrêt autour de la table, rangés par ordre alphabétique.",
-    sections: [section("1", [link("/ressources/index-du-vocabulaire", "Ouvrir l’index du vocabulaire", "Ajouter, renommer, ranger les mots dans l’index.", { compact: true, vis: "mj" }), eraserModule("vocabulaire")])],
+    sections: [section("1", [
+      link("/ressources/index-du-vocabulaire", "Ouvrir l’index du vocabulaire", "Ajouter, renommer, ranger les mots dans l’index.", { compact: true, vis: "mj" }),
+      { id: newId("b"), vis: "tous", type: "view", index: "vocabulary", tab: "Vocabulaire", kind: "list", limit: 0, height: "auto", heading: "", rowMatch: "",
+        layout: { kind: "list", alphabet: true, menu: "top", itemCard: "eraser-vocabulaire-entree", listColumns: 2, hideCounts: true, look: { sectionStyle: "letter", surface: "plain", density: "compact" } }, sort: { column: "Nom", desc: false } },
+    ])],
   }),
   "/regles/combat": () => ({
     title: "Combat", icon: "swords", emoji: "", description: "Les règles de tours, d’actions, d’états et de résolution des affrontements seront réunies ici.",
@@ -112,6 +120,69 @@ const blueprints: Record<string, () => Blueprint> = {
 
 /** Les pages qu'on redessine en blocs (les autres gardent leur contenu d'origine en un module). */
 export const redrawnPaths = Object.keys(blueprints)
+
+/**
+ * Les pages d'Eraser dessinées par le moteur des pages sans rien enregistrer : tant qu'aucune
+ * page du créateur ne les remplace, elles se rendent depuis leur plan de blocs — leurs vues,
+ * leurs cartes et leurs formes sont celles réglées dans leur index. « Modifier la page » les
+ * reprend dans l'atelier (une page de remplacement, en brouillon, du même plan) ; « Voir la
+ * page d'origine » (admins et MJ) montre encore le rendu codé à part.
+ */
+export const enginePages = ["/", "/regles/classes", "/regles/vocabulaire"]
+
+/** Le modèle d'adresse (« /regles/classes ») d'une adresse demandée, parmi les pages dessinées par le moteur. */
+export function enginePageOf(pathname: string) {
+  return enginePages.find((path) => matchesReplacement(path, pathname)) ?? null
+}
+
+/** L'identifiant de la page virtuelle d'une page d'Eraser : « eraser:/regles/classes ». */
+export const VIRTUAL_PAGE_PREFIX = "eraser:"
+export const isVirtualPageId = (id: string) => id.startsWith(VIRTUAL_PAGE_PREFIX)
+export const virtualPagePath = (id: string) => isVirtualPageId(id) ? id.slice(VIRTUAL_PAGE_PREFIX.length) : null
+
+/**
+ * Le plan d'une page avec des identifiants stables (s1, b1, b2…, dans l'ordre de lecture) :
+ * la page virtuelle et la route qui lit ses blocs le rebâtissent chacune de leur côté et
+ * doivent se retrouver sur les mêmes identifiants.
+ */
+export function stableBlueprint(path: string): PageContent | null {
+  const known = blueprints[path]
+  if (!known) return null
+  const content = known()
+  let blocks = 0
+  return {
+    ...content,
+    sections: content.sections.map((section, at) => ({
+      ...section,
+      id: `s${at + 1}`,
+      cols: section.cols.map((column) => column.map((block) => { blocks += 1; return { ...block, id: `b${blocks}` } })),
+    })),
+  }
+}
+
+/** La page virtuelle (jamais enregistrée) qui dessine une page d'Eraser depuis son plan ; `null` hors des pages dessinées par le moteur. */
+export function virtualEraserPage(path: string): CustomPage | null {
+  if (!enginePages.includes(path)) return null
+  const content = stableBlueprint(path)
+  if (!content) return null
+  const author = { uid: "", name: "Eraser" }
+  const stamp = "2000-01-01T00:00:00.000Z"
+  return {
+    ...content,
+    id: `${VIRTUAL_PAGE_PREFIX}${path}`,
+    slug: blueprintSlug(path),
+    place: "hors-menu",
+    campaignId: "",
+    vis: blueprintVisibility(path),
+    status: "publiee",
+    replaces: path,
+    replaceMode: "replace",
+    createdAt: stamp, createdBy: author, updatedAt: stamp, updatedBy: author,
+    published: content, publishedAt: stamp, publishedBy: author,
+    trashedAt: "", trashedBy: null,
+    live: {},
+  }
+}
 
 /**
  * Le contenu de départ de la page qui remplace `path` : redessinée en blocs si on sait le

@@ -121,7 +121,8 @@ function SectionsSettings({ ctx, withAlphabet = false }: { ctx: Ctx; withAlphabe
         <Toggle checked={Boolean(layout.hideCounts)} onChange={(hideCounts) => set({ hideCounts: hideCounts || undefined })} disabled={disabled}>Sans le nombre de lignes</Toggle>
       </div>
       <div className="flex flex-wrap items-end gap-3">
-        <Choice label="Titre des sections" value={look.sectionStyle ?? "bar"} options={[{ value: "bar", label: "Trait discret" }, { value: "heading", label: "Grand titre centré" }]} onChange={(sectionStyle) => setLook({ sectionStyle: sectionStyle === "bar" ? undefined : sectionStyle })} disabled={disabled} />
+        <Choice label="Titre des sections" value={look.sectionStyle ?? "bar"} options={[{ value: "bar", label: "Trait discret" }, { value: "heading", label: "Grand titre centré" }, { value: "letter", label: "En marge (glossaire)" }]} onChange={(sectionStyle) => setLook({ sectionStyle: sectionStyle === "bar" ? undefined : sectionStyle })} disabled={disabled} />
+        <Choice label="Menu des sections" value={layout.menu ?? "none"} options={[{ value: "none", label: "Aucun" }, { value: "top", label: "En haut" }, { value: "side", label: "Sur le côté" }]} onChange={(menu) => set({ menu: menu === "none" ? undefined : menu })} disabled={disabled} />
         <span className={fieldLabel}>Icône des sections<IconPick value={look.sectionIcon} onChange={(sectionIcon) => setLook({ sectionIcon })} disabled={disabled} /></span>
       </div>
     </>}

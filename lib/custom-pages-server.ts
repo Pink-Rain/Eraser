@@ -13,6 +13,7 @@ import { knownMenuLayout } from "@/lib/app-menu-store"
 import { listCustomIndexes } from "@/lib/custom-indexes"
 import { entityColumnHiddenForPlayers } from "@/lib/index-references-entities"
 import { isForbiddenReplacement, isReplaceablePath, matchesReplacement } from "@/lib/page-replacements"
+import { enginePageOf, virtualEraserPage } from "@/lib/eraser-page-blueprints"
 import type { AuthorizedUser } from "@/lib/server-auth"
 import { worldIndexDefinitions, type WorldIndexKey } from "@/lib/world-index-definitions"
 import { getWorldIndexQuick } from "@/lib/world-indexes"
@@ -198,6 +199,12 @@ export function replacementFor(pathname: string, account: Pick<AuthorizedUser, "
     const view = pageForViewer(page, viewer)
     if (view) return { page, view, mode: page.replaceMode ?? "after" }
   }
+  // Rien d'enregistré : les pages dessinées par le moteur se rendent depuis leur plan.
+  const enginePath = enginePageOf(pathname)
+  const virtual = enginePath ? virtualEraserPage(enginePath) : null
+  const view = virtual ? pageForViewer(virtual, viewer) : null
+  // Jamais ouverte telle quelle dans l'atelier : « Modifier la page » l'adopte d'abord.
+  if (virtual && view) return { page: virtual, view: { ...view, editable: false, unpublished: false }, mode: "replace" as const }
   return null
 }
 

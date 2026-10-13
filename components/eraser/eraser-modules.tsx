@@ -3,7 +3,10 @@ import { Files } from "lucide-react"
 
 import { customPageLinks } from "@/components/eraser/custom-page-links"
 import { DeferredContentLoading } from "@/components/eraser/deferred-content-loading"
+import { ClassAccentSampler } from "@/components/eraser/class-accent-sampler"
 import { ClassPresentationPanel, ClassSupplementsPanel } from "@/components/eraser/class-detail"
+import { classImageUrl } from "@/lib/class-images"
+import { listClasses } from "@/lib/google-sheets"
 import { HomeAchievementsPanel, HomeGreeting, HomeMain, HomeSide, HomeTodos } from "@/components/eraser/home-shell"
 import { getClassContent } from "@/lib/class-content"
 import { IndexDirectory } from "@/components/eraser/index-directory"
@@ -39,6 +42,18 @@ async function Vocabulary({ canEdit }: { canEdit: boolean }) {
   return <VocabularyGlossary initialEntries={entries} canEdit={canEdit} loadError={loadError} inPage />
 }
 
+/** Règles › Classes, pour un admin : l'échantillonneur qui tire des images la couleur d'accent des classes qui n'en ont pas encore (rien d'affiché). */
+async function ClassAccents() {
+  const classes = await listClasses().catch(() => [])
+  const imageCounts = new Map<string, number>()
+  classes.forEach((characterClass) => imageCounts.set(characterClass.image, (imageCounts.get(characterClass.image) || 0) + 1))
+  const targets = classes.flatMap((characterClass) => {
+    const imageUrl = classImageUrl(characterClass.image)
+    return !characterClass.accentReady && imageUrl && imageCounts.get(characterClass.image) === 1 ? [{ id: characterClass.id, imageUrl }] : []
+  })
+  return targets.length ? <ClassAccentSampler targets={targets} /> : null
+}
+
 /** Un morceau de la page d'une classe : la classe de la page (page qui remplace celle d'une classe). */
 async function ClassPart({ classId, part }: { classId: string; part: "presentation" | "supplements" }) {
   const content = await getClassContent(classId).catch((error) => {
@@ -63,6 +78,7 @@ function render(block: ModuleBlock, context: ModuleContext): ReactNode {
     case "accueil-cote": return <HomeSide />
     case "accueil-succes": return <HomeAchievementsPanel />
     case "accueil-a-faire": return context.account.role === "admin" ? <HomeTodos /> : null
+    case "classes-accents": return context.account.role === "admin" ? <Suspense fallback={null}><ClassAccents /></Suspense> : null
     case "classe-presentation":
     case "classe-specificites":
       // Sans classe (atelier, adresse propre de la page) : l'emplacement seulement.

@@ -200,11 +200,25 @@ function Item({ row, props, fields, framed, extra, className = "", lead }: { row
   </article>
 }
 
-function Section({ title, count, collapsible, startCollapsed, color, hideCount, heading, icon, accent, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; heading?: boolean; icon?: string; accent?: string; children: ReactNode }) {
+/** L'ancre d'une section dans la page (le menu des sections y descend). */
+const sectionAnchor = (title: string) => `section-${(title || "sans-valeur").normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").replace(/[^a-z0-9#]+/g, "-")}`
+
+function Section({ title, count, collapsible, startCollapsed, color, hideCount, heading, letter, icon, accent, children }: { title: string; count: number; collapsible?: boolean; startCollapsed?: boolean; color?: string; hideCount?: boolean; heading?: boolean; letter?: boolean; icon?: string; accent?: string; children: ReactNode }) {
   const [open, setOpen] = useState(!startCollapsed)
   const glyph = <Glyph value={icon} className={heading ? "size-6" : "size-3.5"} color={color ?? accent} />
+  const anchor = sectionAnchor(title)
+  // La lettre (ou le nom) en marge, grande et qui reste visible en défilant : le glossaire.
+  if (letter) return <section id={anchor} className="grid gap-x-6 gap-y-3 sm:grid-cols-[minmax(5rem,8rem)_minmax(0,1fr)]">
+    <div className="sm:sticky sm:top-20 sm:self-start">
+      {collapsible
+        ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex items-center gap-2 font-display text-6xl font-semibold leading-none hover:text-primary sm:text-[7.5rem]" style={{ color: color ?? accent }}>{title || "—"}</button>
+        : <h2 className="font-display text-6xl font-semibold leading-none sm:text-[7.5rem]" style={{ color: color ?? accent }}>{glyph}{title || "—"}</h2>}
+      {!hideCount && <p className="mt-1 text-xs text-muted-foreground">{count}</p>}
+    </div>
+    {open && <div className="min-w-0">{children}</div>}
+  </section>
   // Un grand titre centré, au-dessus d'un trait (les familles de la page des classes).
-  if (heading) return <section className="space-y-5">
+  if (heading) return <section id={anchor} className="space-y-5">
     {collapsible
       ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold hover:text-primary sm:text-4xl"><ChevronDown className={`size-5 transition-transform ${open ? "" : "-rotate-90"}`} />{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</button>
       : <h2 className="flex items-center justify-center gap-2 border-b pb-3 text-center font-display text-3xl font-semibold sm:text-4xl">{color && !icon && <span className="size-3 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}{!hideCount && <span className="text-base font-normal text-muted-foreground">{count}</span>}</h2>}
@@ -212,7 +226,7 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
   </section>
   const label = <><span className="flex items-center gap-2">{color && !icon && <span className="size-2.5 rounded-full" style={{ backgroundColor: color }} />}{glyph}{title || "Sans valeur"}</span>{!hideCount && <span className="text-muted-foreground">{count}</span>}</>
   const tone: CSSProperties = { color: accent ?? "var(--primary)" }
-  return <section className="space-y-2">
+  return <section id={anchor} className="space-y-2">
     {collapsible
       ? <button type="button" aria-expanded={open} onClick={() => setOpen((value) => !value)} className="flex w-full items-center gap-2 border-b pb-1.5 text-left text-xs font-semibold uppercase tracking-[0.14em] opacity-80 hover:opacity-100" style={tone}><ChevronDown className={`size-3.5 transition-transform ${open ? "" : "-rotate-90"}`} /><span className="flex flex-1 items-center justify-between gap-2">{label}</span></button>
       : <p className="flex items-center justify-between gap-2 border-b pb-1.5 text-xs font-semibold uppercase tracking-[0.14em] opacity-80" style={tone}>{label}</p>}
@@ -221,19 +235,33 @@ function Section({ title, count, collapsible, startCollapsed, color, hideCount, 
 }
 
 /** Les lignes rangées en sections si la présentation le demande (une colonne, ou la première lettre du nom). */
+/** Le menu relié aux sections : leurs lettres ou leurs noms, en haut ou sur le côté ; un clic descend à la section. */
+function SectionMenu({ names, accent, side }: { names: string[]; accent?: string; side?: boolean }) {
+  if (!names.length) return null
+  return <nav aria-label="Sections" className={side ? "flex flex-wrap gap-1 lg:sticky lg:top-20 lg:flex-col lg:self-start" : "flex flex-wrap gap-1"}>
+    {names.map((name) => <a key={name || "*"} href={`#${sectionAnchor(name)}`} className={`rounded-full border bg-card px-2.5 py-0.5 text-xs font-semibold transition-colors hover:bg-muted ${side ? "lg:rounded-md lg:border-0 lg:bg-transparent lg:px-2 lg:py-1 lg:text-sm lg:font-medium" : ""}`} style={{ color: accent }}>{name || "Sans valeur"}</a>)}
+  </nav>
+}
+
 function Sections({ layout, rows, valueOf, nameOf, optionsOf, render }: { layout: ViewLayout; rows: string[]; valueOf: ViewLayoutProps["valueOf"]; nameOf?: ViewLayoutProps["nameOf"]; optionsOf?: ViewLayoutProps["optionsOf"]; render: (rows: string[]) => ReactNode }) {
   const look = layout.look ?? {}
   const heading = look.sectionStyle === "heading"
+  const letter = look.sectionStyle === "letter"
+  const spacing = heading ? "space-y-14" : letter ? "space-y-10" : "space-y-5"
+  // Le menu des sections (lettres ou noms) : au-dessus des sections, ou à leur gauche sur un grand écran.
+  const withMenu = (names: string[], body: ReactNode) => !layout.menu ? body
+    : layout.menu === "side" ? <div className="grid gap-5 lg:grid-cols-[9rem_minmax(0,1fr)]"><SectionMenu names={names} accent={look.color} side />{body}</div>
+      : <div className="grid gap-5"><SectionMenu names={names} accent={look.color} />{body}</div>
   if (!layout.groupBy && layout.alphabet && nameOf) {
     // L'annuaire : une section par première lettre (les accents pliés, les chiffres et symboles sous « # »).
-    const letter = (row: string) => { const first = plain(nameOf(row)).normalize("NFD").replace(/[̀-ͯ]/g, "").charAt(0).toLocaleUpperCase("fr"); return /[A-Z]/.test(first) ? first : "#" }
-    const groups = [...new Set(rows.map(letter))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => letter(row) === name) }))
-    return <div className={heading ? "space-y-14" : "space-y-5"}>{groups.map((group) => <Section key={group.name} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} icon={look.sectionIcon} accent={look.color}>{render(group.rows)}</Section>)}</div>
+    const first = (row: string) => { const initial = plain(nameOf(row)).normalize("NFD").replace(/[̀-ͯ]/g, "").charAt(0).toLocaleUpperCase("fr"); return /[A-Z]/.test(initial) ? initial : "#" }
+    const groups = [...new Set(rows.map(first))].sort((left, right) => left === "#" ? 1 : right === "#" ? -1 : left.localeCompare(right, "fr")).map((name) => ({ name, rows: rows.filter((row) => first(row) === name) }))
+    return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color}>{render(group.rows)}</Section>)}</div>)
   }
   if (!layout.groupBy) return <>{render(rows)}</>
   const options = optionsOf?.(layout.groupBy) ?? []
   const groups = groupRowsBy(rows, (row) => valueOf(row, layout.groupBy!), options.map((option) => option.value)).filter((group) => group.name || !layout.hideEmpty)
-  return <div className={heading ? "space-y-14" : "space-y-5"}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} icon={look.sectionIcon} accent={look.color} color={options.find((option) => fold(option.value) === fold(group.name))?.color}>{render(group.rows)}</Section>)}</div>
+  return withMenu(groups.map((group) => group.name), <div className={spacing}>{groups.map((group) => <Section key={group.name || "*"} title={group.name} count={group.rows.length} collapsible={layout.collapsible} startCollapsed={layout.collapsed} hideCount={layout.hideCounts} heading={heading} letter={letter} icon={look.sectionIcon} accent={look.color} color={options.find((option) => fold(option.value) === fold(group.name))?.color}>{render(group.rows)}</Section>)}</div>)
 }
 
 const PAGE = 60
