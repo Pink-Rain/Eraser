@@ -531,8 +531,22 @@ async function createWindow(address, bounds = null) {
   win.webContents.on("render-process-gone", (_event, details) => {
     logLine(`[interface:error] Le moteur d’affichage s’est arrêté : ${details.reason}.`)
   })
-  await win.loadURL(address.startsWith(url) ? address : url)
+  try {
+    await win.loadURL(address.startsWith(url) ? address : url)
+  } catch (error) {
+    // Un premier chargement interrompu par une autre navigation (mise à jour appliquée avant la
+    // fin du chargement, lien suivi, page rechargée) n'est pas une panne : la fenêtre affiche
+    // déjà la nouvelle page. Seul un vrai échec (serveur injoignable…) remonte.
+    if (!isAbortedLoad(error)) throw error
+    logLine(`[interface] Premier chargement remplacé par une autre navigation (${error instanceof Error ? error.message : error}).`)
+  }
   return win
+}
+
+/** Un chargement annulé parce qu'une autre navigation l'a remplacé (ERR_ABORTED, -3). */
+function isAbortedLoad(error) {
+  if (!error || typeof error !== "object") return false
+  return error.code === "ERR_ABORTED" || error.errno === -3 || /ERR_ABORTED/.test(String(error.message ?? ""))
 }
 
 function ensureUpdaterConfigured() {
@@ -902,6 +916,12 @@ app.whenReady().then(async () => {
     setTimeout(() => void prepareUpdates(), 10_000)
     setInterval(() => void prepareUpdates(), UPDATE_CHECK_INTERVAL_MS)
   } catch (error) {
+    // La fenêtre est ouverte et le service répond : une erreur après coup (un chargement
+    // interrompu…) ne doit pas fermer Eraser. Elle est notée au journal.
+    if (mainWindow && !mainWindow.isDestroyed() && serverUrl && isAbortedLoad(error)) {
+      logLine(`[interface:error] ${error instanceof Error ? error.message : String(error)} (Eraser reste ouvert)`)
+      return
+    }
     const details = recentLog()
     dialog.showErrorBox(
       "Impossible d’ouvrir Eraser",
