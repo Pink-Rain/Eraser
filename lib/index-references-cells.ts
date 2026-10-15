@@ -108,6 +108,9 @@ export function rowDetails(table: SourceTable, row: SourceRow, options: { object
  * Les cases du survol, rangées : vides et colonnes privées (joueurs) laissées de côté. Le
  * serveur s'en sert pour les citations « { », l'aperçu de « Modifier › Survol » aussi.
  */
+/** La colonne d'une couleur lue dans la ligne (« {Couleur} »), sinon rien. */
+const colorColumnOf = (value: string | undefined) => value?.match(/^\{([^{}]+)\}$/)?.[1].trim() ?? ""
+
 export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow, hidden: (column: string) => boolean): ResolvedLayout {
   const columns = table.headers.filter((header) => header.trim() && !hidden(header) && !isIdHeader(header))
   const cells = columns.flatMap((header): ResolvedLayoutField[] => {
@@ -116,7 +119,9 @@ export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow,
   })
   // Un bloc (paliers, tuiles…) emporte les cases qu'il lit, vides comprises (il sait quoi en faire).
   const arranged = arrangeLayout(layout, cells, (cell) => cell.column, (field) => {
-    const needed = blockColumns(field.block).filter((column) => !hidden(column))
+    // Les couleurs lues dans une colonne (tuiles, trait) viennent avec : la carte n'a pas la ligne.
+    const colors = field.block.kind === "tiles" ? Object.values(field.block.colors ?? {}) : field.block.kind === "divider" ? [field.block.color] : []
+    const needed = [...blockColumns(field.block), ...colors.map(colorColumnOf).filter(Boolean)].filter((column) => !hidden(column))
     const read = needed.flatMap((column) => { const cell = citedCell(table, row, column); return cell ? [[cell.column, { value: cell.value, valueHtml: cell.valueHtml }] as const] : [] })
     return { column: field.column, value: "", valueHtml: "", block: field.block, cells: Object.fromEntries(read) }
   })
@@ -143,7 +148,11 @@ export function hoverOf(layout: IndexLayout, table: SourceTable, row: SourceRow,
   const banner = layout.banner && bannerValue ? { value: bannerValue, ...(layout.banner.height ? { height: layout.banner.height } : {}) } : undefined
   // La couleur d'accent réglée (« {Couleur} », « #… ») : résolue ici, la carte n'a pas la ligne.
   const accent = layout.accent ? resolveLayoutColor(layout.accent, "", (column) => pick(column)) : ""
+  // Les autres couleurs « {Colonne} » (libellés, sections, fond) : leurs cases, pour que la carte les résolve.
+  const colorColumns = [layout.look?.background, layout.look?.labelColor, ...sections.flatMap((section) => [section.color, ...section.rows.flatMap((line) => line.fields.map((field) => field.color))]), ...arranged.aside.map((field) => field.color)].map(colorColumnOf).filter(Boolean)
+  const colorCells = Object.fromEntries(colorColumns.flatMap((column) => { const value = pick(column); return value ? [[foldName(column), value] as const] : [] }))
   return {
+    ...(Object.keys(colorCells).length ? { colorCells } : {}),
     ...(image ? { image } : {}),
     ...(subtitle ? { subtitle } : {}),
     ...(icon ? { icon } : {}),

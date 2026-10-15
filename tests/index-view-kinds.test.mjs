@@ -94,7 +94,8 @@ test("les réglages propres à chaque vue se relisent (icônes, couleurs, colonn
   const list = views.cleanPresentation({ kind: "list", numbered: true, alphabet: true, iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", fields: ["A", "B", "C", "D", "E", "F", "G", "H", "I"], look: { surface: "zebra", color: "#397f88", sectionIcon: "flag", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent" } });
   assert.deepEqual(list, { kind: "list", fields: ["A", "B", "C", "D", "E", "F", "G", "H"], iconColumn: "Icône", itemIcon: "skull", badgeColumn: "Rang", numbered: true, alphabet: true, look: { surface: "zebra", radius: "lg", shadow: true, titleCaps: true, fieldColor: "accent", color: "#397f88", sectionIcon: "flag" } });
   const kanban = views.cleanPresentation({ kind: "kanban", kanbanColumn: "État", laneCollapse: true, lanes: [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }, { value: "" }, { value: "Rien" }] });
-  assert.deepEqual(kanban.lanes, [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }]);
+  // Une valeur seule reste (colonne ajoutée à la main) ; une valeur vide est écartée.
+  assert.deepEqual(kanban.lanes, [{ value: "En cours", label: "WIP", color: "#b3261e", icon: "⚔️", limit: 3 }, { value: "Fini", hidden: true }, { value: "Rien" }]);
   assert.equal(kanban.laneCollapse, true);
   const master = views.cleanPresentation({ kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });
   assert.deepEqual(master, { kind: "master-detail", masterSide: "right", detailColumns: 3, detailImage: "banner" });

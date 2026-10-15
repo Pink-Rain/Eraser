@@ -151,7 +151,7 @@ export type ImageBoxValue = { widthPct?: number; heightPct?: number; autoHeight?
  * l'élément), « auto » au bout du curseur de hauteur, le bouton lier / délier, les bords
  * auxquels l'image est collée. Une seule ligne de réglages.
  */
-export function ImageBoxControls({ value, defaults, onChange, disabled, radius, onRadius, unit = "%", widthRange = [5, 100], heightRange = [5, 300], withEdges = true, withBare = true, edgeLabels }: {
+export function ImageBoxControls({ value, defaults, onChange, disabled, radius, onRadius, unit = "%", widthRange = [5, 100], heightRange = [5, 300], withEdges = true, withBare = true, withAuto = true, onBare, edgeLabels }: {
   value: ImageBoxValue
   /** Ce qui s'affiche quand rien n'est réglé (déduit des anciens réglages). */
   defaults: { widthPct: number; heightPct?: number; autoHeight?: boolean; edges: Array<"top" | "bottom" | "left" | "right"> }
@@ -166,17 +166,21 @@ export function ImageBoxControls({ value, defaults, onChange, disabled, radius, 
   withEdges?: boolean
   /** Le choix « fond » : avec (cadre et fond neutre) ou sans (image détourée, rien derrière). */
   withBare?: boolean
+  /** Le choix « fond » enregistré à part (sinon : `bare` dans `onChange`). */
+  onBare?: (bare: boolean) => void
+  /** « auto » (la hauteur de l'image) au bout du curseur de hauteur : seulement là où l'affichage le sait. */
+  withAuto?: boolean
   edgeLabels?: Partial<Record<"top" | "bottom" | "left" | "right", string>>
 }) {
   const width = value.widthPct ?? defaults.widthPct
-  const auto = value.autoHeight ?? Boolean(defaults.autoHeight)
+  const auto = withAuto && (value.autoHeight ?? Boolean(defaults.autoHeight))
   const height = value.heightPct ?? defaults.heightPct ?? width
   const linked = value.linked ?? true
   const edges = value.edges ?? defaults.edges
   const [heightMin, heightMax] = heightRange
   const setWidth = (next: number) => onChange(linked && !auto ? { widthPct: next, heightPct: Math.max(heightMin, Math.min(heightMax, Math.round(height * next / Math.max(1, width)))) } : { widthPct: next })
   const setHeight = (next: number) => {
-    if (next > heightMax) { onChange({ autoHeight: true }); return }
+    if (next > heightMax) { if (withAuto) onChange({ autoHeight: true }); return }
     onChange(linked ? { heightPct: next, autoHeight: false, widthPct: Math.max(widthRange[0], Math.min(widthRange[1], Math.round(width * next / Math.max(1, height)))) } : { heightPct: next, autoHeight: false })
   }
   const toggleEdge = (edge: "top" | "bottom" | "left" | "right") => onChange({ edges: edges.includes(edge) ? edges.filter((item) => item !== edge) : [...edges, edge] })
@@ -185,7 +189,7 @@ export function ImageBoxControls({ value, defaults, onChange, disabled, radius, 
     <SettingsRow>
       <button type="button" disabled={disabled} aria-pressed={linked} onClick={() => onChange({ linked: !linked })} title={linked ? "Liées : bouger un curseur bouge l’autre dans les mêmes proportions" : "Déliées : largeur et hauteur indépendantes"} className={cn("grid size-8 shrink-0 place-items-center rounded-md border text-base", linked ? "border-primary bg-primary/10 text-primary" : "text-muted-foreground hover:bg-muted")}>{linked ? "🔗" : "⛓️‍💥"}</button>
       <label className="grid min-w-32 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Largeur</span><span className="font-normal tabular-nums">{width} {unit}</span></span><input type="range" min={widthRange[0]} max={widthRange[1]} step={1} value={width} disabled={disabled} onChange={(event) => setWidth(Number(event.target.value))} className="accent-primary" /></label>
-      <label className="grid min-w-32 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Hauteur</span><span className="font-normal tabular-nums">{auto ? "auto (celle de l’image)" : `${height} ${unit}`}</span></span><input type="range" min={heightMin} max={heightMax + 1} step={1} value={auto ? heightMax + 1 : height} disabled={disabled} onChange={(event) => setHeight(Number(event.target.value))} className="accent-primary" /></label>
+      <label className="grid min-w-32 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Hauteur</span><span className="font-normal tabular-nums">{auto ? "auto (celle de l’image)" : `${height} ${unit}`}</span></span><input type="range" min={heightMin} max={withAuto ? heightMax + 1 : heightMax} step={1} value={auto ? heightMax + 1 : height} disabled={disabled} onChange={(event) => setHeight(Number(event.target.value))} className="accent-primary" /></label>
       {onRadius && <label className="grid min-w-28 flex-1 gap-0.5 text-[11px] font-semibold text-muted-foreground"><span className="flex justify-between"><span>Arrondi</span><span className="font-normal tabular-nums">{radius ?? 0} px</span></span><input type="range" min={0} max={200} step={1} value={radius ?? 0} disabled={disabled} onChange={(event) => onRadius(Number(event.target.value))} className="accent-primary" /></label>}
     </SettingsRow>
     {(withEdges || withBare) && <SettingsRow>
@@ -194,7 +198,7 @@ export function ImageBoxControls({ value, defaults, onChange, disabled, radius, 
         {(["top", "bottom", "left", "right"] as const).map((edge) => <Toggle key={edge} checked={edges.includes(edge)} onChange={() => toggleEdge(edge)} disabled={disabled}>{labels[edge]}</Toggle>)}
         <button type="button" disabled={disabled} onClick={() => onChange({ edges: [] })} className={cn("text-[11px]", edges.length ? "text-muted-foreground hover:text-foreground" : "font-semibold text-foreground")}>aucun</button>
       </>}
-      {withBare && <span className={cn("flex items-center", withEdges && "ml-auto")}><Toggle checked={!value.bare} onChange={(checked) => onChange({ bare: checked ? undefined : true })} disabled={disabled} title="Coché : un fond neutre et un cadre derrière l’image. Décoché : rien derrière (image détourée, pictogramme).">Fond</Toggle></span>}
+      {withBare && <span className={cn("flex items-center", withEdges && "ml-auto")}><Toggle checked={!value.bare} onChange={(checked) => onBare ? onBare(!checked) : onChange({ bare: checked ? undefined : true })} disabled={disabled} title="Coché : un fond neutre et un cadre derrière l’image. Décoché : rien derrière (image détourée, pictogramme).">Fond</Toggle></span>}
     </SettingsRow>}
   </div>
 }

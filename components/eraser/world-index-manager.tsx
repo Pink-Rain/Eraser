@@ -237,6 +237,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const [ownQuery, setQuery] = useRememberedSearch()
   const query = embed?.query ?? ownQuery
   const [details, setDetails] = useState<string | null>(null)
+  const [sheetForm, setSheetForm] = useState<{ row: string; form: string } | null>(null)
   const [sort, setSort] = usePersistentState<SheetGridSort>(`eraser:world-index:${storeKey}:sort`, null, isValidSort)
   const localEdits = useRef<Record<string, string>>({})
   // Pour chaque saisie : ses écritures encore en route, et le numéro de requête atteint quand
@@ -1236,6 +1237,12 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const statsView = viewLayout?.kind === "stats" ? activeView : null
   const statTabs = useMemo(() => tables.map((owner) => owner.tabName), [tables])
   const statRowKeys = useMemo(() => tables.flatMap((owner) => owner.rows.map((row) => rowKeyOf(owner.tabName, row.rowNumber))), [tables])
+  // Un onglet stat calcule sur les lignes que trouve la recherche (toutes sans recherche).
+  const statSearchRows = useMemo(() => {
+    const folded = foldName(deferredQuery)
+    if (!folded) return statRowKeys
+    return tables.flatMap((owner) => owner.rows.filter((row) => row.values.map(foldName).join("\n").includes(folded)).map((row) => rowKeyOf(owner.tabName, row.rowNumber)))
+  }, [deferredQuery, statRowKeys, tables])
   const statHeaders = useMemo(() => {
     const seen = new Map<string, string>()
     for (const owner of tables) for (const header of owner.headers) {
@@ -1297,7 +1304,9 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
 
   // La fiche d'une ligne : tous ses champs du formulaire, rangés par sa mise en page.
   // Une colonne hors fiche (ancien « Tableau seulement ») y vient quand sa mise en page la place.
-  const sheetLayout = detailsFound ? tabLayoutOrBuiltin(settings.layouts, indexKey, detailsFound.table.tabName, "form") : null
+  // Un bouton « Ouvrir un formulaire » de la fiche y montre ce formulaire (pour cette ligne seulement).
+  const sheetFormId = sheetForm && sheetForm.row === details ? sheetForm.form : null
+  const sheetLayout = detailsFound ? (sheetFormId ? tabFormOrBuiltin(settings.layouts, indexKey, detailsFound.table.tabName, sheetFormId) : null) ?? tabLayoutOrBuiltin(settings.layouts, indexKey, detailsFound.table.tabName, "form") : null
   /* eslint-disable react-hooks/refs -- la fiche lit les cases comme le tableau les montre, saisies enregistrées comprises */
   const sheetFields = detailsFound ? (data?.columns[detailsFound.table.tabName] ?? [])
     .filter((column) => (isSheetSpec(column.spec) || layoutPlaces(sheetLayout, column.header)) && !["auto-links", "ranked-links", "tab"].includes(column.spec.kind) && !rankHeaders.has(foldName(column.header)))
@@ -1427,7 +1436,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
             {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog({ mode: "edit" })} title="Modifier cette vue" aria-label="Modifier cette vue"><Pencil /></Button>}
           </span>
         </label>}
-        {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
+        {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={statsView ? "Rechercher les lignes comptées…" : display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
         {table && !statsView && (!activeView || activeView.kind === "table") && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {data?.webViewLink && <SheetsLinkButton href={data.webViewLink} />}
@@ -1507,7 +1516,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         groups={settings.statGroups}
         separatorOf={statSeparatorOf}
         pinnedOnly
-        rows={statRowKeys}
+        rows={statSearchRows}
         columns={statHeaders}
         tabs={statTabs}
         valueOf={statValueOf}
@@ -1617,7 +1626,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         inventoryEndpoint={indexKey === "npcs" ? (row) => `/api/npcs/${encodeURIComponent(row.id)}/inventory` : undefined}
         navigation={sheetNavigation}
         onSave={saveSheet}
-        onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null) }}
+        openForm={(formId) => setSheetForm(formId && details ? { row: details, form: formId } : null)}
+        onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null); setSheetForm(null) }}
       />}
       {viewDialog && <SavedViewDialog
         open

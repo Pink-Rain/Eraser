@@ -262,7 +262,8 @@ export function cleanLayoutBlock(input: unknown): LayoutBlock | null {
         if (Object.keys(colors).length) block.colors = colors
       }
       if (typeof raw.perRow === "number" && raw.perRow >= 1 && raw.perRow <= 12) block.perRow = Math.round(raw.perRow)
-      if (raw.short === true) block.short = true
+      // « Noms abrégés » décoché s'enregistre `false` : sans réglage, la fiche en lecture abrège.
+      if (typeof raw.short === "boolean") block.short = raw.short
       return block
     }
     case "inventory": {

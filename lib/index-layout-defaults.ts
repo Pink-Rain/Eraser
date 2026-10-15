@@ -277,7 +277,7 @@ export const layoutStarters: LayoutStarter[] = [
     },
   },
   {
-    key: "framed", kind: "form", label: "Sections encadrées", hint: "Identité, Valeurs et Description, chacune dans son cadre teinté avec un titre.",
+    key: "framed", kind: "form", label: "Sections encadrées", hint: "Identité et Description dans un cadre titré, les Valeurs (nombres en tuiles) sur fond teinté.",
     build: (columns) => {
       const roles = layoutRoles(columns)
       const sections = [

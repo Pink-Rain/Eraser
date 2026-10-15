@@ -228,6 +228,8 @@ export type ResolvedLayout = {
   nameInAccent?: boolean
   /** La couleur d'accent de la mise en page, résolue pour cette ligne. */
   accent?: string
+  /** Les cases des colonnes qui donnent une couleur (« {Couleur} » d'un libellé, d'une section, du fond), par nom sans accents ni casse. */
+  colorCells?: Record<string, string>
   width?: "sm" | "md" | "lg"
   asideWidth?: "sm" | "md" | "lg"
   asideSide?: "left" | "right"

@@ -146,23 +146,38 @@ function ClickSettings({ ctx }: { ctx: Ctx }) {
   </div>
 }
 
+/**
+ * Les éditeurs enregistrent le choix « d'office » comme absent : chaque vue dit donc ce que son
+ * affichage fait d'un réglage absent (`font`, `size`, `surface`, `density`). « mixed » : la vue
+ * dessine deux parties différemment (titres et éléments) ; aucun bouton n'est alors coché, et un
+ * choix s'enregistre tel quel pour s'appliquer aux deux.
+ */
+const mixedHint = "Aucun bouton coché : le dessin d’office de la vue, qui ne traite pas ses titres et ses éléments de la même façon."
+const lookChoice = <T extends string>(value: T | undefined, fallback: T | "mixed") => (value ?? (fallback === "mixed" ? "" : fallback)) as T
+const lookSave = <T extends string>(value: T, fallback: T | "mixed") => fallback !== "mixed" && value === fallback ? undefined : value
+
 /** Le nom des éléments : police, taille, capitales. */
-function TitleLook({ ctx, sizes = sizeOptions }: { ctx: Ctx; sizes?: ReadonlyArray<{ value: "sm" | "md" | "lg"; label: string }> }) {
+function TitleLook({ ctx, sizes = sizeOptions, font = "sans", size = "sm" }: { ctx: Ctx; sizes?: ReadonlyArray<{ value: "sm" | "md" | "lg"; label: string }>; font?: "display" | "sans" | "mixed"; size?: "sm" | "md" | "lg" | "mixed" }) {
   const { look, setLook, disabled } = ctx
   return <div className="flex flex-wrap items-end gap-3">
-    <Choice label="Police du nom" value={look.titleFont ?? "sans"} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(titleFont) => setLook({ titleFont: titleFont === "sans" ? undefined : titleFont })} disabled={disabled} />
-    <Choice label="Taille" value={look.titleSize ?? "sm"} options={sizes} onChange={(titleSize) => setLook({ titleSize: titleSize === "sm" ? undefined : titleSize })} disabled={disabled} />
+    <Choice label="Police du nom" value={lookChoice(look.titleFont, font)} options={[{ value: "display", label: "Titre" }, { value: "sans", label: "Texte" }]} onChange={(titleFont) => setLook({ titleFont: lookSave(titleFont, font) })} disabled={disabled} hint={font === "mixed" && !look.titleFont ? mixedHint : undefined} />
+    <Choice label="Taille" value={lookChoice(look.titleSize, size)} options={sizes} onChange={(titleSize) => setLook({ titleSize: lookSave(titleSize, size) })} disabled={disabled} hint={size === "mixed" && !look.titleSize ? mixedHint : undefined} />
     <Toggle checked={Boolean(look.titleCaps)} onChange={(titleCaps) => setLook({ titleCaps: titleCaps || undefined })} disabled={disabled}>Capitales espacées</Toggle>
   </div>
 }
 
-/** Le cadre des éléments : encadrés ou non, espacement, coins, ombre. */
-function FrameLook({ ctx, surfaces = [{ value: "plain", label: "Lignes séparées" }, { value: "zebra", label: "Lignes alternées" }, { value: "boxed", label: "Encadrés" }] }: { ctx: Ctx; surfaces?: ReadonlyArray<{ value: "plain" | "zebra" | "boxed"; label: string }> }) {
+type SurfaceChoice = NonNullable<PresentationLook["surface"]> | "spaced"
+
+/**
+ * Le cadre des éléments : encadrés ou non, espacement, coins, ombre. « spaced » : des éléments
+ * espacés sans trait ni cadre (le maître-détail), le dessin d'un réglage absent.
+ */
+function FrameLook({ ctx, surfaces = [{ value: "plain", label: "Lignes séparées" }, { value: "zebra", label: "Lignes alternées" }, { value: "boxed", label: "Encadrés" }], surface = "plain", density = "normal", withDensity = true }: { ctx: Ctx; surfaces?: ReadonlyArray<{ value: SurfaceChoice; label: string }>; surface?: SurfaceChoice; density?: NonNullable<PresentationLook["density"]> | "mixed"; withDensity?: boolean }) {
   const { look, setLook, disabled } = ctx
   return <>
     <div className="flex flex-wrap items-end gap-3">
-      {surfaces.length > 0 && <Choice label="Éléments" value={look.surface ?? "plain"} options={surfaces} onChange={(surface) => setLook({ surface: surface === "plain" ? undefined : surface })} disabled={disabled} />}
-      <Choice label="Espacement" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
+      {surfaces.length > 0 && <Choice label="Éléments" value={(look.surface ?? surface) as SurfaceChoice} options={surfaces} onChange={(chosen) => setLook({ surface: chosen === surface || chosen === "spaced" ? undefined : chosen })} disabled={disabled} />}
+      {withDensity && <Choice label="Espacement" value={lookChoice(look.density, density)} options={densityOptions} onChange={(chosen) => setLook({ density: lookSave(chosen, density) })} disabled={disabled} hint={density === "mixed" && !look.density ? mixedHint : undefined} />}
     </div>
     <div className="flex flex-wrap items-end gap-3">
       <Choice label="Coins" value={look.radius ?? "md"} options={radiusOptions} onChange={(radius) => setLook({ radius: radius === "md" ? undefined : radius })} disabled={disabled} />
@@ -239,7 +254,7 @@ function ItemSettings({ ctx, fieldsLabel = "Sous le nom", withBadge = true, with
         <ColumnField label="Image ou icône à côté du nom" value={layout.imageColumn} columns={columns} onChange={(imageColumn) => set({ imageColumn })} empty="— Aucune —" disabled={disabled} hint="Une adresse donne une image, un nom d’icône ou un émoji donne une icône" />
         {layout.imageColumn && <Choice label="Forme" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />}
       </SettingsRow>
-      {layout.imageColumn && <ImageBoxControls value={{ widthPct: look.imageWidth, heightPct: look.imageHeight, linked: look.imageLinked, bare: look.imageBare }} defaults={{ widthPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], heightPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], edges: [] }} onChange={(changes) => setLook({ ...(changes.widthPct !== undefined ? { imageWidth: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { imageHeight: changes.heightPct } : {}), ...(changes.linked !== undefined ? { imageLinked: changes.linked || undefined } : {}), ...("bare" in changes ? { imageBare: changes.bare || undefined } : {}) })} disabled={disabled} unit="px" widthRange={[12, 240]} heightRange={[12, 240]} withEdges={false} />}
+      {layout.imageColumn && <ImageBoxControls value={{ widthPct: look.imageWidth, heightPct: look.imageHeight, linked: look.imageLinked, bare: look.imageBare }} defaults={{ widthPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], heightPct: { sm: 24, md: 36, lg: 56 }[look.imageSize ?? "md"], edges: [] }} onChange={(changes) => setLook({ ...(changes.widthPct !== undefined ? { imageWidth: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { imageHeight: changes.heightPct } : {}), ...(changes.linked !== undefined ? { imageLinked: changes.linked || undefined } : {}), ...("bare" in changes ? { imageBare: changes.bare || undefined } : {}) })} disabled={disabled} unit="px" widthRange={[12, 240]} heightRange={[12, 240]} withEdges={false} withAuto={false} />}
       {layout.imageColumn && ctx.kind === "list" && !layout.compact && <span className={fieldLabel}><Toggle checked={Boolean(look.zigzag)} onChange={(zigzag) => setLook({ zigzag: zigzag || undefined })} disabled={disabled}>Image alternée gauche / droite (zigzag)</Toggle></span>}
     </>}
     <GaugeSettings ctx={ctx} />
@@ -352,11 +367,19 @@ function LanesEditor({ ctx }: { ctx: Ctx }) {
   const lanes = layout.lanes ?? []
   const values = [...new Set([...options.map((option) => option.value), ...lanes.map((lane) => lane.value)])]
   const laneOf = (value: string) => lanes.find((lane) => foldName(lane.value) === foldName(value))
+  const isOption = (value: string) => options.some((option) => foldName(option.value) === foldName(value))
   const update = (value: string, changes: Partial<KanbanLane>) => {
     const next = { ...(laneOf(value) ?? { value }), ...changes }
     for (const key of Object.keys(next) as Array<keyof KanbanLane>) if (next[key] === undefined || next[key] === false) delete next[key]
-    const rest = lanes.filter((lane) => foldName(lane.value) !== foldName(value))
-    const kept = Object.keys(next).length > 1 ? [...rest, next] : rest
+    // Réglée à sa place (l'ordre des colonnes écrites à la main en dépend) ; une valeur hors de la
+    // liste de choix reste même sans réglage : c'est une colonne ajoutée à la main.
+    const keep = Object.keys(next).length > 1 || !isOption(value)
+    const at = lanes.findIndex((lane) => foldName(lane.value) === foldName(value))
+    const kept = at < 0 ? (keep ? [...lanes, next] : lanes) : lanes.flatMap((lane, index) => index !== at ? [lane] : keep ? [next] : [])
+    set({ lanes: kept.length ? kept : undefined })
+  }
+  const remove = (value: string) => {
+    const kept = lanes.filter((lane) => foldName(lane.value) !== foldName(value))
     set({ lanes: kept.length ? kept : undefined })
   }
   if (!column) return null
@@ -374,12 +397,13 @@ function LanesEditor({ ctx }: { ctx: Ctx }) {
             <IconPick value={lane?.icon} onChange={(icon) => update(value, { icon })} disabled={disabled} />
             <label className="flex items-center gap-1 text-[11px] text-muted-foreground">Limite<Input type="number" min={1} max={999} value={lane?.limit ?? ""} disabled={disabled} placeholder="—" onChange={(event) => update(value, { limit: Number(event.target.value) > 0 ? Number(event.target.value) : undefined })} className="h-7 w-16 text-xs" aria-label={`Limite de ${value}`} /></label>
             <Toggle checked={Boolean(lane?.hidden)} onChange={(hidden) => update(value, { hidden: hidden || undefined })} disabled={disabled}>Cachée</Toggle>
+            {!option && <Button type="button" size="icon" variant="ghost" className="size-7" disabled={disabled} onClick={() => remove(value)} aria-label={`Retirer la colonne ${value}`} title="Retirer cette colonne ajoutée à la main"><X /></Button>}
           </div>
           <ColorSwatches value={lane?.color} onChange={(color) => update(value, { color })} disabled={disabled} none={option?.color ? "Celle de la liste" : "Accent"} ariaLabel={`Couleur de ${value}`} />
         </div>
       })}
     </div>
-    {!options.length && <form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); if (added.trim()) { update(added.trim(), { label: undefined }); set({ lanes: [...lanes, { value: added.trim() }] }); setAdded("") } }}>
+    {!options.length && <form className="flex gap-1" onSubmit={(event) => { event.preventDefault(); if (added.trim()) { if (!laneOf(added.trim())) set({ lanes: [...lanes, { value: added.trim() }] }); setAdded("") } }}>
       <Input value={added} disabled={disabled} placeholder="Une valeur à régler (« En cours »)" onChange={(event) => setAdded(event.target.value)} className="h-7 text-xs" />
       <Button type="submit" size="sm" variant="outline" className="h-7 text-[11px]" disabled={disabled || !added.trim()}><Plus />Ajouter</Button>
     </form>}
@@ -409,7 +433,7 @@ function KanbanPages(ctx: Ctx): Page[] {
     </> },
     { key: "cards", label: "Cartes", icon: <LayoutGrid className="size-3.5" />, render: () => <><CardChoice ctx={ctx} /><ItemSettings ctx={ctx} /></> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin des cartes</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrées" }, { value: "plain", label: "Séparées d’un trait" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin des cartes</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrées" }, { value: "plain", label: "Séparées d’un trait" }]} surface="boxed" /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri dans chaque colonne</p><SortSettings ctx={ctx} /></div>
     </> },
@@ -446,7 +470,7 @@ function MasterDetailPages(ctx: Ctx): Page[] {
       <CardChoice ctx={ctx} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrées" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "spaced", label: "Espacées" }, { value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrées" }]} surface="spaced" density="mixed" /><TitleLook ctx={ctx} font="mixed" /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri</p><SortSettings ctx={ctx} /></div>
     </> },
@@ -468,6 +492,7 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
   }
   const withLines = (scale === "month" && forms.month === "lines") || (scale === "week" && forms.week === "lines")
   const withGrid = scale === "month" && forms.month !== "lines"
+  const paragraphs = scale === "day" && forms.day === "paragraphs"
   return [
     { key: "dates", label: "Dates", icon: <LayoutGrid className="size-3.5" />, render: () => <>
       <div className={settingsGroup}>
@@ -516,8 +541,8 @@ function CalendarPages(ctx: Ctx, calendars: string[]): Page[] {
           <Toggle checked={!layout.hideSeasons} onChange={(shown) => set({ hideSeasons: shown ? undefined : true })} disabled={disabled}>Afficher la saison</Toggle>
           <Toggle checked={!layout.hideCounts} onChange={(shown) => set({ hideCounts: shown ? undefined : true })} disabled={disabled}>Compter les lignes par mois</Toggle>
         </div>
-        <FrameLook ctx={ctx} surfaces={[{ value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrés" }]} />
-        <TitleLook ctx={ctx} />
+        <FrameLook ctx={ctx} surfaces={[{ value: "plain", label: "Lignes séparées" }, { value: "boxed", label: "Encadrés" }]} surface={paragraphs ? "plain" : "boxed"} withDensity={false} />
+        <TitleLook ctx={ctx} font={paragraphs ? "display" : "mixed"} size={paragraphs ? "lg" : "sm"} />
         <FieldsLook ctx={ctx} />
       </div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /></div>
@@ -581,8 +606,8 @@ function TileEditor({ tile, position, total, ctx, onChange, onMove, onRemove }: 
       <div className="flex flex-wrap items-center gap-1.5">
         <Input value={tile.row ?? ""} disabled={disabled} onChange={(event) => patch({ row: event.target.value || undefined })} placeholder="Nom de la ligne" aria-label="Nom de la ligne" className="h-8 min-w-32 flex-1 text-xs" />
         <NativeSelect value={tile.form ? `form:${tile.form}` : tile.card ?? DEFAULT_ITEM_CARD} disabled={disabled} onChange={(event) => { const next = event.target.value; patch(next.startsWith("form:") ? { form: next.slice(5), card: undefined } : { card: next === DEFAULT_ITEM_CARD ? undefined : next, form: undefined }) }} aria-label="Élément" className="h-8 min-w-40 flex-1 py-0 text-xs">
-          <NativeSelectOptGroup label="Avec une carte (3)"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelectOptGroup>
-          <NativeSelectOptGroup label="Avec un formulaire en lecture (1)">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Avec une carte"><NativeSelectOption value={DEFAULT_ITEM_CARD}>La carte à l’étoile de l’onglet</NativeSelectOption>{cards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}</NativeSelectOptGroup>
+          <NativeSelectOptGroup label="Avec un formulaire en lecture">{forms.map((form) => <NativeSelectOption key={form.id} value={`form:${form.id}`}>{form.name}</NativeSelectOption>)}</NativeSelectOptGroup>
         </NativeSelect>
       </div>
     </div>}
@@ -680,6 +705,7 @@ function GalleryPages(ctx: Ctx): Page[] {
   const { layout, look, set, setLook, columns, disabled } = ctx
   const ratio = galleryRatioOf(layout)
   const style = layout.galleryStyle ?? "plain"
+  const nameAlwaysBelow = style === "cabinet" || style === "strip" || look.imageShape === "circle"
   return [
     { key: "images", label: "Images", icon: <ImageIcon className="size-3.5" />, render: () => <div className={settingsGroup}>
       <p className={settingsTitle}><ImageIcon className="size-3.5" />Les vignettes</p>
@@ -690,9 +716,12 @@ function GalleryPages(ctx: Ctx): Page[] {
         <span className="flex flex-wrap gap-1">{galleryShapes.map((shape) => <button key={shape.key} type="button" disabled={disabled} title={shape.label} aria-label={shape.label} aria-pressed={Math.abs(ratio - shape.ratio) < 0.02} onClick={() => set({ galleryHeightRem: Math.round(galleryWidthOf(layout) / shape.ratio * 2) / 2, galleryWidthRem: galleryWidthOf(layout), galleryRatio: undefined })} className={cn("grid h-9 min-w-10 place-items-center rounded-md border px-1.5", Math.abs(ratio - shape.ratio) < 0.02 ? "border-primary bg-primary/10" : "hover:bg-muted")}><span className="block rounded-[2px] border border-current opacity-70" style={{ width: shape.w, height: shape.h }} /></button>)}</span>
       </span>
       <ImageBoxControls
-        value={{ widthPct: layout.galleryWidthRem, heightPct: layout.galleryHeightRem, linked: layout.galleryLinked }}
+        value={{ widthPct: layout.galleryWidthRem, heightPct: layout.galleryHeightRem, linked: layout.galleryLinked, bare: look.imageBare }}
         defaults={{ widthPct: galleryWidthOf(layout), heightPct: Math.round(galleryWidthOf(layout) / ratio), edges: [] }}
         onChange={(changes) => set({ ...(changes.widthPct !== undefined ? { galleryWidthRem: changes.widthPct } : {}), ...(changes.heightPct !== undefined ? { galleryHeightRem: changes.heightPct, galleryRatio: undefined } : {}), ...(changes.linked !== undefined ? { galleryLinked: changes.linked || undefined } : {}) })}
+        onBare={(bare) => setLook({ imageBare: bare || undefined })}
+        withAuto={false}
+        withBare={style !== "cabinet"}
         disabled={disabled || look.imageShape === "circle"}
         unit="rem"
         widthRange={[5, 30]}
@@ -712,10 +741,13 @@ function GalleryPages(ctx: Ctx): Page[] {
       <div className={settingsGroup}>
         <p className={settingsTitle}><LayoutList className="size-3.5" />Les légendes</p>
         <div className="flex flex-wrap items-end gap-3">
-          <Choice label="Le nom" value={look.caption ?? "overlay"} options={[{ value: "overlay", label: "Posé sur l’image" }, { value: "below", label: "Sous l’image" }]} onChange={(caption) => setLook({ caption: caption === "overlay" ? undefined : caption })} disabled={disabled} />
-          {look.caption !== "below" && <Toggle checked={Boolean(layout.captionOnHover)} onChange={(captionOnHover) => set({ captionOnHover: captionOnHover || undefined })} disabled={disabled}>Seulement au survol</Toggle>}
+          {/* Le cabinet, la planche et les médaillons écrivent toujours le nom dessous ; le mur, posé sur l'image, toujours au survol. */}
+          {nameAlwaysBelow
+            ? <p className={hintText}>{style === "cabinet" ? "Le cabinet" : style === "strip" ? "La planche" : "Les médaillons"} écrivent toujours le nom sous l’image.</p>
+            : <Choice label="Le nom" value={look.caption ?? "overlay"} options={[{ value: "overlay", label: style === "wall" ? "Posé sur l’image (au survol)" : "Posé sur l’image" }, { value: "below", label: "Sous l’image" }]} onChange={(caption) => setLook({ caption: caption === "overlay" ? undefined : caption })} disabled={disabled} />}
+          {!nameAlwaysBelow && style !== "wall" && look.caption !== "below" && <Toggle checked={Boolean(layout.captionOnHover)} onChange={(captionOnHover) => set({ captionOnHover: captionOnHover || undefined })} disabled={disabled}>Seulement au survol</Toggle>}
         </div>
-        <TitleLook ctx={ctx} />
+        <TitleLook ctx={ctx} font="display" />
         <span className={fieldLabel}>Sous le nom <span className="font-normal">(4 au plus)</span><ColumnsPicker value={layout.fields ?? []} columns={columns} onChange={(fields) => set({ fields: fields.length ? fields : undefined })} disabled={disabled} ariaLabel="Colonnes montrées" max={4} /></span>
         <FieldsLook ctx={ctx} />
         <ColumnField label="Ruban sur l’image, pris dans" value={layout.badgeColumn} columns={columns} onChange={(badgeColumn) => set({ badgeColumn })} empty="— Aucun —" disabled={disabled} hint="Un rang, un type : en ruban dans le coin de la vignette" />
@@ -788,7 +820,7 @@ function TimelinePages(ctx: Ctx, calendars: string[]): Page[] {
       <ItemSettings ctx={ctx} withBadge fieldsLabel={style === "bars" || style === "lanes" ? "Sous le nom (jauge)" : "Sous le nom"} />
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrés" }, { value: "plain", label: "Nus" }]} /><TitleLook ctx={ctx} /><FieldsLook ctx={ctx} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><FrameLook ctx={ctx} surfaces={[{ value: "boxed", label: "Encadrés" }, { value: "plain", label: "Nus" }]} surface={style === "chapters" ? "plain" : "boxed"} /><TitleLook ctx={ctx} font={style === "chapters" ? "display" : "sans"} size={style === "chapters" ? "lg" : "sm"} /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} /><p className={hintText}>La ligne du temps et les jalons prennent la couleur d’accent de la vue ; chaque point, celle de sa ligne (ou de sa période).</p></div>
     </> },
   ]
@@ -843,7 +875,7 @@ function TreePages(ctx: Ctx): Page[] {
       {layout.click === "side" && <div className={settingsGroup}><Toggle checked={layout.detail?.kind === "children"} onChange={(children) => set({ detail: { ...(layout.detail ?? {}), kind: children ? "children" : undefined } })} disabled={disabled}>Le panneau montre les enfants du nœud choisi (explorateur)</Toggle><p className={hintText}>Les enfants se dessinent avec l’élément (carte ou lignes) ; un clic sur l’un d’eux descend d’un niveau.</p></div>}
     </> },
     { key: "look", label: "Apparence", icon: <Palette className="size-3.5" />, render: () => <>
-      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><TitleLook ctx={ctx} sizes={[{ value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} /><FieldsLook ctx={ctx} /></div>
+      <div className={settingsGroup}><p className={settingsTitle}><Sparkles className="size-3.5" />Dessin</p><TitleLook ctx={ctx} sizes={[{ value: "sm", label: "S" }, { value: "md", label: "M" }, { value: "lg", label: "L" }]} font="mixed" size="mixed" /><FieldsLook ctx={ctx} /></div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Point et nom" }, { value: "tint", label: "Teinte" }, { value: "dot", label: "Point" }, { value: "title", label: "Nom coloré" }, { value: "none", label: "Rien" }]} /><p className={hintText}>« Couleur des lignes selon » une colonne de rang teinte chaque niveau de la hiérarchie.</p></div>
       <div className={settingsGroup}><p className={settingsTitle}>Tri des enfants</p><SortSettings ctx={ctx} /></div>
     </> },
@@ -917,7 +949,7 @@ function CodexPages(ctx: Ctx): Page[] {
           <Choice label="Marges" value={look.density ?? "normal"} options={densityOptions} onChange={(density) => setLook({ density: density === "normal" ? undefined : density })} disabled={disabled} />
           <Choice label="Image" value={look.imageShape ?? "rounded"} options={imageShapeOptions} onChange={(imageShape) => setLook({ imageShape: imageShape === "rounded" ? undefined : imageShape })} disabled={disabled} />
         </div>
-        <TitleLook ctx={ctx} />
+        <TitleLook ctx={ctx} font="display" size="md" />
         <FieldsLook ctx={ctx} />
       </div>
       <div className={settingsGroup}><p className={settingsTitle}><Palette className="size-3.5" />Couleurs</p><ColorLook ctx={ctx} modes={[{ value: "border", label: "Liseré en haut" }, { value: "tint", label: "Teinte" }, { value: "title", label: "Titre coloré" }, { value: "none", label: "Rien" }]} /></div>

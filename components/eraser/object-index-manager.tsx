@@ -45,7 +45,8 @@ import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, ty
 import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey } from "@/lib/index-windows"
 import { builtinPresentationPresets, type Presentation } from "@/lib/index-presentations"
 import { filterWindowOf, resolveSavedViewPresentation, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
-import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
+import { formOf, layoutPlaces, tabLayout } from "@/lib/index-layouts"
+import { tabLayoutsOf } from "@/lib/index-layout-defaults"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
 
@@ -186,6 +187,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // tableau-là le temps qu'elle reste ouverte (`rows` : les lignes concernées, pour passer de l'une à l'autre).
   const [statSheet, setStatSheet] = useState<{ table: string; rows: string[] } | null>(null)
   const [details, setDetails] = useState<string | null>(null)
+  const [sheetForm, setSheetForm] = useState<{ row: string; form: string } | null>(null)
   const [sheetError, setSheetError] = useState("")
   const openStatRow = useCallback((rowKey: string, list?: string[]) => {
     const found = statLocate(rowKey)
@@ -243,7 +245,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   // Le tableau : toutes les colonnes (les masquées et les anciennes « Formulaire seulement » se
   // montrent d'un clic). La fiche : toutes, sauf les anciennes « Tableau seulement » que sa
   // mise en page ne place pas.
-  const formLayout = selected ? tabLayout(settings.layouts, selected.tabName, "form") : null
+  // Un bouton « Ouvrir un formulaire » de la fiche y montre ce formulaire (pour cette ligne seulement).
+  const sheetFormId = sheetForm && sheetForm.row === details ? sheetForm.form : null
+  const formLayout = selected ? (sheetFormId ? formOf(tabLayoutsOf(settings.layouts, selected.tabName), sheetFormId) : null) ?? tabLayout(settings.layouts, selected.tabName, "form") : null
   const shownColumns = liveColumns
   const sheetColumns = useMemo(() => liveColumns.filter((index) => isSheetSpec(specs[index]) || layoutPlaces(formLayout, selected?.headers[index] ?? "")), [formLayout, liveColumns, selected, specs])
   const columnOfHeader = useCallback((header: string) => {
@@ -816,7 +820,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         title={sheetTitle}
         subtitle={tableLabel(selected)}
         fields={sheetFields}
-        layout={tabLayout(settings.layouts, selected.tabName, "form")}
+        layout={formLayout}
         rowFor={sheetRow}
         error={sheetError}
         navigation={{
@@ -826,7 +830,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         }}
         onSave={saveSheet}
         // Le tableau remonte ses cases : il montre ce qui vient d'être écrit dans la fiche.
-        onClose={() => { setDetails(null); setStatSheet(null); setSheetError(""); setVersion((current) => current + 1) }}
+        openForm={(formId) => setSheetForm(formId && details ? { row: details, form: formId } : null)}
+        onClose={() => { setDetails(null); setStatSheet(null); setSheetError(""); setSheetForm(null); setVersion((current) => current + 1) }}
       />}
       {viewDialog && <SavedViewDialog
         open

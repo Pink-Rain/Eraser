@@ -165,7 +165,7 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
       starredId={DEFAULT_FORM_ID}
       onSelect={onSelect}
       onStar={onStar}
-      starHint={form ? "le formulaire qu’ouvre le nom d’une ligne (et « Ajouter »)" : "le survol d’une ligne citée avec « { »"}
+      starHint={form ? "le formulaire qu’ouvre le nom d’une ligne (et « Ajouter »)" : "le survol d’une ligne citée avec « { », le seul qui s’affiche : les autres versions attendent leur étoile"}
       onRename={onRename}
       renameable={(id) => id !== DEFAULT_FORM_ID}
       onNew={onNew}

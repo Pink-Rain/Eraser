@@ -46,7 +46,7 @@ function releaseFocus() {
  * ni « Fermer ». Une seule barre de mise en forme, en haut, sert à tous les champs. En bas, « Précédente », « Aller à… » et « Suivante » passent d'une ligne
  * à l'autre sans quitter la fiche.
  */
-export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose, rowRef, inventoryEndpoint }: {
+export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, rowFor, renderField, error = "", footer, navigation, onSave, onClose, rowRef, inventoryEndpoint, openForm }: {
   open: boolean
   /** La ligne affichée : chaque enregistrement la désigne, même si on est passé à une autre entre-temps. */
   rowKey: string
@@ -69,6 +69,8 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
   rowRef?: { index: string; id: string; tab?: string }
   /** L'adresse de l'inventaire de la ligne (sinon celle d'office du moteur). */
   inventoryEndpoint?: (row: { index: string; id: string }) => string
+  /** Le bouton « Ouvrir un formulaire » de la mise en page : montre ce formulaire (sans : l'étoilé). */
+  openForm?: (formId?: string) => void
 }) {
   const [status, setStatus] = useState<SaveStatus>("idle")
   // « Réessayer » : renvoie ce que la fiche n'a pas pu enregistrer.
@@ -119,7 +121,7 @@ export function IndexRowSheet({ open, rowKey, title, subtitle, fields, layout, r
       </div>
       {/* Une ligne, un corps : passer à une autre ligne enregistre ce qui restait et repart de ses valeurs. */}
       <RichTextToolbarHost.Provider value={toolbarHost}>
-        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} />
+        <RowSheetBody key={rowKey} rowKey={rowKey} fields={fields} layout={layout} rowFor={rowFor} renderField={renderField} retryRef={retryRef} onSave={onSave} onStatus={setStatus} rowRef={rowRef} inventoryEndpoint={inventoryEndpoint} openForm={openForm} />
       </RichTextToolbarHost.Provider>
       {error && <p className="rounded-lg border border-destructive/25 bg-destructive/5 px-3 py-2 text-sm text-destructive">{error}</p>}
       <DialogFooter className="grid grid-cols-1 items-center gap-2 sm:grid-cols-[1fr_auto_1fr] sm:justify-normal">
@@ -211,7 +213,7 @@ function RowJump({ navigation, current, position, onGo }: { navigation: RowSheet
  * (la frappe continue), puis partent l'une après l'autre ; ce qui reste quand on change de
  * ligne ou qu'on ferme la fiche part aussitôt, toujours vers la ligne d'où il vient.
  */
-function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint }: {
+function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, onSave, onStatus, rowRef, inventoryEndpoint, openForm }: {
   rowKey: string
   fields: RowSheetField[]
   layout?: IndexLayout | null
@@ -222,6 +224,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
   onStatus: (status: SaveStatus) => void
   rowRef?: { index: string; id: string; tab?: string }
   inventoryEndpoint?: (row: { index: string; id: string }) => string
+  openForm?: (formId?: string) => void
 }) {
   // Ce qui a été saisi ici : la fiche l'affiche tant que la page n'a pas relu la ligne.
   const [drafts, setDrafts] = useState<Record<string, string>>({})
@@ -311,6 +314,7 @@ function RowSheetBody({ rowKey, fields, layout, rowFor, renderField, retryRef, o
     row: rowRef,
     onChange: (column, value) => { const item = byLabel(column); if (item) change(item, value) },
     inventoryEndpoint,
+    openForm,
   }
 
   return <div className="min-h-0 flex-1 overflow-y-auto pr-1">

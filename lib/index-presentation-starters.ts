@@ -2,7 +2,7 @@
  * Les formes de base des vues (4 Liste, 5 Kanban, 6 Maître-détail…), remplies d'office avec
  * les colonnes de l'onglet : des points de départ, à mélanger et à modifier ensuite. Chaque
  * forme n'est qu'un assemblage des briques du moteur (groupes, formule, jauge, élément, au
- * clic…) ; rien n'est propre à un cas. Les presets d'Eraser sans colonne (lib/index-presentations.ts)
+ * clic…) ; rien n'est propre à un cas. Les presets d'Eraser, presque tous sans colonne (lib/index-presentations.ts),
  * restent proposés à côté.
  */
 import { isNameColumnSpec, normalizeSpec, type IndexColumnSpec } from "@/lib/index-columns"

@@ -45,7 +45,10 @@ export type CardBlock = {
   /** Ligne : ses morceaux, et ce qui les sépare. */
   parts?: CardPart[]
   separator?: string
-  /** Le libellé écrit (champ, jauge, détails, texte) ; vide : le nom de la colonne. */
+  /**
+   * Le libellé écrit. Vide : le nom de la colonne pour un champ (et pour un texte, une valeur ou
+   * des pastilles avec « showLabel ») ; rien pour une jauge ; « Détails » pour les détails.
+   */
   label?: string
   /** Texte, valeur, pastilles : écrire le nom de la colonne au-dessus. */
   showLabel?: boolean

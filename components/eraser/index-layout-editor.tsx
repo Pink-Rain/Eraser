@@ -179,7 +179,7 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
       </div>}
       <div className="flex flex-wrap items-center gap-3">
         <label className={smallLabel}>Tuiles par ligne<NativeSelect disabled={disabled} value={String(block.perRow ?? 0)} onChange={(event) => onChange({ ...block, perRow: Number(event.target.value) || undefined })} className="h-7 w-auto py-0 pl-2 pr-7 text-xs" aria-label="Tuiles par ligne"><NativeSelectOption value="0">Toutes</NativeSelectOption>{[2, 3, 4, 5, 6, 7, 8].map((count) => <NativeSelectOption key={count} value={String(count)}>{count}</NativeSelectOption>)}</NativeSelect></label>
-        <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={block.short !== false} onCheckedChange={(checked) => onChange({ ...block, short: checked === true ? undefined : false })} />Noms abrégés (FOR, DEX…)</label>
+        <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={block.short !== false} onCheckedChange={(checked) => onChange({ ...block, short: checked === true })} />Noms abrégés (FOR, DEX…)</label>
       </div>
     </div>
     case "inventory": return <div className="grid gap-2">

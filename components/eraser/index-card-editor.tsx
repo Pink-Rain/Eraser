@@ -313,7 +313,9 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
       {block.type !== "title" && <Toggle checked={Boolean(block.caps)} onChange={(caps) => set({ caps: caps || undefined })} disabled={disabled}>Petites capitales</Toggle>}
     </div>
   </>
-  const clamp = (choices: number[]) => <span className={label}>Lignes au plus<Segmented ariaLabel="Nombre de lignes" value={String(block.clamp ?? 0)} options={choices.map((value) => ({ value: String(value), label: value ? String(value) : "Tout" }))} onChange={(value) => set({ clamp: Number(value) || undefined })} disabled={disabled} /></span>
+  // Un titre sans réglage est coupé à 2 lignes (index-card.tsx) : « Tout » s'y enregistre 0.
+  const clampFallback = block.type === "title" ? 2 : 0
+  const clamp = (choices: number[]) => <span className={label}>Lignes au plus<Segmented ariaLabel="Nombre de lignes" value={String(block.clamp ?? clampFallback)} options={choices.map((value) => ({ value: String(value), label: value ? String(value) : "Tout" }))} onChange={(value) => set({ clamp: Number(value) === clampFallback ? undefined : Number(value) })} disabled={disabled} /></span>
 
   switch (block.type) {
     case "title":
@@ -406,7 +408,7 @@ function BlockSettings({ block, columns, onChange, disabled }: { block: CardBloc
           <Choice label="Image" value={block.fit ?? "cover"} options={[{ value: "cover", label: "Remplit" }, { value: "contain", label: "Entière" }]} onChange={(fit) => set({ fit })} disabled={disabled} />
           <span className="self-end pb-1.5"><Toggle checked={block.shape === "circle"} onChange={(circle) => set({ shape: circle ? "circle" : undefined })} disabled={disabled}>Ronde</Toggle></span>
         </SettingsRow>
-        <ImageBoxControls value={{ widthPct: block.widthPct, heightPct: block.heightPct, autoHeight: block.autoHeight, linked: block.linked, edges: block.edges, bare: block.bare }} defaults={box} onChange={(changes) => set(changes)} disabled={disabled} radius={block.radiusPx ?? (block.shape === "rounded" ? 12 : 0)} onRadius={(radiusPx) => set({ radiusPx })} edgeLabels={{ top: "haut", bottom: "bas" }} />
+        <ImageBoxControls value={{ widthPct: block.widthPct, heightPct: block.heightPct, autoHeight: block.autoHeight, linked: block.linked, edges: block.edges, bare: block.bare }} defaults={box} onChange={(changes) => set(changes)} disabled={disabled} radius={block.radiusPx ?? (block.shape === "rounded" ? 12 : 0)} onRadius={(radiusPx) => set({ radiusPx })} edgeLabels={{ top: "haut (1er bloc)", bottom: "bas (dernier bloc)" }} />
       </div>
     }
     case "value":
@@ -768,7 +770,8 @@ function ImagePage({ card, columns, onChange, disabled }: { card: CardTemplate; 
       onRadius={(radiusPx) => setMedia({ radiusPx })}
       withBare={false}
     />}
-    {media && position === "background" && <ImageBoxControls value={{ widthPct: media.widthPct, heightPct: media.heightPct, linked: media.linked }} defaults={{ widthPct: 100, heightPct: box?.heightPct ?? 75, edges: ["top", "bottom", "left", "right"] }} onChange={(changes) => setMedia(changes)} disabled={disabled} withEdges={false} withBare={false} />}
+    {/* En fond, l'image couvre toute la carte : seule sa hauteur (en % de la largeur) se règle. */}
+    {media && position === "background" && <Range text="Hauteur de la carte" value={media.heightPct ?? mediaBox({ ...media, widthPct: 100 }).heightPct ?? 75} min={20} max={200} format={(value) => `${value} % de la largeur`} onChange={(heightPct) => setMedia({ heightPct })} disabled={disabled} />}
   </div>
 }
 

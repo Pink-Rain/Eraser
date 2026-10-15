@@ -216,7 +216,11 @@ function CardPicture({ row, column, accent, fit = "cover", shape, tint = false, 
 // Blocs
 // ---------------------------------------------------------------------------
 
-type BlockContext = { card: CardTemplate; row: CardRowSource; accent: string; onImage: boolean; name: string }
+/**
+ * `pad` : la marge intérieure de la carte. `loose` : les blocs hors de la composition libre, avec
+ * le premier et le dernier, les seuls qu'un bloc image peut coller aux bords de la carte.
+ */
+type BlockContext = { card: CardTemplate; row: CardRowSource; accent: string; onImage: boolean; name: string; pad?: string; loose?: { ids: Set<string>; first?: string; last?: string } }
 
 function Pill({ value, color, variant = "soft", icon }: { value: string; color?: string; variant?: CardBlock["pill"]; icon?: ReactNode }) {
   const tint = color && color !== "muted" ? color : undefined
@@ -347,7 +351,13 @@ function BlockBody({ block, ctx }: { block: CardBlock; ctx: BlockContext }): Rea
       const box = blockBox(block)
       const touchL = box.edges.includes("left"), touchR = box.edges.includes("right")
       const justify = touchL && touchR ? "justify-stretch" : touchL ? "justify-start" : touchR ? "justify-end" : ctx.card.align === "center" ? "justify-center" : align === "right" ? "justify-end" : align === "center" ? "justify-center" : "justify-start"
-      return <div className={cn("flex", justify)}>
+      // Collée en haut ou en bas : l'image passe sous la marge de la carte et touche ce bord (en haut :
+      // le premier bloc seulement, en bas : le dernier ; jamais dans une case de la composition libre).
+      // À gauche et à droite, l'image s'aligne sur ce côté, dans la marge (comme avant).
+      const loose = ctx.loose?.ids.has(block.id) && ctx.pad
+      const bleed = (on: boolean) => loose && on ? `-${ctx.pad}` : undefined
+      const bleedStyle: CSSProperties = { marginTop: bleed(box.edges.includes("top") && ctx.loose?.first === block.id), marginBottom: bleed(box.edges.includes("bottom") && ctx.loose?.last === block.id) }
+      return <div className={cn("flex", justify)} style={bleedStyle}>
         <CardPicture row={row} column={block.column} accent={accent} fit={block.fit} shape={block.shape} bare={block.bare} alt={block.column} initials="" natural={box.autoHeight} className="w-full" style={{ ...(box.autoHeight ? {} : { aspectRatio: `${box.widthPct} / ${box.heightPct}` }), ...radiusStyle(block.radiusPx), width: touchL && touchR ? "100%" : `${box.widthPct}%` }} />
       </div>
     }
@@ -451,8 +461,9 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
   const name = nameOf(card, row)
   const media = card.media && (row.value(card.media.column) !== undefined) ? card.media : undefined
   const onImage = media?.position === "background"
-  const ctx: BlockContext = { card, row, accent, onImage, name }
   const density = card.density ?? "normal"
+  const looseBlocks = card.blocks.filter((block) => !(card.rows ?? []).some((line) => line.cells.some((cell) => cell.blocks.includes(block.id))))
+  const ctx: BlockContext = { card, row, accent, onImage, name, pad: density === "compact" ? "0.625rem" : density === "airy" ? "1.25rem" : "0.875rem", loose: { ids: new Set(looseBlocks.map((block) => block.id)), first: (card.rows ?? []).length ? undefined : looseBlocks[0]?.id, last: looseBlocks.at(-1)?.id } }
   const editing = Boolean(onSelectBlock)
 
   const renderBlock = (block: CardBlock) => {
@@ -520,7 +531,7 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
 
   let content: ReactNode
   // La boîte de l'image principale : largeur et hauteur en % de la carte, collée aux bords cochés, une marge ailleurs.
-  const pad = density === "compact" ? "0.625rem" : density === "airy" ? "1.25rem" : "0.875rem"
+  const pad = ctx.pad!
   const box = media ? mediaBox(media) : null
   const touches = (edge: "top" | "bottom" | "left" | "right") => Boolean(box?.edges.includes(edge))
   const pictureStyle = (stretch = false): CSSProperties => ({ ...(box && !box.autoHeight && !stretch ? { aspectRatio: `${box.widthPct} / ${box.heightPct}` } : {}), ...(stretch ? { height: "100%" } : {}), ...radiusStyle(media?.radiusPx) })
@@ -538,7 +549,8 @@ export const IndexCard = memo(function IndexCard({ card, row, onOpen, href, sele
     const side = <div className={cn("flex shrink-0", align)} style={frame}>{pictureFor("w-full", pictureStyle(stretch))}</div>
     content = <>{band}<div className={cn("flex min-w-0 flex-1", media.position === "right" && "flex-row-reverse")}>{side}{body}{chevron}</div></>
   } else if (onImage && media) {
-    content = <div className="relative grid min-w-0 flex-1" style={aspectClass(media.aspect ?? "4/3", media.ratio)}>
+    // La hauteur réglée (en % de la largeur), sinon l'ancienne proportion.
+    content = <div className="relative grid min-w-0 flex-1" style={media.heightPct !== undefined ? { aspectRatio: `100 / ${media.heightPct}` } : aspectClass(media.aspect ?? "4/3", media.ratio)}>
       {pictureFor("absolute inset-0 size-full")}
       <div className="pointer-events-none absolute inset-0 bg-gradient-to-t from-black/80 via-black/30 to-transparent" />
       {body}

@@ -152,6 +152,10 @@ test("blocs, allure des sections, formulaires nommés : lus et réécrits tels q
   };
   const parsed = layouts.parseIndexLayout(JSON.stringify(rich));
   assert.deepEqual(parsed, rich);
+  // « Noms abrégés » décoché se garde (sans réglage, la fiche en lecture abrège).
+  const unshortened = structuredClone(rich);
+  unshortened.sections[0].rows[0].fields[0].block.short = false;
+  assert.equal(layouts.parseIndexLayout(JSON.stringify(unshortened)).sections[0].rows[0].fields[0].block.short, false);
   // Un bloc illisible est écarté ; une clé « bloc: » sans bloc aussi ; une couleur farfelue est oubliée.
   const cleaned = layouts.parseIndexLayout({ aside: [], sections: [{ rows: [{ fields: [{ column: "bloc:x" }, { column: "bloc:y", block: { kind: "inventory", accept: "Chapeaux" } }, { column: "Nom", color: "rouge" }] }] }] });
   assert.deepEqual(cleaned.sections[0].rows[0].fields, [{ column: "bloc:y", block: { kind: "inventory", accept: "all" } }, { column: "Nom" }]);
@@ -315,4 +319,23 @@ test("le survol d'une ligne écrit son sous-titre de plusieurs colonnes, sépar�
   assert.deepEqual(resolved.look, { labelCase: "normal" });
   // Une colonne vide pour cette ligne est sautée (pas de « • » orphelin).
   assert.equal(cells.hoverOf(layout, table, { ...row, values: ["Irrégulière", "", "Négatif", "Malus", "M1"] }, () => false).subtitle, "Négatif");
+});
+
+test("le survol envoie les cases des couleurs lues dans une colonne (libellés, sections, fond, tuiles)", async () => {
+  const cells = await vite.ssrLoadModule("/lib/index-references-cells.ts");
+  const table = { tab: "Tout", headers: ["Nom", "Couleur", "Teinte", "Force", "Secret", "ID"], columns: ["Nom", "Couleur", "Teinte", "Force", "Secret"], name: 0, specs: new Map(), rows: [] };
+  const row = { id: "P1", name: "Aldric", values: ["Aldric", "#b3261e", "#397f88", "12", "#000000", "P1"], html: ["", "", "", "", "", ""] };
+  const layout = {
+    aside: [],
+    look: { labelColor: "{Couleur}", background: "{Secret}" },
+    sections: [{ id: "s", color: "{Teinte}", rows: [{ id: "r", fields: [
+      { column: "Force", color: "{Couleur}" },
+      { column: "bloc:t", block: { kind: "tiles", columns: ["Force"], colors: { Force: "{Teinte}" } } },
+    ] }] }],
+  };
+  // Une colonne privée (« Secret ») n'est jamais envoyée.
+  const resolved = cells.hoverOf(layout, table, row, (column) => column === "Secret");
+  assert.deepEqual(resolved.colorCells, { couleur: "#b3261e", teinte: "#397f88" });
+  const tiles = resolved.sections[0].rows[0].fields[1];
+  assert.equal(tiles.cells.Teinte.value, "#397f88");
 });

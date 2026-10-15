@@ -137,7 +137,7 @@ export type Presentation = {
   collapsed?: boolean
   /** Liste : une ligne par élément, sans retour à la ligne. */
   compact?: boolean
-  /** Les colonnes montrées sous le nom (liste, kanban, maître-détail) : quatre au plus. */
+  /** Les colonnes montrées sous le nom (liste, kanban, maître-détail…) : huit au plus (quatre proposées en maître-détail et en galerie). */
   fields?: string[]
   /** Kanban : la colonne dont chaque valeur fait une colonne du tableau ; glisser une carte change la case. */
   kanbanColumn?: string
@@ -423,7 +423,10 @@ export function cleanPresentationLook(value: unknown): PresentationLook | undefi
 }
 
 
-/** Une colonne du kanban réglée à la main, nettoyée ; sans valeur : rien. */
+/**
+ * Une colonne du kanban réglée à la main, nettoyée ; sans valeur : rien. Une valeur seule reste :
+ * ajoutée à la main (colonne sans liste de choix), elle fait une colonne vide à sa place.
+ */
 function cleanLane(input: unknown): KanbanLane | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
@@ -436,7 +439,7 @@ function cleanLane(input: unknown): KanbanLane | null {
   if (raw.hidden === true) lane.hidden = true
   const limit = bounded(raw.limit, 1, 999)
   if (limit) lane.limit = limit
-  return Object.keys(lane).length > 1 ? lane : null
+  return lane
 }
 
 /** Une présentation propre (champs connus, longueurs bornées) ; `undefined` pour le tableau simple. */
@@ -882,7 +885,11 @@ export function fitLayoutToColumns(layout: Presentation, columns: string[]): Pre
 /** Un preset de vue : des réglages nommés, communs à tous les index. */
 export type PresentationPreset = { id: string; name: string; layout: Presentation; builtin?: boolean; updatedAt?: string }
 
-/** Les presets d'Eraser, sans colonne : ils se complètent avec celles de l'onglet. */
+/**
+ * Les presets d'Eraser, presque tous sans colonne : ils se complètent avec celles de l'onglet.
+ * « Classes par famille » nomme la colonne Type et la carte de l'index des classes ; appliqué
+ * ailleurs, une colonne absente est retirée (`fitLayoutToColumns`).
+ */
 export const builtinPresentationPresets: PresentationPreset[] = [
   { id: "eraser:list-compact", name: "Liste compacte", builtin: true, layout: { kind: "list", compact: true } },
   { id: "eraser:list-folding", name: "Liste à lignes dépliables", builtin: true, layout: { kind: "list", collapsible: true } },

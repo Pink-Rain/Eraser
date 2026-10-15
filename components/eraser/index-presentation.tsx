@@ -588,11 +588,11 @@ function MasterDetailLayout(props: PresentationProps) {
   const columns = right ? masterWidthsRight[look.masterWidth ?? "normal"] : masterWidths[look.masterWidth ?? "normal"]
   return <div className={`grid gap-4 ${columns}`}>
     <div className={`max-h-[70vh] overflow-y-auto border bg-card/70 p-1.5 ${radii[look.radius ?? "md"]} ${right ? "md:order-2" : ""}`}>
-      <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : "space-y-0.5"}>{group.map((row) => {
+      <Sections layout={layout} rows={rows} valueOf={valueOf} nameOf={nameOf} optionsOf={optionsOf} render={(group) => <div className={look.surface === "plain" ? "divide-y" : look.surface === "boxed" ? "grid gap-1" : "space-y-0.5"}>{group.map((row) => {
         const rowTint = rowColor(layout, row, valueOf, optionsOf)
         const current = row === selected
         const frame = current ? { className: "" } : accentFrame(look, rowTint)
-        return <button key={row} type="button" aria-current={current} onClick={() => setChosen(row)} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full rounded-lg text-left ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
+        return <button key={row} type="button" aria-current={current} onClick={() => setChosen(row)} style={current ? { backgroundColor: accentOf(look), ...frame.style } : frame.style} className={`block w-full text-left ${look.surface === "boxed" ? `border ${current ? "border-transparent" : "bg-card"} ${boxClass(look)}` : "rounded-lg"} ${paddings[look.density ?? "compact"]} ${frame.className} ${current ? "text-white" : "hover:bg-muted"}`}>
           <span className="flex min-w-0 items-center gap-2">
             <RowIcon layout={layout} row={row} valueOf={valueOf} color={current ? undefined : rowTint} />
             <RowImage src={rowImage(layout, row, valueOf)} look={look} size={look.imageSize ?? "sm"} />
@@ -906,7 +906,9 @@ function GalleryLayout(props: PresentationProps) {
     const glyph = rowGlyph(layout, row, valueOf)
     const gauge = layout.gauge ? <RowGauge layout={layout} row={row} valueOf={valueOf} color={frameColor} inverted /> : null
     const title = <span className={`truncate font-semibold leading-tight ${look.titleFont === "sans" ? "" : "font-display"} ${titleSizes[look.titleSize ?? "sm"]} ${look.titleCaps ? "uppercase tracking-[0.12em]" : ""}`}>{nameOf(row) || "Sans nom"}</span>
-    const picture = <span className={`relative block overflow-hidden ${cabinet ? "bg-black/40" : "border bg-muted/40"} ${look.shadow && !cabinet ? "shadow-md" : cabinet ? "" : "shadow-sm"}`} style={{ aspectRatio: String(ratio), borderRadius: cabinet ? 2 : radius, ...marks }}>
+    // « Fond » décoché (`imageBare`) : ni cadre ni fond derrière l'image (image détourée, pictogramme).
+    const bare = look.imageBare && !cabinet
+    const picture = <span className={`relative block overflow-hidden ${cabinet ? "bg-black/40" : bare ? "" : "border bg-muted/40"} ${look.shadow && !cabinet ? "shadow-md" : cabinet || bare ? "" : "shadow-sm"}`} style={{ aspectRatio: String(ratio), borderRadius: cabinet ? 2 : radius, ...marks }}>
       <CoverImage src={src} className={`absolute inset-0 size-full ${layout.galleryFit === "contain" ? "object-contain" : "object-cover"} ${layout.galleryStill ? "" : "transition duration-300 group-hover:scale-[1.03] motion-reduce:transition-none motion-reduce:group-hover:scale-100"}`} fallback={<span className="absolute inset-0 grid place-items-center bg-gradient-to-br from-muted/30 to-muted text-muted-foreground/60"><ImageOff className="size-6" /></span>} />
       {layout.badgeColumn && (() => { const value = plain(valueOf(row, layout.badgeColumn!)).split(/\s*[,;]\s*/)[0] ?? ""; if (!value) return null; const tint = optionsOf?.(layout.badgeColumn!)?.find((option) => fold(option.value) === fold(value))?.color ?? accent; return <span className="absolute left-0 top-2 z-[1] rounded-r-full px-2 py-0.5 text-[9px] font-bold uppercase tracking-[0.12em] text-white shadow-sm" style={{ backgroundColor: tint }}>{value}</span> })()}
       {glyph && <span className="absolute right-1.5 top-1.5 z-[1] grid size-6 place-items-center rounded-full bg-black/55 text-white"><IndexIconGlyph icon={glyph.icon} emoji={glyph.emoji} className="size-3.5" /></span>}
