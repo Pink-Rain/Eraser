@@ -16,7 +16,7 @@ import { shownReferenceText } from "@/components/eraser/reference-store"
 import { htmlToRichText } from "@/lib/google-sheet-rich-text"
 import { OBJECT_REFERENCE_INDEX } from "@/lib/index-references"
 import type { EditorMode } from "@/components/eraser/index-editor"
-import { IndexWindowDialog, useIndexSettings } from "@/components/eraser/index-windows"
+import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
 import { ObjectViewGrid, specIn } from "@/components/eraser/object-view-grid"
@@ -43,7 +43,8 @@ import { numberCorrection } from "@/lib/index-numbers"
 import { indexSortKey, sortByIndexKey } from "@/lib/index-sort"
 import { findEntry, isTrashedEntry, objectHeaderIndex, type IndexEditorModel, type SchemaEntry, type SchemaOperation } from "@/lib/index-schema-shared"
 import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey } from "@/lib/index-windows"
-import type { Presentation } from "@/lib/index-presentations"
+import { builtinPresentationPresets, type Presentation } from "@/lib/index-presentations"
+import { filterWindowOf, resolveSavedViewPresentation, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
 import { layoutPlaces, tabLayout } from "@/lib/index-layouts"
 import { headerOccurrence, objectIndexRowRef } from "@/lib/object-index-refs"
 import { objectItemId, positionalObjectId } from "@/lib/object-item-id"
@@ -121,13 +122,22 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   const [cardChoice, setCardChoice] = usePersistentState<string>("eraser:object-index:card", "", isCardChoice)
   const [editorMode, setEditorMode] = useState<EditorMode>("columns")
   const { viewRole, selectedCampaignId } = useShellData()
-  const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
+  const [viewDialog, setViewDialog] = useState<{ mode: "new" | "edit"; draft?: Partial<SavedView>; notice?: string } | null>(null)
   // Une case modifiée dans une fenêtre : en revenant à un tableau, il est relu.
   const editedInView = useRef(false)
-  const activeView = useMemo(() => { const id = windowIdOfSelectKey(selectedKey); return id ? settings.views.find((view) => view.id === id) ?? null : null }, [selectedKey, settings.views])
-  // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre
-  // (une présentation d'une version précédente est ignorée ; kanban, liste… se posent dans une page).
-  const activeLayout = useMemo((): Presentation | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
+  // Les vues des items : celles du serveur partagé et les onglets-fenêtres de la feuille pas encore
+  // repris ; serveur partagé injoignable : les onglets-fenêtres seuls, et un avertissement.
+  const ownViews = useMemo(() => settings.savedViewsUnavailable ? settings.views.map(savedViewFromWindow) : settings.savedViews, [settings.savedViews, settings.savedViewsUnavailable, settings.views])
+  const activeView = useMemo(() => { const id = windowIdOfSelectKey(selectedKey); return id ? ownViews.find((view) => view.id === id) ?? null : null }, [ownViews, selectedKey])
+  // La forme de la vue : l'onglet stat, les cartes, ou sa présentation (liste, kanban…), prise sur
+  // le premier tableau de sa source, comme le serveur des pages le fait pour un bloc.
+  const presentationPresets = useMemo(() => [...builtinPresentationPresets, ...settings.viewPresets], [settings.viewPresets])
+  const activeLayout = useMemo((): Presentation | null => {
+    if (!activeView || activeView.kind === "table") return null
+    if (activeView.kind === "stats" || activeView.kind === "cards") return { kind: activeView.kind }
+    const first = activeView.source === ALL_SOURCES ? tables[0] : tables.find((table) => tableKey(table) === activeView.source) ?? tables[0]
+    return first ? resolveSavedViewPresentation(activeView, { tab: first.tabName, headers: first.headers.filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)), presentations: settings.presentations, presets: presentationPresets }) : null
+  }, [activeView, presentationPresets, settings.presentations, tables])
 
   // Les statistiques des items (Modifier › Stats), sur tous les tableaux ; un onglet stat montre les épinglées.
   const statKey = (table: ObjectIndexTable, rowNumber: number) => `${tableKey(table)}|${rowNumber}`
@@ -163,8 +173,8 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
   }, [schemas, tables])
   const indexStats = useMemo(() => {
     const seen = new Set<string>()
-    return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
-  }, [settings.stats, settings.views])
+    return [...settings.stats, ...ownViews.flatMap((view) => view.stats ?? []), ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
+  }, [ownViews, settings.stats, settings.views])
   // « Forêt - Ville » (Emplacement principal, secondaire) : chaque lieu compte à part.
   const statSeparatorOf = useCallback((header: string) => {
     const table = tables.find((candidate) => objectHeaderIndex(candidate.headers, header) >= 0)
@@ -685,15 +695,15 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
               value={activeView ? windowSelectKey(activeView.id) : selected ? tableKey(selected) : ""}
               options={[
                 ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table), detail: String(table.rows.length) })),
-                ...settings.views.map((view) => ({ value: windowSelectKey(view.id), label: `⧉ ${view.name}`, group: "Onglets-fenêtres" })),
+                ...ownViews.map((view) => ({ value: windowSelectKey(view.id), label: `${savedViewMark(view.kind)} ${view.name}`, group: "Vues" })),
               ]}
               onChange={(value) => { setSelectedKey(value); if (editedInView.current && !windowIdOfSelectKey(value)) { editedInView.current = false; void refresh(true) } }}
               hrefOf={tabHref}
-              tabLabel={(option) => `Objets · ${option.label.replace(/^⧉ /, "")}`}
+              tabLabel={(option) => `Objets · ${option.label.replace(/^[⧉∑▦◈] /, "")}`}
               disabled={!tables.length || busy}
               empty="Aucun tableau disponible"
             />
-            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+            {activeView && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog({ mode: "edit" })} title="Modifier cette vue" aria-label="Modifier cette vue"><Pencil /></Button>}
           </span>
         </label>
         {selected && !activeView && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Nom, type, sous-type ou autre champ…" className="pl-9" /></div>}
@@ -703,7 +713,7 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
           {selected && !activeView && display === "table" && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {priceCorrections.length > 0 && <Button type="button" variant="outline" onClick={() => void correctPrices()} disabled={busy} title="Les pièces d’argent (PA) et de bronze (PB) n’existent pas : ces prix sont réécrits en pièces de cuivre (PC).">{pending === "prices" ? <LoaderCircle className="animate-spin" /> : <Coins />}Corriger {priceCorrections.length} prix</Button>}
-          <ToolbarIconButton label="Onglet-fenêtre : un onglet qui réaffiche les items répondant à des conditions, sans les copier" onClick={() => setViewDialog("new")} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
+          <ToolbarIconButton label="Nouvelle vue : des items choisis, dans un ordre, sous une forme (tableau, cartes, liste, kanban…) ou un onglet stat" onClick={() => setViewDialog({ mode: "new" })} disabled={!tables.length || busy}><Filter /></ToolbarIconButton>
           {selected && !activeView && <DrawRowButton
             rows={displayedRows}
             weightColumns={weightColumns}
@@ -758,8 +768,9 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         onSave={(values) => void mutate({ action: "add", values: selected.headers.map((header, index) => [header, values[String(index)] ?? ""]) }, "add")}
       />}
 
-      {activeView && activeView.layout?.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
-        : activeView ? <ObjectViewGrid view={activeView} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
+      {settings.savedViewsUnavailable && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">Les vues enregistrées n’ont pas pu être lues sur le serveur partagé d’Eraser : seuls les onglets-fenêtres de la feuille sont montrés, et une vue ne peut pas être enregistrée pour l’instant.</p>}
+      {activeView && activeView.kind === "stats" ? <IndexStats {...statsProps} pinnedOnly canEdit={!busy} onManage={() => void openEditor("stats")} />
+        : activeView ? <ObjectViewGrid view={filterWindowOf(activeView)} tables={tables} schemas={schemas} disabled={busy} layout={activeLayout} cards={settings.cards} onEdited={() => { editedInView.current = true }} /> : selected && display === "cards" ? (shownCard
         ? <IndexCardGrid card={shownCard} rows={displayedRows} rowSource={cardRow} onOpen={setDetails} hrefOf={rowHref} empty={selected.rows.length ? "Aucune ligne ne correspond à la recherche." : "Ce tableau est vide. Ajoute son premier item."} />
         : <NoCardsYet tabName={selected.tabName} onCreate={() => void openEditor("cards")} />
       ) : selected ? (
@@ -817,16 +828,24 @@ export function ObjectIndexManager({ initialTables, initialSchemas = {}, initial
         // Le tableau remonte ses cases : il montre ce qui vient d'être écrit dans la fiche.
         onClose={() => { setDetails(null); setStatSheet(null); setSheetError(""); setVersion((current) => current + 1) }}
       />}
-      {viewDialog && <IndexWindowDialog
+      {viewDialog && <SavedViewDialog
         open
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index="objects"
         allowStats
-        view={viewDialog === "edit" ? activeView : null}
+        view={viewDialog.mode === "edit" ? activeView : null}
+        draft={viewDialog.draft}
+        notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les index d’items" }, ...tables.map((table) => ({ value: tableKey(table), label: tableLabel(table) }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((table) => tableKey(table) === source)).flatMap((table) => table.headers).filter((header) => header.trim() && !/^(id|colonne \d+)$/i.test(header)))]}
-        onSave={async (view) => { const id = await settings.saveView(view); setSelectedKey(windowSelectKey(id)); return id }}
-        onDelete={async (id) => { await settings.deleteView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
+        tabOf={(source) => (source === ALL_SOURCES ? tables[0] : tables.find((table) => tableKey(table) === source) ?? tables[0])?.tabName ?? ""}
+        presentations={settings.presentations}
+        presets={presentationPresets}
+        cards={settings.cards}
+        cardsIndex="objects"
+        nextPosition={Math.max(0, ...ownViews.map((view) => view.position + 1))}
+        onSave={async (view) => { const saved = await settings.saveSavedView(view); setSelectedKey(windowSelectKey(saved.id)); return saved }}
+        onDelete={async (id) => { await settings.removeSavedView(id); setSelectedKey(tables[0] ? tableKey(tables[0]) : "") }}
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
       {selected && sendRow !== null && <ObjectSendDialog

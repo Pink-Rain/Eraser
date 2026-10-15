@@ -1,7 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
-import { AppWindow, ArrowLeft, BookOpen, CalendarDays, ChartColumnBig, Columns3, Filter, Gauge, GitCommitVertical, Images, LayoutGrid, LayoutList, ListTree, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
+import { BookOpen, CalendarDays, ChartColumnBig, Columns3, Filter, Gauge, GitCommitVertical, Images, LayoutGrid, LayoutList, ListTree, LoaderCircle, PanelsLeftRight, Plus, Table2, Trash2, X, type LucideIcon } from "lucide-react"
 
 import { Button } from "@/components/ui/button"
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog"
@@ -10,27 +10,28 @@ import { NativeSelect, NativeSelectOption } from "@/components/ui/native-select"
 import type { ColumnPreset, PresetColumn } from "@/lib/index-presets"
 import { ALL_SOURCES, describeCondition, filterOperators, type IndexWindow, type FilterCondition } from "@/lib/index-windows"
 import type { IndexLayout, LayoutKind, LayoutPreset, NamedLayout, TabLayouts } from "@/lib/index-layouts"
-import type { CardPreset, CardTemplate, TabCards } from "@/lib/index-cards"
+import { tabCardsOf, type CardPreset, type CardTemplate, type TabCards } from "@/lib/index-cards"
 import type { TabLocks } from "@/lib/index-locks"
 import { forgetResolvedReferences } from "@/components/eraser/reference-store"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { type TabPresentations, type Presentation, type AllPresentationKind, type PresentationPreset } from "@/lib/index-presentations"
+import { allPresentationKinds, isPresentationKind, namedPresentationsOf, type TabPresentations, type Presentation, type AllPresentationKind, type PresentationPreset } from "@/lib/index-presentations"
+import { newSavedViewId, savedViewFromWindow, type SavedView } from "@/lib/index-saved-views"
 
 export const layoutIcons: Record<AllPresentationKind, LucideIcon> = { table: Table2, cards: LayoutGrid, list: LayoutList, kanban: Columns3, "master-detail": PanelsLeftRight, calendar: CalendarDays, dashboard: Gauge, gallery: Images, timeline: GitCommitVertical, tree: ListTree, codex: BookOpen, stats: ChartColumnBig }
 
 
 
 
-type Settings = { views: IndexWindow[]; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: PresentationPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
+type Settings = { views: IndexWindow[]; savedViews: SavedView[]; savedViewsUnavailable: boolean; presets: ColumnPreset[]; layouts: Record<string, TabLayouts>; layoutPresets: LayoutPreset[]; cards: Record<string, TabCards>; cardPresets: CardPreset[]; presentations: Record<string, TabPresentations>; viewPresets: PresentationPreset[]; stats: StatDefinition[]; statGroups: StatColumnGroup[]; locks: Record<string, TabLocks> }
 
-const emptySettings: Settings = { views: [], presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
+const emptySettings: Settings = { views: [], savedViews: [], savedViewsUnavailable: false, presets: [], layouts: {}, layoutPresets: [], cards: {}, cardPresets: [], presentations: {}, viewPresets: [], stats: [], statGroups: [], locks: {} }
 
 // Gardés d'un affichage à l'autre : revenir sur un index montre aussitôt ses fenêtres.
 const known = new Map<string, Settings>()
 
 async function postSettings(body: Record<string, unknown>) {
   const response = await fetch("/api/resources/index-settings", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(body) })
-  const payload = (await response.json().catch(() => ({}))) as Partial<Settings> & { id?: string; error?: string }
+  const payload = (await response.json().catch(() => ({}))) as Partial<Settings> & { id?: string; error?: string; savedView?: SavedView }
   if (!response.ok) throw new Error(payload.error || "Le réglage n’a pas pu être enregistré.")
   return payload
 }
@@ -46,7 +47,9 @@ export function useIndexSettings(index: string) {
       .then(({ response, payload }) => {
         if (!active) return
         if (!response.ok) { setError(payload.error || ""); return }
-        const next = { views: payload.views ?? [], presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
+        // Les vues enregistrées (serveur partagé et onglets-fenêtres réunis) ; une route d'avant ne les
+        // donne pas : les onglets-fenêtres en tiennent lieu.
+        const next = { views: payload.views ?? [], savedViews: payload.savedViews ?? (payload.views ?? []).map(savedViewFromWindow), savedViewsUnavailable: payload.savedViewsUnavailable === true, presets: payload.presets ?? [], layouts: payload.layouts ?? {}, layoutPresets: payload.layoutPresets ?? [], cards: payload.cards ?? {}, cardPresets: payload.cardPresets ?? [], presentations: payload.presentations ?? {}, viewPresets: payload.viewPresets ?? [], stats: payload.stats ?? [], statGroups: payload.statGroups ?? [], locks: payload.locks ?? {} }
         known.set(index, next)
         setSettings(next)
       })
@@ -73,6 +76,28 @@ export function useIndexSettings(index: string) {
     // Le survol a pu changer : les lignes citées déjà lues sont relues.
     forgetResolvedReferences()
   }, [index, update])
+  /** Enregistre une vue sur le serveur partagé (la feuille des onglets-fenêtres ne change pas) ; rend la vue enregistrée. */
+  const saveSavedView = useCallback(async (view: SavedView) => {
+    const payload = await postSettings({ action: "save-saved-view", view })
+    const saved = payload.savedView
+    if (!saved) throw new Error("La vue n’a pas pu être enregistrée.")
+    setSettings((current) => {
+      const savedViews = [...current.savedViews.filter((item) => item.id !== saved.id), saved].sort((left, right) => left.position - right.position || left.name.localeCompare(right.name, "fr"))
+      const next = { ...current, savedViews }
+      known.set(index, next)
+      return next
+    })
+    return saved
+  }, [index])
+  /** Retire une vue (un onglet-fenêtre du même identifiant ne revient pas). */
+  const removeSavedView = useCallback(async (id: string) => {
+    await postSettings({ action: "remove-saved-view", index, id })
+    setSettings((current) => {
+      const next = { ...current, savedViews: current.savedViews.filter((item) => item.id !== id) }
+      known.set(index, next)
+      return next
+    })
+  }, [index])
   const deleteView = useCallback(async (id: string) => {
     const payload = await postSettings({ action: "delete-view", id, index })
     if (payload.views) update({ views: payload.views })
@@ -139,193 +164,213 @@ export function useIndexSettings(index: string) {
     const payload = await postSettings({ action: "delete-card-preset", id })
     if (payload.cardPresets) update({ cardPresets: payload.cardPresets })
   }, [update])
-  return { ...settings, error, saveView, deleteView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
+  return { ...settings, error, saveView, deleteView, saveSavedView, removeSavedView, savePreset, deletePreset, saveLayouts, saveLayoutPreset, deleteLayoutPreset, saveCards, saveCardPreset, deleteCardPreset, savePresentations, saveViewPreset, deleteViewPreset, saveStats, saveLocks }
 }
 
 const emptyCondition = (column: string): FilterCondition => ({ column, operator: "est", value: "" })
 
+const fold = (value: string) => value.normalize("NFD").replace(/[̀-ͯ]/g, "").toLocaleLowerCase("fr").replace(/\s+/g, " ").trim()
+
+/** Les genres qu'une vue peut avoir, dans l'ordre du choix ; l'onglet stat à la fin. */
+const kindChoices: Array<{ value: AllPresentationKind; label: string; hint: string }> = [
+  ...allPresentationKinds,
+  { value: "stats", label: "Onglet stat", hint: "Les statistiques épinglées de l’index (Modifier › Stats)." },
+]
+
+/** Le symbole d'une vue devant son nom, dans le choix d'onglet. */
+export function savedViewMark(kind: AllPresentationKind) {
+  return kind === "stats" ? "∑" : kind === "table" ? "⧉" : kind === "cards" ? "▦" : "◈"
+}
+
 /**
- * Créer ou modifier un onglet-fenêtre : son nom, d'où il prend ses lignes (tout l'index
- * ou un onglet) et ses conditions. Les lignes ne sont jamais copiées.
+ * Créer ou modifier une vue : son nom, d'où elle prend ses lignes (tout l'index ou un onglet),
+ * sa présentation (tableau, cartes, liste, kanban… ou onglet stat), sa forme, son filtre et son
+ * tri. Les lignes ne sont jamais copiées : une case modifiée dans la vue l'est à la source.
+ * `draft` pré-remplit une vue nouvelle (« Enregistrer comme vue »), `notice` dit ce qui n'a pas
+ * pu en être repris.
  */
-export function IndexWindowDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, allowStats = false }: {
+export function SavedViewDialog({ open, onOpenChange, index, view, draft, notice, sources, columnsOf, tabOf, presentations, presets, cards, cardsIndex, nextPosition, allowStats = false, onSave, onDelete }: {
   open: boolean
   onOpenChange: (open: boolean) => void
   index: string
-  view?: IndexWindow | null
+  view?: SavedView | null
+  draft?: Partial<SavedView> | null
+  notice?: string
   /** Les sources possibles : la valeur (« * » ou un onglet) et son libellé. */
   sources: Array<{ value: string; label: string }>
-  /** Les colonnes proposées pour les conditions, selon la source choisie. */
+  /** Les colonnes proposées pour les conditions et le tri, selon la source choisie. */
   columnsOf: (source: string) => string[]
-  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
-  onDelete?: (id: string) => Promise<void>
-  /** Un nouvel onglet peut être un onglet stat (le moteur des index sait l'afficher). */
+  /** L'onglet dont la vue prend la forme et les cartes, selon la source choisie. */
+  tabOf: (source: string) => string
+  presentations: Record<string, TabPresentations>
+  presets: PresentationPreset[]
+  cards: Record<string, TabCards>
+  cardsIndex: string
+  nextPosition: number
   allowStats?: boolean
-}) {
-  // Nouvel onglet : d'abord le choix entre onglet fenêtre et onglet stat.
-  const [kind, setKind] = useState<"window" | "stats" | null>(() => view ? view.layout?.kind === "stats" ? "stats" : "window" : allowStats ? null : "window")
-  if (kind === null) return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-xl">
-      <DialogHeader>
-        <DialogTitle>Nouvel onglet</DialogTitle>
-        <DialogDescription className="sr-only">Choisir le genre d’onglet à créer.</DialogDescription>
-      </DialogHeader>
-      <div className="grid gap-3 sm:grid-cols-2">
-        {([
-          { value: "window", Icon: AppWindow, label: "Onglet fenêtre", hint: "Le tableau, seulement avec les lignes qui remplissent tes conditions." },
-          { value: "stats", Icon: ChartColumnBig, label: "Onglet stat", hint: "Des chiffres, barres et tableaux croisés sur l’index." },
-        ] as const).map((choice) => <button key={choice.value} type="button" autoFocus={choice.value === "window"} onClick={() => setKind(choice.value)} className="group grid justify-items-start gap-2 rounded-xl border bg-card/70 p-4 text-left transition-colors hover:border-primary hover:bg-primary/5 focus-visible:outline-2 focus-visible:outline-ring">
-          <span className="grid size-11 place-items-center rounded-lg bg-primary/10 text-primary transition-colors group-hover:bg-primary group-hover:text-primary-foreground"><choice.Icon className="size-6" /></span>
-          <span className="font-display text-lg font-semibold">{choice.label}</span>
-          <span className="text-xs text-muted-foreground">{choice.hint}</span>
-        </button>)}
-      </div>
-    </DialogContent>
-  </Dialog>
-  if (kind === "stats") return <StatsTabDialog open={open} onOpenChange={onOpenChange} index={index} view={view} onBack={view ? undefined : () => setKind(null)} onSave={onSave} onDelete={onDelete} />
-  return <WindowViewDialog open={open} onOpenChange={onOpenChange} index={index} view={view} sources={sources} columnsOf={columnsOf} onSave={onSave} onDelete={onDelete} onBack={!view && allowStats ? () => setKind(null) : undefined} />
-}
-
-/** Un onglet stat : son nom ; ses statistiques se règlent dans l'onglet même. */
-function StatsTabDialog({ open, onOpenChange, index, view, onBack, onSave, onDelete }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  index: string
-  view?: IndexWindow | null
-  onBack?: () => void
-  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
+  onSave: (view: SavedView) => Promise<SavedView>
   onDelete?: (id: string) => Promise<void>
 }) {
-  const [name, setName] = useState(view?.name ?? "")
-  const [pending, setPending] = useState("")
-  const [error, setError] = useState("")
-  async function save() {
-    setPending("save"); setError("")
-    try {
-      // Ses statistiques (la présentation) restent telles quelles : seul le nom change ici.
-      await onSave({ id: view?.id, index, name, source: view?.source ?? ALL_SOURCES, match: view?.match ?? "toutes", conditions: view?.conditions ?? [], layout: view?.layout?.kind === "stats" ? view.layout : { kind: "stats" } })
-      onOpenChange(false)
-    } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "L’onglet stat n’a pas pu être enregistré.")
-    }
-    setPending("")
-  }
-  async function remove() {
-    if (!view || !onDelete || !window.confirm(`Supprimer l’onglet stat « ${view.name} » et ses statistiques ? Les lignes de l’index ne sont pas touchées.`)) return
-    setPending("delete"); setError("")
-    try { await onDelete(view.id); onOpenChange(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
-    setPending("")
-  }
-  return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="sm:max-w-md">
-      <DialogHeader>
-        <DialogTitle className="flex items-center gap-2"><ChartColumnBig className="size-4 text-primary" />{view ? "Modifier l’onglet stat" : "Nouvel onglet stat"}</DialogTitle>
-        <DialogDescription className="sr-only">Le nom de l’onglet stat.</DialogDescription>
-      </DialogHeader>
-      <form className="grid gap-3" onSubmit={(event) => { event.preventDefault(); if (name.trim() && !pending) void save() }}>
-        <label className="grid gap-1.5 text-sm font-medium">Nom de l’onglet<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Statistiques, Raretés…" autoFocus /></label>
-        {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
-        <div className="flex flex-wrap justify-end gap-2">
-          {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}
-          {view && onDelete && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}
-          <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
-          <Button type="submit" disabled={Boolean(pending) || !name.trim()}>{pending === "save" ? <LoaderCircle className="animate-spin" /> : <ChartColumnBig />}{view ? "Enregistrer" : "Créer"}</Button>
-        </div>
-      </form>
-    </DialogContent>
-  </Dialog>
-}
-
-function WindowViewDialog({ open, onOpenChange, index, view, sources, columnsOf, onSave, onDelete, onBack }: {
-  open: boolean
-  onOpenChange: (open: boolean) => void
-  index: string
-  view?: IndexWindow | null
-  sources: Array<{ value: string; label: string }>
-  columnsOf: (source: string) => string[]
-  onSave: (view: Omit<IndexWindow, "id" | "position"> & { id?: string }) => Promise<string>
-  onDelete?: (id: string) => Promise<void>
-  onBack?: () => void
-}) {
-  const [name, setName] = useState(view?.name ?? "")
-  const [source, setSource] = useState(view?.source ?? ALL_SOURCES)
-  const [match, setMatch] = useState<IndexWindow["match"]>(view?.match ?? "toutes")
+  const start = view ?? draft ?? null
+  const [name, setName] = useState(start?.name ?? "")
+  const [source, setSource] = useState(start?.source ?? ALL_SOURCES)
+  const [kind, setKind] = useState<AllPresentationKind>(start?.kind ?? "table")
+  const [shape, setShape] = useState<SavedView["shape"]>(start?.shape)
+  const [cardId, setCardId] = useState(start?.cardId ?? "")
+  const [match, setMatch] = useState<"toutes" | "une">(start?.filter?.match ?? "toutes")
   const columns = columnsOf(source)
-  const [conditions, setConditions] = useState<FilterCondition[]>(() => view?.conditions.length ? view.conditions : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
+  const [conditions, setConditions] = useState<FilterCondition[]>(() => start?.filter?.conditions.length ? start.filter.conditions : view || draft ? [] : [emptyCondition(columns.find((column) => /^type$/i.test(column)) ?? columns[0] ?? "")])
+  const [sortColumn, setSortColumn] = useState(start?.sort?.column ?? "")
+  const [sortDesc, setSortDesc] = useState(start?.sort?.desc ?? false)
   const [pending, setPending] = useState("")
   const [error, setError] = useState("")
+  const tab = tabOf(source)
+  const presentation = isPresentationKind(kind)
+  const kindLabel = kindChoices.find((choice) => choice.value === kind)?.label ?? kind
+  const entry = Object.entries(presentations).find(([name]) => fold(name) === fold(tab))?.[1]
+  const variants = presentation ? namedPresentationsOf(entry, kind) : []
+  const kindPresets = presentation ? presets.filter((preset) => preset.layout.kind === kind) : []
+  const tabCards = tabCardsOf(cards, cardsIndex, tab).cards
+  const shapeValue = shape?.from === "variant" ? `variant:${shape.id}` : shape?.from === "preset" ? `preset:${shape.id}` : shape?.from === "own" ? "own" : ""
 
   function change(position: number, changes: Partial<FilterCondition>) {
-    setConditions((current) => current.map((condition, index) => index === position ? { ...condition, ...changes } : condition))
+    setConditions((current) => current.map((condition, at) => at === position ? { ...condition, ...changes } : condition))
+  }
+
+  function chooseKind(next: AllPresentationKind) {
+    setKind(next)
+    // Une forme choisie pour un autre genre ne vaut plus.
+    if (shape && (shape.from === "own" ? shape.layout.kind !== next : true)) setShape(undefined)
+  }
+
+  function chooseShape(value: string) {
+    if (!value) setShape(undefined)
+    else if (value === "own") setShape(start?.shape)
+    else if (value.startsWith("variant:")) setShape({ from: "variant", id: value.slice("variant:".length) })
+    else if (value.startsWith("preset:")) setShape({ from: "preset", id: value.slice("preset:".length) })
   }
 
   async function save() {
     setPending("save"); setError("")
     try {
-      // Un onglet-fenêtre est le tableau filtré : il n'a pas de présentation à lui (kanban, liste… se
-      // posent dans une page). Une présentation d'avant se retire en l'enregistrant.
-      await onSave({ id: view?.id, index, name, source, match, conditions: conditions.filter((condition) => condition.column) })
+      const kept = conditions.filter((condition) => condition.column && (!filterOperators.find((operator) => operator.value === condition.operator)?.needsValue || condition.value.trim()))
+      const next: SavedView = {
+        id: view?.id ?? newSavedViewId(),
+        index,
+        name: name.trim(),
+        ...(view?.icon ? { icon: view.icon } : {}),
+        source,
+        kind,
+        ...(presentation && shape ? { shape } : {}),
+        ...(kind !== "stats" && (cardId || (view?.cardId && kind !== "cards")) ? { cardId: kind === "cards" ? cardId : view?.cardId ?? cardId } : {}),
+        ...(kind !== "stats" && kept.length ? { filter: { match, conditions: kept } } : {}),
+        ...(kind !== "stats" && sortColumn ? { sort: { column: sortColumn, desc: sortDesc } } : {}),
+        ...(view?.click ? { click: view.click } : {}),
+        ...(kind === "stats" && view?.stats?.length ? { stats: view.stats } : {}),
+        position: view?.position ?? nextPosition,
+      }
+      await onSave(next)
       onOpenChange(false)
     } catch (caught) {
-      setError(caught instanceof Error ? caught.message : "L’onglet-fenêtre n’a pas pu être enregistré.")
+      setError(caught instanceof Error ? caught.message : "La vue n’a pas pu être enregistrée.")
     }
     setPending("")
   }
 
   async function remove() {
-    if (!view || !onDelete || !window.confirm(`Supprimer l’onglet-fenêtre « ${view.name} » ? Les lignes qu’il affiche ne sont pas touchées.`)) return
+    if (!view || !onDelete || !window.confirm(`Supprimer la vue « ${view.name} » ? Les lignes qu’elle affiche ne sont pas touchées.`)) return
     setPending("delete"); setError("")
     try { await onDelete(view.id); onOpenChange(false) } catch (caught) { setError(caught instanceof Error ? caught.message : "Suppression impossible.") }
     setPending("")
   }
 
   return <Dialog open={open} onOpenChange={onOpenChange}>
-    <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-2xl">
+    <DialogContent className="max-h-[calc(100svh-2rem)] overflow-y-auto sm:max-w-3xl">
       <DialogHeader>
         <DialogTitle className="flex items-center gap-2"><Filter className="size-4 text-primary" />{view ? "Modifier la vue" : "Nouvelle vue"}</DialogTitle>
-        <DialogDescription>Un onglet-fenêtre : le tableau, avec seulement les lignes qui remplissent les conditions. Rien n’est copié : une case modifiée ici l’est dans son onglet d’origine.</DialogDescription>
+        <DialogDescription>Des lignes choisies, dans un ordre, sous une forme, pour tout le monde. Rien n’est copié : une case modifiée dans la vue l’est dans son onglet d’origine.</DialogDescription>
       </DialogHeader>
+      {notice && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">{notice}</p>}
       <div className="grid gap-3 sm:grid-cols-2">
-        <label className="grid gap-1.5 text-sm font-medium">Nom de l’onglet<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Runes, Armes légendaires…" autoFocus /></label>
+        <label className="grid gap-1.5 text-sm font-medium">Nom de la vue<Input value={name} onChange={(event) => setName(event.target.value)} maxLength={60} placeholder="Runes, PNJ par lieu, Chronologie du monde…" autoFocus /></label>
         <label className="grid gap-1.5 text-sm font-medium">Chercher les lignes dans
           <NativeSelect value={source} onChange={(event) => setSource(event.target.value)}>
             {sources.map((option) => <NativeSelectOption key={option.value} value={option.value}>{option.label}</NativeSelectOption>)}
           </NativeSelect>
         </label>
       </div>
-      <div className="grid gap-2 rounded-xl border bg-card/60 p-3">
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="font-medium">Afficher les lignes qui remplissent</span>
-          <NativeSelect value={match} onChange={(event) => setMatch(event.target.value === "une" ? "une" : "toutes")} className="h-8 w-auto text-sm">
-            <NativeSelectOption value="toutes">toutes les conditions</NativeSelectOption>
-            <NativeSelectOption value="une">au moins une condition</NativeSelectOption>
-          </NativeSelect>
+      <div className="grid gap-2">
+        <span className="text-sm font-medium">Présentation</span>
+        <div className="grid grid-cols-2 gap-1.5 sm:grid-cols-4" role="radiogroup" aria-label="Présentation">
+          {kindChoices.filter((choice) => allowStats || choice.value !== "stats").map((choice) => {
+            const Icon = layoutIcons[choice.value]
+            const chosen = kind === choice.value
+            return <button key={choice.value} type="button" role="radio" aria-checked={chosen} title={choice.hint} onClick={() => chooseKind(choice.value)} className={`flex items-center gap-2 rounded-lg border px-2.5 py-2 text-left text-sm transition-colors ${chosen ? "border-primary bg-primary/10 font-semibold text-foreground" : "bg-card/60 text-muted-foreground hover:border-primary/50 hover:text-foreground"}`}><Icon className="size-4 shrink-0" />{choice.label}</button>
+          })}
         </div>
-        {conditions.map((condition, position) => {
-          const operator = filterOperators.find((candidate) => candidate.value === condition.operator)
-          return <div key={position} className="grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,1fr)_2rem] items-center gap-2">
-            <NativeSelect value={condition.column} onChange={(event) => change(position, { column: event.target.value })} aria-label="Colonne" className="h-9 text-sm">
-              {!columns.includes(condition.column) && condition.column && <NativeSelectOption value={condition.column}>{condition.column}</NativeSelectOption>}
-              {columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}
-            </NativeSelect>
-            <NativeSelect value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as FilterCondition["operator"] })} aria-label="Comparaison" className="h-9 text-sm">
-              {filterOperators.map((candidate) => <NativeSelectOption key={candidate.value} value={candidate.value}>{candidate.label}</NativeSelectOption>)}
-            </NativeSelect>
-            {operator?.needsValue ? <Input value={condition.value} onChange={(event) => change(position, { value: event.target.value })} placeholder="Valeur" aria-label="Valeur" className="h-9" /> : <span />}
-            <button type="button" onClick={() => setConditions((current) => current.filter((_, index) => index !== position))} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la condition"><X className="size-3.5" /></button>
-          </div>
-        })}
-        <div><Button type="button" variant="ghost" size="sm" onClick={() => setConditions((current) => [...current, emptyCondition(columns[0] ?? "")])}><Plus />Ajouter une condition</Button></div>
-        {!conditions.length && <p className="text-xs text-muted-foreground">Sans condition, la fenêtre montre toutes les lignes de la source.</p>}
-        {conditions.length > 0 && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
+        <p className="text-xs text-muted-foreground">{kindChoices.find((choice) => choice.value === kind)?.hint}</p>
       </div>
-      <p className="text-xs text-muted-foreground">L’onglet-fenêtre montre le tableau (ou les cartes, comme les autres onglets), seulement avec ces lignes. Un kanban, une liste ou une galerie se posent dans une page (bloc Vue d’index).</p>
+      {presentation && <label className="grid gap-1.5 text-sm font-medium">Forme
+        <NativeSelect value={shapeValue} onChange={(event) => chooseShape(event.target.value)}>
+          <NativeSelectOption value="">Celle de l’onglet (Modifier › {kindLabel})</NativeSelectOption>
+          {start?.shape?.from === "own" && start.shape.layout.kind === kind && <NativeSelectOption value="own">Propre à cette vue (gardée)</NativeSelectOption>}
+          {variants.length > 0 && <optgroup label="Les autres versions de l’onglet">{variants.map((variant) => <NativeSelectOption key={variant.id} value={`variant:${variant.id}`}>{variant.name}</NativeSelectOption>)}</optgroup>}
+          {kindPresets.length > 0 && <optgroup label="Presets">{kindPresets.map((preset) => <NativeSelectOption key={preset.id} value={`preset:${preset.id}`}>{preset.name}</NativeSelectOption>)}</optgroup>}
+        </NativeSelect>
+        <span className="text-xs font-normal text-muted-foreground">La forme se règle dans « Modifier › {kindLabel} » ; la vue la suit.</span>
+      </label>}
+      {kind === "cards" && <label className="grid gap-1.5 text-sm font-medium">Carte
+        <NativeSelect value={cardId} onChange={(event) => setCardId(event.target.value)}>
+          <NativeSelectOption value="">Celle à l’étoile (par défaut)</NativeSelectOption>
+          {tabCards.map((card) => <NativeSelectOption key={card.id} value={card.id}>{card.name}</NativeSelectOption>)}
+        </NativeSelect>
+      </label>}
+      {kind === "stats"
+        ? <p className="rounded-xl border bg-card/60 p-3 text-xs text-muted-foreground">Un onglet stat montre les statistiques épinglées de l’index ; elles se créent et s’épinglent dans « Modifier › Stats ».</p>
+        : <>
+          <div className="grid gap-2 rounded-xl border bg-card/60 p-3">
+            <div className="flex flex-wrap items-center gap-2 text-sm">
+              <span className="font-medium">Afficher les lignes qui remplissent</span>
+              <NativeSelect value={match} onChange={(event) => setMatch(event.target.value === "une" ? "une" : "toutes")} className="h-8 w-auto text-sm">
+                <NativeSelectOption value="toutes">toutes les conditions</NativeSelectOption>
+                <NativeSelectOption value="une">au moins une condition</NativeSelectOption>
+              </NativeSelect>
+            </div>
+            {conditions.map((condition, position) => {
+              const operator = filterOperators.find((candidate) => candidate.value === condition.operator)
+              return <div key={position} className="grid grid-cols-[minmax(0,1fr)_minmax(0,10rem)_minmax(0,1fr)_2rem] items-center gap-2">
+                <NativeSelect value={condition.column} onChange={(event) => change(position, { column: event.target.value })} aria-label="Colonne" className="h-9 text-sm">
+                  {!columns.includes(condition.column) && condition.column && <NativeSelectOption value={condition.column}>{condition.column}</NativeSelectOption>}
+                  {columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}
+                </NativeSelect>
+                <NativeSelect value={condition.operator} onChange={(event) => change(position, { operator: event.target.value as FilterCondition["operator"] })} aria-label="Comparaison" className="h-9 text-sm">
+                  {filterOperators.map((candidate) => <NativeSelectOption key={candidate.value} value={candidate.value}>{candidate.label}</NativeSelectOption>)}
+                </NativeSelect>
+                {operator?.needsValue ? <Input value={condition.value} onChange={(event) => change(position, { value: event.target.value })} placeholder="Valeur" aria-label="Valeur" className="h-9" /> : <span />}
+                <button type="button" onClick={() => setConditions((current) => current.filter((_, at) => at !== position))} className="flex size-8 items-center justify-center rounded-md text-muted-foreground hover:bg-destructive/10 hover:text-destructive" aria-label="Retirer la condition"><X className="size-3.5" /></button>
+              </div>
+            })}
+            <div><Button type="button" variant="ghost" size="sm" onClick={() => setConditions((current) => [...current, emptyCondition(columns[0] ?? "")])}><Plus />Ajouter une condition</Button></div>
+            {!conditions.length && <p className="text-xs text-muted-foreground">Sans condition, la vue montre toutes les lignes de la source.</p>}
+            {conditions.some((condition) => condition.column) && <p className="text-xs text-muted-foreground">{conditions.filter((condition) => condition.column).map(describeCondition).join(match === "une" ? " ou " : " et ")}</p>}
+          </div>
+          <div className="flex flex-wrap items-end gap-3">
+            <label className="grid gap-1.5 text-sm font-medium">Trier par
+              <NativeSelect value={sortColumn} onChange={(event) => setSortColumn(event.target.value)} className="min-w-52">
+                <NativeSelectOption value="">— L’ordre de l’onglet —</NativeSelectOption>
+                {sortColumn && !columns.includes(sortColumn) && <NativeSelectOption value={sortColumn}>{sortColumn}</NativeSelectOption>}
+                {columns.map((column) => <NativeSelectOption key={column} value={column}>{column}</NativeSelectOption>)}
+              </NativeSelect>
+            </label>
+            {sortColumn && <label className="flex items-center gap-2 pb-2 text-sm"><input type="checkbox" checked={sortDesc} onChange={(event) => setSortDesc(event.target.checked)} />Ordre décroissant</label>}
+          </div>
+          {kind === "table" && <p className="text-xs text-muted-foreground">En tableau, le tri et les filtres de chacun (en-têtes de colonnes) restent possibles par-dessus la vue.</p>}
+        </>}
       {error && <p className="text-sm text-destructive" role="alert">{error}</p>}
       <div className="flex flex-wrap justify-end gap-2">
-        {onBack && <Button type="button" variant="ghost" className="mr-auto" onClick={onBack}><ArrowLeft />Retour</Button>}
-        {view && onDelete && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}
+        {view && onDelete && !view.builtin && <Button type="button" variant="ghost" className="mr-auto text-destructive hover:text-destructive" disabled={Boolean(pending)} onClick={() => void remove()}>{pending === "delete" ? <LoaderCircle className="animate-spin" /> : <Trash2 />}Supprimer</Button>}
         <Button type="button" variant="ghost" onClick={() => onOpenChange(false)}>Annuler</Button>
-        <Button type="button" disabled={Boolean(pending) || !name.trim()} onClick={() => void save()}>{pending === "save" ? <LoaderCircle className="animate-spin" /> : <Filter />}Enregistrer</Button>
+        <Button type="button" disabled={Boolean(pending) || !name.trim()} onClick={() => void save()}>{pending === "save" ? <LoaderCircle className="animate-spin" /> : <Filter />}{view ? "Enregistrer" : "Créer la vue"}</Button>
       </div>
     </DialogContent>
   </Dialog>

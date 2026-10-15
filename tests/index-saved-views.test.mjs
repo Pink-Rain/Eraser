@@ -109,3 +109,46 @@ test("les vues d'un index se lisent dans l'ordre, sans doublon", () => {
   ]);
   assert.deepEqual(list.map((view) => `${view.id}:${view.kind}`), ["a:list", "b:table"]);
 });
+
+test("une vue montre la même forme qu'un bloc de page : la sienne, la version, le preset, sinon celle de l'onglet", () => {
+  const stored = { Bibliothèque: presentations.parseTabPresentations({ kanban: { kind: "kanban", kanbanColumn: "Rang" }, named: [{ id: "serre", name: "Serré", layout: { kind: "kanban", kanbanColumn: "Lieu", laneWidth: "narrow" } }] }) };
+  const presets = [{ id: "p1", name: "Kanban large", layout: { kind: "kanban", kanbanColumn: "Absente", laneWidth: "wide" } }, { id: "p2", name: "Une liste", layout: { kind: "list", compact: true } }];
+  const context = { tab: "Bibliothèque", headers: ["Nom", "Rang", "Lieu"], presentations: stored, presets };
+  const resolve = (view) => saved.resolveSavedViewPresentation(view, context);
+  assert.deepEqual(resolve({ kind: "kanban" }), { kind: "kanban", kanbanColumn: "Rang" }, "celle de l'onglet");
+  assert.deepEqual(resolve({ kind: "kanban", shape: { from: "variant", id: "serre" } }), { kind: "kanban", kanbanColumn: "Lieu", laneWidth: "narrow" });
+  // Un preset : ses colonnes absentes de l'onglet sont retirées, le reste est gardé.
+  assert.deepEqual(resolve({ kind: "kanban", shape: { from: "preset", id: "p1" } }), { kind: "kanban", laneWidth: "wide" });
+  // Un preset ou une version d'un autre genre, ou disparus : la forme de l'onglet.
+  assert.deepEqual(resolve({ kind: "kanban", shape: { from: "preset", id: "p2" } }), { kind: "kanban", kanbanColumn: "Rang" });
+  assert.deepEqual(resolve({ kind: "kanban", shape: { from: "variant", id: "disparue" } }), { kind: "kanban", kanbanColumn: "Rang" });
+  assert.deepEqual(resolve({ kind: "list", shape: { from: "own", layout: { kind: "list", numbered: true, fields: ["Rang", "Absente"] } } }), { kind: "list", numbered: true, fields: ["Rang"] });
+  // Un onglet sans réglage : les réglages d'office.
+  assert.deepEqual(resolve({ kind: "codex" }), { kind: "codex" });
+  for (const kind of ["table", "cards", "stats"]) assert.equal(resolve({ kind }), null, kind);
+});
+
+test("les filtres personnels du tableau deviennent le filtre d'une vue, et ce qui ne passe pas est dit", () => {
+  const headerOf = (key) => key.startsWith("__") ? undefined : key;
+  const { filter, skipped } = saved.filterFromGridFilters({
+    Type: { condition: { type: "contains", value: " rune " }, hidden: ["Matériau", ""] },
+    Prix: { condition: { type: "gte", value: "10" } },
+    Rang: { condition: { type: "gt", value: "2" } },
+    __proprietaire: { hidden: ["Lina"] },
+    Nom: { condition: { type: "none", value: "" } },
+  }, headerOf);
+  assert.deepEqual(filter, { match: "toutes", conditions: [
+    { column: "Type", operator: "contient", value: "rune" },
+    { column: "Type", operator: "n-est-pas", value: "Matériau" },
+    { column: "Type", operator: "non-vide", value: "" },
+    { column: "Rang", operator: "superieur", value: "2" },
+  ] });
+  assert.deepEqual(skipped, ["Prix", "__proprietaire"]);
+  // Les lignes gardées : les mêmes que le tableau filtré (pour ce qui passe).
+  const view = { filter };
+  assert.equal(saved.matchesSavedView(view, (column) => ({ Type: "Rune de feu", Rang: "3" })[column] ?? ""), true);
+  assert.equal(saved.matchesSavedView(view, (column) => ({ Type: "Matériau", Rang: "3" })[column] ?? ""), false);
+  assert.equal(saved.matchesSavedView(view, (column) => ({ Type: "Rune", Rang: "1" })[column] ?? ""), false);
+  assert.deepEqual(saved.filterFromGridFilters({}, headerOf), { skipped: [] });
+  assert.match(saved.newSavedViewId(), /^vue-[a-z0-9]+$/);
+});

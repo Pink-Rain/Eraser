@@ -101,8 +101,14 @@ Vocabulaire du code (chaque mot ne désigne qu’une chose) :
   (portées `index-cards`, `index-layouts`, `index-stats`).
 - **Bloc « Vue d’index »** d’une page (`ViewBlock`, `lib/custom-pages.ts`) :
   le seul endroit qui réunit aujourd’hui filtre, tri et présentation.
-- **Vue** : réservé à la future vue enregistrée (filtre + tri + présentation
-  sous un nom), voir la roadmap « Vues des index ».
+- **Vue enregistrée** (`SavedView`, `lib/index-saved-views.ts`) : un filtre, un
+  tri et une présentation sous un nom. Gardée sur le Worker (portée
+  `index-saved-views`, une entrée par vue, `lib/index-saved-views-store.ts`) ;
+  les onglets-fenêtres de la feuille sont relus comme des vues tant qu'aucune
+  vue enregistrée ne les remplace (même identifiant), jamais modifiés. Créée et
+  réglée par le dialogue « Nouvelle vue » de l'index, choisie dans le groupe
+  « Vues » du choix d'onglet, affichée sous sa présentation (tableau, cartes,
+  liste, kanban…, onglet stat). Voir la roadmap « Vues des index ».
 
 Les clés déjà enregistrées ou échangées avec le serveur gardent leurs anciens
 noms et ne se renomment jamais : actions `save-view`, `delete-view`,

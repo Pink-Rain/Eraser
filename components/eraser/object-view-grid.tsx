@@ -32,17 +32,13 @@ export function specIn(table: ObjectIndexTable, header: string, schemas: Record<
 }
 
 /**
- * Un onglet-fenêtre de l'index des items : les lignes de plusieurs tableaux (ou d'un
+ * Une vue de l'index des items : les lignes de plusieurs tableaux (ou d'un
  * seul) qui remplissent ses conditions. Chaque case modifiée est écrite dans son tableau
  * d'origine ; rien n'est copié. Ajouter, supprimer ou les boutons se font depuis
  * l'onglet d'origine de la ligne.
  */
 export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layout, cards }: { view: IndexWindow; tables: ObjectIndexTable[]; schemas: Record<string, SchemaEntry[]>; disabled: boolean; onEdited?: () => void
-  /**
-   * Ancien réglage : une présentation (liste, kanban…) posée sur l'onglet-fenêtre. La page des
-   * objets ne la passe plus (toujours `null`) : une fenêtre est un tableau filtré, ces présentations
-   * se posent dans une page. Gardé tant que la Vue enregistrée (roadmap, étapes 4 à 6) n'est pas là.
-   */
+  /** La forme de la vue (liste, kanban…, ou les cartes) ; absente : le tableau. */
   layout?: Presentation | null
   /** Les cartes des onglets (Modifier › Cartes) : vue Cartes, et éléments dessinés en cartes. */
   cards?: Record<string, TabCards> }) {
@@ -152,7 +148,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
   const firstCard = rows[0] ? cardOfRow(rows[0].key, null) : null
 
   return <div className="grid gap-3">
-    <div className="relative min-w-0 lg:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans cet onglet-fenêtre…" className="pl-9" /></div>
+    <div className="relative min-w-0 lg:max-w-sm"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Rechercher dans cette vue…" className="pl-9" /></div>
     {error && <p className="rounded-xl border border-destructive/25 bg-destructive/5 px-4 py-2.5 text-sm text-destructive">{error}</p>}
     {layout && isPresentationKind(layout.kind) ? <IndexPresentation
       layout={layout}
@@ -166,14 +162,14 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       onCommit={disabled ? undefined : (rowKey, header, value) => void commit(rowKey, header, value)}
       renderCard={cards ? renderCard : undefined}
       cardOf={cards ? (rowKey, cardId) => cardOfRow(rowKey, cardId === DEFAULT_ITEM_CARD ? null : cardId) : undefined}
-      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
+      empty="Aucun item ne remplit les conditions de cette vue."
     /> : layout?.kind === "cards" && firstCard ? <IndexCardGrid
       card={firstCard}
       cardOf={(rowKey) => cardOfRow(rowKey, null) ?? firstCard}
       rows={rows}
       rowSource={cardSource}
       onOpen={() => undefined}
-      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
+      empty="Aucun item ne remplit les conditions de cette vue."
     /> : <SheetGrid
       layoutKey={`eraser:object-index:fenetre:${view.id}`}
       columns={columns}
@@ -184,7 +180,7 @@ export function ObjectViewGrid({ view, tables, schemas, disabled, onEdited, layo
       onSort={setSort}
       disabled={disabled}
       toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : <span className="text-[11px] text-muted-foreground">Fenêtre sur {sources.length > 1 ? `${sources.length} tableaux` : "un tableau"} : les cases modifiées sont écrites à la source.</span>}
-      empty="Aucun item ne remplit les conditions de cet onglet-fenêtre."
+      empty="Aucun item ne remplit les conditions de cette vue."
     />}
   </div>
 }

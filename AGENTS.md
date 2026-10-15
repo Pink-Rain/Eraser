@@ -89,7 +89,9 @@
 - Vocabulaire : une **présentation** est une forme (liste, kanban…,
   `lib/index-presentations.ts`) ; un **filtre** est fait de conditions et un
   **onglet-fenêtre** (`IndexWindow`, `lib/index-windows.ts`) affiche un filtre ;
-  **vue** est réservé à la future vue enregistrée (filtre + tri + présentation).
+  une **vue** (`SavedView`, `lib/index-saved-views.ts`) réunit filtre, tri et
+  présentation sous un nom ; elle se garde sur le Worker, les onglets-fenêtres
+  de la feuille ne sont plus que relus.
   Détail dans `ARCHITECTURE.md`.
 - Ne jamais renommer une clé déjà enregistrée ou échangée avec le serveur
   (`save-view`, `views`, `viewPresets`, portées du Worker, colonnes de la feuille

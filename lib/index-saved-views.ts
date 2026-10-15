@@ -13,9 +13,9 @@
  * Rien ici n'écrit ni ne lit un stockage : règles pures, pour la page, le serveur et les tests.
  */
 import { cleanClick, type ViewBlock, type ViewBlockKind } from "@/lib/custom-pages"
-import { cleanPresentation, isPresentationKind, PRESENTATION_VARIANT_PREFIX, type AllPresentationKind, type Presentation } from "@/lib/index-presentations"
+import { cleanPresentation, fitLayoutToColumns, isPresentationKind, presentationFor, presentationVariant, PRESENTATION_VARIANT_PREFIX, type AllPresentationKind, type Presentation, type PresentationPreset, type TabPresentations } from "@/lib/index-presentations"
 import { cleanStats, type StatDefinition } from "@/lib/index-stats"
-import { ALL_SOURCES, matchesFilter, parseFilterConditions, type Filter, type IndexWindow } from "@/lib/index-windows"
+import { ALL_SOURCES, matchesFilter, parseFilterConditions, type Filter, type FilterCondition, type IndexWindow } from "@/lib/index-windows"
 
 /** Le genre d'une vue : une présentation, le tableau, les cartes, ou l'onglet stat. */
 export type SavedViewKind = AllPresentationKind
@@ -267,4 +267,69 @@ export function mergeSavedViews(stored: StoredSavedView[], windows: IndexWindow[
 /** Les vues dont la source change (`ancienne → nouvelle`), comme les onglets-fenêtres au regroupement des index d'objets. */
 export function remapSavedViewSources(views: SavedView[], mapping: Map<string, string>): SavedView[] {
   return views.flatMap((view) => mapping.has(view.source) ? [{ ...view, source: mapping.get(view.source) as string }] : [])
+}
+
+// ---------------------------------------------------------------------------
+// Afficher une vue, en créer une
+// ---------------------------------------------------------------------------
+
+/** Un identifiant neuf pour une vue (lettres, chiffres, tirets). */
+export function newSavedViewId() {
+  return `vue-${Date.now().toString(36)}${Math.random().toString(36).slice(2, 7)}`
+}
+
+/**
+ * La présentation qu'une vue montre, comme le serveur des pages la choisit pour un bloc : la
+ * sienne, sinon la version ou le preset choisis (s'ils sont du même genre), sinon la version à
+ * l'étoile de l'onglet (ou les réglages d'office) ; ses colonnes absentes de l'onglet en sont
+ * retirées. `null` pour le tableau, les cartes et l'onglet stat, qui n'ont pas de présentation.
+ */
+export function resolveSavedViewPresentation(view: Pick<SavedView, "kind" | "shape">, context: { tab: string; headers: string[]; presentations: Record<string, TabPresentations> | null | undefined; presets: PresentationPreset[] }): Presentation | null {
+  if (!isPresentationKind(view.kind)) return null
+  const same = (layout?: Presentation | null) => layout && layout.kind === view.kind ? layout : null
+  const shape = view.shape
+  const chosen = shape?.from === "own" ? same(shape.layout)
+    : shape?.from === "variant" ? same(presentationVariant(context.presentations, context.tab, shape.id))
+    : shape?.from === "preset" ? same(context.presets.find((preset) => preset.id === shape.id)?.layout)
+    : null
+  return fitLayoutToColumns(chosen ?? presentationFor(context.presentations, context.tab, view.kind), context.headers)
+}
+
+/** Un filtre d'une colonne du tableau (menu d'en-tête) : une condition et des valeurs décochées. */
+export type GridColumnFilter = { condition?: { type: string; value: string }; hidden?: string[] }
+
+const gridOperators: Record<string, FilterCondition["operator"]> = {
+  contains: "contient", "not-contains": "ne-contient-pas", starts: "commence", exact: "est", eq: "est",
+  neq: "n-est-pas", empty: "vide", "not-empty": "non-vide", gt: "superieur", lt: "inferieur",
+}
+
+/**
+ * Les filtres personnels du tableau (gardés sur ce poste) écrits comme le filtre d'une vue, pour
+ * « Enregistrer comme vue » : chaque condition devient une condition de la vue, chaque valeur
+ * décochée un « n'est pas ». Toutes doivent être vraies, comme dans le tableau. Ce qu'une vue ne
+ * sait pas dire (« se termine par », « au moins », « au plus ») est rendu dans `skipped`.
+ * `headerOf` donne l'en-tête d'une colonne du tableau (rien pour les colonnes propres à la page).
+ */
+export function filterFromGridFilters(filters: Record<string, GridColumnFilter>, headerOf: (key: string) => string | undefined): { filter?: Filter; skipped: string[] } {
+  const conditions: FilterCondition[] = []
+  const skipped: string[] = []
+  for (const [key, entry] of Object.entries(filters)) {
+    const column = headerOf(key)
+    if (!column) { if (entry.condition?.type !== "none" || entry.hidden?.length) skipped.push(key); continue }
+    const condition = entry.condition
+    if (condition && condition.type !== "none") {
+      const operator = gridOperators[condition.type]
+      if (operator) conditions.push({ column, operator, value: condition.value.trim() })
+      else skipped.push(column)
+    }
+    for (const value of entry.hidden ?? []) conditions.push(value.trim() ? { column, operator: "n-est-pas", value: value.trim() } : { column, operator: "non-vide", value: "" })
+  }
+  const kept = conditions.slice(0, SAVED_VIEW_LIMITS.conditions)
+  if (conditions.length > kept.length) skipped.push(`${conditions.length - kept.length} condition(s) de trop`)
+  return { ...(kept.length ? { filter: { match: "toutes", conditions: kept } } : {}), skipped: [...new Set(skipped)] }
+}
+
+/** Le filtre d'une vue sous la forme d'un onglet-fenêtre (source et conditions), quel que soit son genre : ce que lisent les grilles. */
+export function filterWindowOf(view: SavedView): IndexWindow {
+  return { id: view.id, index: view.index, name: view.name, source: view.source, match: view.filter?.match ?? "toutes", conditions: view.filter?.conditions ?? [], position: view.position, ...(view.builtin ? { builtin: true } : {}) }
 }

@@ -4,7 +4,7 @@ import dynamic from "next/dynamic"
 import { useCallback, useDeferredValue, useEffect, useLayoutEffect, useMemo, useRef, useState, type ReactNode } from "react"
 import { useRememberedSearch } from "@/hooks/use-remembered-search"
 import { usePathname, useRouter } from "next/navigation"
-import { ArrowRightLeft, CircleHelp, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
+import { ArrowRightLeft, BookmarkPlus, CircleHelp, FileText, Filter, LoaderCircle, Pencil, Plus, RefreshCw, Search, Settings2, SpellCheck, Trash2 } from "lucide-react"
 
 import { FullscreenButton, SheetsLinkButton, ToolbarIconButton, useFullscreenPanel } from "@/components/eraser/index-toolbar"
 import { chooseCampaign, copyToClipboard, DrawRowButton, rowCard, sendToCampaignChat, useChoiceDialog, useIndexNotices } from "@/components/eraser/index-action-ui"
@@ -16,18 +16,20 @@ import { IndexRowSheet } from "@/components/eraser/index-row-sheet"
 import { RowPageLink } from "@/components/eraser/row-page-link"
 import { OwnerSelector } from "@/components/eraser/owner-selector"
 import type { EditorMode } from "@/components/eraser/index-editor"
-import { IndexWindowDialog, useIndexSettings } from "@/components/eraser/index-windows"
+import { SavedViewDialog, savedViewMark, useIndexSettings } from "@/components/eraser/index-windows"
 import { IndexPresentation } from "@/components/eraser/index-presentation"
 import { IndexStats, TAB_PSEUDO } from "@/components/eraser/index-stats"
 import type { StatColumnGroup, StatDefinition } from "@/lib/index-stats"
-import { DEFAULT_ITEM_CARD, groupRowsBy, type Presentation } from "@/lib/index-presentations"
+import { builtinPresentationPresets, DEFAULT_ITEM_CARD, groupRowsBy, type Presentation } from "@/lib/index-presentations"
+import { filterFromGridFilters, matchesSavedView, resolveSavedViewPresentation, savedViewFromWindow, windowFromSavedView, type SavedView } from "@/lib/index-saved-views"
 import { IndexCard, IndexCardGrid, IndexDisplayControls, NoCardsYet, isCardChoice, isIndexDisplay, type CardRowSource, type IndexDisplay } from "@/components/eraser/index-card"
 import { pickCard, tabCardsOf } from "@/lib/index-cards"
-import { ALL_SOURCES, matchesFilter, windowIdOfSelectKey, windowSelectKey } from "@/lib/index-windows"
+import { ALL_SOURCES, windowIdOfSelectKey, windowSelectKey, type FilterCondition } from "@/lib/index-windows"
 import { layoutPlaces } from "@/lib/index-layouts"
 import { automaticLayoutFor, tabFormOrBuiltin, tabLayoutOrBuiltin } from "@/lib/index-layout-defaults"
 import { IndexFormView } from "@/components/eraser/index-form-view"
 import { SheetGrid, type SheetGridColumn, type SheetGridSort } from "@/components/eraser/sheet-grid"
+import { isGridFilters, type GridFilters } from "@/components/eraser/sheet-grid-filter"
 import { ContextMenuItem, ContextMenuLabel, ContextMenuSeparator } from "@/components/ui/context-menu"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
@@ -267,10 +269,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const [cardChoice, setCardChoice] = usePersistentState<string>(`eraser:world-index:${storeKey}:card`, "", isCardChoice)
   // « Modifier » s'ouvre sur les colonnes, ou sur les cartes depuis la vue en cartes.
   const [editorMode, setEditorMode] = useState<EditorMode>("columns")
-  const [viewDialog, setViewDialog] = useState<"new" | "edit" | null>(null)
-  // Les onglets-fenêtres prévus par Eraser (Actifs, Passifs, Bonus des sorts), puis ceux de l'index.
-  // Une vue intégrée (Création de classe) est déjà limitée à ses sorts : seulement les siens.
-  const views = useMemo(() => [...(embed ? [] : builtinWindowsFor(indexKey)), ...settings.views], [embed, indexKey, settings.views])
+  // Le dialogue des vues : nouvelle (vide, ou pré-remplie par « Enregistrer comme vue »), ou celle choisie.
+  const [viewDialog, setViewDialog] = useState<{ mode: "new" | "edit"; draft?: Partial<SavedView>; notice?: string } | null>(null)
+  // Les vues de l'index : celles prévues par Eraser (Actifs, Passifs, Bonus des sorts), puis les vues
+  // enregistrées (serveur partagé, et onglets-fenêtres de la feuille pas encore repris). Serveur
+  // partagé injoignable : les onglets-fenêtres seuls, et un avertissement, jamais un repli silencieux.
+  // Une vue intégrée (Création de classe) est déjà limitée à ses sorts : seulement les siennes.
+  const ownViews = useMemo(() => settings.savedViewsUnavailable ? settings.views.map(savedViewFromWindow) : settings.savedViews, [settings.savedViews, settings.savedViewsUnavailable, settings.views])
+  const views = useMemo(() => [...(embed ? [] : builtinWindowsFor(indexKey).map(savedViewFromWindow)), ...ownViews], [embed, indexKey, ownViews])
   const activeView = useMemo(() => { const id = windowIdOfSelectKey(tabName); return id ? views.find((view) => view.id === id) ?? null : null }, [tabName, views])
   // Les onglets de rangement : une par valeur des colonnes « Rangement en onglets ».
   const sortTabs = useMemo(() => {
@@ -323,6 +329,10 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   const spanning = showAll || Boolean((activeView || activeSort) && viewTables.length > 1)
   // Le premier tableau affiché donne les colonnes : les onglets d'un même index ont les mêmes.
   const table: WorldIndexTable | null = viewTables[0] ?? null
+  // La grille de ce qui est affiché (largeurs, filtres et tri de chacun, gardés sur ce poste) : sa
+  // clé, et ses filtres, que « Enregistrer comme vue » reprend.
+  const gridKey = `eraser:world-index:grid:${storeKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table?.tabName ?? ""}`
+  const [gridFilters] = usePersistentState<GridFilters>(`${gridKey}:filters`, {}, isGridFilters)
   const tabDefinition = useMemo(() => definition.tabs.find((tab) => tab.name === table?.tabName) ?? definition.tabs[0] ?? { name: "", itemLabel: "une ligne", headers: [], widths: [], idPrefix: "IDX" }, [definition, table])
   // Le type de chaque colonne, par onglet et en-tête : celui du schéma envoyé par le
   // serveur (colonnes renommées, types choisis dans « Modifier »), sinon le type par défaut.
@@ -748,7 +758,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   }, [applyData, embedAdd, entity, post, router, table])
   /** Une ligne ajoutée depuis la vue intégrée reçoit ce que la page impose (le Type des passifs). */
   // Depuis un onglet-fenêtre prévu par Eraser (Passifs, Bonus), la ligne reçoit son Type : elle y reste.
-  const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? windowAddDefaults(activeView)).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [activeView, embed])
+  const withAddDefaults = useCallback((headers: string[], values: string[]) => headers.map((header, index) => values[index] || (Object.entries(embed?.addDefaults ?? windowAddDefaults(activeView ? windowFromSavedView(activeView) : null)).find(([key]) => foldName(key) === foldName(header))?.[1] ?? "")), [activeView, embed])
 
   // Toutes les colonnes sont dans la liste : la grille cache les masquées (et les
   // « Formulaire seulement », comme celles de la fiche des créatures) et les montre d'un clic.
@@ -1094,28 +1104,35 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // texte cherché de chaque ligne n'est préparé qu'une fois par lecture de l'index.
   const deferredQuery = useDeferredValue(query)
   const haystacks = useMemo(() => new Map(viewTables.flatMap((owner) => owner.rows.map((row) => [row, row.values.map(foldName).join("\n")] as const))), [viewTables])
+  // L'ordre des lignes : en tableau, le tri de chacun (en-têtes), sinon celui de la vue ; sous une
+  // autre forme (cartes d'une vue, liste, kanban…), celui de la vue.
+  const rowSort = useMemo((): SheetGridSort => {
+    const own: SheetGridSort = activeView?.sort ? { column: activeView.sort.column, direction: activeView.sort.desc ? "desc" : "asc" } : null
+    if (activeView && activeView.kind !== "table") return own
+    return sort ?? own
+  }, [activeView, sort])
   const displayedRows = useMemo(() => {
     const folded = foldName(deferredQuery)
     const rows = viewTables.flatMap((owner) => owner.rows
-      .filter((row) => !activeView || matchesFilter(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
+      .filter((row) => !activeView || matchesSavedView(activeView, (header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Vue intégrée : seulement les lignes que la page a choisies (onglets-fenêtres compris).
       .filter((row) => !embed || embed.rowFilter((header) => { const column = columnIndexOf(owner, header); return column >= 0 ? row.values[column] ?? "" : "" }))
       // Un onglet de rangement : les lignes qui portent sa valeur (et celles du vrai onglet du même nom).
       .filter((row) => !activeSort || foldName(owner.tabName) === foldName(activeSort.value) || activeSort.columns.some((header) => { const column = columnIndexOf(owner, header); return column >= 0 && foldName((row.values[column] ?? "").replace(/<[^>]+>/g, "")) === foldName(activeSort.value) }))
       .filter((row) => !folded || (haystacks.get(row) ?? "").includes(folded) || (extras && [OWNER_COLUMN, LINKS_COLUMN].some((key) => foldName(extraText(rowKeyOf(owner.tabName, row.rowNumber), key)).includes(folded))))
       .map((row) => ({ key: rowKeyOf(owner.tabName, row.rowNumber), rowNumber: row.rowNumber, tabName: owner.tabName })))
-    if (!sort) return rows.map(({ key, rowNumber }) => ({ key, rowNumber }))
+    if (!rowSort) return rows.map(({ key, rowNumber }) => ({ key, rowNumber }))
     // Le tri lit ce que montre la case (résultat d'une formule, choix bien écrit, nom actuel
     // d'une référence, valeur d'un nombre), pas le texte brut de Sheets. Vides en bas.
-    const extra = sort.column === OWNER_COLUMN || sort.column === LINKS_COLUMN || sort.column === TAB_COLUMN
+    const extra = rowSort.column === OWNER_COLUMN || rowSort.column === LINKS_COLUMN || rowSort.column === TAB_COLUMN
     // eslint-disable-next-line react-hooks/refs -- le tri lit les cases comme le tableau les montre, saisie en cours comprise
     const sorted = sortByIndexKey(rows, (row) => indexSortKey(
-      valueOf(row.key, sort.column),
-      extra ? undefined : specOf(row.tabName, sort.column),
+      valueOf(row.key, rowSort.column),
+      extra ? undefined : specOf(row.tabName, rowSort.column),
       { resolveReference: shownReferenceText },
-    ), sort.direction === "asc" ? 1 : -1)
+    ), rowSort.direction === "asc" ? 1 : -1)
     return sorted.map(({ key, rowNumber }) => ({ key, rowNumber }))
-  }, [activeSort, activeView, deferredQuery, embed, extraText, extras, haystacks, sort, specOf, valueOf, viewTables])
+  }, [activeSort, activeView, deferredQuery, embed, extraText, extras, haystacks, rowSort, specOf, valueOf, viewTables])
 
   // La colonne « Onglet » de la vue « Tout ». Stable : les lignes ne se redessinent pas pour rien.
   const moveRow = useRef(mutate)
@@ -1137,11 +1154,45 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
 
   // La vue en cartes : la carte de l'onglet affiché ; dans « Tout », chaque ligne prend celle de son onglet.
   const tabCards = table ? tabCardsOf(settings.cards, indexKey, table.tabName) : null
-  const shownCard = tabCards ? pickCard(tabCards, cardChoice) : null
+  // La carte montrée : celle de la vue (genre cartes ou présentation), sinon celle choisie sur ce poste.
+  const viewCardChoice = activeView && activeView.kind !== "table" && activeView.cardId ? activeView.cardId : cardChoice
+  const shownCard = tabCards ? pickCard(tabCards, viewCardChoice) : null
   const cardOf = useCallback((rowKey: string) => {
     const entry = tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName)
-    return pickCard(entry, cardChoice) ?? shownCard!
-  }, [cardChoice, indexKey, settings.cards, shownCard])
+    return pickCard(entry, viewCardChoice) ?? shownCard!
+  }, [viewCardChoice, indexKey, settings.cards, shownCard])
+  // « Enregistrer comme vue » : ce que montre l'index (onglet, filtre de la vue ou de l'onglet de
+  // rangement, affichage, carte), avec le tri et les filtres de chacun du tableau, pour tout le monde.
+  // Ce qu'une vue ne sait pas dire est annoncé dans le dialogue, jamais perdu en silence.
+  const saveHereAsView = useCallback(() => {
+    if (!table) return
+    const grid = filterFromGridFilters(gridFilters, (key) => key.startsWith("__") ? undefined : key)
+    const skipped = [...grid.skipped]
+    // Un onglet prévu par Eraser filtre par catégorie de sort : une vue enregistrée ne sait pas le dire.
+    if (activeView?.builtin) skipped.push(`la catégorie de « ${activeView.name} »`)
+    let match: "toutes" | "une" = activeView?.filter?.match ?? "toutes"
+    let conditions: FilterCondition[] = [
+      ...(activeView && !activeView.builtin ? activeView.filter?.conditions ?? [] : []),
+      ...(activeSort?.columns[0] ? [{ column: activeSort.columns[0], operator: "est" as const, value: activeSort.value }] : []),
+    ]
+    if (grid.filter) {
+      if (match === "une" && conditions.length > 1) skipped.push("tes filtres du tableau (la vue demande « au moins une condition »)")
+      else { conditions = [...conditions, ...grid.filter.conditions]; match = "toutes" }
+    }
+    const kind = activeView && activeView.kind !== "table" ? activeView.kind : display === "cards" ? "cards" : "table"
+    const gridSort = sort && !sort.column.startsWith("__") ? { column: sort.column, desc: sort.direction === "desc" } : undefined
+    if (sort && !gridSort) skipped.push("le tri par une colonne propre à la page")
+    const draft: Partial<SavedView> = {
+      name: activeView ? `${activeView.name} (copie)` : activeSort ? activeSort.value : showAll ? definition.title : table.tabName,
+      source: activeView ? activeView.source : activeSort || showAll ? ALL_SOURCES : table.tabName,
+      kind,
+      ...(activeView?.shape ? { shape: activeView.shape } : {}),
+      ...(kind === "cards" && viewCardChoice ? { cardId: viewCardChoice } : {}),
+      ...(conditions.length ? { filter: { match, conditions: conditions.slice(0, 20) } } : {}),
+      ...(gridSort ? { sort: gridSort } : activeView?.sort ? { sort: activeView.sort } : {}),
+    }
+    setViewDialog({ mode: "new", draft, notice: skipped.length ? `Pas repris dans la vue : ${skipped.join(", ")}.` : undefined })
+  }, [activeSort, activeView, definition.title, display, gridFilters, showAll, sort, table, viewCardChoice])
   const cardRow = useCallback((rowKey: string): CardRowSource => ({
     value: (header) => valueOf(rowKey, header),
     spec: (header) => { const found = locate(rowKey); return found ? specOf(found.table.tabName, header) : undefined },
@@ -1162,13 +1213,16 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     const id = rawOf(rowKey, "ID").replace(/<[^>]+>/g, "").trim()
     return <IndexFormView layout={layout} columns={columns} valueOf={(header) => rawOf(rowKey, header)} row={id ? { index: indexKey, id, tab } : undefined} />
   }, [data, indexKey, locate, rawOf, settings.layouts])
-  // Un onglet-fenêtre est le tableau filtré par ses conditions, ou un onglet stat : rien d'autre.
-  // Une présentation enregistrée par une version précédente (kanban, liste…) est ignorée — elle
-  // reste dans la feuille, et part quand on enregistre l'onglet ; ces vues se posent dans une page.
-  // Les branches plus bas qui dessinent une présentation (cartes en sections, IndexPresentation)
-  // ne servent donc plus : gardées pour la Vue enregistrée (roadmap « Vues des index », étapes 4 à 6).
-  const viewLayout = useMemo((): Presentation | null => activeView?.layout?.kind === "stats" ? activeView.layout : null, [activeView])
   const layoutHeaders = useMemo(() => (table?.headers ?? []).filter((header) => header.trim() && !isIdHeader(header) && specOf(table!.tabName, header).kind !== "archived"), [specOf, table])
+  // La forme de la vue choisie : l'onglet stat, les cartes, ou sa présentation (liste, kanban…),
+  // choisie comme le fait le serveur des pages pour un bloc (la sienne, la version, le preset,
+  // sinon celle de l'onglet). Le tableau n'en a pas.
+  const presentationPresets = useMemo(() => [...builtinPresentationPresets, ...settings.viewPresets], [settings.viewPresets])
+  const viewLayout = useMemo((): Presentation | null => {
+    if (!activeView || activeView.kind === "table") return null
+    if (activeView.kind === "stats" || activeView.kind === "cards") return { kind: activeView.kind }
+    return table ? resolveSavedViewPresentation(activeView, { tab: table.tabName, headers: layoutHeaders, presentations: settings.presentations, presets: presentationPresets }) : null
+  }, [activeView, layoutHeaders, presentationPresets, settings.presentations, table])
   const layoutNameOf = useCallback((rowKey: string) => nameOf(rowKey).replace(/<[^>]+>/g, "").trim(), [nameOf])
   // Cartes rangées en sections : les lignes de chaque valeur de la colonne choisie.
   const cardGroups = useMemo(() => {
@@ -1207,8 +1261,8 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
   // Les statistiques de l'index, et celles qu'un onglet stat de l'alpha 197 gardait encore.
   const indexStats = useMemo(() => {
     const seen = new Set<string>()
-    return [...settings.stats, ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
-  }, [settings.stats, settings.views])
+    return [...settings.stats, ...views.flatMap((view) => view.stats ?? []), ...settings.views.flatMap((view) => view.layout?.kind === "stats" ? view.layout.stats ?? [] : [])].filter((stat) => !seen.has(stat.id) && Boolean(seen.add(stat.id)))
+  }, [settings.stats, settings.views, views])
   const saveStats = useCallback(async (stats: StatDefinition[], groups?: StatColumnGroup[]) => { await settings.saveStats(stats, groups) }, [settings])
   // « {Prix} » écrit dans une case de cet index : le menu « { » propose les colonnes de la ligne.
   const referenceTab = detailsFound?.table.tabName ?? table?.tabName
@@ -1342,14 +1396,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
     <section className={`${embed ? "" : "mt-4 "}flex flex-col gap-3`} {...(embed ? {} : { [IN_PLACE_ATTRIBUTE]: pathname })}>
       <div className="flex flex-wrap items-end gap-2">
         {/* Intégrée : la vue de la page, puis les onglets-fenêtres de l'index (combinés à elle). */}
-        {embed && settings.views.length > 0 && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
+        {embed && ownViews.length > 0 && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
           Vue
           <span className="flex items-center gap-1">
             <NativeSelect value={activeView ? windowSelectKey(activeView.id) : ""} onChange={(event) => { setTabName(event.target.value); setCreating(false); setDetails(null) }} disabled={busy} className="h-9 min-w-44 text-foreground">
               <NativeSelectOption value="">{embed.label}</NativeSelectOption>
-              {settings.views.map((view) => <NativeSelectOption key={view.id} value={windowSelectKey(view.id)}>{view.layout?.kind === "stats" ? "∑" : "⧉"} {view.name}</NativeSelectOption>)}
+              {ownViews.map((view) => <NativeSelectOption key={view.id} value={windowSelectKey(view.id)}>{savedViewMark(view.kind)} {view.name}</NativeSelectOption>)}
             </NativeSelect>
-            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog({ mode: "edit" })} title="Modifier cette vue" aria-label="Modifier cette vue"><Pencil /></Button>}
           </span>
         </label>}
         {!embed && (tables.length > 1 || views.length > 0 || sortTabs.length > 0) && <label className="grid gap-1 text-xs font-semibold text-muted-foreground">
@@ -1362,22 +1416,22 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
                 // Un vrai onglet qui porte le nom d'une valeur de rangement est réuni à son onglet de rangement.
                 ...tables.filter((candidate) => !absorbed.has(foldName(candidate.tabName))).map((candidate) => ({ value: candidate.tabName, label: candidate.tabName, detail: String(candidate.rows.length) })),
                 ...sortTabs.map((entry) => ({ value: `${SORT_PREFIX}${entry.value}`, label: entry.value, detail: String(entry.count) })),
-                ...views.map((view) => ({ value: windowSelectKey(view.id), label: `${view.layout?.kind === "stats" ? "∑" : "⧉"} ${view.name}`, group: "Onglets-fenêtres" })),
+                ...views.map((view) => ({ value: windowSelectKey(view.id), label: `${savedViewMark(view.kind)} ${view.name}`, group: "Vues" })),
               ]}
               onChange={(value) => { setTabName(value); setCreating(false); setDetails(null) }}
               hrefOf={tabHref}
-              tabLabel={(option) => option.value === ALL_TABS ? definition.title : `${definition.title} · ${option.label.replace(/^[⧉∑] /, "")}`}
+              tabLabel={(option) => option.value === ALL_TABS ? definition.title : `${definition.title} · ${option.label.replace(/^[⧉∑▦◈] /, "")}`}
               disabled={busy}
               className="text-foreground"
             />
-            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog("edit")} title="Modifier cet onglet-fenêtre" aria-label="Modifier cet onglet-fenêtre"><Pencil /></Button>}
+            {activeView && !activeView.builtin && <Button type="button" variant="ghost" size="icon" onClick={() => setViewDialog({ mode: "edit" })} title="Modifier cette vue" aria-label="Modifier cette vue"><Pencil /></Button>}
           </span>
         </label>}
         {table && embed?.query === undefined && <div className="relative min-w-48 flex-1 sm:max-w-md"><Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" /><Input value={query} onChange={(event) => setQuery(event.target.value)} placeholder={display === "cards" ? "Rechercher dans les cartes…" : "Rechercher dans le tableau…"} className="pl-9" /></div>}
-        {table && !statsView && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
+        {table && !statsView && (!activeView || activeView.kind === "table") && <IndexDisplayControls display={display} onDisplay={setDisplay} cards={tabCards?.cards ?? []} card={shownCard} onPick={setCardChoice} />}
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {data?.webViewLink && <SheetsLinkButton href={data.webViewLink} />}
-          {table && display === "table" && !statsView && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
+          {table && display === "table" && !statsView && (!activeView || activeView.kind === "table") && <FullscreenButton fullscreen={fullscreen.fullscreen} onToggle={fullscreen.toggle} />}
           {corrections > 0 && <Button type="button" variant="outline" onClick={() => void correct()} disabled={busy} title="Réécrit les valeurs de liste mal orthographiées (« Aggressif » → « Agressif »). Les valeurs hors liste ne sont pas touchées.">{pending === "correct" ? <LoaderCircle className="animate-spin" /> : <SpellCheck />}Corriger {corrections} faute{corrections > 1 ? "s" : ""}</Button>}
           <ToolbarIconButton label="Actualiser : relire Google Sheets" onClick={() => void refresh()} disabled={busy}>{pending === "refresh" ? <LoaderCircle className="animate-spin" /> : <RefreshCw />}</ToolbarIconButton>
           {table && !statsView && <DrawRowButton
@@ -1389,13 +1443,15 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
             disabled={busy}
             compact
           />}
-          <ToolbarIconButton label="Nouvel onglet : onglet fenêtre (des lignes choisies) ou onglet stat (des statistiques)" onClick={() => setViewDialog("new")} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
+          {!embed && table && !statsView && <ToolbarIconButton label="Enregistrer comme vue : cet onglet, son affichage, ton tri et tes filtres du tableau, pour tout le monde" onClick={saveHereAsView} disabled={busy}><BookmarkPlus /></ToolbarIconButton>}
+          <ToolbarIconButton label="Nouvelle vue : des lignes choisies, dans un ordre, sous une forme (tableau, cartes, liste, kanban…) ou un onglet stat" onClick={() => setViewDialog({ mode: "new" })} disabled={busy || !tables.length}><Filter /></ToolbarIconButton>
           <Button type="button" variant="outline" onClick={() => void openEditor("columns")} disabled={busy} title="Colonnes, types, réglages, onglets, mises en page et cartes de cet index">{pending === "editor" ? <LoaderCircle className="animate-spin" /> : <Settings2 />}Modifier</Button>
           <Button type="button" variant="ghost" size="icon" onClick={() => setGuideOpen(true)} title="Guide des colonnes : types, formules, boutons, aléatoire" aria-label="Guide des colonnes"><CircleHelp /></Button>
           <Button type="button" onClick={startAdding} disabled={!table || busy}><Plus />{embed?.addLabel ?? `Ajouter ${spanning ? definition.itemLabel ?? tabDefinition.itemLabel : tabDefinition.itemLabel}`}</Button>
         </div>
       </div>
 
+      {settings.savedViewsUnavailable && !embed && <p className="rounded-lg border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">Les vues enregistrées n’ont pas pu être lues sur le serveur partagé d’Eraser : seuls les onglets-fenêtres de la feuille sont montrés, et une vue ne peut pas être enregistrée pour l’instant.</p>}
       {editor && <IndexEditor
         model={editor}
         sampleRows={Object.fromEntries(tables.map((owner) => [owner.tabName, owner.rows.slice(0, 3).map((row) => Object.fromEntries(owner.headers.map((header, index) => [header, row.values[index] ?? ""])))]))}
@@ -1474,7 +1530,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onOpenPage={(rowKey) => { const href = rowHref(rowKey); if (href && !embed) router.push(href); else openRow(rowKey) }}
         onCommit={busy ? undefined : (rowKey, header, value) => void commitCell(rowKey, header, value)}
         renderCard={renderViewCard}
-        cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? null : cardId)}
+        cardOf={(rowKey, cardId) => pickCard(tabCardsOf(settings.cards, indexKey, parseRowKey(rowKey).tabName), cardId === DEFAULT_ITEM_CARD ? activeView?.cardId ?? null : cardId)}
         renderForm={renderViewForm}
         empty={viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne remplit les conditions de cette vue." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
       /> : table && (display === "cards" || viewLayout?.kind === "cards") ? (shownCard
@@ -1491,14 +1547,14 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
           rowSource={cardRow}
           onOpen={openRow}
           hrefOf={rowHref}
-          empty={activeView ? "Aucune ligne ne remplit les conditions de cet onglet-fenêtre." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
+          empty={activeView ? "Aucune ligne ne remplit les conditions de cette vue." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Cet onglet est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
         />
         : <NoCardsYet tabName={table.tabName} onCreate={() => void openEditor("cards")} />
       ) : table ? (
         <SheetGrid
           fullscreen={fullscreen.fullscreen}
           onExitFullscreen={fullscreen.exit}
-          layoutKey={`eraser:world-index:grid:${storeKey}:${activeView ? `fenetre:${activeView.id}` : activeSort ? `rangement:${foldName(activeSort.value)}` : showAll ? "tout" : table.tabName}`}
+          layoutKey={gridKey}
           columns={columns}
           rows={displayedRows}
           valueOf={valueOf}
@@ -1538,7 +1594,7 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
             </>
           }}
           toolbarTrailing={saving > 0 ? <span className="flex items-center gap-1.5 text-[11px] text-muted-foreground"><LoaderCircle className="size-3 animate-spin" />Enregistrement…</span> : null}
-          empty={activeView ? "Aucune ligne ne remplit les conditions de cet onglet-fenêtre." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Ce tableau est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
+          empty={activeView ? "Aucune ligne ne remplit les conditions de cette vue." : viewTables.some((owner) => owner.rows.length) ? "Aucune ligne ne correspond à la recherche." : `Ce tableau est vide. Ajoute ${tabDefinition.itemLabel} pour commencer.`}
         />
       ) : !error ? <div className="rounded-xl border border-dashed px-5 py-12 text-center text-sm text-muted-foreground">Le classeur « {definition.sheetName} » n’a pas pu être préparé.</div> : null}
 
@@ -1563,15 +1619,23 @@ function WorldIndexView({ indexKey, initialData, initialError, embed }: WorldInd
         onSave={saveSheet}
         onClose={() => { setDetails(null); setSheetError(""); setStatSheetRows(null) }}
       />}
-      {viewDialog && <IndexWindowDialog
+      {viewDialog && <SavedViewDialog
         open
         onOpenChange={(open) => { if (!open) setViewDialog(null) }}
         index={indexKey}
-        view={viewDialog === "edit" ? activeView : null}
+        view={viewDialog.mode === "edit" ? activeView : null}
+        draft={viewDialog.draft}
+        notice={viewDialog.notice}
         sources={[{ value: ALL_SOURCES, label: "Tous les onglets de l’index" }, ...tables.map((candidate) => ({ value: candidate.tabName, label: `L’onglet « ${candidate.tabName} »` }))]}
         columnsOf={(source) => [...new Set((source === ALL_SOURCES ? tables : tables.filter((candidate) => candidate.tabName === source)).flatMap((candidate) => (data?.columns[candidate.tabName] ?? []).map((column) => column.header)).filter((header) => !/^id$/i.test(header)))]}
-        onSave={async (view) => { const id = await settings.saveView(view); setTabName(windowSelectKey(id)); return id }}
-        onDelete={async (id) => { await settings.deleteView(id); setTabName(embed ? "" : ALL_TABS) }}
+        tabOf={(source) => source === ALL_SOURCES ? tables[0]?.tabName ?? "" : source}
+        presentations={settings.presentations}
+        presets={presentationPresets}
+        cards={settings.cards}
+        cardsIndex={indexKey}
+        nextPosition={Math.max(0, ...ownViews.map((view) => view.position + 1))}
+        onSave={async (view) => { const saved = await settings.saveSavedView(view); setTabName(windowSelectKey(saved.id)); return saved }}
+        onDelete={async (id) => { await settings.removeSavedView(id); setTabName(embed ? "" : ALL_TABS) }}
         allowStats
       />}
       {guideOpen && <IndexGuide open onClose={() => setGuideOpen(false)} />}
