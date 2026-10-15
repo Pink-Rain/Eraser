@@ -64,8 +64,9 @@ export async function saveIndexLayouts(index: string, changes: TabLayoutChange[]
   if (!sharedStoreAvailable()) throw new Error("INDEX_LAYOUTS_UNAVAILABLE")
   for (const change of changes.filter((item) => item.tab.trim()).slice(0, 100)) {
     const key = recordKey(index, change.tab)
-    const forms = (change.forms ?? []).filter((item) => parseIndexLayout(item.layout))
-    const hovers = (change.hovers ?? []).filter((item) => parseIndexLayout(item.layout))
+    // Un formulaire ou un survol nommé vidé reste (vide, avec son nom) : seul « Supprimer » le retire.
+    const forms = (change.forms ?? []).filter((item) => parseIndexLayout(item.layout, { keepEmpty: true }))
+    const hovers = (change.hovers ?? []).filter((item) => parseIndexLayout(item.layout, { keepEmpty: true }))
     if (!change.form && !change.hover && !forms.length && !hovers.length) { await deleteSharedRecord(SCOPE, key); continue }
     const value = JSON.stringify({ ...(change.form ? { form: change.form } : {}), ...(change.hover ? { hover: change.hover } : {}), ...(forms.length ? { forms } : {}), ...(hovers.length ? { hovers } : {}) })
     if (value.length > MAX_VALUE) throw new Error("INDEX_LAYOUT_TOO_LARGE")

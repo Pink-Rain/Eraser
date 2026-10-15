@@ -322,8 +322,12 @@ function cleanField(input: unknown): LayoutField | null {
   return field
 }
 
-/** Une mise en page lue (JSON de la feuille ou envoyé par l'éditeur), bornée et nettoyée ; null si vide ou illisible. */
-export function parseIndexLayout(input: unknown): IndexLayout | null {
+/**
+ * Une mise en page lue (JSON de la feuille ou envoyé par l'éditeur), bornée et nettoyée ; null si
+ * illisible, ou si vide (l'onglet garde alors l'affichage automatique). `keepEmpty` : un
+ * formulaire ou un survol nommé vidé reste, vide, avec son nom, jusqu'à « Supprimer ».
+ */
+export function parseIndexLayout(input: unknown, options: { keepEmpty?: boolean } = {}): IndexLayout | null {
   let value = input
   if (typeof value === "string") {
     if (!value.trim()) return null
@@ -398,16 +402,18 @@ export function parseIndexLayout(input: unknown): IndexLayout | null {
   if (raw.tabs === true) layout.tabs = true
   const look = cleanLook(raw.look)
   if (look) layout.look = look
-  if (!aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !subtitles.length && !layout.medallion && !layout.banner) return null
+  // Vide gardé seulement pour une vraie mise en page (des sections ou une colonne de côté), pas un objet quelconque.
+  const keepEmpty = options.keepEmpty && (Array.isArray(raw.sections) || Array.isArray(raw.aside))
+  if (!keepEmpty && !aside.length && !sections.some((section) => section.rows.some((row) => row.fields.length)) && !image && !subtitle && !subtitles.length && !layout.medallion && !layout.banner) return null
   return layout
 }
 
-/** Un formulaire nommé lu (identifiant, nom, mise en page) ; `null` s'il est illisible. */
+/** Un formulaire nommé lu (identifiant, nom, mise en page, vide compris) ; `null` s'il est illisible. */
 export function parseNamedLayout(input: unknown): NamedLayout | null {
   if (!input || typeof input !== "object") return null
   const raw = input as Record<string, unknown>
   const id = cleanText(raw.id, 40).replace(/[^A-Za-z0-9-]/g, "")
-  const layout = parseIndexLayout(raw.layout)
+  const layout = parseIndexLayout(raw.layout, { keepEmpty: true })
   if (!id || !layout) return null
   return { id, name: cleanText(raw.name, 60) || "Formulaire", layout }
 }
@@ -437,12 +443,12 @@ export function parseNamedLayouts(input: unknown): NamedLayout[] {
 
 /** Le texte JSON d'un formulaire nommé. */
 export function serializeNamedLayouts(forms: NamedLayout[] | undefined) {
-  return JSON.stringify((forms ?? []).map((item) => ({ id: item.id, name: item.name, layout: serializeIndexLayout(item.layout) })))
+  return JSON.stringify((forms ?? []).map((item) => ({ id: item.id, name: item.name, layout: serializeIndexLayout(item.layout, { keepEmpty: true }) })))
 }
 
 /** Le texte JSON gardé dans la feuille (vide : pas de mise en page). */
-export function serializeIndexLayout(layout: IndexLayout | null | undefined) {
-  const clean = layout ? parseIndexLayout(layout) : null
+export function serializeIndexLayout(layout: IndexLayout | null | undefined, options: { keepEmpty?: boolean } = {}) {
+  const clean = layout ? parseIndexLayout(layout, options) : null
   return clean ? JSON.stringify(clean) : ""
 }
 

@@ -24,6 +24,9 @@ test("une mise en page se relit telle qu'enregistrée, et rien d'autre", () => {
   assert.equal(layouts.parseIndexLayout(""), null);
   assert.equal(layouts.parseIndexLayout("pas du json"), null);
   assert.equal(layouts.parseIndexLayout({ aside: [], sections: [] }), null);
+  // Un formulaire nommé vidé reste, vide, avec son nom (le formulaire à l'étoile vide redevient l'affichage automatique).
+  assert.deepEqual(layouts.parseNamedLayout({ id: "combat", name: "Combat", layout: { aside: [], sections: [] } }), { id: "combat", name: "Combat", layout: { aside: [], sections: [] } });
+  assert.deepEqual(layouts.parseTabLayouts({ forms: [{ id: "combat", name: "Combat", layout: { aside: [], sections: [] } }] }).forms.map((form) => form.name), ["Combat"]);
   // Largeur inconnue écartée, colonne en double gardée une seule fois.
   const cleaned = layouts.parseIndexLayout({ aside: [{ column: "Nom" }], sections: [{ rows: [{ fields: [{ column: "Nom", span: 5 }, { column: "Rang", span: 7 }] }] }] });
   assert.deepEqual(cleaned.sections[0].rows[0].fields, [{ column: "Rang" }]);

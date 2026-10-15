@@ -479,7 +479,10 @@ function cleanMedia(input: unknown): CardMedia | undefined {
   return media
 }
 
-/** Une carte lue (JSON du serveur ou envoyée par l'éditeur), bornée et nettoyée ; null si illisible. */
+/**
+ * Une carte lue (JSON du serveur ou envoyée par l'éditeur), bornée et nettoyée ; null si
+ * illisible. Une carte vidée de ses blocs reste (vide, avec son nom) : seul « Supprimer » la retire.
+ */
 export function parseCardTemplate(input: unknown): CardTemplate | null {
   let value = input
   if (typeof value === "string") {
@@ -490,7 +493,7 @@ export function parseCardTemplate(input: unknown): CardTemplate | null {
   const raw = value as Record<string, unknown>
   const blocks = (Array.isArray(raw.blocks) ? raw.blocks : []).map(cleanBlock).filter((block): block is CardBlock => Boolean(block)).slice(0, MAX_BLOCKS)
   const media = cleanMedia(raw.media)
-  if (!blocks.length && !media) return null
+  if (!blocks.length && !media && !text(raw.id, 40)) return null
   const card: CardTemplate = { id: text(raw.id, 40) || cardId(), name: text(raw.name, 60) || "Carte", blocks }
   if (media) card.media = media
   if (raw.accent && typeof raw.accent === "object") {

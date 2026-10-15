@@ -28,6 +28,9 @@ test("une carte se relit telle qu'enregistrée, et rien d'autre", () => {
   assert.equal(cards.parseCardTemplate(""), null);
   assert.equal(cards.parseCardTemplate("pas du json"), null);
   assert.equal(cards.parseCardTemplate({ name: "Vide", blocks: [] }), null);
+  // Une carte enregistrée vidée de ses blocs reste, vide, avec son nom : seul « Supprimer » la retire.
+  assert.deepEqual(cards.parseCardTemplate({ id: "c-vide", name: "Vide", blocks: [] }), { id: "c-vide", name: "Vide", blocks: [] });
+  assert.deepEqual(cards.parseTabCards({ cards: [{ id: "c-vide", name: "Vide", blocks: [] }], defaultId: "c-vide" }).cards.map((card) => card.id), ["c-vide"]);
   // Un bloc inconnu, une taille ou un format inconnus, une couleur qui n'en est pas une : écartés.
   const cleaned = cards.parseCardTemplate({
     name: "x",
