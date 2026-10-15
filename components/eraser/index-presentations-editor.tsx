@@ -1110,6 +1110,16 @@ export function PresentationsPanel({ kind, tabName, columns, value, selectedId, 
       starHint="celle que montrent les pages et le tableau de bord ; les autres se choisissent dans un bloc de page"
       onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
       renameable={(id) => id !== MAIN_PRESENTATION_ID}
+      onMove={(delta) => {
+        // Seules les versions nommées se déplacent : l'étoilée reste en tête.
+        const at = named.findIndex((item) => item.id === selected.id)
+        const to = at + delta
+        if (at < 0 || to < 0 || to >= named.length) return
+        const list = [...named]
+        list.splice(to, 0, list.splice(at, 1)[0])
+        setNamed(list)
+      }}
+      pinFirst
       onNew={() => add(`${kindLabel} ${named.length + 2}`, { kind })}
       newHint={`Nouvelle version de la vue ${kindLabel}, avec ses réglages d’office`}
       onDuplicate={() => add(`${selected.id === MAIN_PRESENTATION_ID ? kindLabel : selected.name} (copie)`, layout)}

@@ -1,7 +1,7 @@
 "use client"
 
 import { useMemo, useRef, useState, type DragEvent, type ReactNode } from "react"
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Blocks, Bookmark, GripVertical, Heading, LayoutTemplate, Paintbrush, Palette, Plus, RotateCcw, Settings2, Sparkles, Star, Tag, Trash2, X } from "lucide-react"
+import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Blocks, Bookmark, Copy, GripVertical, Heading, LayoutTemplate, Paintbrush, Palette, Plus, RotateCcw, Settings2, Sparkles, Star, Tag, Trash2, X } from "lucide-react"
 
 import { IconPicker, IndexIconGlyph } from "@/components/eraser/index-gauge"
 import { IndexImage } from "@/components/eraser/index-image"
@@ -110,11 +110,12 @@ const smallLabel = "grid gap-1 text-[11px] font-semibold text-muted-foreground"
 const group = "grid gap-2 rounded-xl border bg-muted/15 p-2.5"
 const groupTitle = "flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-[.14em] text-muted-foreground"
 
-/** Une couleur : une pastille de la palette, une colonne Couleur (« {Couleur} »), ou aucune. */
-function ColorPick({ value, onChange, columns, disabled, label, allowAccent = true }: { value?: string; onChange: (value: string | undefined) => void; columns?: string[]; disabled?: boolean; label: string; allowAccent?: boolean }) {
+/** Une couleur : une pastille de la palette, « discrète » (le gris des textes secondaires), une colonne Couleur (« {Couleur} »), ou aucune. */
+function ColorPick({ value, onChange, columns, disabled, label, allowAccent = true, allowMuted = false }: { value?: string; onChange: (value: string | undefined) => void; columns?: string[]; disabled?: boolean; label: string; allowAccent?: boolean; allowMuted?: boolean }) {
   const fromColumn = value?.startsWith("{") ? value.slice(1, -1) : ""
   return <span className="flex flex-wrap items-center gap-1" role="group" aria-label={label}>
     {allowAccent && <button type="button" disabled={disabled} onClick={() => onChange(undefined)} aria-pressed={!value} title="La couleur d’accent" className={cn("h-5 rounded-full border px-1.5 text-[10px]", !value && "ring-2 ring-primary ring-offset-1")}>accent</button>}
+    {allowMuted && <button type="button" disabled={disabled} onClick={() => onChange("muted")} aria-pressed={value === "muted"} title="Discrète : le gris des textes secondaires" className={cn("h-5 rounded-full border px-1.5 text-[10px] text-muted-foreground", value === "muted" && "ring-2 ring-primary ring-offset-1")}>discrète</button>}
     {cardPalette.map((color) => <button key={color.value} type="button" disabled={disabled} title={color.label} aria-label={color.label} aria-pressed={value === color.value} onClick={() => onChange(color.value)} className={cn("size-5 rounded-full border", value === color.value && "ring-2 ring-primary ring-offset-1")} style={{ backgroundColor: color.value }} />)}
     <label className="relative size-5 cursor-pointer overflow-hidden rounded-full border" title="Autre couleur" style={{ background: value?.startsWith("#") && !cardPalette.some((color) => color.value === value) ? value : "conic-gradient(red, yellow, lime, cyan, blue, magenta, red)" }}>
       <input type="color" disabled={disabled} value={value?.startsWith("#") ? value.slice(0, 7) : "#927640"} onChange={(event) => onChange(event.target.value)} className="absolute inset-0 size-full cursor-pointer opacity-0" aria-label="Autre couleur" />
@@ -193,7 +194,7 @@ function BlockSettings({ block, columns, onChange, disabled, forms }: { block: L
     </div>
     case "divider": return <div className="grid gap-2">
       <span className={smallLabel}>Style<Segmented label="Style du séparateur" value={block.style ?? "line"} disabled={disabled} onChange={(style) => onChange({ ...block, style: style === "line" ? undefined : style })} options={[{ value: "line", label: "Trait" }, { value: "ornament", label: "Ornement" }, { value: "space", label: "Espace" }]} /></span>
-      {block.style !== "space" && <span className={smallLabel}>Couleur<ColorPick label="Couleur du séparateur" value={block.color} columns={colorColumns} disabled={disabled} onChange={(color) => onChange({ ...block, color })} /></span>}
+      {block.style !== "space" && <span className={smallLabel}>Couleur<ColorPick allowMuted label="Couleur du séparateur" value={block.color} columns={colorColumns} disabled={disabled} onChange={(color) => onChange({ ...block, color })} /></span>}
       {block.style === "ornament" && <div className="grid gap-1">
         <span className={smallLabel}>Au milieu</span>
         <div className="flex flex-wrap items-center gap-2">
@@ -334,6 +335,14 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
     }
     set(placeField(layout, column, { area: "row", section, row: target }))
   }
+  // Dupliquer un bloc (une colonne n'apparaît qu'une fois dans un formulaire : seuls les blocs se dupliquent).
+  const duplicateBlock = (field: LayoutField, place: Place, index: number) => {
+    if (!field.block) return
+    const key = blockKey()
+    const fields = [...fieldsAt(layout, place)]
+    fields.splice(index + 1, 0, { ...field, column: key, block: structuredClone(field.block) })
+    set(withFields(layout, place, fields))
+  }
   const updateField = (column: string, changes: Partial<LayoutField>) => {
     const found = placeOf(layout, column)
     if (!found) return
@@ -355,7 +364,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
     const missing = !isBlock && !known(field.column)
     const open = editing === field.column
     const title = isBlock ? layoutBlockKinds.find((entry) => entry.value === field.block!.kind)?.label ?? "Bloc" : field.column
-    const toolButtons = place.area === "row" ? 6 : 4
+    const toolButtons = (place.area === "row" ? 6 : 4) + (isBlock ? 1 : 0)
     return <div
       key={field.column}
       onPointerEnter={(event) => placeToolbar(field.column, event.currentTarget, toolButtons)}
@@ -393,7 +402,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
                   <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(field.hideLabel)} onCheckedChange={(checked) => updateField(field.column, { hideLabel: checked === true || undefined })} />Sans libellé</label>
                   <label className="flex items-center gap-1.5 text-[11px]"><Checkbox disabled={disabled} checked={Boolean(field.large)} onCheckedChange={(checked) => updateField(field.column, { large: checked === true || undefined })} />En grand (un nom, un titre)</label>
                 </div>
-                <span className={smallLabel}>Couleur du libellé<ColorPick label="Couleur du libellé" value={field.color} columns={colorColumns} disabled={disabled} onChange={(color) => updateField(field.column, { color })} /></span>
+                <span className={smallLabel}>Couleur du libellé<ColorPick allowMuted label="Couleur du libellé" value={field.color} columns={colorColumns} disabled={disabled} onChange={(color) => updateField(field.column, { color })} /></span>
               </div>}
           </PopoverContent>
         </Popover>
@@ -403,6 +412,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || place.row === 0} onClick={() => shiftRow(field.column, -1)} title="À la ligne d’avant" aria-label="Ligne d’avant"><ArrowUp /></Button>
           <Button type="button" variant="ghost" size="icon-xs" disabled={disabled} onClick={() => shiftRow(field.column, 1)} title="À la ligne d’après (une nouvelle ligne au bout)" aria-label="Ligne d’après"><ArrowDown /></Button>
         </>}
+        {isBlock && <Button type="button" variant="ghost" size="icon-xs" disabled={disabled || count >= 12} onClick={() => duplicateBlock(field, place, index)} title="Dupliquer le bloc" aria-label="Dupliquer le bloc"><Copy /></Button>}
         <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set(withoutColumn(layout, field.column).layout)} title={isBlock ? "Retirer le bloc" : "Retirer de la mise en page"} aria-label={`Retirer ${title}`}><X /></Button>
       </span>
     </div>
@@ -460,7 +470,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
               <span className="flex flex-wrap items-center gap-1">
                 <button type="button" disabled={disabled} onClick={() => setLook({ labelColor: undefined })} aria-pressed={!look.labelColor} className={cn("h-5 rounded-full border px-1.5 text-[10px]", !look.labelColor && "ring-2 ring-primary ring-offset-1")}>par défaut</button>
                 <button type="button" disabled={disabled} onClick={() => setLook({ labelColor: "accent" })} aria-pressed={look.labelColor === "accent"} className={cn("h-5 rounded-full border px-1.5 text-[10px]", look.labelColor === "accent" && "ring-2 ring-primary ring-offset-1")}>accent</button>
-                <ColorPick label="Couleur des libellés" value={look.labelColor === "accent" ? undefined : look.labelColor} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(labelColor) => setLook({ labelColor })} />
+                <ColorPick allowMuted label="Couleur des libellés" value={look.labelColor === "accent" ? undefined : look.labelColor} columns={colorColumns} disabled={disabled} allowAccent={false} onChange={(labelColor) => setLook({ labelColor })} />
               </span>
             </span>
           </div>
@@ -566,7 +576,7 @@ export function IndexLayoutEditor({ kind, columns, value, source = "saved", onCh
               <Button type="button" variant="ghost" size="icon-xs" className="text-destructive" disabled={disabled} onClick={() => set({ ...layout, sections: layout.sections.filter((_, index) => index !== sectionIndex) })} title="Supprimer la section (ses champs redeviennent libres)" aria-label="Supprimer la section"><Trash2 /></Button>
             </span>
           </div>
-          {(look !== "plain" || section.color) && <span className={smallLabel}>Couleur de la section<ColorPick label="Couleur de la section" value={section.color} columns={colorColumns} disabled={disabled} onChange={(next) => updateSection(sectionIndex, { color: next })} /></span>}
+          {(look !== "plain" || section.color) && <span className={smallLabel}>Couleur de la section<ColorPick allowMuted label="Couleur de la section" value={section.color} columns={colorColumns} disabled={disabled} onChange={(next) => updateSection(sectionIndex, { color: next })} /></span>}
           {section.rows.map((row, rowIndex) => {
             const key = `${section.id}:${row.id}`
             const used = row.fields.reduce((sum, field) => sum + (field.span ?? 6), 0)

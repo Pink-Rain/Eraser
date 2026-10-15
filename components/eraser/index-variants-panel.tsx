@@ -30,7 +30,7 @@ function Tool({ icon: Icon, label, onClick, disabled, className }: { icon: Lucid
   return <Button type="button" variant="ghost" size="icon-sm" className={cn(iconButton, className)} disabled={disabled} onClick={onClick} title={label} aria-label={label}><Icon /></Button>
 }
 
-export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
+export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, starredId, onSelect, onStar, starHint, onRename, renameable = () => true, onMove, pinFirst = false, onNew, newHint, onDuplicate, onRemove, removable = () => true, full = false, empty, presets, onApplyPreset, onSavePreset, savePresetHint, onCopy, copyHint, onManagePresets, footer, disabled = false }: {
   /** « Formulaires », « Survols », « Cartes », « Listes »… */
   title: string
   icon: LucideIcon
@@ -49,6 +49,8 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
   renameable?: (id: string) => boolean
   /** Avancer ou reculer la version choisie dans la liste. */
   onMove?: (delta: number) => void
+  /** La première version (l'étoilée des formulaires, survols et vues) reste en tête : elle ne se déplace pas, rien ne passe devant. */
+  pinFirst?: boolean
   onNew: () => void
   newHint: string
   onDuplicate: () => void
@@ -96,12 +98,12 @@ export function VariantsPanel({ title, icon: Icon, noun, items, selectedId, star
         </NativeSelect>
         {onStar && <Button type="button" variant="ghost" size="icon-sm" className={cn("size-7", starred ? "text-[#c9a227]" : "text-muted-foreground hover:text-[#c9a227]")} disabled={disabled || starred} onClick={() => onStar(selected.id)} title={starred ? `À l’étoile : ${starHint}` : `Mettre l’étoile : ${starHint}`} aria-label={starred ? "À l’étoile" : "Mettre l’étoile"}><Star fill={starred ? "currentColor" : "none"} /></Button>}
       </div>
-      {(onRename && renameable(selected.id)) || onMove || (onRemove && removable(selected.id)) ? <div className="flex items-center gap-0.5">
+      {(onRename && renameable(selected.id)) || (onMove && !(pinFirst && at === 0)) || (onRemove && removable(selected.id)) ? <div className="flex items-center gap-0.5">
         {onRename && renameable(selected.id)
           ? <Input value={selected.name} disabled={disabled} maxLength={60} onChange={(event) => onRename(selected.id, event.target.value)} className="h-7 min-w-0 flex-1 text-xs" aria-label={`Nom de ${the} ${noun}`} />
           : <span className="min-w-0 flex-1" />}
-        {onMove && items.length > 1 && <>
-          <Tool icon={ArrowUp} label="Avancer dans la liste" disabled={disabled || at <= 0} onClick={() => onMove(-1)} />
+        {onMove && items.length > (pinFirst ? 2 : 1) && !(pinFirst && at === 0) && <>
+          <Tool icon={ArrowUp} label="Avancer dans la liste" disabled={disabled || at <= (pinFirst ? 1 : 0)} onClick={() => onMove(-1)} />
           <Tool icon={ArrowDown} label="Reculer dans la liste" disabled={disabled || at < 0 || at >= items.length - 1} onClick={() => onMove(1)} />
         </>}
         {onRemove && removable(selected.id) && <Tool icon={Trash2} label={`Retirer ${this_} ${noun}`} disabled={disabled} onClick={onRemove} className="text-destructive/70 hover:text-destructive" />}

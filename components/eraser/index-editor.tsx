@@ -1229,6 +1229,16 @@ export function IndexEditor({ model, open, pending = false, error = "", title, i
                 select(DEFAULT_FORM_ID)
               }}
               onRename={(id, name) => setNamed(named.map((item) => item.id === id ? { ...item, name } : item))}
+              onMove={(delta) => {
+                // Seules les versions nommées se déplacent : l'étoilée reste en tête.
+                if (!chosen) return
+                const at = named.findIndex((item) => item.id === chosen.id)
+                const to = at + delta
+                if (at < 0 || to < 0 || to >= named.length) return
+                const list = [...named]
+                list.splice(to, 0, list.splice(at, 1)[0])
+                setNamed(list)
+              }}
               onNew={() => add(`${label} ${named.length + 2}`, automaticLayoutFor(kind, layoutColumnsOf(tab, kind)))}
               onDuplicate={() => add(`${chosen ? chosen.name : `${label} principal`} (copie)`, current)}
               onRemove={() => { if (!chosen) return; setNamed(named.filter((item) => item.id !== chosen.id)); select(DEFAULT_FORM_ID) }}

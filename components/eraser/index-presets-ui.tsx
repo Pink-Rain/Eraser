@@ -130,7 +130,7 @@ function ManagePresetsDialog({ tabName, columns, presets, onClose, onSave, onDel
  * celle qu'Eraser montre) et ses presets (appliquer, enregistrer, copier vers d'autres
  * onglets, gérer). Rien n'est écrit avant « Enregistrer » de la fenêtre, sauf les presets.
  */
-export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onNew, onDuplicate, onRemove, full, layout, otherTabs, disabled, onApply, onCopyTo }: {
+export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, onStar, onRename, onMove, onNew, onDuplicate, onRemove, full, layout, otherTabs, disabled, onApply, onCopyTo }: {
   kind: LayoutKind
   tabName: string
   /** Les versions : l'étoilée (`principal`) d'abord, puis les autres. */
@@ -139,6 +139,8 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
   onSelect: (id: string) => void
   onStar: (id: string) => void
   onRename: (id: string, name: string) => void
+  /** Avancer ou reculer la version choisie (l'étoilée reste en tête). */
+  onMove?: (delta: number) => void
   onNew: () => void
   onDuplicate: () => void
   onRemove: () => void
@@ -168,6 +170,8 @@ export function LayoutViewsPanel({ kind, tabName, items, selectedId, onSelect, o
       starHint={form ? "le formulaire qu’ouvre le nom d’une ligne (et « Ajouter »)" : "le survol d’une ligne citée avec « { », le seul qui s’affiche : les autres versions attendent leur étoile"}
       onRename={onRename}
       renameable={(id) => id !== DEFAULT_FORM_ID}
+      onMove={onMove}
+      pinFirst
       onNew={onNew}
       newHint={form ? "Nouveau formulaire, à partir de l’affichage automatique" : "Nouveau survol, à partir de l’affichage automatique"}
       onDuplicate={onDuplicate}
