@@ -19,7 +19,7 @@ import { internalAppPath } from "@/lib/app-links"
 import { sanitizeRichText } from "@/lib/rich-text-sanitize"
 import { cleanReplaceMode, isReplaceablePath, type ReplaceMode } from "@/lib/page-replacements"
 import { cleanPresentation, isPresentationKind, type Presentation } from "@/lib/index-presentations"
-import { parseFilterConditions, filterOperators, type FilterCondition } from "@/lib/index-windows"
+import { parseFilterConditions, filterOperators, type Filter } from "@/lib/index-windows"
 import { eraserModuleKeys, moduleSections, type EraserModuleKey } from "@/lib/eraser-modules"
 
 /* ---------- Les types ---------- */
@@ -85,7 +85,7 @@ export type ViewBlock = Common & {
   click?: string
 }
 /** Les conditions d'un bloc : « toutes » doivent être vraies, ou « une » suffit. */
-export type ViewWhere = { match: "toutes" | "une"; conditions: FilterCondition[] }
+export type ViewWhere = Filter
 export type StatBlock = Common & { type: "stat"; index: string; statId: string; heading: string }
 /** Page de ligne : les valeurs de la ligne (toutes, ou les colonnes choisies). */
 /** « form » : disposées comme la fiche de l'index (Modifier › Formulaire). */

@@ -14,6 +14,9 @@ export type FilterOperator = "est" | "n-est-pas" | "contient" | "ne-contient-pas
 
 export type FilterCondition = { column: string; operator: FilterOperator; value: string }
 
+/** Un filtre : ses conditions, toutes vraies (« toutes ») ou au moins une (« une »). */
+export type Filter = { match: "toutes" | "une"; conditions: FilterCondition[] }
+
 export type IndexWindow = {
   id: string
   /** L'index : une clé d'index du monde (« places », « perso-… ») ou « objects ». */
